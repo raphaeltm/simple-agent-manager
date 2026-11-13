@@ -41,8 +41,11 @@
  *   --file       check only these files (type-checked with the API's tsconfig)
  *
  * Not covered (state it in review instead): state reached through a function parameter (the
- * admin-settings cache passes its per-binding state as one), an instance shared through a module-
- * scope container of a type the scan cannot see, and `for await` over a shared promise.
+ * admin-settings cache passes its per-binding state as one, and compact-r2 passes its pending entry
+ * to joinR2Operation), so a helper that receives a shared ENTRY object is trusted to join through
+ * the two helpers; iteration over a shared collection (`for (const e of flights.values())`,
+ * `.map`, spreads); fields declared in a base class or as constructor parameters; a class whose
+ * module-scope instance lives in another scanned project; and `for await` over a shared promise.
  */
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

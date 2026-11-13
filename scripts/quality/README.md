@@ -47,7 +47,8 @@ different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
   module scope (the admin-settings cache). Mark a reviewed exception with
   `// shared-flight-join-allowed: <reason>` on the line above. `--inventory` lists every
   module-scope variable that holds a promise. It does not follow state reached through a
-  function parameter, Durable Object fields (an object's ops survive one of its requests
+  function parameter (a helper handed a shared entry object is trusted), iteration over a shared
+  collection, Durable Object fields (an object's ops survive one of its requests
   answering on celld 0.6.3), or `for await`.
 - `pnpm lint:oxlint` is report-only. Promotion is forbidden until
   `scripts/quality/lint-adoption-evidence.json` records finding, fix-diff, scope, template,

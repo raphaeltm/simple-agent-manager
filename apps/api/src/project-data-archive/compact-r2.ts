@@ -61,6 +61,10 @@ const pendingR2Operations = new WeakMap<R2Bucket, Map<string, PendingR2Operation
  * from stateless code, and on the self-hosted celld runtime a caller that resumed on another
  * request's settlement would lose its next R2 call and its own deadline timer when that request
  * answered (task R7). On Cloudflare this is the same race against a deadline timer as `timed`.
+ *
+ * Unlike the other shared flights, an abandoned operation is NOT evicted: a second provider call
+ * must never race the first on an immutable key (see timedR2). On celld a dropped operation
+ * therefore keeps failing joiners for that key with a timeout until the isolate is retired.
  */
 async function joinR2Operation(
   pending: PendingR2Operation,
