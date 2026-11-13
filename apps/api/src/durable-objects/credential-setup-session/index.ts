@@ -46,6 +46,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { settleSharedFlight } from '../../lib/shared-flight';
 import {
   OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
   requireProjectCapability,
@@ -140,6 +141,16 @@ const CLEANUP_COLUMNS: ReadonlyArray<readonly [name: string, ddl: string]> = [
  */
 const MAX_CLEANUP_RECOVERY_ATTEMPTS = 3;
 
+/**
+ * How long the recovery alarm waits on an inline cleanup before resuming it itself: the scrub
+ * and the destroy are each bounded by the exec timeout, plus a margin for the slot release and
+ * the D1 repair. Internal safety margin, not an operator setting.
+ */
+const CLEANUP_JOIN_MARGIN_MS = 30_000;
+function cleanupJoinBoundMs(env: Env): number {
+  return 2 * getSandboxConfig(env).execTimeoutMs + CLEANUP_JOIN_MARGIN_MS;
+}
+
 type DeviceAuthDetailsRow = {
   verification_url: string;
   user_code: string | null;
@@ -172,7 +183,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
    * starting a second one. It is in memory on purpose: after an isolate death it
    * is gone, and the alarm then runs the cleanup itself.
    */
-  private cleanupInFlight: Promise<void> | null = null;
+  private cleanupInFlight: { startedAt: number; promise: Promise<void> } | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -718,10 +729,20 @@ export class CredentialSetupSession extends DurableObject<Env> {
 
   /** Alarm path: resume a cleanup an earlier isolate claimed but never finished. */
   private async resumeCleanup(row: SetupSessionRow): Promise<void> {
-    if (this.cleanupInFlight) {
-      // The inline cleanup in this isolate is still running — join it.
-      await this.cleanupInFlight;
-      return;
+    const inline = this.cleanupInFlight;
+    if (inline) {
+      // The inline cleanup in this isolate is still running: join it, under the alarm's own
+      // timer. On celld the request that started it can lose its client, and its sandbox calls
+      // and timeouts are dropped with it, so it may never settle (lib/shared-flight.ts). The
+      // bound is the cleanup's own worst case plus a margin, so a live cleanup always settles
+      // first (Cloudflare unchanged); past it, resume the cleanup here (every step is safe to
+      // repeat).
+      const joined = await settleSharedFlight(
+        inline.promise,
+        inline.startedAt + cleanupJoinBoundMs(this.env)
+      );
+      if (!joined.abandoned) return;
+      if (this.cleanupInFlight === inline) this.cleanupInFlight = null;
     }
     const attempts = (row.cleanup_attempts ?? 0) + 1;
     if (attempts > MAX_CLEANUP_RECOVERY_ATTEMPTS) {
@@ -748,11 +769,14 @@ export class CredentialSetupSession extends DurableObject<Env> {
   }
 
   private startCleanup(row: SetupSessionRow, resumed = false): Promise<void> {
-    const run = this.runCleanup(row, resumed).finally(() => {
-      this.cleanupInFlight = null;
-    });
-    this.cleanupInFlight = run;
-    return run;
+    const flight = {
+      startedAt: Date.now(),
+      promise: this.runCleanup(row, resumed).finally(() => {
+        if (this.cleanupInFlight === flight) this.cleanupInFlight = null;
+      }),
+    };
+    this.cleanupInFlight = flight;
+    return flight.promise;
   }
 
   /**

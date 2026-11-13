@@ -95,6 +95,10 @@
       "registryUrl": "https://www.npmjs.com/package/astro",
       "necessity": "Compiles the shared brand Astro components (packages/ui/src/brand) into the installer's static pages and checks them; same pinned version the marketing site already uses."
     },
+    "diff": {
+      "registryUrl": "https://www.npmjs.com/package/diff",
+      "necessity": "Builds unified diffs for Artifacts repository compare views in repo-hosting; moved from the API worker at the same version."
+    },
     "eslint": {
       "registryUrl": "https://www.npmjs.com/package/eslint",
       "necessity": "Runs authoritative lint and local rule fixtures."
@@ -122,6 +126,10 @@
     "idb-keyval": {
       "registryUrl": "https://www.npmjs.com/package/idb-keyval",
       "necessity": "IndexedDB backing store for the persisted query cache. Chosen over localStorage so it cannot evict the library-cache index, which already needs its own LRU within the ~5 MB localStorage budget."
+    },
+    "isomorphic-git": {
+      "registryUrl": "https://www.npmjs.com/package/isomorphic-git",
+      "necessity": "Reads Artifacts-backed Git repositories in memory for repo-hosting's repository browser; moved from the API worker at the same version."
     },
     "oxlint": {
       "registryUrl": "https://www.npmjs.com/package/oxlint",
