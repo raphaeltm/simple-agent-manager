@@ -1,6 +1,7 @@
 /** Shared Phase 1 resolver and atomic, value-free audit boundary. */
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
+import { settleSharedFlight } from '../lib/shared-flight';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { errors } from '../middleware/error';
 import {
@@ -75,7 +76,11 @@ export async function credentialRows(
     (!existing.pending || Date.now() < existing.deadlineAt) &&
     Math.min(existing.expiresAt, existing.startedAt + ttlMs) > Date.now()
   ) {
-    const rows = await existing.promise;
+    // Own-timer join: a celld flight whose starter left never settles (lib/shared-flight.ts).
+    const joined = await settleSharedFlight(existing.promise, existing.deadlineAt);
+    if (joined.abandoned && credentialCache.get(db) === existing) credentialCache.delete(db);
+    if (joined.abandoned) return credentialRows(env, false, attempt + 1);
+    const rows = joined.value;
     if (credentialCache.get(db) !== existing) return credentialRows(env, false, attempt + 1);
     assertGeneration(db, generation);
     if (Date.now() >= Math.min(existing.expiresAt, existing.startedAt + ttlMs))
@@ -164,7 +169,10 @@ async function legacyKv(
     (!cached.pending || Date.now() < cached.deadlineAt) &&
     Math.min(cached.expiresAt, cached.startedAt + ttlMs) > Date.now()
   ) {
-    const value = await cached.promise;
+    const joined = await settleSharedFlight(cached.promise, cached.deadlineAt); // as above
+    if (joined.abandoned && map.get(key) === cached) map.delete(key);
+    if (joined.abandoned) return legacyKv(env, key, false, ttlMs, attempt + 1);
+    const value = joined.value;
     if (map.get(key) !== cached) return legacyKv(env, key, false, ttlMs, attempt + 1);
     if (
       generationOf(db) !== generation ||

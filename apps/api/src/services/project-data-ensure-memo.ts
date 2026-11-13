@@ -30,6 +30,7 @@
  * See: tasks/archive/2026-08-18-do-roundtrip-ensure-project-id-and-chat-agent-state.md
  */
 import { parsePositiveInt } from '../lib/route-helpers';
+import { settleSharedFlight } from '../lib/shared-flight';
 
 /**
  * Upper bound on memo entries held by one isolate. Entries are ~64 bytes of hex
@@ -50,7 +51,16 @@ export interface ProjectDataEnsureMemoEnv {
 const ensured = new Map<string, true>();
 
 /** In-flight ensure calls, so concurrent first-callers issue exactly one RPC. */
-const inFlight = new Map<string, Promise<void>>();
+const inFlight = new Map<string, { startedAt: number; promise: Promise<void> }>();
+
+/**
+ * How long a caller waits on an ensure another request started before running its own. The
+ * ensure RPC has no deadline of its own, and on the self-hosted celld runtime a request's RPC is
+ * dropped when that request's client disconnects, so a joined flight could otherwise never settle
+ * (lib/shared-flight.ts). A healthy ensure takes milliseconds; the duplicate it allows past this
+ * wait is an idempotent `INSERT OR IGNORE`. Internal safety margin, not an operator setting.
+ */
+export const DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS = 5_000;
 
 export function getProjectDataEnsureMemoMaxEntries(env: ProjectDataEnsureMemoEnv): number {
   return parsePositiveInt(
@@ -79,17 +89,31 @@ export async function ensureOncePerIsolate(
   }
 
   const pending = inFlight.get(doId);
-  if (pending) return pending;
-
-  const run = (async () => {
+  if (pending) {
+    const joined = await settleSharedFlight(
+      pending.promise,
+      pending.startedAt + DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS
+    );
+    if (!joined.abandoned) return;
+    // The starter's request is gone and its ensure with it: run this caller's own.
+    if (inFlight.get(doId) === pending) inFlight.delete(doId);
     await ensure();
     remember(env, doId);
-  })().finally(() => {
-    inFlight.delete(doId);
-  });
+    return;
+  }
 
-  inFlight.set(doId, run);
-  return run;
+  const entry = {
+    startedAt: Date.now(),
+    promise: (async () => {
+      await ensure();
+      remember(env, doId);
+    })().finally(() => {
+      if (inFlight.get(doId) === entry) inFlight.delete(doId);
+    }),
+  };
+
+  inFlight.set(doId, entry);
+  return entry.promise;
 }
 
 function remember(env: ProjectDataEnsureMemoEnv, doId: string): void {

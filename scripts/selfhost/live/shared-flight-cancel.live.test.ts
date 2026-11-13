@@ -37,6 +37,9 @@ const KEY = 'sam-live-sharedflight';
 const SECRET = 'live-sharedflight-store-0123456789';
 const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status === 0;
 const RUNTIME_SECRETS = join(REPO_ROOT, 'apps/api/src/selfhost/runtime-secrets.ts');
+const SETTINGS_CACHE = join(REPO_ROOT, 'apps/api/src/services/admin-settings-cache.ts');
+/** The settings flight's own deadline in the probe: longer than one slow read. */
+const SETTINGS_READ_TIMEOUT_MS = 3000;
 const AGENT = join(REPO_ROOT, 'deploy/selfhost/key-agent/server.ts');
 /** How long the proxy holds each agent connection: wide enough to abort the first request in. */
 const AGENT_DELAY_MS = 1500;
@@ -49,8 +52,13 @@ const CLIENT_CAP_MS = 15_000;
 
 // `/do?name=` reaches the Durable Object without loading secrets in the stateless handler, so the
 // object's own load (wrapDurableObject, under blockConcurrencyWhile) is the only one.
+// `/settings` reads through the real AdminSettingsCache (the shared per-isolate flight every
+// request's auth path joins), with a loader that waits on the slow proxy like a slow D1 read.
 const WORKER = `
 import { wrapDurableObject, wrapWorker } from ${JSON.stringify(RUNTIME_SECRETS)};
+import { AdminSettingsCache } from ${JSON.stringify(SETTINGS_CACHE)};
+const DB = {};
+let settings;
 class Probe {
   constructor(_ctx, env) { this.env = env; }
   async fetch() { return Response.json({ doSecret: typeof this.env.LIVE_SECRET }); }
@@ -62,6 +70,14 @@ const withSecrets = wrapWorker({
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === '/settings') {
+      settings ??= new AdminSettingsCache(60_000, Date.now, async () => {
+        await (await fetch(env.SLOW_URL)).arrayBuffer();
+        return [];
+      });
+      const rows = await settings.read(DB, false, 60_000, ${SETTINGS_READ_TIMEOUT_MS});
+      return Response.json({ rows: rows.length });
+    }
     if (url.pathname === '/do') {
       const stub = env.PROBE_DO.get(env.PROBE_DO.idFromName(url.searchParams.get('name') ?? 'x'));
       return await stub.fetch('https://do/');
@@ -229,6 +245,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not pois
           SAM_INSTALLATION_ID: 'd'.repeat(32),
           // Longer than the proxy delay: a healthy load finishes; only a dropped one hangs.
           SAM_KEY_AGENT_TIMEOUT_MS: '5000',
+          SLOW_URL: `http://127.0.0.1:${ports.proxy}/healthz`,
         },
       })
     );
@@ -305,5 +322,22 @@ describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not pois
     expect(next[2]?.body, report).toEqual({ doSecret: 'string' });
     // Each answer costs about one slow agent round trip, nowhere near the client cap.
     for (const outcome of next) expect(outcome.ms, report).toBeLessThan(CLIENT_CAP_MS / 2);
+  }, 150_000);
+  it('serves settings reads after the request that started the shared read was aborted', async () => {
+    await sleep(IDLE_FOR_FRESH_ISOLATE_MS);
+    expect((await request('/settings', ABORT_AFTER_MS)).status).toBe(0);
+    // The next reads join the dropped flight. They may wait out its deadline plus the join grace,
+    // then read for themselves: bounded, never the client cap.
+    const next = await Promise.all([
+      request('/settings', CLIENT_CAP_MS),
+      request('/settings', CLIENT_CAP_MS),
+    ]);
+    const report = JSON.stringify(next) + (celld?.output().slice(-3000) ?? '');
+    expect(
+      next.map((o) => o.status),
+      report
+    ).toEqual([200, 200]);
+    const bound = SETTINGS_READ_TIMEOUT_MS + 1000 + 2 * AGENT_DELAY_MS + 2000;
+    for (const outcome of next) expect(outcome.ms, report).toBeLessThan(bound);
   }, 150_000);
 });
