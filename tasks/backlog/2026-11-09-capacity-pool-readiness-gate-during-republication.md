@@ -1,5 +1,15 @@
 # A pool mid-republication should keep placing on its last published catalog
 
+## Implementation tracking (2026-11-12)
+
+The committed-catalog readiness and durable continuation work is implemented in draft
+[PR #2693](https://github.com/raphaeltm/simple-agent-manager/pull/2693), tracked by
+[the active recovery task](../active/2026-11-12-resilient-catalog-wake-recovery.md).
+It includes private atomic replacement, retained published capacity, bounded resumable work and
+automatic accepted-wake recovery. Real staging and the coordinator's exact-SHA release gate remain
+open; this backlog item is not archived or claimed shipped. The separate editor/digest optimization
+below remains tracked here.
+
 ## Problem
 
 `defaultPoolEffectiveState()` (`apps/api/src/services/default-capacity-pool-summaries.ts`) returns

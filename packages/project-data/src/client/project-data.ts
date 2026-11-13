@@ -83,28 +83,16 @@ import type {
   UpdateCommentStatusInput,
   UpdateFileCommentStatusInput,
 } from '../do/comment-contracts';
-import {
-  CommentNotFoundError,
-  CommentValidationError,
-} from '../do/comment-contracts';
+import { CommentNotFoundError, CommentValidationError } from '../do/comment-contracts';
 import type { ProjectDataGroupedFtsCleanupResult } from '../do/grouped-fts-cleanup';
 import type {
   GroupedFtsWallRecoveryRequest,
   GroupedFtsWallRecoveryResult,
 } from '../do/grouped-fts-wall-recovery';
 import type { IdeaWorkLinkCaps, IdeaWorkSnapshot } from '../do/idea-work';
-import type {
-  LogicalMessageRequest,
-  LogicalMessageResult,
-} from '../do/logical-message';
-import type {
-  LogicalTranscriptRequest,
-  LogicalTranscriptResult,
-} from '../do/logical-transcript';
-import type {
-  MessageContextRequest,
-  MessageContextResult,
-} from '../do/message-context';
+import type { LogicalMessageRequest, LogicalMessageResult } from '../do/logical-message';
+import type { LogicalTranscriptRequest, LogicalTranscriptResult } from '../do/logical-transcript';
+import type { MessageContextRequest, MessageContextResult } from '../do/message-context';
 import type { SearchResult } from '../do/message-search';
 import {
   AgentMessageRecipientUnavailableError,
@@ -160,7 +148,10 @@ export {
   ProjectEventValidationError,
 } from '../do/project-events-contracts';
 import { log } from '@simple-agent-manager/worker-core';
-import { type NormalizedSearchQuery, normalizeSearchQuery } from '@simple-agent-manager/worker-core';
+import {
+  type NormalizedSearchQuery,
+  normalizeSearchQuery,
+} from '@simple-agent-manager/worker-core';
 import { isDurableObjectStorageFullError } from '@simple-agent-manager/worker-core';
 
 import {
@@ -174,10 +165,7 @@ import {
 } from '../archive/contract';
 import { projectDataPorts } from '../do/ports';
 import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../do/project-events-wake-delivery';
-import type {
-  AcceptedPromptDelivery,
-  AcceptPromptDeliveryInput,
-} from '../do/prompt-delivery';
+import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from '../do/prompt-delivery';
 import type { ActivityReportOutcome } from '../do/session-work-clock';
 import type {
   CreateReservedTaskSessionWithInitialMessageInput,
@@ -680,10 +668,7 @@ export async function sleepSession(
   env: Env,
   projectId: string,
   sessionId: string,
-  options?: Omit<
-    import('../do/sessions').SleepSessionOptions,
-    'stoppedOnly'
-  > & {
+  options?: Omit<import('../do/sessions').SleepSessionOptions, 'stoppedOnly'> & {
     runtimeGuard?: import('../do/session-sleep-runtime-guard').SessionSleepRuntimeGuard;
   }
 ): Promise<boolean> {
@@ -763,7 +748,8 @@ export async function wakeSessionForSnapshotRecovery(
   projectId: string,
   sessionId: string,
   workspaceId: string,
-  taskId: string
+  taskId: string,
+  options: { deferActivation?: boolean; recoveryAttemptId?: string | null } = {}
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(
     env,
@@ -771,17 +757,25 @@ export async function wakeSessionForSnapshotRecovery(
     sessionId,
     'wakeSessionForSnapshotRecovery'
   );
-  const allowStopped = await projectDataPorts().sessions.hasAuthorizedRestorableSnapshotWakeClaim(env, {
-    projectId,
-    chatSessionId: sessionId,
-    workspaceId,
-    taskId,
-  });
+  const allowStopped = await projectDataPorts().sessions.hasAuthorizedRestorableSnapshotWakeClaim(
+    env,
+    {
+      projectId,
+      chatSessionId: sessionId,
+      workspaceId,
+      taskId,
+      recoveryAttemptId: options.recoveryAttemptId,
+      allowRestored: options.deferActivation === true,
+    }
+  );
   if (!allowStopped) return false;
   const stub = await getStub(env, projectId);
   const previousStatus = sessionStatus(await stub.getSession(sessionId));
-  const woke = await stub.wakeSession(sessionId, workspaceId, taskId, { allowStopped });
-  if (woke && previousStatus !== 'active') {
+  const woke = await stub.wakeSession(sessionId, workspaceId, taskId, {
+    allowStopped,
+    deferActivation: options.deferActivation,
+  });
+  if (woke && previousStatus !== 'active' && !options.deferActivation) {
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
       sessionId,

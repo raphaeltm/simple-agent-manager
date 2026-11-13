@@ -91,6 +91,8 @@ function createEnv() {
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
+    schema.capacityPoolCandidateStaging,
+    schema.capacityPoolRefreshes,
   ]);
   return { sqlite, env: { DATABASE: createSqliteD1(sqlite) } as Env };
 }

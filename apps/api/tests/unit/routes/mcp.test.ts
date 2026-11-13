@@ -4296,8 +4296,14 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([['cred-1']])
         .mockResolvedValueOnce([Object.values(raceProject)]); // project (if raw path)
 
-      // Conditional INSERT returns 0 changes — concurrent insert pushed count over limit
-      mockD1._stmt.run.mockResolvedValueOnce({ success: true, meta: { changes: 0 } });
+      // Reject the conditional task INSERT itself; unrelated durable catalog writes may
+      // run first and must not consume this concurrency outcome.
+      const conditionalInsert = vi.fn(async () => ({ success: true, meta: { changes: 0 } }));
+      mockD1._stmt.run.mockImplementation(async () =>
+        mockD1._currentSql().trimStart().startsWith('INSERT INTO tasks')
+          ? conditionalInsert()
+          : { success: true, meta: { changes: 1 } }
+      );
 
       const res = await mcpRequest(
         app,
@@ -4312,6 +4318,7 @@ describe('MCP Routes', () => {
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('rate limit exceeded');
       expect(body.error.message).toContain('concurrent dispatch');
+      expect(conditionalInsert).toHaveBeenCalledOnce();
     });
   });
 

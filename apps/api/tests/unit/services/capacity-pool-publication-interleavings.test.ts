@@ -1,3 +1,4 @@
+import { capacityPlacementAuthorityGeneration } from '@simple-agent-manager/scheduler-core';
 import type { ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -29,6 +30,8 @@ function fixture() {
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
+    schema.capacityPoolCandidateStaging,
+    schema.capacityPoolRefreshes,
     schema.platformSettings,
     schema.users,
     schema.projects,
@@ -181,11 +184,15 @@ describe('pool publication real SQL interleavings', () => {
     const primary = sqlite
       .prepare("SELECT id FROM capacity_pool_candidates WHERE workload_role='workspace'")
       .get() as { id: string };
-    const raced = beforeStatement(database, /INSERT INTO capacity_pool_candidates/, () => {
-      sqlite
-        .prepare("UPDATE capacity_pool_candidates SET status='deleted' WHERE id=?")
-        .run(primary.id);
-    });
+    const raced = beforeStatement(
+      database,
+      /INSERT INTO capacity_pool_candidate(?:s|_staging)/,
+      () => {
+        sqlite
+          .prepare("UPDATE capacity_pool_candidates SET status='deleted' WHERE id=?")
+          .run(primary.id);
+      }
+    );
     await publish(drizzle(raced, { schema }));
     expect(
       sqlite
@@ -210,7 +217,7 @@ describe('pool publication real SQL interleavings', () => {
           "SELECT DISTINCT provider_instance_price_monthly_cents AS price FROM capacity_pool_candidates WHERE provider_instance_type='cx23'"
         )
         .all()
-    ).toEqual([{ price: 9900 }]);
+    ).toEqual([]); // Replacement remains private until every row is staged.
     const changedCatalog = [offering('cx23', 99), offering('cx33', 20)];
     const completed = await publish(db, changedCatalog, options);
     expect(completed.publicationComplete).toBe(true);
@@ -304,9 +311,13 @@ describe('pool publication real SQL interleavings', () => {
   it('does not count generation-rejected writes as published progress', async () => {
     const { sqlite, database } = fixture();
     const store = cursorStore();
-    const raced = beforeStatement(database, /INSERT INTO capacity_pool_candidates/, () => {
-      sqlite.exec("UPDATE capacity_sources SET source_generation=2 WHERE id='source'");
-    });
+    const raced = beforeStatement(
+      database,
+      /INSERT INTO capacity_pool_candidate(?:s|_staging)/,
+      () => {
+        sqlite.exec("UPDATE capacity_sources SET source_generation=2 WHERE id='source'");
+      }
+    );
     const result = await publish(drizzle(raced, { schema }), [offering()], { cursorStore: store });
     expect(result).toMatchObject({
       publishedCandidates: 0,
@@ -325,11 +336,15 @@ describe('pool publication real SQL interleavings', () => {
     sqlite.exec(
       "UPDATE capacity_pool_candidates SET provider_instance_image='old', provider_instance_boot_disk_size_gb=50, provider_instance_architecture='x86'"
     );
-    const raced = beforeStatement(database, /INSERT INTO capacity_pool_candidates/, () => {
-      sqlite.exec(
-        "UPDATE capacity_pool_candidates SET provider_instance_image='new', provider_instance_boot_disk_size_gb=90, provider_instance_architecture='arm'"
-      );
-    });
+    const raced = beforeStatement(
+      database,
+      /INSERT INTO capacity_pool_candidate(?:s|_staging)/,
+      () => {
+        sqlite.exec(
+          "UPDATE capacity_pool_candidates SET provider_instance_image='new', provider_instance_boot_disk_size_gb=90, provider_instance_architecture='arm'"
+        );
+      }
+    );
     expect((await publish(drizzle(raced, { schema }))).publicationComplete).toBe(false);
     expect(
       sqlite
@@ -476,14 +491,36 @@ describe('pool publication real SQL interleavings', () => {
         sourceAuthorityGeneration: change === 'credential authority' ? 2 : 1,
       });
       expect(result.publicationComplete).toBe(false);
-      expect(sqlite.prepare('SELECT count(*) n FROM capacity_pool_candidates').get()).toEqual({
+      expect(
+        sqlite.prepare('SELECT count(*) n FROM capacity_pool_candidate_staging').get()
+      ).toEqual({
         n: 2,
       });
       if (change === 'resources')
         expect(
           sqlite
             .prepare(
-              'SELECT DISTINCT provider_instance_memory_mb memory FROM capacity_pool_candidates'
+              "SELECT DISTINCT json_extract(payload, '$.providerInstanceMemoryMb') memory FROM capacity_pool_candidate_staging"
+            )
+            .all()
+        ).toEqual([{ memory: 8192 }]);
+      expect(sqlite.prepare('SELECT count(*) n FROM capacity_pool_candidates').get()).toEqual({
+        n: 0,
+      });
+      const completed = await publish(db, [updated, offering('cx33')], {
+        publishBatchSize: 2,
+        cursorStore: store,
+        sourceAuthorityGeneration: change === 'credential authority' ? 2 : 1,
+      });
+      expect(completed.publicationComplete).toBe(true);
+      expect(sqlite.prepare('SELECT count(*) n FROM capacity_pool_candidates').get()).toEqual({
+        n: 4,
+      });
+      if (change === 'resources')
+        expect(
+          sqlite
+            .prepare(
+              "SELECT DISTINCT provider_instance_memory_mb memory FROM capacity_pool_candidates WHERE provider_instance_type = 'cx23'"
             )
             .all()
         ).toEqual([{ memory: 8192 }]);
@@ -585,7 +622,11 @@ describe('pool publication pass budget (incident 2026-11-09)', () => {
       ...database,
       prepare: (sql: string) => wrap(database.prepare(sql), sql),
       batch<T = unknown>(statements: D1PreparedStatement[]) {
-        if (statements.some((s) => /INSERT INTO capacity_pool_candidates/.test(sqlOf.get(s) ?? ''))) {
+        if (
+          statements.some((s) =>
+            /INSERT INTO capacity_pool_candidate(?:s|_staging)/.test(sqlOf.get(s) ?? '')
+          )
+        ) {
           candidateBatches += 1;
           if (candidateBatches === failAt) {
             return Promise.reject(new Error('D1_ERROR: simulated batch failure'));
@@ -716,9 +757,13 @@ describe('pool publication pass budget (incident 2026-11-09)', () => {
   it('stops the loop when a newer publisher fences the batch, even with time left', async () => {
     const { sqlite, database } = fixture();
     const store = cursorStore();
-    const raced = beforeStatement(database, /INSERT INTO capacity_pool_candidates/, () => {
-      sqlite.exec("UPDATE capacity_sources SET source_generation=2 WHERE id='source'");
-    });
+    const raced = beforeStatement(
+      database,
+      /INSERT INTO capacity_pool_candidate(?:s|_staging)/,
+      () => {
+        sqlite.exec("UPDATE capacity_sources SET source_generation=2 WHERE id='source'");
+      }
+    );
     const { counter, counted } = countingBatches(raced);
     let tick = 0;
     const result = await publish(drizzle(counted, { schema }), catalog(), {
@@ -733,5 +778,507 @@ describe('pool publication pass budget (incident 2026-11-09)', () => {
     // One candidate write batch plus its one verification read, nothing more.
     expect(counter.batches).toBeLessThanOrEqual(2);
     expect(JSON.parse([...store.values.values()][0]!).published).toBe(0);
+  });
+});
+
+describe('atomic replacement publication', () => {
+  it('publishes an explicitly validated static bootstrap without treating enumeration as complete', async () => {
+    const { db, sqlite } = fixture();
+    const result = await publish(db, [{ ...offering(), catalogSource: 'static' }], {
+      catalogComplete: false,
+      catalogValidated: true,
+    });
+    expect(result).toMatchObject({ publicationComplete: true, markedMissing: false });
+    expect(sqlite.prepare('SELECT count(*) n FROM capacity_pool_candidates').get()).toEqual({
+      n: 2,
+    });
+    expect(sqlite.prepare('SELECT DISTINCT status FROM capacity_pool_candidates').all()).toEqual([
+      { status: 'disabled' },
+    ]);
+  });
+
+  it('atomically publishes trusted static references while preserving stronger API presence and absence', async () => {
+    const { db, sqlite } = fixture();
+    const store = cursorStore();
+    await publish(db, [offering('cx23', 10), offering('cx33', 20), offering('cx53', 40)]);
+    sqlite.exec(
+      "UPDATE capacity_pool_candidates SET status='active'; UPDATE capacity_pool_candidates SET catalog_availability='last-known-unavailable' WHERE provider_instance_type='cx53'"
+    );
+    await reconcileDefaultPoolStatus(db, 'pool');
+    const before = sqlite
+      .prepare(
+        'SELECT id, status, catalog_availability, provider_instance_memory_mb, provider_instance_price_monthly_cents FROM capacity_pool_candidates ORDER BY id'
+      )
+      .all();
+    const references = [
+      { ...offering('cx23', 999), catalogSource: 'static' as const, memoryMb: 8192 },
+      { ...offering('cx43', 30), catalogSource: 'static' as const },
+      { ...offering('cx53', 999), catalogSource: 'static' as const },
+    ];
+    const options = {
+      catalogComplete: false,
+      catalogValidated: true,
+      publishBatchSize: 2,
+      cursorStore: store,
+    };
+    for (let pass = 0; pass < 2; pass++) {
+      expect((await publish(db, references, options)).publicationComplete).toBe(false);
+      expect(
+        sqlite
+          .prepare(
+            'SELECT id, status, catalog_availability, provider_instance_memory_mb, provider_instance_price_monthly_cents FROM capacity_pool_candidates ORDER BY id'
+          )
+          .all()
+      ).toEqual(before);
+    }
+    const result = await publish(db, references, options);
+    expect(result).toMatchObject({ publicationComplete: true, markedMissing: false });
+    expect(
+      sqlite
+        .prepare(
+          'SELECT DISTINCT provider_instance_type type, provider_instance_catalog_source source, catalog_availability availability, provider_instance_price_monthly_cents price FROM capacity_pool_candidates ORDER BY type'
+        )
+        .all()
+    ).toEqual([
+      { type: 'cx23', source: 'api', availability: 'available', price: 1000 },
+      { type: 'cx33', source: 'api', availability: 'available', price: 2000 },
+      { type: 'cx43', source: 'static', availability: 'available', price: 3000 },
+      { type: 'cx53', source: 'api', availability: 'last-known-unavailable', price: 4000 },
+    ]);
+    const committed = sqlite
+      .prepare("SELECT revision, selection_digest FROM capacity_pools WHERE id='pool'")
+      .get();
+    await reconcileDefaultPoolStatus(db, 'pool', result.poolPublicationGuard);
+    expect(
+      sqlite.prepare("SELECT revision, selection_digest FROM capacity_pools WHERE id='pool'").get()
+    ).toEqual(committed);
+    expect((await publish(db, references, options)).publicationComplete).toBe(true);
+    expect(
+      sqlite.prepare("SELECT revision, selection_digest FROM capacity_pools WHERE id='pool'").get()
+    ).toEqual(committed);
+  });
+
+  it('does not publish explicitly invalid metadata even if enumeration is complete', async () => {
+    const { db, sqlite } = fixture();
+    expect(
+      (await publish(db, [offering()], { catalogComplete: true, catalogValidated: false }))
+        .publicationComplete
+    ).toBe(false);
+    expect(sqlite.prepare('SELECT count(*) n FROM capacity_pool_candidates').get()).toEqual({
+      n: 0,
+    });
+  });
+
+  it('keeps partial API resource and price replacements private until a complete catalog returns', async () => {
+    const { db, sqlite } = fixture();
+    const store = cursorStore();
+    const original = [offering('cx23', 10), offering('cx33', 20)];
+    await publish(db, original, { cursorStore: store });
+    sqlite.exec("UPDATE capacity_pool_candidates SET status='active'");
+    await reconcileDefaultPoolStatus(db, 'pool');
+    const beforeRows = sqlite
+      .prepare(
+        'SELECT id, status, provider_instance_memory_mb, provider_instance_price_monthly_cents FROM capacity_pool_candidates ORDER BY id'
+      )
+      .all();
+    const beforePool = sqlite
+      .prepare("SELECT revision, selection_digest FROM capacity_pools WHERE id='pool'")
+      .get();
+    const replacement = { ...offering('cx23', 99), memoryMb: 8192 };
+    const partial = await publish(db, [replacement], {
+      cursorStore: store,
+      catalogComplete: false,
+    });
+    expect(partial).toMatchObject({ publicationComplete: false, markedMissing: false });
+    expect(partial.poolPublicationGuard).toBeUndefined();
+    expect(
+      sqlite
+        .prepare(
+          'SELECT id, status, provider_instance_memory_mb, provider_instance_price_monthly_cents FROM capacity_pool_candidates ORDER BY id'
+        )
+        .all()
+    ).toEqual(beforeRows);
+    expect(
+      sqlite.prepare("SELECT revision, selection_digest FROM capacity_pools WHERE id='pool'").get()
+    ).toEqual(beforePool);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT DISTINCT json_extract(payload, '$.providerInstanceMemoryMb') AS memory FROM capacity_pool_candidate_staging WHERE digest = ?"
+        )
+        .all(JSON.parse([...store.values.values()][0]!).digest)
+    ).toEqual([{ memory: 8192 }]);
+    expect(
+      (await publish(db, [replacement, original[1]!], { cursorStore: store })).publicationComplete
+    ).toBe(true);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT DISTINCT provider_instance_memory_mb memory, provider_instance_price_monthly_cents price FROM capacity_pool_candidates WHERE provider_instance_type='cx23'"
+        )
+        .all()
+    ).toEqual([{ memory: 8192, price: 9900 }]);
+  });
+
+  it('never exposes initial partial API or static fallback rows even when they fit in one batch', async () => {
+    const { db, sqlite } = fixture();
+    for (const catalogSource of ['api', 'static'] as const) {
+      const result = await publish(db, [{ ...offering(), catalogSource }], {
+        catalogComplete: false,
+      });
+      expect(result).toMatchObject({ publicationComplete: false, markedMissing: false });
+      expect(sqlite.prepare('SELECT count(*) n FROM capacity_pool_candidates').get()).toEqual({
+        n: 0,
+      });
+    }
+  });
+
+  it('invalidates competing allocation plans atomically before summary reconciliation', async () => {
+    const { db, sqlite } = fixture();
+    const catalog = [offering('cx23', 10), offering('cx33', 20)];
+    await publish(db, catalog);
+    await reconcileDefaultPoolStatus(db, 'pool');
+    const before = sqlite
+      .prepare("SELECT revision, updated_at FROM capacity_pools WHERE id='pool'")
+      .get() as { revision: number; updated_at: string };
+    const unchangedCandidate = sqlite
+      .prepare(
+        "SELECT authority_generation FROM capacity_pool_candidates WHERE provider_instance_type='cx33' AND workload_role='workspace'"
+      )
+      .get() as { authority_generation: number };
+    const result = await publish(db, [offering('cx23', 1), catalog[1]!], {
+      poolPublicationGuard: {
+        revision: before.revision,
+        updatedAt: before.updated_at,
+        status: 'active',
+      },
+    });
+    // The caller can crash here: no summary call has run, yet the old paid allocation
+    // token is already invalid, including a token for the untouched competing cx33.
+    const after = sqlite.prepare("SELECT revision FROM capacity_pools WHERE id='pool'").get() as {
+      revision: number;
+    };
+    expect(after.revision).toBe(before.revision + 1);
+    expect(result.poolPublicationGuard).toMatchObject({
+      revision: after.revision,
+      status: 'active',
+    });
+    expect(
+      sqlite
+        .prepare(
+          "SELECT authority_generation FROM capacity_pool_candidates WHERE provider_instance_type='cx33' AND workload_role='workspace'"
+        )
+        .get()
+    ).toEqual(unchangedCandidate);
+    const generation = (revision: number) =>
+      capacityPlacementAuthorityGeneration({
+        poolRevision: revision,
+        selectionSettingsGeneration: 1,
+        sourceAuthorityGeneration: 1,
+        candidateAuthorityGeneration: unchangedCandidate.authority_generation,
+      });
+    expect(generation(after.revision)).not.toBe(generation(before.revision));
+    await reconcileDefaultPoolStatus(db, 'pool', result.poolPublicationGuard);
+    expect(sqlite.prepare("SELECT revision FROM capacity_pools WHERE id='pool'").get()).toEqual(
+      after
+    );
+  });
+
+  it('rolls the revision and every live row back if promotion fails midway', async () => {
+    const { db, sqlite } = fixture();
+    await publish(db, [offering('cx23', 10), offering('cx33', 20)]);
+    const beforePool = sqlite
+      .prepare("SELECT revision, selection_digest, updated_at FROM capacity_pools WHERE id='pool'")
+      .get();
+    const beforeRows = sqlite
+      .prepare(
+        'SELECT id, provider_instance_price_monthly_cents FROM capacity_pool_candidates ORDER BY id'
+      )
+      .all();
+    sqlite.exec(`CREATE TRIGGER interrupt_promotion BEFORE INSERT ON capacity_pool_candidates
+      WHEN NEW.provider_instance_type = 'cx33' BEGIN SELECT RAISE(ABORT, 'interrupted publication'); END;`);
+    await expect(publish(db, [offering('cx23', 11), offering('cx33', 21)])).rejects.toThrow(
+      'interrupted publication'
+    );
+    expect(
+      sqlite
+        .prepare(
+          "SELECT revision, selection_digest, updated_at FROM capacity_pools WHERE id='pool'"
+        )
+        .get()
+    ).toEqual(beforePool);
+    expect(
+      sqlite
+        .prepare(
+          'SELECT id, provider_instance_price_monthly_cents FROM capacity_pool_candidates ORDER BY id'
+        )
+        .all()
+    ).toEqual(beforeRows);
+    sqlite.exec('DROP TRIGGER interrupt_promotion');
+    expect(
+      (await publish(db, [offering('cx23', 11), offering('cx33', 21)])).publicationComplete
+    ).toBe(true);
+  });
+
+  it('does not adopt a concurrent pool edit when its promotion CAS loses', async () => {
+    const { db, database, sqlite } = fixture();
+    await publish(db, [offering('cx23', 10)]);
+    const before = sqlite
+      .prepare("SELECT revision, updated_at FROM capacity_pools WHERE id='pool'")
+      .get() as { revision: number; updated_at: string };
+    const raced = beforeStatement(database, /UPDATE capacity_pools SET revision/, () => {
+      sqlite.exec(
+        "UPDATE capacity_pools SET revision=revision+1, updated_at='editor' WHERE id='pool'"
+      );
+    });
+    const result = await publish(drizzle(raced, { schema }), [offering('cx23', 11)], {
+      poolPublicationGuard: {
+        revision: before.revision,
+        updatedAt: before.updated_at,
+        status: 'active',
+      },
+    });
+    expect(result.publicationComplete).toBe(false);
+    expect(result.poolPublicationGuard).toBeUndefined();
+    expect(
+      sqlite
+        .prepare(
+          'SELECT DISTINCT provider_instance_price_monthly_cents price FROM capacity_pool_candidates'
+        )
+        .all()
+    ).toEqual([{ price: 1000 }]);
+    expect(sqlite.prepare("SELECT updated_at FROM capacity_pools WHERE id='pool'").get()).toEqual({
+      updated_at: 'editor',
+    });
+  });
+
+  it.each([
+    "UPDATE capacity_sources SET source_generation=2 WHERE id='source'",
+    "UPDATE capacity_sources SET status='disabled' WHERE id='source'",
+  ])('rejects source authority lost after staging and before promotion: %s', async (mutation) => {
+    const { db, database, sqlite } = fixture();
+    await publish(db, [offering('cx23', 10)]);
+    const before = sqlite
+      .prepare("SELECT revision, selection_digest FROM capacity_pools WHERE id='pool'")
+      .get();
+    const raced = beforeStatement(database, /UPDATE capacity_pools SET revision/, () => {
+      sqlite.exec(mutation);
+    });
+    const result = await publish(drizzle(raced, { schema }), [offering('cx23', 11)]);
+    expect(result.publicationComplete).toBe(false);
+    expect(result.poolPublicationGuard).toBeUndefined();
+    expect(
+      sqlite.prepare("SELECT revision, selection_digest FROM capacity_pools WHERE id='pool'").get()
+    ).toEqual(before);
+    expect(
+      sqlite
+        .prepare(
+          'SELECT DISTINCT provider_instance_price_monthly_cents price FROM capacity_pool_candidates'
+        )
+        .all()
+    ).toEqual([{ price: 1000 }]);
+  });
+
+  it('returns its own committed guard even if another edit wins before the response arrives', async () => {
+    const { db, database, sqlite } = fixture();
+    await publish(db, [offering('cx23', 10)]);
+    const before = sqlite.prepare("SELECT revision FROM capacity_pools WHERE id='pool'").get() as {
+      revision: number;
+    };
+    const batch = database.batch.bind(database);
+    let intervened = false;
+    const raced = {
+      ...database,
+      batch: async (...args: Parameters<D1Database['batch']>) => {
+        const result = await batch(...args);
+        if (!intervened && result[0]?.results?.length) {
+          intervened = true;
+          sqlite.exec(
+            "UPDATE capacity_pools SET revision=revision+1, updated_at='later-editor' WHERE id='pool'"
+          );
+        }
+        return result;
+      },
+    };
+    const result = await publish(drizzle(raced, { schema }), [offering('cx23', 11)]);
+    expect(result.poolPublicationGuard?.revision).toBe(before.revision + 1);
+    expect(result.poolPublicationGuard?.updatedAt).not.toBe('later-editor');
+    expect(
+      sqlite.prepare("SELECT revision, updated_at FROM capacity_pools WHERE id='pool'").get()
+    ).toEqual({ revision: before.revision + 2, updated_at: 'later-editor' });
+    await reconcileDefaultPoolStatus(db, 'pool', result.poolPublicationGuard);
+    expect(sqlite.prepare("SELECT updated_at FROM capacity_pools WHERE id='pool'").get()).toEqual({
+      updated_at: 'later-editor',
+    });
+  });
+
+  it.each([
+    'missing batch entry',
+    'missing returned row',
+    'missing revision',
+    'missing timestamp',
+    'missing status',
+    'wrong revision',
+    'wrong timestamp',
+    'wrong status',
+    'string revision',
+  ])('does not adopt a promotion acknowledgement with %s', async (fault) => {
+    const { db, database, sqlite } = fixture();
+    await publish(db, [offering('cx23', 10)]);
+    const before = sqlite.prepare("SELECT revision FROM capacity_pools WHERE id='pool'").get();
+    const batch = database.batch.bind(database);
+    let tampered = false;
+    const malformed = {
+      ...database,
+      batch: async (...args: Parameters<D1Database['batch']>) => {
+        const result = await batch(...args);
+        const first = result[0];
+        const raw = first?.results?.[0];
+        if (
+          !tampered &&
+          first &&
+          raw &&
+          typeof raw === 'object' &&
+          'revision' in raw &&
+          'updatedAt' in raw &&
+          'status' in raw
+        ) {
+          // The actual atomic SQLite promotion committed. Only its external acknowledgement
+          // is damaged; rejecting it cannot rely on rolling back or re-reading a later edit.
+          tampered = true;
+          const acknowledgement: Record<string, unknown> = { ...raw };
+          if (fault === 'missing batch entry') result.shift();
+          else if (fault === 'missing returned row') first.results = [];
+          else {
+            if (fault === 'missing revision') delete acknowledgement.revision;
+            if (fault === 'missing timestamp') delete acknowledgement.updatedAt;
+            if (fault === 'missing status') delete acknowledgement.status;
+            if (fault === 'wrong revision')
+              acknowledgement.revision = Number(acknowledgement.revision) + 1;
+            if (fault === 'wrong timestamp')
+              acknowledgement.updatedAt = `${String(acknowledgement.updatedAt)}-other-publication`;
+            if (fault === 'wrong status') acknowledgement.status = 'disabled';
+            if (fault === 'string revision')
+              acknowledgement.revision = String(acknowledgement.revision);
+            first.results = [acknowledgement];
+          }
+        }
+        return result;
+      },
+    };
+    const store = cursorStore();
+    const result = await publish(drizzle(malformed, { schema }), [offering('cx23', 11)], {
+      cursorStore: store,
+    });
+    expect(tampered).toBe(true);
+    expect(result.publicationComplete).toBe(false);
+    expect(result.poolPublicationGuard).toBeUndefined();
+    expect([...store.values.values()].map((value) => JSON.parse(value).complete)).toEqual([false]);
+    const committed = sqlite.prepare("SELECT revision FROM capacity_pools WHERE id='pool'").get();
+    expect(committed).not.toEqual(before);
+    expect(
+      sqlite
+        .prepare(
+          'SELECT DISTINCT provider_instance_price_monthly_cents price FROM capacity_pool_candidates'
+        )
+        .all()
+    ).toEqual([{ price: 1100 }]);
+    const recovered = await publish(db, [offering('cx23', 11)], { cursorStore: store });
+    expect(recovered.publicationComplete).toBe(true);
+    expect(recovered.poolPublicationGuard).toBeDefined();
+    expect(sqlite.prepare("SELECT revision FROM capacity_pools WHERE id='pool'").get()).toEqual(
+      committed
+    );
+  });
+
+  it('restarts after promotion committed but cursor persistence was interrupted without rebumping', async () => {
+    const { db, sqlite } = fixture();
+    const store = cursorStore();
+    const catalog = [offering('cx23', 10), offering('cx33', 20)];
+    await publish(db, catalog, {
+      cursorStore: store,
+      publishBatchSize: 2,
+      publishDeadlineAt: Infinity,
+    });
+    const replacement = [offering('cx23', 11), offering('cx33', 21)];
+    const interrupted = {
+      ...store,
+      write: async (key: string, value: string | null) => {
+        if (value && JSON.parse(value).complete) throw new Error('lost completion');
+        await store.write(key, value);
+      },
+    };
+    await expect(
+      publish(db, replacement, {
+        cursorStore: interrupted,
+        publishBatchSize: 2,
+        publishDeadlineAt: Infinity,
+      })
+    ).rejects.toThrow('lost completion');
+    const committed = sqlite
+      .prepare("SELECT revision, selection_digest FROM capacity_pools WHERE id='pool'")
+      .get();
+    expect(
+      (
+        await publish(db, replacement, {
+          cursorStore: store,
+          publishBatchSize: 2,
+          publishDeadlineAt: Infinity,
+        })
+      ).publicationComplete
+    ).toBe(true);
+    expect(
+      sqlite.prepare("SELECT revision, selection_digest FROM capacity_pools WHERE id='pool'").get()
+    ).toEqual(committed);
+  });
+
+  it('retains the committed rows across an interrupted replacement and promotes together', async () => {
+    const { db, sqlite } = fixture();
+    const store = cursorStore();
+    const initial = [offering('cx23', 10), offering('cx33', 20)];
+    await publish(db, initial, { cursorStore: store, publishDeadlineAt: Infinity });
+    const committed = sqlite
+      .prepare(
+        'SELECT id, provider_instance_price_monthly_cents FROM capacity_pool_candidates ORDER BY id'
+      )
+      .all();
+    const replacement = [offering('cx23', 11), offering('cx33', 21), offering('cx43', 30)];
+    const partial = await publish(db, replacement, { cursorStore: store, publishBatchSize: 2 });
+    expect(partial.publicationComplete).toBe(false);
+    expect(
+      sqlite
+        .prepare(
+          'SELECT id, provider_instance_price_monthly_cents FROM capacity_pool_candidates ORDER BY id'
+        )
+        .all()
+    ).toEqual(committed);
+    // A fresh entry-point call resumes its saved cursor, rather than exposing the staged prefix.
+    await publish(db, replacement, {
+      cursorStore: store,
+      publishBatchSize: 2,
+      publishDeadlineAt: Infinity,
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM capacity_pool_candidates').get()).toEqual({
+      n: 6,
+    });
+    expect(
+      sqlite
+        .prepare(
+          "SELECT DISTINCT provider_instance_price_monthly_cents AS price FROM capacity_pool_candidates WHERE provider_instance_type='cx23'"
+        )
+        .all()
+    ).toEqual([{ price: 1100 }]);
+  });
+
+  it('never exposes a partially published first catalog', async () => {
+    const { db, sqlite } = fixture();
+    const store = cursorStore();
+    await publish(db, [offering('cx23'), offering('cx33')], {
+      cursorStore: store,
+      publishBatchSize: 2,
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM capacity_pool_candidates').get()).toEqual({
+      n: 0,
+    });
   });
 });

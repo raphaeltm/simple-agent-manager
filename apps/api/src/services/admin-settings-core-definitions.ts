@@ -27,6 +27,13 @@ import {
   oauthDefinition,
 } from './admin-setting-definitions';
 import { agentModelSettingDefinitions } from './agent-models/settings-definition';
+import {
+  DEFAULT_CAPACITY_POOL_REFRESH_DEADLINE_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_LEASE_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_PASS_BUDGET_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_RETRY_BASE_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_RETRY_MAX_MS,
+} from './capacity-pool-refresh-defaults';
 import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settings-definition';
 import { DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS } from './default-capacity-pool-candidates-common';
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
@@ -90,10 +97,45 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     { min: 1, max: 30000 }
   ),
   integerDefinition(
+    'operations.capacityPoolRefreshPassBudgetMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_PASS_BUDGET_MS,
+    'Operations',
+    'Shared wall time for catalog work across all sources and scopes per pass.',
+    { min: 1, max: 120000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshRetryBaseMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_RETRY_BASE_MS,
+    'Operations',
+    'Initial delay for unfinished catalog publication; cron also reconciles missed continuations.',
+    { min: 1, max: 300000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshRetryMaxMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_RETRY_MAX_MS,
+    'Operations',
+    'Maximum backoff delay for unfinished catalog publication.',
+    { min: 1, max: 900000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshDeadlineMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_DEADLINE_MS,
+    'Operations',
+    'Maximum elapsed time for one catalog refresh before an actionable error retains the committed catalog.',
+    { min: 1, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshLeaseMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_LEASE_MS,
+    'Operations',
+    'Crash-recovery lease for a claimed catalog continuation or discovery sweep.',
+    { min: 1, max: 900000 }
+  ),
+  integerDefinition(
     'operations.capacityPoolPublishBudgetMs',
     DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS,
     'Operations',
-    'Time budget in milliseconds for writing a changed compute pool catalog in one refresh. SAM keeps writing batches until the catalog is complete or this time is used, then resumes on the next refresh. A pool cannot place new VMs until its catalog is complete. 0 writes one batch per refresh.',
+    'Time budget in milliseconds for writing a changed compute pool catalog in one refresh. SAM keeps writing batches until the catalog is complete or this time is used, then resumes on the next refresh. Established pools retain their committed catalog while replacements are staged. 0 writes one batch per refresh.',
     { min: 0, max: 120000 }
   ),
   integerDefinition(

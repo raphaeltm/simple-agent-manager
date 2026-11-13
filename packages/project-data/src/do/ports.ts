@@ -220,6 +220,7 @@ export interface SnapshotWakeClaimInput {
   workspaceId: string;
   taskId: string;
   recoveryAttemptId?: string | null;
+  allowRestored?: boolean;
 }
 
 export interface SleepSnapshotLookupInput {

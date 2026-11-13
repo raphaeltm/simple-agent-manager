@@ -1560,7 +1560,8 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
           userId: 'user-1',
           projectId: 'project-1',
           includeInstallation: true,
-          env: env,
+          // This teardown/wake fixture uses the validated bundled catalog. Its synthetic
+          // credential is intentionally not encrypted for a live provider lookup.
         });
         const lifecycle = env.NODE_LIFECYCLE;
         env.NODE_LIFECYCLE = {

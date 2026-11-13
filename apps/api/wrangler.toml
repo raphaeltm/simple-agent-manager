@@ -469,13 +469,14 @@ binding = "AI"
 # because they break Vitest — Cloudflare issue #9343).
 
 # Cron triggers:
+# - Every minute: lightweight durable compute-catalog continuation only
 # - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery
 # - Hourly at :30: monthly AI cost aggregation per user (Gateway logs → KV cache)
 # - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
 # NOTE: Cron strings are matched exactly in scheduled/handler.ts:scheduled() to dispatch
 # between the different jobs. If you change them here, update the comparisons there.
 [triggers]
-crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *"]
+crons = ["* * * * *", "*/5 * * * *", "30 * * * *", "0 3 * * *"]
 
 # Secrets (set via wrangler secret bulk):
 # - BOOTSTRAP_OWNER_EMAIL (optional — immutable verified first-owner identity for installer deployments)

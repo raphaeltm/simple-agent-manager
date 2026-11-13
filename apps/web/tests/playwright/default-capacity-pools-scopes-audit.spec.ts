@@ -2,6 +2,7 @@ import { expect, type Page, test } from '@playwright/test';
 
 import {
   applyMockCapacityDefaultsUpdate,
+  assertNoClippedOverflow,
   assertNoOverflow,
   getProjectSuffix,
   jsonResponse,
@@ -380,6 +381,13 @@ async function setupCommonMocks(page: Page, authUser: unknown, catalogScope: Poo
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
     if (path === '/api/credentials') return respond(200, []);
+    if (path === '/api/cc/credentials') return respond(200, { credentials: [] });
+    if (path === '/api/cc/configurations') return respond(200, { configurations: [] });
+    if (path === '/api/cc/attachments' || path === '/api/cc/profile-attachments') {
+      return respond(200, { attachments: [] });
+    }
+    if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
+    if (path === '/api/credentials/limits') return respond(200, { credentials: [] });
     if (path.startsWith('/api/github')) return respond(200, []);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/providers/catalog') {
@@ -632,6 +640,81 @@ test.describe('Default capacity pool scope surfaces', () => {
   // Each scope exercises filters, membership edits, persistence, and multiple
   // screenshots; the shared single-screen timeout is too short for this flow.
   test.setTimeout(120_000);
+
+  for (const scope of ['project', 'user', 'installation'] as const) {
+    for (const theme of ['dark', 'light'] as const) {
+      test(`${scope} failed refresh keeps the stressed ready pool usable in ${theme} theme`, async ({
+        page,
+      }) => {
+        await page.addInitScript((value) => localStorage.setItem('sam-theme', value), theme);
+        if (scope === 'project') await setupProjectPoolMocks(page);
+        else if (scope === 'user') await setupUserPoolMocks(page);
+        else await setupInstallationPoolMocks(page);
+        let refreshCalls = 0;
+        const responseBody = defaultsResponse(scope);
+        const selected = responseBody.effective as typeof responseBody.effective & {
+          diagnostics: string[];
+        };
+        selected.diagnostics = [
+          'catalog-refresh-failed',
+          '<script>unsafe provider diagnostic</script>',
+        ];
+        const endpoint =
+          scope === 'project'
+            ? `/api/projects/${MOCK_PROJECT.id}/capacity-pools/defaults`
+            : scope === 'installation'
+              ? '/api/admin/capacity-pools/defaults'
+              : '/api/capacity-pools/defaults';
+        await page.route(`**${endpoint}**`, (route) => {
+          if (route.request().method() === 'POST') {
+            refreshCalls++;
+            selected.diagnostics = [];
+          }
+          return jsonResponse(route, 200, responseBody);
+        });
+        const path =
+          scope === 'project'
+            ? `/projects/${MOCK_PROJECT.id}/settings/infrastructure`
+            : scope === 'installation'
+              ? '/admin/infrastructure'
+              : '/settings/infrastructure';
+        await page.goto(path);
+        await expectStressedDefaultPool(page, scope);
+        await expect(page.locator('html')).toHaveAttribute(
+          'data-ui-theme',
+          theme === 'dark' ? 'sam' : 'sam-light'
+        );
+        const panel = page.getByRole('region', { name: POOL_HEADINGS[scope], exact: true });
+        const notice = panel.getByRole('alert');
+        await expect(notice).toHaveText(
+          'Machine list refresh failed. Check the connected cloud accounts, then select Refresh to retry.'
+        );
+        await expect(page.getByText(/unsafe provider diagnostic/)).toHaveCount(0);
+        const refresh = panel.getByRole('button', { name: 'Refresh machine list' });
+        await expect(refresh).toHaveCount(1);
+        await expect(refresh).toBeEnabled();
+        const account = panel.getByRole('switch', { name: /^Use .+ in this pool$/ }).first();
+        await expect(account).toBeEnabled();
+        await assertNoClippedOverflow(page);
+        // Align the actual changed panel at the top of its scroll pane. Leaving an already
+        // visible heading near the viewport bottom can crop the retained-ready status.
+        await panel
+          .getByRole('heading', { name: POOL_HEADINGS[scope], exact: true })
+          .evaluate((heading) => heading.scrollIntoView({ block: 'start' }));
+        await screenshotNearHeading(
+          page,
+          POOL_HEADINGS[scope],
+          `catalog-refresh-failed-${scope}-${theme}`
+        );
+        await refresh.click();
+        await expect(notice).toHaveCount(0);
+        expect(refreshCalls).toBe(1);
+        await expect(account).toBeEnabled();
+        await expect(panel.getByText(`Ready · ${pickedRowCount(scope)} in pool`)).toBeVisible();
+        await assertNoOverflow(page);
+      });
+    }
+  }
 
   test('project settings surface renders stressed project default pool without overflow', async ({
     page,
