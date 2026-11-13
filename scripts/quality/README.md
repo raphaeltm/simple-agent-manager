@@ -35,13 +35,21 @@ different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
   fails the run with a nonzero exit code — no `--fail-on-findings` flag required. Other scopes
   remain advisory (exit 0 regardless of findings) until their own evidence is promoted.
 - `pnpm quality:shared-flight-joins` (blocking in CI) fails when Worker code (`apps/api/src` and
-  the shared, providers and cloud-init packages) awaits or returns a promise read out of
-  module-scope state: another request's in-flight read. On the self-hosted celld runtime such a
-  promise never settles once its starter's client disconnects. Join with `joinSharedFlight` /
-  `settleSharedFlight` (`apps/api/src/lib/shared-flight.ts`), or mark a reviewed exception with
+  the shared, providers and cloud-init packages) resumes after another request's in-flight read
+  in any way other than `joinSharedFlight` / `settleSharedFlight`
+  (`apps/api/src/lib/shared-flight.ts`). On the self-hosted celld runtime such a promise never
+  settles once its starter's client disconnects, and a request that resumes on its settlement
+  runs as part of the starter's request and loses its later D1 calls, fetches and timers when
+  the starter answers; the helpers wait under the joiner's own timer and, on celld, resume it on
+  that timer. Flagged: an `await`/`return` of the shared promise, a `.then`/`.catch`/`.finally`
+  on it (awaited or not), and handing it to any other function (a `Promise.race`, a timeout
+  wrapper). Shared state is module-scope state, or a field of a class with an instance held in
+  module scope (the admin-settings cache). Mark a reviewed exception with
   `// shared-flight-join-allowed: <reason>` on the line above. `--inventory` lists every
-  module-scope variable that holds a promise. It does not follow `this` state inside a class (a
-  Durable Object field), a module-scope promise handed to a helper that awaits it, or `for await`.
+  module-scope variable that holds a promise. It does not follow state reached through a
+  function parameter (a helper handed a shared entry object is trusted), iteration over a shared
+  collection, Durable Object fields (an object's ops survive one of its requests
+  answering on celld 0.6.3), or `for await`.
 - `pnpm lint:oxlint` is report-only. Promotion is forbidden until
   `scripts/quality/lint-adoption-evidence.json` records finding, fix-diff, scope, template,
   suppression, and cold-performance parity. Type-aware Oxlint is disabled.

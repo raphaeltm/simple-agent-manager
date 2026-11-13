@@ -107,12 +107,60 @@ describe('shared-flight join guard', () => {
     expect(findings).toEqual([]);
   });
 
-  it('does not treat a call on a module-scope object as joining its state', () => {
+  it('flags a module-held class instance joining its own flight field (the R6 shape)', () => {
+    // One instance in module scope serves every request in the isolate, so its fields are
+    // request-shared state: the admin-settings cache, where task R6's hangs were.
     const { findings } = scan(`${HELPER}
       class Cache { private flight?: Promise<string>; async read() { return (this.flight ??= read()); } }
-      const cache = new Cache();
+      export const cache = new Cache();
       export async function use() { return await cache.read(); }`);
+    expect(findings).toEqual([expect.objectContaining({ root: 'this.flight', kind: 'awaits' })]);
+  });
+
+  it('does not treat fields of a class instantiated per call as shared', () => {
+    // Control for the case above: the same class, with no module-scope instance.
+    const { findings } = scan(`${HELPER}
+      class Cache { private flight?: Promise<string>; async read() { return (this.flight ??= read()); } }
+      export async function use() { return await new Cache().read(); }`);
     expect(findings).toEqual([]);
+  });
+
+  it('flags a continuation attached to a shared flight, awaited or not', () => {
+    // On celld the continuation runs as part of the request that settles the flight (task R6).
+    const { findings } = scan(`${HELPER}
+      const pending = new Map<string, Promise<string>>();
+      export function onSettle(key: string, record: (value: string) => void) {
+        pending.get(key)?.then(record);
+      }
+      export function onFailure(key: string) {
+        void pending.get(key)?.catch(() => undefined);
+      }`);
+    expect(findings.map((f) => f.kind)).toEqual(['continues', 'continues']);
+    expect(findings.every((f) => f.root === 'pending')).toBe(true);
+  });
+
+  it('flags a shared flight handed to a helper other than the sanctioned joins (the compact-r2 shape)', () => {
+    const { findings } = scan(`${HELPER}
+      declare function timed<T>(p: Promise<T>, deadline: number): Promise<T>;
+      declare function joinSharedFlight<T>(p: Promise<T>, deadlineAt: number): Promise<T>;
+      const pending = new Map<string, { deadlineAt: number; promise: Promise<string> }>();
+      export async function viaTimed(key: string) {
+        const entry = pending.get(key);
+        if (entry) return timed(entry.promise, entry.deadlineAt);
+      }
+      export async function viaRace(key: string) {
+        const entry = pending.get(key);
+        if (entry) void Promise.race([entry.promise, read()]);
+      }
+      export async function sanctioned(key: string) {
+        const entry = pending.get(key);
+        if (entry) await joinSharedFlight(entry.promise, entry.deadlineAt);
+        if (entry) await settleSharedFlight(entry.promise, entry.deadlineAt);
+      }`);
+    expect(findings.map((f) => [f.kind, f.code])).toEqual([
+      ['hands-off', 'entry.promise'],
+      ['hands-off', 'entry.promise'],
+    ]);
   });
 
   it('honours a reviewed exception on the line above', () => {

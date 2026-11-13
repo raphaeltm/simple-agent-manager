@@ -7,18 +7,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  __setSharedFlightResumeOnOwnTimerForTest,
   DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS,
   joinSharedFlight,
   settleSharedFlight,
+  SHARED_FLIGHT_POLL_MS,
   SharedFlightAbandonedError,
 } from '../../../src/lib/shared-flight';
 
 const never = () => new Promise<never>(() => undefined);
 
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  __setSharedFlightResumeOnOwnTimerForTest(false);
+});
 
-describe('joinSharedFlight', () => {
+describe.each([
+  { runtime: 'Cloudflare', ownTimer: false },
+  { runtime: 'celld', ownTimer: true },
+])('joinSharedFlight ($runtime)', ({ ownTimer }) => {
+  beforeEach(() => __setSharedFlightResumeOnOwnTimerForTest(ownTimer));
+
   it('returns a live flight’s value and leaves no timer behind', async () => {
     const now = Date.now();
     await expect(joinSharedFlight(Promise.resolve('v'), now + 5000, now)).resolves.toBe('v');
@@ -62,5 +72,45 @@ describe('joinSharedFlight', () => {
     });
     const failure = new Error('x');
     await expect(settleSharedFlight(Promise.reject(failure), now + 10, now)).rejects.toBe(failure);
+  });
+});
+
+describe('where a joiner resumes', () => {
+  it('resumes a joiner of a pending flight on its own timer, never on the settlement', async () => {
+    // On celld the code that runs when a promise settles belongs to the request that settled it,
+    // so a joiner must not continue there (task R6). Settling the flight alone must not resume it.
+    __setSharedFlightResumeOnOwnTimerForTest(true);
+    let settle: (value: string) => void = () => undefined;
+    const flight = new Promise<string>((resolve) => (settle = resolve));
+    const now = Date.now();
+    let resumed = false;
+    const joined = joinSharedFlight(flight, now + 5000, now).then((value) => {
+      resumed = true;
+      return value;
+    });
+    await vi.advanceTimersByTimeAsync(SHARED_FLIGHT_POLL_MS * 3);
+    settle('v');
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(resumed).toBe(false);
+    await vi.advanceTimersByTimeAsync(SHARED_FLIGHT_POLL_MS);
+    expect(resumed).toBe(true);
+    await expect(joined).resolves.toBe('v');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('on Cloudflare resumes a joiner directly on the settlement, with no added timer', async () => {
+    let settle: (value: string) => void = () => undefined;
+    const flight = new Promise<string>((resolve) => (settle = resolve));
+    const now = Date.now();
+    let resumed = false;
+    const joined = joinSharedFlight(flight, now + 5000, now).then((value) => {
+      resumed = true;
+      return value;
+    });
+    settle('v');
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(resumed).toBe(true);
+    await expect(joined).resolves.toBe('v');
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

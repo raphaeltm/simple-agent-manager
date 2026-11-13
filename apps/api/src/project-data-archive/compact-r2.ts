@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { joinSharedFlight, SharedFlightAbandonedError } from '../lib/shared-flight';
 import { PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES, type ProjectDataArchiveChunk } from './contract';
 import { sha256Hex } from './hashing';
 
@@ -55,6 +56,32 @@ type PendingR2Operation = { stage: string; promise: Promise<unknown> };
 const pendingR2Operations = new WeakMap<R2Bucket, Map<string, PendingR2Operation>>();
 
 /**
+ * Wait for an R2 operation another caller started, under this caller's own deadline. Joined
+ * through lib/shared-flight.ts like every other per-isolate flight: the cron sweep reaches this
+ * from stateless code, and on the self-hosted celld runtime a caller that resumed on another
+ * request's settlement would lose its next R2 call and its own deadline timer when that request
+ * answered (task R7). On Cloudflare this is the same race against a deadline timer as `timed`.
+ *
+ * Unlike the other shared flights, an abandoned operation is NOT evicted: a second provider call
+ * must never race the first on an immutable key (see timedR2). On celld a dropped operation
+ * therefore keeps failing joiners for that key with a timeout until the isolate is retired.
+ */
+async function joinR2Operation(
+  pending: PendingR2Operation,
+  deadline: number,
+  stage: string
+): Promise<unknown> {
+  void pending.promise.catch(() => undefined);
+  if (deadline - Date.now() <= 0) throw new CompactArchiveTimeoutError(stage);
+  try {
+    return await joinSharedFlight(pending.promise, deadline, Date.now(), 0);
+  } catch (error) {
+    if (error instanceof SharedFlightAbandonedError) throw new CompactArchiveTimeoutError(stage);
+    throw error;
+  }
+}
+
+/**
  * Keep one provider operation in flight per bucket/key. A deadline may release
  * the request, but a retry in the same isolate waits for the original provider
  * promise to settle before issuing another GET/HEAD/PUT for that immutable key.
@@ -78,12 +105,12 @@ async function timedR2<T>(
       // GET results carry a single-use body stream. Wait for the provider call,
       // then fetch an independent body for the joining reader.
       if (stage === 'get') {
-        await timed(pending.promise, deadline, stage);
+        await joinR2Operation(pending, deadline, stage);
         return timedR2(r2, key, deadline, stage, start);
       }
-      return timed(pending.promise as Promise<T>, deadline, stage);
+      return (await joinR2Operation(pending, deadline, stage)) as T;
     }
-    await timed(pending.promise, deadline, `${stage}_pending`);
+    await joinR2Operation(pending, deadline, `${stage}_pending`);
     return timedR2(r2, key, deadline, stage, start);
   }
   const promise = start();
