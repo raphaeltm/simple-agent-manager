@@ -16,16 +16,21 @@ Main's worker modularization now owns the D1 schema in `packages/worker-core` an
 
 The Go collector, trusted-root acquisition, trailing `rel + "/."` FIFO guard, source PUT, upload diagnostics, context job admission and cancellation/spool logic are unchanged from `23b6171bd353350457c51f0692e2972cbd637521`.
 
-## Migration renumbering and staging-only prerequisite
+## Preserve the staging-applied migration names
 
-Main ends at migration 0237. Both renames preserve file contents byte-for-byte:
+Coordinator message `1c2af4cd-25d7-454a-938f-24e98fb43393` supersedes the initial renumber plan. Keep `0230_publish_job_build_context.sql` and `0231_publish_job_context_shadow.sql`, byte-identical to `23b6171bd`. The coordinator verified their staging ledger records as ids **261/262**, applied on **2026-11-09**, and confirmed the columns exist. No D1 bookkeeping is needed or authorized; no staging mutation was performed by this task.
 
-| Previously applied staging name | New name |
-| --- | --- |
-| `0230_publish_job_build_context.sql` | `0238_publish_job_build_context.sql` |
-| `0231_publish_job_context_shadow.sql` | `0239_publish_job_context_shadow.sql` |
+Use the repository's existing exact-file `LEGACY_ALLOWED_DUPLICATE_FILES` convention. Prefix0230 permits capacity-pool, node-tunnel and publish-context files; prefix0231 permits node-tunnel pending-create and publish-shadow files. The guard still rejects an additional unknown filename under either prefix. Renaming already-applied files would replay their ADD COLUMN statements.
 
-Coordinator approved these filenames, but **no authorization to mutate staging migration bookkeeping has yet been received**. A normal deployment would replay the renamed ADD COLUMN statements and fail. Before deployment, verify the old records and actual context columns, then obtain explicit coordinator OK for staging-only insertion of the renamed `d1_migrations` records. Copy the old records' `applied_at`, with an existence guard for the new names. Do not apply this bookkeeping to production; production should execute the additive migrations normally. No D1 mutation occurred during local repair.
+Production's lexical apply order is:
+
+1. `0230_capacity_pool_excluded_sources.sql`
+2. `0230_node_cloudflare_tunnels.sql`
+3. `0230_publish_job_build_context.sql`
+4. `0231_node_tunnel_pending_creates.sql`
+5. `0231_publish_job_context_shadow.sql`
+
+Both dependency orders hold: node-tunnel creation precedes its pending-create ALTER, and publish context columns precede the shadow marker. Main currently ends at0237; the preserved duplicate prefixes do not require renumbering it.
 
 ## Local validation
 

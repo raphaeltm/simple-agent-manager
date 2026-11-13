@@ -127,7 +127,19 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
       // excluded_source_ids_json against staging and abort its migration run.
       [
         '0230',
-        new Set(['0230_capacity_pool_excluded_sources.sql', '0230_node_cloudflare_tunnels.sql']),
+        new Set([
+          '0230_capacity_pool_excluded_sources.sql',
+          '0230_node_cloudflare_tunnels.sql',
+          '0230_publish_job_build_context.sql',
+        ]),
+      ],
+      // PR #2605's context migrations were applied to staging on 2026-11-09 as
+      // d1_migrations ids 261/262, before main claimed prefixes 0230/0231.
+      // Keep their exact filenames (0230 is included above): renumbering would
+      // replay the ALTER TABLE deployment_publish_jobs ADD COLUMN statements.
+      [
+        '0231',
+        new Set(['0231_node_tunnel_pending_creates.sql', '0231_publish_job_context_shadow.sql']),
       ],
     ]),
   ],

@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 import initialJobsMigration from '../../../src/db/migrations/0077_deployment_publish_jobs.sql?raw';
 import heartbeatMigration from '../../../src/db/migrations/0227_publish_job_heartbeat.sql?raw';
-import contextMigration from '../../../src/db/migrations/0238_publish_job_build_context.sql?raw';
-import shadowMigration from '../../../src/db/migrations/0239_publish_job_context_shadow.sql?raw';
+import contextMigration from '../../../src/db/migrations/0230_publish_job_build_context.sql?raw';
+import shadowMigration from '../../../src/db/migrations/0231_publish_job_context_shadow.sql?raw';
 
 describe('additive build context migration', () => {
   it.each([false, true])(
