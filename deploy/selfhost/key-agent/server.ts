@@ -14,7 +14,11 @@
  * Cache: an opened bundle stays in memory for SAM_KEY_AGENT_CACHE_SECONDS. After that the next
  * request opens it again. If the key service is merely unreachable the stale copy is served (an
  * outage does not take SAM down); if it refuses (`denied`) the copy is dropped, so revoking the
- * box's access stops new Worker isolates within that window.
+ * box's access stops new Worker isolates within that window. A key service that hangs rather than
+ * refuses would hold the request for the whole key-service timeout (5 s), longer than the Worker
+ * waits for this agent (SAM_KEY_AGENT_TIMEOUT_MS, 3 s), so with a stale copy in hand a request
+ * waits at most SAM_KEY_AGENT_STALE_WAIT_MS for the refresh and then gets the stale copy while the
+ * refresh carries on; its result still updates or drops the cache.
  *
  * Run with Node's type stripping: `node server.ts`.
  */
@@ -30,6 +34,12 @@ import { createKeyProvider, LEGACY_KEY_PROVIDER } from './providers.ts';
 
 export const DEFAULT_KEY_AGENT_PORT = 7190;
 export const DEFAULT_CACHE_SECONDS = 300;
+/**
+ * How long a request with a stale copy in hand waits for a slow refresh. Must stay well below the
+ * Worker's wait for this agent (DEFAULT_KEY_AGENT_TIMEOUT_MS, 3000 ms in
+ * apps/api/src/selfhost/runtime-secrets.ts), or a hung key service fails every fresh isolate.
+ */
+export const DEFAULT_STALE_WAIT_MS = 1000;
 const MAX_REQUEST_BYTES = 1024;
 /** The bundle entry holding the agent's Ed25519 signing key (PKCS#8 DER, base64); never served. */
 export const SIGNING_KEY_NAME = 'SAM_KEY_AGENT_SIGNING_KEY';
@@ -37,6 +47,7 @@ export const SIGNING_KEY_NAME = 'SAM_KEY_AGENT_SIGNING_KEY';
 const INSTALLATION_ID_NAME = 'SAM_INSTALLATION_ID';
 export const SIGNATURE_HEADER = 'x-sam-key-agent-signature';
 const NONCE = /^[0-9a-f]{32}$/;
+const STALE = Symbol('stale');
 
 interface Opened {
   installationId: string;
@@ -87,6 +98,8 @@ export interface AgentOptions {
   bundleDir: string;
   allowedUids: ReadonlySet<number>;
   cacheMs: number;
+  /** Wait for a refresh before serving the stale copy (DEFAULT_STALE_WAIT_MS when unset). */
+  staleWaitMs?: number;
   /** Peer lookup; tests replace it, production reads /proc/net/tcp. */
   peerUid?: (request: IncomingMessage) => number | null;
   now?: () => number;
@@ -134,11 +147,34 @@ export function createKeyAgent(options: AgentOptions): Server {
   const cache = new Map<string, { opened: Opened; openedAt: number }>();
   const opening = new Map<string, Promise<Opened>>();
 
+  const staleWaitMs = options.staleWaitMs ?? DEFAULT_STALE_WAIT_MS;
+
   async function open(bundleId: string): Promise<Opened> {
     const cached = cache.get(bundleId);
     if (cached && now() - cached.openedAt < options.cacheMs) return cached.opened;
-    const pending = opening.get(bundleId);
-    if (pending) return await pending;
+    const attempt = opening.get(bundleId) ?? refresh(bundleId);
+    if (!cached) return await attempt;
+    // A stale copy is in hand: do not let a hung key service outlast the Worker's wait.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const slow = new Promise<typeof STALE>((done) => {
+      timer = setTimeout(() => done(STALE), staleWaitMs);
+    });
+    try {
+      const first = await Promise.race([attempt, slow]);
+      if (first !== STALE) return first;
+      log({
+        event: 'key_agent.serving_stale',
+        bundleId,
+        reason: `key service slower than ${staleWaitMs} ms; the refresh continues`,
+      });
+      return cached.opened;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function refresh(bundleId: string): Promise<Opened> {
+    const cached = cache.get(bundleId);
     const attempt = (async () => {
       let text: string;
       try {
@@ -173,11 +209,12 @@ export function createKeyAgent(options: AgentOptions): Server {
       }
     })();
     opening.set(bundleId, attempt);
-    try {
-      return await attempt;
-    } finally {
-      opening.delete(bundleId);
-    }
+    // A request that served the stale copy no longer awaits this; its failure is logged above.
+    attempt.then(
+      () => opening.delete(bundleId),
+      () => opening.delete(bundleId)
+    );
+    return attempt;
   }
 
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -328,6 +365,11 @@ export function previousProvider(stateDir: string): KeyProvider | undefined {
   return createKeyProvider(env);
 }
 
+function positiveInt(raw: string | undefined): number | undefined {
+  const value = Number(raw);
+  return raw?.trim() && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
 function main(): void {
   const env = process.env;
   const dropped = dropToOwnerOf(env.SAM_KEY_AGENT_STATE_DIR ?? '/etc/sam/key-agent');
@@ -346,6 +388,7 @@ function main(): void {
     bundleDir: env.SAM_KEY_AGENT_BUNDLE_DIR ?? '/etc/sam/key-agent/bundles',
     allowedUids: parseUids(env.SAM_KEY_AGENT_ALLOWED_UIDS),
     cacheMs: Math.max(0, cacheSeconds) * 1000,
+    staleWaitMs: positiveInt(env.SAM_KEY_AGENT_STALE_WAIT_MS) ?? DEFAULT_STALE_WAIT_MS,
   });
   server.listen(port, '127.0.0.1', () => {
     console.log(

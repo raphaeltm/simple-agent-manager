@@ -85,7 +85,12 @@ by a key provider), and the Worker gets them at runtime from the `key-agent` ser
 only `SAM_KEY_AGENT_URL`, the bundle id and the agent's public verify key, so the bucket's
 `deploy/` manifests hold no secret. If the agent is down the API answers 503
 `SECRETS_UNAVAILABLE` (`docker compose ps key-agent`). Each fresh Worker isolate pays one loopback
-request (about 4 ms); the agent keeps an opened bundle for 300 s.
+request (about 4 ms); the agent keeps an opened bundle for 300 s. When it reopens a bundle and the key
+service is unreachable, or slower than `SAM_KEY_AGENT_STALE_WAIT_MS` (default 1000 ms, below the
+Worker's 3 s wait for the agent), it serves the copy it already opened while the refresh continues; a
+key service that refuses (`denied`) drops that copy. Measured on Google Cloud: opening a bundle
+through Cloud KMS takes about 190-235 ms the first time (metadata token included), about 115-135 ms
+on a later reopen.
 
 **Which key provider.** `pnpm selfhost:deploy --init` chooses once, records the choice and why
 in `.state/key-agent/choice.json`, and every deploy prints it (`key provider: file (...)`);
@@ -510,6 +515,12 @@ The inventory lists every item, where it is (on the box, in the object store, in
 the bootstrap, in your cloud made by SAM at runtime, outside SAM), how it is removed, and what each
 mode does with it. Without `--confirm`, a terminal asks you to type the domain; anywhere else the
 command refuses.
+
+**What it cannot see.** A lookup that fails for any reason other than "not found" (for example the
+box VM's own account, which may not read firewall rules, workload identity or KMS key metadata) is
+listed as "could not check" and left for you, never read as absent. The Cloud KMS key the box seals
+with (`.state/key-agent/choice.json`) is always listed; when the bootstrap ran elsewhere (Cloud
+Shell), its record is there, so remove the key and the box's grant from there.
 
 **What it may remove.** Only what `.state/created-resources.json` lists, or what it finds by the
 exact names and labels the install itself sets, shown as "discovered, not recorded". The record is

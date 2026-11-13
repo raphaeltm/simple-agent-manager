@@ -36,6 +36,11 @@ const fail = (message) => {
   process.exit(1);
 };
 const out = (text) => process.stdout.write(`${text}\n`);
+// FAKE_GCLOUD_DENY: a regex over the command; matching calls fail as an account without the
+// permission would (the box VM's own service account, for example).
+if (process.env.FAKE_GCLOUD_DENY && new RegExp(process.env.FAKE_GCLOUD_DENY).test(args.join(' '))) {
+  fail(`(gcloud.${words.slice(0, 3).join('.')}) PERMISSION_DENIED: Permission denied on resource`);
+}
 const format = flag('format') ?? '';
 // $STATE/fail-once holds one operation that fails the first time it is attempted (resume tests).
 function failOnce(operation) {

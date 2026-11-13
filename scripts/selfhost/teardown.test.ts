@@ -168,8 +168,8 @@ async function install(): Promise<void> {
   );
 }
 
-function teardown(args: string[]) {
-  return runTsx(TEARDOWN, ['--box-env', envFile, ...args], fakeEnv());
+function teardown(args: string[], env: Record<string, string> = {}) {
+  return runTsx(TEARDOWN, ['--box-env', envFile, ...args], { ...fakeEnv(), ...env });
 }
 
 /** Everything teardown could change, for "nothing changed" checks. */
@@ -483,6 +483,94 @@ exec node ${JSON.stringify(resolve(import.meta.dirname, 'testdata/fake-gcloud-ia
     expect(Object.keys(gcp().pools)).toEqual([]);
     expect(Object.keys(gcp().accounts)).toEqual([]);
     expect(Object.keys(gcp().keys)).toHaveLength(1); // keep my data keeps the key
+  });
+
+  // Box round R5: on sam-box (bootstrap run from Cloud Shell, so no bootstrap record on the box;
+  // gcloud on the box = the VM's own account) the inventory silently omitted the firewall rules and
+  // the Cloud KMS key sealing the box, because "permission denied" was read as "does not exist".
+  describe('the box VM account, with the bootstrap run elsewhere', () => {
+    const DENY = '^(compute firewall-rules describe|kms keys describe|iam )';
+    async function sealedWithCloudKms(): Promise<string> {
+      await install();
+      const key = record().resources.find((r) => r.kind === 'kms-key')!.name;
+      const kept = record().resources.filter((r) => r.cloud === 'box');
+      writeFileSync(
+        join(state, 'created-resources.json'),
+        JSON.stringify({ format: 'sam-created-resources/1', resources: kept })
+      );
+      mkdirSync(join(state, 'key-agent'), { recursive: true });
+      writeFileSync(
+        join(state, 'key-agent', 'choice.json'),
+        JSON.stringify({ provider: 'gcp-kms', settings: { SAM_GCP_KMS_KEY: key } })
+      );
+      return key;
+    }
+
+    it('lists what it could not check and the KMS key that seals the box', async () => {
+      const key = await sealedWithCloudKms();
+      const before = snapshot();
+      const inventory = await teardown(['--gcp-project', PROJECT], { FAKE_GCLOUD_DENY: DENY });
+      expect(inventory.status, inventory.out).toBe(0);
+      for (const rule of ['sam-allow-agent', 'sam-allow-app-routes']) {
+        expect(inventory.out).toContain(
+          `firewall rule ${rule} (${PROJECT}): could not check (ERROR: (gcloud.compute.firewall-rules.describe) PERMISSION_DENIED`
+        );
+      }
+      expect(inventory.out).toMatch(
+        /could not check workload identity pool sam-[0-9a-f]{8}, service account sam-nodes@[^,]+, KMS key sam-selfhost\/sam-[0-9a-f]{8} \(ERROR/
+      );
+      expect(inventory.out).toContain(`the Cloud KMS key ${key} that seals this box`);
+      const dry = await teardown(['--remove-everything', '--dry-run', '--gcp-project', PROJECT], {
+        FAKE_GCLOUD_DENY: DENY,
+      });
+      expect(dry.status, dry.out).toBe(0);
+      expect(dry.out).toMatch(
+        new RegExp(
+          `Cloud KMS key ${key.replace(/[/.]/g, '\\$&')} [^\n]*: kept \\(pass --destroy-key`
+        )
+      );
+      expect(dry.out).toMatch(
+        /firewall rule sam-allow-agent [^\n]*could not check[^\n]*: left for you/
+      );
+      expect(snapshot()).toBe(before);
+    });
+
+    it('control: an account that can look finds the key once and reports nothing unchecked', async () => {
+      const key = await sealedWithCloudKms();
+      const inventory = await teardown(['--gcp-project', PROJECT]);
+      expect(inventory.status, inventory.out).toBe(0);
+      expect(inventory.out).toContain(`kms-key ${key} (labelled sam-install=`);
+      expect(inventory.out).not.toContain('that seals this box');
+      expect(inventory.out).not.toContain('could not check');
+    });
+  });
+
+  // #2695 kept `-f docker-compose.yml` after #2696 moved every scripted compose call to the
+  // COMPOSE_FILE list (an explicit -f drops the guided-login override; R4 bug 1).
+  it('runs compose with every file COMPOSE_FILE lists', async () => {
+    await install();
+    writeFileSync(
+      envFile,
+      `${readFileSync(envFile, 'utf8')}COMPOSE_FILE=docker-compose.yml:docker-compose.guided-login.yml\n`,
+      { mode: 0o600 }
+    );
+    const inventory = await teardown([]);
+    expect(inventory.status, inventory.out).toBe(0);
+    expect(inventory.out).toMatch(
+      /docker compose -f \S+\/docker-compose\.yml -f \S+\/docker-compose\.guided-login\.yml --env-file/
+    );
+  });
+
+  it('says so when no node VM in the project is labelled for SAM', async () => {
+    await install();
+    setGcp((db) => {
+      db.instances = [];
+    });
+    const inventory = await teardown(['--gcp-project', PROJECT]);
+    expect(inventory.status, inventory.out).toBe(0);
+    expect(inventory.out).toContain(
+      `node VMs in ${PROJECT}: none labelled managed=simple-agent-manager`
+    );
   });
 
   it('leaves an un-prefixed bucket you brought to you instead of emptying it (security review H1)', async () => {
