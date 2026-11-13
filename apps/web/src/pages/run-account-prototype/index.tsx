@@ -11,6 +11,7 @@ import type { ReactNode } from 'react';
 import { AccountPicking, Nudge } from './account-variants';
 import { TodayRows, VariantRows } from './connector-rows';
 import { OPUS_CHAT } from './mock-data';
+import { Round2Column } from './usage-round2';
 import { PickerList, ToControlVariant, TwinLegend } from './usage-variants';
 
 function Card({
@@ -83,6 +84,55 @@ export function RunAccountPrototype() {
           Connector provenance, usage windows, and choosing an account per run
         </h1>
       </header>
+
+      <Section
+        id="usage-r2"
+        columns="xl:grid-cols-5"
+        title="2b · Usage, round 2: the 5h window comes first"
+        intro="Same eight account states in every column; the mono line under each name is the truth (5h left · week left). Words under it are shared by the new variants: silent while both windows have more than half left, 5h first otherwise. Colours everywhere use your thresholds on what is left: green above 50%, amber 25–50%, red below 25%."
+      >
+        <Card
+          id="r2-today"
+          label="Today"
+          title="One ring, tightest window"
+          why="Shows whichever window is tightest, unlabelled. “5h fresh, week nearly gone” and “5h nearly gone” look identical."
+        >
+          <Round2Column variant="today" />
+        </Card>
+        <Card
+          id="r2-raph"
+          label="D · yours"
+          recommended
+          title="Arc = 5h, colour = week"
+          why="One glyph, two answers: how much of this session is left (length) and whether the week can carry on (colour). An empty 5h still shows a dot. Weakness: colour alone carries the week, so the words must back it up for colour-blind readers."
+        >
+          <Round2Column variant="raph" />
+        </Card>
+        <Card
+          id="r2-pip"
+          label="E"
+          title="Ring = 5h, pip = week"
+          why="Like presence dots: the ring answers “now”, a corner dot answers “this week”. Each signal has its own place, so the arc can keep its own colour. Costs one more mark on a small avatar."
+        >
+          <Round2Column variant="pip" />
+        </Card>
+        <Card
+          id="r2-hairline"
+          label="F"
+          title="Thick ring 5h, hairline week"
+          why="Shows the week’s amount, not just its band. Weight sets the hierarchy (thick = now), which is easier to learn than equal twin rings, but the hairline is hard to read at 32px."
+        >
+          <Round2Column variant="hairline" />
+        </Card>
+        <Card
+          id="r2-bar"
+          label="G"
+          title="Ring 5h, bar week"
+          why="Borrowed from CodexBar and UsageBar (thick 5h over thin weekly) and Claude’s own usage page (session above weekly). Most explicit, but the bar adds height to every row and the composer chip."
+        >
+          <Round2Column variant="bar" />
+        </Card>
+      </Section>
 
       <Section
         id="connector"
