@@ -189,6 +189,7 @@ where it says so and the app continues from there.
 | `connector.teamTextChars`          | 600     | 100–4,000    | Characters of each agent summary, evidence note and question per task in team status |
 | `connector.channelHistoryPageSize` | 20      | 1–100        | Channel messages in one page when the app does not ask for a number                  |
 | `connector.channelMessageChars`    | 2,000   | 200–4,096    | Characters of each channel message                                                   |
+| `connector.usageStaleAfterMinutes` | 60      | 1–10,080     | Minutes after which `sam_usage_get` calls a provider usage reading stale             |
 
 ## Chat
 

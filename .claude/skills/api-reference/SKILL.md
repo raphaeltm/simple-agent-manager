@@ -448,13 +448,18 @@ Connector connection/client inventories accept `cursor` and return `nextCursor`.
 
 ### External operational MCP tools
 
-The full external registry (38 tools, 27 read-only) includes `sam_chat_interrupt`, `sam_chat_status`,
+The full external registry (39 tools, 28 read-only) includes `sam_chat_interrupt`, `sam_chat_status`,
 `sam_chat_delivery_get`, `sam_chat_interactions`, `sam_work_changes`,
 `sam_chat_jobs_list`, and `sam_operation_get`; transcript reads `sam_chat_read` (whole messages by
 default, `unit:"rows"` for stored rows) and `sam_chat_message_get`; `sam_team_status`; schedules
 `sam_schedules_list|get|create|update|cancel` (one-off DO schedules + cron triggers); channels
 `sam_channels_list`, `sam_channel_history`, `sam_channel_get`, `sam_channel_subscription_cancel`
-(no app posting). Agent questions (attention markers) appear in `sam_chat_read.pendingAttention`,
+(no app posting); account monitoring `sam_usage_get` (provider usage per quota pool, freshness,
+`exhausted`/`nextResetAt`) with `sam_profiles_list.account` (`state`, `tier`, opaque `poolId`,
+`accountName`; `services/profile-account-bindings.ts` over the shared selection in
+`services/agent-credential-selection.ts`, no decryption); `sam_chat_start` takes a
+one-chat `model`/`effort`; `sam_chats_list` rows carry `operational` task state and
+`sam_tasks_list` rows `parentTaskId`/`executionStep`/`sessionId`. Agent questions (attention markers) appear in `sam_chat_read.pendingAttention`,
 `sam_chat_interactions.attention` and the inbox. Operational session reads require
 current session-writer authority; operation receipts are actor/project scoped.
 Interrupt requires a requestKey and preserves the task/workspace. Reads never

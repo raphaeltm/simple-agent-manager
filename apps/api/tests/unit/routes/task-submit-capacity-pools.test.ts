@@ -1490,6 +1490,52 @@ describe('task submit capacity-pool placement', () => {
     );
 
     it.each(['vm', 'cf-container'] as const)(
+      'Connector sam_chat_start overrides the model for one chat, keeping the profile (%s)',
+      async (runtime) => {
+        await withSolEnv(runtime, async ({ sqlite, env }) => {
+          for (const migration of ['0191_connector_execution.sql', '0189_cli_operation_receipts.sql'])
+            sqlite.exec(readFileSync(join(process.cwd(), 'src/db/migrations', migration), 'utf8'));
+          const { samChatStart } =
+            await import('@simple-agent-manager/operations/internal/connector-operations');
+          const result = await samChatStart.run(
+            {
+              env,
+              ports: createOperationPorts(env),
+              actor: {
+                userId: 'user-1',
+                via: 'connector',
+                clientName: 'Claude',
+                scopes: new Set(['sam.read', 'sam.write']),
+              },
+              requestId: 'override',
+              idempotencyKey: 'override-start',
+              execCtx: executionCtx,
+            },
+            {
+              projectId: 'project-1',
+              message: 'Use a different model for this one',
+              agentProfileId: 'sol',
+              model: 'gpt-6.1-astra',
+              effort: 'low',
+            }
+          );
+          expect(result).toMatchObject({
+            agentOverrides: { model: 'gpt-6.1-astra', effort: 'low', scope: 'this_chat_only' },
+          });
+          expect(launchedRunSettings(runtime)).toEqual({ model: 'gpt-6.1-astra', effort: 'low' });
+          // The run keeps the chosen profile (and so its account resolution) ...
+          expect(
+            sqlite.prepare('SELECT agent_profile_hint FROM tasks WHERE id=?').get(result.taskId)
+          ).toEqual({ agent_profile_hint: 'sol' });
+          // ... and the profile itself is unchanged for every other chat.
+          expect(
+            sqlite.prepare("SELECT model, effort FROM agent_profiles WHERE id='sol'").get()
+          ).toEqual({ model: 'gpt-6.1-sol', effort: 'high' });
+        });
+      }
+    );
+
+    it.each(['vm', 'cf-container'] as const)(
       'rejects an effort the resolved agent cannot run before creating anything (%s)',
       async (runtime) => {
         await withSolEnv(runtime, async ({ sqlite, env }) => {

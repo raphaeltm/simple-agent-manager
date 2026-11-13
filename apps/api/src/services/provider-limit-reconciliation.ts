@@ -16,7 +16,7 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { evaluateRunawayCostCeiling } from '../scheduled/stuck-task-ceiling';
-import { getSelectedAgentCredentialReference } from './agent-key-resolution';
+import { getSelectedAgentCredentialReference } from './agent-credential-selection';
 import {
   type ProfileCredentialContext,
   resolveProfileCredentialContext,

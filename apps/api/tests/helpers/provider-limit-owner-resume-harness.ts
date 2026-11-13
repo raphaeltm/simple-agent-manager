@@ -34,7 +34,7 @@ vi.mock('../../src/middleware/auth', () => ({
 }));
 // Credential decryption is outside this slice. Profile resolution, source generation,
 // credential reference comparison and every persistence predicate remain real.
-vi.mock('../../src/services/agent-key-resolution', () => ({
+vi.mock('../../src/services/agent-credential-selection', () => ({
   getSelectedAgentCredentialReference: (...args: unknown[]) => boundary.selected(...args),
 }));
 vi.mock('../../src/services/task-runner-do', () => ({

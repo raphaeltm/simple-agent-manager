@@ -7,7 +7,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { errors } from '../middleware/error';
-import { getSelectedAgentCredentialReference } from './agent-key-resolution';
+import { getSelectedAgentCredentialReference } from './agent-credential-selection';
 import { resolveProfileCredentialContext } from './composable-credentials/profile-context';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
 import * as projectData from './project-data';
