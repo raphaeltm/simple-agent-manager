@@ -25,7 +25,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
-import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { composableCredentialReference } from '../default-capacity-pool-helpers';
@@ -277,6 +277,50 @@ export async function listUserCredentialLimits(
   const credentials = summarize(result.results ?? [], true, now);
   await restoreOwnCredentialReferences(env, credentials, input.userId);
   await attachOwnCredentialNames(env, credentials, input.userId);
+  return { credentials, generatedAt: now };
+}
+
+/** One statement's bound parameters, less the user id and the row cap. */
+const REFERENCE_CHUNK = D1_MAX_BOUND_PARAMETERS - 2;
+
+/**
+ * Windows recorded for these references of the caller's own credentials, in every project and
+ * from every source, newest sample per window. The Connector's usage read already knows which of
+ * the caller's references back each profile, so it reads exactly those rows: the
+ * `idx_credential_limit_windows_credential_window_observed` index serves it, and other
+ * credentials' rows can never crowd a rarely used account out of the row cap. `user_id = ?` keeps
+ * another member's rows out even if a reference were shared.
+ */
+export async function listOwnCredentialLimitsByReferences(
+  env: Env,
+  input: { userId: string; references: readonly string[] }
+): Promise<CredentialLimitsResponse> {
+  const referenceByKey = new Map<string, string>();
+  for (const reference of new Set(input.references)) {
+    const key = await credentialLimitReferenceKey(reference);
+    if (key) referenceByKey.set(key, reference);
+  }
+  const keys = [...referenceByKey.keys()];
+  const maxRows = readMaxRows(env);
+  const results = await Promise.all(
+    chunk(keys, REFERENCE_CHUNK).map((batch) =>
+      env.DATABASE.prepare(
+        `SELECT ${WINDOW_COLUMNS}
+           FROM credential_limit_windows
+          WHERE user_id = ?
+            AND credential_reference IN (${batch.map(() => '?').join(', ')})
+          ORDER BY observed_at DESC, credential_reference ASC, window_type ASC
+          LIMIT ?`
+      )
+        .bind(input.userId, ...batch, maxRows)
+        .all<WindowReadRow>()
+    )
+  );
+  const rows = results.flatMap((result) => result.results ?? []);
+  rows.sort((a, b) => (b.observed_at ?? 0) - (a.observed_at ?? 0));
+  const now = Date.now();
+  const credentials = summarize(rows, true, now);
+  restoreCredentialReferences(credentials, referenceByKey);
   return { credentials, generatedAt: now };
 }
 

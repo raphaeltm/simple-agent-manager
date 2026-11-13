@@ -8,7 +8,7 @@
  * agent mid-prompt, is the workspace up) stays with `sam_chat_status`.
  */
 import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
-import { chunk, D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
+import { chunk, D1_MAX_BOUND_PARAMETERS, log } from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
 import { inArray } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
@@ -39,18 +39,27 @@ export async function chatTaskStates(
     string,
     { projectId: string; status: string; executionStep: string | null; parentTaskId: string | null }
   >();
-  for (const ids of chunk(taskIds, D1_MAX_BOUND_PARAMETERS)) {
-    const found = await db
-      .select({
-        id: schema.tasks.id,
-        projectId: schema.tasks.projectId,
-        status: schema.tasks.status,
-        executionStep: schema.tasks.executionStep,
-        parentTaskId: schema.tasks.parentTaskId,
-      })
-      .from(schema.tasks)
-      .where(inArray(schema.tasks.id, ids));
-    for (const task of found) tasks.set(task.id, task);
+  try {
+    const found = await Promise.all(
+      chunk(taskIds, D1_MAX_BOUND_PARAMETERS).map((ids) =>
+        db
+          .select({
+            id: schema.tasks.id,
+            projectId: schema.tasks.projectId,
+            status: schema.tasks.status,
+            executionStep: schema.tasks.executionStep,
+            parentTaskId: schema.tasks.parentTaskId,
+          })
+          .from(schema.tasks)
+          .where(inArray(schema.tasks.id, ids))
+      )
+    );
+    for (const task of found.flat()) tasks.set(task.id, task);
+  } catch (error) {
+    // The chat list itself is still correct; only the enrichment is missing.
+    log.warn('connector.chat_task_state_unavailable', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   const states = new Map<string, ChatTaskState>();
   for (const row of rows) {

@@ -43,8 +43,8 @@ reliably:
 3. Per-chat model/effort override on `sam_chat_start` keeping profile/account (HIGH, requested) — implement.
 4. Chat list shows stale lifecycle label without operational state or lineage (MEDIUM-HIGH) — implement task status/step/parent fields.
 5. Task list lacks lineage (`parentTaskId`), `executionStep`, session link (MEDIUM) — implement.
-6. No connector read of running compute (nodes/workspaces, cost) for an account (MEDIUM) — deferred; idea filed.
-7. No push delivery to external agents (polling `sam_work_changes` exists) (LOW) — deferred.
+6. No connector read of running compute (nodes/workspaces, cost) for an account (MEDIUM) — deferred; tracked as a note on idea `01M4GJ0W0DS5BTKBM1YW0X5YC8` (SAM Connector remaining work).
+7. No push delivery to external agents (polling `sam_work_changes` exists) (LOW) — deferred; same idea note `01M4GJ0W0DS5BTKBM1YW0X5YC8`.
 
 ## Checklist
 

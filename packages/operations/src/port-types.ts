@@ -504,18 +504,20 @@ export interface ProfileAccountBinding {
   profileId: string;
   agentType: string;
   /**
-   * `account`: one of the caller's own stored credentials. `platform`: SAM's platform credential or
-   * AI proxy for this agent. `paused`: a pinned account is switched off, so runs refuse to start
-   * rather than fall back. `none`: no credential would be found.
+   * `account`: one of the caller's own stored credentials. `sam_ai_proxy`: no credential of the
+   * caller's own, and the caller chose SAM as the provider, so the run uses SAM's AI proxy and the
+   * caller's SAM AI budget. `paused`: a pinned account is switched off, so runs refuse to start
+   * rather than fall back. `none`: a run would fail to find a credential. `unknown`: this profile
+   * could not be resolved right now.
    */
-  state: 'account' | 'platform' | 'paused' | 'none';
-  /** The resolution tier that decided: a profile pin, a project pin, the user default, the platform. */
-  tier: 'profile' | 'project' | 'user' | 'platform' | null;
+  state: 'account' | 'sam_ai_proxy' | 'paused' | 'none' | 'unknown';
+  /** The tier that chose the account: a profile pin, a project pin, or the caller's default. */
+  tier: 'profile' | 'project' | 'user' | null;
   /** Why a paused binding stopped, from the shared resolver's step reasons. */
   reason: string | null;
   /**
-   * Opaque quota-pool key. Profiles with the same poolId draw on one provider quota; never treat
-   * them as independent. Null when no account resolves.
+   * Opaque quota-pool key (a digest; never a credential id). Profiles with the same poolId draw on
+   * one quota; never treat them as independent. Null when no account resolves.
    */
   poolId: string | null;
   /** The caller's own account. `name` is the Settings name; legacy rows have none. */

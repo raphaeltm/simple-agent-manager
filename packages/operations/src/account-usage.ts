@@ -2,17 +2,15 @@
  * Profile → account association and remaining provider usage for monitoring apps
  * (`sam_profiles_list`, `sam_usage_get`).
  *
- * Which account a profile runs on comes from the worker's metadata-only resolver
- * (`ports.account.profileAccountBindings`, the same shared resolver the agent-key callback runs).
- * Usage comes from the provider-reported windows SAM already stores
- * (`ports.account.listUserCredentialLimits`, `ports.tasks.listCredentialLimits`); nothing here is
- * estimated. Usage is reported per quota pool, never per profile, so profiles that share one
+ * Which account a profile runs on comes from the worker's metadata-only selection
+ * (`ports.account.profileAccountBindings`, the same precedence the agent-key callback runs).
+ * Usage comes from the provider-reported windows SAM already stores for exactly those accounts
+ * (`ports.account.listOwnCredentialLimitsByReferences`); nothing here is estimated. Usage is reported per quota pool, never per profile, so profiles that share one
  * stored credential can never be read as independent quotas.
  */
 import {
   type CredentialLimitCredentialSummary,
   type CredentialLimitLevel,
-  type CredentialLimitsResponse,
   credentialLimitWindowLabel,
   type CredentialLimitWindowSummary,
   worstCredentialLimitLevel,
@@ -22,7 +20,7 @@ import { log } from '@simple-agent-manager/worker-core';
 import { operationLink } from './connector-read-core';
 import { OperationError } from './errors';
 import type { ProfileAccountBinding } from './port-types';
-import { samAiDailyUsage, settle, type Settled } from './team-usage';
+import { samAiDailyUsage, settle } from './team-usage';
 import type { OperationContext } from './types';
 
 export type UsageFreshness = 'fresh' | 'stale' | 'reset_since_sample';
@@ -162,41 +160,23 @@ export function poolWindows(
   );
 }
 
-function summariesForPool(
-  binding: ProfileAccountBinding,
-  limits: readonly CredentialLimitCredentialSummary[]
-): CredentialLimitCredentialSummary[] {
-  if (binding.state === 'platform') {
-    return limits.filter(
-      (summary) =>
-        summary.credentialSource === 'platform' && summary.agentType === binding.agentType
-    );
-  }
-  const references = new Set(binding.usageReferences);
-  // Only the caller's own references are in a binding, so another member's rows never match.
-  return limits.filter((summary) => references.has(summary.credentialReference));
-}
-
-function mergeLimits(
-  ...reads: Settled<CredentialLimitsResponse>[]
-): CredentialLimitCredentialSummary[] | null {
-  const ok = reads.filter(
-    (read): read is { ok: true; value: CredentialLimitsResponse } => read.ok
-  );
-  if (ok.length === 0) return null;
-  return ok.flatMap((read) => read.value.credentials);
-}
-
 export async function usageGet(
   ctx: OperationContext,
   input: { projectId: string; profileId?: string }
 ) {
-  let profiles;
-  try {
-    profiles = await ctx.ports.account.listProfiles(input.projectId, ctx.actor.userId);
-  } catch (error) {
-    throw new OperationError('unavailable', `Failed to list profiles: ${(error as Error).message}`);
+  const [listed, settings] = await Promise.all([
+    settle('profiles', () => ctx.ports.account.listProfiles(input.projectId, ctx.actor.userId)),
+    ctx.ports.settings.connectorReadLimits(),
+  ]);
+  if (!listed.ok) {
+    throw new OperationError('unavailable', 'SAM could not list agent profiles right now.');
   }
+  const profiles = listed.value;
+  const wanted = input.profileId
+    ? profiles.find((profile) => profile.id === input.profileId)
+    : undefined;
+  if (input.profileId && !wanted) throw new OperationError('not_found', 'Agent profile not found');
+
   const bindings = await bindProfiles(ctx, input.projectId, profiles);
   if (!bindings) {
     throw new OperationError(
@@ -205,27 +185,6 @@ export async function usageGet(
       'Retry shortly; this read does not change anything.'
     );
   }
-  const [userLimits, projectLimits, settings] = await Promise.all([
-    settle('credential_limits_user', () =>
-      ctx.ports.account.listUserCredentialLimits(ctx.actor.userId)
-    ),
-    settle('credential_limits_project', () =>
-      ctx.ports.tasks.listCredentialLimits({
-        projectId: input.projectId,
-        userId: ctx.actor.userId,
-      })
-    ),
-    ctx.ports.settings.connectorReadLimits(),
-  ]);
-  const limits = mergeLimits(userLimits, projectLimits);
-  const staleAfterMinutes = settings.usageStaleAfterMinutes;
-  const staleAfterMs = staleAfterMinutes * 60_000;
-  const now = Date.now();
-
-  const wanted = input.profileId
-    ? profiles.find((profile) => profile.id === input.profileId)
-    : undefined;
-  if (input.profileId && !wanted) throw new OperationError('not_found', 'Agent profile not found');
   const wantedPool = wanted ? bindings.get(wanted.id)?.poolId : undefined;
 
   const pools = new Map<
@@ -236,12 +195,17 @@ export async function usageGet(
       profiles: { id: string; name: string; tier: string | null }[];
     }
   >();
-  const withoutAccount: { profileId: string; name: string; state: string; reason: string | null }[] =
-    [];
+  const withoutAccount: {
+    profileId: string;
+    name: string;
+    state: string;
+    reason: string | null;
+  }[] = [];
   for (const profile of profiles) {
     const binding = bindings.get(profile.id);
     if (!binding) continue;
-    if (wanted && binding.poolId !== wantedPool && profile.id !== wanted.id) continue;
+    if (wanted && profile.id !== wanted.id && (!wantedPool || binding.poolId !== wantedPool))
+      continue;
     if (!binding.poolId) {
       withoutAccount.push({
         profileId: profile.id,
@@ -261,19 +225,40 @@ export async function usageGet(
     pools.set(binding.poolId, pool);
   }
 
+  const references = [...pools.values()].flatMap((pool) => pool.binding.usageReferences);
+  const anyProxy = [...pools.values()].some((pool) => pool.binding.state === 'sam_ai_proxy');
+  const [limits, samAi] = await Promise.all([
+    references.length > 0
+      ? settle('credential_limits', () =>
+          ctx.ports.account.listOwnCredentialLimitsByReferences(ctx.actor.userId, references)
+        )
+      : Promise.resolve({ ok: true as const, value: { credentials: [], generatedAt: Date.now() } }),
+    anyProxy ? samAiDailyUsage(ctx) : Promise.resolve(null),
+  ]);
+  if (!limits.ok) log.warn('connector.usage_limits_unavailable', { projectId: input.projectId });
+  const staleAfterMinutes = settings.usageStaleAfterMinutes;
+  const staleAfterMs = staleAfterMinutes * 60_000;
+  const now = Date.now();
+
   const projected = [...pools.entries()]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([poolId, pool]) => {
-      const usage = limits
-        ? summarizePoolUsage(
-            poolWindows(summariesForPool(pool.binding, limits)),
-            now,
-            staleAfterMs
-          )
-        : { state: 'unavailable' as const };
+      const proxy = pool.binding.state === 'sam_ai_proxy';
+      const own = new Set(pool.binding.usageReferences);
+      const usage = proxy
+        ? { state: 'sam_ai_budget' as const, samAiToday: samAi ?? ('unavailable' as const) }
+        : limits.ok
+          ? summarizePoolUsage(
+              poolWindows(
+                limits.value.credentials.filter((summary) => own.has(summary.credentialReference))
+              ),
+              now,
+              staleAfterMs
+            )
+          : { state: 'unavailable' as const };
       return {
         poolId,
-        kind: pool.binding.state === 'platform' ? ('platform' as const) : ('account' as const),
+        kind: proxy ? ('sam_ai_proxy' as const) : ('account' as const),
         accountName: pool.binding.account?.name ?? null,
         agentTypes: [...pool.agentTypes].sort(),
         sharedBy: pool.profiles.length,
@@ -281,22 +266,18 @@ export async function usageGet(
         usage,
       };
     });
-  if (!limits) {
-    log.warn('connector.usage_limits_unavailable', { projectId: input.projectId });
-  }
-  const anyPlatform = projected.some((pool) => pool.kind === 'platform');
   return {
     projectId: input.projectId,
     generatedAt: new Date(now).toISOString(),
     staleAfterMinutes,
     pools: projected,
     profilesWithoutAccount: withoutAccount,
-    ...(anyPlatform ? { samAiProxyToday: await samAiDailyUsage(ctx) } : {}),
     semantics: [
-      'Usage is per pool: every profile listed under one poolId draws on the same provider quota, so never add their remaining capacity together.',
-      'Pools are stored credentials. Two different stored credentials that log in to the same provider account are not detected and appear as separate pools.',
-      'Windows are the provider’s own last-reported numbers, sampled only when an agent runs on that account. freshness "stale" means no sample within staleAfterMinutes; "reset_since_sample" means the window reset after the last sample, so usedPercent restarts from 0. usage.state "never_reported" means SAM has no sample for this account: remaining capacity is unknown, not full.',
-      'kind "platform" pools are SAM-managed and shared across the installation; their windows (if any) are not attributable to you. samAiProxyToday is your SAM AI proxy budget when SAM provides the model.',
+      'Usage is per pool: every profile listed under one poolId draws on the same quota, so never add their remaining capacity together.',
+      'Pools are your stored credentials; copies of one stored secret are one pool. Two separately stored logins to the same provider account cannot be told apart and appear as separate pools. poolId is an opaque digest that changes when stored copies are added or replaced; re-read it rather than caching it.',
+      'Windows are the provider’s own last-reported numbers, sampled only while an agent runs on that account. freshness "stale" means no sample within staleAfterMinutes; "reset_since_sample" means the window reset after the last sample, so usedPercent restarts from 0. usage.state "never_reported" means SAM has no sample for this account: remaining capacity is unknown, not full. "unavailable" means the usage read failed; retry.',
+      'kind "sam_ai_proxy" means the profile has no account of yours and runs on SAM’s AI proxy because you chose SAM as the provider; usage.samAiToday is your SAM AI budget today (UTC, all projects).',
+      'This is the account a new run would use. A skill that switches the agent at start time is not applied here.',
     ],
     link: operationLink(ctx, input.projectId),
   };

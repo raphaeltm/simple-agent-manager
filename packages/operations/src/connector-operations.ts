@@ -79,9 +79,9 @@ export const samChatStart = defineOperation({
     taskMode: v.optional(v.picklist(['conversation', 'task'])),
     agentProfileId: v.optional(id),
     skillId: v.optional(id),
-    model: v.optional(
-      v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(AGENT_MODEL_MAX_LENGTH))
-    ),
+    // No v.trim(): the Connector publishes this schema as JSON Schema, which cannot express a
+    // transform. Submission trims, and a blank model inherits (`resolveTaskAgentOverrides`).
+    model: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(AGENT_MODEL_MAX_LENGTH))),
     effort: v.optional(v.picklist(AGENT_EFFORT_LEVELS)),
     requestKey,
   }),

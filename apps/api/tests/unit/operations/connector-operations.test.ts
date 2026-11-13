@@ -273,11 +273,11 @@ describe('connector operations current membership and creator authority', () => 
     const ok = v.safeParse(samChatStart.input, {
       projectId: 'project',
       message: 'Work',
-      model: '  claude-opus-5-5 ',
+      model: 'claude-opus-5-5',
       effort: 'high',
     });
     expect(ok.success && ok.output).toMatchObject({ model: 'claude-opus-5-5', effort: 'high' });
-    for (const bad of [{ model: 'x'.repeat(201) }, { model: '   ' }, { effort: 'turbo' }])
+    for (const bad of [{ model: 'x'.repeat(201) }, { model: '' }, { effort: 'turbo' }])
       expect(
         v.safeParse(samChatStart.input, { projectId: 'project', message: 'Work', ...bad }).success
       ).toBe(false);

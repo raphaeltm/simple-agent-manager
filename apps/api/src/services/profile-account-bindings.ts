@@ -2,343 +2,131 @@
  * Which stored account each agent profile would run on for one person in one project, for the
  * Connector's monitoring reads (`sam_profiles_list`, `sam_usage_get`).
  *
- * The decision is the shared pure resolver `explainResolution`
- * (`packages/shared/src/composable-credentials/resolver.ts`), the same function the agent-key
- * callback runs (`getDecryptedAgentKey` → `resolveAgentKeyViaCC`) and the web profile editor
- * shows (`explainProfileAccount`). The resolver never reads secret values, so this snapshot is
- * built from row metadata only: nothing is decrypted, and no token, ciphertext or IV leaves this
- * module. When the person has no cc_* rows yet, the agent-key path falls back to the legacy
- * `credentials` table (`resolveAgentKeyLegacy`); this does the same, read-only.
+ * Selection is not re-implemented here: it is `resolveAgentCredentialSelections`
+ * (`agent-credential-selection.ts`), the same precedence the agent-key callback and
+ * provider-limit admission use, run over a metadata-only snapshot. This module adds two things
+ * the selection does not answer:
  *
- * Quota pools: two stored rows with byte-identical `(encrypted_token, iv)` are copies of one
- * secret (dual-writes copy ciphertext verbatim and every encryption uses a fresh random IV; see
- * `run-agent-credential.ts`). Profiles that resolve to any copy share one pool, so a reader can
- * never treat them as independent quotas. The ciphertext is compared in memory and discarded.
+ * 1. What a run does without a credential of the person's own. The agent-key route
+ *    (`routes/workspaces/runtime.ts`, `POST /:id/agent-key`) never hands a platform credential to
+ *    a workspace; Claude Code and Codex then run on SAM's AI proxy only when the person chose the
+ *    `sam` provider mode for that agent, and every other case fails with "Agent credential not
+ *    found". So `sam_ai_proxy` vs `none` is decided from `agent_settings.provider_mode`.
+ * 2. Quota pools. Stored rows with byte-identical `(encrypted_token, iv)` are copies of one secret
+ *    (dual-writes and the cc backfill copy ciphertext verbatim; see `run-agent-credential.ts`), so
+ *    profiles on any copy share one provider quota. The equality is computed in SQL, so no
+ *    ciphertext reaches this Worker. The pool id is a one-way digest of the member references:
+ *    backfilled credential ids embed ciphertext (`credential-limit-events/values.ts`) and must
+ *    never leave the platform.
  *
- * Scoping (`.claude/rules/11`, `.claude/rules/28`): every query binds the caller's user id, so
- * another member's credentials, configurations and pins can neither be returned nor change the
- * answer. One malformed row is skipped, never fatal (`.claude/rules/41`, `.claude/rules/50`).
+ * Every query binds the caller's user id (rules 11, 28): another member's credentials, pins and
+ * settings can neither be returned nor change the answer.
  */
 import type { ProfileAccountBinding } from '@simple-agent-manager/operations';
-import {
-  type CCAttachment,
-  type CCCompositionSnapshot,
-  type CCConfiguration,
-  type CCCredential,
-  explainResolution,
-} from '@simple-agent-manager/shared';
+import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../env';
-import { log } from '../lib/logger';
+import { resolveAgentCredentialSelections } from './agent-credential-selection';
 
-type CredentialRow = {
-  id: unknown;
-  name: unknown;
-  is_active: unknown;
-  encrypted_token: unknown;
-  iv: unknown;
-};
-type ConfigurationRow = {
-  id: unknown;
-  consumer_target: unknown;
-  credential_id: unknown;
-  is_active: unknown;
-};
-type AttachmentRow = {
-  id: unknown;
-  configuration_id: unknown;
-  consumer_target: unknown;
-  project_id: unknown;
-  is_active: unknown;
-};
-type ProfilePinRow = {
-  id: unknown;
-  configuration_id: unknown;
-  agent_profile_id: unknown;
-  consumer_target: unknown;
-  is_active: unknown;
-};
-type PlatformRow = { id: unknown; agent_type: unknown };
-type LegacyRow = {
-  id: unknown;
-  project_id: unknown;
-  agent_type: unknown;
-  is_active: unknown;
-  encrypted_token: unknown;
-  iv: unknown;
-};
+/** Agents the agent-key route can start on SAM's AI proxy (`buildPlatformInferenceConfig`). */
+const SAM_PROXY_AGENTS: ReadonlySet<string> = new Set(['claude-code', 'openai-codex']);
 
-const OWNER = 'caller';
+/** The SAM AI proxy budget is per person across agents, so it is one pool. */
+export const SAM_AI_PROXY_POOL_ID = 'sam-ai-proxy';
+
+/** Union-find over credential references that name copies of one secret. */
+class Pools {
+  private readonly parent = new Map<string, string>();
+
+  private find(reference: string): string {
+    let root = reference;
+    for (let next = this.parent.get(root); next && next !== root; next = this.parent.get(root)) {
+      root = next;
+    }
+    return root;
+  }
+
+  union(a: string, b: string): void {
+    if (!this.parent.has(a)) this.parent.set(a, a);
+    if (!this.parent.has(b)) this.parent.set(b, b);
+    const rootA = this.find(a);
+    const rootB = this.find(b);
+    if (rootA === rootB) return;
+    // The smaller reference stays the root, so the grouping is deterministic.
+    if (rootA < rootB) this.parent.set(rootB, rootA);
+    else this.parent.set(rootA, rootB);
+  }
+
+  members(reference: string): string[] {
+    if (!this.parent.has(reference)) return [reference];
+    const root = this.find(reference);
+    return [...this.parent.keys()].filter((candidate) => this.find(candidate) === root).sort();
+  }
+}
+
+async function poolDigest(references: readonly string[]): Promise<string> {
+  const bytes = new TextEncoder().encode([...references].sort().join('\n'));
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return `pool_${Array.from(digest.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
+
+type EdgeRow = { a: unknown; b: unknown };
+type ModeRow = { agent_type: unknown; provider_mode: unknown };
 
 function text(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
 }
 
-function flag(value: unknown): boolean {
-  return value === 1 || value === true;
-}
-
-/** Identity of one stored secret generation, compared in memory only. */
-function generationKey(row: { encrypted_token: unknown; iv: unknown }): string | null {
-  const token = text(row.encrypted_token);
-  const iv = text(row.iv);
-  return token && iv ? `${token}\u0000${iv}` : null;
-}
-
-function skipRow(table: string, id: unknown): void {
-  log.warn('profile_account_bindings.row_skipped', {
-    table,
-    rowId: typeof id === 'string' ? id : null,
-  });
-}
-
-interface StoredSecret {
-  reference: string;
-  generation: string | null;
-}
-
-/**
- * Every stored copy of the same secret, keyed by generation. The pool id is the
- * smallest reference in the group so it is stable across calls.
- */
-class PoolIndex {
-  private readonly byGeneration = new Map<string, string[]>();
-
-  add(secret: StoredSecret): void {
-    if (!secret.generation) return;
-    const group = this.byGeneration.get(secret.generation) ?? [];
-    group.push(secret.reference);
-    this.byGeneration.set(secret.generation, group);
-  }
-
-  pool(secret: StoredSecret): { poolId: string; references: string[] } {
-    const group = secret.generation ? this.byGeneration.get(secret.generation) : undefined;
-    const references = [...new Set(group ?? [secret.reference])].sort();
-    return { poolId: references[0] ?? secret.reference, references };
-  }
-}
-
-interface Loaded {
-  credentials: CredentialRow[];
-  configurations: ConfigurationRow[];
-  attachments: AttachmentRow[];
-  pins: ProfilePinRow[];
-  platform: PlatformRow[];
-  legacy: LegacyRow[];
-}
-
-async function load(env: Env, userId: string, projectId: string): Promise<Loaded> {
+async function loadPoolsAndModes(env: Env, userId: string) {
   const db = env.DATABASE;
-  const [credentials, configurations, attachments, pins, platform, legacy] = await db.batch([
+  const [ccEdges, legacyEdges, modes] = await db.batch([
+    // Distinct cc rows of mine holding the same ciphertext.
     db
       .prepare(
-        `SELECT id, name, is_active, encrypted_token, iv FROM cc_credentials WHERE owner_id = ?`
+        `SELECT a.id AS a, b.id AS b FROM cc_credentials a
+           JOIN cc_credentials b
+             ON b.owner_id = a.owner_id AND b.id > a.id
+            AND b.encrypted_token = a.encrypted_token AND b.iv = a.iv
+          WHERE a.owner_id = ?`
+      )
+      .bind(userId),
+    // Legacy agent keys of mine mirrored into cc rows of mine.
+    db
+      .prepare(
+        `SELECT l.id AS a, c.id AS b FROM credentials l
+           JOIN cc_credentials c
+             ON c.owner_id = l.user_id
+            AND c.encrypted_token = l.encrypted_token AND c.iv = l.iv
+          WHERE l.user_id = ? AND l.credential_type = 'agent-api-key'`
       )
       .bind(userId),
     db
-      .prepare(
-        `SELECT id, consumer_target, credential_id, is_active FROM cc_configurations
-          WHERE owner_id = ? AND consumer_kind = 'agent'`
-      )
+      .prepare(`SELECT agent_type, provider_mode FROM agent_settings WHERE user_id = ?`)
       .bind(userId),
-    db
-      .prepare(
-        `SELECT id, configuration_id, consumer_target, project_id, is_active FROM cc_attachments
-          WHERE user_id = ? AND consumer_kind = 'agent' AND (project_id IS NULL OR project_id = ?)`
-      )
-      .bind(userId, projectId),
-    db
-      .prepare(
-        `SELECT id, configuration_id, agent_profile_id, consumer_target, is_active
-           FROM cc_profile_attachments WHERE user_id = ? AND consumer_kind = 'agent'`
-      )
-      .bind(userId),
-    db.prepare(
-      `SELECT id, agent_type FROM platform_credentials
-        WHERE is_enabled = 1 AND credential_type = 'agent-api-key' AND agent_type IS NOT NULL`
-    ),
-    db
-      .prepare(
-        `SELECT id, project_id, agent_type, is_active, encrypted_token, iv FROM credentials
-          WHERE user_id = ? AND credential_type = 'agent-api-key'
-            AND (project_id IS NULL OR project_id = ?)
-          ORDER BY id`
-      )
-      .bind(userId, projectId),
   ]);
-  return {
-    credentials: (credentials?.results ?? []) as CredentialRow[],
-    configurations: (configurations?.results ?? []) as ConfigurationRow[],
-    attachments: (attachments?.results ?? []) as AttachmentRow[],
-    pins: (pins?.results ?? []) as ProfilePinRow[],
-    platform: (platform?.results ?? []) as PlatformRow[],
-    legacy: (legacy?.results ?? []) as LegacyRow[],
-  };
-}
-
-/** A resolver snapshot with placeholder secrets: the resolver decides on ids and flags only. */
-function toSnapshot(rows: Loaded): CCCompositionSnapshot {
-  const credentials: CCCredential[] = [];
-  for (const row of rows.credentials) {
-    const id = text(row.id);
-    if (!id) {
-      skipRow('cc_credentials', row.id);
-      continue;
-    }
-    credentials.push({
-      id,
-      ownerId: OWNER,
-      name: text(row.name) ?? id,
-      kind: 'api-key',
-      secret: { kind: 'api-key', apiKey: '' },
-      isActive: flag(row.is_active),
-    });
+  const pools = new Pools();
+  for (const row of (ccEdges?.results ?? []) as EdgeRow[]) {
+    const a = text(row.a);
+    const b = text(row.b);
+    if (a && b) pools.union(`cc_credentials:${a}`, `cc_credentials:${b}`);
   }
-  const configurations: CCConfiguration[] = [];
-  for (const row of rows.configurations) {
-    const id = text(row.id);
-    const agentType = text(row.consumer_target);
-    if (!id || !agentType) {
-      skipRow('cc_configurations', row.id);
-      continue;
-    }
-    configurations.push({
-      id,
-      ownerId: OWNER,
-      name: id,
-      consumer: { kind: 'agent', agentType },
-      credentialId: text(row.credential_id),
-      settings: {},
-      isActive: flag(row.is_active),
-    });
+  for (const row of (legacyEdges?.results ?? []) as EdgeRow[]) {
+    const a = text(row.a);
+    const b = text(row.b);
+    if (a && b) pools.union(`credentials:${a}`, `cc_credentials:${b}`);
   }
-  const attachments: CCAttachment[] = [];
-  for (const row of rows.attachments) {
-    const id = text(row.id);
-    const configurationId = text(row.configuration_id);
-    const agentType = text(row.consumer_target);
-    if (!id || !configurationId || !agentType) {
-      skipRow('cc_attachments', row.id);
-      continue;
-    }
-    const attachedProject = text(row.project_id);
-    attachments.push({
-      id,
-      configurationId,
-      consumer: { kind: 'agent', agentType },
-      target: attachedProject
-        ? { scope: 'project', userId: OWNER, projectId: attachedProject }
-        : { scope: 'user', userId: OWNER },
-      isActive: flag(row.is_active),
-    });
-  }
-  for (const row of rows.pins) {
-    const id = text(row.id);
-    const configurationId = text(row.configuration_id);
-    const profileId = text(row.agent_profile_id);
-    const agentType = text(row.consumer_target);
-    if (!id || !configurationId || !profileId || !agentType) {
-      skipRow('cc_profile_attachments', row.id);
-      continue;
-    }
-    attachments.push({
-      id,
-      configurationId,
-      consumer: { kind: 'agent', agentType },
-      target: { scope: 'profile', userId: OWNER, profileId },
-      isActive: flag(row.is_active),
-    });
-  }
-  const platform: CCCompositionSnapshot['platform'] = {};
-  for (const row of rows.platform) {
-    const id = text(row.id);
+  const samMode = new Set<string>();
+  for (const row of (modes?.results ?? []) as ModeRow[]) {
     const agentType = text(row.agent_type);
-    if (!id || !agentType) continue;
-    platform[`agent:${agentType}`] = {
-      mode: 'credential',
-      credential: {
-        id,
-        ownerId: '__platform__',
-        name: 'platform',
-        kind: 'api-key',
-        secret: { kind: 'api-key', apiKey: '' },
-        isActive: true,
-      },
-    };
+    if (agentType && row.provider_mode === 'sam') samMode.add(agentType);
   }
-  return { credentials, configurations, attachments, platform };
-}
-
-function platformBinding(
-  profile: { id: string; agentType: string },
-  hasPlatform: boolean
-): ProfileAccountBinding {
-  return hasPlatform
-    ? {
-        profileId: profile.id,
-        agentType: profile.agentType,
-        state: 'platform',
-        tier: 'platform',
-        reason: null,
-        poolId: `platform:${profile.agentType}`,
-        account: null,
-        usageReferences: [],
-      }
-    : noneBinding(profile);
-}
-
-function noneBinding(profile: { id: string; agentType: string }): ProfileAccountBinding {
-  return {
-    profileId: profile.id,
-    agentType: profile.agentType,
-    state: 'none',
-    tier: null,
-    reason: null,
-    poolId: null,
-    account: null,
-    usageReferences: [],
-  };
-}
-
-/** Read-only mirror of `resolveAgentKeyLegacy` for a person with no cc_* rows. */
-function legacyBinding(
-  rows: Loaded,
-  pools: PoolIndex,
-  profile: { id: string; agentType: string },
-  projectId: string,
-  hasPlatform: boolean
-): ProfileAccountBinding {
-  const forAgent = rows.legacy.filter((row) => text(row.agent_type) === profile.agentType);
-  const projectRow = forAgent.find((row) => text(row.project_id) === projectId);
-  const chosen = projectRow ?? forAgent.find((row) => !text(row.project_id) && flag(row.is_active));
-  const tier = projectRow ? 'project' : 'user';
-  if (projectRow && !flag(projectRow.is_active)) {
-    return {
-      ...noneBinding(profile),
-      state: 'paused',
-      tier: 'project',
-      reason: 'credential-inactive',
-    };
-  }
-  const id = chosen ? text(chosen.id) : null;
-  if (!chosen || !id) return platformBinding(profile, hasPlatform);
-  const pool = pools.pool({ reference: `credentials:${id}`, generation: generationKey(chosen) });
-  return {
-    profileId: profile.id,
-    agentType: profile.agentType,
-    state: 'account',
-    tier,
-    reason: null,
-    poolId: pool.poolId,
-    account: { name: null, storage: 'legacy' },
-    usageReferences: pool.references,
-  };
+  return { pools, samMode };
 }
 
 /**
  * The account each profile resolves to for `userId` running in `projectId`. Never decrypts and
- * never returns secret material; `usageReferences` are opaque `cc_credentials:<id>` /
- * `credentials:<id>` references of the caller's own rows, used to match usage samples.
+ * never returns secret material; `usageReferences` are the caller's own credential references,
+ * internal to the usage read.
  */
 export async function resolveProfileAccountBindings(
   env: Env,
@@ -349,84 +137,58 @@ export async function resolveProfileAccountBindings(
   }
 ): Promise<ProfileAccountBinding[]> {
   if (input.profiles.length === 0) return [];
-  const rows = await load(env, input.userId, input.projectId);
-  const pools = new PoolIndex();
-  const namesById = new Map<string, string | null>();
-  for (const row of rows.credentials) {
-    const id = text(row.id);
-    if (!id) continue;
-    namesById.set(id, text(row.name));
-    pools.add({ reference: `cc_credentials:${id}`, generation: generationKey(row) });
-  }
-  for (const row of rows.legacy) {
-    const id = text(row.id);
-    if (id) pools.add({ reference: `credentials:${id}`, generation: generationKey(row) });
-  }
-  const generationById = new Map(
-    rows.credentials.flatMap((row) => {
-      const id = text(row.id);
-      return id ? [[id, generationKey(row)] as const] : [];
-    })
-  );
-  const platformAgents = new Set(rows.platform.map((row) => text(row.agent_type)));
-  // Same switch as the agent-key path: cc rows exist → cc decides; none → legacy table.
-  const useCC = rows.credentials.length > 0;
-  const snapshot = useCC ? toSnapshot(rows) : null;
-
-  return input.profiles.map((profile) => {
-    const hasPlatform = platformAgents.has(profile.agentType);
-    if (!snapshot) return legacyBinding(rows, pools, profile, input.projectId, hasPlatform);
-    const trace = explainResolution(
-      snapshot,
-      { kind: 'agent', agentType: profile.agentType },
-      {
-        userId: OWNER,
-        projectId: input.projectId,
-        profileId: profile.id,
-        profileAgentType: profile.agentType,
+  const [selections, { pools, samMode }] = await Promise.all([
+    resolveAgentCredentialSelections(drizzle(env.DATABASE), input),
+    loadPoolsAndModes(env, input.userId),
+  ]);
+  return Promise.all(
+    selections.map(
+      async ({
+        profileId,
+        agentType,
+        selection,
+        credentialName,
+      }): Promise<ProfileAccountBinding> => {
+        const base = {
+          profileId,
+          agentType,
+          tier: null,
+          reason: null,
+          poolId: null,
+          account: null,
+          usageReferences: [],
+        };
+        switch (selection.kind) {
+          case 'credential': {
+            const references = pools.members(selection.reference);
+            return {
+              ...base,
+              state: 'account',
+              tier: selection.tier,
+              poolId: await poolDigest(references),
+              account: {
+                name: credentialName,
+                storage: selection.reference.startsWith('credentials:') ? 'legacy' : 'account',
+              },
+              usageReferences: references,
+            };
+          }
+          case 'halted':
+            return {
+              ...base,
+              state: 'paused',
+              tier: selection.tier === 'platform' ? null : selection.tier,
+              reason: selection.reason,
+              account: credentialName ? { name: credentialName, storage: 'account' } : null,
+            };
+          case 'unknown':
+            return { ...base, state: 'unknown' };
+          case 'none':
+            return SAM_PROXY_AGENTS.has(agentType) && samMode.has(agentType)
+              ? { ...base, state: 'sam_ai_proxy', poolId: SAM_AI_PROXY_POOL_ID }
+              : { ...base, state: 'none' };
+        }
       }
-    );
-    if (trace.halted) {
-      const step = trace.steps.find((candidate) => candidate.state === 'halted');
-      const configuration = snapshot.configurations.find(
-        (candidate) => candidate.id === step?.configurationId
-      );
-      const credentialId = configuration?.credentialId ?? null;
-      return {
-        ...noneBinding(profile),
-        state: 'paused',
-        tier: step?.tier ?? null,
-        reason: step?.reason ?? null,
-        account: credentialId
-          ? { name: namesById.get(credentialId) ?? null, storage: 'account' }
-          : null,
-      };
-    }
-    const resolved = trace.resolved;
-    if (!resolved) return noneBinding(profile);
-    if (resolved.source === 'platform' || resolved.source === 'platform-proxy') {
-      return platformBinding(profile, true);
-    }
-    const credentialId = resolved.credential?.id ?? null;
-    if (!credentialId) return noneBinding(profile);
-    const pool = pools.pool({
-      reference: `cc_credentials:${credentialId}`,
-      generation: generationById.get(credentialId) ?? null,
-    });
-    return {
-      profileId: profile.id,
-      agentType: profile.agentType,
-      state: 'account',
-      tier:
-        resolved.source === 'profile-attachment'
-          ? 'profile'
-          : resolved.source === 'project-attachment'
-            ? 'project'
-            : 'user',
-      reason: null,
-      poolId: pool.poolId,
-      account: { name: namesById.get(credentialId) ?? null, storage: 'account' },
-      usageReferences: pool.references,
-    };
-  });
+    )
+  );
 }

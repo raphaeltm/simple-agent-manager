@@ -323,8 +323,14 @@ export interface OperationAccountPort {
     userId: string;
     profiles: readonly { id: string; agentType: string }[];
   }): Promise<ProfileAccountBinding[]>;
-  /** The caller's own credentials' usage windows across every project, newest sample per window. */
-  listUserCredentialLimits(userId: string): Promise<CredentialLimitsResponse>;
+  /**
+   * Usage windows recorded for these credential references of `userId`'s own, across every
+   * project, newest sample per window. References come from `profileAccountBindings`.
+   */
+  listOwnCredentialLimitsByReferences(
+    userId: string,
+    references: readonly string[]
+  ): Promise<CredentialLimitsResponse>;
   tokenUsage(userId: string): Promise<TokenBudget>;
   budgetSettings(userId: string): Promise<UserAiBudgetSettings | null>;
   effectiveBudgetLimits(settings: UserAiBudgetSettings | null): {

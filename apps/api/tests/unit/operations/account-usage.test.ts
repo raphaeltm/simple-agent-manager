@@ -187,15 +187,21 @@ describe('connector account monitoring', () => {
     });
     const accountA = 'account' in byId['prof-a']! ? byId['prof-a'].account : null;
     const accountB = 'account' in byId['prof-b']! ? byId['prof-b'].account : null;
-    expect(accountA?.poolId).toBeTruthy();
+    expect(accountA?.poolId).toMatch(/^pool_[0-9a-f]{16}$/);
     expect(accountA?.poolId).toBe(accountB?.poolId);
-    expect(byId['prof-oc']).toMatchObject({
-      account: { state: 'platform', poolId: 'platform:opencode' },
-    });
+    // An enabled platform credential is never handed to a workspace, so it is no account.
+    expect(byId['prof-oc']).toMatchObject({ account: { state: 'none', poolId: null } });
     expect(byId['prof-none']).toMatchObject({ account: { state: 'none', poolId: null } });
     expect(result).toMatchObject({ accountNote: expect.stringContaining('sam_usage_get') });
     const serialized = JSON.stringify(result);
-    for (const secret of [SECRET, 'iv-1', 'PLATFORM-SECRET', 'mate', 'usageReferences'])
+    for (const secret of [
+      SECRET,
+      'iv-1',
+      'PLATFORM-SECRET',
+      'mate',
+      'usageReferences',
+      'cc_credentials',
+    ])
       expect(serialized).not.toContain(secret);
   });
 
@@ -238,23 +244,22 @@ describe('connector account monitoring', () => {
     expect(result.pools.find((pool) => pool.agentTypes.includes('openai-codex'))).toMatchObject({
       usage: { state: 'never_reported', remainingPercent: null, exhausted: null },
     });
-    expect(result.pools.find((pool) => pool.kind === 'platform')).toMatchObject({
-      poolId: 'platform:opencode',
-      usage: { state: 'reported', windows: [expect.objectContaining({ usedPercent: 12 })] },
-    });
     expect(result.profilesWithoutAccount).toEqual([
+      { profileId: 'prof-oc', name: 'OpenCode', state: 'none', reason: null },
       { profileId: 'prof-none', name: 'Vibe', state: 'none', reason: null },
     ]);
-    expect(result).toMatchObject({
-      staleAfterMinutes: 60,
-      samAiProxyToday: { inputTokens: 1200, outputTokens: 300 },
-    });
+    expect(result.staleAfterMinutes).toBe(60);
+    expect(result.pools.every((pool) => pool.kind === 'account')).toBe(true);
+    // No SAM proxy pool, so the SAM AI meter is not read.
+    expect(mocks.tokens).not.toHaveBeenCalled();
     const serialized = JSON.stringify(result);
-    for (const leaked of [SECRET, 'iv-1', 'PLATFORM-SECRET', 'mate-cred', 'Mate Max'])
+    for (const leaked of [SECRET, 'iv-1', 'PLATFORM-SECRET', 'mate-cred', 'Mate Max', 'max-mirror'])
       expect(serialized).not.toContain(leaked);
     // Mate's 99% sample must not be counted anywhere.
     expect(serialized).not.toContain('"usedPercent":99');
     expect(serialized).not.toContain('"usedPercent":77');
+    // Platform-sourced samples (any member's runs) are never attributed to a pool.
+    expect(serialized).not.toContain('"usedPercent":12');
   });
 
   it('profileId narrows to that profile’s whole pool', async () => {
@@ -278,19 +283,51 @@ describe('connector account monitoring', () => {
   });
 
   it('a mate sees their own account for the same shared profile (owner-path control)', async () => {
-    const result = await samUsageGet.run(ctx('mate'), { projectId: 'project', profileId: 'prof-a' });
+    const result = await samUsageGet.run(ctx('mate'), {
+      projectId: 'project',
+      profileId: 'prof-a',
+    });
     expect(result.pools[0]).toMatchObject({
-      poolId: 'cc_credentials:mate-cred',
+      poolId: expect.stringMatching(/^pool_/),
       accountName: 'Mate Max',
       usage: { windows: [expect.objectContaining({ usedPercent: 99 })] },
     });
     expect(JSON.stringify(result)).not.toContain('Work Max');
   });
 
+  it('a member with no account who chose SAM as provider gets the SAM AI proxy pool', async () => {
+    sqlite.exec(`
+      INSERT INTO users (id,name,email) VALUES ('solo','Solo','s@x');
+      INSERT INTO project_members (project_id,user_id,role,status) VALUES ('project','solo','maintainer','active');
+      INSERT INTO agent_settings (id,user_id,agent_type,provider_mode,created_at,updated_at)
+        VALUES ('s-solo','solo','claude-code','sam','now','now');
+    `);
+    const result = await samUsageGet.run(ctx('solo'), { projectId: 'project' });
+    expect(result.pools).toEqual([
+      expect.objectContaining({
+        poolId: 'sam-ai-proxy',
+        kind: 'sam_ai_proxy',
+        agentTypes: ['claude-code'],
+        sharedBy: 2,
+        usage: {
+          state: 'sam_ai_budget',
+          samAiToday: expect.objectContaining({ inputTokens: 1200, outputTokens: 300 }),
+        },
+      }),
+    ]);
+    // Codex without a SAM provider choice would fail to start: no pool.
+    expect(result.profilesWithoutAccount.map((profile) => profile.profileId)).toEqual([
+      'prof-codex',
+      'prof-oc',
+      'prof-none',
+    ]);
+    expect(mocks.tokens).toHaveBeenCalledWith(expect.anything(), 'solo', expect.anything());
+  });
+
   it('non-members are refused', async () => {
-    await expect(samUsageGet.run(ctx('outsider'), { projectId: 'project' })).rejects.toMatchObject(
-      { code: 'not_found' }
-    );
+    await expect(samUsageGet.run(ctx('outsider'), { projectId: 'project' })).rejects.toMatchObject({
+      code: 'not_found',
+    });
   });
 });
 
@@ -337,7 +374,12 @@ describe('summarizePoolUsage', () => {
   });
 
   it('a window that reset since its sample is not exhausted and says so', () => {
-    const reset = { ...base, status: 'allowed' as const, resetElapsed: true, utilizationPercent: 0 };
+    const reset = {
+      ...base,
+      status: 'allowed' as const,
+      resetElapsed: true,
+      utilizationPercent: 0,
+    };
     expect(summarizePoolUsage([reset], NOW, 60 * MIN)).toMatchObject({
       exhausted: false,
       freshness: 'reset_since_sample',
@@ -361,5 +403,42 @@ describe('summarizePoolUsage', () => {
       windows: [window],
     });
     expect(poolWindows([summary(older), summary(newer)])).toEqual([newer]);
+  });
+});
+
+describe('listOwnCredentialLimitsByReferences', () => {
+  it('reads digest-keyed rows of mine only, across projects, and restores the reference', async () => {
+    const { listOwnCredentialLimitsByReferences } =
+      await import('../../../src/services/credential-limit-events/read');
+    const { credentialLimitReferenceKey } =
+      await import('../../../src/services/credential-limit-events/values');
+    const sqlite = new Database(':memory:');
+    createAllSchemaTables(sqlite, schema);
+    const env = { DATABASE: createSqliteD1(sqlite) } as unknown as Env;
+    // Backfilled ids are long, so their rows are keyed by digest.
+    const reference = `cc_credentials:cred-owner-${'c'.repeat(160)}`;
+    const key = await credentialLimitReferenceKey(reference);
+    expect(key).not.toBe(reference);
+    const insert = sqlite.prepare(
+      `INSERT INTO credential_limit_windows (project_id, credential_reference, window_type,
+        credential_source, provider, provider_mode, agent_type, user_id, source, status,
+        last_event_level, utilization_percent, window_minutes, resets_at, observed_at, created_at, updated_at)
+       VALUES (?,?,?, 'user','anthropic','direct','claude-code',?, 's','allowed','ok',?,300,NULL,?,?,?)`
+    );
+    insert.run('p1', key, 'claude.five_hour', 'owner', 30, NOW - 20 * MIN, 0, 0);
+    insert.run('p2', key, 'claude.five_hour', 'owner', 55, NOW - 5 * MIN, 0, 0);
+    // The same key under another member's id must never be read for me.
+    insert.run('p1', key, 'claude.seven_day', 'mate', 99, NOW, 0, 0);
+    const result = await listOwnCredentialLimitsByReferences(env, {
+      userId: 'owner',
+      references: [reference, reference],
+    });
+    expect(result.credentials).toHaveLength(1);
+    expect(result.credentials[0]).toMatchObject({ credentialReference: reference });
+    // Newest sample per window wins across projects.
+    expect(result.credentials[0]?.windows).toEqual([
+      expect.objectContaining({ windowType: 'claude.five_hour', utilizationPercent: 55 }),
+    ]);
+    sqlite.close();
   });
 });

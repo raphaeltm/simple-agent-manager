@@ -53,8 +53,8 @@ import {
 import { auditConnectorWrite, executeConnectorWrite } from './services/connector-execution';
 import { getConnectorReadLimits } from './services/connector-read-settings';
 import {
+  listOwnCredentialLimitsByReferences,
   listProjectCredentialLimits,
-  listUserCredentialLimits,
 } from './services/credential-limit-events/read';
 import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
@@ -223,7 +223,8 @@ export function createOperationPorts(env: Env): OperationPorts {
     account: {
       listProfiles: (projectId, userId) => listProfiles(db(), projectId, userId, env),
       profileAccountBindings: (input) => resolveProfileAccountBindings(env, input),
-      listUserCredentialLimits: (userId) => listUserCredentialLimits(env, { userId }),
+      listOwnCredentialLimitsByReferences: (userId, references) =>
+        listOwnCredentialLimitsByReferences(env, { userId, references }),
       tokenUsage: (userId) => getTokenUsage(env.KV, userId, env),
       budgetSettings: (userId) => getUserBudgetSettings(env.KV, userId),
       effectiveBudgetLimits: (settings) => resolveEffectiveLimits(settings, env),
