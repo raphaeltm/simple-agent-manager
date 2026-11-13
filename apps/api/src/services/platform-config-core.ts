@@ -376,8 +376,9 @@ async function resolveLegacyPlatformConfig(
     Date.now() < joinable.deadlineAt &&
     joinAttempt < MAX_PLATFORM_CONFIG_JOIN_ATTEMPTS
   ) {
-    // Joined under this request's own timer: on celld a flight whose starter's client went away
-    // never settles, its deadline timer included (lib/shared-flight.ts).
+    // Joined under this request's own timer, and resumed in its own turn (lib/shared-flight.ts):
+    // on celld a flight whose starter's client went away never settles, and a plain await would
+    // also run the rest of this request as part of the starter's.
     const joined = await settleSharedFlight(joinable.promise, joinable.deadlineAt);
     if (joined.abandoned) {
       // The first caller to notice drops the dead flight and starts the replacement read; the

@@ -18,7 +18,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { WranglerToml } from '../deploy/types.js';
 import { buildCelldConfig } from './celld-config.js';
-import { listMigrationFiles, prepareCelldProject, writeCelldConfig } from './celld-project.js';
+import {
+  CELLD_MAIN,
+  listMigrationFiles,
+  prepareCelldProject,
+  writeCelldConfig,
+} from './celld-project.js';
 
 const API_DIR = resolve(import.meta.dirname, '../../apps/api');
 
@@ -42,6 +47,16 @@ function fakeWebDist(): string {
 }
 
 describe('prepareCelldProject', () => {
+  it('writes the celld entry in both key modes, so the runtime switches are always on', () => {
+    for (const runtimeSecrets of [true, false]) {
+      const projectDir = join(mkdtempSync(join(tmpdir(), 'sam-celld-')), 'project');
+      prepareCelldProject({ apiDir: API_DIR, projectDir, plan: plan(), runtimeSecrets });
+      const main = readFileSync(join(projectDir, CELLD_MAIN), 'utf8');
+      expect(main).toContain('resumeSharedFlightJoinsOnOwnTimer();');
+      expect(main.includes('wrapWorker(worker)')).toBe(runtimeSecrets);
+    }
+  });
+
   it('builds flat per-database migration dirs from the real migrations without moving them', () => {
     const projectDir = join(mkdtempSync(join(tmpdir(), 'sam-celld-')), 'project');
     const p = plan();
