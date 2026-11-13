@@ -1,0 +1,143 @@
+/**
+ * AI proxy billing mode resolution.
+ *
+ * Determines which upstream authentication to use for AI Gateway requests:
+ * - Unified Billing: `cf-aig-authorization: Bearer <token>` (Cloudflare credits)
+ *   Token resolution: CF_AIG_TOKEN (explicit) > CF_API_TOKEN (already a Worker secret)
+ * - Platform Key: `x-api-key: <stored-api-key>` (admin-managed provider credential)
+ * - Auto: try unified first, fall back to platform key if no CF token is available
+ */
+import {
+  AI_PROXY_BILLING_MODE_KV_KEY,
+  type BillingMode,
+  DEFAULT_AI_PROXY_BILLING_MODE,
+  VALID_BILLING_MODES,
+} from '@simple-agent-manager/shared';
+import { log } from '@simple-agent-manager/worker-core';
+
+import { resolveAiGatewayId } from './ai-gateway-availability';
+import type { AiProxyEnv } from './env';
+import type { AiProxyPorts } from './ports';
+
+export interface UpstreamAuth {
+  /** Headers to send to the upstream AI Gateway endpoint. */
+  headers: Record<string, string>;
+  /** The resolved billing mode that was used. */
+  billingMode: BillingMode;
+  /** Non-secret credential/account reference actually used for provider calls. */
+  credentialReference: string;
+  credentialSource: 'platform';
+  credentialProvider: 'anthropic';
+  providerMode: 'unified-billing' | 'platform-key';
+}
+
+/**
+ * Resolve the effective billing mode from KV > env > default.
+ */
+export async function resolveBillingMode(env: AiProxyEnv): Promise<BillingMode> {
+  // Priority: KV (admin-set) > env var > default constant
+  const kvValue = await env.KV.get(AI_PROXY_BILLING_MODE_KV_KEY);
+  if (kvValue && isValidBillingMode(kvValue)) {
+    return kvValue;
+  }
+  const envValue = env.AI_PROXY_BILLING_MODE;
+  if (envValue && isValidBillingMode(envValue)) {
+    return envValue;
+  }
+  return DEFAULT_AI_PROXY_BILLING_MODE;
+}
+
+function isValidBillingMode(value: string): value is BillingMode {
+  return (VALID_BILLING_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * Resolve the Cloudflare token for Unified Billing.
+ * Prefers the explicit CF_AIG_TOKEN, falls back to CF_API_TOKEN (already a Worker secret).
+ *
+ * Unified Billing exists only through AI Gateway. When the gateway cannot be addressed the call
+ * goes straight to the provider, so there is no unified billing and the Cloudflare token must
+ * not be sent: callers then use the provider key instead.
+ */
+export function resolveUnifiedBillingToken(env: AiProxyEnv): string | undefined {
+  if (!resolveAiGatewayId(env)) return undefined;
+  return env.CF_AIG_TOKEN ?? env.CF_API_TOKEN ?? undefined;
+}
+
+/**
+ * Resolve upstream authentication headers for AI Gateway requests.
+ *
+ * Resolution order depends on billing mode:
+ * - 'unified': Use CF token via cf-aig-authorization header. Error if no token available.
+ * - 'platform-key': Use stored platform credential via x-api-key header. Error if missing.
+ * - 'auto' (default): Try unified if a CF token exists, else fall back to platform key.
+ */
+export async function resolveUpstreamAuth(
+  env: AiProxyEnv,
+  ports: Pick<AiProxyPorts, 'getPlatformAnthropicKey'>
+): Promise<UpstreamAuth> {
+  const mode = await resolveBillingMode(env);
+  const cfToken = resolveUnifiedBillingToken(env);
+
+  // Warn when falling back to the high-privilege CF_API_TOKEN
+  if (cfToken && !env.CF_AIG_TOKEN && env.CF_API_TOKEN) {
+    log.warn('ai_billing.unified.using_platform_token', {
+      message:
+        'CF_AIG_TOKEN not set — falling back to CF_API_TOKEN for AI Gateway. Set CF_AIG_TOKEN for least-privilege billing.',
+    });
+  }
+
+  if (mode === 'unified') {
+    if (!cfToken) {
+      throw new Error(
+        'Unified Billing enabled but unavailable: it needs AI Gateway (AI_GATEWAY_ID and CF_ACCOUNT_ID) and a CF token (CF_AIG_TOKEN or CF_API_TOKEN)'
+      );
+    }
+    return {
+      headers: { 'cf-aig-authorization': `Bearer ${cfToken}` },
+      billingMode: 'unified',
+      credentialReference: 'platform_proxy:cloudflare-ai-gateway',
+      credentialSource: 'platform',
+      credentialProvider: 'anthropic',
+      providerMode: 'unified-billing',
+    };
+  }
+
+  if (mode === 'auto') {
+    // Try unified first if a CF token is available
+    if (cfToken) {
+      return {
+        headers: { 'cf-aig-authorization': `Bearer ${cfToken}` },
+        billingMode: 'unified',
+        credentialReference: 'platform_proxy:cloudflare-ai-gateway',
+        credentialSource: 'platform',
+        credentialProvider: 'anthropic',
+        providerMode: 'unified-billing',
+      };
+    }
+    // Fall back to platform credential
+    return resolvePlatformKeyAuth(ports);
+  }
+
+  // mode === 'platform-key'
+  return resolvePlatformKeyAuth(ports);
+}
+
+async function resolvePlatformKeyAuth(
+  ports: Pick<AiProxyPorts, 'getPlatformAnthropicKey'>
+): Promise<UpstreamAuth> {
+  const cred = await ports.getPlatformAnthropicKey();
+  if (!cred?.credential) {
+    throw new Error(
+      'No Anthropic API key configured. An admin must add a Claude Code platform credential.'
+    );
+  }
+  return {
+    headers: { 'x-api-key': cred.credential },
+    billingMode: 'platform-key',
+    credentialReference: `platform_credentials:${cred.credentialId}`,
+    credentialSource: 'platform',
+    credentialProvider: 'anthropic',
+    providerMode: 'platform-key',
+  };
+}

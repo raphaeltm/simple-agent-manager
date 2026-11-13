@@ -5,8 +5,8 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { resolveAdminSetting } from '../services/admin-settings-resolution';
+import { getBetterAuthAccessTokenForProvider } from '../services/better-auth-access-token';
 import { IoTimeoutError, withDeadline } from '../services/fetch-timeout';
-import { getBetterAuthAccessTokenForProvider } from '../services/user-access-token';
 import { DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS } from './user-access-token-lock-config';
 
 const requestSchema = v.object({

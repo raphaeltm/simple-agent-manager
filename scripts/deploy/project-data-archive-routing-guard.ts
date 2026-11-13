@@ -94,9 +94,9 @@ function queryNonRootPointers(environment: string, db: DatabaseTarget): number {
 
 function assertRoutingBridgePresent(): void {
   const root = resolve(import.meta.dirname, '../..');
-  const contractPath = resolve(root, 'apps/api/src/project-data-archive/contract.ts');
-  const servicePath = resolve(root, 'apps/api/src/services/project-data.ts');
-  const doPath = resolve(root, 'apps/api/src/durable-objects/project-data/index.ts');
+  const contractPath = resolve(root, 'packages/project-data/src/archive/contract.ts');
+  const servicePath = resolve(root, 'packages/project-data/src/client/project-data.ts');
+  const doPath = resolve(root, 'packages/project-data/src/do/index.ts');
   for (const path of [contractPath, servicePath, doPath]) {
     if (!existsSync(path)) {
       throw new ProjectDataArchiveRoutingGuardError(

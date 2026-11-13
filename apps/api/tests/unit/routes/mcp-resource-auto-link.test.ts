@@ -28,7 +28,7 @@ vi.mock('../../../src/services/admin-settings', () => ({
       { value: 500 },
     ]),
 }));
-vi.mock('../../../src/operations/agent-linked-context', () => ({
+vi.mock('@simple-agent-manager/operations/internal/agent-linked-context', () => ({
   getAgentLinkedContext: vi.fn().mockResolvedValue({ kind: 'idea', id: 'idea1' }),
 }));
 vi.mock('../../../src/middleware/project-auth', async (original) => ({
@@ -51,11 +51,13 @@ vi.mock('../../../src/services/workspace-file-transfer', async (original) => ({
   uploadToWorkspace: fileMocks.toWorkspace,
 }));
 
+import { recordAutoLink } from '@simple-agent-manager/operations';
+import { recordLink as recordDoLink } from '@simple-agent-manager/project-data/internal/do/links';
+import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
+
 import * as schema from '../../../src/db/schema';
-import { MIGRATIONS } from '../../../src/durable-objects/migrations';
-import { recordLink as recordDoLink } from '../../../src/durable-objects/project-data/links';
 import type { Env } from '../../../src/env';
-import { recordAutoLink } from '../../../src/operations/link-core';
+import { operationDeps } from '../../../src/operation-ports';
 import {
   createJsonKv,
   createMcpApp,
@@ -262,7 +264,7 @@ describe('automatic links from real workspace MCP triggers', () => {
         expect.anything()
       );
       const beforeForeignRead = writes.mock.calls.length;
-      await recordAutoLink(env, 'project1', {
+      await recordAutoLink(operationDeps(env), 'project1', {
         sourceKind: 'session',
         sourceId: 'session1',
         targetKind: 'idea',
@@ -359,7 +361,7 @@ describe('automatic links from real workspace MCP triggers', () => {
       expect(writes).toHaveBeenCalledTimes(explicitBefore);
 
       // The same row, through the automatic link path.
-      await recordAutoLink(env, 'project1', {
+      await recordAutoLink(operationDeps(env), 'project1', {
         sourceKind: 'session',
         sourceId: 'session1',
         targetKind: 'idea',
@@ -371,7 +373,7 @@ describe('automatic links from real workspace MCP triggers', () => {
       expect(writes).toHaveBeenCalledTimes(explicitBefore);
       // Owner control for the automatic path: a real idea in the same project is still
       // recorded, so the two assertions above cannot pass by auto-linking being broken.
-      await recordAutoLink(env, 'project1', {
+      await recordAutoLink(operationDeps(env), 'project1', {
         sourceKind: 'session',
         sourceId: 'session1',
         targetKind: 'idea',

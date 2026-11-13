@@ -25,6 +25,7 @@ import {
   withGcpErrorCategory,
 } from './gcp-metadata';
 import {
+  gcpBootDisk,
   gcpInstanceToObservedVM,
   gcpInstanceToVM,
   resolveGcpSourceImage,
@@ -210,17 +211,12 @@ export class GcpProvider implements Provider {
         items: networkTags,
       },
       disks: [
-        {
-          boot: true,
-          autoDelete: true,
-          initializeParams: {
-            sourceImage: resolveGcpSourceImage(
-              nativeConfig.image ?? this.imageFamily,
-              this.imageProject
-            ),
-            diskSizeGb: String(nativeConfig.bootDiskSizeGb ?? this.diskSizeGb),
-          },
-        },
+        gcpBootDisk(
+          zone,
+          nativeConfig.instanceType,
+          resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
+          nativeConfig.bootDiskSizeGb ?? this.diskSizeGb
+        ),
       ],
       networkInterfaces: [
         {

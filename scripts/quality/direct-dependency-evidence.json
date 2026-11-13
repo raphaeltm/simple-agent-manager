@@ -10,6 +10,14 @@
       "registryUrl": "https://www.npmjs.com/package/@astrojs/check",
       "necessity": "Validates Astro templates and embedded TypeScript."
     },
+    "@aws-sdk/client-s3": {
+      "registryUrl": "https://www.npmjs.com/package/@aws-sdk/client-s3",
+      "necessity": "R2 S3-compatible client for compose image artifact presigned uploads and cleanup in app-deployment; already the API worker's R2 client at the same catalog version."
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "registryUrl": "https://www.npmjs.com/package/@aws-sdk/s3-request-presigner",
+      "necessity": "Presigns R2 upload and download URLs for compose image artifacts in app-deployment; already used by the API worker at the same catalog version."
+    },
     "@axe-core/playwright": {
       "registryUrl": "https://www.npmjs.com/package/@axe-core/playwright",
       "necessity": "Runs accessibility assertions in browser evidence tests."
@@ -71,6 +79,14 @@
       "registryUrl": "https://www.npmjs.com/package/@tanstack/query-persist-client-core",
       "necessity": "Persists an allowlisted slice of the TanStack Query cache so a reload paints from cache instead of an empty state. Loaded via dynamic import for signed-in sessions only."
     },
+    "@types/better-sqlite3": {
+      "registryUrl": "https://www.npmjs.com/package/@types/better-sqlite3",
+      "necessity": "Types for the project-data test SQLite engine; same version the API worker tests use."
+    },
+    "@types/node": {
+      "registryUrl": "https://www.npmjs.com/package/@types/node",
+      "necessity": "Types for node:crypto, which project-data's archive hashing uses under the Worker's nodejs_compat; same catalog version as the root."
+    },
     "@types/pako": {
       "registryUrl": "https://www.npmjs.com/package/@types/pako",
       "necessity": "Type declarations for pako, used by the vendored dgit git core."
@@ -95,6 +111,18 @@
       "registryUrl": "https://www.npmjs.com/package/astro",
       "necessity": "Compiles the shared brand Astro components (packages/ui/src/brand) into the installer's static pages and checks them; same pinned version the marketing site already uses."
     },
+    "better-sqlite3": {
+      "registryUrl": "https://www.npmjs.com/package/better-sqlite3",
+      "necessity": "Real SQLite engine for project-data unit tests of Durable Object SQL; already the API worker's test engine at the same version."
+    },
+    "diff": {
+      "registryUrl": "https://www.npmjs.com/package/diff",
+      "necessity": "Builds unified diffs for Artifacts repository compare views in repo-hosting; moved from the API worker at the same version."
+    },
+    "drizzle-orm": {
+      "registryUrl": "https://www.npmjs.com/package/drizzle-orm",
+      "necessity": "Defines the D1 schema in worker-core; already the API worker ORM at the same pinned version."
+    },
     "eslint": {
       "registryUrl": "https://www.npmjs.com/package/eslint",
       "necessity": "Runs authoritative lint and local rule fixtures."
@@ -115,6 +143,10 @@
       "registryUrl": "https://www.npmjs.com/package/fake-indexeddb",
       "necessity": "In-memory IndexedDB for tests of the query-cache persister; jsdom provides no IndexedDB implementation."
     },
+    "fast-check": {
+      "registryUrl": "https://www.npmjs.com/package/fast-check",
+      "necessity": "Property-based generator for the scheduler lifecycle simulation in scheduler-core; already the API worker's test dependency at the same pinned version."
+    },
     "globals": {
       "registryUrl": "https://www.npmjs.com/package/globals",
       "necessity": "Defines explicit flat-config runtime globals."
@@ -122,6 +154,14 @@
     "idb-keyval": {
       "registryUrl": "https://www.npmjs.com/package/idb-keyval",
       "necessity": "IndexedDB backing store for the persisted query cache. Chosen over localStorage so it cannot evict the library-cache index, which already needs its own LRU within the ~5 MB localStorage budget."
+    },
+    "isomorphic-git": {
+      "registryUrl": "https://www.npmjs.com/package/isomorphic-git",
+      "necessity": "Reads Artifacts-backed Git repositories in memory for repo-hosting's repository browser; moved from the API worker at the same version."
+    },
+    "jose": {
+      "registryUrl": "https://www.npmjs.com/package/jose",
+      "necessity": "Signs GitHub App JWTs in repo-hosting; the API worker uses the same catalog version for its own JWTs."
     },
     "oxlint": {
       "registryUrl": "https://www.npmjs.com/package/oxlint",
@@ -135,7 +175,7 @@
     "postal-mime": {
       "registryUrl": "https://www.npmjs.com/package/postal-mime",
       "homepageUrl": "https://github.com/postalsys/postal-mime",
-      "necessity": "Parses inbound RFC 5322/MIME email in the API Worker email() handler for agent email triggers; zero dependencies and the parser Cloudflare documents for Email Workers."
+      "necessity": "Parses inbound RFC 5322/MIME email for agent email triggers (packages/agent-email, reached from the API Worker email() handler); zero dependencies and the parser Cloudflare documents for Email Workers."
     },
     "sharp": {
       "registryUrl": "https://www.npmjs.com/package/sharp",
@@ -166,6 +206,10 @@
       "homepageUrl": "https://github.com/leeoniya/uPlot",
       "necessity": "Canvas time-series charts for the session resource timeline; handles tens of thousands of points with zoom and synced cursors in ~23 KB gzipped, loaded only when Resources opens."
     },
+    "valibot": {
+      "registryUrl": "https://www.npmjs.com/package/valibot",
+      "necessity": "Runtime JSON boundary validation in worker-core and scheduler-core; already used by shared and the API worker at the same catalog version."
+    },
     "vite": {
       "registryUrl": "https://www.npmjs.com/package/vite",
       "necessity": "Bundles browser-facing Storybook test assets."
@@ -180,7 +224,7 @@
     },
     "yaml": {
       "registryUrl": "https://www.npmjs.com/package/yaml",
-      "necessity": "Structurally parses GitHub workflow contracts in security regression tests."
+      "necessity": "Parses and renders Docker Compose documents in app-deployment and the API worker, and structurally parses GitHub workflow contracts in security regression tests."
     }
   },
   "go": {

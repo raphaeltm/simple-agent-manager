@@ -1,3 +1,7 @@
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import type { UpdateProjectRequest } from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
@@ -27,10 +31,6 @@ import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { jsonValidator, UpdateProjectSchema } from '../../schemas';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
 import {
   assertRepositoryAccess,
   normalizeProjectName,

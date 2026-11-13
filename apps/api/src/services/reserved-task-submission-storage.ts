@@ -108,7 +108,7 @@ export async function commitD1Submission(
     : input.source.kind === 'trigger'
       ? // An execution whose agent email SAM rejected (gave up on, or refused) never gains a
         // task: a slow attempt that outlived its lease would otherwise start one after the
-        // email's run slot was released (services/agent-email/inbound-delivery.ts,
+        // email's run slot was released (packages/agent-email/src/inbound-delivery.ts,
         // closeDelivery). Executions of other trigger types have no email rows.
         env.DATABASE.prepare(
           `INSERT INTO tasks ${insertTaskColumns}

@@ -24,7 +24,7 @@ import {
   type UsageByModel,
   type UsageByProvider,
 } from '../services/ai-gateway-logs';
-import { getLocalUsageBreakdown } from '../services/ai-model-usage';
+import { getLocalUsageBreakdown } from '@simple-agent-manager/ai-proxy';
 import {
   deleteUserBudgetSettings,
   getAdminAiAllowance,

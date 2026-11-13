@@ -4,17 +4,9 @@
  * Membership, recurring schedules (cron triggers), receipts and audit run against a real SQLite
  * engine, so project predicates are evaluated rather than assumed.
  */
-import type { ProjectSchedule, ProjectScheduleMutationResult } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import * as schema from '../../../src/db/schema';
-import { ProjectScheduleNotFoundError } from '../../../src/durable-objects/project-data/project-event-schedules-storage';
-import { ProjectEventValidationError } from '../../../src/durable-objects/project-data/project-events-contracts';
-import type { Env } from '../../../src/env';
-import { log } from '../../../src/lib/logger';
-import { OperationError } from '../../../src/operations/errors';
-import { operationInputJsonSchema } from '../../../src/operations/registry';
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { OperationError } from '@simple-agent-manager/operations';
+import { operationInputJsonSchema } from '@simple-agent-manager/operations';
 import {
   samScheduleCancel,
   samScheduleCreate,
@@ -23,8 +15,17 @@ import {
   samScheduleUpdate,
   scheduleCreateStartsWork,
   scheduleOperations,
-} from '../../../src/operations/schedule-operations';
-import type { OperationContext } from '../../../src/operations/types';
+} from '@simple-agent-manager/operations';
+import { ProjectScheduleNotFoundError } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import { ProjectEventValidationError } from '@simple-agent-manager/project-data/internal/do/project-events-contracts';
+import type { ProjectSchedule, ProjectScheduleMutationResult } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { log } from '../../../src/lib/logger';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { CONNECTOR_DEFAULTS } from '../../../src/services/connector-settings-definition';
 import { applySqliteMigration, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -103,6 +104,7 @@ describe('connector schedule operations', () => {
   function ctx(userId = 'owner', overrides: Partial<OperationContext> = {}): OperationContext {
     return {
       env,
+      ports: createOperationPorts(env),
       requestId: 'test',
       connectorSettings: CONNECTOR_DEFAULTS,
       actor: {

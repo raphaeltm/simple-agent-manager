@@ -1,12 +1,12 @@
+import {
+  PROJECT_DATA_ARCHIVE_TABLES,
+  type ProjectDataArchiveTableName,
+} from '@simple-agent-manager/project-data/internal/archive/contract';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import {
-  PROJECT_DATA_ARCHIVE_TABLES,
-  type ProjectDataArchiveTableName,
-} from '../../../src/project-data-archive/contract';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createAdminProjectDataStorageApp } from './helpers/admin-project-data-storage-route';
 

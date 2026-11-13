@@ -1,4 +1,7 @@
 import {
+  createPersistedTaskResourcePlanJson,
+} from '@simple-agent-manager/scheduler-core';
+import {
   DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
@@ -11,7 +14,6 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
-import { createPersistedTaskResourcePlanJson } from '../../../src/services/resource-requirements-input';
 import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';

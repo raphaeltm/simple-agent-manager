@@ -1,7 +1,7 @@
 # MCP Page-Size Limits Not Configurable via Env Vars
 
 > **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved. The three
-> configurable limits are now `apps/api/src/operations/limits.ts:22-25` (read at
+> configurable limits are now `packages/operations/src/limits.ts:22-25` (read at
 > `routes/mcp/_helpers.ts:151-153` and `operations/task-core.ts:138,151,155`), typed at
 > `env.ts:1073-1076` and documented at `.env.example:752-755`; the parity test is
 > `platform-operations.test.ts:568`. Still open: the session limits are bare constants
@@ -10,7 +10,7 @@
 
 > **Reconciliation 2026-10-12:** #2293 (`6973ceb77`) made three of the five configurable:
 > `taskListLimit`, `taskListMax` and `taskSearchMax` now come from `getPlatformOperationLimits`
-> (`apps/api/src/operations/limits.ts:19-22`; read at `routes/mcp/_helpers.ts:135,149-151` and
+> (`packages/operations/src/limits.ts:19-22`; read at `routes/mcp/_helpers.ts:135,149-151` and
 > `operations/task-core.ts:181,193-198`), are typed in `apps/api/src/env.ts:1063-1066` and are
 > documented in `apps/api/.env.example:750-753`. A parity test covers the shared values
 > (`apps/api/tests/unit/operations/platform-operations.test.ts:515`). Still open:

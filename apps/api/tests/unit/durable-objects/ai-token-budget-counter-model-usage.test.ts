@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AiTokenBudgetCounter } from '../../../src/durable-objects/ai-token-budget-counter';
 import type { Env } from '../../../src/env';
-import { getLocalUsageBreakdown, incrementModelUsage } from '../../../src/services/ai-model-usage';
+import { getLocalUsageBreakdown, incrementModelUsage } from '@simple-agent-manager/ai-proxy';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 function counter(): AiTokenBudgetCounter {

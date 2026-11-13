@@ -1,59 +1,17 @@
-import type { ApiError } from '@simple-agent-manager/shared';
+// Moved to @simple-agent-manager/worker-core (worker modularization W0). This re-export keeps
+// existing importers unchanged; new code imports from the package entry point directly.
+import { AppError, errors as coreErrors } from '@simple-agent-manager/worker-core';
 
 import type { PlatformCapability } from '../services/platform-capabilities';
 
-/**
- * Custom error class for API errors with status codes.
- */
-export class AppError extends Error {
-  constructor(
-    public statusCode: number,
-    public error: string,
-    message: string,
-    public details?: Record<string, unknown>
-  ) {
-    super(message);
-    this.name = 'AppError';
-  }
-
-  toJSON(): ApiError {
-    return {
-      error: this.error,
-      message: this.message,
-      ...(this.details && { details: this.details }),
-    };
-  }
-}
+export { AppError };
 
 /**
- * Common error factory functions.
+ * The package's error helpers plus `featureUnavailable`, which names a worker-side
+ * capability (services/platform-capabilities.ts) and so stays in the worker.
  */
 export const errors = {
-  badRequest: (message: string, details?: Record<string, unknown>) =>
-    new AppError(400, 'BAD_REQUEST', message, details),
-
-  unauthorized: (message = 'Authentication required') => new AppError(401, 'UNAUTHORIZED', message),
-
-  forbidden: (message = 'Access denied') => new AppError(403, 'FORBIDDEN', message),
-
-  notFound: (resource = 'Resource') => new AppError(404, 'NOT_FOUND', `${resource} not found`),
-
-  gone: (message = 'Resource is gone') => new AppError(410, 'GONE', message),
-
-  conflict: (message: string) => new AppError(409, 'CONFLICT', message),
-
-  unprocessable: (message: string, details?: Record<string, unknown>) =>
-    new AppError(422, 'UNPROCESSABLE_ENTITY', message, details),
-
-  paymentRequired: (message = 'Payment required') => new AppError(402, 'PAYMENT_REQUIRED', message),
-
-  tooManyRequests: (message = 'Too many requests') =>
-    new AppError(429, 'TOO_MANY_REQUESTS', message),
-
-  internal: (message = 'Internal server error') => new AppError(500, 'INTERNAL_ERROR', message),
-
-  serviceUnavailable: (message = 'Service unavailable') =>
-    new AppError(503, 'SERVICE_UNAVAILABLE', message),
+  ...coreErrors,
 
   /**
    * A platform service this installation does not have (for example Workers AI off
@@ -61,7 +19,6 @@ export const errors = {
    * and retrying will not help. `feature` names the capability in
    * services/platform-capabilities.ts.
    */
-  /** A platform service this installation does not have (services/platform-capabilities.ts). */
   featureUnavailable: (feature: PlatformCapability, message: string) =>
     new AppError(404, 'FEATURE_UNAVAILABLE', message, { feature }),
 };

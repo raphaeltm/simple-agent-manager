@@ -20,19 +20,19 @@
  * activity writer (`upsertActivityState`), and the real `persistError`. The clock
  * is injected, so a 25-hour runtime costs nothing to simulate.
  */
+import {
+  createAttentionMarker,
+  hasPendingHumanInput,
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
+import { readTaskAcpLivenessSignals } from '@simple-agent-manager/project-data/internal/do/task-acp-liveness-signals';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as observabilitySchema from '../../src/db/observability-schema';
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
-import {
-  createAttentionMarker,
-  hasPendingHumanInput,
-} from '../../src/durable-objects/project-data/attention';
-import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
-import { readTaskAcpLivenessSignals } from '../../src/durable-objects/project-data/task-runtime-liveness';
-import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import { hasUnexpiredHumanInput } from '../../src/services/acp-interaction-store';

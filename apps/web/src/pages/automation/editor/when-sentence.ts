@@ -33,7 +33,10 @@ export function whenSentence(state: EditorState): string {
     case 'github':
       return githubTriggerWhen(state.github.eventType, buildGitHubFilters(state.github));
     case 'webhook':
-      return webhookTriggerWhen(state.webhook.sourceLabel);
+      return webhookTriggerWhen(
+        state.webhook.sourceLabel,
+        state.webhook.caller === 'slack' ? 'slack_v0' : undefined
+      );
     case 'email':
       return emailTriggerWhen(null);
     case 'event':

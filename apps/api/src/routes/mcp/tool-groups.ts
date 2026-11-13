@@ -12,7 +12,7 @@
  * Kept out of groups on purpose: library tools (the web UI and vm-agent recognise the
  * write tools by name, and `download_library_file` writes into the workspace, so it
  * cannot share a read-only tool with `list_library_files`),
- * `request_human_input`, `ops_request_action`), task lifecycle and dispatch, agent
+ * `request_human_input`, `ops_request_action`, `request_secret`), task lifecycle and dispatch, agent
  * messaging/eventing/orchestration (pending a backend unification), triggers (create and
  * update schemas disagree on nullability), hard deletes, and Operations-only tools.
  */
@@ -227,6 +227,11 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
       credentials: {
         tool: 'get_credential_status',
         summary: 'which credentials are present (never values)',
+      },
+      runtime_env: {
+        tool: 'list_runtime_env',
+        summary:
+          'managed runtime env and secret names this session can use, with scope, expiry and provenance (never values)',
       },
       credential_limits: {
         tool: 'get_credential_limits',

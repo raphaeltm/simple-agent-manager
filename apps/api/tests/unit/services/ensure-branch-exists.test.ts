@@ -10,9 +10,15 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('../../../src/lib/logger', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
+// Logger and runtime validation live in worker-core, which the moved GitHub App code imports.
+// Runtime validation is stubbed to avoid valibot schema issues during getInstallationToken.
+vi.mock('@simple-agent-manager/worker-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core')>()),
   log: mocks.log,
+  readResponseJson: vi.fn().mockImplementation(async (response: Response) => {
+    return response.json();
+  }),
+  expectJsonRecord: vi.fn().mockImplementation((val: unknown) => val),
 }));
 
 // Mock jose to avoid crypto operations when getInstallationToken is called
@@ -39,14 +45,6 @@ vi.mock('jose', () => {
     SignJWT: MockSignJWT,
   };
 });
-
-// Mock runtime-validation to avoid valibot schema issues during getInstallationToken
-vi.mock('../../../src/lib/runtime-validation', () => ({
-  readResponseJson: vi.fn().mockImplementation(async (response: Response) => {
-    return response.json();
-  }),
-  expectJsonRecord: vi.fn().mockImplementation((val: unknown) => val),
-}));
 
 import type { Env } from '../../../src/env';
 import { ensureBranchExists } from '../../../src/services/github-app';

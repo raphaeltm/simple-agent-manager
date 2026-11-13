@@ -107,6 +107,22 @@ export const DEFAULT_WEBHOOK_RATE_LIMIT_WINDOW_SECONDS = 60;
 /** Seconds to redeem an MCP webhook credential claim. Override via WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS. */
 export const DEFAULT_WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS = 600;
 
+/** Events a signed webhook automation may hold while it waits for a run slot. Admin setting `operations.webhookQueueMaxPending`. */
+export const DEFAULT_WEBHOOK_QUEUE_MAX_PENDING = 50;
+
+/** Seconds a signed webhook event may wait for a run slot before it is dropped. Admin setting `operations.webhookQueueTtlSeconds`. */
+export const DEFAULT_WEBHOOK_QUEUE_TTL_SECONDS = 86_400;
+
+/** Allowed clock difference for schemes that sign a timestamp (Slack's own window). Admin setting `operations.webhookSignatureToleranceSeconds`. */
+export const DEFAULT_WEBHOOK_SIGNATURE_TOLERANCE_SECONDS = 300;
+
+/** Longest provider event ID accepted as a duplicate key, in bytes. */
+export const WEBHOOK_EVENT_ID_MAX_BYTES = 200;
+
+/** Bounds for a pasted signing secret. Slack's is 32 characters; GitHub allows any string. */
+export const WEBHOOK_SIGNING_SECRET_MIN_LENGTH = 8;
+export const WEBHOOK_SIGNING_SECRET_MAX_LENGTH = 512;
+
 /** All trigger defaults aggregated for convenience. */
 export const TRIGGER_DEFAULTS = {
   WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS: DEFAULT_WEBHOOK_CREDENTIAL_CLAIM_TTL_SECONDS,

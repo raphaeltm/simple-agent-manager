@@ -2,7 +2,7 @@
  * Superadmin agent email status, setup and loopback self-test (preview).
  *
  * - The setup (`/setup`) turns agent email on after the deploy prepared it; see
- *   `services/agent-email/setup.ts`.
+ *   `packages/agent-email/src/setup.ts`.
  * - The loopback sends one fixed message from `agent+loopback@agents.<BASE_DOMAIN>` to an
  *   existing email trigger, so an operator can prove routing and sending end to end without a
  *   personal mailbox.

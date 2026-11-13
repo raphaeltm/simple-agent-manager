@@ -1,16 +1,12 @@
-import type { PromptDeliverySource } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { runMigrations } from '../../../src/durable-objects/migrations';
-import type { DurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
-import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
+import type { DurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   acceptPromptDelivery,
   claimDuePromptDeliveries,
   nudgePromptDeliveriesForTarget,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
-import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import {
   computeSessionAccessExpiryAlarmTime,
   createSessionAccessGrant,
@@ -22,9 +18,13 @@ import {
   revokeSessionAccessGrant,
   SENDER_ACCESS_EXPIRED_REASON,
   SENDER_ACCESS_REVOKED_REASON,
-} from '../../../src/durable-objects/project-data/session-access';
-import { handleExpiredGrants } from '../../../src/durable-objects/project-data/session-access-expiry';
-import { SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT } from '../../../src/durable-objects/project-data/session-access-store';
+} from '@simple-agent-manager/project-data/internal/do/session-access';
+import { handleExpiredGrants } from '@simple-agent-manager/project-data/internal/do/session-access-expiry';
+import { SESSION_ACCESS_UNDELIVERED_SUMMARY_LIMIT } from '@simple-agent-manager/project-data/internal/do/session-access-store';
+import type { PromptDeliverySource } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import type { VmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { createSqlStorage } from './sql-storage-test-utils';
 

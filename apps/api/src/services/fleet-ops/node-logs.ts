@@ -8,8 +8,9 @@
  * `search`), and returns at most `maxLines` lines and `maxBytes` bytes. `nextCursor` reads
  * further back.
  */
+import { untrustedTextBlock } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
-import { untrustedTextBlock } from '../../operations/untrusted-text';
 import { getNodeLogsFromNode } from '../node-agent-diagnostics';
 import { type NodeAccess, runNodeDiagnostic } from '../node-diagnostics-access';
 

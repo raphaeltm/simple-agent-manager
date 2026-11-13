@@ -9,6 +9,14 @@
  * The list reads stored pull request state only. It never asks GitHub, because one person
  * opening the page would otherwise cost one GitHub call per pull request in the project.
  */
+import { toOperationHttpError } from '@simple-agent-manager/operations';
+import { createIdea } from '@simple-agent-manager/operations';
+import {
+  getIdeaWithDerivedStatus,
+  type IdeaPullRequestRefresh,
+  listIdeasWithDerivedStatus,
+} from '@simple-agent-manager/operations';
+import { acknowledgeIdeaMerge, applyIdeaStatusTransition } from '@simple-agent-manager/operations';
 import { IDEA_HUMAN_TRANSITIONS } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -20,15 +28,7 @@ import { log } from '../lib/logger';
 import { parsePositiveInt, requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
-import { toOperationHttpError } from '../operations/errors';
-import { createIdea } from '../operations/idea-core';
-import {
-  getIdeaWithDerivedStatus,
-  type IdeaPullRequestRefresh,
-  listIdeasWithDerivedStatus,
-} from '../operations/idea-list-core';
-import { acknowledgeIdeaMerge, applyIdeaStatusTransition } from '../operations/idea-transitions';
-import { webOperationContext } from '../operations/types';
+import { webOperationContext } from '../operation-ports';
 import { jsonValidator } from '../schemas';
 
 export const ideaRoutes = new Hono<{ Bindings: Env }>();

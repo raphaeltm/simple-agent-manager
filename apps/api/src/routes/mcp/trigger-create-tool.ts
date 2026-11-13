@@ -1,3 +1,8 @@
+import {
+  ResourceRequirementsValidationError,
+  serializeModernResourceRequirementsInput,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
@@ -9,13 +14,9 @@ import { AppError } from '../../middleware/error';
 import { CreateTriggerSchema } from '../../schemas/triggers';
 import { cronToHumanReadable } from '../../services/cron-utils';
 import { readGitHubTriggerConfig } from '../../services/github-trigger-config';
-import {
-  ResourceRequirementsValidationError,
-  serializeModernResourceRequirementsInput,
-  serializeResourceRequirementsInput,
-} from '../../services/resource-requirements-input';
 import { createTrigger } from '../../services/trigger-create';
 import { areWebhookTriggersEnabled } from '../../services/webhook-trigger-config';
+import { readWebhookTriggerConfig } from '../../services/webhook-trigger-setup';
 import { requireProjectTaskWrite } from '../task-project-auth';
 import {
   INVALID_PARAMS,
@@ -25,6 +26,8 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+
+const SECRET_PARAM_NAMES = ['secret', 'signingSecret', 'signing_secret'];
 
 export async function handleCreateTrigger(
   requestId: string | number | null,
@@ -38,6 +41,23 @@ export async function handleCreateTrigger(
       requestId,
       INVALID_PARAMS,
       'sourceType must be "cron", "github", or "webhook"'
+    );
+  }
+  // The signing secret of a signed webhook is saved by a person on the automation's page so it
+  // never passes through a transcript. Refuse it here instead of dropping it silently.
+  const webhookInput =
+    typeof params.webhookConfig === 'object' && params.webhookConfig !== null
+      ? (params.webhookConfig as Record<string, unknown>)
+      : {};
+  if (
+    SECRET_PARAM_NAMES.some(
+      (name) => params[name] !== undefined || webhookInput[name] !== undefined
+    )
+  ) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Do not pass a signing secret to create_trigger. Create the trigger, then ask a person to save the secret at the returned webhookConfig.setup.secretEntryUrl.'
     );
   }
   // Keep MCP's modern resource input contract and retired-field compatibility.
@@ -131,6 +151,10 @@ export async function handleCreateTrigger(
               : undefined,
             githubConfig:
               sourceType === 'github' ? await readGitHubTriggerConfig(db, created.id) : undefined,
+            // Address, scheme, and for signed schemes the setup state and the page where a
+            // person saves the signing secret. Never a credential.
+            webhookConfig:
+              sourceType === 'webhook' ? await readWebhookTriggerConfig(env, created) : undefined,
           }),
         },
       ],

@@ -105,6 +105,9 @@ export function EditorFlow({
     setState(next);
     // GitHub choice fields validate edited values inline; do not retain the old step error.
     if (state.start === 'github') setErrors({});
+    // A signed webhook's header and event-ID errors describe the values just replaced.
+    if (state.start === 'webhook' && next.webhook !== state.webhook)
+      setErrors(({ webhookSignature: _signature, webhookEventId: _eventId, ...rest }) => rest);
   };
   const [confirmLeave, setConfirmLeave] = useState(false);
   const initialRef = useRef(JSON.stringify(initial));

@@ -1,3 +1,9 @@
+import {
+  WEBHOOK_FILTER_OPERATORS,
+  WEBHOOK_SETUP_STATES,
+  WEBHOOK_VERIFICATION_SCHEMES,
+} from '@simple-agent-manager/shared';
+
 import { cliWorkflowMutations, cliWorkflowPaths } from './cli-workflows';
 
 // FILE SIZE EXCEPTION: Hand-maintained OpenAPI document literal with a byte-exact
@@ -758,7 +764,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       WebhookTriggerFilter: objectSchema(
         {
           path: stringSchema('Dot-separated path in the JSON request body.'),
-          operator: { type: 'string', enum: ['exists', 'equals', 'contains'] },
+          operator: { type: 'string', enum: [...WEBHOOK_FILTER_OPERATORS] },
           value: { type: ['string', 'number', 'boolean', 'null'] },
         },
         ['path', 'operator']
@@ -769,20 +775,72 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           filterMode: { type: 'string', enum: ['all', 'any'] },
           filters: arrayOf(ref('WebhookTriggerFilter')),
           includedHeaders: arrayOf(stringSchema()),
-          tokenLastFour: stringSchema(
-            'Only the final four token characters; never credential material.'
+          verification: objectSchema(
+            {
+              scheme: { type: 'string', enum: [...WEBHOOK_VERIFICATION_SCHEMES] },
+              header: stringSchema('hmac_sha256_body only: the header carrying the HMAC.'),
+            },
+            ['scheme']
           ),
-          tokenCreatedAt: dateTimeSchema(),
+          eventId: nullable(
+            objectSchema(
+              {
+                path: stringSchema('Dot path of the sender event ID in the JSON body.'),
+                header: stringSchema('Header carrying the sender event ID.'),
+              },
+              []
+            )
+          ),
+          endpointUrl: stringSchema(
+            'Address the sender calls. Signed automations each have their own; not a credential.'
+          ),
+          tokenLastFour: nullable(
+            stringSchema(
+              'Only the final four token characters; never credential material. Null for signed automations.'
+            )
+          ),
+          tokenCreatedAt: nullable(dateTimeSchema()),
           tokenRotatedAt: nullable(dateTimeSchema()),
+          signingSecret: nullable(
+            objectSchema(
+              {
+                set: booleanSchema(),
+                setAt: nullable(dateTimeSchema()),
+                setBy: nullable(stringSchema()),
+              },
+              ['set', 'setAt', 'setBy']
+            )
+          ),
+          setup: objectSchema(
+            {
+              state: { type: 'string', enum: [...WEBHOOK_SETUP_STATES] },
+              secretEntryUrl: stringSchema(
+                'Page where a person with write access saves the signing secret. Not a credential.'
+              ),
+              lastEventAt: nullable(dateTimeSchema()),
+              waiting: { type: 'integer', minimum: 0 },
+              lastRejection: nullable(
+                objectSchema(
+                  { reason: stringSchema(), at: dateTimeSchema(), hint: stringSchema() },
+                  ['reason', 'at', 'hint']
+                )
+              ),
+            },
+            ['state', 'secretEntryUrl', 'lastEventAt', 'waiting', 'lastRejection']
+          ),
         },
         [
           'sourceLabel',
           'filterMode',
           'filters',
           'includedHeaders',
+          'verification',
+          'eventId',
+          'endpointUrl',
           'tokenLastFour',
           'tokenCreatedAt',
           'tokenRotatedAt',
+          'signingSecret',
         ]
       ),
       ListTriggersResponse: objectSchema(

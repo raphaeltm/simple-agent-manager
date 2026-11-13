@@ -1,3 +1,6 @@
+import {
+  readPersistedTaskResourcePlan,
+} from '@simple-agent-manager/scheduler-core';
 import { resolveResourceReservation } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -9,7 +12,6 @@ import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { getRuntimeValidationError } from '../../../src/routes/mcp/dispatch-instant';
 import { parseDispatchTaskParams } from '../../../src/routes/mcp/dispatch-tool-params';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
-import { readPersistedTaskResourcePlan } from '../../../src/services/resource-requirements-input';
 import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';

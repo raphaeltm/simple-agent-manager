@@ -1210,7 +1210,7 @@ export function generateApiWorkerEnv(
 
     // Vars: merge top-level defaults with dynamic overrides. With the agent email binding, the
     // Worker also learns its own script name: the admin setup points the `agent@` routing rule
-    // at it (apps/api/src/services/agent-email/setup.ts).
+    // at it (packages/agent-email/src/setup.ts).
     vars: {
       ...getApiWorkerVars(topLevel, outputs, stack, analyticsDataset, includeArtifactsBinding),
       ...(agentEmailBindingEnabled ? { [AGENT_EMAIL_WORKER_NAME_VAR]: workerName } : {}),

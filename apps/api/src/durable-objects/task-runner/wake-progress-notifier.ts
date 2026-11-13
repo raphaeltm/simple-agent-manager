@@ -42,7 +42,8 @@ export {
   DEFAULT_WAKE_PROGRESS_BROADCAST_TIMEOUT_MS,
   getWakeProgressBroadcastTimeoutMs,
 } from '../../services/session-wake-ready';
-import type { ProjectData } from '../project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/durable-object';
+
 import type { SessionWakeProgressInput } from '../project-data/session-wake-progress';
 import type { SessionWakeReadyInput } from '../project-data/session-wake-ready';
 

@@ -56,7 +56,7 @@ import { aiProxyAnthropicRoutes } from '../../../src/routes/ai-proxy-anthropic';
 import { usageRoutes } from '../../../src/routes/usage';
 import { updateAdminSettings } from '../../../src/services/admin-settings-mutations';
 import { __resetAdminSettingsCacheForTest } from '../../../src/services/admin-settings-resolution';
-import { priceModelUsageUsd } from '../../../src/services/ai-cost-pricing';
+import { priceModelUsageUsd } from '@simple-agent-manager/ai-proxy';
 import {
   buildMonthlyCostCacheKey,
   getLocalMonthlyAiCostUsd,

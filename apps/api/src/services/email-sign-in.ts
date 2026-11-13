@@ -1,6 +1,6 @@
 /**
  * Email sign-in: BetterAuth's emailOTP plugin, sending a six-digit code through SAM's email
- * transport (`./agent-email/provider.ts`, `emailTransportKind`):
+ * transport (`packages/agent-email/src/provider.ts`, `emailTransportKind`):
  * - Cloudflare Email Sending (the `AGENT_EMAIL` binding), from `sign-in@agents.<BASE_DOMAIN>`:
  *   installer installs and GitHub Actions deploys whose token has the email permissions.
  *   Turning inbound agent email on is a separate admin step; sending does not need it.

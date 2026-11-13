@@ -54,7 +54,7 @@ function relativeToSrc(file: string): string {
 }
 
 describe('workspace provisioning paths all run the checkout-branch guard', () => {
-  const provisioningFiles = collectSourceFiles(SRC_ROOT)
+  const provisioningFiles = collectSourceFiles()
     .filter((file) => readFileSync(file, 'utf8').includes(PROVISIONING_CALL))
     .map(relativeToSrc)
     .sort();

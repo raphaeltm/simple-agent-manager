@@ -23,7 +23,7 @@ The email fix:
 - refuses a task insert for an execution whose email was rejected (the trigger insert guard in
   `services/reserved-task-submission-storage.ts`);
 - accepts instead of rejecting when the task exists (`closeDelivery` in
-  `services/agent-email/inbound-delivery.ts`).
+  `packages/agent-email/src/inbound-delivery.ts`).
 
 The GitHub inbox needs the equivalent. This is pre-existing behavior, not introduced by #2413.
 

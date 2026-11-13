@@ -15,7 +15,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { resolveSmtpConfig } from '../../apps/api/src/services/agent-email/smtp-config.js';
+import { resolveSmtpConfig } from '../../packages/agent-email/src/smtp-config.js';
 import { writePrivateFile } from './secret-files.js';
 
 export const MAIL_COLLECTOR_PROFILE = 'mail-collector';

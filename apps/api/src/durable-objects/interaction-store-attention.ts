@@ -1,10 +1,10 @@
+import type { ProjectData } from '@simple-agent-manager/project-data/durable-object';
 import { ACP_INTERACTION_ATTENTION_SOURCE } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { canonicalJson } from '../lib/canonical-json';
 import { nowMs, parseSummary, terminalState } from './interaction-store-model';
 import { readInteractionRow } from './interaction-store-read';
-import type { ProjectData } from './project-data';
 
 export async function projectInteractionAttention(
   sql: SqlStorage,

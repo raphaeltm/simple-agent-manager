@@ -58,6 +58,14 @@ jobs:
             api:
               - 'apps/api/**'
               - 'packages/shared/**'
+              - 'packages/worker-core/**'
+              - 'packages/app-deployment/**'
+              - 'packages/project-data/**'
+              - 'packages/repo-hosting/**'
+              - 'packages/scheduler-core/**'
+              - 'packages/agent-email/**'
+              - 'packages/operations/**'
+              - 'packages/ai-proxy/**'
               - 'packages/task-runner/**'
               - 'packages/config/**'
               - 'scripts/quality/*migration*.ts'
@@ -77,6 +85,14 @@ jobs:
               - 'packages/vm-agent/internal/config/**'
               - 'apps/api/src/**'
               - 'packages/shared/src/**'
+              - 'packages/worker-core/src/**'
+              - 'packages/app-deployment/src/**'
+              - 'packages/project-data/src/**'
+              - 'packages/repo-hosting/src/**'
+              - 'packages/scheduler-core/src/**'
+              - 'packages/agent-email/src/**'
+              - 'packages/operations/src/**'
+              - 'packages/ai-proxy/src/**'
               - 'sonar-project.properties'
               - '.claude/rules/36-cli-quality.md'
             devcontainer:
@@ -392,9 +408,13 @@ jobs:
     name: Test
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
-    # Normal runs take 12-20 min; on slower runners 3 runs on 2026-11-08 were
-    # cancelled at the old 20-min limit with no failing suite.
-    timeout-minutes: 30
+    # Normal runs took 12-20 min; on slower runners 3 runs on 2026-11-08 were
+    # cancelled at the old 20-min limit with no failing suite. After the worker
+    # was split into packages (2026-11-12) the same suites run as eight more
+    # turbo tasks and took 27 min, then hit the 30-min limit with no failing
+    # suite (run 43273493049). 45 is a stopgap until PR runs test only what
+    # changed (idea 01M77GBTAM775FAKY72RT4HMDV).
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -20,7 +20,7 @@ import { createModuleLogger } from '../lib/logger';
 import { guardedFetch } from '../lib/network-hosts';
 import { readResponseJson } from '../lib/runtime-validation';
 import { getTimeoutMs } from './fetch-timeout';
-import { DEFAULT_GITLAB_API_TIMEOUT_MS, gitLabHostVerdict } from './gitlab-host-policy';
+import { DEFAULT_GITLAB_API_TIMEOUT_MS, gitLabHostVerdict } from '@simple-agent-manager/repo-hosting';
 import { keepLinkedAccountEmail } from './linked-account-identity';
 import { resolveOutboundMaxRedirects } from './outbound-fetch-settings';
 import type { GitLabOAuthConfig } from './platform-config-oauth';

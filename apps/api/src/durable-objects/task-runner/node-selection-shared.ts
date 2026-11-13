@@ -3,6 +3,13 @@
  * reusable-node selection (`node-selection.ts`). Split out per rule 18.
  */
 import {
+  hasWorkspaceReservationCapacity,
+  isResolvedResourceReservation,
+  parseWorkspaceAdmissionMetrics,
+  resolveTrustedWorkspaceNodeCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import {
   type CapacityPlacementSnapshot,
   type ResolvedResourceReservation,
   resolveResourceReservation,
@@ -14,14 +21,11 @@ import {
 } from '../../services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
-  hasWorkspaceReservationCapacity,
-  isResolvedResourceReservation,
-  loadActiveWorkspaceReservationUsage,
-  parseWorkspaceAdmissionMetrics,
-  resolveTrustedWorkspaceNodeCapacity,
-  resolveWorkspaceAdmissionPolicy,
   type TrustedWorkspaceNodeCapacityRow,
-} from '../../services/workspace-resource-capacity';
+} from '../../services/workspace-admission-sql';
+import {
+  loadActiveWorkspaceReservationUsage,
+} from '../../services/workspace-reservation-usage';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export interface ReusableNodeSelection {

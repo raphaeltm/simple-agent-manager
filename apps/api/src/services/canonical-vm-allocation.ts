@@ -1,4 +1,7 @@
 import type { NativeVMConfig } from '@simple-agent-manager/providers';
+import {
+  emptyCapacityPoolMessage,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   CapacityWorkloadRole,
@@ -14,7 +17,6 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
-import { emptyCapacityPoolMessage } from './placement-resolution-error';
 import {
   capacityPlacementSnapshotForCandidate,
   directPlacementAuditSnapshot,

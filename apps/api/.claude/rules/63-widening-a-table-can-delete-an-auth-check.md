@@ -155,7 +155,7 @@ Before merging a migration that relaxes a constraint:
 
 - Task: `tasks/archive/2026-08-22-library-file-commenting.md` (moves to
   `tasks/archive/` on completion)
-- Implementation at the time: `apps/api/src/durable-objects/project-data/library-file-comments.ts`,
+- Implementation at the time: `packages/project-data/src/do/library-file-comments.ts`,
   DO migration `033-library-file-comment-threads` (now frozen legacy storage)
 - Current shared-table implementation: `anchored-comment-scope.ts`, `anchored-comment-store.ts`,
   `anchored-comment-mutations.ts`, DO migration `073-anchored-comment-threads`

@@ -26,9 +26,9 @@ import {
   type AgentEmailSender,
   type EmailTransportEnv,
   emailTransportKind,
+  type SmtpConnect,
   systemEmailTransportFor,
-} from './provider';
-import type { SmtpConnect } from './smtp-client';
+} from '@simple-agent-manager/agent-email';
 
 export type SelfHostInboundEnv = EmailTransportEnv &
   Pick<Env, 'AGENT_EMAIL_INBOUND_SMTP' | 'REVERSE_TUNNEL_GATEWAY_SECRET'>;

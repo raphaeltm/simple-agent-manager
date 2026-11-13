@@ -1,3 +1,4 @@
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
 import type {
   ProjectScheduleMutationResult,
   ProjectStandingWatchMutationResult,
@@ -6,7 +7,6 @@ import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
-import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { projectScheduleRoutes } from '../../src/routes/project-schedules';

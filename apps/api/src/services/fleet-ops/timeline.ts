@@ -6,9 +6,10 @@
  * the most recent `limit` events. The result says which sources hit their cap, how many
  * merged events were dropped, and the `until` to pass to read further back.
  */
+import { untrustedTextBlock } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { untrustedTextBlock } from '../../operations/untrusted-text';
 import type { NodeAccess } from '../node-diagnostics-access';
 import { type EntityGraph, type OpsEntityType, resolveEntityGraph } from './entity-graph';
 import {

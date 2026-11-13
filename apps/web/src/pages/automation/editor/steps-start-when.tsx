@@ -6,6 +6,7 @@ import { EmailTriggerFields } from '../../../components/triggers/EmailTriggerFie
 import { GitHubFilterPreview } from '../../../components/triggers/GitHubFilterPreview';
 import { GitHubTriggerFields } from '../../../components/triggers/GitHubTriggerFields';
 import { buildGitHubFilters } from '../../../components/triggers/trigger-form-support';
+import { WebhookCallerFields } from '../../../components/triggers/WebhookCallerFields';
 import { WebhookTriggerFields } from '../../../components/triggers/WebhookTriggerFields';
 import type { AutomationStart } from '../../../lib/automation-routes';
 import { ChoiceCards } from '../fields';
@@ -13,7 +14,7 @@ import { Notice } from '../page';
 import { OnceTimeFields } from '../schedule-time';
 import { KindIcon } from '../ui';
 import type { Errors } from './requests';
-import type { EditorState } from './state';
+import { type EditorState, type WebhookCaller, withWebhookCaller } from './state';
 import { ScheduleWhen } from './when-schedule';
 import { WatchWhen } from './when-watch';
 
@@ -50,6 +51,21 @@ const STARTS: Array<{ id: AutomationStart; title: string; text: string; advanced
     advanced: true,
   },
 ];
+
+/** What happens next for each kind of caller, so the person knows what they will need. */
+function webhookNotice(caller: WebhookCaller, creating: boolean): string {
+  if (caller === 'slack')
+    return creating
+      ? 'After you create it, its page shows the address for Slack and a field for your Slack app’s signing secret, with four steps. Events that arrive while a run is busy wait in order.'
+      : 'Saving keeps its address and signing secret. Replace the secret on its page.';
+  if (caller === 'signed')
+    return creating
+      ? 'After you create it, its page shows its address and a field for the service’s signing secret. Events that arrive while a run is busy wait in order.'
+      : 'Saving keeps its address and signing secret. Replace the secret on its page.';
+  return creating
+    ? 'After you create it, SAM shows the URL and a secret token once. Paste both into the service that will call it.'
+    : 'Saving keeps its URL and token. To replace the token, use Get a new token on its page.';
+}
 
 export function StepStart({
   value,
@@ -167,11 +183,14 @@ export function StepWhen({
         onChange({ ...state, webhook: { ...webhook, ...patch } });
       return (
         <div className="flex flex-col gap-3">
-          <Notice>
-            {creating
-              ? 'After you create it, SAM shows the URL and a secret token once. Paste both into the service that will call it.'
-              : 'Saving keeps its URL and token. To replace the token, use Get a new token on its page.'}
-          </Notice>
+          <WebhookCallerFields
+            value={webhook}
+            creating={creating}
+            errors={{ signature: errors.webhookSignature, eventId: errors.webhookEventId }}
+            onCallerChange={(caller) => onChange(withWebhookCaller(state, caller))}
+            onChange={set}
+          />
+          <Notice>{webhookNotice(webhook.caller, creating)}</Notice>
           <WebhookTriggerFields
             sourceLabel={webhook.sourceLabel}
             includedHeaders={webhook.includedHeaders}
