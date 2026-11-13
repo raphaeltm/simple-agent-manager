@@ -24,7 +24,7 @@ import {
   emailTransportKind,
   type SmtpConnect,
   systemEmailTransportFor,
-} from '@simple-agent-manager/agent-email';
+} from '@simple-agent-manager/agent-email/definitions';
 import { AGENT_EMAIL_LOCAL_PART } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';

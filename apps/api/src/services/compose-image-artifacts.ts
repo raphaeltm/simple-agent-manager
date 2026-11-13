@@ -22,20 +22,24 @@ export type {
   ComposeImageArtifactUpload,
 } from '@simple-agent-manager/app-deployment';
 export {
+  buildComposeImageArtifactKey,
+  COMPOSE_IMAGE_ARTIFACT_ARCHIVE_TYPE,
+  COMPOSE_IMAGE_ARTIFACT_MEDIA_TYPE,
   getComposeImageArtifactMaxBytes,
   validateCompletedComposeImageArtifacts,
   validateComposeImageArtifactDescriptor,
 } from '@simple-agent-manager/app-deployment';
 
-// Compose artifacts have always been signed with the SDK's default checksum behaviour.
-export function createComposeImageArtifactUploads(
+// Compose artifacts have always been signed with the SDK's default checksum behaviour. Async so a
+// missing R2 credential rejects the returned promise, as it did before, instead of throwing.
+export async function createComposeImageArtifactUploads(
   env: Env,
   input: Parameters<typeof createUploads>[1]
 ): Promise<ComposeImageArtifactUpload[]> {
   return createUploads(env, input, getR2PresignTarget(env, 'SDK_DEFAULT'));
 }
 
-export function createComposeImageArtifactDownloads(
+export async function createComposeImageArtifactDownloads(
   env: Env,
   artifacts: ComposeImageArtifactDescriptor[]
 ): Promise<ComposeImageArtifactDownload[]> {

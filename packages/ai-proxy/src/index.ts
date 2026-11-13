@@ -67,6 +67,7 @@ export {
 } from './ai-proxy-shared';
 export {
   type AiProviderUsageAttribution,
+  buildBudgetKey,
   checkAiUsageGate,
   consumeFeatureTokenBudget,
   deleteUserBudgetSettings,

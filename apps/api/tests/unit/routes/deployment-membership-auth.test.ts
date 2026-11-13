@@ -77,7 +77,10 @@ let memberRows: ProjectMemberRow[] = [];
 let environmentRows: EnvironmentRow[] = [];
 let nodeRows: NodeRow[] = [];
 
-vi.mock('drizzle-orm', () => ({
+// Partial: the real `sql` stays, because packages load the real D1 schema
+// (@simple-agent-manager/worker-core/schema), which the src/db/schema mock below does not reach.
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('drizzle-orm')>()),
   and: (...conds: Condition[]) => ({ op: 'and', conds }),
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
 }));

@@ -3,6 +3,7 @@
 export {
   type AiBudgetLimits,
   type AiProviderUsageAttribution,
+  buildBudgetKey,
   buildBudgetSettingsKey,
   buildMonthlyCostCacheKey,
   checkAiUsageGate,

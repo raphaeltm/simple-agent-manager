@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
+import { configureRepoHostingPort } from '../../src/ports';
 import { ArtifactsRepoBrowser } from '../../src/repo-browse/artifacts';
+
+// What the worker's artifacts port answers on Cloudflare: the ARTIFACTS binding the tests pass is
+// the backend, and repositories are read over the network (no in-process hosted git).
+configureRepoHostingPort('artifacts', { resolve: () => null, localRemoteFetch: () => null });
 
 // Mock isomorphic-git (the git mechanics themselves are proven by the workerd
 // spike, idea §10). The real `diff` lib is used so patch generation is exercised.

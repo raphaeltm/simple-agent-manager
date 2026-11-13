@@ -1,7 +1,8 @@
 /**
  * Machine-checked inventory of outbound requests (self-host T5, rule 61), per call site.
  *
- * outbound-fetch-analyzer.ts walks every src/ file with the TypeScript parser and finds every
+ * outbound-fetch-analyzer.ts walks every src/ file, and every file of the packages the worker
+ * modularization (#2681) moved worker code into, with the TypeScript parser and finds every
  * call that can send a request: the global fetch in any spelling, fetchWithTimeout, local
  * aliases, injected fetchers, and `.fetch(` on bindings and stubs. A site passes only if it is a
  * call to a guard entry point (guardedFetch, fetchChatTarget, fetchProxyUpstream) or has an
@@ -18,6 +19,22 @@ import { OUTBOUND_FETCH_ALLOWLIST } from './outbound-fetch-allowlist';
 import { analyzeSource, type CallCategory, type CallSite } from './outbound-fetch-analyzer';
 
 const SRC = resolve(import.meta.dirname, '../../../src');
+const PACKAGES = resolve(import.meta.dirname, '../../../../../packages');
+
+/**
+ * Packages holding code that runs in this Worker (moved out of src/ by #2681, the same set
+ * scripts/quality/ast-checks.ts scans). Their sites are keyed `@<package>/<path under src>`.
+ */
+const WORKER_PACKAGES = [
+  'agent-email',
+  'ai-proxy',
+  'app-deployment',
+  'operations',
+  'project-data',
+  'repo-hosting',
+  'scheduler-core',
+  'worker-core',
+];
 
 /**
  * Exact counts. When you add, remove or guard a call site, update these and the allowlist in
@@ -42,7 +59,7 @@ const MUST_BE_GUARDED = [
   'services/debug-agent-tools.ts › complete › fetchChatTarget',
   'durable-objects/sam-session/agent-loop-llm.ts › callOpenAIChatLLM › fetchChatTarget',
   'durable-objects/sam-session/operator/model.ts › fetch › fetchChatTarget',
-  'services/gitlab.ts › gitlabFetch › guardedFetch',
+  '@repo-hosting/gitlab.ts › gitlabFetch › guardedFetch',
   'services/gitlab-login-provider.ts › fetchGitLabUserInfo › guardedFetch',
   'routes/mcp/check-dns-status.ts › handleCheckDnsStatus › guardedFetch',
   // Operator-chosen issuer (AGENT_SIGN_IN_TRUST); on self-host the Worker shares a host with
@@ -68,8 +85,14 @@ function sourceFiles(dir: string): string[] {
 }
 
 function scanSrc(): CallSite[] {
-  return sourceFiles(SRC).flatMap((path) =>
-    analyzeSource(relative(SRC, path), readFileSync(path, 'utf8'))
+  const roots = [
+    { dir: SRC, prefix: '' },
+    ...WORKER_PACKAGES.map((name) => ({ dir: join(PACKAGES, name, 'src'), prefix: `@${name}/` })),
+  ];
+  return roots.flatMap(({ dir, prefix }) =>
+    sourceFiles(dir).flatMap((path) =>
+      analyzeSource(`${prefix}${relative(dir, path)}`, readFileSync(path, 'utf8'))
+    )
   );
 }
 
@@ -189,7 +212,7 @@ describe('outbound fetch analyzer: every spelling is a call site', () => {
   });
 });
 
-describe('outbound fetch inventory (apps/api/src)', () => {
+describe('outbound fetch inventory (apps/api/src and the worker packages)', () => {
   const sites = scanSrc();
 
   it('every unguarded call site is listed, with the right kind and count, and no entry is stale', () => {

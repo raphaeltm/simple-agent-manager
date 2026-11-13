@@ -1,3 +1,4 @@
+import { DEFAULT_OUTBOUND_MAX_REDIRECTS } from '@simple-agent-manager/worker-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
@@ -13,6 +14,8 @@ configureRepoHostingPort('platformConfig', {
   githubApp: vi.fn(),
   githubOAuth: vi.fn(),
   gitlabOAuth: (env) => platformConfig.getGitLabOAuthConfig(env),
+  // The worker reads the `outbound.maxRedirects` admin setting; unset, it is the default.
+  outboundMaxRedirects: async () => DEFAULT_OUTBOUND_MAX_REDIRECTS,
 });
 
 const originalFetch = globalThis.fetch;
