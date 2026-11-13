@@ -1,0 +1,41 @@
+---
+/** A real-UI screenshot in a bordered frame with a caption. Light/dark variants are picked by OptimizedFeatureImage. */
+import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
+
+interface Props {
+  src: string;
+  alt: string;
+  caption: string;
+}
+
+const { src, alt, caption } = Astro.props;
+---
+
+<figure class="shot-frame animate-on-scroll">
+  <OptimizedFeatureImage src={src} alt={alt} />
+  <figcaption>{caption}</figcaption>
+</figure>
+
+<style>
+  .shot-frame {
+    margin: 0;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--color-bg-surface);
+  }
+
+  .shot-frame :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .shot-frame figcaption {
+    padding: 12px 16px;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--color-fg-muted);
+    border-top: 1px solid var(--glass-border);
+  }
+</style>

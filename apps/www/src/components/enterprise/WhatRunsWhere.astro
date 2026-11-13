@@ -1,0 +1,148 @@
+---
+/**
+ * "What runs where" diagram for /enterprise/. Three zones (your Cloudflare account, your cloud
+ * accounts, services you choose) with the connections between them. Plain HTML so it reflows on
+ * phones and stays readable to screen readers.
+ */
+const zones = [
+  {
+    title: 'Your Cloudflare account',
+    owner: 'Deployed by you with the installer or self-hosting guide',
+    items: [
+      'API Worker and web app (the control plane)',
+      'D1: users, projects, tasks, encrypted credentials',
+      'Durable Objects: chat history and activity, one per project',
+      'R2: workspace snapshots, files, logs',
+      'Workers AI and AI Gateway',
+      'Cloudflare Containers for Instant sessions',
+    ],
+  },
+  {
+    title: 'Cloud accounts you connect',
+    owner: 'A project\'s, a user\'s, or one the administrator provides',
+    items: [
+      'VMs running the SAM VM agent',
+      'Your repository\'s devcontainer, with Docker',
+      'The coding agent and its working copy of your code',
+      'Deployment nodes and persistent volumes for apps',
+    ],
+  },
+  {
+    title: 'Services you choose',
+    owner: 'Contracts you already have',
+    items: [
+      'Model providers: Anthropic, OpenAI, Google, Mistral and others',
+      'Code hosting: GitHub or GitLab',
+      'MCP servers and webhooks you connect',
+    ],
+  },
+];
+
+const links = [
+  'Browsers reach the control plane over HTTPS on your domain.',
+  'The control plane reaches each VM agent through Cloudflare: the agent port admits only Cloudflare, or a tunnel replaces it.',
+  'Agents call model providers directly with the user\'s key, or through the installation AI proxy if you enable it.',
+];
+---
+
+<div class="wrw animate-on-scroll">
+  <div class="wrw-zones">
+    {zones.map((zone, i) => (
+      <section class={`wrw-zone wrw-zone--${i}`} aria-label={zone.title}>
+        <h3>{zone.title}</h3>
+        <p class="wrw-owner">{zone.owner}</p>
+        <ul>
+          {zone.items.map((item) => <li>{item}</li>)}
+        </ul>
+      </section>
+    ))}
+  </div>
+  <ol class="wrw-links">
+    {links.map((link) => <li>{link}</li>)}
+  </ol>
+</div>
+
+<style>
+  .wrw-zones {
+    display: grid;
+    gap: 14px;
+  }
+
+  @media (min-width: 900px) {
+    .wrw-zones {
+      grid-template-columns: 1.2fr 1fr 1fr;
+    }
+  }
+
+  .wrw-zone {
+    padding: 22px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    background: var(--glass-bg);
+  }
+
+  .wrw-zone--0 {
+    border-top: 3px solid #f6821f;
+  }
+
+  .wrw-zone--1 {
+    border-top: 3px solid var(--color-accent);
+  }
+
+  .wrw-zone--2 {
+    border-top: 3px solid var(--color-fg-dim);
+  }
+
+  .wrw-zone h3 {
+    font-family: var(--font-display);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--color-fg-primary);
+  }
+
+  .wrw-owner {
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+    margin: 4px 0 14px;
+  }
+
+  .wrw-zone ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 8px;
+  }
+
+  .wrw-zone li {
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--color-fg-muted);
+    padding-left: 14px;
+    position: relative;
+  }
+
+  .wrw-zone li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.62em;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--color-fg-dim);
+  }
+
+  .wrw-links {
+    margin: 18px 0 0;
+    padding-left: 20px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .wrw-links li {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--color-fg-muted);
+  }
+</style>

@@ -1,156 +1,76 @@
 ---
-import Base from '../../layouts/Base.astro';
-import Header from '../../components/Header.astro';
-import CtaFooter from '../../components/CtaFooter.astro';
+import EnterpriseDetail from '../../components/enterprise/EnterpriseDetail.astro';
+import ComparisonTable from '../../components/ComparisonTable.astro';
 ---
 
-<Base
-  title="Security Isolation — SAM Enterprise"
-  description="One user per VM, one agent per workspace. OS-level firewalls, short-lived VMs, and hard security boundaries between every user."
+<EnterpriseDetail
+  slug="security"
+  seoTitle="Isolation and Network Security | SAM Enterprise"
+  seoDescription="How SAM isolates agent workspaces: one user per VM, an ingress firewall that only admits Cloudflare, per-node TLS keys, and short-lived tokens."
+  title="The VM is the boundary"
+  subtitle="Every workspace machine belongs to exactly one user. Containers inside it can be privileged so agents can run Docker, so SAM puts the hard boundary at the VM and keeps everything else scoped to it."
 >
-  <Header />
-  <main>
-    <section class="detail-hero">
-      <div class="detail-glow" aria-hidden="true"></div>
-      <div class="container detail-hero-content">
-        <a href="/enterprise/" class="back-link animate-on-scroll">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-          Enterprise
-        </a>
-        <span class="section-label animate-on-scroll">Security Isolation</span>
-        <h1 class="detail-title animate-on-scroll">
-          One user per VM.<br />
-          <span class="gradient-text">Hard boundaries.</span>
-        </h1>
-        <p class="detail-subtitle animate-on-scroll">
-          Each user's workspaces run on their own dedicated VMs — different users never share a node.
-          OS-level firewalls enforce network isolation. VMs are short-lived and destroyed after an idle timeout.
-        </p>
-      </div>
-    </section>
+  <h2>One user per machine</h2>
+  <p>
+    Every node has a required owner. Placement only ever reuses the requesting user's own running or warm
+    machines, so two users never share a VM, even when they work in the same shared project.
+  </p>
+  <p>
+    One machine can host several of that user's workspaces at once. Placement packs them by the CPU and memory
+    each one reserves, not by a fixed count.
+  </p>
 
-    <hr class="divider" />
+  <h2>Containers are not the boundary</h2>
+  <p>
+    Teams need <code>docker build</code>, Docker Compose and Testcontainers inside a workspace, so SAM applies a
+    repository's devcontainer configuration as written, including privileged mode. Escaping a devcontainer
+    therefore reaches the rest of that user's VM, including their other workspaces on it, but not another user's
+    machine. Opening a repository in SAM trusts its devcontainer the same way GitHub Codespaces or VS Code Dev
+    Containers do.
+  </p>
+  <p>
+    A workspace can run more than one agent session (up to 10 by default). They share the workspace's files,
+    so treat a workspace as one unit of trust.
+  </p>
 
-    <section class="section">
-      <div class="container detail-content">
-        <div class="detail-block animate-on-scroll">
-          <h2>VM-Level User Isolation</h2>
-          <p>
-            Different users never share the same VM. Each user's workspaces run on their own
-            dedicated nodes. There is no shared-infrastructure scenario where one user's agent
-            could access another user's code, credentials, or runtime environment.
-          </p>
-          <p>
-            A single node can host multiple workspaces for the same user (up to a configurable limit,
-            default 3) — but cross-user node sharing is structurally prevented by the node selection logic.
-          </p>
-        </div>
+  <h2>Network</h2>
+  <ul>
+    <li>The VM agent's port accepts connections only from Cloudflare's IP ranges. In Cloudflare Tunnel mode a machine has no public agent port at all and reaches Cloudflare through an outbound connector.</li>
+    <li>Inbound SSH is dropped.</li>
+    <li>Containers cannot reach the cloud provider's metadata endpoint, and machines hold no cloud-account credentials. The control plane makes every provider API call.</li>
+    <li>Each machine generates its own TLS private key and gets a short-lived Cloudflare Origin CA certificate (7 days by default). No key is shared across machines.</li>
+    <li><strong>Outbound traffic is not restricted.</strong> Agents can reach the internet, which they need for package installs and model APIs. Egress allowlisting is on the <a href="/enterprise/#not-yet">not-yet list</a>.</li>
+  </ul>
 
-        <div class="detail-block animate-on-scroll">
-          <h2>One Agent Per Workspace</h2>
-          <p>
-            Each workspace hosts exactly one agent session in its own container. No concurrent agents sharing
-            filesystem, memory, or network within a workspace. This eliminates an entire class
-            of inter-agent interference bugs and security risks.
-          </p>
-        </div>
+  <h2>Short-lived machines</h2>
+  <p>
+    When a machine's last workspace ends, it stays warm (30 minutes by default) so the same user's next task starts
+    quickly, then SAM deletes it. Automatically created machines also have a 4-hour maximum lifetime. Durable
+    Object alarms, a scheduled sweep and that lifetime cap all guard against forgotten machines.
+  </p>
+  <p>
+    Two kinds of machine are long-lived on purpose: deployment nodes that host apps your agents ship, and
+    machines users enroll themselves. Deployment nodes reject Compose settings that grant host
+    authority, such as <code>privileged</code> and <code>network_mode</code>.
+  </p>
 
-        <div class="detail-block animate-on-scroll">
-          <h2>OS-Level Firewalls</h2>
-          <p>
-            Every VM is provisioned with iptables rules baked into cloud-init. Security measures
-            are controlled within the VM provisioning process, not dependent on cloud-provider-specific
-            firewall features. The rules apply before any user code runs.
-          </p>
-        </div>
+  <h2>Tokens</h2>
+  <ComparisonTable
+    caption="Credentials that cross the control-plane boundary, and how long they live."
+    rowHeader="Token"
+    columns={['Lifetime', 'Purpose']}
+    rows={[
+      { label: 'Session cookie', cells: ['7 days', 'Browser sign-in (HttpOnly, Secure, SameSite)'] },
+      { label: 'Workspace JWT', cells: ['1 hour', 'Terminal and agent WebSocket access to one workspace'] },
+      { label: 'Bootstrap token', cells: ['15 minutes, one use', 'Delivers a new machine its credentials'] },
+      { label: 'Callback token', cells: ['24 hours', 'VM agent calls back to the control plane, scoped to one node or workspace'] },
+    ]}
+  />
 
-        <div class="detail-block animate-on-scroll">
-          <h2>Short-Lived VMs</h2>
-          <p>
-            VMs are created for work and destroyed after an idle timeout (default 30 minutes).
-            After a task completes, the node enters a warm pool for fast reuse by the same user.
-            If no new work arrives, the node is automatically destroyed.
-            Each task starts from a known-good base image, and there is no long-lived server accumulating
-            state or drift.
-          </p>
-        </div>
-
-        <div class="detail-block animate-on-scroll">
-          <h2>Token Architecture</h2>
-          <div class="detail-table-wrap">
-            <table class="detail-table">
-              <thead>
-                <tr>
-                  <th>Token</th>
-                  <th>Lifetime</th>
-                  <th>Purpose</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Session cookie</td>
-                  <td>7 days</td>
-                  <td>Browser authentication (HttpOnly, Secure, SameSite)</td>
-                </tr>
-                <tr>
-                  <td>Workspace JWT</td>
-                  <td>1 hour</td>
-                  <td>Terminal WebSocket auth</td>
-                </tr>
-                <tr>
-                  <td>Bootstrap token</td>
-                  <td>15 minutes, one-time use</td>
-                  <td>VM credential injection</td>
-                </tr>
-                <tr>
-                  <td>Callback token</td>
-                  <td>24 hours</td>
-                  <td>VM agent → control plane callbacks</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="detail-nav animate-on-scroll">
-          <a href="/enterprise/scale/" class="detail-nav-link">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-            Scale
-          </a>
-          <a href="/enterprise/governance/" class="detail-nav-link">
-            Governance
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-          </a>
-        </div>
-      </div>
-    </section>
-
-    <hr class="divider" />
-    <CtaFooter />
-  </main>
-</Base>
-
-<style>
-  .detail-hero { position: relative; padding: 140px 0 60px; overflow: hidden; }
-  @media (min-width: 768px) { .detail-hero { padding: 160px 0 80px; } }
-  .detail-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(22, 163, 74, 0.1) 0%, transparent 70%); pointer-events: none; }
-  :global(html[data-theme='light']) .detail-glow { background: radial-gradient(ellipse, rgba(21, 128, 61, 0.07) 0%, transparent 70%); }
-  .detail-hero-content { max-width: 720px; }
-  .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--color-fg-dim); margin-bottom: 24px; }
-  .back-link:hover { color: var(--color-fg-muted); }
-  .detail-title { font-family: var(--font-display); font-size: clamp(1.75rem, 4.5vw, 2.75rem); font-weight: 600; line-height: 1.15; color: var(--color-fg-primary); margin-bottom: 20px; }
-  .gradient-text { background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-success) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-  .detail-subtitle { font-size: 1.0625rem; color: var(--color-fg-muted); line-height: 1.7; max-width: 600px; }
-  .detail-content { max-width: 720px; }
-  .detail-block { margin-bottom: 48px; }
-  .detail-block h2 { font-family: var(--font-display); font-size: 1.375rem; font-weight: 600; color: var(--color-fg-primary); margin-bottom: 16px; }
-  .detail-block p { font-size: 1rem; color: var(--color-fg-muted); line-height: 1.7; margin-bottom: 16px; }
-  .detail-table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--glass-border); margin-top: 16px; }
-  .detail-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-  .detail-table th { padding: 12px 16px; text-align: left; background: var(--color-bg-surface); font-weight: 600; font-size: 0.8125rem; color: var(--color-fg-muted); border-bottom: 1px solid var(--glass-border); }
-  .detail-table td { padding: 10px 16px; border-bottom: 1px solid var(--color-border-subtle); color: var(--color-fg-muted); }
-  .detail-table tbody tr:last-child td { border-bottom: none; }
-  .detail-nav { display: flex; justify-content: space-between; gap: 16px; padding-top: 32px; border-top: 1px solid var(--color-border-subtle); }
-  .detail-nav-link { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; font-weight: 500; color: var(--color-fg-muted); }
-  .detail-nav-link:hover { color: var(--color-accent); }
-</style>
+  <div class="callout">
+    <p>
+      The <a href="/docs/architecture/security/">security architecture</a> documents each of these with the code
+      that enforces it, and says where a security review should focus.
+    </p>
+  </div>
+</EnterpriseDetail>
