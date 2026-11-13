@@ -87,3 +87,18 @@ staging verification skipped by explicit instruction.
 - Reveal runs only on navigation (deep link, a thread's View), not on clicking the painted words.
 - Discrimination checks (each guard removed, intended test went red): resolved filter, mutation
   observer, selection guard, registry union, newest-open pick, reveal (Playwright long reply).
+
+## Review outcomes (Phase 5)
+
+- ui-ux-specialist: no CRITICAL/HIGH. Fixed M1 (dismiss tap), M2 (double click), L1 (text-line
+  hit test), L2 (keep open thread). Not changed: M3 (phone inline thread scrolls into view —
+  showing the opened thread is intended), M4 (library comments overlay covers the file on phones —
+  existing panel design), L3 (repeated phrase paints first occurrence — needs stored offsets),
+  L5 (hover-only cue), L7 (extra request per markdown preview, intended).
+- architecture-reviewer: HIGH (two landing implementations) addressed by sharing the text index,
+  scroll helpers and `USER_SCROLL_EVENTS`; the reader keeps its own one-time landing (sheet inset,
+  placement, Back to the comment). Jump fork replaced by `jumpToMessage(..., { confirm: true })`.
+- performance-reviewer: no observer/paint without targets; per-element text index per paint.
+  Follow-ups not done: dirty-anchor repaint, Range reuse, hit-test scoping (bounded today).
+- task-completion-validator: reader filter + Comments page link tests added; reveal find cap.
+- test-engineer: reveal window, late attach, click guards, library deep-link reveal tests added.
