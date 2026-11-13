@@ -7,10 +7,14 @@ import { and, eq, exists, isNotNull, lt, notInArray, or, sql } from 'drizzle-orm
 import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';
+import { providerLimitRecoveryApprovalCondition } from './provider-limit-recovery-approval';
 import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
 import { type Db, TERMINAL_TASK_STATUSES } from './session-snapshot-recovery-conditions';
 
-export function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTaskGuard | undefined) {
+export function sourceTaskGuardCondition(
+  db: Db,
+  guard: SessionRecoverySourceTaskGuard | undefined
+) {
   if (!guard) return undefined;
   const sourceTask = alias(schema.tasks, 'recovery_source_task');
   const recoveryOwner = alias(schema.tasks, 'recovery_session_owner');
@@ -81,6 +85,10 @@ export function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTas
               ]
             : []),
           sourceIsWakeable,
+          providerLimitRecoveryApprovalCondition(
+            'recovery_source_task',
+            guard.providerLimitApproval
+          ),
           or(
             eq(sourceTask.chatSessionId, guard.chatSessionId),
             exists(
@@ -139,6 +147,7 @@ export async function sourceTaskGuardIsValid(
         eq(schema.tasks.id, guard.taskId),
         eq(schema.tasks.projectId, guard.projectId),
         sourceIsWakeable,
+        providerLimitRecoveryApprovalCondition('tasks', guard.providerLimitApproval),
         or(
           eq(schema.tasks.chatSessionId, guard.chatSessionId),
           exists(

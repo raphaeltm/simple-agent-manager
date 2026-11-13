@@ -32,6 +32,7 @@ import {
   jsonValidator,
   MessageBatchSchema,
 } from '../../schemas';
+import type { ResolvedAgentKey } from '../../services/agent-key-resolution';
 import { appendBootLog } from '../../services/boot-log';
 import { registerBootstrapTokenConsume } from '../../services/bootstrap';
 import { resolveSessionProfileCredentialContext } from '../../services/composable-credentials/profile-context';
@@ -133,7 +134,8 @@ async function callbackJsonWithJit<T extends Record<string, unknown>>(
   c: RuntimeContext,
   expected: WorkspaceCallbackIdentitySnapshot,
   callback: WorkspaceDeletionCallbackKind,
-  body: T
+  body: T,
+  agentSessionId?: string | null
 ) {
   await assertWorkspaceCallbackIdentityCurrent(c.env, expected, callback);
   if (
@@ -145,9 +147,46 @@ async function callbackJsonWithJit<T extends Record<string, unknown>>(
       c.env,
       expected.workspaceId,
       body.credentialReference,
-      expected
+      expected,
+      undefined,
+      agentSessionId,
+      {
+        credentialGeneration:
+          typeof body.credentialGeneration === 'number' ? body.credentialGeneration : undefined,
+      }
     );
   return c.json(body);
+}
+
+async function respondWithDirectAgentKey(
+  c: RuntimeContext,
+  workspace: WorkspaceCallbackIdentitySnapshot,
+  body: { agentType: string; agentSessionId?: string | null },
+  credentialData: ResolvedAgentKey,
+  providerMode: string
+) {
+  const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
+    workspaceId: workspace.workspaceId,
+    agentSessionId: body.agentSessionId,
+    agentType: body.agentType,
+    attribution: credentialAttributionFromData(credentialData, body.agentType, providerMode),
+  });
+  return callbackJsonWithJit(
+    c,
+    workspace,
+    'agent_key',
+    {
+      apiKey: credentialData.credential,
+      credentialKind: credentialData.credentialKind,
+      credentialSource: credentialData.credentialSource,
+      credentialReference: credentialData.credentialReference,
+      credentialProvider:
+        credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
+      providerMode,
+      credentialGeneration: persistedAttribution?.credentialGeneration,
+    },
+    persistedAttribution?.agentSessionId
+  );
 }
 
 const DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES = 256 * 1024;
@@ -793,26 +832,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   }
 
   if (credentialData && opencodeRequiresDedicatedCredential) {
-    const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
-      workspaceId,
-      agentSessionId: body.agentSessionId,
-      agentType: body.agentType,
-      attribution: credentialAttributionFromData(
-        credentialData,
-        body.agentType,
-        credentialProviderMode
-      ),
-    });
-    return callbackJsonWithJit(c, workspace, 'agent_key', {
-      apiKey: credentialData.credential,
-      credentialKind: credentialData.credentialKind,
-      credentialSource: credentialData.credentialSource,
-      credentialReference: credentialData.credentialReference,
-      credentialProvider:
-        credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
-      providerMode: credentialProviderMode,
-      credentialGeneration: persistedAttribution?.credentialGeneration,
-    });
+    return respondWithDirectAgentKey(c, workspace, body, credentialData, credentialProviderMode);
   }
 
   if (!credentialData && opencodeRequiresDedicatedCredential) {
@@ -929,19 +949,25 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         ),
       });
 
-      return callbackJsonWithJit(c, workspace, 'agent_key', {
-        apiKey: '__sam_proxy__',
-        credentialKind: credentialData.credentialKind,
-        credentialSource: credentialData.credentialSource,
-        credentialReference: credentialData.credentialReference,
-        credentialProvider:
-          credentialData.credentialProvider ??
-          credentialData.providerDialect ??
-          agentCredentialProviderFallback(body.agentType),
-        providerMode: 'proxy-passthrough',
-        credentialGeneration: persistedAttribution?.credentialGeneration,
-        inferenceConfig,
-      });
+      return callbackJsonWithJit(
+        c,
+        workspace,
+        'agent_key',
+        {
+          apiKey: '__sam_proxy__',
+          credentialKind: credentialData.credentialKind,
+          credentialSource: credentialData.credentialSource,
+          credentialReference: credentialData.credentialReference,
+          credentialProvider:
+            credentialData.credentialProvider ??
+            credentialData.providerDialect ??
+            agentCredentialProviderFallback(body.agentType),
+          providerMode: 'proxy-passthrough',
+          credentialGeneration: persistedAttribution?.credentialGeneration,
+          inferenceConfig,
+        },
+        persistedAttribution?.agentSessionId
+      );
     }
 
     if (credentialData?.baseUrl) {
@@ -955,26 +981,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
 
     if (credentialData) {
-      const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
-        workspaceId,
-        agentSessionId: body.agentSessionId,
-        agentType: body.agentType,
-        attribution: credentialAttributionFromData(
-          credentialData,
-          body.agentType,
-          credentialProviderMode
-        ),
-      });
-      return callbackJsonWithJit(c, workspace, 'agent_key', {
-        apiKey: credentialData.credential,
-        credentialKind: credentialData.credentialKind,
-        credentialSource: credentialData.credentialSource,
-        credentialReference: credentialData.credentialReference,
-        credentialProvider:
-          credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
-        providerMode: credentialProviderMode,
-        credentialGeneration: persistedAttribution?.credentialGeneration,
-      });
+      return respondWithDirectAgentKey(c, workspace, body, credentialData, credentialProviderMode);
     }
 
     // Claude Code and Codex require an explicit SAM provider selection before
@@ -1035,16 +1042,22 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       attribution: platformAttribution,
     });
 
-    return callbackJsonWithJit(c, workspace, 'agent_key', {
-      apiKey: '__platform_proxy__',
-      credentialKind: 'api-key' as const,
-      credentialSource: 'platform' as const,
-      credentialReference: platformAttribution.credentialReference,
-      credentialProvider: platformAttribution.credentialProvider,
-      providerMode: platformAttribution.providerMode,
-      credentialGeneration: persistedAttribution?.credentialGeneration,
-      inferenceConfig,
-    });
+    return callbackJsonWithJit(
+      c,
+      workspace,
+      'agent_key',
+      {
+        apiKey: '__platform_proxy__',
+        credentialKind: 'api-key' as const,
+        credentialSource: 'platform' as const,
+        credentialReference: platformAttribution.credentialReference,
+        credentialProvider: platformAttribution.credentialProvider,
+        providerMode: platformAttribution.providerMode,
+        credentialGeneration: persistedAttribution?.credentialGeneration,
+        inferenceConfig,
+      },
+      persistedAttribution?.agentSessionId
+    );
   }
 
   if (!credentialData) {
@@ -1068,27 +1081,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
-  const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
-    workspaceId,
-    agentSessionId: body.agentSessionId,
-    agentType: body.agentType,
-    attribution: credentialAttributionFromData(
-      credentialData,
-      body.agentType,
-      credentialProviderMode
-    ),
-  });
-
-  return callbackJsonWithJit(c, workspace, 'agent_key', {
-    apiKey: credentialData.credential,
-    credentialKind: credentialData.credentialKind,
-    credentialSource: credentialData.credentialSource,
-    credentialReference: credentialData.credentialReference,
-    credentialProvider:
-      credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
-    providerMode: credentialProviderMode,
-    credentialGeneration: persistedAttribution?.credentialGeneration,
-  });
+  return respondWithDirectAgentKey(c, workspace, body, credentialData, credentialProviderMode);
 });
 
 /**

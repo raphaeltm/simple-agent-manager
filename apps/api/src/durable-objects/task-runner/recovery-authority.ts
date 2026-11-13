@@ -7,7 +7,13 @@
  * source task and any project-event wake still authorize it. Every refusal names
  * the check that failed and logs it with the snapshot claim (`recovery-revocation.ts`).
  */
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
+
 import type { Env } from '../../env';
+import {
+  loadProviderLimitRecoveryApproval,
+  providerLimitRecoveryApprovalIsCurrent,
+} from '../../services/provider-limit-recovery-approval';
 import { assertReplacementDeletionConfirmed } from '../../services/replacement-deletion-fence';
 import {
   findSessionRecoveryTaskAndEventAuthorityFailure,
@@ -35,13 +41,20 @@ type RecoveryAttemptFailure = Extract<
 async function findRecoveryAttemptFailure(
   env: Env,
   ctx: DurableObjectState,
-  input: StartTaskInput | TaskRunnerState
+  input: StartTaskInput | TaskRunnerState,
+  persistedState?: TaskRunnerState | null
 ): Promise<RecoveryAttemptFailure | null> {
   if ('stepResults' in input) {
-    const persisted = await ctx.storage.get<TaskRunnerState>('state');
+    const persisted =
+      persistedState === undefined
+        ? await ctx.storage.get<TaskRunnerState>('state')
+        : persistedState;
     if (
       persisted &&
-      (persisted.config.recoveryAttemptId ?? null) !== (input.config.recoveryAttemptId ?? null)
+      (persisted.taskId !== input.taskId ||
+        persisted.projectId !== input.projectId ||
+        persisted.userId !== input.userId ||
+        (persisted.config.recoveryAttemptId ?? null) !== (input.config.recoveryAttemptId ?? null))
     )
       return 'runner_attempt_superseded';
   }
@@ -83,8 +96,70 @@ export async function findRecoveryAuthorityFailure(
   ctx: DurableObjectState,
   input: StartTaskInput | TaskRunnerState
 ): Promise<SessionRecoveryAuthorityCheck | null> {
-  const attemptFailure = await findRecoveryAttemptFailure(env, ctx, input);
+  const persisted = 'stepResults' in input ? await ctx.storage.get<TaskRunnerState>('state') : null;
+  const attemptFailure = await findRecoveryAttemptFailure(env, ctx, input, persisted ?? null);
   if (attemptFailure) return attemptFailure;
+  // A nudge can install consent while this step is awaiting an external call.
+  // The captured input must not erase or bypass the same-attempt stored guard.
+  const approval =
+    persisted?.config.providerLimitRecoveryApproval ?? input.config.providerLimitRecoveryApproval;
+  if (
+    approval &&
+    !(await providerLimitRecoveryApprovalIsCurrent(
+      env,
+      input.taskId,
+      input.projectId,
+      approval,
+      true
+    ))
+  )
+    return 'recovery_task_authority';
+  // Owner force-resume can approve a previously unguarded human-message wake.
+  // Keep its existing claim, while making that approval revocable at every
+  // external runner boundary rather than only when the owner clicked.
+  const ownerApproval = await env.DATABASE.prepare(
+    `SELECT t.provider_limit_wait_json,
+      EXISTS (SELECT 1 FROM project_members m JOIN users u ON u.id=m.user_id
+        WHERE m.project_id=t.project_id AND m.user_id=t.user_id AND m.status='active'
+        AND m.role IN ('owner','admin','maintainer') AND u.status='active') AS member_active
+     FROM tasks t WHERE t.id=? AND t.project_id=? AND t.user_id=?
+       AND json_valid(t.provider_limit_wait_json)
+       AND json_type(t.provider_limit_wait_json,'$.ownerOverride.expiresAt')='integer'`
+  )
+    .bind(input.taskId, input.projectId, input.userId)
+    .first<{ provider_limit_wait_json: string; member_active: number }>();
+  if (
+    ownerApproval &&
+    !ownerApproval.member_active &&
+    parseProviderLimitWait(ownerApproval.provider_limit_wait_json)?.ownerOverride
+  )
+    return 'recovery_task_authority';
+  // The same live state is used by bootstrap and its legacy skill fallback.
+  if (approval) input.config.providerLimitRecoveryApproval = approval;
+  // The owner CAS may commit before the nudge reaches this runner. Reconstruct
+  // that live scoped guard rather than treating an old unguarded state as consent.
+  if (!approval && ownerApproval) {
+    const wait = parseProviderLimitWait(ownerApproval.provider_limit_wait_json);
+    if (wait?.ownerOverride?.ownerUserId && wait.ownerOverride.snapshotId) {
+      const liveApproval = await loadProviderLimitRecoveryApproval(
+        env,
+        input.taskId,
+        ownerApproval.provider_limit_wait_json
+      );
+      if (
+        !liveApproval ||
+        !(await providerLimitRecoveryApprovalIsCurrent(
+          env,
+          input.taskId,
+          input.projectId,
+          liveApproval,
+          true
+        ))
+      )
+        return 'recovery_task_authority';
+      input.config.providerLimitRecoveryApproval = liveApproval;
+    }
+  }
   const sourceTaskId = input.config.recoverySourceTaskId ?? null;
   const chatSessionId = input.config.resumeSnapshotChatSessionId ?? null;
   // A human follow-up may recover a completed conversation without a live

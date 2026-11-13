@@ -16,7 +16,7 @@
  */
 import type { MessagePosition } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
@@ -468,15 +468,18 @@ describe('resumable archive cursor', () => {
     // A lease far shorter than the tick: without renewal the fence is lost mid-copy and the
     // claim fails with lease_fence_lost. Long enough to survive the tick's setup before the claim.
     // At wall-clock time, because the lease is claimed from the tick's `now`.
-    // Every chunk put is slowed so the copy is certain to outlast the lease several times over:
-    // a claim that happened to finish inside 400 ms would pass with renewal deleted.
+    // Charge each actual chunk write 40 ms on the coordinator's clock. Setup
+    // overhead cannot spend the tick budget before the claim proves renewal.
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const { bucket, puts } = countingR2(env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket);
     const slow = new Proxy(bucket, {
       get(target, property, receiver) {
         if (property === 'put') {
           return async (...args: unknown[]) => {
-            await new Promise((resolve) => setTimeout(resolve, 40));
-            return (target.put as (...rest: unknown[]) => Promise<unknown>)(...args);
+            const result = await (target.put as (...rest: unknown[]) => Promise<unknown>)(...args);
+            now += 40;
+            return result;
           };
         }
         const value = Reflect.get(target, property, receiver);
@@ -484,24 +487,28 @@ describe('resumable archive cursor', () => {
       },
     });
     const startedAt = Date.now();
-    const stats = await withR2(slow as R2Bucket, () =>
-      withArchiveEnv(
-        sweepEnv({
-          PROJECT_DATA_ARCHIVE_LEASE_MS: '400',
-          PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '2000',
-        }),
-        () => runProjectDataArchiveSharding(testEnv, new Date())
-      )
-    );
-    // The claim held its fence well past the original expiry and kept copying.
-    expect(Date.now() - startedAt).toBeGreaterThan(3 * 400);
-    expect(puts.size * 40).toBeGreaterThan(3 * 400);
-    const journal = await readJournal(projectId, sessionId);
-    expect(journal?.error_message ?? null).toBeNull();
-    expect(stats.failed).toBe(0);
-    expect(['copying', 'target_sealed', 'recovery_manifest_persisted', 'published']).toContain(
-      journal?.state
-    );
+    try {
+      const stats = await withR2(slow as R2Bucket, () =>
+        withArchiveEnv(
+          sweepEnv({
+            PROJECT_DATA_ARCHIVE_LEASE_MS: '400',
+            PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '2000',
+          }),
+          () => runProjectDataArchiveSharding(testEnv, new Date(now))
+        )
+      );
+      // The claim held its fence well past the original expiry and kept copying.
+      expect(Date.now() - startedAt).toBeGreaterThan(3 * 400);
+      expect(puts.size * 40).toBeGreaterThan(3 * 400);
+      const journal = await readJournal(projectId, sessionId);
+      expect(journal?.error_message ?? null).toBeNull();
+      expect(stats.failed).toBe(0);
+      expect(['copying', 'target_sealed', 'recovery_manifest_persisted', 'published']).toContain(
+        journal?.state
+      );
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('stops reclaim at the tick deadline, flags a stuck reclaim, then frees the bytes', async () => {
@@ -794,8 +801,34 @@ describe('resumable archive cursor', () => {
       'legacyintent',
       LARGE_MESSAGES
     );
-    const first = await tick({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' });
-    expect(first.yielded ?? 0).toBe(1);
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const original = env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket;
+    let copiedChunk = false;
+    const yieldingR2 = new Proxy(original, {
+      get(target, property, receiver) {
+        if (property === 'put')
+          return async (...args: unknown[]) => {
+            const result = await (target.put as (...rest: unknown[]) => Promise<unknown>)(...args);
+            if (!copiedChunk) {
+              copiedChunk = true;
+              now += 151; // End the first tick only after its real intent and first copy.
+            }
+            return result;
+          };
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      const first = await withR2(yieldingR2 as R2Bucket, () =>
+        tick({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' })
+      );
+      expect(copiedChunk).toBe(true);
+      expect(first.yielded ?? 0).toBe(1);
+    } finally {
+      clock.mockRestore();
+    }
     // What an intent prepared by the previous build looks like: no generation, no components.
     await runInDurableObject(source, async (_instance, state) => {
       state.storage.sql.exec(

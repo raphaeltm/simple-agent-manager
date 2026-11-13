@@ -219,3 +219,52 @@ describe('provider limit owner recovery', () => {
     }
   });
 });
+
+describe('saved waiting callback force-resume notice', () => {
+  function held(owner = true, eligible = true) {
+    const lc = lifecycle(owner);
+    return {
+      ...lc,
+      resumeError: null,
+      taskEmbed: {
+        ...lc.taskEmbed!,
+        providerLimitReason: 'Waiting until 19:10 UTC',
+        providerLimitCanStartAnyway: false,
+        providerLimitCanResumeAnyway: eligible,
+      },
+    };
+  }
+  it('resumes the same task and remains disabled while accepted state is stale', async () => {
+    let finish!: () => void;
+    mocks.startAnyway.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const view = render(<SessionStatusBanners lc={held()} projectId="project-1" />);
+    expect(screen.getByText(/same account/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Resume anyway' }));
+    expect(screen.getByRole('button', { name: 'Resuming…' })).toBeDisabled();
+    expect(mocks.startAnyway).toHaveBeenCalledWith('project-1', 'task-1');
+    finish();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Waking…' })).toBeDisabled());
+    view.rerender(<SessionStatusBanners lc={held()} projectId="project-1" />);
+    expect(screen.getByRole('button', { name: 'Waking…' })).toBeDisabled();
+    expect(mocks.startAnyway).toHaveBeenCalledTimes(1);
+  });
+  it('shows errors and supports a safe retry', async () => {
+    mocks.startAnyway.mockRejectedValueOnce(new Error('Selected account changed'));
+    render(<SessionStatusBanners lc={held()} projectId="project-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Resume anyway' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Selected account changed');
+    expect(screen.getByRole('button', { name: 'Resume anyway' })).toBeEnabled();
+  });
+  it.each([
+    [false, true],
+    [true, false],
+  ])('withholds the action (owner=%s eligible=%s)', (owner, eligible) => {
+    render(<SessionStatusBanners lc={held(owner, eligible)} projectId="project-1" />);
+    expect(screen.queryByRole('button', { name: 'Resume anyway' })).not.toBeInTheDocument();
+  });
+});

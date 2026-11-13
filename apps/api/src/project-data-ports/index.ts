@@ -5,7 +5,8 @@
  * worker own. One module per port, so a consumer (or a test) loads only the
  * worker modules its port needs. Installed by `project-data-wiring.ts`.
  */
-import type { ProjectDataPorts } from '../durable-objects/project-data/ports';
+import type { ProjectDataPorts } from '@simple-agent-manager/project-data';
+
 import { credentialsPort } from './credentials';
 import { noticesPort } from './notices';
 import { notificationsPort } from './notifications';

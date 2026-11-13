@@ -24,6 +24,7 @@ import { errors } from '../middleware/error';
 import { operationDeps } from '../operation-ports';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
+import { canResumeProviderLimitTaskAnyway } from '../services/provider-limit-force-resume';
 import { canStartProviderLimitTaskAnyway } from '../services/provider-limit-recovery';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';
@@ -181,6 +182,13 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             providerLimitCanStartAnyway:
               taskRow.userId === userId &&
               canStartProviderLimitTaskAnyway(
+                taskRow,
+                parseProviderLimitWait(taskRow.providerLimitWaitJson)
+              ),
+            providerLimitCanResumeAnyway:
+              taskRow.userId === userId &&
+              sessionRecord.status === 'sleeping' &&
+              canResumeProviderLimitTaskAnyway(
                 taskRow,
                 parseProviderLimitWait(taskRow.providerLimitWaitJson)
               ),

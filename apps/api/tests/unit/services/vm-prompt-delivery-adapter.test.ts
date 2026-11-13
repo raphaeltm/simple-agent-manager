@@ -303,6 +303,82 @@ describe('VM prompt delivery adapter', () => {
     expect(adapterEnv.DATABASE.prepare).not.toHaveBeenCalled();
   });
 
+  it.each([410, 503])(
+    'does not wake a runtime stopped after target resolution (%s)',
+    async (status) => {
+      mocks.nodeAgentRequest.mockRejectedValue(
+        new mocks.NodeAgentHttpError(status, 'RUNTIME_STOPPED')
+      );
+      const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget()).reconcile(
+        input(false)
+      );
+      expect(result).toMatchObject({
+        kind: 'ambiguous',
+        reason: 'receipt_unavailable',
+        capabilities: null,
+      });
+      expect(mocks.nodeAgentRequest).toHaveBeenCalledExactlyOnceWith(
+        'node-1',
+        expect.anything(),
+        '/workspaces/workspace-1/agent-capabilities',
+        expect.objectContaining({ noWakeContainer: true, recoverContainerOnTimeout: false })
+      );
+      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+      expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps a real capability endpoint 404 as legacy rather than a stopped runtime', async () => {
+    mocks.nodeAgentRequest.mockRejectedValue(new mocks.NodeAgentHttpError(404, 'not found'));
+    const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget()).reconcile(
+      input(false)
+    );
+    expect(result).toMatchObject({
+      kind: 'ambiguous',
+      reason: 'receipt_unavailable',
+      capabilities: { protocolVersion: 0, promptReceipts: { supported: false } },
+    });
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
+  it.each([410, 503])(
+    'does not recover or replay when stop wins after capability lookup (%s)',
+    async (status) => {
+      mocks.nodeAgentRequest
+        .mockResolvedValueOnce(protocolFixture.capabilities)
+        .mockRejectedValueOnce(new mocks.NodeAgentHttpError(status, 'RUNTIME_STOPPED'));
+      const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget()).reconcile(
+        input(false)
+      );
+      expect(result).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
+      expect(mocks.nodeAgentRequest).toHaveBeenCalledTimes(2);
+      for (const [, , , options] of mocks.nodeAgentRequest.mock.calls) {
+        expect(options).toMatchObject({ noWakeContainer: true, recoverContainerOnTimeout: false });
+      }
+      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+      expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    }
+  );
+
+  it('still confirms an accepted receipt using only no-wake reads', async () => {
+    mocks.nodeAgentRequest
+      .mockResolvedValueOnce(protocolFixture.capabilities)
+      .mockResolvedValueOnce({
+        deliveryId: 'delivery-1',
+        state: 'accepted',
+        runtimeIdentity: 'runtime-vm-01',
+        acceptedAt: 500,
+        completedAt: null,
+      });
+    expect(
+      await new DefaultVmPromptDeliveryAdapter(envWithTarget()).reconcile(input(false))
+    ).toMatchObject({ kind: 'accepted', promptEpoch: 500 });
+    for (const [, , , options] of mocks.nodeAgentRequest.mock.calls) {
+      expect(options).toMatchObject({ noWakeContainer: true, recoverContainerOnTimeout: false });
+    }
+  });
+
   it('marks a transient capability failure during reconciliation ambiguous', async () => {
     mocks.nodeAgentRequest.mockRejectedValue(new Error('connection timeout'));
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
@@ -422,6 +498,10 @@ describe('VM prompt delivery adapter', () => {
     });
     expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
     expect(mocks.reportSessionRecoveryRefusal).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest.mock.calls[0]?.[3]).toMatchObject({
+      noWakeContainer: false,
+      recoverContainerOnTimeout: false,
+    });
   });
 
   // Control (`.claude/rules/61`): only the slept-container verdict stopped reading the health
@@ -854,6 +934,9 @@ describe('VM prompt delivery adapter', () => {
     const result = await adapter.reconcile(input(false));
 
     expect(result).toMatchObject({ kind: 'retry', reason: 'receipt_not_found' });
+    for (const [, , , options] of mocks.nodeAgentRequest.mock.calls) {
+      expect(options).toMatchObject({ noWakeContainer: true, recoverContainerOnTimeout: false });
+    }
   });
 
   it('does not replay a 200 not_found receipt', async () => {
@@ -1215,5 +1298,30 @@ describe('attachment delivery ordering', () => {
     expect(result.kind).toBe('retry');
     expect(mocks.transferWorkspaceAttachments).not.toHaveBeenCalled();
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+});
+
+describe('issued prompt receipt reconciliation never wakes a runtime', () => {
+  beforeEach(() => vi.clearAllMocks());
+  it.each([
+    ['sleeping VM', { ...targetRow, workspace_status: 'sleeping' }],
+    ['deleted VM', { ...targetRow, workspace_status: 'deleted' }],
+    ['sleeping Instant', sleptContainerRow],
+    ['missing workspace', null],
+  ])('keeps %s ambiguous without replay, recovery, or provisioning', async (_label, row) => {
+    mocks.ensureSessionRecovery.mockResolvedValue({ status: 'waking', taskId: 'task-1' });
+    const request = input(false);
+    request.claim.mode = 'reconcile';
+    request.claim.message.sourceKind = 'scheduled_action';
+    request.claim.message.runtimeIdentity = 'issued-runtime-1';
+    // The schedule was cancelled after issue; the source guard allows only a
+    // receipt lookup. Target resolution itself must not provision a new runtime.
+    request.beforeSideEffect = async () => null;
+    const result = await new DefaultVmPromptDeliveryAdapter(envWithTarget(row)).reconcile(request);
+    expect(result.kind).toBe('ambiguous');
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    expect(mocks.wakeSession).not.toHaveBeenCalled();
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
   });
 });

@@ -638,6 +638,7 @@ by the read-only cron-liveness check.
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Threshold before stale working activity is checked against authoritative SessionHost inventory (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
 - `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
+- `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS` — Background prompt target/recovery preparation and owner-approved recovery repair wait budget, also used for VM submit/receipt calls (default: `5000`). Owner repair timeout retains the pending consent/claim; late completion stays fenced and cannot acknowledge the timed-out sweep.
 - `TASK_LIVENESS_MAX_ACP_SESSIONS` — Maximum task-scoped ACP sessions inspected per liveness probe (default: 5)
 - `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS` — Timeout for stale-VM-node health probes used by ProjectData idle cleanup and stuck-task reconciliation; a timeout is inconclusive and preserves the task/workspace (default: 5000)
 - `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning allocation/reconciliation request budget, also used for background readiness and workspace dispatch (default: 5000).

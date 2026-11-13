@@ -15,6 +15,10 @@ const migration = readFileSync(
   new URL('0211_d1_hot_query_indexes.sql', migrationDirectory),
   'utf8'
 );
+const recoveryScanMigration = readFileSync(
+  new URL('0238_provider_limit_recovery_scan_index.sql', migrationDirectory),
+  'utf8'
+);
 describe('incident hot queries on representative SQLite cardinality', () => {
   let sqlite: Database.Database;
   beforeEach(() => {
@@ -105,6 +109,7 @@ describe('incident hot queries on representative SQLite cardinality', () => {
   it('preserves existing rows and makes active keyset pages seek through equal timestamps and wrap', async () => {
     const before = sqlite.prepare('SELECT * FROM tasks ORDER BY id').all();
     sqlite.exec(migration);
+    sqlite.exec(recoveryScanMigration);
     expect(sqlite.prepare('SELECT * FROM tasks ORDER BY id').all()).toEqual(before);
     let cursor = JSON.stringify({ updatedAt: '2026-10-28T12:00:00.000Z', taskId: 'task-11997' });
     const db = createSqliteD1(sqlite);
@@ -132,7 +137,7 @@ describe('incident hot queries on representative SQLite cardinality', () => {
     expect(result.wrapped).toBe(true);
     for (const { sql, params } of queries) {
       expect(plan(sqlite, sql, params)).toContain(
-        'SEARCH tasks USING INDEX idx_tasks_active_updated_id'
+        'SEARCH tasks USING INDEX idx_tasks_recovery_scan_updated_id'
       );
       expect(plan(sqlite, sql, params)).not.toContain('TEMP B-TREE');
     }
@@ -140,6 +145,94 @@ describe('incident hot queries on representative SQLite cardinality', () => {
     expect((await selectStuckTaskCandidates(env, 2)).tasks.map((t) => t.id)).toEqual([
       'task-11903',
       'task-11904',
+    ]);
+  });
+
+  it('seeks one ordered recovery index across pending sleeping rows without sorting historical tasks', async () => {
+    const insert = sqlite.prepare(
+      'INSERT INTO tasks(id,project_id,user_id,status,admission_state,updated_at) VALUES (?,?,?,?,?,?)'
+    );
+    const timestamp = '2026-10-28T12:00:00.000Z';
+    sqlite.transaction(() => {
+      for (let i = 0; i < 6000; i++) {
+        insert.run(
+          `unrelated-sleep-${i}`,
+          'project',
+          'user',
+          'sleeping',
+          i % 2 ? null : 'provider_limit_waiting',
+          timestamp
+        );
+      }
+      for (let i = 0; i < 200; i++) {
+        insert.run(
+          `pending-${String(i).padStart(5, '0')}`,
+          'project',
+          'user',
+          'sleeping',
+          'provider_limit_recovery_pending',
+          timestamp
+        );
+      }
+      // Committed pending ACK cleanup remains part of the ordinary active index domain.
+      sqlite.exec(
+        "UPDATE tasks SET admission_state='provider_limit_recovery_pending' WHERE id='task-11998'"
+      );
+    })();
+    const before = sqlite.prepare('SELECT * FROM tasks ORDER BY id').all();
+    sqlite.exec(migration);
+    sqlite.exec(recoveryScanMigration);
+    sqlite.exec(recoveryScanMigration);
+    expect(sqlite.prepare('SELECT * FROM tasks ORDER BY id').all()).toEqual(before);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_active_updated_id'"
+        )
+        .get()
+    ).toEqual({ name: 'idx_tasks_active_updated_id' });
+    sqlite.exec('ANALYZE');
+    let cursor = JSON.stringify({ updatedAt: timestamp, taskId: 'task-11996' });
+    const db = createSqliteD1(sqlite);
+    const queries: { sql: string; params: unknown[] }[] = [];
+    const prepare = db.prepare.bind(db);
+    db.prepare = (sql: string) => {
+      const statement = prepare(sql);
+      return {
+        ...statement,
+        bind: (...params: unknown[]) => {
+          queries.push({ sql, params });
+          return statement.bind(...params);
+        },
+      } as D1PreparedStatement;
+    };
+    const env = { DATABASE: db, KV: { get: async () => cursor } } as unknown as Env;
+    const selected = await selectStuckTaskCandidates(env, 5);
+    expect(selected.tasks.map((t) => t.id)).toEqual([
+      'task-11997',
+      'task-11998',
+      'task-11999',
+      'pending-00000',
+      'pending-00001',
+    ]);
+    expect(selected.wrapped).toBe(true);
+    expect(selected.nextCursor).toEqual({ updatedAt: timestamp, taskId: 'pending-00001' });
+    for (const { sql, params } of queries) {
+      expect(plan(sqlite, sql, params)).toContain(
+        'SEARCH tasks USING INDEX idx_tasks_recovery_scan_updated_id'
+      );
+      expect(plan(sqlite, sql, params)).not.toContain('TEMP B-TREE');
+    }
+    cursor = JSON.stringify(selected.nextCursor);
+    expect((await selectStuckTaskCandidates(env, 2)).tasks.map((t) => t.id)).toEqual([
+      'pending-00002',
+      'pending-00003',
+    ]);
+    cursor = '';
+    expect((await selectStuckTaskCandidates(env, 3)).tasks.map((t) => t.id)).toEqual([
+      'task-11997',
+      'task-11998',
+      'task-11999',
     ]);
   });
 

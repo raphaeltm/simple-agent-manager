@@ -1,4 +1,5 @@
-import type { ObservabilityPort } from '../durable-objects/project-data/ports';
+import type { ObservabilityPort } from '@simple-agent-manager/project-data';
+
 import { persistError } from '../services/observability';
 import {
   recordAcpActivityCallbackMetric,

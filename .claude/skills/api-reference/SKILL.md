@@ -111,6 +111,7 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 - `GET /api/projects/:projectId/tasks/:taskId` — Get task detail (includes dependencies + blocked state)
 - `PATCH /api/projects/:projectId/tasks/:taskId` — Update task fields (`title`, `description`, `priority`, `parentTaskId`)
 - `DELETE /api/projects/:projectId/tasks/:taskId` — Delete task
+- `POST /api/projects/:projectId/tasks/:taskId/provider-limit/start-anyway` — Owner-only `task:write` override of a waiting admission hold (`202 starting`) or saved callback hold (`202 waking`, same account/profile and retained claim). The saved-session notice calls this **Resume anyway**. Snapshot/generation/authority/expiry are rechecked; changed waits return `409`.
 - `POST /api/projects/:projectId/tasks/:taskId/provider-limit/resume` — Owner approves a blocked provider wait and resumes its retained snapshot or first-dispatch admission. Requires `task:write`; `202` waking, `409` if no longer blocked or snapshot unavailable.
 - `POST /api/projects/:projectId/tasks/:taskId/status` — Transition task status
 - `POST /api/projects/:projectId/tasks/:taskId/status/callback` — Trusted callback status update for delegated tasks

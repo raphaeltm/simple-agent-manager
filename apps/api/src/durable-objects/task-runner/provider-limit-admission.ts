@@ -108,19 +108,36 @@ export async function holdTaskForProviderLimit(
   // 01M73WJGGD2TZP6XDFHJJWHD33). It covers only the exact, non-null credential it was granted
   // for: any other selection falls through to the checks below and blocks for review. A real
   // provider rejection later builds a fresh wait without the override and parks as usual.
+  const approval = previous?.ownerOverride;
+  const approvalScopeChanged =
+    approval?.expiresAt !== undefined &&
+    (approval.expiresAt <= now ||
+      approval.profileId !== (row?.agent_profile_hint ?? null) ||
+      approval.skillId !== (row?.skill_id ?? null) ||
+      approval.agentType !==
+        (state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode') ||
+      (approval.profileId !== null && profile?.profileId !== approval.profileId) ||
+      (profile !== null && profile.agentType !== approval.agentType));
   if (
     key !== null &&
     previous?.phase === 'released' &&
-    previous.ownerOverride?.credentialKey === key
+    approval?.credentialKey === key &&
+    !approvalScopeChanged
   )
     return false;
   const window = await rejectedProviderWindow(rc.env, reference, now);
   let wait = previous;
-  if (!ownerResumed && previous?.credentialKey && previous.credentialKey !== key) {
+  if (
+    previous &&
+    (approvalScopeChanged ||
+      (!ownerResumed && previous.credentialKey && previous.credentialKey !== key))
+  ) {
     wait = {
       ...previous,
       phase: 'blocked',
-      reason: 'Blocked: selected provider credential changed; review before resuming.', // A blocked wait needs fresh review; an earlier start-anyway must not carry over.
+      reason: approvalScopeChanged
+        ? 'Blocked: provider resume approval expired or the selected profile changed; review before resuming.'
+        : 'Blocked: selected provider credential changed; review before resuming.', // A blocked wait needs fresh review; an earlier start-anyway must not carry over.
       ownerOverride: undefined,
     };
   } else if (previous?.phase === 'blocked') {

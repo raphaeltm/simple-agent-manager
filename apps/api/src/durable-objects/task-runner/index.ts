@@ -45,9 +45,17 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { capacityPlacementSnapshotForTaskStart } from '../../services/placement-resolver';
+import {
+  type ProviderLimitRecoveryApproval,
+  providerLimitRecoveryApprovalIsCurrent,
+} from '../../services/provider-limit-recovery-approval';
 import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import { handleAgentSession } from './agent-session-step';
-import { putTaskRunnerState, taskRunnerAttemptContext } from './attempt-storage';
+import {
+  persistProviderLimitRecoveryNudge,
+  putTaskRunnerState,
+  taskRunnerAttemptContext,
+} from './attempt-storage';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
 import { recordRunnerPhase } from './phase-timings';
@@ -345,11 +353,25 @@ export class TaskRunner extends DurableObject<Env> {
    * Pull a non-terminal runner's alarm forward after external capacity changes.
    * Used by VM admission wakeups; safe to call repeatedly.
    */
-  async nudge(reason?: string): Promise<boolean> {
+  async nudge(reason?: string, approval?: ProviderLimitRecoveryApproval): Promise<boolean> {
     const state = await this.getState();
     if (!state || state.completed) return false;
     if (state.currentStep === 'running' || state.currentStep === 'awaiting_followup') {
       return false;
+    }
+    if (approval) {
+      if (
+        !(await providerLimitRecoveryApprovalIsCurrent(
+          this.env,
+          state.taskId,
+          state.projectId,
+          approval
+        ))
+      )
+        return false;
+      if (!state.config.recoveryAttemptId || !(await this.isCurrentRecoveryAttempt(state)))
+        return false;
+      return persistProviderLimitRecoveryNudge(this.ctx.storage, state, approval);
     }
     await this.ctx.storage.setAlarm(Date.now());
     log.info('task_runner_do.nudged', {

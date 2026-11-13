@@ -64,6 +64,8 @@ export function SessionStatusBanners({
   const providerBlocked = providerReason?.startsWith('Blocked:');
   const canStartAnyway =
     !providerBlocked && isMine && lc.taskEmbed?.providerLimitCanStartAnyway === true;
+  const canResumeAnyway =
+    !providerBlocked && isMine && lc.taskEmbed?.providerLimitCanResumeAnyway === true;
   return (
     <>
       {(providerBlocked || providerReason) && (
@@ -74,17 +76,24 @@ export function SessionStatusBanners({
           icon={<CloudOff size={15} />}
           title={providerBlocked ? 'Needs you' : 'Waiting for provider limit reset'}
           detail={
-            canStartAnyway
-              ? `${providerReason} If this account has extra credits, you can start now; the run may use them.`
-              : (providerReason ?? 'The provider wait needs your approval to resume.')
+            canResumeAnyway
+              ? `${providerReason} If you reset this account’s limit or enabled extra usage, resume now with the same account. The run may use extra credits.`
+              : canStartAnyway
+                ? `${providerReason} If this account has extra credits, you can start now; the run may use them.`
+                : (providerReason ?? 'The provider wait needs your approval to resume.')
           }
           actions={
-            (providerBlocked || canStartAnyway) && isMine && lc.taskEmbed && lc.session ? (
+            (providerBlocked || canStartAnyway || canResumeAnyway) &&
+            isMine &&
+            lc.taskEmbed &&
+            lc.session ? (
               <ProviderLimitResume
                 key={`${lc.taskEmbed.id}:${lc.taskEmbed.providerLimitVersion ?? ''}`}
                 projectId={projectId}
                 taskId={lc.taskEmbed.id}
-                action={providerBlocked ? 'resume' : 'start-anyway'}
+                action={
+                  providerBlocked ? 'resume' : canResumeAnyway ? 'resume-anyway' : 'start-anyway'
+                }
               />
             ) : undefined
           }

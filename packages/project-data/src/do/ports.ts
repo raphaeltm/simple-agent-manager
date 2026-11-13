@@ -287,7 +287,12 @@ export interface VmPromptDeliveryTarget {
 /** Source-task authority carried by a delivery; a wake it causes must honor it. */
 export type VmPromptDeliverySourceTaskGuard = Pick<
   SessionRecoverySourceTaskGuard,
-  'taskId' | 'projectId' | 'chatSessionId' | 'projectEventWake' | 'requiredProjectMemberId'
+  | 'taskId'
+  | 'projectId'
+  | 'chatSessionId'
+  | 'projectEventWake'
+  | 'requireSourceProjectMember'
+  | 'requiredProjectMemberId'
 >;
 
 export interface VmPromptDeliveryAdapterInput {
