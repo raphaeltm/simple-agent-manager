@@ -2,62 +2,43 @@ import {
   DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS,
   DEFAULT_TERMINAL_TOKEN_EXPIRY_MS,
 } from '@simple-agent-manager/shared';
-import {
-  decodeJwt,
-  exportJWK,
-  importPKCS8,
-  importSPKI,
-  type JWTPayload,
-  jwtVerify,
-  SignJWT,
-} from 'jose';
+import { decodeJwt, importPKCS8, SignJWT } from 'jose';
 
 import type { Env } from '../env';
-import { AppError } from '../middleware/error';
 import {
   CALLBACK_TOKEN_CREDENTIAL_GENERATION_CLAIM,
   CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM,
 } from './callback-token-claims';
+import { loadCallbackCredentialGeneration } from './callback-token-generation';
 import {
-  assertCallbackCredentialGenerationCurrent,
-  loadCallbackCredentialGeneration,
-} from './callback-token-generation';
+  CALLBACK_AUDIENCE,
+  currentJwtKeyId,
+  getIssuer,
+  LOCAL_FORWARD_AUDIENCE,
+  NODE_MANAGEMENT_AUDIENCE,
+  PORT_ACCESS_AUDIENCE,
+  TERMINAL_AUDIENCE,
+} from './jwt-keys';
+import type { LocalForwardTokenPayload } from './jwt-verify';
 
-// Key ID format: key-YYYY-MM (rotates monthly)
-const KEY_ID = `key-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+// Verification and the JWKS document live in jwt-verify.ts; re-exported so importers keep using
+// this module.
+export type {
+  CallbackTokenPayload,
+  CallbackTokenScope,
+  LocalForwardTokenPayload,
+  PortAccessTokenPayload,
+  TerminalTokenPayload,
+} from './jwt-verify';
+export {
+  getJWKS,
+  verifyCallbackToken,
+  verifyLocalForwardToken,
+  verifyPortAccessToken,
+  verifyTerminalToken,
+} from './jwt-verify';
 
-// Audiences for different token types
-const TERMINAL_AUDIENCE = 'workspace-terminal';
-const CALLBACK_AUDIENCE = 'workspace-callback';
-const NODE_MANAGEMENT_AUDIENCE = 'node-management';
-const PORT_ACCESS_AUDIENCE = 'port-access';
-const LOCAL_FORWARD_AUDIENCE = 'local-forward';
 const IDENTITY_TOKEN_TYPE = 'identity';
-
-function callbackTokenUnauthorized(message = 'Invalid or expired callback token'): AppError {
-  return new AppError(401, 'UNAUTHORIZED', message);
-}
-
-function callbackTokenForbidden(message: string): AppError {
-  return new AppError(403, 'FORBIDDEN', message);
-}
-
-function isJoseVerificationFailure(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const code = (error as { code?: unknown }).code;
-  return (
-    typeof code === 'string' &&
-    (code.startsWith('ERR_JWT_') || code.startsWith('ERR_JWS_') || code.startsWith('ERR_JOSE_'))
-  );
-}
-
-/**
- * Get the JWT issuer URL from environment.
- * Derives from BASE_DOMAIN per constitution principle XI (no hardcoded values).
- */
-function getIssuer(env: Env): string {
-  return `https://api.${env.BASE_DOMAIN}`;
-}
 
 /**
  * A token's expiry: `expiryMs` from now, but never later than `notAfter` when given. Session
@@ -112,7 +93,7 @@ export async function signTerminalToken(
     // capped control-plane session's terminal access ends with it even off the Worker path.
     ...(options.notAfter ? { sessionNotAfter: Math.floor(options.notAfter.getTime() / 1000) } : {}),
   })
-    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setProtectedHeader({ alg: 'RS256', kid: currentJwtKeyId(env) })
     .setIssuer(issuer)
     .setSubject(userId)
     .setAudience(TERMINAL_AUDIENCE)
@@ -174,7 +155,7 @@ export async function signCallbackToken(
       : {}),
     ...credentialGenerationClaim(options.callbackGeneration),
   })
-    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setProtectedHeader({ alg: 'RS256', kid: currentJwtKeyId(env) })
     .setIssuer(issuer)
     .setSubject(workspaceId)
     .setAudience(CALLBACK_AUDIENCE)
@@ -209,7 +190,7 @@ export async function signNodeCallbackToken(
     scope: 'node',
     ...credentialGenerationClaim(options.callbackGeneration),
   })
-    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setProtectedHeader({ alg: 'RS256', kid: currentJwtKeyId(env) })
     .setIssuer(issuer)
     .setSubject(nodeId)
     .setAudience(CALLBACK_AUDIENCE)
@@ -259,7 +240,7 @@ export async function signNodeManagementToken(
     node: nodeId,
     ...(workspaceId ? { workspace: workspaceId } : {}),
   })
-    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setProtectedHeader({ alg: 'RS256', kid: currentJwtKeyId(env) })
     .setIssuer(issuer)
     .setSubject(userId)
     .setAudience(NODE_MANAGEMENT_AUDIENCE)
@@ -270,165 +251,6 @@ export async function signNodeManagementToken(
   return {
     token,
     expiresAt: expiresAt.toISOString(),
-  };
-}
-
-/** Token scope discriminator. Every callback token names exactly one scope. */
-export type CallbackTokenScope = 'node' | 'workspace';
-
-/** Payload structure for verified callback tokens. */
-export interface CallbackTokenPayload {
-  workspace: string;
-  type: 'callback';
-  scope: CallbackTokenScope;
-  /**
-   * The token's credential generation (`cgen`), null when absent. Verification has already
-   * proved it equals the row's current generation; renewals must carry it forward.
-   */
-  callbackGeneration: string | null;
-}
-
-export interface TerminalTokenPayload {
-  workspace: string;
-  subject: string;
-  sessionToken?: string;
-}
-
-export interface PortAccessTokenPayload {
-  workspace: string;
-  port: number;
-  subject: string;
-}
-
-export interface LocalForwardTokenPayload {
-  userId: string;
-  workspaceId: string;
-  nodeId: string;
-  remotePort: number;
-  mode: 'http';
-  localAuthority: string;
-  subject: string;
-}
-
-/**
- * Verify a callback token from VM Agent.
- *
- * Fails closed on anything SAM never mints: a missing or unknown `scope` (unscoped tokens
- * stopped being issued in #483, and every renewal path mints scoped tokens) or a missing
- * `iat` (every signer calls `setIssuedAt`, and the Instant stale-callback guard needs it).
- *
- * Also rejects a token from a retired runtime: its `cgen` claim must equal the current
- * `callback_generation` of the workspace or node row it names (one D1 read). This is the
- * single place every callback sink inherits revocation across reactivation from, so the
- * check lives here rather than at each sink (`callback-token-generation.ts`).
- *
- * @throws AppError 401 if the token is invalid, expired, has the wrong audience, or lacks
- *   a required claim; 403 if `expectedScope` is set and does not match.
- */
-export async function verifyCallbackToken(
-  token: string,
-  env: Env,
-  options?: { expectedScope?: CallbackTokenScope }
-): Promise<CallbackTokenPayload> {
-  const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
-  const issuer = getIssuer(env);
-
-  let payload: JWTPayload;
-  try {
-    ({ payload } = await jwtVerify(token, publicKey, {
-      issuer,
-      audience: CALLBACK_AUDIENCE,
-    }));
-  } catch (error) {
-    if (isJoseVerificationFailure(error)) {
-      throw callbackTokenUnauthorized();
-    }
-    throw error;
-  }
-
-  // Validate required claims
-  if (payload.type !== 'callback') {
-    throw callbackTokenUnauthorized('Invalid token type');
-  }
-
-  if (typeof payload.workspace !== 'string') {
-    throw callbackTokenUnauthorized('Missing workspace claim');
-  }
-
-  const rawScope = payload.scope;
-  if (rawScope !== 'node' && rawScope !== 'workspace') {
-    throw callbackTokenUnauthorized(
-      rawScope === undefined ? 'Missing token scope claim' : 'Invalid token scope claim'
-    );
-  }
-  const scope: CallbackTokenScope = rawScope;
-
-  if (typeof payload.iat !== 'number' || !Number.isSafeInteger(payload.iat) || payload.iat <= 0) {
-    throw callbackTokenUnauthorized('Missing token issue time');
-  }
-
-  const rawGeneration = payload[CALLBACK_TOKEN_CREDENTIAL_GENERATION_CLAIM];
-  if (rawGeneration !== undefined && (typeof rawGeneration !== 'string' || rawGeneration === '')) {
-    throw callbackTokenUnauthorized('Invalid token generation claim');
-  }
-  const callbackGeneration: string | null =
-    typeof rawGeneration === 'string' ? rawGeneration : null;
-
-  // Enforce expected scope when specified (unified scope check — F-010)
-  if (options?.expectedScope && scope !== options.expectedScope) {
-    throw callbackTokenForbidden(
-      `Token scope '${scope}' does not match expected '${options.expectedScope}'`
-    );
-  }
-
-  await assertCallbackCredentialGenerationCurrent(
-    env,
-    scope,
-    payload.workspace,
-    callbackGeneration
-  );
-
-  return {
-    workspace: payload.workspace,
-    type: 'callback',
-    scope,
-    callbackGeneration,
-  };
-}
-
-/**
- * Verify a browser-to-workspace terminal token.
- *
- * These tokens are minted after normal app authentication by
- * POST /api/terminal/token, then sent directly to workspace subdomains as a
- * query parameter because WebSocket upgrades cannot reliably attach custom
- * headers. The API workspace proxy verifies the token before forwarding the
- * request to the VM agent so token-only project chat connections do not depend
- * on cross-subdomain app cookies.
- */
-export async function verifyTerminalToken(token: string, env: Env): Promise<TerminalTokenPayload> {
-  const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
-  const issuer = getIssuer(env);
-
-  const { payload } = await jwtVerify(token, publicKey, {
-    issuer,
-    audience: TERMINAL_AUDIENCE,
-  });
-
-  if (typeof payload.workspace !== 'string') {
-    throw new Error('Missing workspace claim');
-  }
-  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
-    throw new Error('Missing subject claim');
-  }
-
-  return {
-    workspace: payload.workspace,
-    subject: payload.sub,
-    sessionToken:
-      typeof payload.sessionToken === 'string' && payload.sessionToken.length > 0
-        ? payload.sessionToken
-        : undefined,
   };
 }
 
@@ -467,7 +289,7 @@ export async function signPortAccessToken(
     workspace: workspaceId,
     port,
   })
-    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setProtectedHeader({ alg: 'RS256', kid: currentJwtKeyId(env) })
     .setIssuer(issuer)
     .setSubject(userId)
     .setAudience(PORT_ACCESS_AUDIENCE)
@@ -476,40 +298,6 @@ export async function signPortAccessToken(
     .sign(privateKey);
 
   return token;
-}
-
-/**
- * Verify a port access token from an exposed port URL or cookie.
- *
- * @throws Error if token is invalid, expired, or has wrong audience
- */
-export async function verifyPortAccessToken(
-  token: string,
-  env: Env
-): Promise<PortAccessTokenPayload> {
-  const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
-  const issuer = getIssuer(env);
-
-  const { payload } = await jwtVerify(token, publicKey, {
-    issuer,
-    audience: PORT_ACCESS_AUDIENCE,
-  });
-
-  if (typeof payload.workspace !== 'string') {
-    throw new Error('Missing workspace claim');
-  }
-  if (typeof payload.port !== 'number') {
-    throw new Error('Missing port claim');
-  }
-  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
-    throw new Error('Missing subject claim');
-  }
-
-  return {
-    workspace: payload.workspace,
-    port: payload.port,
-    subject: payload.sub,
-  };
 }
 
 export async function signLocalForwardToken(
@@ -530,7 +318,7 @@ export async function signLocalForwardToken(
     mode: claims.mode,
     localAuthority: claims.localAuthority,
   })
-    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setProtectedHeader({ alg: 'RS256', kid: currentJwtKeyId(env) })
     .setIssuer(issuer)
     .setSubject(claims.userId)
     .setAudience(LOCAL_FORWARD_AUDIENCE)
@@ -541,58 +329,6 @@ export async function signLocalForwardToken(
   return {
     token,
     expiresAt: expiresAt.toISOString(),
-  };
-}
-
-export async function verifyLocalForwardToken(
-  token: string,
-  env: Env
-): Promise<LocalForwardTokenPayload> {
-  const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
-  const issuer = getIssuer(env);
-
-  const { payload } = await jwtVerify(token, publicKey, {
-    issuer,
-    audience: LOCAL_FORWARD_AUDIENCE,
-  });
-
-  if (payload.type !== 'local-forward') {
-    throw new Error('Invalid token type');
-  }
-  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
-    throw new Error('Missing subject claim');
-  }
-  if (typeof payload.userId !== 'string' || payload.userId !== payload.sub) {
-    throw new Error('Invalid user claim');
-  }
-  if (typeof payload.workspace !== 'string') {
-    throw new TypeError('Missing workspace claim');
-  }
-  if (typeof payload.node !== 'string') {
-    throw new TypeError('Missing node claim');
-  }
-  if (
-    typeof payload.remotePort !== 'number' ||
-    payload.remotePort < 1 ||
-    payload.remotePort > 65535
-  ) {
-    throw new Error('Invalid remote port claim');
-  }
-  if (payload.mode !== 'http') {
-    throw new Error('Invalid local forward mode');
-  }
-  if (typeof payload.localAuthority !== 'string' || payload.localAuthority.length === 0) {
-    throw new Error('Missing local authority claim');
-  }
-
-  return {
-    userId: payload.userId,
-    workspaceId: payload.workspace,
-    nodeId: payload.node,
-    remotePort: payload.remotePort,
-    mode: payload.mode,
-    localAuthority: payload.localAuthority,
-    subject: payload.sub,
   };
 }
 
@@ -622,26 +358,6 @@ export function shouldRefreshCallbackToken(token: string, env: Env): boolean {
   } catch {
     return true; // Can't decode — refresh to be safe
   }
-}
-
-/**
- * Get the JWKS (JSON Web Key Set) for JWT validation.
- * Published at /.well-known/jwks.json for VM Agent to fetch.
- */
-export async function getJWKS(env: Env) {
-  const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
-  const jwk = await exportJWK(publicKey);
-
-  return {
-    keys: [
-      {
-        ...jwk,
-        kid: KEY_ID,
-        use: 'sig',
-        alg: 'RS256',
-      },
-    ],
-  };
 }
 
 /**
@@ -692,7 +408,7 @@ export async function signIdentityToken(
     ...(claims.workspaceId ? { workspace_id: claims.workspaceId } : {}),
     ...(claims.nodeId ? { node_id: claims.nodeId } : {}),
   })
-    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setProtectedHeader({ alg: 'RS256', kid: currentJwtKeyId(env) })
     .setIssuer(issuer)
     .setSubject(`project:${claims.projectId}`)
     .setAudience(claims.audience)

@@ -8,8 +8,10 @@ import { calculateJwkThumbprint, exportJWK, importPKCS8, importSPKI, SignJWT } f
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { log, serializeError } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { resolveAdminSettingDetails } from './admin-settings';
+import { activePreviousJwtKey } from './jwt-keys';
 
 // Separate issuer isolates external identities from every internal SAM verifier,
 // even though installation-managed signing material is reused.
@@ -59,9 +61,32 @@ export function validateWorkloadAudience(audience: string): void {
   }
 }
 
-export async function getWorkloadJWKS(env: Env) {
-  const key = await exportJWK(await importSPKI(env.JWT_PUBLIC_KEY, 'RS256'));
-  return { keys: [{ ...key, kid: await calculateJwkThumbprint(key), use: 'sig', alg: 'RS256' }] };
+async function workloadJwk(publicKeyPem: string) {
+  const key = await exportJWK(await importSPKI(publicKeyPem, 'RS256'));
+  return { ...key, kid: await calculateJwkThumbprint(key), use: 'sig', alg: 'RS256' };
+}
+
+/**
+ * The current key first (signWorkloadIdentityToken signs with keys[0]), then the previous key
+ * while its rotation overlap window is open (jwt-keys.ts:activePreviousJwtKey), so tokens minted
+ * before a rotation keep verifying at federated relying parties until they expire.
+ */
+export async function getWorkloadJWKS(env: Env, nowMs: number = Date.now()) {
+  const current = await workloadJwk(env.JWT_PUBLIC_KEY);
+  const keys = [current];
+  const previous = activePreviousJwtKey(env, nowMs);
+  if (!previous) return { keys };
+  try {
+    const previousKey = await workloadJwk(previous.publicKeyPem);
+    // Same key material means the same thumbprint kid: publish it once.
+    if (previousKey.kid !== current.kid) keys.push(previousKey);
+  } catch (error) {
+    log.error('workload_identity.previous_key_import_failed', {
+      ...serializeError(error),
+      action: 'previous_key_not_published',
+    });
+  }
+  return { keys };
 }
 
 export function getWorkloadDiscovery(env: Env) {
