@@ -2673,12 +2673,175 @@ export const MIGRATIONS: Migration[] = [
       sql.exec('ALTER TABLE project_schedules ADD COLUMN prompt_author TEXT');
     },
   },
+  {
+    // Archive write-generation fence. Counts every write to the rows an archive terminal
+    // version covers, for a session whose source intent has not flipped yet, so the archive
+    // flip can prove "unchanged since prepare" in O(1) instead of re-hashing the whole session
+    // on the root object. The triggers fire on any writer, including ones that bypass the
+    // transcript write fence, and count only real changes to hashed columns. Column lists are
+    // literal on purpose: a migration must not change when later code edits its constants.
+    name: '076-archive-source-write-generation',
+    run(sql) {
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_source_write_generation (
+          session_id TEXT PRIMARY KEY,
+          generation INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      const intentColumns = new Set(
+        sql
+          .exec('PRAGMA table_info(project_data_archive_source_intents)')
+          .toArray()
+          .map((column) => column.name)
+      );
+      if (!intentColumns.has('prepared_write_generation')) {
+        sql.exec(
+          'ALTER TABLE project_data_archive_source_intents ADD COLUMN prepared_write_generation INTEGER'
+        );
+      }
+      if (!intentColumns.has('terminal_components_json')) {
+        sql.exec(
+          'ALTER TABLE project_data_archive_source_intents ADD COLUMN terminal_components_json TEXT'
+        );
+      }
+      for (const statement of archiveWriteGenerationTriggerStatements()) sql.exec(statement);
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.
 ];
+
+/** A session the archive has fenced but not flipped: writes to it move its write generation. */
+function archivePreFlipIntent(sessionKey: string): string {
+  return `EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+    WHERE i.session_id = ${sessionKey} AND i.state NOT IN ('source_deleted', 'rehome_exported'))`;
+}
+
+function archiveBumpGeneration(sessionKey: string): string {
+  return `INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+    SELECT ${sessionKey}, 1 WHERE ${archivePreFlipIntent(sessionKey)}
+    ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;`;
+}
+
+/**
+ * Triggers for migration 076. Each covered table gets INSERT, UPDATE and DELETE triggers; the
+ * UPDATE trigger fires only when a column the terminal version hashes actually changed, and it
+ * bumps both the old and the new session when a row moves between sessions.
+ */
+function archiveWriteGenerationTriggerStatements(): string[] {
+  const tables: Array<{
+    table: string;
+    key: string;
+    columns: string[];
+    where?: (row: 'OLD' | 'NEW') => string;
+  }> = [
+    {
+      table: 'chat_messages',
+      key: 'session_id',
+      columns: [
+        'id',
+        'session_id',
+        'role',
+        'content',
+        'tool_metadata',
+        'created_at',
+        'sequence',
+        'origin',
+      ],
+    },
+    {
+      table: 'chat_messages_grouped',
+      key: 'session_id',
+      columns: ['id', 'session_id', 'role', 'content', 'created_at'],
+    },
+    {
+      table: 'tool_payload_archives',
+      key: 'session_id',
+      columns: [
+        'message_id',
+        'session_id',
+        'r2_key',
+        'content_bytes',
+        'tool_metadata_bytes',
+        'archived_at',
+        'message_created_at',
+        'message_sequence',
+        'archive_version',
+        'archive_body_bytes',
+        'archive_body_sha256',
+        'root_object_bytes',
+        'root_object_sha256',
+        'verified_object_count',
+        'source_tool_metadata_sha256',
+      ],
+    },
+    {
+      table: 'chat_sessions',
+      key: 'id',
+      columns: [
+        'id',
+        'workspace_id',
+        'task_id',
+        'created_by_user_id',
+        'topic',
+        'status',
+        'message_count',
+        'started_at',
+        'ended_at',
+        'created_at',
+        'updated_at',
+        'agent_completed_at',
+        'materialized_at',
+        'materialized_through_created_at',
+        'materialized_through_sequence',
+        'terminal_reconcile_deferred_until',
+        'terminal_reconcile_defer_reason',
+        'search_index_state',
+        'search_index_updated_at',
+        'search_index_degradation_reason',
+      ],
+    },
+    {
+      table: 'anchored_comment_threads',
+      key: 'scope_key',
+      columns: ['anchor_kind', 'scope_key'],
+      where: (row) => `${row}.anchor_kind = 'message'`,
+    },
+    {
+      table: 'anchored_comment_replies',
+      key: 'scope_key',
+      columns: ['anchor_kind', 'scope_key'],
+      where: (row) => `${row}.anchor_kind = 'message'`,
+    },
+  ];
+  const statements: string[] = [];
+  for (const { table, key, columns, where } of tables) {
+    const name = `archive_write_generation_${table}`;
+    const newKey = `NEW.${key}`;
+    const oldKey = `OLD.${key}`;
+    const scoped = (row: 'OLD' | 'NEW') => (where ? ` AND ${where(row)}` : '');
+    statements.push(`CREATE TRIGGER IF NOT EXISTS ${name}_insert
+      AFTER INSERT ON ${table}
+      WHEN ${archivePreFlipIntent(newKey)}${scoped('NEW')}
+      BEGIN ${archiveBumpGeneration(newKey)} END`);
+    statements.push(`CREATE TRIGGER IF NOT EXISTS ${name}_delete
+      AFTER DELETE ON ${table}
+      WHEN ${archivePreFlipIntent(oldKey)}${scoped('OLD')}
+      BEGIN ${archiveBumpGeneration(oldKey)} END`);
+    const changed = columns.map((column) => `OLD.${column} IS NOT NEW.${column}`).join(' OR ');
+    statements.push(`CREATE TRIGGER IF NOT EXISTS ${name}_update
+      AFTER UPDATE ON ${table}
+      WHEN (${changed})
+      BEGIN
+        ${archiveBumpGeneration(oldKey).replace(' WHERE ', ` WHERE ${where ? where('OLD') + ' AND ' : ''}`)}
+        ${archiveBumpGeneration(newKey).replace(' WHERE ', ` WHERE ${oldKey} IS NOT ${newKey} AND ${where ? where('NEW') + ' AND ' : ''}`)}
+      END`);
+  }
+  return statements;
+}
 
 /**
  * Run pending migrations inside a transaction.

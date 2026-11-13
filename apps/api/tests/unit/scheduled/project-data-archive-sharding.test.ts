@@ -231,11 +231,30 @@ function createFakeSource(options: FakeSourceOptions = {}) {
         databaseSizeAfterBytes: 500,
       };
     }),
+    // The flip leaves the rows in place; this fake root has none left to reclaim.
+    archiveSourceReclaimPage: vi.fn(async () => ({
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      ftsRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      remaining: false,
+    })),
+    archiveSourceListReclaimPending: vi.fn(async () => []),
     archiveSourceRestoreChunk: vi.fn(async () => ({
       idempotent: false,
       rowCount: 0,
       sha256: 'copy',
     })),
+    // A resumed claim rotates its token without re-preparing.
+    archiveSourceReattachToken: vi.fn(async (input: { sourceIntentToken: string }) => {
+      if (!state || state === 'source_deleted') return false;
+      token = input.sourceIntentToken;
+      return true;
+    }),
+    // The coordinator flips through `archiveSourceFlip`; its accepted path is the finalize below.
+    archiveSourceFlip: vi.fn(async (input: unknown) =>
+      (source.archiveSourceFinalizeDelete as (value: unknown) => Promise<unknown>)(input)
+    ),
     archiveSourceMarkCopyBackRestored: vi.fn(async () => true),
     archiveSourceAbandonIntent: vi.fn(async () => {
       if (state === 'source_deleted') {
@@ -269,6 +288,26 @@ function createFakeTarget() {
         sha256: chunk.sha256,
       };
     }),
+    // The paged abandon: same preconditions as the one-shot abandon, one page for this fixture.
+    archiveTargetAbandonPage: vi.fn(async (input: { sourceIntactVerified?: boolean }) => {
+      if (state === 'rehome_exported') throw new Error('target_not_abandonable');
+      if (state === 'sealed' && input.sourceIntactVerified !== true) {
+        throw new Error('target_sealed_requires_source_proof');
+      }
+      const removed = chunks.length > 0 || state !== 'prepared';
+      const rowsDeleted = chunks.reduce((sum, chunk) => sum + chunk.rowCount, 0);
+      chunks.length = 0;
+      state = 'prepared';
+      return { removed, remaining: false, rowsDeleted };
+    }),
+    // Compact targets re-read R2 in pages before the flip; this fake reports one complete page.
+    archiveTargetVerifyPage: vi.fn(async () => ({
+      complete: true,
+      chunksVerified: 1,
+      rowsVerified: 0,
+      nextOrdinal: 1,
+      totalRowsVerified: 0,
+    })),
     archiveTargetSeal: vi.fn(async () => {
       state = 'sealed';
       return { aggregateSha256: TARGET_SHA, messageCount: 2, groupedCount: 1, toolArchiveCount: 0 };
@@ -994,6 +1033,9 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       const skipped = await runProjectDataArchiveSharding(env, new Date(NOW + 5 * 60 * 1000));
       expect(skipped.skipReason).toBe('cadence_not_due');
       seedSessionSummary(sqlite, { sessionId: 'session-manual-bypass', updatedAt: 2000 });
+      // The primer sweep's pending-reclaim pass may ask the root object for leftovers of the
+      // published primer; what this test pins is that the DRY RUN touches no object.
+      projectDataGet.mockClear();
 
       const manualDryRun = await runScopedProjectDataArchiveCanary(env, {
         projectId: PROJECT_ID,
@@ -2289,9 +2331,9 @@ describe('archive-sharding abandon control', () => {
         restoredToRoot: true,
         sourceIntentRemoved: true,
         targetRemoved: true,
-        targetRowsDeleted: 4,
+        targetRowsDeleted: 3,
       });
-      expect(target.archiveTargetAbandonSession).toHaveBeenCalledWith(
+      expect(target.archiveTargetAbandonPage).toHaveBeenCalledWith(
         expect.objectContaining({ sourceIntactVerified: true, migrationId: MIGRATION_ID })
       );
       expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({
@@ -2403,7 +2445,7 @@ describe('archive-sharding abandon control', () => {
           })
         ).rejects.toMatchObject({ reason: 'abandon_requires_source_intact' });
       }
-      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(target.archiveTargetAbandonPage).not.toHaveBeenCalled();
       expect(source.archiveSourceAbandonIntent).not.toHaveBeenCalled();
       expect(readLocationRow(sqlite, 'session-lagging')).toMatchObject({
         location_state: 'migrating',
@@ -2494,7 +2536,7 @@ describe('archive-sharding abandon control', () => {
         ).rejects.toMatchObject({ reason: 'abandon_reason_required' });
       }
       expect(source.archiveSourceInspectIntent).not.toHaveBeenCalled();
-      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(target.archiveTargetAbandonPage).not.toHaveBeenCalled();
       expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({ state: 'failed' });
       expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
     } finally {
@@ -2531,7 +2573,7 @@ describe('archive-sharding abandon control', () => {
 
       expect(source.archiveSourceInspectIntent).toHaveBeenCalledTimes(1);
       expect(source.archiveSourceAbandonIntent).toHaveBeenCalledTimes(1);
-      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(target.archiveTargetAbandonPage).not.toHaveBeenCalled();
       expect((await target.archiveTargetInspectSession()).state).toBe('sealed');
       // The reservation is released so a sweep can finish publishing; the journal and the
       // location are left exactly as they were.
@@ -3149,7 +3191,7 @@ describe('archive-sharding failed journals wait a retry delay before a sweep rec
   }
 
   async function reclaimed(sqlite: Database.Database, overrides: Partial<Env>, nowDate: Date) {
-    const source = createFakeSource();
+    const source = createFakeSource({ state: 'intent_prepared' });
     const stubs: Record<string, unknown> = { [SOURCE_OWNER]: source };
     const namespace = {
       idFromName: (name: string) => name,
@@ -3209,7 +3251,7 @@ describe('archive-sharding failed journals wait a retry delay before a sweep rec
     try {
       createCoordinatorTables(scoped);
       seedFailedAt(scoped, NOW - 1_000);
-      const source = createFakeSource();
+      const source = createFakeSource({ state: 'intent_prepared' });
       const stubs: Record<string, unknown> = { [SOURCE_OWNER]: source };
       const namespace = {
         idFromName: (name: string) => name,
