@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { joinSharedFlight, SharedFlightAbandonedError } from '@simple-agent-manager/worker-core';
+
 import { PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES, type ProjectDataArchiveChunk } from './contract';
 import { sha256Hex } from './hashing';
 

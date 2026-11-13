@@ -1,7 +1,7 @@
+import { __setSharedFlightResumeOnOwnTimerForTest } from '@simple-agent-manager/worker-core';
 import Database from 'better-sqlite3';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
-import { __setSharedFlightResumeOnOwnTimerForTest } from '@simple-agent-manager/worker-core';
 import {
   ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES,
   COMPACT_ARCHIVE_MAX_OBJECT_BYTES,
