@@ -114,7 +114,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
     if (target.runtime === 'cf-container') {
-      const guarded = await commitContainerWake(this.env, target, () => runSideEffectGuard(input));
+      const guarded = await commitContainerWake(this.env, target, () =>
+        runSideEffectGuard(input)
+      );
       if (guarded) return guarded;
     }
     if (!capabilities.promptReceipts.supported && !input.allowLegacyVm) {

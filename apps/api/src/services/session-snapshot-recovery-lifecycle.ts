@@ -5,10 +5,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
 import { reconcileSessionRecoveryBindingFailure } from './session-recovery-binding-failure';
-import {
-  isRestorableSnapshot,
-  type SessionSnapshotRecoveryClaim,
-} from './session-snapshot-artifacts';
+import { isRestorableSnapshot, type SessionSnapshotRecoveryClaim } from './session-snapshot-artifacts';
 import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryAttemptsAfterClaim,

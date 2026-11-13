@@ -1,5 +1,7 @@
 import type { Provider } from '@simple-agent-manager/providers';
-import { timestampVersion } from '@simple-agent-manager/scheduler-core';
+import {
+  timestampVersion,
+} from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -71,9 +73,7 @@ function parseProviderCredentialReference(
   return null;
 }
 
-export function isExactCredentialSource(
-  value: string | null | undefined
-): value is CredentialSource {
+export function isExactCredentialSource(value: string | null | undefined): value is CredentialSource {
   return value === 'user' || value === 'project' || value === 'platform';
 }
 

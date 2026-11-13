@@ -7,7 +7,9 @@
  * client can draw the whole session from D1 alone and fetch full-resolution
  * chunks only for the window the user zooms into.
  */
-import { parseStoredResolvedReservationJson } from '@simple-agent-manager/scheduler-core';
+import {
+  parseStoredResolvedReservationJson,
+} from '@simple-agent-manager/scheduler-core';
 import { and, count, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 

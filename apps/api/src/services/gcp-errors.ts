@@ -56,25 +56,19 @@ const STATUS_MESSAGES: Record<number, string> = {
 const STEP_HINTS: Record<string, string> = {
   list_projects: 'Failed to list Google Cloud projects.',
   get_project_number: 'Failed to retrieve project details.',
-  enable_apis:
-    'Failed to enable required Google Cloud APIs. Ensure your account has the Service Usage Admin role.',
-  create_wif_pool:
-    'Failed to configure workload identity. Ensure your account has the IAM Admin role.',
+  enable_apis: 'Failed to enable required Google Cloud APIs. Ensure your account has the Service Usage Admin role.',
+  create_wif_pool: 'Failed to configure workload identity. Ensure your account has the IAM Admin role.',
   create_oidc_provider: 'Failed to configure the identity provider.',
   update_oidc_provider: 'Failed to update the identity provider.',
-  create_service_account:
-    'Failed to create the service account. Ensure your account has the IAM Admin role.',
+  create_service_account: 'Failed to create the service account. Ensure your account has the IAM Admin role.',
   grant_wif_user: 'Failed to configure identity federation on the service account.',
-  grant_project_roles:
-    'Failed to grant project permissions. Ensure your account has the Project IAM Admin role.',
+  grant_project_roles: 'Failed to grant project permissions. Ensure your account has the Project IAM Admin role.',
   poll_operation: 'A Google Cloud operation timed out or failed.',
   sts_exchange: 'Google Cloud token exchange failed. The OIDC setup may need to be reconfigured.',
   sa_impersonation: 'Failed to authenticate with the service account.',
   service_account_key: 'The stored service-account private key is invalid.',
-  service_account_token:
-    'Google rejected the service-account key. It may be revoked, disabled, or deleted.',
-  service_account_compute_verify:
-    'The service account cannot use Compute Engine in the selected project and zone.',
+  service_account_token: 'Google rejected the service-account key. It may be revoked, disabled, or deleted.',
+  service_account_compute_verify: 'The service account cannot use Compute Engine in the selected project and zone.',
 };
 
 /**

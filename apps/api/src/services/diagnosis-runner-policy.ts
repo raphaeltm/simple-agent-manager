@@ -22,10 +22,6 @@ export function classifyDiagnosisFailure(error: unknown): { transient: boolean; 
   return { transient: false, code: 'PERMANENT_EXECUTION' };
 }
 
-export function diagnosisRetryDelay(
-  attempt: number,
-  baseDelayMs: number,
-  maxDelayMs: number
-): number {
+export function diagnosisRetryDelay(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
   return Math.min(maxDelayMs, baseDelayMs * 2 ** Math.max(0, attempt - 1));
 }

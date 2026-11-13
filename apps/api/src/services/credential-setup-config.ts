@@ -110,7 +110,11 @@ export const ACTIVE_SETUP_STATUSES = [
 ] as const;
 
 export type SetupSessionStatus =
-  (typeof ACTIVE_SETUP_STATUSES)[number] | 'completed' | 'failed' | 'cancelled' | 'expired';
+  | (typeof ACTIVE_SETUP_STATUSES)[number]
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'expired';
 
 export function isTerminalSetupStatus(status: string): boolean {
   return (

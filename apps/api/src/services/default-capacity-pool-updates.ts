@@ -1,4 +1,6 @@
-import { capacityCandidateIdForRole } from '@simple-agent-manager/scheduler-core';
+import {
+  capacityCandidateIdForRole,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityExhaustionPolicy,
   CapacityPoolStatus,

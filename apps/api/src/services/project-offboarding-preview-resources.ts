@@ -235,7 +235,8 @@ async function addTriggerResources(input: {
         executionUserId: trigger.executionUserId,
         effectiveExecutionUserId: executionUserIdBefore,
         executionCapability: TRIGGER_EXECUTION_CAPABILITY,
-        hasAuthorizedRemainingExecutionPrincipal: input.hasAuthorizedRemainingExecutionPrincipal,
+        hasAuthorizedRemainingExecutionPrincipal:
+          input.hasAuthorizedRemainingExecutionPrincipal,
         remainingProjectCoverage: {
           agent: agentCoverage
             ? {
@@ -520,13 +521,11 @@ export async function enumerateOffboardingResources(input: {
   // `detailsJson` against the stored plan, so an actor-dependent value would
   // make a plan previewed by one admin unapplyable by another.
   const hasAuthorizedRemainingExecutionPrincipal =
-    (
-      await loadAuthorizedRemainingExecutionPrincipals({
-        db: input.db,
-        projectId: input.project.id,
-        departingUserId: input.memberUserId,
-      })
-    ).length > 0;
+    (await loadAuthorizedRemainingExecutionPrincipals({
+      db: input.db,
+      projectId: input.project.id,
+      departingUserId: input.memberUserId,
+    })).length > 0;
   const resourcesByKey = new Map<string, ResourceDraft>();
 
   await addTriggerResources({

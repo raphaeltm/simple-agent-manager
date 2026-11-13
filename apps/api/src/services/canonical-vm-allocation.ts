@@ -1,5 +1,7 @@
 import type { NativeVMConfig } from '@simple-agent-manager/providers';
-import { emptyCapacityPoolMessage } from '@simple-agent-manager/scheduler-core';
+import {
+  emptyCapacityPoolMessage,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   CapacityWorkloadRole,

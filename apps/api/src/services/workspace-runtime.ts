@@ -1,7 +1,4 @@
-import {
-  decideWorkspaceRuntime,
-  type WorkspaceRuntimeDecision,
-} from '@simple-agent-manager/scheduler-core';
+import { decideWorkspaceRuntime, type WorkspaceRuntimeDecision } from '@simple-agent-manager/scheduler-core';
 import type { AgentProfileRuntime, CredentialProvider } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -22,10 +19,7 @@ export async function resolveWorkspaceRuntime(
   }
 ): Promise<WorkspaceRuntimeDecision> {
   if ((env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) !== 'true') {
-    return decideWorkspaceRuntime({
-      containerEnabled: false,
-      explicitRuntime: input.explicitRuntime,
-    });
+    return decideWorkspaceRuntime({ containerEnabled: false, explicitRuntime: input.explicitRuntime });
   }
 
   const credential = await resolveCredentialSource(

@@ -1,4 +1,6 @@
-import { legacyNodeVcpuEstimate } from '@simple-agent-manager/scheduler-core';
+import {
+  legacyNodeVcpuEstimate,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   ActiveComputeSession,
   AdminUserUsageSummary,

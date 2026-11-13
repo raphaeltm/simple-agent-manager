@@ -51,7 +51,15 @@ export async function markTaskFailedIfNonTerminal(
          SELECT ?, id, status, 'failed', ?, ?, ?, ? FROM tasks
          WHERE id = ? AND ${taskStatusIsNonTerminalSql()}`
       )
-      .bind(ulid(), actorType, actorId, reason, failedAt, taskId, ...TERMINAL_STATUS_VALUES),
+      .bind(
+        ulid(),
+        actorType,
+        actorId,
+        reason,
+        failedAt,
+        taskId,
+        ...TERMINAL_STATUS_VALUES
+      ),
     database
       .prepare(
         `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ?,

@@ -16,13 +16,12 @@ import { computeSchedulerStates } from './scheduler-state';
  */
 export async function recomputeMissionSchedulerStates(
   db: D1Database,
-  missionId: string
+  missionId: string,
 ): Promise<void> {
   // Fetch all tasks in this mission
-  const tasksResult = await db
-    .prepare('SELECT id, status, mission_id FROM tasks WHERE mission_id = ?')
-    .bind(missionId)
-    .all<{ id: string; status: string; mission_id: string | null }>();
+  const tasksResult = await db.prepare(
+    'SELECT id, status, mission_id FROM tasks WHERE mission_id = ?',
+  ).bind(missionId).all<{ id: string; status: string; mission_id: string | null }>();
 
   const tasks: TaskForScheduling[] = (tasksResult.results ?? []).map((r) => ({
     id: r.id,
@@ -35,12 +34,9 @@ export async function recomputeMissionSchedulerStates(
   // Fetch dependency edges for these tasks
   const taskIds = tasks.map((t) => t.id);
   const placeholders = taskIds.map(() => '?').join(',');
-  const depsResult = await db
-    .prepare(
-      `SELECT task_id, depends_on_task_id FROM task_dependencies WHERE task_id IN (${placeholders})`
-    )
-    .bind(...taskIds)
-    .all<{ task_id: string; depends_on_task_id: string }>();
+  const depsResult = await db.prepare(
+    `SELECT task_id, depends_on_task_id FROM task_dependencies WHERE task_id IN (${placeholders})`,
+  ).bind(...taskIds).all<{ task_id: string; depends_on_task_id: string }>();
 
   const dependencies: DependencyEdge[] = (depsResult.results ?? []).map((r) => ({
     taskId: r.task_id,
@@ -58,12 +54,9 @@ export async function recomputeMissionSchedulerStates(
     const newState = newStates.get(task.id);
     if (newState) {
       updates.push(
-        db
-          .prepare(
-            'UPDATE tasks SET scheduler_state = ?, updated_at = ? WHERE id = ? AND (scheduler_state IS NULL OR scheduler_state != ?)'
-          )
-          .bind(newState, now, task.id, newState)
-          .run()
+        db.prepare(
+          'UPDATE tasks SET scheduler_state = ?, updated_at = ? WHERE id = ? AND (scheduler_state IS NULL OR scheduler_state != ?)',
+        ).bind(newState, now, task.id, newState).run(),
       );
     }
   }

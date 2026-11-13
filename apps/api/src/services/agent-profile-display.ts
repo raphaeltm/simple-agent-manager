@@ -43,9 +43,7 @@ export async function resolveTaskAgentProfileHints(
   }
 ): Promise<Map<string, string>> {
   const uniqueHints = Array.from(
-    new Set(
-      input.hints.filter((hint): hint is string => typeof hint === 'string' && hint.length > 0)
-    )
+    new Set(input.hints.filter((hint): hint is string => typeof hint === 'string' && hint.length > 0))
   );
 
   if (uniqueHints.length === 0) {
@@ -65,10 +63,7 @@ export async function resolveTaskAgentProfileHints(
           and(
             inArray(schema.agentProfiles.id, hintBatch),
             eq(schema.agentProfiles.userId, input.userId),
-            or(
-              eq(schema.agentProfiles.projectId, input.projectId),
-              isNull(schema.agentProfiles.projectId)
-            )
+            or(eq(schema.agentProfiles.projectId, input.projectId), isNull(schema.agentProfiles.projectId))
           )
         );
       rows.push(...batchRows);

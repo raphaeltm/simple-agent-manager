@@ -24,7 +24,9 @@
  * defaults, whatever the workspace's age), and by `nodes.usageMaxChunksPerWorkspace` rows.
  * Every cap that drops something is disclosed in the response.
  */
-import { parseStoredResolvedReservationJson } from '@simple-agent-manager/scheduler-core';
+import {
+  parseStoredResolvedReservationJson,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   NodeResourceReservation,
   NodeResourceUsageResponse,
@@ -48,7 +50,9 @@ import {
   readChunkRows,
   SeriesBuilder,
 } from './node-resource-usage-history';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUSES } from './workspace-reservation-usage';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUSES,
+} from './workspace-reservation-usage';
 import { getRollupConfig } from './workspace-resource-rollup';
 
 const MINUTE_MS = 60_000;

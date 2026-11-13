@@ -2,7 +2,7 @@ import {
   capacityCandidateAuthorityGeneration,
   capacitySourceAuthorityGeneration,
 } from '@simple-agent-manager/scheduler-core';
-import { and, eq, getTableColumns, type SQL, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, type SQL,sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';

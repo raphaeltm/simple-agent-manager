@@ -7,7 +7,9 @@ import { and, eq } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
-import { defaultCapacitySourceId } from './default-capacity-pool-helpers';
+import {
+  defaultCapacitySourceId,
+} from './default-capacity-pool-helpers';
 import {
   ACTIVE_STATUS,
   CREDENTIAL_TYPE_CLOUD_PROVIDER,

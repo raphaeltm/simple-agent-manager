@@ -32,7 +32,7 @@ import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 export async function upsertAppRouteDNSRecord(
   hostname: string,
   ip: string,
-  env: Env
+  env: Env,
 ): Promise<string> {
   // Check-then-act across an await: concurrent callers can both observe "no
   // record" and both POST, and Cloudflare rejects the loser as a duplicate.
@@ -82,15 +82,11 @@ export async function upsertAppRouteDNSRecord(
         },
         body,
       },
-      timeoutMs
+      timeoutMs,
     );
 
     if (response.ok) {
-      const data = await readResponseJson(
-        response,
-        dnsRecordIdResponseSchema,
-        'cloudflare.dns.upsert_app_route_record'
-      );
+      const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.upsert_app_route_record');
       return data.result.id;
     }
 
@@ -118,7 +114,10 @@ export async function upsertAppRouteDNSRecord(
  * caller) is treated as success. Returns true if a record was found and
  * deleted, false if no matching record existed.
  */
-export async function deleteAppRouteDNSRecord(hostname: string, env: Env): Promise<boolean> {
+export async function deleteAppRouteDNSRecord(
+  hostname: string,
+  env: Env,
+): Promise<boolean> {
   const existing = await findDNSRecordByName(hostname, env);
   if (!existing) {
     return false;
@@ -137,7 +136,10 @@ export async function deleteAppRouteDNSRecord(hostname: string, env: Env): Promi
  * so a single bad record cannot block the rest of the teardown. Returns the
  * number of records actually deleted.
  */
-export async function cleanupAppRouteDNSRecords(hostnames: string[], env: Env): Promise<number> {
+export async function cleanupAppRouteDNSRecords(
+  hostnames: string[],
+  env: Env,
+): Promise<number> {
   let deleted = 0;
   for (const hostname of hostnames) {
     try {

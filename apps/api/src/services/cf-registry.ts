@@ -45,7 +45,7 @@ interface CloudflareRegistryCredentialsResponse {
  * @throws Error if the CF API call fails or returns incomplete data
  */
 export async function mintCloudflareRegistryCredentials(
-  config: CloudflareRegistryMintConfig
+  config: CloudflareRegistryMintConfig,
 ): Promise<CloudflareRegistryCredentials> {
   const url = `${CLOUDFLARE_API_BASE}/accounts/${config.accountId}/containers/registries/${config.registryHost}/credentials`;
   const response = await fetchWithTimeout(
@@ -61,7 +61,7 @@ export async function mintCloudflareRegistryCredentials(
         permissions: config.permissions,
       }),
     },
-    config.timeoutMs
+    config.timeoutMs,
   );
 
   const body = await response.json<CloudflareRegistryCredentialsResponse>().catch(() => null);
@@ -74,9 +74,7 @@ export async function mintCloudflareRegistryCredentials(
   const username = (body.result.username || '').trim();
   const password = body.result.password || '';
   if (!registry || !username || !password) {
-    throw new Error(
-      'Cloudflare registry credential response was missing registry, username, or password'
-    );
+    throw new Error('Cloudflare registry credential response was missing registry, username, or password');
   }
 
   return { registry, username, password };
@@ -86,18 +84,15 @@ export async function mintCloudflareRegistryCredentials(
  * Build a mint config from platform env vars.
  * Returns null if required vars (account ID, API token) are missing.
  */
-export function buildMintConfigFromEnv(
-  env: {
-    CF_ACCOUNT_ID?: string;
-    CF_API_TOKEN?: string;
-    CF_API_TIMEOUT_MS?: string;
-  },
-  overrides?: {
-    registryHost?: string;
-    expirationMinutes?: number;
-    permissions?: Array<'pull' | 'push'>;
-  }
-): CloudflareRegistryMintConfig | null {
+export function buildMintConfigFromEnv(env: {
+  CF_ACCOUNT_ID?: string;
+  CF_API_TOKEN?: string;
+  CF_API_TIMEOUT_MS?: string;
+}, overrides?: {
+  registryHost?: string;
+  expirationMinutes?: number;
+  permissions?: Array<'pull' | 'push'>;
+}): CloudflareRegistryMintConfig | null {
   const accountId = (env.CF_ACCOUNT_ID || '').trim();
   const apiToken = (env.CF_API_TOKEN || '').trim();
   if (!accountId || !apiToken) {

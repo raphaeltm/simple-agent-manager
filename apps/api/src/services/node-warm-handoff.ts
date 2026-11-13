@@ -30,7 +30,9 @@ import {
 import { cleanupNodeProvenanceSql } from './node-teardown-provenance';
 import { resolveOperationsTelemetrySetting } from './operations-telemetry-settings';
 import { wakeVmAdmissionWaiters } from './vm-admission-wakeup';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from './workspace-reservation-usage';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+} from './workspace-reservation-usage';
 
 export type NodeWarmHandoffSkipReason =
   | 'node_missing'

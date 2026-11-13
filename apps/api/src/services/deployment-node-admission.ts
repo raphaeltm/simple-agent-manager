@@ -27,8 +27,12 @@ import {
   type CapacityAwareNodePlacementRow,
   resolveReusableNodeCapacitySnapshot,
 } from './placement-resolver';
-import { trustedWorkspaceNodeCapacityColumnsSql } from './workspace-admission-sql';
-import { RESOURCE_REQUIREMENTS_SOURCE_SQL } from './workspace-reservation-usage';
+import {
+  trustedWorkspaceNodeCapacityColumnsSql,
+} from './workspace-admission-sql';
+import {
+  RESOURCE_REQUIREMENTS_SOURCE_SQL,
+} from './workspace-reservation-usage';
 
 /** Default maximum number of deployment environments placed on one deployment node. */
 export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;

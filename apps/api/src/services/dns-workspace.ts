@@ -23,41 +23,36 @@ import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
  *   - vm-{id}.{domain} (legacy backend records, pre two-level subdomain migration)
  *   - {id}.vm.{domain} (current backend records, two-level subdomain format)
  */
-export async function cleanupWorkspaceDNSRecords(workspaceId: string, env: Env): Promise<number> {
+export async function cleanupWorkspaceDNSRecords(
+  workspaceId: string,
+  env: Env
+): Promise<number> {
   const baseDomain = env.BASE_DOMAIN;
   const id = workspaceId.toLowerCase();
 
   // Search for all possible DNS record name formats
   const recordNames = [
-    `ws-${id}.${baseDomain}`, // workspace proxied
-    `vm-${id}.${baseDomain}`, // legacy backend (pre migration)
-    `${id}.vm.${baseDomain}`, // current backend (two-level subdomain)
+    `ws-${id}.${baseDomain}`,       // workspace proxied
+    `vm-${id}.${baseDomain}`,       // legacy backend (pre migration)
+    `${id}.vm.${baseDomain}`,       // current backend (two-level subdomain)
   ];
   let deleted = 0;
 
   for (const recordName of recordNames) {
     const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}`;
     const cfTimeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-    const response = await fetchWithTimeout(
-      searchUrl,
-      {
-        headers: {
-          Authorization: `Bearer ${env.CF_API_TOKEN}`,
-        },
+    const response = await fetchWithTimeout(searchUrl, {
+      headers: {
+        Authorization: `Bearer ${env.CF_API_TOKEN}`,
       },
-      cfTimeoutMs
-    );
+    }, cfTimeoutMs);
 
     if (!response.ok) {
       log.error('dns.search_records_failed', { recordName, status: response.status });
       continue;
     }
 
-    const data = await readResponseJson(
-      response,
-      dnsRecordListResponseSchema,
-      'cloudflare.dns.cleanup_records'
-    );
+    const data = await readResponseJson(response, dnsRecordListResponseSchema, 'cloudflare.dns.cleanup_records');
     const records = data.result || [];
 
     for (const record of records) {
