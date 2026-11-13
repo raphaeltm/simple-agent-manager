@@ -248,7 +248,8 @@ Review round 1 (2026-11-13, head ab10ea984) and fixes (commit 327f3db1f):
   bounded by refusals per day); routing `frozen` reads to root; exponential backoff for repeated
   flip refusals (bounded to one copy per session per day by the 1-day refusal window and visible
   as `flipUnwound`). Backlog: `tasks/backlog/2026-11-13-archive-verify-r2-recheck-and-orphans.md`,
-  `tasks/backlog/2026-11-13-archive-frozen-reads-and-unwind-backoff.md`.
+  `tasks/backlog/2026-11-13-archive-frozen-reads-and-unwind-backoff.md`; SAM ideas
+  `01M79RQ1YZ5SHDQT15B08WW8T7`, `01M79RQ94GFC2Q0TCH54MVN5MY`.
 
 Measurement (2026-11-13, local better-sqlite3 + node:crypto, NOT production): 100,000 messages
 (512 B bodies) + 50,000 grouped rows: prepare hash 1,820 ms over 302 yields, longest uninterrupted
@@ -293,7 +294,8 @@ Production after #2700 (read-only D1 `sam-prod`, 2026-11-13 01:55Z, normal opera
 - Open question: 24 `active_session_state` refusals remain after dropping `'error'`; these are
   `prompting`/`recovering` or `runtime_work_state` active/settling on sessions terminal for the whole
   grace. Not yet attributed (needs a DO-side read); not changed in PR B. Backlog:
-  `tasks/backlog/2026-11-13-archive-active-session-state-refusals.md`.
+  `tasks/backlog/2026-11-13-archive-active-session-state-refusals.md`; SAM idea
+  `01M1V3WYT6D88Z41WQWP0ASVC3` (updated).
 
 Audit notes:
 
@@ -394,3 +396,13 @@ on completion" reddens it), finish-unwind branch (interrupted unwind test), prog
 release (transient R2 test), budget floor (lower-bound test), token reattach (unit token test).
 Round 1 (renewal, reserve-once, yield reset, failure reset, unwind, verify, migrating reads,
 stuck past deadline) was recorded at 02:05Z.
+
+- 2026-11-13 06:10Z: #2681 (worker extraction) merged as 57614ec6b. Parent approved folding PR B
+  (#2704) into #2702: one combined draft PR, one staging window, exact-head parent review, no merge
+  approval yet. Port: PR A + B squashed and rebased onto 57614ec6b; code now in
+  `packages/project-data/src/{do,archive,scheduled,client}` (DO migration 076 in
+  `packages/project-data/src/do/migrations.ts`, worker tests import
+  `@simple-agent-manager/project-data/internal/...`). CI failures on #2704 head 0b68080bf fixed in
+  the port: import order, DO migration gate (trigger SQL frozen as literals; the gate test allows
+  `CREATE TRIGGER IF NOT EXISTS` only when its body neither deletes nor drops), AST sql-injection
+  (`DELETE FROM ${table}` split into two literal statements).

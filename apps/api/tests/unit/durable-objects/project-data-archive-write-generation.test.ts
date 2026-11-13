@@ -11,11 +11,13 @@
  *   when a writer that bypasses the transcript fence changed it;
  * - an intent prepared before the fence still flips through the whole recompute.
  */
-import Database from 'better-sqlite3';
 import { writeFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../../src/durable-objects/migrations';
+import {
+  ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS,
+  ARCHIVE_WRITE_FIXED_RESERVATION,
+  estimateArchiveWrites,
+} from '@simple-agent-manager/project-data/internal/archive/write-budget';
 import {
   ARCHIVE_WRITE_GENERATION_TRIGGER_COUNT,
   archiveTerminalHashedColumns,
@@ -30,12 +32,11 @@ import {
   prepareArchiveSourceIntentOrRefuse,
   readArchiveWriteGeneration,
   reattachArchiveSourceToken,
-} from '../../../src/durable-objects/project-data/archive-sharding';
-import {
-  ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS,
-  ARCHIVE_WRITE_FIXED_RESERVATION,
-  estimateArchiveWrites,
-} from '../../../src/project-data-archive/write-budget';
+} from '@simple-agent-manager/project-data/internal/do/archive-sharding';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const NOW = 1_800_000_000_000;

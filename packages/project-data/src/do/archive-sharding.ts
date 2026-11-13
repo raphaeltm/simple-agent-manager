@@ -4237,12 +4237,22 @@ export function abandonArchiveTargetSessionPage(
       }
       budget -= documents.length;
     }
-    for (const table of ['tool_payload_archives', 'chat_messages'] as const) {
-      if (budget <= 0) break;
+    if (budget > 0) {
       const deleted =
         sql.exec(
-          `DELETE FROM ${table} WHERE rowid IN (
-             SELECT rowid FROM ${table} WHERE session_id = ? LIMIT ?)`,
+          `DELETE FROM tool_payload_archives WHERE rowid IN (
+             SELECT rowid FROM tool_payload_archives WHERE session_id = ? LIMIT ?)`,
+          input.sessionId,
+          budget
+        ).rowsWritten ?? 0;
+      rowsDeleted += deleted;
+      budget -= deleted;
+    }
+    if (budget > 0) {
+      const deleted =
+        sql.exec(
+          `DELETE FROM chat_messages WHERE rowid IN (
+             SELECT rowid FROM chat_messages WHERE session_id = ? LIMIT ?)`,
           input.sessionId,
           budget
         ).rowsWritten ?? 0;

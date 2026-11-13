@@ -69,8 +69,8 @@ import type {
   ArchiveSourceFlipRefusal,
   ArchiveSourceInspectIntentResult,
   ArchiveSourcePrepareResult,
-  ArchiveTerminalComponents,
   ArchiveTargetInspectResult,
+  ArchiveTerminalComponents,
 } from '../do/archive-sharding';
 import { projectDataPorts } from '../do/ports';
 import type { ProjectDataEnv } from '../do/types';

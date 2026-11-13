@@ -151,7 +151,7 @@ describe('DO migration safety — current migrations are non-destructive', () =>
     }
   });
 
-  it('all DO migrations use safe patterns (CREATE TABLE, ALTER TABLE, CREATE [UNIQUE] INDEX)', () => {
+  it('all DO migrations use safe patterns (CREATE TABLE, ALTER TABLE, CREATE [UNIQUE] INDEX, non-destructive CREATE TRIGGER)', () => {
     const { readFileSync } = require('node:fs');
     const migrations = readFileSync(
       join(
@@ -177,6 +177,9 @@ describe('DO migration safety — current migrations are non-destructive', () =>
       /UPDATE\s+\w+\s+SET\s+[\s\S]*WHERE/i, // UPDATE with WHERE is fine
       /INSERT\s+INTO/i,
       /INSERT\s+OR\s+IGNORE/i,
+      // A trigger only adds behaviour; it is safe while its body neither deletes nor drops
+      // anything (migration 076's write-generation triggers only upsert a counter row).
+      /^(?![\s\S]*\b(?:DELETE\s+FROM|DROP)\b)CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\b/i,
     ];
 
     for (const sql of sqlBlocks) {

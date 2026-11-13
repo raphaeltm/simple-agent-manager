@@ -2704,7 +2704,7 @@ export const MIGRATIONS: Migration[] = [
           'ALTER TABLE project_data_archive_source_intents ADD COLUMN terminal_components_json TEXT'
         );
       }
-      for (const statement of archiveWriteGenerationTriggerStatements()) sql.exec(statement);
+      for (const statement of ARCHIVE_WRITE_GENERATION_TRIGGERS) sql.exec(statement);
     },
   },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
@@ -2714,134 +2714,190 @@ export const MIGRATIONS: Migration[] = [
   // never drop tables, so neither that migration name nor that table name may be reused.
 ];
 
-/** A session the archive has fenced but not flipped: writes to it move its write generation. */
-function archivePreFlipIntent(sessionKey: string): string {
-  return `EXISTS (SELECT 1 FROM project_data_archive_source_intents i
-    WHERE i.session_id = ${sessionKey} AND i.state NOT IN ('source_deleted', 'rehome_exported'))`;
-}
-
-function archiveBumpGeneration(sessionKey: string): string {
-  return `INSERT INTO project_data_archive_source_write_generation (session_id, generation)
-    SELECT ${sessionKey}, 1 WHERE ${archivePreFlipIntent(sessionKey)}
-    ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;`;
-}
-
 /**
- * Triggers for migration 076. Each covered table gets INSERT, UPDATE and DELETE triggers; the
- * UPDATE trigger fires only when a column the terminal version hashes actually changed, and it
- * bumps both the old and the new session when a row moves between sessions.
+ * The 18 triggers of migration 076, frozen as literal SQL (a migration must not change when
+ * later code edits its constants). Three per covered table: INSERT and DELETE count a write to a
+ * fenced, unflipped session; UPDATE counts only when a column the terminal version hashes
+ * changed, and bumps both the old and the new session when a row moves between sessions.
+ * `tests/unit/durable-objects/project-data-archive-write-generation.test.ts` pins the watched
+ * columns to `archiveTerminalHashedColumns()`.
  */
-function archiveWriteGenerationTriggerStatements(): string[] {
-  const tables: Array<{
-    table: string;
-    key: string;
-    columns: string[];
-    where?: (row: 'OLD' | 'NEW') => string;
-  }> = [
-    {
-      table: 'chat_messages',
-      key: 'session_id',
-      columns: [
-        'id',
-        'session_id',
-        'role',
-        'content',
-        'tool_metadata',
-        'created_at',
-        'sequence',
-        'origin',
-      ],
-    },
-    {
-      table: 'chat_messages_grouped',
-      key: 'session_id',
-      columns: ['id', 'session_id', 'role', 'content', 'created_at'],
-    },
-    {
-      table: 'tool_payload_archives',
-      key: 'session_id',
-      columns: [
-        'message_id',
-        'session_id',
-        'r2_key',
-        'content_bytes',
-        'tool_metadata_bytes',
-        'archived_at',
-        'message_created_at',
-        'message_sequence',
-        'archive_version',
-        'archive_body_bytes',
-        'archive_body_sha256',
-        'root_object_bytes',
-        'root_object_sha256',
-        'verified_object_count',
-        'source_tool_metadata_sha256',
-      ],
-    },
-    {
-      table: 'chat_sessions',
-      key: 'id',
-      columns: [
-        'id',
-        'workspace_id',
-        'task_id',
-        'created_by_user_id',
-        'topic',
-        'status',
-        'message_count',
-        'started_at',
-        'ended_at',
-        'created_at',
-        'updated_at',
-        'agent_completed_at',
-        'materialized_at',
-        'materialized_through_created_at',
-        'materialized_through_sequence',
-        'terminal_reconcile_deferred_until',
-        'terminal_reconcile_defer_reason',
-        'search_index_state',
-        'search_index_updated_at',
-        'search_index_degradation_reason',
-      ],
-    },
-    {
-      table: 'anchored_comment_threads',
-      key: 'scope_key',
-      columns: ['anchor_kind', 'scope_key'],
-      where: (row) => `${row}.anchor_kind = 'message'`,
-    },
-    {
-      table: 'anchored_comment_replies',
-      key: 'scope_key',
-      columns: ['anchor_kind', 'scope_key'],
-      where: (row) => `${row}.anchor_kind = 'message'`,
-    },
-  ];
-  const statements: string[] = [];
-  for (const { table, key, columns, where } of tables) {
-    const name = `archive_write_generation_${table}`;
-    const newKey = `NEW.${key}`;
-    const oldKey = `OLD.${key}`;
-    const scoped = (row: 'OLD' | 'NEW') => (where ? ` AND ${where(row)}` : '');
-    statements.push(`CREATE TRIGGER IF NOT EXISTS ${name}_insert
-      AFTER INSERT ON ${table}
-      WHEN ${archivePreFlipIntent(newKey)}${scoped('NEW')}
-      BEGIN ${archiveBumpGeneration(newKey)} END`);
-    statements.push(`CREATE TRIGGER IF NOT EXISTS ${name}_delete
-      AFTER DELETE ON ${table}
-      WHEN ${archivePreFlipIntent(oldKey)}${scoped('OLD')}
-      BEGIN ${archiveBumpGeneration(oldKey)} END`);
-    const changed = columns.map((column) => `OLD.${column} IS NOT NEW.${column}`).join(' OR ');
-    statements.push(`CREATE TRIGGER IF NOT EXISTS ${name}_update
-      AFTER UPDATE ON ${table}
-      WHEN (${changed})
+const ARCHIVE_WRITE_GENERATION_TRIGGERS: readonly string[] = [
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_chat_messages_insert
+      AFTER INSERT ON chat_messages
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.session_id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_chat_messages_delete
+      AFTER DELETE ON chat_messages
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.session_id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_chat_messages_update
+      AFTER UPDATE ON chat_messages
+      WHEN (OLD.id IS NOT NEW.id OR OLD.session_id IS NOT NEW.session_id OR OLD.role IS NOT NEW.role OR OLD.content IS NOT NEW.content OR OLD.tool_metadata IS NOT NEW.tool_metadata OR OLD.created_at IS NOT NEW.created_at OR OLD.sequence IS NOT NEW.sequence OR OLD.origin IS NOT NEW.origin)
       BEGIN
-        ${archiveBumpGeneration(oldKey).replace(' WHERE ', ` WHERE ${where ? where('OLD') + ' AND ' : ''}`)}
-        ${archiveBumpGeneration(newKey).replace(' WHERE ', ` WHERE ${oldKey} IS NOT ${newKey} AND ${where ? where('NEW') + ' AND ' : ''}`)}
-      END`);
-  }
-  return statements;
-}
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.session_id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.session_id, 1 WHERE OLD.session_id IS NOT NEW.session_id AND EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_chat_messages_grouped_insert
+      AFTER INSERT ON chat_messages_grouped
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.session_id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_chat_messages_grouped_delete
+      AFTER DELETE ON chat_messages_grouped
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.session_id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_chat_messages_grouped_update
+      AFTER UPDATE ON chat_messages_grouped
+      WHEN (OLD.id IS NOT NEW.id OR OLD.session_id IS NOT NEW.session_id OR OLD.role IS NOT NEW.role OR OLD.content IS NOT NEW.content OR OLD.created_at IS NOT NEW.created_at)
+      BEGIN
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.session_id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.session_id, 1 WHERE OLD.session_id IS NOT NEW.session_id AND EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_tool_payload_archives_insert
+      AFTER INSERT ON tool_payload_archives
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.session_id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_tool_payload_archives_delete
+      AFTER DELETE ON tool_payload_archives
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.session_id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_tool_payload_archives_update
+      AFTER UPDATE ON tool_payload_archives
+      WHEN (OLD.message_id IS NOT NEW.message_id OR OLD.session_id IS NOT NEW.session_id OR OLD.r2_key IS NOT NEW.r2_key OR OLD.content_bytes IS NOT NEW.content_bytes OR OLD.tool_metadata_bytes IS NOT NEW.tool_metadata_bytes OR OLD.archived_at IS NOT NEW.archived_at OR OLD.message_created_at IS NOT NEW.message_created_at OR OLD.message_sequence IS NOT NEW.message_sequence OR OLD.archive_version IS NOT NEW.archive_version OR OLD.archive_body_bytes IS NOT NEW.archive_body_bytes OR OLD.archive_body_sha256 IS NOT NEW.archive_body_sha256 OR OLD.root_object_bytes IS NOT NEW.root_object_bytes OR OLD.root_object_sha256 IS NOT NEW.root_object_sha256 OR OLD.verified_object_count IS NOT NEW.verified_object_count OR OLD.source_tool_metadata_sha256 IS NOT NEW.source_tool_metadata_sha256)
+      BEGIN
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.session_id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.session_id, 1 WHERE OLD.session_id IS NOT NEW.session_id AND EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.session_id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_chat_sessions_insert
+      AFTER INSERT ON chat_sessions
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_chat_sessions_delete
+      AFTER DELETE ON chat_sessions
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_chat_sessions_update
+      AFTER UPDATE ON chat_sessions
+      WHEN (OLD.id IS NOT NEW.id OR OLD.workspace_id IS NOT NEW.workspace_id OR OLD.task_id IS NOT NEW.task_id OR OLD.created_by_user_id IS NOT NEW.created_by_user_id OR OLD.topic IS NOT NEW.topic OR OLD.status IS NOT NEW.status OR OLD.message_count IS NOT NEW.message_count OR OLD.started_at IS NOT NEW.started_at OR OLD.ended_at IS NOT NEW.ended_at OR OLD.created_at IS NOT NEW.created_at OR OLD.updated_at IS NOT NEW.updated_at OR OLD.agent_completed_at IS NOT NEW.agent_completed_at OR OLD.materialized_at IS NOT NEW.materialized_at OR OLD.materialized_through_created_at IS NOT NEW.materialized_through_created_at OR OLD.materialized_through_sequence IS NOT NEW.materialized_through_sequence OR OLD.terminal_reconcile_deferred_until IS NOT NEW.terminal_reconcile_deferred_until OR OLD.terminal_reconcile_defer_reason IS NOT NEW.terminal_reconcile_defer_reason OR OLD.search_index_state IS NOT NEW.search_index_state OR OLD.search_index_updated_at IS NOT NEW.search_index_updated_at OR OLD.search_index_degradation_reason IS NOT NEW.search_index_degradation_reason)
+      BEGIN
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.id, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.id, 1 WHERE OLD.id IS NOT NEW.id AND EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.id AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_anchored_comment_threads_insert
+      AFTER INSERT ON anchored_comment_threads
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported')) AND NEW.anchor_kind = 'message'
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.scope_key, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_anchored_comment_threads_delete
+      AFTER DELETE ON anchored_comment_threads
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported')) AND OLD.anchor_kind = 'message'
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.scope_key, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_anchored_comment_threads_update
+      AFTER UPDATE ON anchored_comment_threads
+      WHEN (OLD.anchor_kind IS NOT NEW.anchor_kind OR OLD.scope_key IS NOT NEW.scope_key)
+      BEGIN
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.scope_key, 1 WHERE OLD.anchor_kind = 'message' AND EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.scope_key, 1 WHERE OLD.scope_key IS NOT NEW.scope_key AND NEW.anchor_kind = 'message' AND EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_anchored_comment_replies_insert
+      AFTER INSERT ON anchored_comment_replies
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported')) AND NEW.anchor_kind = 'message'
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.scope_key, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_anchored_comment_replies_delete
+      AFTER DELETE ON anchored_comment_replies
+      WHEN EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported')) AND OLD.anchor_kind = 'message'
+      BEGIN INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.scope_key, 1 WHERE EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1; END`,
+  `CREATE TRIGGER IF NOT EXISTS archive_write_generation_anchored_comment_replies_update
+      AFTER UPDATE ON anchored_comment_replies
+      WHEN (OLD.anchor_kind IS NOT NEW.anchor_kind OR OLD.scope_key IS NOT NEW.scope_key)
+      BEGIN
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT OLD.scope_key, 1 WHERE OLD.anchor_kind = 'message' AND EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = OLD.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      INSERT INTO project_data_archive_source_write_generation (session_id, generation)
+      SELECT NEW.scope_key, 1 WHERE OLD.scope_key IS NOT NEW.scope_key AND NEW.anchor_kind = 'message' AND EXISTS (SELECT 1 FROM project_data_archive_source_intents i
+      WHERE i.session_id = NEW.scope_key AND i.state NOT IN ('source_deleted', 'rehome_exported'))
+      ON CONFLICT(session_id) DO UPDATE SET generation = generation + 1;
+      END`,
+];
 
 /**
  * Run pending migrations inside a transaction.
