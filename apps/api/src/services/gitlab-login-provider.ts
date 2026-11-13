@@ -4,15 +4,19 @@
  * Outbound requests, and who controls them (better-auth 1.7.14, @better-auth/core dist):
  * - authorization redirect: the browser goes there; the Worker fetches nothing.
  * - code exchange (`validateAuthorizationCode`) and token refresh (`refreshAccessToken`, reached
- *   through `getAccessToken` from gitlab-access-token.ts): better-auth's `fetchRefusingRedirects`
- *   (`oauth2/reject-redirects.mjs`), `redirect: 'manual'`, any 3xx is an error. They carry the
- *   client secret and refresh token, and go only to `<issuer>/oauth/token`. The provider has no
+ *   through `getAccessToken` from the repo-hosting package's gitlab.ts): better-auth's
+ *   `fetchRefusingRedirects` (`oauth2/reject-redirects.mjs`), `redirect: 'manual'`, any 3xx is
+ *   an error. They carry the client secret and refresh token, and go only to
+ *   `<issuer>/oauth/token`. The provider has no
  *   fetch hook for these, so SAM guards them by refusing to register the provider at all for a
  *   host it may not call (`assertGitLabHostAllowed`); DNS answers are the egress fence's job.
  * - profile (`getUserInfo`): better-auth's default follows redirects with the access token, so
  *   SAM replaces it with a guarded fetch (every hop re-checked, cross-origin hops lose the token).
  */
-import { DEFAULT_GITLAB_API_TIMEOUT_MS, gitLabHostVerdict } from '@simple-agent-manager/repo-hosting';
+import {
+  DEFAULT_GITLAB_API_TIMEOUT_MS,
+  gitLabHostVerdict,
+} from '@simple-agent-manager/repo-hosting';
 import type { GitlabOptions, GitlabProfile } from 'better-auth/social-providers';
 import * as v from 'valibot';
 

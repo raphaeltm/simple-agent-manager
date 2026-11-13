@@ -200,7 +200,7 @@ account may sign up by email before any administrator exists. Today the self-hos
 | `SMTP_USERNAME` | _(unset)_                             | Sent with `AUTH PLAIN`, only after TLS (or over loopback). Set with `SMTP_PASSWORD` (a secret) or not at all.                   |
 | `SMTP_FROM`     | _(required)_                          | The address sign-in codes come from. It must be one the relay accepts.                                                          |
 
-`resolveSmtpConfig()` (`services/agent-email/smtp-config.ts`) refuses an invalid set as a whole and
+`resolveSmtpConfig()` (`packages/agent-email/src/smtp-config.ts`) refuses an invalid set as a whole and
 logs the reason once per isolate; email sign-in is then not offered. A server that does not offer
 STARTTLS in `starttls` mode is refused, never used in plaintext, and the certificate chain and host
 name are verified. On celld only publicly trusted certificates are accepted (celld ignores the

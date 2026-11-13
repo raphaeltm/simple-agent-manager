@@ -38,7 +38,7 @@ export class AiTokenBudgetCounter extends DurableObject<AiProxyEnv> {
         )`
       );
       // Per-model spend SAM priced itself, for usage breakdowns without AI Gateway
-      // (services/ai-model-usage.ts). Additive.
+      // (./ai-model-usage.ts). Additive.
       this.sql.exec(
         `CREATE TABLE IF NOT EXISTS ai_model_usage (
           budget_date        TEXT NOT NULL,
