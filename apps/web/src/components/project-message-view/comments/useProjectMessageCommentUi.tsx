@@ -11,9 +11,6 @@ import { type useMessageComments } from './useMessageComments';
 
 type MessageCommentsController = ReturnType<typeof useMessageComments>;
 
-/** Chat rows carry the id of the message they render as their comment anchor. */
-const messageIdOf = (thread: UiMessageCommentThread) => thread.anchor.messageId;
-
 export function useProjectMessageCommentUi({
   messageComments,
   canComment,
@@ -25,6 +22,7 @@ export function useProjectMessageCommentUi({
   onRequestCommentSurface,
   focusCommentThreadId,
   commentSurfaceOpen = false,
+  rowIdFor,
 }: {
   messageComments: MessageCommentsController;
   /** Start threads, including from selected text. Every project member who can see the session. */
@@ -44,6 +42,11 @@ export function useProjectMessageCommentUi({
   focusCommentThreadId?: string | null;
   /** The docked comments rail (or the phone comments drawer) is open. */
   commentSurfaceOpen?: boolean;
+  /**
+   * The rendered row a message id is in (`useConversationJump`). A thread can be anchored to a
+   * later streamed chunk of a reply, which renders inside the reply's row, not a row of its own.
+   */
+  rowIdFor?: (messageId: string) => string | null;
 }) {
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
@@ -200,7 +203,8 @@ export function useProjectMessageCommentUi({
   useCommentQuoteHighlights({
     containerRef: chatLogRef,
     threads: messageComments.comments,
-    itemIdOf: messageIdOf,
+    // Chat rows carry the id of the row they render as their comment anchor.
+    itemIdOf: (thread) => rowIdFor?.(thread.anchor.messageId) ?? thread.anchor.messageId,
     activeThreadId: focusedShowing ? focusedCommentId : null,
     revealKey,
     onOpenThread: openHighlightedThread,

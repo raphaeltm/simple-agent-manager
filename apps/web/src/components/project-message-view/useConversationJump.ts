@@ -62,6 +62,11 @@ interface ConversationJump {
   jumpToMessage: (target: TimelineJumpTarget) => void;
   /** Id of the rendered row currently flashing, or null. */
   highlightedRowId: string | null;
+  /**
+   * Id of the rendered row a message id belongs to: itself, or the reply or group that absorbed
+   * it (a later streamed chunk, a tool call). Null when it is not loaded.
+   */
+  rowIdFor: (messageId: string) => string | null;
 }
 
 /**
@@ -279,5 +284,13 @@ export function useConversationJump({
     return index === undefined ? null : (displayItems[index]?.id ?? null);
   }, [highlightedItemId, itemIndexById, displayItems]);
 
-  return { jumpToMessage, highlightedRowId };
+  const rowIdFor = useCallback(
+    (messageId: string): string | null => {
+      const index = resolveIndex(messageId);
+      return index === undefined ? null : (displayItems[index]?.id ?? null);
+    },
+    [displayItems, resolveIndex]
+  );
+
+  return { jumpToMessage, highlightedRowId, rowIdFor };
 }

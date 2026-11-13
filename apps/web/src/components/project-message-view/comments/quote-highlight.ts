@@ -359,20 +359,25 @@ export function useQuoteHighlights(
 
     paint();
     let frame = 0;
+    const schedulePaint = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        paint();
+      });
+    };
     const observer =
       observeMutations && typeof MutationObserver === 'function'
-        ? new MutationObserver(() => {
-            if (frame) return;
-            frame = requestAnimationFrame(() => {
-              frame = 0;
-              paint();
-            });
-          })
+        ? new MutationObserver(schedulePaint)
         : null;
     // Painting never touches the DOM, so this cannot feed itself.
     observer?.observe(container, { childList: true, subtree: true, characterData: true });
+    // An image loading moves the text below it without any DOM mutation. `load` does not
+    // bubble, so it is caught on the way down.
+    if (observer) container.addEventListener('load', schedulePaint, true);
     return () => {
       observer?.disconnect();
+      if (observer) container.removeEventListener('load', schedulePaint, true);
       if (frame) cancelAnimationFrame(frame);
       clearSurfaceHighlights(surface);
       paintedRef.current = [];

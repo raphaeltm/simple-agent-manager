@@ -60,6 +60,7 @@ vi.mock('react-virtuoso', async () => {
 
 import { ProjectMessageView } from '../../../src/components/project-message-view';
 import { VIRTUAL_START } from '../../../src/components/project-message-view/types';
+import { stubCssHighlights } from '../../test-utils/css-highlights';
 import {
   resetVirtuosoMock,
   scrollToIndexCalls,
@@ -322,6 +323,40 @@ describe('ProjectMessageView — history arrives newest first', () => {
         scrollToIndexCalls.filter((call) => typeof call === 'object' && call.index === 1).length
       ).toBeGreaterThanOrEqual(3)
     );
+  });
+
+  it('paints a comment quoting a later streamed chunk inside the reply that absorbed it', async () => {
+    const highlights = stubCssHighlights();
+    onTestFinished(() => highlights.restore());
+    const chunk = (n: number, text: string): Row => ({
+      ...row(n),
+      id: `a${n}`,
+      role: 'assistant',
+      content: text,
+    });
+    serveTranscript(
+      [
+        row(1),
+        chunk(2, 'It retries because '),
+        chunk(3, 'the handler '),
+        chunk(4, 'returns 500.'),
+        row(5),
+      ],
+      10
+    );
+    // Anchored to the THIRD chunk, which renders inside the reply's row (id a2), not on its own.
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [
+        { ...commentOn('a4'), anchor: { kind: 'message', messageId: 'a4', quote: 'returns 500.' } },
+      ],
+    });
+
+    renderView(<ProjectMessageView projectId="proj-1" sessionId={SESSION_ID} />);
+
+    expect(
+      await screen.findByText('It retries because the handler returns 500.')
+    ).toBeInTheDocument();
+    await waitFor(() => expect(highlights.otherQuotes()).toEqual(['returns 500.']));
   });
 
   it('scrolls again until a row that arrived with older history stays on screen', async () => {

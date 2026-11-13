@@ -7,6 +7,16 @@ import { threadToOpen, useQuoteHighlightClicks } from './quote-highlight-clicks'
 /** What a thread needs to be painted: message threads and library-file threads both fit. */
 export type HighlightableThread = Pick<UiCommentThread, 'id' | 'status' | 'createdAt' | 'anchor'>;
 
+/**
+ * Statuses painted by default: every comment still open, including one sent to the agent. A
+ * resolved comment is painted only while it is the one being shown. A new status is not
+ * painted until it is added here on purpose.
+ */
+export const DEFAULT_PAINTED_STATUSES: ReadonlySet<HighlightableThread['status']> = new Set([
+  'open',
+  'sent',
+]);
+
 /** Painted words are found in the surface's `[data-comment-anchor]` elements. */
 const COMMENT_ANCHOR_KEY: QuoteItemKey = 'commentAnchor';
 
@@ -29,7 +39,9 @@ function paintTargets<T extends HighlightableThread>(
   if (enabled) {
     for (const thread of threads) {
       const quote = thread.anchor.quote;
-      if (!quote || (thread.status === 'resolved' && thread.id !== activeId)) continue;
+      if (!quote || (!DEFAULT_PAINTED_STATUSES.has(thread.status) && thread.id !== activeId)) {
+        continue;
+      }
       const target = { itemId: itemIdOf(thread), quote, threadId: thread.id };
       if (thread.id === activeId) active = target;
       else others.push(target);

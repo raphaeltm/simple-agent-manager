@@ -246,6 +246,17 @@ describe('chat comment quotes', () => {
     expect(focusState()).toBe('-|-|no-rail');
   });
 
+  it('keeps painting a comment that was sent to the agent', async () => {
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [{ ...OPEN_OLDER, status: 'sent' }, RESOLVED],
+    });
+    renderWithQuery(<ChatHarness />);
+
+    await waitFor(() =>
+      expect(highlights.otherQuotes()).toEqual(['gives up after three attempts'])
+    );
+  });
+
   it('paints a deep-linked comment strongly, even a resolved one, with the rail open', async () => {
     renderWithQuery(<ChatHarness focusCommentThreadId="resolved" />);
 
@@ -512,6 +523,17 @@ describe('bringing a comment’s words on screen', () => {
     expect(
       screen.getByText('Deploys run on every merge to main, on tags, and nightly.')
     ).toBeTruthy();
+  });
+
+  it('brings them back when an image loading above moves them', async () => {
+    const { log } = await openLog('open-older');
+    await waitFor(() => expect(log.scrollTop).toBe(QUOTE_TOP - 150));
+
+    // An image finishing loading changes layout, not the DOM; its load event does not bubble.
+    log.scrollTop = 0;
+    screen.getByText(SECOND_TEXT).dispatchEvent(new Event('load', { bubbles: false }));
+
+    await waitFor(() => expect(log.scrollTop).toBe(QUOTE_TOP - 150));
   });
 
   it('stops bringing them back once the settling window has passed', async () => {

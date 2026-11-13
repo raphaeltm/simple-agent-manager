@@ -28,6 +28,7 @@ import {
 } from '../../components/project-message-view/comments/commented-message-label';
 import { QuotedAnchor } from '../../components/project-message-view/comments/CommentPrimitives';
 import { threadCallbacks } from '../../components/project-message-view/comments/MessageCommentPanels';
+import { DEFAULT_PAINTED_STATUSES } from '../../components/project-message-view/comments/useCommentQuoteHighlights';
 import { useCommentsRailViewport } from '../../components/project-message-view/comments/useCommentsRailViewport';
 import { useMessageComments } from '../../components/project-message-view/comments/useMessageComments';
 import { useProjectCommentInbox } from '../../components/project-message-view/comments/useProjectCommentInbox';
@@ -99,7 +100,7 @@ export function ProjectCommentReader() {
     () =>
       others.flatMap((other) => {
         const itemId = locate(other.anchor.messageId);
-        return itemId && other.anchor.quote && other.status !== 'resolved'
+        return itemId && other.anchor.quote && DEFAULT_PAINTED_STATUSES.has(other.status)
           ? [{ itemId, quote: other.anchor.quote }]
           : [];
       }),
