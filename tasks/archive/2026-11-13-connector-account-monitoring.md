@@ -48,17 +48,17 @@ reliably:
 
 ## Checklist
 
-- [ ] API service: metadata-only profile account bindings (no decrypt), with legacy fallback and ciphertext-identity pools
-- [ ] Operations port + shared usage pooling/freshness logic
-- [ ] `sam_profiles_list`: `account` per profile (state, tier, poolId, name)
-- [ ] `sam_usage_get`: pools with profiles, windows, freshness, exhausted/nextResetAt, SAM AI proxy budget when platform
-- [ ] Admin setting `connector.usageStaleAfterMinutes`
-- [ ] `sam_chat_start`: `model`, `effort` overrides passed through
-- [ ] `sam_chats_list`: task status, execution step, parentTaskId per chat
-- [ ] `sam_tasks_list`: parentTaskId, executionStep, chatSessionId
-- [ ] Connector instructions mention new tools
-- [ ] Tests: real SQLite for bindings (scoping, pools, legacy, halted, platform, no secrets), operations tests, chat_start override passthrough
-- [ ] Docs: sam-connector guide, api reference, admin-settings
+- [x] API service: profile account bindings over the shared selection (`agent-credential-selection.ts`, metadata-only `buildSnapshot`), legacy fallback, SQL ciphertext-identity pools, opaque pool ids
+- [x] Operations port + shared usage pooling/freshness logic
+- [x] `sam_profiles_list`: `account` per profile (state, tier, poolId, name)
+- [x] `sam_usage_get`: pools with profiles, windows, freshness, exhausted/nextResetAt, SAM AI proxy budget when platform
+- [x] Admin setting `connector.usageStaleAfterMinutes`
+- [x] `sam_chat_start`: `model`, `effort` overrides passed through
+- [x] `sam_chats_list`: task status, execution step, parentTaskId per chat
+- [x] `sam_tasks_list`: parentTaskId, executionStep, chatSessionId
+- [x] Connector instructions mention new tools
+- [x] Tests: real SQLite for bindings (scoping, pools, legacy, halted, platform, no secrets), operations tests, chat_start override passthrough
+- [x] Docs: sam-connector guide, api reference, admin-settings
 
 ## Acceptance criteria
 
@@ -67,3 +67,19 @@ reliably:
 - Another member's credentials and pins never affect or appear in the caller's bindings.
 - Usage windows say `fresh`, `stale` or `reset_since_sample`; a pool with no samples says `never_reported`.
 - `sam_chat_start` with `model` runs that model with the chosen profile and does not modify the profile.
+
+## Outcome (2026-11-13)
+
+- Review rounds: task-completion-validator, security-auditor (x2), cloudflare-specialist,
+  architecture-reviewer (x2), doc-sync-validator. All findings addressed in 29d8afc36 and 6157f587e.
+  The second-round reviewers raised no remaining MEDIUM or higher findings.
+- Staging (deploy 43415364040, 6157f587e):
+  - The Connector over a PAT listed 39 tools. Two profiles on one OAuth account returned one opaque pool.
+  - `sam_usage_get` returned a weekly window at 94% `stale`, a 5h window `reset_since_sample`, and the next reset.
+  - Chats and tasks returned operational state and lineage. A leak check found no credential references.
+  - `sam_chat_start` with `model: claude-haiku-5-5` on the Sonnet VM profile: the agent replied
+    `claude-haiku-5-5`. The run was seeded with the user's own cc credential (`agent_sessions`), and
+    the profile model was unchanged (`claude-sonnet-4-6`). The workspace was stopped and deleted, and
+    node 01M7AAWMDEZX2JFP9ZKV71D707 was deleted.
+- The first staging deploy (43413327702) failed with "Script startup exceeded CPU time limit". The
+  identical next deploy succeeded, so it looks transient, but it is recorded in the PR.
