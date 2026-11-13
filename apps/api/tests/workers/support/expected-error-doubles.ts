@@ -78,6 +78,170 @@ type ProjectDataExpectedErrorOperation =
  */
 export class ProjectDataTestDouble extends ProjectData {
   /**
+   * Remaining injected failures for `archiveSourceReclaimPage` and
+   * `archiveSourceMarkCopyBackRestored`. They stand in for a reset or a lost RPC after the
+   * archive flip committed, which is the state paged reclaim must recover from.
+   */
+  private reclaimFailuresForTest = 0;
+  private copyBackMarkFailuresForTest = 0;
+  /** Remaining injected `archiveSourceFlip` failures: a non-unwindable fault at the flip. */
+  private flipFailuresForTest = 0;
+  /** Remaining injected `archiveTargetAbandonPage` failures: a reset mid-unwind. */
+  private targetAbandonPageFailuresForTest = 0;
+
+  /** How many times the coordinator asked this object for a write estimate. */
+  private estimateCallsForTest = 0;
+  /** How many times the coordinator listed this object's pending reclaims. */
+  private reclaimListingsForTest = 0;
+  /** Added latency per listing: stands in for a cold root object in another region. */
+  private reclaimListingDelayMsForTest = 0;
+
+  reclaimListingCountForTest(): number {
+    return this.reclaimListingsForTest;
+  }
+
+  setReclaimListingDelayForTest(ms: number): void {
+    this.reclaimListingDelayMsForTest = ms;
+  }
+
+  override async archiveSourceListReclaimPending(
+    input: Parameters<ProjectData['archiveSourceListReclaimPending']>[0]
+  ): Promise<ReturnType<ProjectData['archiveSourceListReclaimPending']>> {
+    this.reclaimListingsForTest++;
+    if (this.reclaimListingDelayMsForTest > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.reclaimListingDelayMsForTest));
+    }
+    return super.archiveSourceListReclaimPending(input);
+  }
+
+  estimateCallCountForTest(): number {
+    return this.estimateCallsForTest;
+  }
+
+  override archiveSourceEstimateWrites(
+    sessionId: string,
+    factor: number,
+    maxMessages: number
+  ): number {
+    this.estimateCallsForTest++;
+    return super.archiveSourceEstimateWrites(sessionId, factor, maxMessages);
+  }
+
+  /** Remaining R2 reads that fail (a transient 5xx) inside `archiveTargetVerifyPage`. */
+  private verifyReadFailuresForTest = 0;
+
+  failNextArchiveVerifyReadsForTest(count: number): void {
+    this.verifyReadFailuresForTest = count;
+  }
+
+  override async archiveTargetVerifyPage(
+    input: archiveSharding.ArchiveTargetVerifyPageInput
+  ): Promise<archiveSharding.ArchiveTargetVerifyPageResult> {
+    if (this.verifyReadFailuresForTest <= 0) return super.archiveTargetVerifyPage(input);
+    const env = this.env as { PROJECT_DATA_ARCHIVE_R2?: R2Bucket };
+    const bucket = env.PROJECT_DATA_ARCHIVE_R2;
+    if (!bucket) return super.archiveTargetVerifyPage(input);
+    const flaky = new Proxy(bucket, {
+      get: (target, property, receiver) => {
+        if (property === 'get' && this.verifyReadFailuresForTest > 0) {
+          return async () => {
+            this.verifyReadFailuresForTest--;
+            throw new Error('injected R2 get failure (503)');
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    env.PROJECT_DATA_ARCHIVE_R2 = flaky;
+    try {
+      return await super.archiveTargetVerifyPage(input);
+    } finally {
+      env.PROJECT_DATA_ARCHIVE_R2 = bucket;
+    }
+  }
+
+  failNextArchiveFlipsForTest(count: number): void {
+    this.flipFailuresForTest = count;
+  }
+
+  failNextArchiveTargetAbandonPagesForTest(count: number): void {
+    this.targetAbandonPageFailuresForTest = count;
+  }
+
+  override async archiveSourceFlip(
+    input: archiveSharding.ArchiveSourceFinalizeDeleteInput
+  ): Promise<
+    archiveSharding.ArchiveSourceFinalizeDeleteResult | archiveSharding.ArchiveSourceFlipRefusal
+  > {
+    if (this.flipFailuresForTest > 0) {
+      this.flipFailuresForTest--;
+      throw new Error('injected archive flip failure');
+    }
+    return super.archiveSourceFlip(input);
+  }
+
+  override async archiveTargetAbandonPage(
+    input: archiveSharding.ArchiveTargetAbandonInput & { maxRows: number }
+  ): Promise<archiveSharding.ArchiveTargetAbandonPageResult> {
+    if (this.targetAbandonPageFailuresForTest > 0) {
+      this.targetAbandonPageFailuresForTest--;
+      throw new Error('injected archive target abandon failure');
+    }
+    return super.archiveTargetAbandonPage(input);
+  }
+
+  failNextArchiveReclaimPagesForTest(count: number): void {
+    this.reclaimFailuresForTest = count;
+  }
+
+  failNextCopyBackMarkForTest(): void {
+    this.copyBackMarkFailuresForTest = 1;
+  }
+
+  async archiveSourceReclaimPageCapturedForTest(
+    input: archiveSharding.ArchiveSourceReclaimPageInput
+  ): Promise<CapturedExpectedError> {
+    try {
+      await super.archiveSourceReclaimPage(input);
+      return { threw: false };
+    } catch (error) {
+      return capture(error);
+    }
+  }
+
+  async createCommentThreadCapturedForTest(
+    input: Parameters<ProjectData['createCommentThread']>[0]
+  ): Promise<CapturedExpectedError> {
+    try {
+      await this.createCommentThread(input);
+      return { threw: false };
+    } catch (error) {
+      return capture(error);
+    }
+  }
+
+  override async archiveSourceReclaimPage(
+    input: archiveSharding.ArchiveSourceReclaimPageInput
+  ): Promise<archiveSharding.ArchiveSourceReclaimPageResult> {
+    if (this.reclaimFailuresForTest > 0) {
+      this.reclaimFailuresForTest--;
+      throw new Error('injected archive reclaim failure');
+    }
+    return super.archiveSourceReclaimPage(input);
+  }
+
+  override async archiveSourceMarkCopyBackRestored(
+    input: Parameters<ProjectData['archiveSourceMarkCopyBackRestored']>[0]
+  ): Promise<boolean> {
+    if (this.copyBackMarkFailuresForTest > 0) {
+      this.copyBackMarkFailuresForTest--;
+      throw new Error('injected copy-back mark failure');
+    }
+    return super.archiveSourceMarkCopyBackRestored(input);
+  }
+
+  /**
    * Test convenience over the production `searchMessagesWithCoverage` RPC: the same bounded
    * search, results only. Production callers must use the coverage variant and disclose it.
    */

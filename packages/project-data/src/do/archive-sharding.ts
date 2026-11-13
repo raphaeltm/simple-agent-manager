@@ -1,7 +1,11 @@
 // FILE SIZE EXCEPTION: ProjectData terminal archive migration state machine — keeping source intent, target copy/seal, canonical hash, exact-read guards, and final source-delete invariants in one module avoids cross-file transaction coupling during Fable review. See .claude/rules/18-file-size-limits.md
 import type { MessageCursor } from '@simple-agent-manager/shared';
 import { D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
-import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
+import {
+  createModuleLogger,
+  isDurableObjectSqliteNoMemError,
+  serializeError,
+} from '@simple-agent-manager/worker-core';
 
 import {
   COMPACT_ARCHIVE_FORMAT,
@@ -37,10 +41,7 @@ import {
   createCanonicalRowsHasher,
   sha256Hex,
 } from '../archive/hashing';
-import {
-  type ArchiveWriteReservation,
-  estimateArchiveWrites,
-} from '../archive/write-budget';
+import { type ArchiveWriteReservation, estimateArchiveWrites } from '../archive/write-budget';
 import {
   MESSAGE_COMMENT_REPLY_COUNT_SQL,
   MESSAGE_COMMENT_THREAD_COUNT_SQL,
@@ -251,6 +252,8 @@ export type ArchiveSourceInspectIntentResult =
       databaseSizeBeforeBytes: number | null;
       databaseSizeAfterBytes: number | null;
       databaseSizeBytes: number;
+      /** Recorded by prepares since migration 076; null for intents prepared before it. */
+      terminalComponents?: ArchiveTerminalComponents | null;
     };
 
 export type ArchiveSourceExportChunkInput = {
@@ -313,6 +316,12 @@ export type ArchiveTargetSealInput = {
   now: number;
   /** See `ArchiveSourcePrepareInput.hashPageRows`: DO-owned page size, never set by coordinators. */
   hashPageRows?: number;
+  /**
+   * Skip the whole-session R2 re-read an already sealed compact target performs. Set only by
+   * coordinators that verify the R2 chunks in bounded pages (`archiveTargetVerifyPage`) before
+   * the flip; an older coordinator omits it and keeps the one-RPC recompute it relies on.
+   */
+  skipCompactRecoveryRecompute?: boolean;
 };
 
 export type ArchiveTargetSealResult = {
@@ -339,6 +348,11 @@ export type ArchiveSourceFinalizeDeleteInput = {
   hashPageRows?: number;
 };
 
+/**
+ * The flip deletes no rows, so the `*Deleted` counts are always 0 and the sizes are equal on a
+ * fresh flip. They are kept so the RPC shape and the `sourceFinalization` log stay compatible
+ * across a mixed-version deploy; reclaim reports the real counts.
+ */
 export type ArchiveSourceFinalizeDeleteResult = {
   idempotent: boolean;
   lastMessageAt: number | null;
@@ -411,6 +425,21 @@ type TerminalVersion = {
   lastMessageAt: number | null;
   messageCount: number;
   sessionRow: ProjectDataArchiveRow;
+  components: ArchiveTerminalComponents;
+};
+
+/**
+ * The parts of a terminal version, recorded by the root at prepare. The shard recomputes the
+ * parts it holds in its own SQLite (anchor, grouped rows, tool-payload archives) before the flip
+ * and compares them here, because the paged R2 check covers only the message rows.
+ */
+export type ArchiveTerminalComponents = {
+  anchorSha256: string;
+  messagesSha256: string;
+  groupedSha256: string;
+  toolPayloadArchivesSha256: string;
+  commentThreads: number;
+  commentReplies: number;
 };
 
 type CompactRawEvidence = {
@@ -855,12 +884,14 @@ async function tableAggregateSha256(
   sql: SqlStorage,
   tableName: ProjectDataArchiveTableName,
   sessionId: string,
-  pageRows: number
+  pageRows: number,
+  yieldBetweenPages?: () => Promise<void>
 ): Promise<string> {
   const spec = validateTableName(tableName);
   const hasher = createCanonicalRowsHasher(spec.columns);
   let cursor: string | null = null;
-  for (;;) {
+  for (let page = 0; ; page++) {
+    if (page > 0 && yieldBetweenPages) await yieldBetweenPages();
     let query = `SELECT ${spec.columns.join(', ')} FROM ${tableName} WHERE session_id = ?`;
     const params: Array<string | number> = [sessionId];
     if (cursor) {
@@ -884,6 +915,12 @@ async function tableAggregateSha256(
 
 export type ComputeTerminalVersionOptions = {
   hashPageRows?: number;
+  /**
+   * Awaited between hash pages so the object can serve other requests while a large session
+   * is hashed. Only safe where something else proves the rows did not change between pages
+   * (the archive write generation, `prepareArchiveSourceIntentPhased`).
+   */
+  yieldBetweenPages?: () => Promise<void>;
   compactEnv?: Env;
   compactDeadline?: number;
   compactPerChunkTimeoutMs?: number;
@@ -918,16 +955,35 @@ export async function computeTerminalVersion(
     raw?.messageCount ??
     countRows(sql, 'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', sessionId);
   const lastMessageAt = raw ? raw.lastMessageAt : readLastMessageAt(sql, sessionId);
+  const yieldBetweenPages = options.yieldBetweenPages;
+  const anchor = canonicalizeArchiveRow(CHAT_SESSION_ANCHOR_COLUMNS, sessionRow);
+  const messagesSha256 =
+    raw?.sha256 ??
+    (await tableAggregateSha256(sql, 'chat_messages', sessionId, pageRows, yieldBetweenPages));
+  if (yieldBetweenPages) await yieldBetweenPages();
+  const groupedSha256 = await tableAggregateSha256(
+    sql,
+    'chat_messages_grouped',
+    sessionId,
+    pageRows,
+    yieldBetweenPages
+  );
+  if (yieldBetweenPages) await yieldBetweenPages();
+  const toolPayloadArchivesSha256 = await tableAggregateSha256(
+    sql,
+    'tool_payload_archives',
+    sessionId,
+    pageRows,
+    yieldBetweenPages
+  );
+  const commentThreads = countRows(sql, MESSAGE_COMMENT_THREAD_COUNT_SQL, sessionId);
+  const commentReplies = countRows(sql, MESSAGE_COMMENT_REPLY_COUNT_SQL, sessionId);
   const components = [
-    `chat_session:${canonicalizeArchiveRow(CHAT_SESSION_ANCHOR_COLUMNS, sessionRow)}`,
-    `chat_messages:${raw?.sha256 ?? (await tableAggregateSha256(sql, 'chat_messages', sessionId, pageRows))}`,
-    `chat_messages_grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', sessionId, pageRows)}`,
-    `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', sessionId, pageRows)}`,
-    `comments:${countRows(sql, MESSAGE_COMMENT_THREAD_COUNT_SQL, sessionId)}:${countRows(
-      sql,
-      MESSAGE_COMMENT_REPLY_COUNT_SQL,
-      sessionId
-    )}`,
+    `chat_session:${anchor}`,
+    `chat_messages:${messagesSha256}`,
+    `chat_messages_grouped:${groupedSha256}`,
+    `tool_payload_archives:${toolPayloadArchivesSha256}`,
+    `comments:${commentThreads}:${commentReplies}`,
     `last_message_at:${lastMessageAt ?? 'null'}`,
   ];
   return {
@@ -935,6 +991,14 @@ export async function computeTerminalVersion(
     lastMessageAt,
     messageCount,
     sessionRow,
+    components: {
+      anchorSha256: await sha256Hex(anchor),
+      messagesSha256,
+      groupedSha256,
+      toolPayloadArchivesSha256,
+      commentThreads,
+      commentReplies,
+    },
   };
 }
 
@@ -1000,13 +1064,28 @@ function assertMatchingSourceIntent(
   return state;
 }
 
-function isActiveSourceIntentState(state: ProjectDataArchiveSourceIntentState): boolean {
-  return state !== 'rehome_exported';
+/**
+ * Whether the root's copy of a session can no longer answer exact reads.
+ *
+ * Deliberately narrower than the transcript write fence (`assertTranscriptWriteAllowed` in
+ * `messages.ts`, every intent state but `rehome_exported`), which must stay closed for the whole
+ * migration (rule 67: widening a shared predicate would reopen writes). Before the flip the
+ * root still holds every row of the session and writes to it are fenced, so its copy is
+ * complete and immutable: a migration that spans many ticks keeps the transcript readable from
+ * the root until the atomic flip. From `source_deleted` on, routing points at the shard and
+ * the root's rows are leftovers awaiting reclaim, or rows a copy-back is restoring, so reads
+ * fail closed there.
+ */
+function isSourceExactReadFenced(state: ProjectDataArchiveSourceIntentState): boolean {
+  return state === 'source_deleted';
 }
 
 function reattachSourceIntentToken(
   sql: SqlStorage,
-  input: ArchiveSourcePrepareInput,
+  input: Pick<
+    ArchiveSourcePrepareInput,
+    'sourceIntentToken' | 'now' | 'sessionId' | 'projectId' | 'migrationId'
+  >,
   state: ProjectDataArchiveSourceIntentState
 ): void {
   if (state === 'source_deleted' || state === 'rehome_exported') return;
@@ -1056,6 +1135,48 @@ export function inspectArchiveSourceIntent(
     databaseSizeBeforeBytes: optionalInteger(intent.source_database_size_before),
     databaseSizeAfterBytes: optionalInteger(intent.source_database_size_after),
     databaseSizeBytes: databaseSize(sql),
+    terminalComponents: parseTerminalComponents(intent.terminal_components_json),
+  };
+}
+
+function parseTerminalComponents(value: unknown): ArchiveTerminalComponents | null {
+  if (typeof value !== 'string') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const record = parsed as Record<string, unknown>;
+  const text = (key: string) => (typeof record[key] === 'string' ? (record[key] as string) : null);
+  const count = (key: string) =>
+    Number.isSafeInteger(record[key]) && (record[key] as number) >= 0
+      ? (record[key] as number)
+      : null;
+  const anchorSha256 = text('anchorSha256');
+  const messagesSha256 = text('messagesSha256');
+  const groupedSha256 = text('groupedSha256');
+  const toolPayloadArchivesSha256 = text('toolPayloadArchivesSha256');
+  const commentThreads = count('commentThreads');
+  const commentReplies = count('commentReplies');
+  if (
+    anchorSha256 === null ||
+    messagesSha256 === null ||
+    groupedSha256 === null ||
+    toolPayloadArchivesSha256 === null ||
+    commentThreads === null ||
+    commentReplies === null
+  ) {
+    return null;
+  }
+  return {
+    anchorSha256,
+    messagesSha256,
+    groupedSha256,
+    toolPayloadArchivesSha256,
+    commentThreads,
+    commentReplies,
   };
 }
 
@@ -1146,21 +1267,103 @@ export async function prepareArchiveSourceIntentOrRefuse(
   sql: SqlStorage,
   input: ArchiveSourcePrepareInput
 ): Promise<ArchiveSourcePrepareOutcome> {
+  const begun = beginArchiveSourcePrepare(sql, input, {
+    estimateExceedsReservation: estimateExceedsReservation(sql, input),
+  });
+  if (begun.kind === 'refused') return begun.refusal;
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, {
+    hashPageRows: input.hashPageRows,
+  });
+  return completeArchiveSourcePrepare(sql, input, begun, terminalVersion);
+}
+
+/** Whether the session's inventory now exceeds what its write reservation was sized for. */
+export function estimateExceedsReservation(
+  sql: SqlStorage,
+  input: Pick<ArchiveSourcePrepareInput, 'sessionId' | 'writeReservation'>
+): boolean {
+  return (
+    !!input.writeReservation &&
+    estimateArchiveWrites(
+      sql,
+      input.sessionId,
+      input.writeReservation.factor,
+      input.writeReservation.maxMessages
+    ) > input.writeReservation.estimatedWrites
+  );
+}
+
+/**
+ * Columns each terminal-version table hashes, as migration 076's triggers must watch them. Exposed
+ * so a test can pin the frozen trigger SQL to the live hash definition: adding a hashed column
+ * without a new trigger migration would silently weaken the flip's O(1) proof.
+ */
+export function archiveTerminalHashedColumns(): Record<string, readonly string[]> {
+  return {
+    chat_sessions: CHAT_SESSION_ANCHOR_COLUMNS,
+    chat_messages: ARCHIVE_TABLE_SPECS.chat_messages.columns,
+    chat_messages_grouped: ARCHIVE_TABLE_SPECS.chat_messages_grouped.columns,
+    tool_payload_archives: ARCHIVE_TABLE_SPECS.tool_payload_archives.columns,
+  };
+}
+
+/** Triggers migration 076 installs: three per covered table, six tables. */
+export const ARCHIVE_WRITE_GENERATION_TRIGGER_COUNT = 18;
+
+/**
+ * Whether every write-generation trigger exists. The O(1) flip proof is only as good as the
+ * triggers; a later migration that recreated a covered table would silently drop its triggers
+ * and the generation would stop moving, so the flip re-hashes instead of trusting it.
+ */
+export function archiveWriteGenerationFenceInstalled(sql: SqlStorage): boolean {
+  const row = sql
+    .exec(
+      `SELECT COUNT(*) AS count FROM sqlite_master
+       WHERE type = 'trigger' AND name LIKE 'archive_write_generation_%'`
+    )
+    .toArray()[0];
+  return Number(row?.count ?? 0) === ARCHIVE_WRITE_GENERATION_TRIGGER_COUNT;
+}
+
+/** Current archive write generation of a session (migration 076); 0 before any counted write. */
+export function readArchiveWriteGeneration(sql: SqlStorage, sessionId: string): number {
+  const row = sql
+    .exec(
+      'SELECT generation FROM project_data_archive_source_write_generation WHERE session_id = ?',
+      sessionId
+    )
+    .toArray()[0];
+  return Number(row?.generation ?? 0);
+}
+
+export type ArchiveSourcePrepareBegun =
+  | { kind: 'refused'; refusal: Extract<ArchiveSourcePrepareOutcome, { refused: true }> }
+  | { kind: 'proceed'; existing: Record<string, unknown> | null; generation: number };
+
+/**
+ * First phase of the source prepare, run under the transcript lock: eligibility, then the
+ * source intent (the transcript write fence), then the write generation the hash must still
+ * see when it finishes.
+ *
+ * A refusal is returned ONLY while no source intent row exists for the session, or only a
+ * verified completed copy-back predecessor remains. Every later invariant (including the same
+ * eligibility check on a re-prepare with an intent present, and at finalize) still throws,
+ * because by then the transcript is fenced on this object and the coordinator must keep the
+ * journal on its fail-closed retry path. Returning instead of throwing is what lets the refusal
+ * cross the RPC boundary with its `reason` intact (rule 63) so the caller can unwind the fence.
+ */
+export function beginArchiveSourcePrepare(
+  sql: SqlStorage,
+  input: ArchiveSourcePrepareInput,
+  options: { estimateExceedsReservation: boolean }
+): ArchiveSourcePrepareBegun {
   validateRootSourceOwner(input);
   const minTerminalAgeMs = input.minTerminalAgeMs ?? PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS;
   let existing = readSourceIntent(sql, input.sessionId);
   const completedPredecessor = isCompletedCopyBackPredecessor(sql, existing, input);
   try {
     assertEligibleTerminalSource(sql, input.sessionId, input.now, minTerminalAgeMs);
-    if (
-      input.writeReservation &&
-      estimateArchiveWrites(
-        sql,
-        input.sessionId,
-        input.writeReservation.factor,
-        input.writeReservation.maxMessages
-      ) > input.writeReservation.estimatedWrites
-    ) {
+    if (options.estimateExceedsReservation) {
       throw new ProjectDataArchiveInvariantError(
         'write_budget_inventory_changed',
         'Archive inventory exceeds its reserved write estimate'
@@ -1169,17 +1372,20 @@ export async function prepareArchiveSourceIntentOrRefuse(
   } catch (error) {
     if ((!existing || completedPredecessor) && error instanceof ProjectDataArchiveInvariantError) {
       return {
-        refused: true,
-        reason: error.reason,
-        message: error.message,
-        databaseSizeBytes: databaseSize(sql),
+        kind: 'refused',
+        refusal: {
+          refused: true,
+          reason: error.reason,
+          message: error.message,
+          databaseSizeBytes: databaseSize(sql),
+        },
       };
     }
     throw error;
   }
   if (completedPredecessor && existing) {
-    // No await between replacement and the fresh fence below; the RPC holds the
-    // source mutation lock. This removes only the completed intent, never history.
+    // No await between replacement and the fresh fence below; the caller holds the source
+    // mutation lock. This removes only the completed intent, never history.
     sql.exec(
       `DELETE FROM project_data_archive_source_intents
        WHERE session_id = ? AND migration_id = ? AND state = 'rehome_exported'`,
@@ -1209,66 +1415,91 @@ export async function prepareArchiveSourceIntentOrRefuse(
       input.now
     );
   }
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, {
-    hashPageRows: input.hashPageRows,
-  });
-  if (existing) {
-    const state = assertPreparedSourceIntent(existing, input, terminalVersion.sha256);
-    if (existing.source_intent_token !== input.sourceIntentToken) {
-      reattachSourceIntentToken(sql, input, state);
-    }
-    sql.exec(
-      `UPDATE project_data_archive_source_intents
-       SET terminal_version_sha256 = ?,
-           last_message_at = ?,
-           message_count = ?,
-           updated_at = ?
-       WHERE session_id = ?
-         AND project_id = ?
-         AND migration_id = ?
-         AND state = ?`,
-      terminalVersion.sha256,
-      terminalVersion.lastMessageAt,
-      terminalVersion.messageCount,
-      input.now,
-      input.sessionId,
-      input.projectId,
-      input.migrationId,
-      state
+  // Read after the intent exists: from here every write to the session's hashed rows moves it.
+  return {
+    kind: 'proceed',
+    existing,
+    generation: readArchiveWriteGeneration(sql, input.sessionId),
+  };
+}
+
+/**
+ * Last phase of the source prepare, run under the transcript lock after the hash. The hash may
+ * have run in pages with other requests served in between; the unchanged write generation is
+ * what proves those pages saw one consistent session. Records the terminal version, its
+ * components and the generation the flip will compare against.
+ */
+export function completeArchiveSourcePrepare(
+  sql: SqlStorage,
+  input: ArchiveSourcePrepareInput,
+  begun: { existing: Record<string, unknown> | null; generation: number },
+  terminalVersion: TerminalVersion
+): ArchiveSourcePrepareResult & { databaseSizeBytes: number } {
+  if (readArchiveWriteGeneration(sql, input.sessionId) !== begun.generation) {
+    throw new ProjectDataArchiveInvariantError(
+      'terminal_version_changed',
+      'ProjectData archive source changed while its terminal version was being hashed'
     );
-    return {
-      idempotent: true,
-      sourceIntentToken: input.sourceIntentToken,
-      terminalVersionSha256: terminalVersion.sha256,
-      lastMessageAt: terminalVersion.lastMessageAt,
-      messageCount: terminalVersion.messageCount,
-      sessionRow: terminalVersion.sessionRow,
-      databaseSizeBytes: databaseSize(sql),
-    };
+  }
+  const current = readSourceIntent(sql, input.sessionId);
+  const state = assertSameSourceIntentMigration(current, input);
+  if (!begun.existing && current?.source_intent_token !== input.sourceIntentToken) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_intent_mismatch',
+      'ProjectData archive source intent was replaced while it was being hashed'
+    );
+  }
+  if (
+    begun.existing &&
+    (current?.created_at !== begun.existing.created_at ||
+      current?.migration_id !== begun.existing.migration_id)
+  ) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_intent_mismatch',
+      'ProjectData archive source intent was replaced while it was being hashed'
+    );
+  }
+  const componentsJson = JSON.stringify(terminalVersion.components);
+  if (begun.existing) {
+    const preparedState = assertPreparedSourceIntent(
+      current as Record<string, unknown>,
+      input,
+      terminalVersion.sha256
+    );
+    if (current?.source_intent_token !== input.sourceIntentToken) {
+      reattachSourceIntentToken(sql, input, preparedState);
+    }
+  } else if (state !== 'intent_prepared') {
+    throw new ProjectDataArchiveInvariantError(
+      'source_intent_mismatch',
+      'ProjectData archive source intent advanced while it was being hashed'
+    );
   }
   sql.exec(
     `UPDATE project_data_archive_source_intents
      SET terminal_version_sha256 = ?,
          last_message_at = ?,
          message_count = ?,
+         prepared_write_generation = ?,
+         terminal_components_json = ?,
          updated_at = ?
      WHERE session_id = ?
        AND project_id = ?
        AND migration_id = ?
-       AND source_intent_token = ?
-       AND state = 'intent_prepared'`,
+       AND state = ?`,
     terminalVersion.sha256,
     terminalVersion.lastMessageAt,
     terminalVersion.messageCount,
+    begun.generation,
+    componentsJson,
     input.now,
     input.sessionId,
     input.projectId,
     input.migrationId,
-    input.sourceIntentToken
+    state
   );
-
   return {
-    idempotent: false,
+    idempotent: begun.existing !== null,
     sourceIntentToken: input.sourceIntentToken,
     terminalVersionSha256: terminalVersion.sha256,
     lastMessageAt: terminalVersion.lastMessageAt,
@@ -1659,8 +1890,13 @@ async function readValidatedSeal(
 ): Promise<ArchiveTargetSealResult> {
   const row = readTargetSession(sql, input.sessionId);
   // A resumed coordinator must not delete the root copy using a historical seal
-  // if an external R2 loss occurred while the migration was paused.
-  if (env && compactArchive.isCompactArchive(sql, input.sessionId)) {
+  // if an external R2 loss occurred while the migration was paused. Coordinators that verify
+  // R2 page by page before the flip skip this whole-session read (`verifyArchiveTargetPage`).
+  if (
+    env &&
+    !input.skipCompactRecoveryRecompute &&
+    compactArchive.isCompactArchive(sql, input.sessionId)
+  ) {
     const verified = await computeTerminalVersion(sql, input.sessionId, {
       compactEnv: env,
       compactPerChunkTimeoutMs,
@@ -1843,6 +2079,453 @@ export async function sealArchiveTarget(
     input.sessionId
   );
   return { aggregateSha256, messageCount, groupedCount, toolArchiveCount };
+}
+
+export type ArchiveTargetVerifyPageInput = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string;
+  targetOwnerName: string;
+  targetGeneration: number;
+  terminalVersionSha256: string;
+  /**
+   * The root's terminal-version components recorded at prepare. The final page compares the
+   * shard's own anchor, grouped and tool-payload rows against them; the R2 pages cover messages.
+   */
+  expectedComponents: ArchiveTerminalComponents;
+  /** Epoch ms after which this call starts no new chunk read. At least one chunk is read. */
+  deadlineAt: number;
+  now: number;
+};
+
+export type ArchiveTargetVerifyPageResult = {
+  complete: boolean;
+  /** Chunks read and checked by this call. */
+  chunksVerified: number;
+  /** Rows checked by this call. */
+  rowsVerified: number;
+  /** Next raw chunk ordinal to verify; equals the chunk count once complete. */
+  nextOrdinal: number;
+  /** Rows verified so far across every call for this migration. */
+  totalRowsVerified: number;
+  /**
+   * Set when the copy did not verify: a missing or unreadable R2 object, a hash, order, identity
+   * or count mismatch. Returned rather than thrown so the reason crosses the RPC boundary
+   * (rule 63); the coordinator fails the migration and the root keeps every row.
+   */
+  failure?: { reason: string; message: string };
+};
+
+/**
+ * Progress of a paged compact verification, kept in the shard's `do_meta` (no table migration)
+ * while the verification is in flight and removed once it completes or the target is abandoned.
+ */
+const VERIFY_PROGRESS_META_PREFIX = 'archive_target_verify:';
+
+type VerifyProgress = {
+  migrationId: string;
+  terminalVersionSha256: string;
+  nextOrdinal: number;
+  rows: number;
+  /** Order key of the last verified row: [created_at, sequence, id]. */
+  lastKey: [number, number | null, string] | null;
+  /**
+   * Set once every check passed. Kept (not deleted) so a claim that fails AFTER verification,
+   * e.g. at the flip, does not re-read the whole copy and count that as progress: a re-run returns
+   * `complete` with zero chunks verified, so the poison counter still advances.
+   */
+  complete?: boolean;
+  /** Set when a check failed for good; later calls return it without re-reading anything. */
+  failure?: { reason: string; message: string };
+};
+
+function readVerifyProgress(
+  sql: SqlStorage,
+  sessionId: string,
+  migrationId: string,
+  terminalVersionSha256: string
+): VerifyProgress {
+  const fresh: VerifyProgress = {
+    migrationId,
+    terminalVersionSha256,
+    nextOrdinal: 0,
+    rows: 0,
+    lastKey: null,
+  };
+  const value = sql
+    .exec('SELECT value FROM do_meta WHERE key = ?', VERIFY_PROGRESS_META_PREFIX + sessionId)
+    .toArray()[0]?.value;
+  if (typeof value !== 'string') return fresh;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (isVerifyProgress(parsed, migrationId, terminalVersionSha256)) return parsed;
+  } catch {
+    // An unreadable progress row only costs a restart from ordinal 0.
+  }
+  return fresh;
+}
+
+function isVerifyProgress(
+  value: unknown,
+  migrationId: string,
+  terminalVersionSha256: string
+): value is VerifyProgress {
+  if (!value || typeof value !== 'object') return false;
+  const progress = value as Record<string, unknown>;
+  const lastKey = progress.lastKey;
+  const lastKeyValid =
+    lastKey === null ||
+    (Array.isArray(lastKey) &&
+      lastKey.length === 3 &&
+      typeof lastKey[0] === 'number' &&
+      (lastKey[1] === null || typeof lastKey[1] === 'number') &&
+      typeof lastKey[2] === 'string');
+  return (
+    progress.migrationId === migrationId &&
+    progress.terminalVersionSha256 === terminalVersionSha256 &&
+    Number.isSafeInteger(progress.nextOrdinal) &&
+    (progress.nextOrdinal as number) >= 0 &&
+    Number.isSafeInteger(progress.rows) &&
+    (progress.rows as number) >= 0 &&
+    lastKeyValid &&
+    (progress.complete === undefined || typeof progress.complete === 'boolean') &&
+    (progress.failure === undefined ||
+      (typeof progress.failure === 'object' &&
+        progress.failure !== null &&
+        typeof (progress.failure as Record<string, unknown>).reason === 'string' &&
+        typeof (progress.failure as Record<string, unknown>).message === 'string'))
+  );
+}
+
+function messageOrderKey(row: ProjectDataArchiveRow): [number, number | null, string] {
+  const createdAt = Number(row.created_at);
+  const sequence =
+    row.sequence === null || row.sequence === undefined ? null : Number(row.sequence);
+  return [createdAt, sequence, String(row.id)];
+}
+
+/** SQLite order of `created_at ASC, sequence ASC, id ASC` (NULL sorts first). */
+function compareMessageOrderKeys(
+  left: [number, number | null, string],
+  right: [number, number | null, string]
+): number {
+  if (left[0] !== right[0]) return left[0] < right[0] ? -1 : 1;
+  if (left[1] !== right[1]) {
+    if (left[1] === null) return -1;
+    if (right[1] === null) return 1;
+    return left[1] < right[1] ? -1 : 1;
+  }
+  return compareUtf8Bytes(left[2], right[2]);
+}
+
+const utf8Encoder = new TextEncoder();
+
+/** SQLite BINARY collation order: UTF-8 bytes, not JS UTF-16 code units. */
+function compareUtf8Bytes(left: string, right: string): number {
+  const a = utf8Encoder.encode(left);
+  const b = utf8Encoder.encode(right);
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    if (a[index] !== b[index]) return (a[index] ?? 0) < (b[index] ?? 0) ? -1 : 1;
+  }
+  return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
+}
+
+/**
+ * Re-read a sealed compact target's R2 message chunks in bounded pages, before the flip lets the
+ * root reclaim its copy.
+ *
+ * Replaces the one-RPC whole-session recompute (`readValidatedSeal`), which re-read every R2
+ * chunk of the session in a single call (~0.4-0.8 ms per message in production, so 40-80 s on
+ * the shard at the 100k-message cap). Each call reads chunks in ordinal order until its deadline
+ * and records where it stopped, so the work spans ticks. Together the checks prove the same
+ * thing the recompute did:
+ * - every raw chunk's rows hash to the sha256 the ROOT computed when it exported that chunk
+ *   (the commit receipt), so R2 holds exactly the rows the root exported;
+ * - rows are strictly increasing in the root's export order across chunk boundaries and belong
+ *   to this session, so no row is duplicated or out of place;
+ * - the verified row count equals the root's prepared message count, and the flip that follows
+ *   re-proves the root unchanged since then (`finalizeSourceDelete` terminal version), so the
+ *   exported rows are all of the root's rows.
+ */
+/**
+ * Verdicts that hold however often the copy is re-read: the shard's own receipts, order, identity,
+ * counts or components disagree with what the root exported. Anything else (an R2 5xx, a stream
+ * error, an object that is momentarily unreadable, out-of-memory) is retried by the next call
+ * from the saved progress, and only poisons the migration through the coordinator's
+ * no-progress attempt count.
+ */
+const DETERMINISTIC_VERIFY_FAILURES = new Set([
+  'target_chunk_inventory_gap',
+  'target_chunk_identity_mismatch',
+  'target_chunk_receipt_mismatch',
+  'target_chunk_order_mismatch',
+  'target_message_count_mismatch',
+  'target_component_mismatch',
+  'target_terminal_version_mismatch',
+  'target_not_compact',
+]);
+
+export async function verifyArchiveTargetPage(
+  sql: SqlStorage,
+  env: Env,
+  input: ArchiveTargetVerifyPageInput,
+  options: { yieldBetweenPages?: () => Promise<void>; hashPageRows?: number } = {}
+): Promise<ArchiveTargetVerifyPageResult> {
+  let progress: VerifyProgress | null = null;
+  // Chunks this call verified, credited even when it stops on an error or a timeout: they are in
+  // the saved progress and will not be read again.
+  const counted = { chunks: 0, rows: 0 };
+  const partial = (): ArchiveTargetVerifyPageResult => ({
+    complete: false,
+    chunksVerified: counted.chunks,
+    rowsVerified: counted.rows,
+    nextOrdinal: progress?.nextOrdinal ?? 0,
+    totalRowsVerified: progress?.rows ?? 0,
+  });
+  try {
+    if (!isTerminalComponents(input.expectedComponents)) {
+      return {
+        ...partial(),
+        failure: {
+          reason: 'invalid_input',
+          message: 'Archive verification requires the root terminal-version components',
+        },
+      };
+    }
+    const target = readTargetSession(sql, input.sessionId);
+    const state = validateTargetOwner(target, input);
+    if (state !== 'sealed' && state !== 'published') {
+      throw new ProjectDataArchiveInvariantError(
+        'target_not_sealed',
+        'ProjectData archive target must be sealed before its chunks are verified'
+      );
+    }
+    if (!compactArchive.isCompactArchive(sql, input.sessionId)) {
+      throw new ProjectDataArchiveInvariantError(
+        'target_not_compact',
+        'Paged archive verification applies to compact archive targets only'
+      );
+    }
+    if (target?.terminal_version_sha256 !== input.terminalVersionSha256) {
+      throw new ProjectDataArchiveInvariantError(
+        'target_terminal_version_mismatch',
+        'ProjectData archive target terminal version does not match the migration'
+      );
+    }
+    progress = readVerifyProgress(
+      sql,
+      input.sessionId,
+      input.migrationId,
+      input.terminalVersionSha256
+    );
+    if (progress.failure) return { ...partial(), failure: progress.failure };
+    if (progress.complete) return { ...partial(), complete: true };
+    return await verifyChunksAndComponents(sql, env, input, target, progress, counted, options);
+  } catch (error) {
+    const deterministic =
+      error instanceof ProjectDataArchiveInvariantError &&
+      DETERMINISTIC_VERIFY_FAILURES.has(error.reason);
+    const failure = {
+      reason:
+        error instanceof ProjectDataArchiveInvariantError
+          ? error.reason
+          : 'target_chunk_read_failed',
+      message: error instanceof Error ? error.message : String(error),
+    };
+    if (progress) {
+      // Keep what was verified either way. Only a deterministic verdict is recorded; a read that
+      // ran out of time or failed transiently continues from the saved progress next call.
+      if (deterministic) progress.failure = failure;
+      writeVerifyProgress(sql, input.sessionId, progress);
+    }
+    return compactArchive.isArchiveReadOutOfTime(error) ? partial() : { ...partial(), failure };
+  }
+}
+
+function isTerminalComponents(value: unknown): value is ArchiveTerminalComponents {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    parseTerminalComponents(JSON.stringify(value)) !== null
+  );
+}
+
+function writeVerifyProgress(sql: SqlStorage, sessionId: string, progress: VerifyProgress): void {
+  sql.exec(
+    'INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)',
+    VERIFY_PROGRESS_META_PREFIX + sessionId,
+    JSON.stringify(progress)
+  );
+}
+
+async function verifyChunksAndComponents(
+  sql: SqlStorage,
+  env: Env,
+  input: ArchiveTargetVerifyPageInput,
+  target: Record<string, unknown> | null,
+  progress: VerifyProgress,
+  counted: { chunks: number; rows: number },
+  options: { yieldBetweenPages?: () => Promise<void>; hashPageRows?: number }
+): Promise<ArchiveTargetVerifyPageResult> {
+  const expectedMessageCount = strictInteger(
+    target?.expected_message_count,
+    'target.expected_message_count'
+  );
+  const perChunkTimeoutMs = compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
+  let exhausted = true;
+  try {
+    for await (const chunk of compactArchive.compactRawChunks(sql, env, input.sessionId, {
+      perChunkTimeoutMs,
+      ...(progress.nextOrdinal > 0 ? { startAfterOrdinal: progress.nextOrdinal - 1 } : {}),
+    })) {
+      if (chunk.ordinal !== progress.nextOrdinal) {
+        throw new ProjectDataArchiveInvariantError(
+          'target_chunk_inventory_gap',
+          'Compact archive raw chunk inventory has a gap'
+        );
+      }
+      if (chunk.sessionId !== input.sessionId || chunk.migrationId !== input.migrationId) {
+        throw new ProjectDataArchiveInvariantError(
+          'target_chunk_identity_mismatch',
+          'Compact archive raw chunk belongs to another session or migration'
+        );
+      }
+      const receipt = sql
+        .exec(
+          `SELECT sha256, row_count FROM project_data_archive_target_chunks
+           WHERE session_id = ? AND migration_id = ? AND table_name = 'chat_messages' AND ordinal = ?`,
+          input.sessionId,
+          input.migrationId,
+          chunk.ordinal
+        )
+        .toArray()[0];
+      if (!receipt || receipt.sha256 !== chunk.sha256 || receipt.row_count !== chunk.rows.length) {
+        throw new ProjectDataArchiveInvariantError(
+          'target_chunk_receipt_mismatch',
+          'Compact archive raw chunk does not match the hash the root exported'
+        );
+      }
+      // Validate the whole chunk before taking any of it into the saved progress.
+      let lastKey = progress.lastKey;
+      for (const row of chunk.rows) {
+        if (row.session_id !== input.sessionId) {
+          throw new ProjectDataArchiveInvariantError(
+            'target_chunk_identity_mismatch',
+            'Compact archive raw chunk holds a row of another session'
+          );
+        }
+        const key = messageOrderKey(row);
+        if (lastKey && compareMessageOrderKeys(lastKey, key) >= 0) {
+          throw new ProjectDataArchiveInvariantError(
+            'target_chunk_order_mismatch',
+            'Compact archive rows are not in strictly increasing export order'
+          );
+        }
+        lastKey = key;
+      }
+      progress.lastKey = lastKey;
+      progress.nextOrdinal++;
+      progress.rows += chunk.rows.length;
+      counted.chunks++;
+      counted.rows += chunk.rows.length;
+      if (Date.now() >= input.deadlineAt) {
+        exhausted = false;
+        break;
+      }
+    }
+  } catch (error) {
+    // Keep the chunks this call did verify, whatever stopped it.
+    writeVerifyProgress(sql, input.sessionId, progress);
+    throw error;
+  }
+  const result = (complete: boolean): ArchiveTargetVerifyPageResult => ({
+    complete,
+    chunksVerified: counted.chunks,
+    rowsVerified: counted.rows,
+    nextOrdinal: progress.nextOrdinal,
+    totalRowsVerified: progress.rows,
+  });
+  if (!exhausted) {
+    writeVerifyProgress(sql, input.sessionId, progress);
+    return result(false);
+  }
+  const receiptCount = countRows(
+    sql,
+    `SELECT COUNT(*) AS count FROM project_data_archive_target_chunks
+     WHERE session_id = ? AND migration_id = ? AND table_name = 'chat_messages'`,
+    input.sessionId,
+    input.migrationId
+  );
+  if (receiptCount !== progress.nextOrdinal || progress.rows !== expectedMessageCount) {
+    throw new ProjectDataArchiveInvariantError(
+      'target_message_count_mismatch',
+      'Compact archive verified rows do not match the prepared source count'
+    );
+  }
+  // Saved first, so a reset during the component hash does not re-read every chunk.
+  writeVerifyProgress(sql, input.sessionId, progress);
+  await assertTargetComponentsMatch(sql, input, options.hashPageRows, options.yieldBetweenPages);
+  progress.complete = true;
+  writeVerifyProgress(sql, input.sessionId, progress);
+  return result(true);
+}
+
+/**
+ * The shard-local half of the pre-flip proof. The R2 pages prove the message rows; this proves
+ * the session anchor, grouped rows and tool-payload archives the shard holds in its own SQLite
+ * equal what the root hashed at prepare. Comments are never copied (the root refuses to archive
+ * a session that has any), so the root's counts must be zero.
+ */
+async function assertTargetComponentsMatch(
+  sql: SqlStorage,
+  input: ArchiveTargetVerifyPageInput,
+  hashPageRows: number | undefined,
+  yieldBetweenPages?: () => Promise<void>
+): Promise<void> {
+  const expected = input.expectedComponents;
+  const mismatch = (component: string) =>
+    new ProjectDataArchiveInvariantError(
+      'target_component_mismatch',
+      `ProjectData archive target ${component} does not match the root's prepared terminal version`
+    );
+  const anchorRow = readSessionAnchor(sql, input.sessionId);
+  if (
+    !anchorRow ||
+    (await sha256Hex(canonicalizeArchiveRow(CHAT_SESSION_ANCHOR_COLUMNS, anchorRow))) !==
+      expected.anchorSha256
+  ) {
+    throw mismatch('session anchor');
+  }
+  if (expected.commentThreads !== 0 || expected.commentReplies !== 0) throw mismatch('comments');
+  const pageRows = resolveHashPageRows(hashPageRows);
+  if (
+    (await tableAggregateSha256(
+      sql,
+      'chat_messages_grouped',
+      input.sessionId,
+      pageRows,
+      yieldBetweenPages
+    )) !== expected.groupedSha256
+  ) {
+    throw mismatch('grouped rows');
+  }
+  if (
+    (await tableAggregateSha256(
+      sql,
+      'tool_payload_archives',
+      input.sessionId,
+      pageRows,
+      yieldBetweenPages
+    )) !== expected.toolPayloadArchivesSha256
+  ) {
+    throw mismatch('tool-payload archives');
+  }
+}
+
+/** Drop a paged verification's progress and verdict, e.g. when the target is abandoned. */
+export function clearArchiveTargetVerifyProgress(sql: SqlStorage, sessionId: string): void {
+  sql.exec('DELETE FROM do_meta WHERE key = ?', VERIFY_PROGRESS_META_PREFIX + sessionId);
 }
 
 function readTargetChunkInventory(
@@ -3110,6 +3793,28 @@ export async function restoreSourceArchiveChunk(
       'ProjectData archive source can only be restored after source deletion proof exists'
     );
   }
+  if (
+    state === 'source_deleted' &&
+    !isCopyBackInProgress(sql, input.sessionId, input.migrationId)
+  ) {
+    // A copy-back over leftover rows would re-index grouped rows the FTS already holds, and
+    // duplicate FTS5 postings corrupt the project's search index. The coordinator drains
+    // reclaim first (`copyBackProjectDataArchiveMigration`); this refuses if it did not.
+    if (sourceStillOwnsRows(sql, input.sessionId)) {
+      throw new ProjectDataArchiveInvariantError(
+        'copy_back_reclaim_outstanding',
+        'ProjectData archive copy-back cannot start while the flipped session still has rows to reclaim'
+      );
+    }
+  }
+  if (state === 'source_deleted') {
+    // Fence reclaim before the first restored row lands (`isCopyBackInProgress`).
+    sql.exec(
+      'INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)',
+      COPY_BACK_IN_PROGRESS_META_PREFIX + input.sessionId,
+      input.migrationId
+    );
+  }
   const spec = validateTableName(input.tableName);
   const suppliedHash = await canonicalRowsSha256(spec.columns, input.rows);
   if (suppliedHash !== input.sha256) {
@@ -3202,6 +3907,11 @@ export async function markSourceCopyBackRestored(
          updated_at = updated_at
      WHERE id = ?`,
     input.sessionId
+  );
+  // The intent is now `rehome_exported`, which reclaim already refuses, so the fence can go.
+  sql.exec(
+    'DELETE FROM do_meta WHERE key = ?',
+    COPY_BACK_IN_PROGRESS_META_PREFIX + input.sessionId
   );
   return (result.rowsWritten ?? 0) > 0;
 }
@@ -3421,6 +4131,7 @@ export function abandonArchiveTargetSession(
     input.targetGeneration
   );
   sql.exec('DELETE FROM chat_sessions WHERE id = ?', input.sessionId);
+  clearArchiveTargetVerifyProgress(sql, input.sessionId);
   return {
     removed: true,
     state,
@@ -3433,10 +4144,162 @@ export function abandonArchiveTargetSession(
   };
 }
 
+export type ArchiveTargetAbandonPageResult = {
+  /** True when this call deleted the target session (its last page). */
+  removed: boolean;
+  /** True while the target still holds rows; false once it is gone or never existed. */
+  remaining: boolean;
+  rowsDeleted: number;
+};
+
+/**
+ * `abandonArchiveTargetSession` in bounded pages, for unwinding a large copy. A compact target
+ * of a 100k-message session holds tens of thousands of grouped rows and search documents, each
+ * needing an FTS delete marker; deleting them in one transaction risks the object's CPU limit,
+ * and a reset there would leave the unwind half done. Each call deletes at most `maxRows` rows in
+ * one transaction; the session's target row goes last, so every page re-validates the same
+ * target. Same preconditions as the one-shot abandon.
+ */
+export function abandonArchiveTargetSessionPage(
+  sql: SqlStorage,
+  input: ArchiveTargetAbandonInput & { maxRows: number },
+  transactionSync: <T>(callback: () => T) => T = (callback) => callback()
+): ArchiveTargetAbandonPageResult {
+  const target = readTargetSession(sql, input.sessionId);
+  if (!target) return { removed: false, remaining: false, rowsDeleted: 0 };
+  const state = validateTargetOwner(target, input);
+  if (state === 'published' || state === 'rehome_exported') {
+    throw new ProjectDataArchiveInvariantError(
+      'target_not_abandonable',
+      'ProjectData archive target holds the only copy of a published session; abandon refused'
+    );
+  }
+  if (state === 'sealed' && input.sourceIntactVerified !== true) {
+    throw new ProjectDataArchiveInvariantError(
+      'target_sealed_requires_source_proof',
+      'ProjectData archive sealed target may be the only copy; verify the source intent is intact before abandoning'
+    );
+  }
+  const maxRows = Math.min(ARCHIVE_RECLAIM_MAX_PAGE_ROWS, Math.max(1, Math.floor(input.maxRows)));
+  return transactionSync(() => {
+    let budget = maxRows;
+    let rowsDeleted = 0;
+    const grouped = sql
+      .exec(
+        'SELECT rowid, content FROM chat_messages_grouped WHERE session_id = ? LIMIT ?',
+        input.sessionId,
+        budget
+      )
+      .toArray();
+    for (const row of grouped) {
+      try {
+        sql.exec(
+          `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
+           VALUES('delete', ?, ?)`,
+          row.rowid,
+          row.content
+        );
+      } catch (error) {
+        if (isDurableObjectSqliteNoMemError(error)) throw error;
+        log.warn('archive_target_abandon_fts_delete_marker_failed', {
+          sessionId: input.sessionId,
+          rowid: row.rowid,
+          ...serializeError(error),
+        });
+      }
+      rowsDeleted +=
+        sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', row.rowid).rowsWritten ?? 0;
+    }
+    budget -= grouped.length;
+    if (budget > 0) {
+      const documents = sql
+        .exec(
+          `SELECT rowid, content FROM project_data_archive_search_documents
+           WHERE session_id = ? LIMIT ?`,
+          input.sessionId,
+          budget
+        )
+        .toArray();
+      for (const row of documents) {
+        sql.exec(
+          `INSERT INTO project_data_archive_search_documents_fts(
+             project_data_archive_search_documents_fts, rowid, content
+           ) VALUES('delete', ?, ?)`,
+          row.rowid,
+          row.content
+        );
+        rowsDeleted +=
+          sql.exec('DELETE FROM project_data_archive_search_documents WHERE rowid = ?', row.rowid)
+            .rowsWritten ?? 0;
+      }
+      budget -= documents.length;
+    }
+    if (budget > 0) {
+      const deleted =
+        sql.exec(
+          `DELETE FROM tool_payload_archives WHERE rowid IN (
+             SELECT rowid FROM tool_payload_archives WHERE session_id = ? LIMIT ?)`,
+          input.sessionId,
+          budget
+        ).rowsWritten ?? 0;
+      rowsDeleted += deleted;
+      budget -= deleted;
+    }
+    if (budget > 0) {
+      const deleted =
+        sql.exec(
+          `DELETE FROM chat_messages WHERE rowid IN (
+             SELECT rowid FROM chat_messages WHERE session_id = ? LIMIT ?)`,
+          input.sessionId,
+          budget
+        ).rowsWritten ?? 0;
+      rowsDeleted += deleted;
+      budget -= deleted;
+    }
+    if (budget <= 0) return { removed: false, remaining: true, rowsDeleted };
+    // Everything row-sized is gone; the rest is one session's metadata.
+    sql.exec(
+      'DELETE FROM project_data_archive_target_chunks WHERE session_id = ? AND migration_id = ?',
+      input.sessionId,
+      input.migrationId
+    );
+    sql.exec(
+      `DELETE FROM project_data_archive_target_sessions
+       WHERE session_id = ? AND project_id = ? AND migration_id = ? AND owner_name = ? AND generation = ?`,
+      input.sessionId,
+      input.projectId,
+      input.migrationId,
+      input.targetOwnerName,
+      input.targetGeneration
+    );
+    sql.exec('DELETE FROM chat_sessions WHERE id = ?', input.sessionId);
+    clearArchiveTargetVerifyProgress(sql, input.sessionId);
+    return { removed: true, remaining: false, rowsDeleted };
+  });
+}
+
+/**
+ * Give a resumed claim its own source-intent token without re-running the prepare, so the root's
+ * token check (`assertMatchingSourceIntent`) keeps rejecting a predecessor claim's late calls.
+ * O(1): no hash. Refuses once the session has flipped.
+ */
+export function reattachArchiveSourceToken(
+  sql: SqlStorage,
+  input: ArchiveSourceInspectIntentInput & { sourceIntentToken: string; now: number }
+): boolean {
+  validateRootSourceOwner(input);
+  const intent = readSourceIntent(sql, input.sessionId);
+  const state = assertSameSourceIntentMigration(intent, input);
+  if (state === 'source_deleted' || state === 'rehome_exported') return false;
+  reattachSourceIntentToken(sql, input, state);
+  return true;
+}
+
 export async function finalizeSourceDelete(
   sql: SqlStorage,
   input: ArchiveSourceFinalizeDeleteInput,
-  transactionSync: <T>(callback: () => T) => T = (callback) => callback()
+  transactionSync: <T>(callback: () => T) => T = (callback) => callback(),
+  options: { proveByWriteGeneration?: boolean } = {}
 ): Promise<ArchiveSourceFinalizeDeleteResult> {
   validateRootSourceOwner(input);
   const intent = readSourceIntent(sql, input.sessionId);
@@ -3484,49 +4347,45 @@ export async function finalizeSourceDelete(
     input.now,
     input.minTerminalAgeMs ?? PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS
   );
-  const hashPageRows = resolveHashPageRows(input.hashPageRows);
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows });
-  if (terminalVersion.sha256 !== input.expectedTerminalVersionSha256) {
-    throw new ProjectDataArchiveInvariantError(
-      'terminal_version_changed',
-      'ProjectData archive terminal version changed before source delete'
-    );
+  // Prove the root unchanged since prepare. A prepare that recorded its write generation
+  // (migration 076 triggers) is proven in O(1): any write to the hashed rows since then moved the
+  // generation. Intents prepared before that, and coordinators calling the legacy
+  // `archiveSourceFinalizeDelete`, re-hash the whole session as before.
+  const preparedGeneration = optionalInteger(intent?.prepared_write_generation);
+  let lastMessageAt: number | null;
+  if (
+    options.proveByWriteGeneration &&
+    preparedGeneration !== null &&
+    archiveWriteGenerationFenceInstalled(sql)
+  ) {
+    if (readArchiveWriteGeneration(sql, input.sessionId) !== preparedGeneration) {
+      throw new ProjectDataArchiveInvariantError(
+        'terminal_version_changed',
+        'ProjectData archive source was written after its terminal version was prepared'
+      );
+    }
+    lastMessageAt = optionalInteger(intent?.last_message_at);
+  } else {
+    const hashPageRows = resolveHashPageRows(input.hashPageRows);
+    const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows });
+    if (terminalVersion.sha256 !== input.expectedTerminalVersionSha256) {
+      throw new ProjectDataArchiveInvariantError(
+        'terminal_version_changed',
+        'ProjectData archive terminal version changed before source delete'
+      );
+    }
+    lastMessageAt = terminalVersion.lastMessageAt;
   }
 
-  // All destructive rows and the source-deleted routing anchor commit in one
-  // SQLite transaction. A reset can occur before or after this callback, never
-  // between a partial transcript delete and its durable state transition.
+  // The flip: the routing anchors and the `source_deleted` intent commit in one SQLite
+  // transaction, and NO transcript rows are deleted here. Deleting a whole session in this
+  // transaction held the root object for up to ~5.5 s at 9k messages in production
+  // (2026-11-12) and would be ~60 s at the 100k-message cap. The rows are reclaimed afterwards
+  // in bounded pages by `reclaimArchiveSourcePage`. Until then they are unreachable: exact reads
+  // fail closed on the `source_deleted` intent, routing points at the shard, and project search
+  // dedupes by (sessionId, id).
   return transactionSync(() => {
     const databaseSizeBeforeBytes = databaseSize(sql);
-    let ftsRowsDeleted = 0;
-    let groupedRowsDeleted = 0;
-    forEachGroupedRowPaged(sql, input.sessionId, hashPageRows, (row) => {
-      try {
-        sql.exec(
-          `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
-           VALUES('delete', ?, ?)`,
-          row.rowid,
-          row.content
-        );
-        ftsRowsDeleted++;
-      } catch (error) {
-        log.warn('archive_source_fts_delete_marker_failed', {
-          sessionId: input.sessionId,
-          rowid: row.rowid,
-          ...serializeError(error),
-        });
-      }
-      const deleteGrouped = sql.exec(
-        'DELETE FROM chat_messages_grouped WHERE rowid = ?',
-        row.rowid
-      );
-      groupedRowsDeleted += deleteGrouped.rowsWritten ?? 0;
-    });
-    const toolArchiveRowsDeleted =
-      sql.exec('DELETE FROM tool_payload_archives WHERE session_id = ?', input.sessionId)
-        .rowsWritten ?? 0;
-    const messagesDeleted =
-      sql.exec('DELETE FROM chat_messages WHERE session_id = ?', input.sessionId).rowsWritten ?? 0;
     sql.exec(
       `UPDATE chat_sessions
        SET archive_last_message_at = ?,
@@ -3536,13 +4395,12 @@ export async function finalizeSourceDelete(
            archive_state = 'source_deleted',
            updated_at = updated_at
        WHERE id = ?`,
-      terminalVersion.lastMessageAt,
+      lastMessageAt,
       input.targetOwnerName,
       input.targetGeneration,
       input.migrationId,
       input.sessionId
     );
-    const databaseSizeAfterBytes = databaseSize(sql);
     sql.exec(
       `UPDATE project_data_archive_source_intents
        SET state = 'source_deleted',
@@ -3557,23 +4415,321 @@ export async function finalizeSourceDelete(
       input.r2ManifestKey,
       input.now,
       databaseSizeBeforeBytes,
-      databaseSizeAfterBytes,
+      databaseSizeBeforeBytes,
       input.now,
       input.sessionId,
       input.migrationId,
       input.sourceIntentToken
     );
+    sql.exec(
+      'INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)',
+      RECLAIM_PENDING_META_PREFIX + input.sessionId,
+      input.migrationId
+    );
     return {
       idempotent: false,
-      lastMessageAt: terminalVersion.lastMessageAt,
+      lastMessageAt: lastMessageAt,
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      ftsRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      databaseSizeBeforeBytes,
+      databaseSizeAfterBytes: databaseSizeBeforeBytes,
+    };
+  });
+}
+
+/**
+ * Disagreements the flip may find between the root and the copy it is about to publish that
+ * mean "this session changed or became busy after it was fenced", not "the archive is corrupt".
+ * Each one is the root's own eligibility or terminal-version check. The root still holds every
+ * row, so the safe answer is to unwind to the root and retry after the refusal window, never to
+ * fail the migration toward poison and the project breaker.
+ */
+const FLIP_UNWINDABLE_REASONS = new Set([
+  'session_not_terminal',
+  'terminal_grace_not_elapsed',
+  'active_acp_session',
+  'active_session_state',
+  'active_task_wait',
+  'active_idle_cleanup',
+  'unresolved_attention',
+  'message_comments_present',
+  'tool_payload_cleanup_incomplete',
+  'terminal_version_changed',
+]);
+
+export type ArchiveSourceFlipRefusal = {
+  refused: true;
+  reason: string;
+  message: string;
+};
+
+/**
+ * `finalizeSourceDelete` for coordinators that can unwind: a late-writer disagreement comes back
+ * as a value, so its reason survives the RPC boundary (rule 63) and nothing has been written.
+ * A separate RPC rather than a changed return shape, so a coordinator from before this change
+ * keeps calling `archiveSourceFinalizeDelete` and keeps its throwing contract during a rollout.
+ */
+export async function flipArchiveSource(
+  sql: SqlStorage,
+  input: ArchiveSourceFinalizeDeleteInput,
+  transactionSync?: <T>(callback: () => T) => T
+): Promise<ArchiveSourceFinalizeDeleteResult | ArchiveSourceFlipRefusal> {
+  try {
+    return await finalizeSourceDelete(sql, input, transactionSync, {
+      proveByWriteGeneration: true,
+    });
+  } catch (error) {
+    if (
+      error instanceof ProjectDataArchiveInvariantError &&
+      FLIP_UNWINDABLE_REASONS.has(error.reason)
+    ) {
+      return { refused: true, reason: error.reason, message: error.message };
+    }
+    throw error;
+  }
+}
+
+export type ArchiveSourceReclaimPageInput = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string;
+  /** Most rows this call deletes across all transcript tables. */
+  maxRows: number;
+};
+
+export type ArchiveSourceReclaimPageResult = {
+  messagesDeleted: number;
+  groupedRowsDeleted: number;
+  ftsRowsDeleted: number;
+  toolArchiveRowsDeleted: number;
+  /** True when this session still owns transcript rows in the root after this page. */
+  remaining: boolean;
+  /** Root database size before and after this page, for reclaimed-bytes accounting. */
+  databaseSizeBeforeBytes?: number;
+  databaseSizeAfterBytes?: number;
+  /**
+   * True when a copy-back is restoring this session: nothing was deleted, because the rows in
+   * the root are being restored rather than left over.
+   */
+  copyBackInProgress?: boolean;
+};
+
+/**
+ * Set by the first copy-back restore chunk and cleared when the copy-back is marked restored.
+ * While it is present the session's root rows are being RESTORED, not left over, so reclaim
+ * must not touch them. The value is the migration id, and only a fence for the session's
+ * current migration counts. Kept in `do_meta` so no table migration is needed.
+ */
+const COPY_BACK_IN_PROGRESS_META_PREFIX = 'archive_copy_back_in_progress:';
+/**
+ * Set by the flip (`finalizeSourceDelete`) and cleared by the reclaim page that deletes the
+ * session's last row, so listing pending reclaims costs O(pending) rather than a probe of every
+ * `source_deleted` intent the root has ever recorded. Value: the migration id.
+ */
+const RECLAIM_PENDING_META_PREFIX = 'archive_reclaim_pending:';
+/** Upper bound on one reclaim page, whatever the caller asks for, so no page holds the root long. */
+const ARCHIVE_RECLAIM_MAX_PAGE_ROWS = 2_000;
+
+const COPY_BACK_IN_PROGRESS_SQL = 'SELECT 1 AS present FROM do_meta WHERE key = ? AND value = ?';
+
+function isCopyBackInProgress(sql: SqlStorage, sessionId: string, migrationId: string): boolean {
+  return (
+    sql
+      .exec(COPY_BACK_IN_PROGRESS_SQL, COPY_BACK_IN_PROGRESS_META_PREFIX + sessionId, migrationId)
+      .toArray().length > 0
+  );
+}
+
+const SOURCE_OWNS_ROWS_SQL = `SELECT (
+    EXISTS (SELECT 1 FROM chat_messages WHERE session_id = ?)
+    OR EXISTS (SELECT 1 FROM chat_messages_grouped WHERE session_id = ?)
+    OR EXISTS (SELECT 1 FROM tool_payload_archives WHERE session_id = ?)
+  ) AS present`;
+
+function sourceStillOwnsRows(sql: SqlStorage, sessionId: string): boolean {
+  const row = sql.exec(SOURCE_OWNS_ROWS_SQL, sessionId, sessionId, sessionId).toArray()[0];
+  return Number(row?.present ?? 0) === 1;
+}
+
+const LIST_RECLAIM_PENDING_SQL = `SELECT i.session_id, i.migration_id, i.source_deleted_at,
+    EXISTS (
+      SELECT 1 FROM do_meta fence
+      WHERE fence.key = ? || i.session_id AND fence.value = i.migration_id
+    ) AS fenced
+  FROM do_meta pending
+  JOIN project_data_archive_source_intents i
+    ON i.session_id = substr(pending.key, ?)
+   AND i.migration_id = pending.value
+  WHERE pending.key >= ? AND pending.key < ?
+    AND i.project_id = ?
+    AND i.state = 'source_deleted'
+    AND (? IS NULL OR i.session_id = ?)
+  ORDER BY pending.key ASC
+  LIMIT ?`;
+
+/**
+ * Sessions whose archive flip has committed (`source_deleted` intent) and whose transcript rows
+ * have not all been reclaimed. Read from the marker the flip writes, so a reclaim interrupted by
+ * a crash, a deadline, or an older coordinator that published without reclaiming is still
+ * found. A session fenced by an in-progress copy-back of the same migration is returned with
+ * `fenced: true`: its rows must not be reclaimed, but it is still pending, so a complete listing
+ * that omits a session proves that session has nothing left to reclaim.
+ */
+export function listArchiveSourceReclaimPending(
+  sql: SqlStorage,
+  input: { projectId: string; limit: number; sessionId?: string | null }
+): Array<{ sessionId: string; migrationId: string; flippedAt: number | null; fenced: boolean }> {
+  const sessionId = input.sessionId ?? null;
+  return sql
+    .exec(
+      LIST_RECLAIM_PENDING_SQL,
+      COPY_BACK_IN_PROGRESS_META_PREFIX,
+      RECLAIM_PENDING_META_PREFIX.length + 1,
+      RECLAIM_PENDING_META_PREFIX,
+      // The smallest string greater than every key with the prefix (':' + 1 = ';').
+      RECLAIM_PENDING_META_PREFIX.slice(0, -1) + ';',
+      input.projectId,
+      sessionId,
+      sessionId,
+      Math.max(1, Math.floor(input.limit))
+    )
+    .toArray()
+    .map((row) => ({
+      sessionId: strictString(row.session_id, 'source_intent.session_id'),
+      migrationId: strictString(row.migration_id, 'source_intent.migration_id'),
+      flippedAt: optionalInteger(row.source_deleted_at),
+      fenced: Number(row.fenced) === 1,
+    }));
+}
+
+/**
+ * Delete at most `maxRows` transcript rows of a session whose archive flip has committed.
+ *
+ * Messages go first: materialization builds grouped rows from messages, so removing messages
+ * first means nothing can regenerate what a later page deletes. Grouped rows go with their FTS
+ * delete markers, then tool-payload archive rows. Each call is one transaction, so a reset
+ * leaves whole pages, and the next call continues from whatever is left.
+ */
+export function reclaimArchiveSourcePage(
+  sql: SqlStorage,
+  input: ArchiveSourceReclaimPageInput,
+  transactionSync: <T>(callback: () => T) => T = (callback) => callback()
+): ArchiveSourceReclaimPageResult {
+  const intent = readSourceIntent(sql, input.sessionId);
+  if (
+    !intent ||
+    intent.project_id !== input.projectId ||
+    intent.migration_id !== input.migrationId ||
+    intent.state !== 'source_deleted'
+  ) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_reclaim_not_flipped',
+      'ProjectData archive source rows may be reclaimed only after this migration flipped the session'
+    );
+  }
+  if (isCopyBackInProgress(sql, input.sessionId, input.migrationId)) {
+    return {
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      ftsRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      remaining: true,
+      copyBackInProgress: true,
+    };
+  }
+  const requested = Number.isFinite(input.maxRows) ? Math.floor(input.maxRows) : 1;
+  const maxRows = Math.min(ARCHIVE_RECLAIM_MAX_PAGE_ROWS, Math.max(1, requested));
+  return transactionSync(() => {
+    const databaseSizeBeforeBytes = databaseSize(sql);
+    let budget = maxRows;
+    const messagesDeleted =
+      sql.exec(
+        `DELETE FROM chat_messages WHERE rowid IN (
+           SELECT rowid FROM chat_messages WHERE session_id = ? LIMIT ?)`,
+        input.sessionId,
+        budget
+      ).rowsWritten ?? 0;
+    budget -= messagesDeleted;
+    let groupedRowsDeleted = 0;
+    let ftsRowsDeleted = 0;
+    if (budget > 0) {
+      const rows = sql
+        .exec(
+          'SELECT rowid, content FROM chat_messages_grouped WHERE session_id = ? LIMIT ?',
+          input.sessionId,
+          budget
+        )
+        .toArray();
+      for (const row of rows) {
+        try {
+          sql.exec(
+            `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
+             VALUES('delete', ?, ?)`,
+            row.rowid,
+            row.content
+          );
+          ftsRowsDeleted++;
+        } catch (error) {
+          // Out of memory must roll the page back rather than delete the row and strand its
+          // FTS entry; the next page retries (same policy as grouped-fts-cleanup.ts).
+          if (isDurableObjectSqliteNoMemError(error)) throw error;
+          log.warn('archive_source_fts_delete_marker_failed', {
+            sessionId: input.sessionId,
+            rowid: row.rowid,
+            ...serializeError(error),
+          });
+        }
+        groupedRowsDeleted +=
+          sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', row.rowid).rowsWritten ?? 0;
+      }
+      budget -= rows.length;
+    }
+    let toolArchiveRowsDeleted = 0;
+    if (budget > 0) {
+      toolArchiveRowsDeleted =
+        sql.exec(
+          `DELETE FROM tool_payload_archives WHERE rowid IN (
+             SELECT rowid FROM tool_payload_archives WHERE session_id = ? LIMIT ?)`,
+          input.sessionId,
+          budget
+        ).rowsWritten ?? 0;
+    }
+    const remaining = sourceStillOwnsRows(sql, input.sessionId);
+    const databaseSizeAfterBytes = databaseSize(sql);
+    if (!remaining) {
+      sql.exec('DELETE FROM do_meta WHERE key = ?', RECLAIM_PENDING_META_PREFIX + input.sessionId);
+      sql.exec(
+        'DELETE FROM project_data_archive_source_write_generation WHERE session_id = ?',
+        input.sessionId
+      );
+      // The reclaim evidence the flip recorded as "nothing freed yet" becomes the real
+      // post-reclaim size once the last row is gone.
+      sql.exec(
+        `UPDATE project_data_archive_source_intents
+         SET source_database_size_after = ?
+         WHERE session_id = ? AND migration_id = ? AND state = 'source_deleted'`,
+        databaseSizeAfterBytes,
+        input.sessionId,
+        input.migrationId
+      );
+    }
+    return {
       messagesDeleted,
       groupedRowsDeleted,
       ftsRowsDeleted,
       toolArchiveRowsDeleted,
+      remaining,
       databaseSizeBeforeBytes,
       databaseSizeAfterBytes,
     };
   });
+}
+
+/** True when a flipped session still has transcript rows waiting to be reclaimed. */
+export function archiveSourceReclaimOutstanding(sql: SqlStorage, sessionId: string): boolean {
+  return sourceStillOwnsRows(sql, sessionId);
 }
 
 export function markSourceRecoveryManifestPersisted(
@@ -3694,10 +4850,10 @@ export function archiveSourceReadMessages(
     targetGeneration: 1,
   });
   const source = readSourceIntent(sql, input.sessionId);
-  if (source && isActiveSourceIntentState(validateIntentState(source.state))) {
+  if (source && isSourceExactReadFenced(validateIntentState(source.state))) {
     throw new ProjectDataArchiveInvariantError(
       'source_migration_in_progress',
-      'ProjectData archive source exact read failed closed because the source has an archive migration intent'
+      'ProjectData archive source exact read failed closed because the session was flipped to its archive shard'
     );
   }
   const compactOptions = compact ? messages.resolveCompactMessageOptions(env) : undefined;
@@ -3726,10 +4882,10 @@ export function archiveSourceReadMessageCount(
     targetGeneration: 1,
   });
   const source = readSourceIntent(sql, input.sessionId);
-  if (source && isActiveSourceIntentState(validateIntentState(source.state))) {
+  if (source && isSourceExactReadFenced(validateIntentState(source.state))) {
     throw new ProjectDataArchiveInvariantError(
       'source_migration_in_progress',
-      'ProjectData archive source count read failed closed because the source has an archive migration intent'
+      'ProjectData archive source count read failed closed because the session was flipped to its archive shard'
     );
   }
   return messages.getMessageCount(sql, input.sessionId, roles);
@@ -3747,10 +4903,10 @@ export function assertSourceExactReadAvailable(
     targetGeneration: 1,
   });
   const source = readSourceIntent(sql, input.sessionId);
-  if (source && isActiveSourceIntentState(validateIntentState(source.state))) {
+  if (source && isSourceExactReadFenced(validateIntentState(source.state))) {
     throw new ProjectDataArchiveInvariantError(
       'source_migration_in_progress',
-      `ProjectData archive source ${operation} failed closed because the source has an archive migration intent`
+      `ProjectData archive source ${operation} failed closed because the session was flipped to its archive shard`
     );
   }
 }
