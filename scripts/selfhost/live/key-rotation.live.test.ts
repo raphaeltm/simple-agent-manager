@@ -93,6 +93,8 @@ async function setup(env) {
     await env.DATABASE.prepare('CREATE TABLE IF NOT EXISTS ' + location.table + ' (id TEXT PRIMARY KEY, ' + columns + ')').run();
   }
   await env.DATABASE.prepare('CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, placement_credential_fingerprint TEXT)').run();
+  // BetterAuth's OAuth token table: rotate encryption-key chains better-auth-secret over it.
+  await env.DATABASE.prepare('CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, access_token TEXT, refresh_token TEXT)').run();
   for (let i = 0; i < ${ROWS}; i += 1) {
     const sealed = await encrypt('secret-' + i, env.ENCRYPTION_KEY);
     await env.DATABASE.prepare('INSERT INTO credentials (id, encrypted_token, iv) VALUES (?, ?, ?)')
@@ -348,6 +350,10 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
 
     const head = (await openRotationStore(box(), state).head()).secrets;
     expect(head.ENCRYPTION_KEY).not.toBe(oldKey);
+    // BETTER_AUTH_SECRET was unset, so the old key signed sessions: the chained step replaced it.
+    expect(head.BETTER_AUTH_SECRET).toBeTruthy();
+    expect(head.BETTER_AUTH_SECRET).not.toBe(oldKey);
+    expect(head.BETTER_AUTH_SECRET_PREVIOUS).toBeUndefined();
     expect(head.ENCRYPTION_KEY_PREVIOUS).toBeUndefined();
     expect(head.SAM_KEY_ROTATION_CONTROL_KEY).toBeUndefined();
     const after = await readProbe();
