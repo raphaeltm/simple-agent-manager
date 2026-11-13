@@ -11,11 +11,13 @@
  *
  * See: .claude/rules/60-request-io-and-bundle-budgets.md
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS } from '../../../src/lib/shared-flight';
 import * as svc from '../../../src/services/project-data';
 import {
+  DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS,
   DEFAULT_PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES,
   getProjectDataEnsureMemoMaxEntries,
   projectDataEnsureMemoSize,
@@ -156,6 +158,50 @@ describe('ProjectData ensure memo — DO roundtrip budget', () => {
 
     expect(totals.ensure).toBe(1);
     expect(totals.method).toBe(8);
+  });
+
+  it('runs its own ensure once a joined ensure is abandoned (celld drops a cancelled request’s RPC)', async () => {
+    // On celld, the request that started the ensure can lose its client; its RPC is then dropped
+    // and never settles (lib/shared-flight.ts). Model it as an ensure that never resolves.
+    vi.useFakeTimers();
+    try {
+      let ensureCalls = 0;
+      let methodCalls = 0;
+      const namespace = {
+        idFromName: (name: string) => ({ toString: () => `doid-${name}` }),
+        get: () => ({
+          ensureProjectId: () => {
+            ensureCalls += 1;
+            return ensureCalls === 1 ? new Promise<void>(() => undefined) : Promise.resolve();
+          },
+          getSummary: async () => {
+            methodCalls += 1;
+            return { sessionCount: 0 };
+          },
+        }),
+      };
+      const env = { PROJECT_DATA: namespace } as unknown as Env;
+
+      void svc.getSummary(env, 'proj-dropped'); // the starter, whose client goes away
+      await vi.advanceTimersByTimeAsync(0);
+      let joinerDone = false;
+      const joiner = svc.getSummary(env, 'proj-dropped').then(() => (joinerDone = true));
+      // Still joined just before the bound: a slow but live ensure is not duplicated.
+      await vi.advanceTimersByTimeAsync(
+        DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS + DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS - 1
+      );
+      expect(joinerDone).toBe(false);
+      expect(ensureCalls).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await joiner;
+      expect(ensureCalls).toBe(2);
+      expect(methodCalls).toBe(1);
+      // The joiner's own ensure is remembered: later callers pay no ensure.
+      await svc.getSummary(env, 'proj-dropped');
+      expect(ensureCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('re-ensures after a failed DO call so a reset DO re-persists its projectId', async () => {

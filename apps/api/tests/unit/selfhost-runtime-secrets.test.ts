@@ -1,8 +1,9 @@
 /**
- * The API Worker's side of sealed self-host secrets (src/selfhost/runtime-secrets.ts): one fetch
- * per isolate shared by concurrent callers, fail closed when the agent is unreachable or answers
- * wrongly, and Durable Objects held until their secrets arrive. The same module on the real
- * celld runtime: scripts/selfhost/live/key-agent-celld.live.test.ts.
+ * The API Worker's side of sealed self-host secrets (src/selfhost/runtime-secrets.ts): cached per
+ * isolate after the first success, each cold caller making its own request (never joining
+ * another request's load), fail closed when the agent is unreachable or answers wrongly, and
+ * Durable Objects held until their secrets arrive. The same module on the real celld runtime:
+ * scripts/selfhost/live/key-agent-celld.live.test.ts and shared-flight-cancel.live.test.ts.
  */
 import { generateKeyPairSync, sign } from 'node:crypto';
 
@@ -94,20 +95,36 @@ describe('wrapWorker fetch', () => {
     expect(base).not.toHaveProperty('ENCRYPTION_KEY'); // the runtime's env is never mutated
   });
 
-  it('shares one in-flight request between concurrent first requests', async () => {
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((done) => (release = done));
+  it('never makes a cold request wait on another request’s load', async () => {
+    // celld drops a load whose request's client disconnected: that fetch never settles. Model it
+    // as a fetch that never resolves, then prove the next request does not wait on it.
     const respond = ok({ A_SECRET: 'v' });
-    fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
-      await gate;
-      return await respond(url, init);
-    });
+    fetchMock
+      .mockImplementationOnce(() => new Promise<Response>(() => undefined))
+      .mockImplementation(respond);
     const worker = wrapWorker({ fetch: async () => new Response('ok') });
-    const pending = [1, 2, 3].map(() => worker.fetch!(new Request('https://api/'), env(), ctx));
-    await Promise.resolve();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    release();
-    expect((await Promise.all(pending)).map((r) => r.status)).toEqual([200, 200, 200]);
+    const stuck = worker.fetch!(new Request('https://api/'), env(), ctx);
+    let stuckSettled = false;
+    void stuck.then(() => (stuckSettled = true));
+    const next = await worker.fetch!(new Request('https://api/'), env(), ctx);
+    expect(next.status).toBe(200);
+    expect(stuckSettled).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The success is cached: a third request asks nobody.
+    expect((await worker.fetch!(new Request('https://api/'), env(), ctx)).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets concurrent cold requests each ask the agent once', async () => {
+    fetchMock.mockImplementation(ok({ A_SECRET: 'v' }));
+    const worker = wrapWorker({ fetch: async () => new Response('ok') });
+    const statuses = await Promise.all(
+      [1, 2, 3].map(
+        async () => (await worker.fetch!(new Request('https://api/'), env(), ctx)).status
+      )
+    );
+    expect(statuses).toEqual([200, 200, 200]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('fails closed with 503 when the agent is unreachable, never calling the handler, and retries next time', async () => {

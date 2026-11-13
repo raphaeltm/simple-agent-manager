@@ -11,10 +11,18 @@
  * The Cloudflare build's entry is `src/index.ts`, which does not, so Cloudflare installs keep
  * their Worker secret bindings and never run this code.
  *
- * Cost: one loopback request per isolate (celld retires idle stateless isolates every 30 s pool
- * tick), shared by every request that arrives while it is in flight. If the agent is down the
+ * Cost: one loopback request per cold request, until one succeeds and the isolate caches the
+ * answer (celld retires idle stateless isolates every 30 s pool tick). If the agent is down the
  * Worker fails closed: HTTP 503 `SECRETS_UNAVAILABLE`, a failed cron run, a Durable Object that
  * refuses its events. Nothing runs without its secrets.
+ *
+ * Why every caller makes its own request instead of joining one in flight: celld 0.6.3 gives an
+ * async op (fetch, setTimeout, AbortSignal.timeout) to the request that started it and drops it
+ * when that request's client disconnects. A shared in-flight load started by a request whose
+ * client then gave up never settles, its abort timer included, so every request that joined it
+ * hung until its own client gave up or celld's 300 s handler budget ran out: the one-minute
+ * hangs on the box (task H2, scripts/selfhost/live/shared-flight-cancel.live.test.ts). The agent
+ * caches the opened bundle, so a concurrent cold burst costs one signature per request.
  */
 
 import { log } from '../lib/logger';
@@ -59,12 +67,10 @@ export class RuntimeSecretsUnavailableError extends Error {
 }
 
 let cached: { bundleId: string; secrets: RuntimeSecrets } | null = null;
-let inflight: { bundleId: string; promise: Promise<RuntimeSecrets> } | null = null;
 
 /** For tests: forget this isolate's copy, as a fresh isolate would. */
 export function resetRuntimeSecretsForTests(): void {
   cached = null;
-  inflight = null;
 }
 
 interface AgentSettings {
@@ -209,37 +215,17 @@ async function fetchSecrets(agent: AgentSettings): Promise<RuntimeSecrets> {
 }
 
 /**
- * The deployment's secrets: from this isolate's memory, else one request to the key agent shared
- * by every caller that arrives while it runs. A failure is not cached, so the next request
- * retries (a refused connection fails in about a millisecond).
+ * The deployment's secrets: from this isolate's memory, else one request to the key agent made by
+ * this caller. Never joins another request's load (see the module comment). A failure is not
+ * cached, so the next request retries (a refused connection fails in about a millisecond).
  */
 export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecrets> {
   const hit = cachedRuntimeSecrets(env);
   if (hit) return hit;
   const agent = settings(env);
-  const { bundleId } = agent;
-  if (!inflight || inflight.bundleId !== bundleId) {
-    const promise = fetchSecrets(agent).then(
-      (secrets) => {
-        cached = { bundleId, secrets };
-        return secrets;
-      },
-      (error: unknown) => {
-        throw error;
-      }
-    );
-    const entry = { bundleId, promise };
-    inflight = entry;
-    promise
-      .then(
-        () => undefined,
-        () => undefined
-      )
-      .finally(() => {
-        if (inflight === entry) inflight = null;
-      });
-  }
-  return await inflight.promise;
+  const secrets = await fetchSecrets(agent);
+  cached = { bundleId: agent.bundleId, secrets };
+  return secrets;
 }
 
 /**
