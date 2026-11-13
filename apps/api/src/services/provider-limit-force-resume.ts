@@ -1,4 +1,5 @@
 /** Owner recovery of a saved callback hold. Reuses the existing claim and runner. */
+import type { ProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -14,7 +15,6 @@ import {
   parseProviderLimitSnapshotRow,
   resolveProviderLimitProfileId,
 } from './provider-limit-approval-context';
-import type { ProviderLimitWait } from './provider-limit-policy';
 import {
   loadProviderLimitRecoveryApproval,
   providerLimitRecoveryApprovalD1Fence,

@@ -18,7 +18,7 @@ import type {
 import { handleWorkspaceReady } from '../../src/durable-objects/task-runner/workspace-ready-steps';
 import { createSqliteD1 } from '../helpers/sqlite-d1';
 
-const schemaSource = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
+const schemaSource = readFileSync(resolve(process.cwd(), '../../packages/worker-core/src/schema.ts'), 'utf8');
 const nodeLifecycleSource = readFileSync(
   resolve(process.cwd(), 'src/routes/node-lifecycle.ts'),
   'utf8'

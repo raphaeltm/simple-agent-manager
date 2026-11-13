@@ -1,3 +1,5 @@
+import { OperationError, operationErrorHttpStatus } from '@simple-agent-manager/operations';
+import { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from '@simple-agent-manager/operations';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
@@ -8,9 +10,7 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { AppError } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
-import { OperationError, operationErrorHttpStatus } from '../operations/errors';
-import { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from '../operations/idea-update-core';
-import { webOperationContext } from '../operations/types';
+import { webOperationContext } from '../operation-ports';
 import { jsonValidator } from '../schemas';
 
 const ideaUpdateRoutes = new Hono<{ Bindings: Env }>();

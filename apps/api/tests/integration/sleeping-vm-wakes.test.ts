@@ -7,33 +7,33 @@
  * authority the wake carries. `eviction-recovery-prompt.test.ts` runs the real wake from a
  * queued-message delivery down to the TaskRunner start it requests.
  */
+import {
+  type DurabilityFoundationHooks,
+  finalizeAcceptedPromptDelivery,
+  processPromptDeliveryAlarm,
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import {
+  OWNER_ONLY_SCHEDULE,
+  requireScheduleAction,
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-authority';
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
+import {
+  createSchedule,
+  getSchedule,
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import {
+  admitProjectEvent,
+  createProjectEventSubscription,
+} from '@simple-agent-manager/project-data/internal/do/project-events';
+import {
+  runProjectEventWakeMaterializationBatch,
+  selectProjectEventWakeMaterializationCandidates,
+} from '@simple-agent-manager/project-data/internal/do/project-events-materialization';
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import {
-  type DurabilityFoundationHooks,
-  finalizeAcceptedPromptDelivery,
-  processPromptDeliveryAlarm,
-} from '../../src/durable-objects/project-data/durability-foundation';
-import {
-  OWNER_ONLY_SCHEDULE,
-  requireScheduleAction,
-} from '../../src/durable-objects/project-data/project-event-schedules-authority';
-import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
-import {
-  createSchedule,
-  getSchedule,
-} from '../../src/durable-objects/project-data/project-event-schedules-storage';
-import {
-  admitProjectEvent,
-  createProjectEventSubscription,
-} from '../../src/durable-objects/project-data/project-events';
-import {
-  runProjectEventWakeMaterializationBatch,
-  selectProjectEventWakeMaterializationCandidates,
-} from '../../src/durable-objects/project-data/project-events-materialization';
 import type { Env } from '../../src/env';
 import { isSessionRecoverySourceTaskGuardValid } from '../../src/services/session-recovery-authority';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep';

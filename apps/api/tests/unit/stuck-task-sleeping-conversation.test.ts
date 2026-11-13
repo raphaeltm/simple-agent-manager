@@ -285,6 +285,8 @@ beforeEach(() => {
     schema.workspaces,
     schema.nodes,
     schema.sessionSnapshots,
+    // Read by the snapshot-expiry sweep to leave archived and fenced sessions alone.
+    schema.projectDataSessionLocations,
     schema.triggerExecutions,
     schema.projectEventSourceOutbox,
     observabilitySchema.platformErrors,

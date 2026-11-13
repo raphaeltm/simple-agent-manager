@@ -11,7 +11,7 @@ Raphaël reports externally resetting his selected Claude account and cannot fin
 - `provider-limit-admission.ts`: released override bypasses live rejected window; must bind profile/current credential and deadline, preserve changed-account review.
 - `project-event-schedules-delivery.ts`: scheduled callback continuation validates scheduleKey before submit; changing the key invalidates obsolete pending notices. Reconcile must still inspect already-issued receipts.
 - Existing restored-session prompt machinery retains original accepted inbox messages. Do not repost/fork/replay.
-- Sol owns shared catalog/placement and committed-active/readiness fixes. Coordinate imports and staging, do not duplicate. The recovery scan now needs additive ordered partial index0238; 0237 is reserved by Sol.
+- Sol owns shared catalog/placement and committed-active/readiness fixes. Coordinate imports and staging, do not duplicate. The recovery scan now needs additive ordered partial index0238; applied main0237_archive_reclaim_pending stays unchanged; Sol reserved unapplied0239 for catalog.
 
 ## Implementation checklist
 
@@ -98,3 +98,9 @@ Read-only peer review additionally caught missing in-memory hydration after auth
 
 
 Final corrective validation is settled: all39 real Workers cases across four files passed on the frozen source (exit0,353.40s; full-restore13 plus scheduled/authority/binding controls). This includes real non-null skill creation, checkpoint preparation/completion between restore and final authority, missing and stale runner repair using the same current claim, marker progress/ACK/timeout, first-release expiry/membership denial, and original delivery once. Native560/20 passed before the final small refinements; all134 affected owner/intent/runner/state cases then passed on the final refinements. Final API typecheck, changed-file lint and diff check passed. Read-only peer audit found no unresolved blocker. A post-nudge claim-advance regression failed before the atomic expected-attempt ACK fence and passes after it. Fresh source CI/review, independent coordinator approval and final combined staging remain pending.
+
+## Current-main package port (2026-11-13)
+
+Coordinator authorized one code-only refresh onto main527f16b9580ad7cd762c60ea7e711175dd843ada on this existing task. Earlier6367435 source reviews/CI and db0ef integration proof are historical. Pure provider wait schema and consent fields move with the existing scheduler-core public entry; D1 scan index declaration moves to worker-core schema; ProjectData schedule delivery keeps receipt-only no-wake reconciliation behind the existing package ports. Worker recovery/credential SQL and claim, lease, task, runner, acknowledgement and source checkpoint fences remain worker-owned. Migration ownership confirmed with sole catalog owner: preserve applied archive0237 byte-identical, retain unapplied force index0238, reserve unapplied catalog0239.
+
+Port verification: all11 dependency builds, API typecheck, API/package lint and type-boundary/migration-safety/migration-ordering/node-pool-boundary checks pass. Focused native323/10files (including real clean/upgrade0237→0238 SQLite migration tests), pure wait policy9, UI12 and real Workers26/4files pass. Local security/Cloudflare/package port reviews pass; final immutable CI and a new CodeRabbit wait remain required. PR remains draft and needs-human-review solely for the physical staging cleanup hold. No deployment, provision, cleanup retry or combined integration refresh is authorized before coordinator reviews the new full head.

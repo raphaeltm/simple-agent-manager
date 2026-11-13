@@ -10,7 +10,7 @@
 > code default (`.claude/rules/07-env-and-urls.md:98`), and the vars are already documented in
 > `apps/api/.env.example:258-269`. #2293 (`6973ceb77`) moved MCP `search_knowledge` into the shared
 > operations layer, and its `minConfidence`/`entityType` checks moved with it
-> (`apps/api/src/operations/memory-core.ts:27-53`). Pointers: the shared `resolveSessionId` is now
+> (`packages/operations/src/memory-core.ts:27-53`). Pointers: the shared `resolveSessionId` is now
 > `routes/mcp/_helpers.ts:411`; `deleteKnowledgeEntity` is `project-data/index.ts:2929-2932`.
 
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**

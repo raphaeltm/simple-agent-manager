@@ -13,6 +13,7 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SRC = join(__dirname, '../../../src');
+const PROJECT_DATA_SRC = join(__dirname, '../../../../../packages/project-data/src');
 const LEGACY_TABLES = [
   'comment_threads',
   'comment_replies',
@@ -22,8 +23,8 @@ const LEGACY_TABLES = [
   'library_file_comment_status_mutations',
 ];
 const ALLOWED_FILES = new Set([
-  'durable-objects/migrations.ts',
-  'durable-objects/project-data/anchored-comments-migration.ts',
+  'packages/project-data/src/do/migrations.ts',
+  'packages/project-data/src/do/anchored-comments-migration.ts',
 ]);
 
 function sourceFiles(dir: string): string[] {
@@ -47,10 +48,17 @@ function writePattern(table: string): RegExp {
 }
 
 describe('legacy comment tables are not written after migration 073', () => {
-  const files = sourceFiles(SRC).map((path) => ({
-    path: relative(SRC, path),
-    content: readFileSync(path, 'utf8'),
-  }));
+  // ProjectData (where the comment tables live) is its own package; scan it with the Worker.
+  const files = [
+    ...sourceFiles(SRC).map((path) => ({
+      path: relative(SRC, path),
+      content: readFileSync(path, 'utf8'),
+    })),
+    ...sourceFiles(PROJECT_DATA_SRC).map((path) => ({
+      path: `packages/project-data/src/${relative(PROJECT_DATA_SRC, path)}`,
+      content: readFileSync(path, 'utf8'),
+    })),
+  ];
 
   it('scans the whole Worker source tree', () => {
     expect(files.length).toBeGreaterThan(500);
@@ -101,8 +109,8 @@ describe('legacy comment tables are not written after migration 073', () => {
       .map(({ path }) => path)
       .sort();
     expect(anchoredWriters).toEqual([
-      'durable-objects/project-data/anchored-comment-mutations.ts',
-      'durable-objects/project-data/anchored-comments-migration.ts',
+      'packages/project-data/src/do/anchored-comment-mutations.ts',
+      'packages/project-data/src/do/anchored-comments-migration.ts',
     ]);
   });
 });

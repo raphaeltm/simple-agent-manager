@@ -2,14 +2,14 @@
 // Register the shared external-boundary doubles before importing recovery consumers.
 import '../helpers/provider-limit-owner-resume-harness';
 
-import type Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   createAttentionMarker,
   listActiveAttentionMarkers,
-} from '../../src/durable-objects/project-data/attention';
-import { getSession } from '../../src/durable-objects/project-data/session-reads';
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import { getSession } from '@simple-agent-manager/project-data/internal/do/session-reads';
+import type Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { findRecoveryAuthorityFailure } from '../../src/durable-objects/task-runner/recovery-authority';
 import type { StartTaskInput } from '../../src/durable-objects/task-runner/types';
 import type { Env } from '../../src/env';

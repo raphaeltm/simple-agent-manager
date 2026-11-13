@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 
+import type { OperationContext } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import type { OperationContext } from '../../../src/operations/types';
 import { invalidateAdminSettings } from '../../../src/services/admin-settings';
 import {
   auditConnectorWrite,

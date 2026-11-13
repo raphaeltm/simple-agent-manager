@@ -1,22 +1,19 @@
 /** Shared real-SQLite owner HTTP slice. Only auth/decryption and the runner boundary are doubled. */
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { syncProviderLimitAttention } from '@simple-agent-manager/project-data/internal/do/provider-limit-attention';
+import { resolveSessionAccess } from '@simple-agent-manager/project-data/internal/do/session-access';
+import { getSession } from '@simple-agent-manager/project-data/internal/do/session-reads';
+import { newProviderLimitWait, type ProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
-import { syncProviderLimitAttention } from '../../src/durable-objects/project-data/provider-limit-attention';
-import { resolveSessionAccess } from '../../src/durable-objects/project-data/session-access';
-import { getSession } from '../../src/durable-objects/project-data/session-reads';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
-import {
-  newProviderLimitWait,
-  type ProviderLimitWait,
-} from '../../src/services/provider-limit-policy';
 import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
 import { pickStarterMachines } from './capacity-pool-picks';
 import { createAllSchemaTables } from './sqlite-d1';

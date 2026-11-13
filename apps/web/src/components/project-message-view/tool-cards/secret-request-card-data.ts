@@ -6,9 +6,8 @@ import { normalizeToolName, parseResultPayload } from './document-card-data';
 
 /**
  * The agent secret request tool (base name, separator-agnostic) whose result renders as a
- * SecretRequestCard. Keep in sync with SECRET_REQUEST_CARD_TOOL in
- * apps/api/src/durable-objects/project-data/row-schemas/messages.ts, which keeps the request ID
- * when chat history is loaded in compact mode.
+ * SecretRequestCard. Listed in the shared TYPED_CHAT_CARD_TOOLS, which also types the API matcher
+ * that keeps the request ID when chat history is loaded in compact mode.
  */
 export const SECRET_REQUEST_CARD_TOOL = REQUEST_SECRET_TOOL;
 

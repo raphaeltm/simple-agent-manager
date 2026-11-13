@@ -1,4 +1,8 @@
 import {
+  parseProviderLimitWait,
+  type ProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
+import {
   DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
   DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS,
@@ -24,7 +28,6 @@ import {
 } from './provider-limit-approval-context';
 import { acknowledgeProviderLimitRecovery } from './provider-limit-force-resume';
 import { repairProviderLimitIntents } from './provider-limit-parking';
-import { parseProviderLimitWait, type ProviderLimitWait } from './provider-limit-policy';
 import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
 import {
   type ProviderLimitRecoveryApproval,

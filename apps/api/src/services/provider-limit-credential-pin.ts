@@ -1,3 +1,7 @@
+import {
+  parseProviderLimitWait,
+  type ProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -6,7 +10,6 @@ import { errors } from '../middleware/error';
 import { resolveProfileCredentialContext } from './composable-credentials/profile-context';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
 import { resolveProviderLimitProfileId } from './provider-limit-approval-context';
-import { parseProviderLimitWait, type ProviderLimitWait } from './provider-limit-policy';
 import {
   sameWorkspaceCallbackIdentity,
   type WorkspaceCallbackIdentitySnapshot,

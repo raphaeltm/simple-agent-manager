@@ -10,6 +10,7 @@ import { DEPLOYMENT_STOP_ERROR_PREFIX } from '@simple-agent-manager/shared';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
+import { createDeploymentProviderPort } from '../app-deployment-ports/providers';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
@@ -159,7 +160,13 @@ export async function detachVolumesForEnvironmentStop(
   let volumesDetached = 0;
   for (const serverId of serverIds) {
     try {
-      const detached = await detachEnvironmentVolumes(db, env, userId, envId, serverId);
+      const detached = await detachEnvironmentVolumes(
+        db,
+        createDeploymentProviderPort(env),
+        userId,
+        envId,
+        serverId
+      );
       volumesDetached += detached.length;
     } catch (err) {
       const message = lifecycleErrorMessage(err);

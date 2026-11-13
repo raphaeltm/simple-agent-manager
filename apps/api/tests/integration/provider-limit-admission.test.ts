@@ -1,5 +1,8 @@
 import { readFileSync } from 'node:fs';
 
+import {
+  newProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +20,6 @@ import {
 import { startSamAwareAgentSession } from '../../src/services/agent-session-bootstrap';
 import { cancelTask } from '../../src/services/cancel-task';
 import { assertProviderLimitCredentialPin } from '../../src/services/provider-limit-credential-pin';
-import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import {
   canStartProviderLimitTaskAnyway,
   resumeProviderLimitTask,

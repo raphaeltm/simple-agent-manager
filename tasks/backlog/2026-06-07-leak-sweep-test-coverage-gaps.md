@@ -74,7 +74,7 @@ All 42 existing tests pass; none are source-contract tests.
 ## References
 
 - PR #1245 (merged `634bb8a3`); sweep service
-  `apps/api/src/services/github-installation-leak-sweep.ts`; route
+  `packages/repo-hosting/src/github-installation-leak-sweep.ts`; route
   `apps/api/src/routes/admin-github-installation-leak-sweep.ts`; tests
   `apps/api/tests/unit/{services,routes}`.
 - Rule 25 (review merge gate — MEDIUM/LOW deferral), rule 35 (vertical slice).

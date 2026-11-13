@@ -106,7 +106,7 @@ Tells:
    idempotent and the app-route path does not persist a single DNS record id as the owner.
 
 9. **Prefer prior art in this repo over a new invention.** `ensureBranchExists`
-   (`apps/api/src/services/github-app.ts`) already solved this class against the GitHub API,
+   (`packages/repo-hosting/src/github-app-branches.ts`) already solved this class against the GitHub API,
    treating a `422` on create as `status: 'exists'`. Match the existing shape.
 
 ## Required Tests

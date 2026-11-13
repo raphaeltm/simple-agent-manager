@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 import type { ExecutionContext } from 'hono';
 
+import { createDeploymentProviderPort } from '../app-deployment-ports/providers';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
@@ -205,7 +206,13 @@ async function stopRuntimeBeforeNodeMove(params: {
   }
   for (const serverId of attachedServerIds) {
     await params.beforeExternalMutation?.();
-    await detachEnvironmentVolumes(params.db, params.env, params.userId, params.envId, serverId);
+    await detachEnvironmentVolumes(
+      params.db,
+      createDeploymentProviderPort(params.env),
+      params.userId,
+      params.envId,
+      serverId
+    );
   }
 }
 
@@ -366,9 +373,15 @@ async function attachVolumesForRelease(params: {
     }
   };
   try {
-    await attachEnvironmentVolumesToLinkedNode(params.db, params.env, params.userId, params.envId, {
-      assertExternalMutationAuthority: assertAttachmentCurrent,
-    });
+    await attachEnvironmentVolumesToLinkedNode(
+      params.db,
+      createDeploymentProviderPort(params.env),
+      params.userId,
+      params.envId,
+      {
+        assertExternalMutationAuthority: assertAttachmentCurrent,
+      }
+    );
   } catch (err) {
     if (!isPlacementCancellation(err)) {
       await markDeploymentReleaseVolumeAttachFailed(

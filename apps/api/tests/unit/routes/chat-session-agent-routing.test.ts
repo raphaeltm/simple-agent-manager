@@ -68,8 +68,11 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
 
-vi.mock('../../../src/operations/pull-request-core', async (importActual) => {
-  const actual = await importActual<typeof import('../../../src/operations/pull-request-core')>();
+vi.mock('@simple-agent-manager/operations/internal/pull-request-core', async (importActual) => {
+  const actual =
+    await importActual<
+      typeof import('@simple-agent-manager/operations/internal/pull-request-core')
+    >();
   return { ...actual, getPullRequestStates: mocks.getPullRequestStates };
 });
 

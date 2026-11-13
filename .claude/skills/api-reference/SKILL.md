@@ -163,7 +163,7 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 
 ## Administration (Superadmin Only)
 
-- `GET|PUT|DELETE /api/admin/ai-allowance/:userId` — Per-user AI allowance: budget ceilings plus `allowedModelTiers` (`null` = every tier, else a subset of `low-cost`/`standard`/`premium`; unknown names are `400`). The AI proxy enforces the tiers on every platform-credential route (`services/ai-model-tier-gate.ts`): out-of-tier or untiered models get `403 permission_error`, an unreadable allowance fails closed; BYO-key passthrough is not restricted
+- `GET|PUT|DELETE /api/admin/ai-allowance/:userId` — Per-user AI allowance: budget ceilings plus `allowedModelTiers` (`null` = every tier, else a subset of `low-cost`/`standard`/`premium`; unknown names are `400`). The AI proxy enforces the tiers on every platform-credential route (`packages/ai-proxy/src/ai-model-tier-gate.ts`): out-of-tier or untiered models get `403 permission_error`, an unreadable allowance fails closed; BYO-key passthrough is not restricted
 - `GET /api/admin/tasks/stuck` — List tasks currently in transient states
 - `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` — Read the TaskRunner probe, task-scoped runtime liveness, eligibility threshold, reconciliation decision, and whether/where the bounded cursor page selects the task, without mutating task state
 - `GET /api/admin/tasks/recent-failures` — List recent failed tasks with error details
@@ -478,7 +478,7 @@ Private VM-agent node-management routes: `POST /workspaces/:workspaceId/mcp/secr
 ### Workload identity
 
 - `GET /oidc/.well-known/openid-configuration` and `GET /oidc/.well-known/jwks.json` — public provider-neutral workload issuer discovery and active public key. Separate from legacy GCP/internal JWT issuer.
-- `GET /api/projects/:projectId/sessions/:sessionId/agent-credential` — Which account the chat's agent ran on: `credentialSource`, `credentialScope` (`profile`/`project`/`user`/`platform`), and `accountName` (only for the session's own user).
+- `GET /api/projects/:projectId/sessions/:sessionId/agent-credential` — Which account the chat's agent ran on: `credentialSource`, `credentialScope` (`profile`/`project`/`user`/`platform`), and `accountName` (only for the session's own user); plus `runtime` — the session's frozen effective `model`, `effort`, `permissionMode`, `opencodeProvider` and `skillName` (personal skills only to the runner), null for pre-contract sessions.
 - `GET /api/projects/:projectId/sessions/:sessionId/workload-identity` — authenticated project-member read-only current workload metadata (issuer, subject, TTL, claims). Never mints a token. Unavailable runtime returns 409.
 - `exec_with_secrets` accepts optional `oidc: { audience: string }`; privately injects reserved `SAM_OIDC_TOKEN`, including when `secretNames` is empty. Same-session job status/cancel semantics are unchanged.
 

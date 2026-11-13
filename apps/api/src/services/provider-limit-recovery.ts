@@ -1,4 +1,9 @@
 /** Owner recovery and the durable needs-attention state for provider waits. */
+import {
+  parseProviderLimitWait,
+  type ProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
+
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -8,7 +13,6 @@ import {
   canResumeProviderLimitTaskAnyway,
   forceResumeSavedProviderLimitTask,
 } from './provider-limit-force-resume';
-import { parseProviderLimitWait, type ProviderLimitWait } from './provider-limit-policy';
 import { ensureSessionRecovery } from './session-recovery';
 import { nudgeTaskRunnerDO } from './task-runner-do';
 

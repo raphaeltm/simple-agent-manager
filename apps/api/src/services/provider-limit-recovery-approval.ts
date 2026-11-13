@@ -1,10 +1,10 @@
 /** Exact owner consent carried through the existing snapshot claim and runner. */
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import { type SQL, sql } from 'drizzle-orm';
 import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
 
 import type { Env } from '../env';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
-import { parseProviderLimitWait } from './provider-limit-policy';
 
 export interface ProviderLimitRecoveryApproval {
   receipt: string;

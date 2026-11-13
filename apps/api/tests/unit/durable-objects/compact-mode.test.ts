@@ -9,15 +9,14 @@
  * - contentSize accurately reflects UTF-8 byte count
  * - parseChatMessageRowCompact produces compact output
  */
-import { describe, expect, it } from 'vitest';
-
-import { getMessageToolContent } from '../../../src/durable-objects/project-data/messages';
+import { UNTRUSTED_TEXT_GUIDANCE } from '@simple-agent-manager/operations';
+import { getMessageToolContent } from '@simple-agent-manager/project-data/internal/do/messages';
 import {
   parseChatMessageRow,
   parseChatMessageRowCompact,
   stripToolMetadataContent,
-} from '../../../src/durable-objects/project-data/row-schemas';
-import { UNTRUSTED_TEXT_GUIDANCE } from '../../../src/operations/untrusted-text';
+} from '@simple-agent-manager/project-data/internal/do/row-schemas';
+import { describe, expect, it } from 'vitest';
 
 describe('stripToolMetadataContent', () => {
   it('strips content array and adds contentSize', () => {
@@ -552,6 +551,31 @@ describe('stripToolMetadataContent — secret request card', () => {
         secretRequest: { id: 'req-1' },
       });
     }
+  });
+
+  it('keeps the Codex result row content when the row names no tool', () => {
+    // Codex's completed update carries only toolCallId + status; the result JSON is the row's own
+    // content. Compact mode cannot match a card payload without a tool name, so the web recovers
+    // the request ID from `content` by toolCallId (typed-card-cross-harness.test.ts). This pins
+    // that compact history keeps that content column.
+    const row = parseChatMessageRowCompact({
+      id: 'msg-codex-result',
+      session_id: 'session-1',
+      role: 'tool',
+      content: resultText,
+      tool_metadata: JSON.stringify({
+        toolCallId: 'call_codex',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: resultText } }],
+      }),
+      created_at: 1_794_492_918_886,
+      sequence: 3,
+    });
+    const meta = row.toolMetadata as Record<string, unknown>;
+    expect(meta.rawOutput).toBeUndefined();
+    expect(meta.content).toBeUndefined();
+    expect(meta.contentSize).toBeGreaterThan(0);
+    expect(JSON.parse(row.content)).toMatchObject({ secretRequest: { id: 'req-1' } });
   });
 
   it('keeps nothing for a failed request', () => {

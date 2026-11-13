@@ -2,10 +2,10 @@
 // Register the shared external-boundary doubles before importing recovery consumers.
 import '../helpers/provider-limit-owner-resume-harness';
 
+import { getSession } from '@simple-agent-manager/project-data/internal/do/session-reads';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getSession } from '../../src/durable-objects/project-data/session-reads';
 import type { Env } from '../../src/env';
 import { recoverStuckTasks, selectStuckTaskCandidates } from '../../src/scheduled/stuck-tasks';
 import { preserveProviderLimitWait } from '../../src/services/provider-limit-reconciliation';

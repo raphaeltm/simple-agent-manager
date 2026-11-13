@@ -4,6 +4,9 @@
  * the active shared-access grants. Split out of `chat.ts`
  * (`.claude/rules/18-file-size-limits.md`).
  */
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { getPullRequestStates } from '@simple-agent-manager/operations';
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
@@ -18,12 +21,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
-import { getPullRequestStates } from '../operations/pull-request-core';
-import type { OperationContext } from '../operations/types';
+import { operationDeps } from '../operation-ports';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
 import { canResumeProviderLimitTaskAnyway } from '../services/provider-limit-force-resume';
-import { parseProviderLimitWait } from '../services/provider-limit-policy';
 import { canStartProviderLimitTaskAnyway } from '../services/provider-limit-recovery';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';
@@ -143,7 +144,7 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             try {
               const states = await getPullRequestStates(
                 {
-                  env: c.env,
+                  ...operationDeps(c.env),
                   execCtx: c.executionCtx as OperationContext['execCtx'],
                 },
                 projectId,

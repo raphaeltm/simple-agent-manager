@@ -16,14 +16,17 @@ vi.mock('../../../src/services/agent-activity', () => ({
   listAgentActivityTasks: vi.fn().mockResolvedValue([]),
 }));
 vi.mock('../../../src/services/project-data', () => ({ listSessions: vi.fn() }));
-vi.mock('../../../src/operations/link-core', () => ({ listLinksForTargets: vi.fn() }));
+vi.mock('@simple-agent-manager/operations/internal/link-core', () => ({
+  listLinksForTargets: vi.fn(),
+}));
 vi.mock('../../../src/services/admin-settings', () => ({
   resolveAdminSettingDetailsMany: vi
     .fn()
     .mockResolvedValue([{ value: 10 }, { value: 100 }, { value: 100 }, { value: 50 }]),
 }));
 
-import { listLinksForTargets } from '../../../src/operations/link-core';
+import { listLinksForTargets } from '@simple-agent-manager/operations';
+
 import { listAgentActivityTasks } from '../../../src/services/agent-activity';
 import { listSessions } from '../../../src/services/project-data';
 

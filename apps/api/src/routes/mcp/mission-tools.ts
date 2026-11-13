@@ -4,16 +4,12 @@
  * Missions metadata lives in D1 (cross-project queryable).
  * State entries and handoff packets live in ProjectData DO (per-project, high-write).
  */
-import {
-  DEFAULT_MISSION_MAX_PER_PROJECT,
-  isMissionStateEntryType,
-  MISSION_STATE_ENTRY_TYPES,
-} from '@simple-agent-manager/shared';
+import { createMissionRecord, missionTextLimits } from '@simple-agent-manager/operations';
+import { isMissionStateEntryType, MISSION_STATE_ENTRY_TYPES } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
-import { log } from '../../lib/logger';
+import { operationDeps } from '../../operation-ports';
 import * as projectDataService from '../../services/project-data';
-import * as orchestratorService from '../../services/project-orchestrator';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -31,47 +27,37 @@ export async function handleCreateMission(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
-  const titleMaxLen = Number(env.MISSION_TITLE_MAX_LENGTH) || 200;
-  const descMaxLen = Number(env.MISSION_DESCRIPTION_MAX_LENGTH) || 5000;
+  const { titleMaxLength, descriptionMaxLength } = missionTextLimits(env);
 
   const title = typeof params.title === 'string'
-    ? sanitizeUserInput(params.title.trim()).slice(0, titleMaxLen)
+    ? sanitizeUserInput(params.title.trim()).slice(0, titleMaxLength)
     : '';
   if (!title) return jsonRpcError(requestId, INVALID_PARAMS, 'title is required');
 
   const description = typeof params.description === 'string'
-    ? sanitizeUserInput(params.description.trim()).slice(0, descMaxLen)
+    ? sanitizeUserInput(params.description.trim()).slice(0, descriptionMaxLength)
     : null;
 
   const budgetConfig = params.budgetConfig && typeof params.budgetConfig === 'object'
     ? JSON.stringify(params.budgetConfig)
     : null;
 
-  // Enforce per-project limit
-  const maxPerProject = Number(env.MISSION_MAX_PER_PROJECT) || DEFAULT_MISSION_MAX_PER_PROJECT;
-  const countRow = await env.DATABASE.prepare(
-    'SELECT COUNT(*) as cnt FROM missions WHERE project_id = ?',
-  ).bind(tokenData.projectId).first<{ cnt: number }>();
-  if (countRow && countRow.cnt >= maxPerProject) {
-    return jsonRpcError(requestId, INVALID_PARAMS, `Maximum missions per project (${maxPerProject}) reached`);
-  }
-
   const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  await env.DATABASE.prepare(
-    `INSERT INTO missions (id, project_id, user_id, title, description, status, budget_config, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'planning', ?, ?, ?)`,
-  ).bind(id, tokenData.projectId, tokenData.userId, title, description, budgetConfig, now, now).run();
-
-  // Register mission with the ProjectOrchestrator DO for scheduling
-  try {
-    await orchestratorService.startOrchestration(env, tokenData.projectId, id);
-  } catch (err) {
-    log.warn('mcp.create_mission.orchestrator_start_failed', {
-      missionId: id,
-      projectId: tokenData.projectId,
-      error: err instanceof Error ? err.message : String(err),
-    });
+  const created = await createMissionRecord(operationDeps(env), {
+    id,
+    projectId: tokenData.projectId,
+    userId: tokenData.userId,
+    title,
+    description,
+    budgetConfig,
+    surface: 'mcp',
+  });
+  if (!created.ok) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Maximum missions per project (${created.maxPerProject}) reached`,
+    );
   }
 
   return jsonRpcSuccess(requestId, {

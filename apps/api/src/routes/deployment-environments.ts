@@ -10,6 +10,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import * as v from 'valibot';
 
+import { createDeploymentProviderPort } from '../app-deployment-ports/providers';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -403,9 +404,10 @@ deploymentEnvironmentRoutes.delete(
       }
     }
 
+    const providers = createDeploymentProviderPort(c.env);
     for (const serverId of attachedServerIds) {
       try {
-        const detached = await detachEnvironmentVolumes(db, c.env, userId, envId, serverId);
+        const detached = await detachEnvironmentVolumes(db, providers, userId, envId, serverId);
         volumesDetached += detached.length;
       } catch (err) {
         throw errors.conflict(
@@ -417,7 +419,7 @@ deploymentEnvironmentRoutes.delete(
     const currentVolumes = await listEnvironmentVolumes(db, envId);
     for (const volume of currentVolumes) {
       try {
-        await deleteEnvironmentVolume(db, c.env, userId, volume.id, envId, {
+        await deleteEnvironmentVolume(db, providers, userId, volume.id, envId, {
           allowLatestReleaseDeclaredVolume: true,
         });
         volumesDeleted += 1;

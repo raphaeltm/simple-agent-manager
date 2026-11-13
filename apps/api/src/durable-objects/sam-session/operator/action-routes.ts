@@ -1,7 +1,8 @@
+import { operations } from '@simple-agent-manager/operations';
 import * as v from 'valibot';
 
 import type { Env } from '../../../env';
-import { operations } from '../../../operations/registry';
+import { createOperationPorts } from '../../../operation-ports';
 import { assertOperatorExecution, assertOperatorResource } from './operations';
 import { actionProjection } from './projection';
 import type { OperatorStore } from './store';
@@ -60,6 +61,7 @@ async function reconcileAction(
     const result = await operation.run(
       {
         env,
+        ports: createOperationPorts(env),
         actor: { userId, via: 'sam', scopes: new Set(['sam.read', 'sam.write']) },
         requestId: action.id,
         idempotencyKey: action.id,
@@ -138,6 +140,7 @@ async function confirmAction(
     const result = await operation.run(
       {
         env,
+        ports: createOperationPorts(env),
         actor: { userId, via: 'sam', scopes: new Set(['sam.read', 'sam.write']) },
         requestId: action.id,
         idempotencyKey: action.id,

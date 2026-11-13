@@ -3,13 +3,13 @@
  *
  * Used across all MCP tool handler files (instruction-tools, task-tools, session-tools, idea-tools).
  */
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
 import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
 
 import type { McpRateCounter } from '../../durable-objects/mcp-rate-counter';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { getPlatformOperationLimits } from '../../operations/limits';
 import type { McpTokenData } from '../../services/mcp-token';
 import { validateActiveWorkspaceMcpToken } from '../../services/mcp-token-lifecycle';
 import { readStorageActivation } from '../../services/reliability-storage';
@@ -66,8 +66,6 @@ export { type MessageRole, VALID_MESSAGE_ROLES, validateRoles } from '../../lib/
 /** Default HTTP-level rate limit for the /mcp endpoint (per token, per minute). Override via MCP_RATE_LIMIT env var. */
 const DEFAULT_MCP_RATE_LIMIT = 120;
 const DEFAULT_MCP_RATE_LIMIT_WINDOW_SECONDS = 60;
-const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT = 10;
-const DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX = 50;
 
 /** Default dispatch limits for agent-to-agent task spawning. */
 const DEFAULT_MCP_DISPATCH_MAX_DEPTH = 3;
@@ -157,14 +155,6 @@ export function getMcpLimits(env: Env) {
     messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
     messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX, DEFAULT_MCP_MESSAGE_LIST_MAX),
     messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
-    archivedToolPayloadListLimit: parsePositiveInt(
-      env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT,
-      DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT
-    ),
-    archivedToolPayloadListMax: parsePositiveInt(
-      env.MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX,
-      DEFAULT_MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX
-    ),
     projectEventListLimit: parsePositiveInt(
       env.PROJECT_EVENT_LIST_LIMIT,
       DEFAULT_PROJECT_EVENT_LIMITS.listLimitDefault

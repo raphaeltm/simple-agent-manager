@@ -1,12 +1,12 @@
+import {
+  PROJECT_DATA_ARCHIVE_TABLES,
+  type ProjectDataArchiveTableName,
+} from '@simple-agent-manager/project-data/internal/archive/contract';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import {
-  PROJECT_DATA_ARCHIVE_TABLES,
-  type ProjectDataArchiveTableName,
-} from '../../../src/project-data-archive/contract';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createAdminProjectDataStorageApp } from './helpers/admin-project-data-storage-route';
 
@@ -135,6 +135,14 @@ function createArchiveProjectDataNamespace(
       databaseSizeBeforeBytes: 100,
       databaseSizeAfterBytes: 10,
       databaseSizeBytes: 10,
+    })),
+    // Copy-back drains any flip leftovers first; this fake root has none.
+    archiveSourceReclaimPage: vi.fn(async () => ({
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      ftsRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      remaining: false,
     })),
     archiveSourceRestoreChunk: vi.fn(async () => true),
     archiveSourceMarkCopyBackRestored: vi.fn(async () => true),
@@ -401,15 +409,11 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         sessionId: 'session-deleted',
         state: 'source_deleted',
       });
-      const archiveTargetAbandonSession = vi.fn(async () => ({
-        removed: true,
-        state: 'copying',
-        messagesDeleted: 3,
-        groupedRowsDeleted: 2,
-        toolArchiveRowsDeleted: 1,
-        chunksDeleted: 4,
-        databaseSizeBytes: 10,
-      }));
+      // Two pages: the target copy is removed in bounded pages.
+      const archiveTargetAbandonPage = vi
+        .fn()
+        .mockResolvedValueOnce({ removed: false, remaining: true, rowsDeleted: 6 })
+        .mockResolvedValueOnce({ removed: true, remaining: false, rowsDeleted: 4 });
       const archiveSourceAbandonIntent = vi.fn(async () => ({
         removed: true,
         state: 'intent_prepared',
@@ -435,7 +439,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         },
         [TARGET_OWNER]: {
           ensureProjectId: vi.fn(async () => true),
-          archiveTargetAbandonSession,
+          archiveTargetAbandonPage,
         },
       });
       const request = (migrationId: string, body: unknown) =>
@@ -457,7 +461,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
       const blankReason = await request('migration-abandon', { reason: '   ' });
       expect(blankReason.status).toBe(400);
       expect(await blankReason.json()).toMatchObject({ error: 'BAD_REQUEST' });
-      expect(archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(archiveTargetAbandonPage).not.toHaveBeenCalled();
 
       const pastDeletion = await request('migration-abandon-deleted', { reason: 'operator' });
       expect(pastDeletion.status).toBe(400);
@@ -465,7 +469,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         error: 'BAD_REQUEST',
         message: expect.stringContaining('use copy-back'),
       });
-      expect(archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(archiveTargetAbandonPage).not.toHaveBeenCalled();
 
       const wrongProject = await createAdminProjectDataStorageApp().request(
         '/api/admin/project-data/storage/project-other/archive-sharding/migrations/migration-abandon/abandon',
@@ -477,7 +481,7 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         makeEnv(sqlite, { PROJECT_DATA: namespace })
       );
       expect(wrongProject.status).toBe(400);
-      expect(archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(archiveTargetAbandonPage).not.toHaveBeenCalled();
 
       const response = await request('migration-abandon', { reason: '  operator abandon  ' });
       expect(response.status).toBe(200);
@@ -495,8 +499,8 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
           targetRowsDeleted: 10,
         },
       });
-      expect(archiveTargetAbandonSession).toHaveBeenCalledTimes(1);
-      expect(archiveTargetAbandonSession.mock.calls[0]?.[0]).toMatchObject({
+      expect(archiveTargetAbandonPage).toHaveBeenCalledTimes(2);
+      expect(archiveTargetAbandonPage.mock.calls[0]?.[0]).toMatchObject({
         migrationId: 'migration-abandon',
         sourceIntactVerified: true,
       });

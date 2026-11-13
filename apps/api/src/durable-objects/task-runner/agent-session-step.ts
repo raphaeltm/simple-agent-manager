@@ -4,13 +4,14 @@
  * Handles the agent_session step: creating the session, generating MCP token,
  * and starting the agent with the initial prompt.
  */
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
+
 import { log } from '../../lib/logger';
 import {
   buildSamBootstrapInstructions,
   buildVisibleInitialPrompt,
 } from '../../services/agent-bootstrap-prompt';
 import type { SamAwareAgentStartResult } from '../../services/agent-session-bootstrap';
-import { parseProviderLimitWait } from '../../services/provider-limit-policy';
 import { getRecoverySourceTaskGuard } from './helpers';
 import { transitionToInProgress } from './in-progress-transition';
 import { prepareSnapshotRestoreAttempt } from './snapshot-restore-retry';

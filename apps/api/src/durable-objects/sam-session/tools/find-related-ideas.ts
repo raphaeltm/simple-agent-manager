@@ -1,13 +1,13 @@
 /**
  * SAM find_related_ideas tool — search ideas by keyword.
  */
+import { ideaTaskPredicateSql } from '@simple-agent-manager/operations';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../../../lib/search-query-limits';
-import { ideaTaskPredicateSql } from '../../../operations/idea-identity';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 const DEFAULT_LIMIT = 10;

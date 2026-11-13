@@ -7,8 +7,9 @@
  * source task and any project-event wake still authorize it. Every refusal names
  * the check that failed and logs it with the snapshot claim (`recovery-revocation.ts`).
  */
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
+
 import type { Env } from '../../env';
-import { parseProviderLimitWait } from '../../services/provider-limit-policy';
 import {
   loadProviderLimitRecoveryApproval,
   providerLimitRecoveryApprovalIsCurrent,

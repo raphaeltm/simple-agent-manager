@@ -1,4 +1,4 @@
-/** MCP adapter for agent email replies. The operation lives in services/agent-email/reply. */
+/** MCP adapter for agent email replies. The operation lives in packages/agent-email/src/reply.ts. */
 import type { Env } from '../../env';
 import { AgentEmailReplyError, replyToTriggerEmail } from '../../services/agent-email/reply';
 import { activeAgentEmailSender } from '../../services/agent-email/setup-state';
