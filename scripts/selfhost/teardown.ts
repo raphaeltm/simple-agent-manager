@@ -26,6 +26,7 @@ import { parseArgs } from 'node:util';
 import { normalizeInstallationId } from '../../apps/api/src/services/node-provider-labels';
 import { type CreatedResource, readRecord } from '../../deploy/selfhost/created-resources.mjs';
 import { log, runCommand, SELFHOST_DIR } from './backup-cli';
+import { composeFilesFor } from './backup-lib';
 import { recordPath } from './install-record';
 import { assertPrivateFile, parseDotenv } from './secret-files';
 import { boxItems, bucketItems, type TeardownContext } from './teardown-box';
@@ -167,7 +168,7 @@ async function main(): Promise<number> {
     box,
     envFile,
     stateDir,
-    composeFile: join(SELFHOST_DIR, 'docker-compose.yml'),
+    composeFiles: composeFilesFor(box, SELFHOST_DIR),
     run: runCommand,
     now: () => Date.now(),
     log,
