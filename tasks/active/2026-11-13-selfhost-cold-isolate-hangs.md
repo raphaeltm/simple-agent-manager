@@ -98,3 +98,29 @@ fix covers both triggers.
 
 Not reproduced locally: a legacy-plaintext hang through unauthenticated routes. The
 admin-settings join was proven through real celld by the live settings case instead.
+
+## R6 follow-up: joiners resumed on the starter's turn (box round, 2026-11-13)
+
+On the box (030a84ad8, Worker 4a179e1014d3d0f9, same bounded load as before the fix) the long
+poller outages were gone, but 13 of 128 authenticated requests (`get-session` with a cookie,
+`/api/projects`, project sessions) still hung to the 60 s client cap. Anonymous requests and
+`/health` never hung.
+
+Cause, reproduced on local real celld 0.6.3: when request B awaits a promise request A started,
+B's continuation runs as part of A (the "continuation of a retired request" in finding 1). Every
+timer, fetch or D1 call B makes afterwards is dropped as soon as A answers, with no client
+disconnecting. The shared-flight timer only covers a flight that never settles. A healthy
+settings flight joined by a concurrent authenticated request reproduces it every time.
+
+Fix (branch `sam/r6-joiner-own-turn`):
+- [x] `joinSharedFlight` on celld: the flight's settlement only records the outcome; the joiner
+      wakes on its own 10 ms timer. Cloudflare keeps the direct resume (no added timer).
+- [x] The generated celld entry turns the switch on at startup, in both key modes
+      (`renderRuntimeSecretsMain`, new `renderPlainMain`; `deploy.ts` always uses `celld-main.ts`).
+- [x] `platform-config-core.ts` joins through `settleSharedFlight` (review V1 M1).
+- [x] Live test case: a healthy joined settings read followed by the joiner's own fetch and timer.
+      Red without the switch (second request hung to the 15 s cap), green with it.
+- [x] Unit tests: both runtimes for every existing case; own-timer resume (red on the old code);
+      Cloudflare direct-resume control.
+- [ ] Box: deploy the branch and repeat the same load (see idea `01M77QE3GR2JRA7DSQQENMJZDE`,
+      note "BOX ROUND R6 (hang fix)").

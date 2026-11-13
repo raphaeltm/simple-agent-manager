@@ -25,7 +25,7 @@ import { createFileProvider } from '../../deploy/selfhost/key-agent/provider-fil
 import type { WranglerToml } from '../deploy/types.js';
 import { type BoxContext, OBJECTSTORE_IMAGE, runBackup, type RunResult } from './backup-lib';
 import { buildCelldConfig } from './celld-config.js';
-import { renderRuntimeSecretsMain } from './celld-project.js';
+import { renderPlainMain, renderRuntimeSecretsMain } from './celld-project.js';
 import { buildFencePlan } from './egress-fence.js';
 import {
   agentVerifyKey,
@@ -373,6 +373,20 @@ describe('the celld entry and the egress fence', () => {
       'wrapDurableObject(api.TaskRunner)',
     ]);
     expect(() => renderRuntimeSecretsMain(['Bad; import x'])).toThrow(/not a valid/);
+  });
+
+  it('turns on the celld runtime switches in both key modes, before any request runs', () => {
+    // On celld a joiner must resume on its own timer (apps/api/src/lib/shared-flight.ts, R6).
+    for (const main of [renderRuntimeSecretsMain(['ProjectData']), renderPlainMain()]) {
+      expect(main).toContain(
+        "import { resumeSharedFlightJoinsOnOwnTimer } from './src/lib/shared-flight.ts';"
+      );
+      expect(main.match(/^resumeSharedFlightJoinsOnOwnTimer\(\);$/gm)).toHaveLength(1);
+      expect(main).toContain("export * from './src/index.ts';");
+    }
+    // The plaintext entry is the API's own entry, unwrapped.
+    expect(renderPlainMain()).toContain('export default worker;');
+    expect(renderPlainMain()).not.toContain('wrapWorker');
   });
 
   it('covers every Durable Object class the deployed config declares', () => {

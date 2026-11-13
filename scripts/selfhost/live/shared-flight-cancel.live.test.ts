@@ -38,6 +38,7 @@ const SECRET = 'live-sharedflight-store-0123456789';
 const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status === 0;
 const RUNTIME_SECRETS = join(REPO_ROOT, 'apps/api/src/selfhost/runtime-secrets.ts');
 const SETTINGS_CACHE = join(REPO_ROOT, 'apps/api/src/services/admin-settings-cache.ts');
+const SHARED_FLIGHT = join(REPO_ROOT, 'apps/api/src/lib/shared-flight.ts');
 /** The settings flight's own deadline in the probe: longer than one slow read. */
 const SETTINGS_READ_TIMEOUT_MS = 3000;
 const AGENT = join(REPO_ROOT, 'deploy/selfhost/key-agent/server.ts');
@@ -57,8 +58,14 @@ const CLIENT_CAP_MS = 15_000;
 const WORKER = `
 import { wrapDurableObject, wrapWorker } from ${JSON.stringify(RUNTIME_SECRETS)};
 import { AdminSettingsCache } from ${JSON.stringify(SETTINGS_CACHE)};
+import { resumeSharedFlightJoinsOnOwnTimer } from ${JSON.stringify(SHARED_FLIGHT)};
+// What the generated celld entry does at startup (scripts/selfhost/celld-project.ts).
+resumeSharedFlightJoinsOnOwnTimer();
 const DB = {};
+const isolate = crypto.randomUUID().slice(0, 8);
 let settings;
+let ioSettings;
+let ioLoads = 0;
 class Probe {
   constructor(_ctx, env) { this.env = env; }
   async fetch() { return Response.json({ doSecret: typeof this.env.LIVE_SECRET }); }
@@ -77,6 +84,18 @@ export default {
       });
       const rows = await settings.read(DB, false, 60_000, ${SETTINGS_READ_TIMEOUT_MS});
       return Response.json({ rows: rows.length });
+    }
+    if (url.pathname === '/settings-io') {
+      // A healthy shared read, then I/O of the request's own: what every auth path does next.
+      ioSettings ??= new AdminSettingsCache(60_000, Date.now, async () => {
+        ioLoads++;
+        await (await fetch(env.SLOW_URL)).arrayBuffer();
+        return [];
+      });
+      await ioSettings.read(DB, false, 60_000, ${SETTINGS_READ_TIMEOUT_MS});
+      await (await fetch(env.FAST_URL)).arrayBuffer();
+      await new Promise((resume) => setTimeout(resume, 50));
+      return Response.json({ isolate, loads: ioLoads });
     }
     if (url.pathname === '/do') {
       const stub = env.PROBE_DO.get(env.PROBE_DO.idFromName(url.searchParams.get('name') ?? 'x'));
@@ -246,6 +265,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not pois
           // Longer than the proxy delay: a healthy load finishes; only a dropped one hangs.
           SAM_KEY_AGENT_TIMEOUT_MS: '5000',
           SLOW_URL: `http://127.0.0.1:${ports.proxy}/healthz`,
+          FAST_URL: `http://127.0.0.1:${ports.agent}/healthz`,
         },
       })
     );
@@ -340,4 +360,26 @@ describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not pois
     const bound = SETTINGS_READ_TIMEOUT_MS + 1000 + 2 * AGENT_DELAY_MS + 2000;
     for (const outcome of next) expect(outcome.ms, report).toBeLessThan(bound);
   }, 150_000);
+  it('a request that joined a healthy shared read keeps its own I/O after the starter answers', async () => {
+    // No client gives up here. B joins A's settings read, then makes its own fetch and timer.
+    // Before the fix B resumed on A's settlement, so celld counted B's later ops as A's and
+    // dropped them when A answered: B hung to the client cap (R6, authenticated requests).
+    const first = request('/settings-io', CLIENT_CAP_MS);
+    await sleep(200);
+    const second = request('/settings-io', CLIENT_CAP_MS);
+    const both = [await first, await second];
+    const report = JSON.stringify(both) + (celld?.output().slice(-3000) ?? '');
+    expect(
+      both.map((o) => o.status),
+      report
+    ).toEqual([200, 200]);
+    // Liveness of the scenario: one isolate and ONE load, so the second request really joined.
+    const bodies = both.map((o) => o.body as { isolate: string; loads: number });
+    expect(bodies[1]?.isolate, report).toBe(bodies[0]?.isolate);
+    expect(
+      bodies.map((b) => b.loads),
+      report
+    ).toEqual([1, 1]);
+    for (const outcome of both) expect(outcome.ms, report).toBeLessThan(2 * AGENT_DELAY_MS + 2000);
+  }, 60_000);
 });

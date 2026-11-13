@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
+import { settleSharedFlight } from '../lib/shared-flight';
 import {
   commitAdminSettingsStatements,
   resolveAdminSettingDetailsMany,
@@ -366,7 +367,15 @@ async function resolveLegacyPlatformConfig(
     joinable.generation === platformConfigCacheGeneration &&
     Date.now() < joinable.deadlineAt
   ) {
-    const config = await joinable.promise;
+    // Under this request's own timer, and resumed in its own turn (lib/shared-flight.ts): on
+    // celld a flight whose starter is gone never settles, and a plain await would also run the
+    // rest of this request as part of the starter's.
+    const joined = await settleSharedFlight(joinable.promise, joinable.deadlineAt);
+    if (joined.abandoned) {
+      if (platformConfigInFlight === joinable) platformConfigInFlight = null;
+      return resolveLegacyPlatformConfig(env, Date.now(), timeoutMs);
+    }
+    const config = joined.value;
     if (
       platformConfigCacheGeneration !== joinable.generation ||
       platformConfigInFlight !== joinable
