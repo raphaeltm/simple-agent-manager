@@ -365,11 +365,15 @@ export async function proveNodeInstanceOwnership(
 }
 
 /**
- * The provider refused this credential (401/403 or a categorised auth error), so it can never
- * answer for the instance. Rate limits, capacity and server errors are temporary and excluded
- * (rule 72). Same classification as `node-manual-deletion.ts`.
+ * The provider refused this credential, so it can never answer for the instance. Trust the
+ * provider's own category first: GCP and Hetzner also answer 403 for rate limits and quotas, which
+ * are temporary (rule 72). A bare 401/403 counts only when the provider gave no category.
  */
 function isCredentialRejection(error: unknown): boolean {
   if (!(error instanceof ProviderError)) return false;
-  return error.statusCode === 401 || error.statusCode === 403 || error.category === 'auth_error';
+  if (error.category === 'auth_error') return true;
+  return (
+    (error.statusCode === 401 || error.statusCode === 403) &&
+    (error.category === undefined || error.category === 'unknown')
+  );
 }

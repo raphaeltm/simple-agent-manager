@@ -382,3 +382,39 @@ describe('node teardown after the GCP connection is saved again (incident 2026-1
     expect(nodeRow()).toMatchObject({ reason: 'teardown_credential_unavailable', proof: null });
   });
 });
+
+describe('proveNodeInstanceOwnership: provider refusals', () => {
+  async function prove(error: Error) {
+    const { proveNodeInstanceOwnership } = await import(
+      '../../../src/services/node-teardown-authority'
+    );
+    const node = {
+      id: NODE_ID,
+      nodeRole: 'workspace',
+      providerInstanceId: INSTANCE_ID,
+      runtimeIncarnationId: INCARNATION,
+    } as unknown as Parameters<typeof proveNodeInstanceOwnership>[0];
+    const candidate = {
+      provider: { getVM: async () => Promise.reject(error) },
+      providerName: 'gcp',
+      credentialSource: 'user',
+    } as unknown as Parameters<typeof proveNodeInstanceOwnership>[2][number];
+    return proveNodeInstanceOwnership(node, env, [candidate]).catch((err: unknown) => err as Error);
+  }
+
+  it('a credential the provider rejects cannot see the instance (named verdict)', async () => {
+    const { ProviderError } = await import('@simple-agent-manager/providers');
+    const result = await prove(new ProviderError('gcp', 403, 'Permission denied'));
+    expect(result.message).toMatch(/^teardown_instance_not_visible/);
+  });
+
+  it('a rate-limited or quota 403 stays an ordinary, retryable read failure', async () => {
+    const { ProviderError } = await import('@simple-agent-manager/providers');
+    for (const category of ['rate_limited', 'quota_exceeded'] as const) {
+      const error = new ProviderError('gcp', 403, 'Rate limit exceeded', { category });
+      const result = await prove(error);
+      expect(result).toBe(error);
+    }
+  });
+});
+
