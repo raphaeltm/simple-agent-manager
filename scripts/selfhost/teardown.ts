@@ -195,11 +195,17 @@ async function main(): Promise<number> {
     `install ${domain || '(domain unknown)'}, installation ${installationId ?? '?'} (${idSource})`
   );
   log(`record ${recordFile}${existsSync(recordFile) ? '' : ' (none yet)'}`);
+  const cloudItems = gcpItems(ctx);
   const items: Item[] = [
     ...boxItems(ctx),
     ...bucketItems(ctx),
-    ...gcpItems(ctx),
-    ...outsideItems(ctx),
+    ...cloudItems,
+    // The sealing key named in choice.json, unless the bootstrap's record or discovery lists it.
+    ...outsideItems(ctx).filter(
+      (i) =>
+        !i.id.startsWith('outside:gcp-kms:') ||
+        !cloudItems.some((c) => c.id === `gcp:kms-key:${i.id.slice('outside:gcp-kms:'.length)}`)
+    ),
   ];
 
   if (!mode) {

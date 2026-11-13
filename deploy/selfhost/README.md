@@ -85,7 +85,12 @@ by a key provider), and the Worker gets them at runtime from the `key-agent` ser
 only `SAM_KEY_AGENT_URL`, the bundle id and the agent's public verify key, so the bucket's
 `deploy/` manifests hold no secret. If the agent is down the API answers 503
 `SECRETS_UNAVAILABLE` (`docker compose ps key-agent`). Each fresh Worker isolate pays one loopback
-request (about 4 ms); the agent keeps an opened bundle for 300 s.
+request (about 4 ms); the agent keeps an opened bundle for 300 s. When it reopens a bundle and the key
+service is unreachable, or slower than `SAM_KEY_AGENT_STALE_WAIT_MS` (default 1000 ms, below the
+Worker's 3 s wait for the agent), it serves the copy it already opened while the refresh continues; a
+key service that refuses (`denied`) drops that copy. Measured on Google Cloud: opening a bundle
+through Cloud KMS takes about 190-235 ms the first time (metadata token included), about 115-135 ms
+on a later reopen.
 
 **Which key provider.** `pnpm selfhost:deploy --init` chooses once, records the choice and why
 in `.state/key-agent/choice.json`, and every deploy prints it (`key provider: file (...)`);
@@ -590,6 +595,12 @@ the bootstrap, in your cloud made by SAM at runtime, outside SAM), how it is rem
 mode does with it. Without `--confirm`, a terminal asks you to type the domain; anywhere else the
 command refuses.
 
+**What it cannot see.** A lookup that fails for any reason other than "not found" (for example the
+box VM's own account, which may not read firewall rules, workload identity or KMS key metadata) is
+listed as "could not check" and left for you, never read as absent. The Cloud KMS key the box seals
+with (`.state/key-agent/choice.json`) is always listed; when the bootstrap ran elsewhere (Cloud
+Shell), its record is there, so remove the key and the box's grant from there.
+
 **What it may remove.** Only what `.state/created-resources.json` lists, or what it finds by the
 exact names and labels the install itself sets, shown as "discovered, not recorded". The record is
 written when things are created: `pnpm selfhost:deploy` (with or without `--init`) records the
@@ -723,6 +734,24 @@ access log. Each tick costs one isolate start (about 1.5 s of CPU every 30 s) wh
 anyone is using the box. Set `SAM_KEEP_WARM=off` in `.env` and run `docker compose up -d caddy`
 to turn it off. The upstream fix (celld keeping a warm stateless isolate, or a retirement
 setting) is tracked in `tasks/backlog/2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md`.
+
+**Aborted requests on a cold isolate.** celld 0.6.3 gives every async operation of a Worker (a
+fetch, a D1 call, a timer) to the request that started it. When that request's client
+disconnects, celld drops those operations without settling them. If Worker code shares one
+in-flight promise between requests, every request that joined it would then wait until its own
+client gave up or celld's 300 s handler budget ran out. Before task H2 the box saw outages of
+about a minute under load. A slow cold start outlasted the timeout of a client (the keep-warm
+check, the deploy health check, a monitoring probe), and the request that client dropped had
+started the isolate's runtime-secrets load or a settings read.
+
+The API Worker no longer joins another request's load unbounded:
+
+- Each cold request fetches its own runtime secrets (`apps/api/src/selfhost/runtime-secrets.ts`).
+- The settings caches and the ProjectData ensure memo wait on another request's read only until
+  that read's own deadline plus a grace, then read for themselves (`apps/api/src/lib/shared-flight.ts`).
+
+`scripts/selfhost/live/shared-flight-cancel.live.test.ts` reproduces the hang on celld 0.6.3.
+New Worker code must not await a promise that another request started without such a bound.
 
 ## Guided credential login (opt-in, experimental)
 

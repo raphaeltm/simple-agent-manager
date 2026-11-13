@@ -19,6 +19,20 @@ const PROVIDER_ID = 'sam-api';
 const NODE_ACCOUNT = 'sam-nodes';
 
 /** Runs gcloud; a missing gcloud reads as a failed command (status 127), not a crash. */
+/**
+ * True when gcloud said the resource does not exist. Any other failure (permission denied, network,
+ * auth) means teardown could not check, which must be reported rather than read as "absent".
+ */
+export function gcloudNotFound(stderr: string): boolean {
+  return /not found|NOT_FOUND|notFound|does not exist/i.test(stderr);
+}
+
+/** The first `ERROR:` line of a gcloud failure, for a "could not check" item. */
+export function gcloudReason(stderr: string): string {
+  const line = stderr.split('\n').find((l) => l.includes('ERROR')) ?? stderr.split('\n')[0] ?? '';
+  return line.trim().slice(0, 200) || 'gcloud failed';
+}
+
 export function gcloud(ctx: TeardownContext, args: string[]) {
   try {
     return ctx.run('gcloud', args);
@@ -66,8 +80,10 @@ export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
   const entries = ctx.record.filter(
     (r) => r.cloud === 'gcp' && r.createdBy === BOOTSTRAP && r.attributes?.project === project
   );
-  const discovered =
-    entries.length === 0 && ctx.domain ? discoverBootstrap(ctx, project, issuer) : [];
+  const { found: discovered, unchecked } =
+    entries.length === 0 && ctx.domain
+      ? discoverBootstrap(ctx, project, issuer)
+      : { found: [], unchecked: [] };
   const runKey = `gcp-bootstrap:${project}`;
   let output = '';
   const run = () => {
@@ -134,6 +150,20 @@ export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
       settle: settle(d.kind, d.name),
     });
   }
+  if (unchecked.length > 0) {
+    items.push({
+      id: `gcp:${project}:bootstrap-unchecked`,
+      place: 'in your cloud, made by the bootstrap',
+      what: `could not check ${unchecked.map((u) => u.name).join(', ')} (${unchecked[0]?.reason})`,
+      provenance: 'discovered, not recorded',
+      how: `run again with gcloud logged in as a project owner, or ${how} where the bootstrap ran (its record is there)`,
+      step: STEPS.identity,
+      plan: both({
+        act: 'operator',
+        why: 'teardown could not check them with this gcloud account',
+      }),
+    });
+  }
   return items;
 }
 
@@ -148,36 +178,49 @@ interface Discovered {
  * each with the same proof its teardown checks (description naming the issuer, provider trusting
  * it, key labelled sam-install=<hash>).
  */
-function discoverBootstrap(ctx: TeardownContext, project: string, issuer: string): Discovered[] {
+function discoverBootstrap(
+  ctx: TeardownContext,
+  project: string,
+  issuer: string
+): { found: Discovered[]; unchecked: Array<{ name: string; reason: string }> } {
   const hash = installHash(issuer);
   const pool = `sam-${hash}`;
   const found: Discovered[] = [];
-  const value = (args: string[]) => {
+  const unchecked: Array<{ name: string; reason: string }> = [];
+  const value = (args: string[], name: string) => {
     const r = gcloud(ctx, args);
-    return r.status === 0 ? r.stdout.trim() : null;
+    if (r.status === 0) return r.stdout.trim();
+    if (!gcloudNotFound(r.stderr)) unchecked.push({ name, reason: gcloudReason(r.stderr) });
+    return null;
   };
   const poolName = `projects/${project}/locations/global/workloadIdentityPools/${pool}`;
-  const poolDescription = value([
-    'iam',
-    'workload-identity-pools',
-    'describe',
-    pool,
-    `--project=${project}`,
-    '--location=global',
-    '--format=value(description)',
-  ]);
-  if (poolDescription?.endsWith(issuer)) {
-    const providerIssuer = value([
+  const poolDescription = value(
+    [
       'iam',
       'workload-identity-pools',
-      'providers',
       'describe',
-      PROVIDER_ID,
+      pool,
       `--project=${project}`,
       '--location=global',
-      `--workload-identity-pool=${pool}`,
-      '--format=value(oidc.issuerUri)',
-    ]);
+      '--format=value(description)',
+    ],
+    `workload identity pool ${pool}`
+  );
+  if (poolDescription?.endsWith(issuer)) {
+    const providerIssuer = value(
+      [
+        'iam',
+        'workload-identity-pools',
+        'providers',
+        'describe',
+        PROVIDER_ID,
+        `--project=${project}`,
+        '--location=global',
+        `--workload-identity-pool=${pool}`,
+        '--format=value(oidc.issuerUri)',
+      ],
+      `provider ${PROVIDER_ID}`
+    );
     if (providerIssuer === issuer) {
       found.push({
         kind: 'workload-identity-provider',
@@ -192,14 +235,17 @@ function discoverBootstrap(ctx: TeardownContext, project: string, issuer: string
     });
   }
   const email = `${NODE_ACCOUNT}@${project}.iam.gserviceaccount.com`;
-  const saDescription = value([
-    'iam',
-    'service-accounts',
-    'describe',
-    email,
-    `--project=${project}`,
-    '--format=value(description)',
-  ]);
+  const saDescription = value(
+    [
+      'iam',
+      'service-accounts',
+      'describe',
+      email,
+      `--project=${project}`,
+      '--format=value(description)',
+    ],
+    `service account ${email}`
+  );
   if (saDescription?.endsWith(issuer)) {
     for (const role of ['roles/compute.instanceAdmin.v1', 'roles/compute.securityAdmin']) {
       found.push({
@@ -210,16 +256,19 @@ function discoverBootstrap(ctx: TeardownContext, project: string, issuer: string
     }
     found.push({ kind: 'service-account', name: email, proof: `description names ${issuer}` });
   }
-  const keyLabel = value([
-    'kms',
-    'keys',
-    'describe',
-    pool,
-    `--keyring=${KEY_RING}`,
-    '--location=global',
-    `--project=${project}`,
-    '--format=value(labels.sam-install)',
-  ]);
+  const keyLabel = value(
+    [
+      'kms',
+      'keys',
+      'describe',
+      pool,
+      `--keyring=${KEY_RING}`,
+      '--location=global',
+      `--project=${project}`,
+      '--format=value(labels.sam-install)',
+    ],
+    `KMS key ${KEY_RING}/${pool}`
+  );
   if (keyLabel === hash) {
     found.push({
       kind: 'kms-key',
@@ -227,7 +276,7 @@ function discoverBootstrap(ctx: TeardownContext, project: string, issuer: string
       proof: `labelled sam-install=${hash}`,
     });
   }
-  return found;
+  return { found, unchecked };
 }
 
 function runBootstrapTeardown(
