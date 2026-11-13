@@ -77,7 +77,7 @@ describe('highlight registry', () => {
     stubs = null;
   });
 
-  it('keeps every surface\'s ranges when one repaints or unmounts', () => {
+  it("keeps every surface's ranges when one repaints or unmounts", () => {
     stubs = stubCssHighlights();
     const root = rendered('<p>alpha beta gamma delta</p>');
     const chat = Symbol('chat');
@@ -120,7 +120,9 @@ describe('opening a clicked quote', () => {
 
   it('reads only the quotes whose rects contain the point, the open comment first', () => {
     const box = (top: number) =>
-      ({ getClientRects: () => [{ left: 0, right: 100, top, bottom: top + 10 }] }) as unknown as Range;
+      ({
+        getClientRects: () => [{ left: 0, right: 100, top, bottom: top + 10 }],
+      }) as unknown as Range;
     const painted: PaintedQuote[] = [
       { target: { itemId: 'm', quote: 'a', threadId: 'other' }, range: box(0), active: false },
       { target: { itemId: 'm', quote: 'b', threadId: 'below' }, range: box(50), active: false },

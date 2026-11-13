@@ -48,7 +48,8 @@ import { useProjectMessageCommentUi } from '../../../src/components/project-mess
 import type { DisplayItem } from '../../../src/components/project-message-view/tool-call-groups';
 import { renderWithQuery } from '../../test-utils/query-test-utils';
 
-const FIRST_TEXT = 'The retry loop gives up after three attempts. Then it logs the failure and exits.';
+const FIRST_TEXT =
+  'The retry loop gives up after three attempts. Then it logs the failure and exits.';
 const SECOND_TEXT = 'Deploys run on every merge to main.';
 
 function makeThread(overrides: Partial<MessageCommentThread>): MessageCommentThread {
@@ -87,7 +88,10 @@ const RESOLVED = makeThread({
   createdAt: 3_000,
   status: 'resolved',
 });
-const WHOLE_MESSAGE = makeThread({ id: 'no-quote', anchor: { kind: 'message', messageId: 'msg-2', quote: null } });
+const WHOLE_MESSAGE = makeThread({
+  id: 'no-quote',
+  anchor: { kind: 'message', messageId: 'msg-2', quote: null },
+});
 
 function items(firstText = FIRST_TEXT): DisplayItem[] {
   return [
@@ -207,12 +211,17 @@ describe('chat comment quotes', () => {
     await waitFor(() => expect(highlights.activeQuotes()).toEqual(['logs the failure']));
     expect(focusState()).toBe('msg-1|resolved|rail');
     // The open ones stay painted faintly beside it.
-    expect(highlights.otherQuotes()).toEqual(['gives up after three attempts', 'after three attempts']);
+    expect(highlights.otherQuotes()).toEqual([
+      'gives up after three attempts',
+      'after three attempts',
+    ]);
   });
 
   it('stops painting the focused comment strongly once the rail is closed', async () => {
     renderWithQuery(<ChatHarness focusCommentThreadId="open-older" />);
-    await waitFor(() => expect(highlights.activeQuotes()).toEqual(['gives up after three attempts']));
+    await waitFor(() =>
+      expect(highlights.activeQuotes()).toEqual(['gives up after three attempts'])
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Close rail' }));
 
@@ -248,7 +257,9 @@ describe('chat comment quotes', () => {
         'Why three?'
       )
     );
-    await waitFor(() => expect(highlights.activeQuotes()).toEqual(['gives up after three attempts']));
+    await waitFor(() =>
+      expect(highlights.activeQuotes()).toEqual(['gives up after three attempts'])
+    );
   });
 
   it('ignores a click on unpainted words, and a click that ends a text selection', async () => {

@@ -77,7 +77,8 @@ export function FilePreviewModal({
     // comment anchor (`FilePreviewContent`).
     itemIdOf: () => file.id,
     activeThreadId: commentsOpen ? focusedThreadId : null,
-    revealKey: focusedThreadId,
+    // Only a comment link brings its words on screen; a click on them is already looking.
+    revealKey: initialCommentThreadId,
     enabled: isMarkdown && mdViewMode === 'rendered',
     onOpenThread: openThread,
   });

@@ -186,21 +186,28 @@ export function useConversationJump({
     [listReady, loadUntil, onJump, resolveIndex, scrollAndHighlight]
   );
 
-  // Route-driven jump from the project Comments page. This deliberately reuses
-  // the same jump path as the timeline and session comments drawer so URL
-  // deep-links inherit the existing virtualized-list coordinate fix and
-  // fallback loading behavior.
+  // Route-driven jump from the project Comments page ("Open in chat"). It always takes the
+  // confirmed path below, never `jumpToMessage`'s one-shot fast path: the chat has just opened,
+  // and the list's own first scroll to the newest message can land after a single scroll and
+  // undo it, leaving the reader at the bottom with the target never mounted.
   useEffect(() => {
     if (!targetMessageId) return;
     const targetKey = `${sessionId}:${targetMessageId}`;
     if (consumedTargetMessageRef.current === targetKey) return;
     consumedTargetMessageRef.current = targetKey;
-    jumpToMessage({
-      messageId: targetMessageId,
-      timestamp: targetMessageTimestamp ?? Date.now(),
-    });
+    const target = { messageId: targetMessageId, timestamp: targetMessageTimestamp ?? Date.now() };
+    onJump();
+    setPendingJump(target);
+    void loadUntil(target);
     onTargetMessageConsumed?.();
-  }, [jumpToMessage, onTargetMessageConsumed, sessionId, targetMessageId, targetMessageTimestamp]);
+  }, [
+    loadUntil,
+    onJump,
+    onTargetMessageConsumed,
+    sessionId,
+    targetMessageId,
+    targetMessageTimestamp,
+  ]);
 
   // Resolve a pending jump once the target (or the nearest message, after
   // loading settles) is available in the rendered list. The target usually just

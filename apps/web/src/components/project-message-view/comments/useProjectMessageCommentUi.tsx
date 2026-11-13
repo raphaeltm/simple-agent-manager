@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useEffect, useMemo, useState } from 'react';
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MessageCommentDraft, UiMessageCommentThread } from './comment-utils';
 import type { MessageCommentRowState } from './CommentableConversationItem';
@@ -72,13 +72,33 @@ export function useProjectMessageCommentUi({
 
   const clearDraft = useCallback(() => setDraft(null), []);
 
-  const selectMessageComments = useCallback(
+  /*
+   * Changes each time someone is sent to a thread (a deep link, a thread's View or chip), so
+   * its quoted words are brought on screen even when it is the thread already focused. A click
+   * on the painted words themselves does not change it: the reader is looking at them.
+   */
+  const [revealKey, setRevealKey] = useState<string | null>(null);
+  const revealCount = useRef(0);
+  const requestReveal = useCallback((threadId: string) => {
+    revealCount.current += 1;
+    setRevealKey(`${threadId}:${revealCount.current}`);
+  }, []);
+
+  const focusThread = useCallback(
     (messageId: string, commentId?: string) => {
       setActiveMessageId(messageId);
       setFocusedCommentId(commentId ?? null);
       if (usesDesktopRail) onRequestCommentSurface?.();
     },
     [onRequestCommentSurface, usesDesktopRail]
+  );
+
+  const selectMessageComments = useCallback(
+    (messageId: string, commentId?: string) => {
+      focusThread(messageId, commentId);
+      if (commentId) requestReveal(commentId);
+    },
+    [focusThread, requestReveal]
   );
 
   const { createThread, reply, resolve, reopen, sendToAgent } = messageComments;
@@ -119,20 +139,12 @@ export function useProjectMessageCommentUi({
     );
     if (thread) {
       setPendingFocusThreadId(null);
-      setActiveMessageId(thread.anchor.messageId);
-      setFocusedCommentId(thread.id);
-      if (usesDesktopRail) onRequestCommentSurface?.();
+      selectMessageComments(thread.anchor.messageId, thread.id);
       return;
     }
     // Deleted, or not a thread of this session: stop waiting once the list has settled.
     if (commentsSettled) setPendingFocusThreadId(null);
-  }, [
-    commentsSettled,
-    messageComments.comments,
-    onRequestCommentSurface,
-    pendingFocusThreadId,
-    usesDesktopRail,
-  ]);
+  }, [commentsSettled, messageComments.comments, pendingFocusThreadId, selectMessageComments]);
 
   const rowState = useMemo<MessageCommentRowState>(
     () => ({
@@ -182,17 +194,15 @@ export function useProjectMessageCommentUi({
     focusedThread.anchor.messageId === activeMessageId &&
     (usesDesktopRail ? commentSurfaceOpen : true);
   const openHighlightedThread = useCallback(
-    (thread: UiMessageCommentThread) => selectMessageComments(thread.anchor.messageId, thread.id),
-    [selectMessageComments]
+    (thread: UiMessageCommentThread) => focusThread(thread.anchor.messageId, thread.id),
+    [focusThread]
   );
   useCommentQuoteHighlights({
     containerRef: chatLogRef,
     threads: messageComments.comments,
     itemIdOf: messageIdOf,
     activeThreadId: focusedShowing ? focusedCommentId : null,
-    // Keyed on the focus, not on whether it is showing: reopening the rail on the same thread
-    // must not pull the conversation back to it after the user scrolled away.
-    revealKey: focusedCommentId,
+    revealKey,
     onOpenThread: openHighlightedThread,
   });
 

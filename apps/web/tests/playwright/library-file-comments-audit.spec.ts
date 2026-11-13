@@ -10,6 +10,12 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, screenshot, setupProjectChatMocks } from './audit-helpers';
+import {
+  ACTIVE_QUOTE,
+  clickPaintedWords,
+  OTHER_QUOTE,
+  paintedQuotes,
+} from './quote-highlight-helpers';
 
 const PROJECT_ID = 'proj-library-comments';
 const SESSION_ID = 'sess-library-comments';
@@ -97,6 +103,9 @@ const MOCK_MESSAGES = [
   },
 ];
 
+const QUOTED_SENTENCE =
+  'The quick brown fox jumps over the lazy dog and keeps going for quite a while.';
+
 const LONG_BODY =
   'This paragraph contradicts the section above it, and the reasoning behind the ' +
   'retention window is never stated anywhere in the document, which makes the ' +
@@ -183,6 +192,12 @@ async function setupMocks(page: Page, scenario: Scenario) {
                 id: 'thread-resolved',
                 body: 'Fixed in the latest revision.',
                 status: 'resolved',
+                // Resolved: not painted on the file by default.
+                anchor: {
+                  kind: 'library_file',
+                  fileId: FILE_ID,
+                  quote: 'Should the retention window be configurable per project?',
+                },
               }),
               thread({
                 id: 'thread-unbroken',
@@ -394,5 +409,28 @@ test.describe('Library file comments', () => {
     await page.getByRole('button', { name: `Open ${FILE_NAME}` }).click();
     await openCommentPanel(page);
     await expect(commentPanel(page).getByText('This sentence needs a citation.')).toBeVisible();
+  });
+
+  test('commented words are painted, and clicking them opens the thread', async ({ page }) => {
+    await setupMocks(page, 'populated');
+    await openPreview(page);
+
+    // Painted before the panel is ever opened; the resolved thread's words are not.
+    await expect.poll(() => paintedQuotes(page, OTHER_QUOTE)).toEqual([QUOTED_SENTENCE]);
+    expect(await paintedQuotes(page, ACTIVE_QUOTE)).toEqual([]);
+    await expect(commentPanel(page).getByRole('heading', { name: 'Comments' })).toHaveCount(0);
+    await screenshot(page, `library-file-comments-highlighted-${suffixFor(page)}`);
+    await assertNoOverflow(page);
+
+    await clickPaintedWords(page, QUOTED_SENTENCE);
+
+    const panel = commentPanel(page);
+    await expect(panel.getByRole('heading', { name: 'Comments' })).toBeVisible();
+    const focused = panel.locator('[data-comment-focused="true"]');
+    await expect(focused).toBeVisible();
+    await expect(focused).toContainText(LONG_BODY);
+    await expect.poll(() => paintedQuotes(page, ACTIVE_QUOTE)).toEqual([QUOTED_SENTENCE]);
+    await screenshot(page, `library-file-comments-highlight-opened-${suffixFor(page)}`);
+    await assertNoOverflow(page);
   });
 });
