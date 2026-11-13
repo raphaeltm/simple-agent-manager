@@ -58,6 +58,7 @@ import {
 } from './services/credential-limit-events/read';
 import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
+import { resolveProfileAccountBindings } from './services/profile-account-bindings';
 import * as projectData from './services/project-data';
 import { describeRootSearchCoverage } from './services/project-data-search-coverage';
 import { startOrchestration } from './services/project-orchestrator';
@@ -69,7 +70,6 @@ import {
   parseHarnessWorkConfig,
 } from './services/session-idleness';
 import { DEFAULT_SESSION_SLEEP_AFTER_MS } from './services/session-snapshots';
-import { resolveProfileAccountBindings } from './services/profile-account-bindings';
 import { submitTask } from './services/submit-task';
 import { getRecentAssistantMessagesForTask } from './services/task-final-assistant-message';
 import {

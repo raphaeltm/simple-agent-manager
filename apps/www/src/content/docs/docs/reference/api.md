@@ -213,6 +213,18 @@ Notes for client developers:
   one-off schedules and recurring (cron) ones. `sam_channels_list`, `sam_channel_history`,
   `sam_channel_get` and `sam_channel_subscription_cancel` read and manage coordination channels;
   apps cannot post to them.
+- `sam_profiles_list` gives each profile an `account` (`state`: `account`, `platform`, `paused` or
+  `none`; `tier`: `profile`, `project`, `user` or `platform`; `poolId`; `accountName`), resolved by the
+  same resolver agent runs use, from row metadata only. `sam_usage_get` groups profiles by `poolId`
+  (one stored credential, including byte-identical copies) and returns provider-reported windows
+  with `usedPercent`, `remainingPercent`, `resetsAt`, `observedAt`, `ageMinutes` and `freshness`
+  (`fresh`, `stale` after `connector.usageStaleAfterMinutes`, or `reset_since_sample`), plus per-pool
+  `exhausted` and `nextResetAt`. `usage.state: "never_reported"` means unknown. Platform pools add
+  `samAiProxyToday`. Credentials, ciphertext and other members' accounts are never returned.
+- `sam_chat_start` accepts `model` and `effort` for that chat only; the result echoes them as
+  `agentOverrides`. `sam_chats_list` rows carry `operational` (`taskStatus`, `executionStep`,
+  `parentTaskId`, `taskTerminal`, `labelMayBeStale`) beside the index `status` label, and
+  `sam_tasks_list` rows carry `parentTaskId`, `executionStep` and `sessionId`.
 - To answer an agent, send its `interactionId` with an `optionId`, `formContent`, or
   `decline: true`. A link request is accepted with `optionId: "accept"`. An attention question takes
   its `markerId` and an `answer` instead. SAM generates the receipt metadata.

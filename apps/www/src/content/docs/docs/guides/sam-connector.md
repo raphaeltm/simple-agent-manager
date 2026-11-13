@@ -108,6 +108,10 @@ container** decides where the work runs; with an **Auto** profile, or none, it r
 or the project has a cloud credential connected, and on Instant otherwise. To stop runaway use, each person can start 10 pieces of
 work an hour and 50 a day through the Connector unless your administrator changed the limits.
 
+The app can also pick a different model, and an effort level, for one piece of work. That changes
+only that chat: the profile, the account it runs on, and every other chat keep the profile's model.
+SAM passes the model name to the agent as given, so it has to be one the profile's agent supports.
+
 Work your app starts is labelled **via ChatGPT** (or the app's name) on the dashboard, in the session
 list, and on ideas, so you can tell it apart from work you started in SAM.
 
@@ -136,6 +140,21 @@ list, and on ideas, so you can tell it apart from work you started in SAM.
   usage today when agents use SAM's AI service, and the latest usage-limit readings your
   providers reported for your credentials. SAM doesn't record token counts per task or which
   commit a deployment runs, so those show as unavailable rather than as guesses.
+- **Which account each profile uses, and how much is left.** When the app lists your agent
+  profiles, each one says which of your accounts it runs on (by the name you gave it in Settings),
+  whether that comes from a pin on the profile, a pin on the project, or your default, or that SAM's
+  platform account is used, the account is paused, or there is none. Profiles that run on the same
+  stored account share one usage limit, and the app sees them grouped under one pool rather than as
+  separate capacity. For each pool it gets the provider's latest usage readings, when each window
+  resets, and whether a limit is used up and until when. Readings arrive only while an agent runs on
+  that account, so each one says how old it is, and an account SAM has never seen a reading for is
+  reported as unknown rather than full. Two separately stored logins to the same provider account
+  can't be told apart, so they show as separate pools. Nothing about your credentials themselves,
+  and nothing about other members' accounts, is returned.
+- **What a chat is actually doing.** The chat list shows each chat's label (for example "active")
+  beside the status of the task behind it, its current step and its parent task, and flags chats
+  still labelled active whose task has already finished. The app can ask for a chat's live status
+  for whether its agent is working right now.
 - **Coordination channels.** The app can list a project's channels, read their messages, and see
   which tasks are on a channel and which chats follow it. Messages are what agents posted, not
   decisions you made, and SAM doesn't record whether an agent read one. Private agent-to-agent
