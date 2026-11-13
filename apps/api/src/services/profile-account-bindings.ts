@@ -25,6 +25,7 @@ import type { ProfileAccountBinding } from '@simple-agent-manager/operations';
 import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../env';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { resolveAgentCredentialSelections } from './agent-credential-selection';
 import { samProxyFallbackAvailable } from './sam-ai-proxy-fallback';
 
@@ -67,8 +68,13 @@ async function poolDigest(references: readonly string[]): Promise<string> {
   return `pool_${Array.from(digest.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('')}`;
 }
 
-type EdgeRow = { a: unknown; b: unknown };
-type ModeRow = { agent_type: unknown; provider_mode: unknown };
+/** Each result row as a record; a non-object row is skipped (rule 50). */
+function rows(result: D1Result | undefined): Record<string, unknown>[] {
+  return (result?.results ?? []).flatMap((row) => {
+    const record = maybeJsonRecord(row);
+    return record ? [record] : [];
+  });
+}
 
 function text(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
@@ -102,18 +108,18 @@ async function loadPoolsAndModes(env: Env, userId: string) {
       .bind(userId),
   ]);
   const pools = new Pools();
-  for (const row of (ccEdges?.results ?? []) as EdgeRow[]) {
+  for (const row of rows(ccEdges)) {
     const a = text(row.a);
     const b = text(row.b);
     if (a && b) pools.union(`cc_credentials:${a}`, `cc_credentials:${b}`);
   }
-  for (const row of (legacyEdges?.results ?? []) as EdgeRow[]) {
+  for (const row of rows(legacyEdges)) {
     const a = text(row.a);
     const b = text(row.b);
     if (a && b) pools.union(`credentials:${a}`, `cc_credentials:${b}`);
   }
   const providerModes = new Map<string, string | null>();
-  for (const row of (modes?.results ?? []) as ModeRow[]) {
+  for (const row of rows(modes)) {
     const agentType = text(row.agent_type);
     if (agentType) providerModes.set(agentType, text(row.provider_mode));
   }
