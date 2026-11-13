@@ -39,6 +39,7 @@ async function setup(
     uid?: number | null;
     wrap?: (p: KeyProvider) => KeyProvider;
     cacheMs?: number;
+    staleWaitMs?: number;
     noSigningKey?: boolean;
   } = {}
 ) {
@@ -58,6 +59,7 @@ async function setup(
     bundleDir: dir,
     allowedUids: new Set([7101]),
     cacheMs: options.cacheMs ?? 1000,
+    staleWaitMs: options.staleWaitMs,
     peerUid: () => (options.uid === undefined ? 7101 : options.uid),
     now: () => now,
     log: (event) => logs.push(event),
@@ -188,6 +190,73 @@ describe('cache and key-service failures', () => {
     advance(1001);
     expect((await ask()).status).toBe(200);
     expect(logs).toContainEqual(expect.objectContaining({ event: 'key_agent.serving_stale' }));
+  });
+
+  // Box round R5 (real Cloud KMS, outbound 443 dropped for the agent only): the agent waited the
+  // full key-service timeout (5 s) before serving stale, the Worker gives up after 3 s, and fresh
+  // isolates answered 503 KEY_AGENT_UNREACHABLE for the whole outage.
+  type Hang = {
+    release: ((error?: KeyProviderError) => void) | null;
+    calls: number;
+    after?: KeyProviderError;
+  };
+  function hanging(state: Hang) {
+    return (real: KeyProvider): KeyProvider => ({
+      ...real,
+      unwrap: async (w, c) => {
+        state.calls += 1;
+        if (state.calls !== 2) {
+          if (state.calls > 2 && state.after) throw state.after;
+          return await real.unwrap(w, c);
+        }
+        await new Promise<void>((resolve, reject) => {
+          state.release = (error) => (error ? reject(error) : resolve());
+        });
+        return await real.unwrap(w, c);
+      },
+    });
+  }
+
+  async function within<T>(ms: number, promise: Promise<T>): Promise<T | 'timed out'> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<'timed out'>((done) => {
+      timer = setTimeout(() => done('timed out'), ms);
+    });
+    try {
+      return await Promise.race([promise, late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  it('serves the stale copy within the stale wait when the key service hangs', async () => {
+    const state: Hang = { release: null, calls: 0 };
+    const { ask, advance, logs } = await setup({ wrap: hanging(state), staleWaitMs: 50 });
+    expect((await ask()).status).toBe(200);
+    advance(1001);
+    const res = await within(1000, ask());
+    expect(res).not.toBe('timed out');
+    expect((res as Response).status).toBe(200);
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        event: 'key_agent.serving_stale',
+        reason: expect.stringContaining('slower than 50 ms'),
+      })
+    );
+    // The refresh carried on; a refusal that arrives later still drops the copy.
+    state.after = new KeyProviderError('denied', 'HTTP 403');
+    state.release?.(state.after);
+    await new Promise((done) => setTimeout(done, 10));
+    expect((await ask()).status).toBe(503);
+  });
+
+  it('control: with no copy in hand a hung key service is waited for, not skipped', async () => {
+    const state: Hang = { release: null, calls: 1 }; // the first unwrap already hangs
+    const { ask } = await setup({ wrap: hanging(state), staleWaitMs: 50 });
+    const pending = ask();
+    expect(await within(300, pending)).toBe('timed out');
+    state.release?.();
+    expect((await pending).status).toBe(200);
   });
 
   it('drops the copy when the key service refuses (revocation takes effect)', async () => {

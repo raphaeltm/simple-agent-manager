@@ -38,7 +38,7 @@ function ctx(bucket: string): BoxContext {
     },
     envFile: join(root, 'box.env'),
     stateDir: join(root, 'state'),
-    composeFile: '/unused/docker-compose.yml',
+    composeFiles: ['/unused/docker-compose.yml'],
     run,
     now: () => Date.now(),
     log: () => undefined,

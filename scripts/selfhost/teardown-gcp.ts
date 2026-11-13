@@ -26,7 +26,13 @@ import {
 import { check } from './backup-lib';
 import { SELFHOST_ENVIRONMENT } from './install-record';
 import type { TeardownContext } from './teardown-box';
-import { BOOTSTRAP, bootstrapItems, gcloud } from './teardown-gcp-bootstrap';
+import {
+  BOOTSTRAP,
+  bootstrapItems,
+  gcloud,
+  gcloudNotFound,
+  gcloudReason,
+} from './teardown-gcp-bootstrap';
 import { both, type Item, STEPS } from './teardown-model';
 
 /**
@@ -170,6 +176,19 @@ function instanceItems(
       },
     ];
   }
+  if (listed.length === 0) {
+    return [
+      {
+        id: `gcp:${project}:instances`,
+        place: 'in your cloud, made by SAM at runtime',
+        what: `node VMs in ${project}: none labelled managed=${SAM_MANAGED_LABEL_VALUE}`,
+        provenance: 'discovered, not recorded',
+        how: 'nothing to remove',
+        step: STEPS.compute,
+        plan: both({ act: 'keep', why: 'nothing to remove' }),
+      },
+    ];
+  }
   return listed.map((instance) => {
     const refusal = ownershipRefusal(instance, ctx.installationId);
     const path = `projects/${project}/zones/${instance.zone}/instances/${instance.name}`;
@@ -277,7 +296,23 @@ function firewallItems(
       `--project=${project}`,
       '--format=value(name)',
     ]);
-    if (found.status !== 0) continue;
+    if (found.status !== 0) {
+      if (gcloudNotFound(found.stderr)) continue;
+      // Permission denied (the box's own account cannot read firewalls) is not "absent".
+      items.push({
+        id: `gcp:${project}:firewall:${rule}`,
+        place: 'in your cloud, made by SAM at runtime',
+        what: `firewall rule ${rule} (${project}): could not check (${gcloudReason(found.stderr)})`,
+        provenance: 'discovered, not recorded',
+        how: `gcloud compute firewall-rules describe ${rule} --project=${project} as a project owner; delete it only if no other SAM install uses ${project}`,
+        step: STEPS.compute,
+        plan: both({
+          act: 'operator',
+          why: 'teardown could not check it with this gcloud account',
+        }),
+      });
+      continue;
+    }
     const inUse =
       others.length > 0
         ? `; ${others.length} other SAM VM(s) in this project still use it, so keep it`

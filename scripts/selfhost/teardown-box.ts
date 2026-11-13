@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 
 import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
-import { type BoxContext, check, MANIFEST_NAME, parseBucketUrl } from './backup-lib';
+import { type BoxContext, check, composeArgs, MANIFEST_NAME, parseBucketUrl } from './backup-lib';
 import { deleteObjects, listObjects } from './bucket-objects';
 import { COMPOSE_PROJECT, RECORD_FILE, usesBundledStore } from './install-record';
 import { both, type Item, type Mode, STEPS } from './teardown-model';
@@ -44,17 +44,14 @@ export function recorded(ctx: TeardownContext, kind: string, name?: string) {
 }
 
 function compose(ctx: TeardownContext, args: string[]): void {
-  check(
-    ctx.run('docker', ['compose', '-f', ctx.composeFile, '--env-file', ctx.envFile, ...args]),
-    `docker compose ${args[0]}`
-  );
+  check(ctx.run('docker', composeArgs(ctx, args)), `docker compose ${args[0]}`);
 }
 
 export function boxItems(ctx: TeardownContext): Item[] {
   const items: Item[] = [];
   const project = recorded(ctx, 'compose-project', COMPOSE_PROJECT);
   const composeGone = project?.removedAt ?? (existsSync(ctx.envFile) ? undefined : 'no .env left');
-  const composeCmd = `docker compose -f ${ctx.composeFile} --env-file ${ctx.envFile}`;
+  const composeCmd = `docker ${composeArgs(ctx, []).join(' ')}`;
   const everything = ctx.mode === 'remove-everything';
 
   items.push({
