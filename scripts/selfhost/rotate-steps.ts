@@ -219,7 +219,9 @@ export async function advanceOverlap(ctx: StepContext, overlapHours: number): Pr
       const kids = await jwksKids(ctx);
       for (const kid of [head.JWT_KEY_ID, head.JWT_PREVIOUS_KEY_ID]) {
         if (!kids.includes(kid ?? ''))
-          throw new ApplyFailedError(`the JWKS does not publish kid ${kid}`);
+          throw new ApplyFailedError(
+            `the JWKS does not publish kid ${kid} (it publishes ${kids.join(', ') || 'nothing'})`
+          );
       }
       step.waitUntil = head.JWT_PUBLIC_KEY_PREVIOUS_UNTIL;
       ctx.save();

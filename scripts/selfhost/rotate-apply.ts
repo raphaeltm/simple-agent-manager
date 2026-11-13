@@ -58,6 +58,21 @@ export function patched(base: Secrets, patch: Patch): Secrets {
   return next;
 }
 
+/** Longest wait for the clock to pass the newest bundle's createdAt (two seals in one ms). */
+const MAX_CLOCK_WAIT_MS = 2000;
+
+async function afterInstant(instantMs: number): Promise<void> {
+  const deadline = Date.now() + MAX_CLOCK_WAIT_MS;
+  while (Date.now() <= instantMs) {
+    if (Date.now() > deadline) {
+      throw new ApplyFailedError(
+        'the newest bundle is dated in the future; is the clock behind? Fix the clock and resume'
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
 /** Applies `patch`, or resumes the one already recorded; on success the step is in `then`. */
 export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): Promise<void> {
   const { step, store, deps } = ctx;
@@ -73,8 +88,9 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
     }
     deps.log(`  resuming: deploying the recorded bundle ${bundleId} again`);
   } else {
-    const { secrets } = await store.head();
-    const bundle = await store.seal(patched(secrets, patch));
+    const current = await store.head();
+    await afterInstant(Date.parse(current.bundle.createdAt));
+    const bundle = await store.seal(patched(current.secrets, patch));
     step.stagedFrom = step.phase === 'staging' ? step.stagedFrom : step.phase;
     step.stagedBundleId = bundle.bundleId;
     step.stagedFor = then;
@@ -82,6 +98,14 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
     ctx.save();
     store.write(bundle);
     bundleId = bundle.bundleId;
+    // The deploy runs with the newest bundle by createdAt: a clock that stepped back would
+    // make it pick another one, so never deploy unless this one is the newest.
+    const newest = (await store.head()).bundle.bundleId;
+    if (newest !== bundleId) {
+      throw new ApplyFailedError(
+        `the bundle just sealed (${bundleId}) is not the newest (${newest}); is the clock behind?`
+      );
+    }
   }
   await deps.deploy();
   const check = await deps.adoptAndCheck();

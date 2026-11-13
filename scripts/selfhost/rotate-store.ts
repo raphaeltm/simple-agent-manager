@@ -33,7 +33,7 @@ import {
   listBundles,
   pruneBundles,
 } from './key-service';
-import { ensurePrivateDir, readPrivateJson, writePrivateFile } from './secret-files';
+import { ensurePrivateDir, writePrivateFile } from './secret-files';
 
 export const JOURNAL_FORMAT = 'sam-key-rotation/1';
 export const ROTATION_DIR = 'rotation';
@@ -222,7 +222,7 @@ export function openRotationStore(
     },
     async readSnapshot(rotationId, name) {
       const path = snapshotPath(rotationId, name);
-      return await openBundle(parseBundle(JSON.stringify(readPrivateJson(path))), keyProvider);
+      return await openBundle(parseBundle(readFileSync(path, 'utf8')), keyProvider);
     },
   };
   return store;
