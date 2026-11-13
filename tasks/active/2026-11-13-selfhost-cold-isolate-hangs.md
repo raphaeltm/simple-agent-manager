@@ -44,7 +44,9 @@ deployed by the real `scripts/selfhost/deploy.ts`. It was tried in both sealed (
    - `apps/api/src/services/project-data-ensure-memo.ts`: `inFlight`. A DO RPC with no deadline,
      so a joined dead flight never expires.
    - `apps/api/src/services/agent-sign-in/verify.ts`: jose `createRemoteJWKSet` keeps one
-     pending JWKS fetch per isolate.
+     pending JWKS fetch per isolate, but jose drops a pending fetch instead of joining it when it
+     detects Workers (`WebSocketPair` or the `Cloudflare-Workers` user agent). celld defines both
+     (`js/harness.js`), so this one is safe; no change.
    - Safe: `hosted-git/tokens.ts` caches a crypto key promise, but celld's WebCrypto settles it
      within the same turn (`js/crypto.js`).
 4. **Who disconnects first on the box:**
@@ -58,16 +60,16 @@ deployed by the real `scripts/selfhost/deploy.ts`. It was tried in both sealed (
 
 ## Implementation checklist
 
-- [ ] runtime-secrets: stop sharing the in-flight fetch across requests; cache only on success
-- [ ] Live regression test through real celld: an aborted first request on a fresh isolate must
+- [x] runtime-secrets: stop sharing the in-flight fetch across requests; cache only on success
+- [x] Live regression test through real celld: an aborted first request on a fresh isolate must
       not poison later requests (stateless and Durable Object); proven red before the fix
-- [ ] Shared-flight joins elsewhere bounded by the joiner's own timer (admin settings caches),
+- [x] Shared-flight joins elsewhere bounded by the joiner's own timer (admin settings caches),
       CF behaviour unchanged; unit tests
-- [ ] project-data ensure memo: no cross-request join; unit test
-- [ ] agent sign-in JWKS: bounded, recoverable join; unit test
-- [ ] Before/after load numbers (same harness)
-- [ ] Upstream celld issue text and minimal repro in PR body
-- [ ] README "Cold starts" / troubleshooting updated
+- [x] project-data ensure memo: join bounded by the joiner's own timer, then its own ensure; unit test
+- [x] agent sign-in JWKS: checked, jose already avoids the join on celld (no change)
+- [x] Before/after load numbers (same harness)
+- [x] Upstream celld issue text and minimal repro in PR body
+- [x] README "Cold starts" / troubleshooting updated
 - [ ] CI green on branch (manual dispatch)
 
 ## Acceptance criteria
@@ -75,3 +77,24 @@ deployed by the real `scripts/selfhost/deploy.ts`. It was tried in both sealed (
 - [ ] With the fix, the abort probe leaves no hung request (stateless + DO) on real celld
 - [ ] Load test after: zero requests >= 10 s that were not caused by the load itself
 - [ ] Cloudflare behaviour unchanged (no new Worker vars; CF entry never imports selfhost code)
+
+## Results (local, real celld 0.6.3 + real API Worker, 2-CPU cpuset under CPU+disk load)
+
+| Run                                              | Mode   | Requests | Hung (>= 10 s or client cap) | Worst |
+| ------------------------------------------------ | ------ | -------- | ---------------------------- | ----- |
+| Natural load, 15 min, before                     | sealed | 2153     | 2 (150 s cap)                | 150 s |
+| Natural load, 15 min, after                      | sealed | 2153     | 0                            | 2.8 s |
+| Natural load, 15 min, before                     | legacy | 2153     | 0                            | 2.7 s |
+| Natural load, 15 min, after                      | legacy | 2153     | 0                            | 2.6 s |
+| Cold burst + impatient client, 10 cycles, before | sealed | 60       | 46 (9/10 cycles, 60 s cap)   | 60 s  |
+| Cold burst + impatient client, 10 cycles, after  | sealed | 60       | 0                            | 2.8 s |
+| Cold burst + impatient client, 10 cycles, before | legacy | 60       | 0                            | 4.3 s |
+| Cold burst + impatient client, 10 cycles, after  | legacy | 60       | 0                            | 4.0 s |
+
+The natural-load hangs needed no client abort: a burst of six requests produced two concurrent
+isolate builds, and two requests hung with no Worker log line. celld clears a stateless request's
+ops when it answers without `waitUntil`, so an answering starter drops a shared flight too. The
+fix covers both triggers.
+
+Not reproduced locally: a legacy-plaintext hang through unauthenticated routes. The
+admin-settings join was proven through real celld by the live settings case instead.

@@ -1,8 +1,8 @@
 /** Shared Phase 1 resolver and atomic, value-free audit boundary. */
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
-import { settleSharedFlight } from '../lib/shared-flight';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { settleSharedFlight } from '../lib/shared-flight';
 import { errors } from '../middleware/error';
 import {
   adminSettingCacheMs,

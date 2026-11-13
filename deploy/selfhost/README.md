@@ -656,6 +656,24 @@ anyone is using the box. Set `SAM_KEEP_WARM=off` in `.env` and run `docker compo
 to turn it off. The upstream fix (celld keeping a warm stateless isolate, or a retirement
 setting) is tracked in `tasks/backlog/2026-11-11-selfhost-celld-isolate-cold-start-slow-page-loads.md`.
 
+**Aborted requests on a cold isolate.** celld 0.6.3 gives every async operation of a Worker (a
+fetch, a D1 call, a timer) to the request that started it. When that request's client
+disconnects, celld drops those operations without settling them. If Worker code shares one
+in-flight promise between requests, every request that joined it would then wait until its own
+client gave up or celld's 300 s handler budget ran out. Before task H2 the box saw outages of
+about a minute under load. A slow cold start outlasted the timeout of a client (the keep-warm
+check, the deploy health check, a monitoring probe), and the request that client dropped had
+started the isolate's runtime-secrets load or a settings read.
+
+The API Worker no longer joins another request's load unbounded:
+
+- Each cold request fetches its own runtime secrets (`apps/api/src/selfhost/runtime-secrets.ts`).
+- The settings caches and the ProjectData ensure memo wait on another request's read only until
+  that read's own deadline plus a grace, then read for themselves (`apps/api/src/lib/shared-flight.ts`).
+
+`scripts/selfhost/live/shared-flight-cancel.live.test.ts` reproduces the hang on celld 0.6.3.
+New Worker code must not await a promise that another request started without such a bound.
+
 ## Guided credential login (opt-in, experimental)
 
 The "sign in with your Claude / ChatGPT subscription" button runs the provider's CLI in a Sandbox

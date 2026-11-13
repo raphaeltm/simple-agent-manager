@@ -14,8 +14,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import * as svc from '../../../src/services/project-data';
 import { DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS } from '../../../src/lib/shared-flight';
+import * as svc from '../../../src/services/project-data';
 import {
   DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS,
   DEFAULT_PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES,
