@@ -19,6 +19,7 @@ import { jsonValidator, StartChatSessionSchema } from '../schemas';
 import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
+import { validateRunAgentConfiguration } from '../services/run-agent-configuration';
 import { resolveSkillProfile } from '../services/skills';
 import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { truncateTitle } from '../services/task-title';
@@ -177,6 +178,11 @@ chatStartRoutes.post(
       'opencode';
     // Before any effect: an effort the resolved agent cannot run is rejected here.
     const agentRun = resolveTaskAgentOverrides(agentType, body, resolvedProfile ?? {});
+    const agentConfigurationId = await validateRunAgentConfiguration(db, {
+      userId,
+      configurationId: body.agentConfigurationId,
+      agentType,
+    });
 
     const parentTask = await resolveParentLineage(
       db,
@@ -211,6 +217,7 @@ chatStartRoutes.post(
       agentProfileHint: resolvedProfile?.profileId ?? null,
       skillId: resolvedProfile?.skillId ?? null,
       skillHint: body.skillId ?? null,
+      agentConfigurationId,
       taskMode: 'conversation',
       triggeredBy: 'user',
       // Never another member's credentials: a teammate's parent task must not make this one

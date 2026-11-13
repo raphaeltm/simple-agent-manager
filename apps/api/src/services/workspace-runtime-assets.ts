@@ -115,13 +115,21 @@ async function resolveAgentSessionRuntimeIds(
 async function resolveTaskRuntimeIds(
   db: Db,
   workspace: WorkspaceRuntimeBase
-): Promise<{ profileId: string | null; skillId: string | null }> {
+): Promise<{
+  profileId: string | null;
+  skillId: string | null;
+  runConfigurationId: string | null;
+}> {
   if (!workspace.projectId) {
-    return { profileId: null, skillId: null };
+    return { profileId: null, skillId: null, runConfigurationId: null };
   }
 
   const taskRows = await db
-    .select({ profileId: schema.tasks.agentProfileHint, skillId: schema.tasks.skillId })
+    .select({
+      profileId: schema.tasks.agentProfileHint,
+      skillId: schema.tasks.skillId,
+      runConfigurationId: schema.tasks.agentConfigurationId,
+    })
     .from(schema.tasks)
     .where(
       and(
@@ -135,7 +143,19 @@ async function resolveTaskRuntimeIds(
   return {
     profileId: taskRows[0]?.profileId ?? null,
     skillId: taskRows[0]?.skillId ?? null,
+    runConfigurationId: taskRows[0]?.runConfigurationId ?? null,
   };
+}
+
+/**
+ * The account chosen for the run this workspace serves (`tasks.agent_configuration_id`),
+ * read from the same task row `resolveWorkspaceRuntimeIds` takes the profile from.
+ */
+export async function resolveWorkspaceRunConfigurationId(
+  db: Db,
+  workspace: WorkspaceRuntimeBase
+): Promise<string | null> {
+  return (await resolveTaskRuntimeIds(db, workspace)).runConfigurationId;
 }
 
 /**
@@ -238,6 +258,8 @@ export interface WorkspaceRuntimeIds {
   /** Not yet validated against the workspace's project. */
   profileId: string | null;
   skillId: string | null;
+  /** Read only on the task path; undefined when the ids came from elsewhere. */
+  runConfigurationId?: string | null;
   source: RuntimeAssetContext['source'];
 }
 
@@ -249,7 +271,7 @@ export async function resolveWorkspaceRuntimeIds(
 ): Promise<WorkspaceRuntimeIds> {
   const workspace = preloaded?.workspace ?? (await getWorkspaceRuntimeBase(db, input.workspaceId));
   if (!workspace.projectId) {
-    return { workspace, profileId: null, skillId: null, source: 'none' };
+    return { workspace, profileId: null, skillId: null, runConfigurationId: null, source: 'none' };
   }
   const agentSessionId = input.agentSessionId?.trim();
   if (agentSessionId) {
@@ -262,10 +284,17 @@ export async function resolveWorkspaceRuntimeIds(
   }
   const taskIds = await resolveTaskRuntimeIds(db, workspace);
   if (taskIds.profileId || taskIds.skillId) return { workspace, ...taskIds, source: 'task' };
+  const { runConfigurationId } = taskIds;
   if (workspace.agentProfileHint) {
-    return { workspace, profileId: workspace.agentProfileHint, skillId: null, source: 'workspace' };
+    return {
+      workspace,
+      profileId: workspace.agentProfileHint,
+      skillId: null,
+      runConfigurationId,
+      source: 'workspace',
+    };
   }
-  return { workspace, profileId: null, skillId: null, source: 'none' };
+  return { workspace, profileId: null, skillId: null, runConfigurationId, source: 'none' };
 }
 
 export async function resolveWorkspaceRuntimeAssetContext(

@@ -79,6 +79,8 @@ export function describeCredential(credential: SessionAgentCredential): string {
     ? (credential.accountName ?? 'Your account')
     : 'Their own account';
   switch (credential.credentialScope) {
+    case 'run':
+      return `${account} · chosen for this chat`;
     case 'profile':
       return `${account} · chosen for this profile`;
     case 'project':
