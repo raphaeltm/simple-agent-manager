@@ -1,15 +1,14 @@
 import { type RefObject, useCallback, useState } from 'react';
 
+import type { UiCommentThread } from './comment-utils';
 import { type QuoteItemKey, type QuoteTarget, useQuoteHighlights } from './quote-highlight';
 import { threadToOpen, useQuoteHighlightClicks } from './quote-highlight-clicks';
 
 /** What a thread needs to be painted: message threads and library-file threads both fit. */
-export interface HighlightableThread {
-  id: string;
-  status: string;
-  createdAt: number;
-  anchor: { quote?: string | null };
-}
+export type HighlightableThread = Pick<UiCommentThread, 'id' | 'status' | 'createdAt' | 'anchor'>;
+
+/** Painted words are found in the surface's `[data-comment-anchor]` elements. */
+const COMMENT_ANCHOR_KEY: QuoteItemKey = 'commentAnchor';
 
 interface PaintTargets {
   /** Identifies the content below; equal keys mean equal targets. */
@@ -92,12 +91,10 @@ export function useCommentQuoteHighlights<T extends HighlightableThread>({
   const openClicked = useCallback(
     (targets: QuoteTarget[]) => {
       const threadIds = targets.flatMap((target) => (target.threadId ? [target.threadId] : []));
-      const thread = threadToOpen(threadIds, threads);
+      const thread = threadToOpen(threadIds, threads, enabled ? activeThreadId : null);
       if (thread) onOpenThread(thread);
     },
-    [onOpenThread, threads]
+    [activeThreadId, enabled, onOpenThread, threads]
   );
   useQuoteHighlightClicks(containerRef, paintedRef, openClicked, enabled);
 }
-
-const COMMENT_ANCHOR_KEY: QuoteItemKey = 'commentAnchor';

@@ -189,4 +189,81 @@ describe('library markdown comment quotes', () => {
 
     expect(highlights.registry.size).toBe(0);
   });
+
+  it('brings a deep-linked comment’s words on screen once the file has loaded', async () => {
+    // jsdom has no layout: give the preview pane one, with the quoted words 1500px down it.
+    const original = Range.prototype.getBoundingClientRect;
+    let pane: HTMLElement | null = null;
+    Range.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      const top = 1500 - (pane?.scrollTop ?? 0);
+      return {
+        top,
+        bottom: top + 20,
+        left: 0,
+        right: 100,
+        width: 100,
+        height: 20,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      };
+    };
+    try {
+      renderPreview('open');
+      pane = screen.getByRole('region', { name: 'Preview of rollout.md' });
+      pane.style.overflowY = 'auto';
+      Object.defineProperty(pane, 'scrollHeight', { configurable: true, value: 3000 });
+      Object.defineProperty(pane, 'clientHeight', { configurable: true, value: 500 });
+      pane.getBoundingClientRect = () =>
+        ({
+          top: 0,
+          bottom: 500,
+          left: 0,
+          right: 100,
+          width: 100,
+          height: 500,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect;
+
+      await waitFor(() => expect(highlights.activeQuotes()).toEqual(['within a week']));
+      await waitFor(() => expect(pane?.scrollTop).toBe(1500 - 500 * 0.3));
+    } finally {
+      Range.prototype.getBoundingClientRect = original;
+    }
+  });
+
+  it('clicking a comment’s words opens it without moving the file', async () => {
+    const original = Range.prototype.getBoundingClientRect;
+    Range.prototype.getBoundingClientRect = () =>
+      ({
+        top: 1500,
+        bottom: 1520,
+        left: 0,
+        right: 100,
+        width: 100,
+        height: 20,
+        x: 0,
+        y: 1500,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    try {
+      renderPreview();
+      const pane = screen.getByRole('region', { name: 'Preview of rollout.md' });
+      pane.style.overflowY = 'auto';
+      Object.defineProperty(pane, 'scrollHeight', { configurable: true, value: 3000 });
+      Object.defineProperty(pane, 'clientHeight', { configurable: true, value: 500 });
+
+      // Clicking the words opens their thread without moving the file.
+      await waitFor(() => expect(highlights.otherQuotes()).toEqual(['within a week']));
+      highlights.pointerOver('within a week');
+      fireEvent.pointerDown(screen.getByText(/Every region/), { ...POINTER, pointerType: 'touch' });
+      fireEvent.click(screen.getByText(/Every region/), POINTER);
+      await waitFor(() => expect(focusedThreadText()).toContain('Too slow?'));
+      expect(pane.scrollTop).toBe(0);
+    } finally {
+      Range.prototype.getBoundingClientRect = original;
+    }
+  });
 });

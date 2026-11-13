@@ -30,6 +30,7 @@ import {
   scrollBoxIntoView,
   targetBox,
   useQuoteHighlights,
+  USER_SCROLL_EVENTS,
 } from '../../components/project-message-view/comments/quote-highlight';
 import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
 
@@ -312,13 +313,10 @@ export function ReaderConversation({
     const mark = () => {
       userScrolled.current = true;
     };
-    scroller.addEventListener('wheel', mark, { passive: true });
-    scroller.addEventListener('touchmove', mark, { passive: true });
-    scroller.addEventListener('keydown', mark);
+    // The same signals end the chat's and the library's reveal window.
+    for (const name of USER_SCROLL_EVENTS) scroller.addEventListener(name, mark, { passive: true });
     return () => {
-      scroller.removeEventListener('wheel', mark);
-      scroller.removeEventListener('touchmove', mark);
-      scroller.removeEventListener('keydown', mark);
+      for (const name of USER_SCROLL_EVENTS) scroller.removeEventListener(name, mark);
     };
   }, []);
 

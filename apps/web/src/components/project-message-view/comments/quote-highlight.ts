@@ -50,14 +50,15 @@ function rangeOver(nodes: Text[], starts: number[], index: number, length: numbe
   return null;
 }
 
-/**
- * A Range over `quote` in `root`'s text. Whitespace may differ (a selection reads paragraph
- * breaks as newlines the DOM text does not have), so words are matched with any whitespace
- * between them. Falls back to the longest leading run of the quote's words that matches.
- */
-export function findTextRange(root: Node, quote: string): Range | null {
-  const needle = matchableQuote(quote);
-  if (!needle) return null;
+/** An element's text, flattened once so several quotes can be found in it. */
+export interface TextIndex {
+  nodes: Text[];
+  /** Offset of each node's first character in `text`. */
+  starts: number[];
+  text: string;
+}
+
+export function indexText(root: Node): TextIndex {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
   const starts: number[] = [];
@@ -68,6 +69,17 @@ export function findTextRange(root: Node, quote: string): Range | null {
     nodes.push(node);
     text += node.data;
   }
+  return { nodes, starts, text };
+}
+
+/**
+ * A Range over `quote` in indexed text. Whitespace may differ (a selection reads paragraph
+ * breaks as newlines the DOM text does not have), so words are matched with any whitespace
+ * between them. Falls back to the longest leading run of the quote's words that matches.
+ */
+export function findInIndex({ nodes, starts, text }: TextIndex, quote: string): Range | null {
+  const needle = matchableQuote(quote);
+  if (!needle) return null;
   const exact = text.indexOf(needle);
   if (exact !== -1) return rangeOver(nodes, starts, exact, needle.length);
 
@@ -83,6 +95,11 @@ export function findTextRange(root: Node, quote: string): Range | null {
     match = leading(count);
   }
   return match ? rangeOver(nodes, starts, match.index, match[0].length) : null;
+}
+
+/** A Range over `quote` in `root`'s text (`findInIndex`). */
+export function findTextRange(root: Node, quote: string): Range | null {
+  return findInIndex(indexText(root), quote);
 }
 
 export interface QuoteTarget {
@@ -189,6 +206,11 @@ export function clearSurfaceHighlights(surface: symbol): void {
  * message or document laying out).
  */
 const QUOTE_REVEAL_WINDOW_MS = 2500;
+/**
+ * How long a new focus waits for its words to be found (history loading, the row mounting)
+ * before it stops trying to bring them on screen.
+ */
+const QUOTE_REVEAL_FIND_MS = 10_000;
 /** Where revealed words land: this far down the visible height (0 = top). */
 const QUOTE_REVEAL_RATIO = 0.3;
 
@@ -223,19 +245,26 @@ export interface QuoteHighlightOptions {
   /**
    * Find the ranges again whenever the container's DOM changes, at most once a frame. For a
    * virtualized list (rows mount and unmount on scroll) or streaming text, where `renderKey`
-   * cannot say when the words were redrawn.
+   * cannot say when the words were redrawn. Nothing is observed while there is nothing to
+   * paint, so a chat without quoted comments pays nothing while an agent streams.
    */
   observeMutations?: boolean;
   /**
-   * Changes when someone is sent to the open comment (a deep link, a click on its thread).
-   * From when its words are first found, for a short window, they are scrolled back on screen
-   * whenever a repaint finds them off it. The user scrolling, tapping or typing ends it. Null
-   * reveals nothing.
+   * Changes when someone is sent to the open comment (a deep link, a thread's View). From when
+   * its words are first found, for a short window, they are scrolled back on screen whenever a
+   * repaint finds them off it. The user scrolling or typing ends it. Null reveals nothing.
    */
   revealKey?: string | null;
 }
 
-const USER_SCROLL_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+/**
+ * What says the person has taken the scroll position over. Shared by the reveal window here
+ * and the comment reader's own landing, so both surfaces stop following at the same signals.
+ */
+export const USER_SCROLL_EVENTS = ['wheel', 'touchmove', 'keydown'] as const;
+
+type RevealWindow =
+  { phase: 'finding'; until: number } | { phase: 'showing'; until: number } | null;
 
 /**
  * Paint the open comment's quote strongly and the other comments' quotes faintly.
@@ -252,21 +281,20 @@ export function useQuoteHighlights(
   const { itemKey = 'readerItem', observeMutations = false, revealKey = null } = options;
   const paintedRef = useRef<readonly PaintedQuote[]>([]);
   const [surface] = useState(() => Symbol('quote-highlights'));
-  /**
-   * The reveal window: null when none is open, Infinity while waiting for the words to be
-   * found, then its end (performance.now()).
-   */
-  const revealUntil = useRef<number | null>(null);
+  const reveal = useRef<RevealWindow>(null);
   const container = useAttachedElement(containerRef);
 
   useLayoutEffect(() => {
-    revealUntil.current = revealKey ? Number.POSITIVE_INFINITY : null;
+    reveal.current = revealKey
+      ? { phase: 'finding', until: performance.now() + QUOTE_REVEAL_FIND_MS }
+      : null;
     if (!revealKey || !container) return;
     const stop = () => {
-      revealUntil.current = null;
+      reveal.current = null;
     };
-    for (const name of USER_SCROLL_EVENTS)
+    for (const name of USER_SCROLL_EVENTS) {
       container.addEventListener(name, stop, { passive: true });
+    }
     return () => {
       for (const name of USER_SCROLL_EVENTS) container.removeEventListener(name, stop);
     };
@@ -274,15 +302,22 @@ export function useQuoteHighlights(
 
   useLayoutEffect(() => {
     if (!container || !highlightsSupported()) return;
+    if (!active && others.length === 0) {
+      paintedRef.current = [];
+      clearSurfaceHighlights(surface);
+      return;
+    }
 
-    const reveal = (range: Range) => {
-      if (revealUntil.current === null) return;
+    const bringOnScreen = (range: Range) => {
+      const current = reveal.current;
+      if (!current) return;
       const now = performance.now();
-      if (revealUntil.current === Number.POSITIVE_INFINITY) {
-        revealUntil.current = now + QUOTE_REVEAL_WINDOW_MS;
-      } else if (now > revealUntil.current) {
-        revealUntil.current = null;
+      if (now > current.until) {
+        reveal.current = null;
         return;
+      }
+      if (current.phase === 'finding') {
+        reveal.current = { phase: 'showing', until: now + QUOTE_REVEAL_WINDOW_MS };
       }
       const scroller = scrollParent(range.startContainer.parentElement);
       if (!scroller) return;
@@ -294,9 +329,17 @@ export function useQuoteHighlights(
 
     const paint = () => {
       const elements = itemElements(container, itemKey);
+      // Each element's text is flattened once per paint, however many quotes are in it.
+      const indexes = new Map<HTMLElement, TextIndex>();
       const find = (target: QuoteTarget) => {
         const element = elements.get(target.itemId);
-        return element && target.quote ? findTextRange(element, target.quote) : null;
+        if (!element || !target.quote) return null;
+        let index = indexes.get(element);
+        if (!index) {
+          index = indexText(element);
+          indexes.set(element, index);
+        }
+        return findInIndex(index, target.quote);
       };
       const painted: PaintedQuote[] = [];
       const activeRange = active ? find(active) : null;
@@ -311,7 +354,7 @@ export function useQuoteHighlights(
         activeRange ? [activeRange] : [],
         painted.filter((quote) => !quote.active).map((quote) => quote.range)
       );
-      if (activeRange) reveal(activeRange);
+      if (activeRange) bringOnScreen(activeRange);
     };
 
     paint();
