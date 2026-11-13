@@ -118,7 +118,7 @@ describe('context bundle retention', () => {
     });
     expect(await kv.get('cleanup:compose-build-contexts:cursor')).toBeNull();
   });
-  it('retains the current page cursor on budget exhaustion and resumes remaining objects', async () => {
+  it('checkpoints the last attempted key on budget exhaustion and resumes remaining objects', async () => {
     vi.useFakeTimers();
     const now = new Date('2026-11-09T00:00:00Z');
     vi.setSystemTime(now);
@@ -131,12 +131,14 @@ describe('context bundle retention', () => {
       size: 100,
       uploaded: new Date('2026-11-01T00:00:00Z'),
     });
-    const list = vi.fn(async ({ cursor }: { cursor?: string }) => ({
+    const list = vi.fn(async ({ cursor, startAfter }: R2ListOptions) => ({
       objects: (cursor === 'current'
         ? [object('first'), object('second')]
-        : [object('third')]
+        : startAfter === object('first').key
+          ? [object('second')]
+          : [object('third')]
       ).filter((o) => !removed.has(o.key)),
-      truncated: cursor === 'current',
+      truncated: cursor === 'current' || Boolean(startAfter),
       cursor: 'next',
     }));
     const remove = vi.fn(async (key: string) => {
@@ -154,7 +156,7 @@ describe('context bundle retention', () => {
       bytes: 100,
       errors: 0,
     });
-    expect(await kv.get(cursorKey)).toBe('current');
+    expect(JSON.parse((await kv.get(cursorKey))!)).toEqual({ startAfter: object('first').key });
     expect(list).toHaveBeenCalledTimes(1);
     expect(await runBuildContextCleanup(env, now)).toEqual({
       scanned: 2,
@@ -164,7 +166,7 @@ describe('context bundle retention', () => {
     });
     expect(list.mock.calls.map(([request]) => request.cursor)).toEqual([
       'current',
-      'current',
+      undefined,
       'next',
     ]);
     expect(await kv.get(cursorKey)).toBeNull();
