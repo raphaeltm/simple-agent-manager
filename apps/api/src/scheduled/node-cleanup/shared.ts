@@ -293,6 +293,19 @@ async function handleCleanupFailure(
       options.refusalWarnAfterMs
     );
   }
+  if (error instanceof NodeTeardownBlockedError) {
+    // A named teardown refusal needs a person (reconnect the account, or remove the VM by hand),
+    // so it cannot clear itself. The refusal backoff above shrinks to zero once the blocked
+    // deadline passes, which would re-read the provider every tick forever (rule 47). Keep the
+    // full failure backoff instead.
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET cleanup_backoff_until=?
+      WHERE id=? AND user_id=? AND status IN ('stopped','destroying')
+        AND (cleanup_backoff_until IS NULL OR cleanup_backoff_until < ?)`
+    )
+      .bind(backoffUntil, node.id, node.user_id, backoffUntil)
+      .run();
+  }
   await persistCleanupFailure(env, node, options, error, backoffUntil);
 }
 

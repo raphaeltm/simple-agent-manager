@@ -15,14 +15,22 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     batch: (queries: PromiseLike<unknown>[]) => Promise.all(queries),
     select: () => {
+      let table: unknown;
       const selectRows = async () => {
+        // No platform credentials exist in this harness; every other read is the node row.
+        if ((table as Record<symbol, unknown>)?.[Symbol.for('drizzle:Name')] === 'platform_credentials')
+          return [];
         selectCallCount += 1;
         beforeSelectReturn?.(selectCallCount);
         return nodeRows;
       };
       const builder = {
-        from: () => builder,
+        from: (from: unknown) => {
+          table = from;
+          return builder;
+        },
         where: () => builder,
+        orderBy: () => builder,
         limit: selectRows,
         then: <TResult1 = unknown[], TResult2 = never>(
           onfulfilled?: ((value: unknown[]) => TResult1 | PromiseLike<TResult1>) | null,

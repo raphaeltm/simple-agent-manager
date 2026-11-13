@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as observabilitySchema from '../../../src/db/observability-schema';
 import { resolveCleanupConfig, runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
+import { emptyResult } from '../../../src/scheduled/node-cleanup/shared';
+import { sweepStrandedNodes } from '../../../src/scheduled/node-cleanup/stranded-node-retirement';
 import { encrypt } from '../../../src/services/encryption';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { handoffFixture } from './node-cleanup-handoff-fixture';
@@ -259,25 +261,80 @@ describe('cleanup cron tears a node down after its placement credential rotates'
     expect(f.gets).toHaveLength(1);
     expect(f.node().reason).toMatch(/^teardown_instance_not_visible/);
 
-    // After the backoff the retry runs once, fails the same way, and the reason survives.
+    // After the failure backoff the retry runs once (now past the blocked-retirement deadline, so
+    // the stranded sweep forces it), fails the same way, and the named reason survives instead of
+    // being replaced by the stranded sweep's catch-all.
     const config = resolveCleanupConfig(f.env);
-    await f.sweep(
-      new Date(NOW.getTime() + Math.min(config.failureBackoffMs, config.refusalWarnAfterMs) + 1)
-    );
+    expect(config.failureBackoffMs).toBeGreaterThan(config.blockedRetirementMs);
+    const retryAt = NOW.getTime() + config.failureBackoffMs + 60_000;
+    await f.sweep(new Date(retryAt));
     expect(f.gets).toHaveLength(2);
-    expect(f.deletes).toEqual([]);
-    expect(f.node().reason).toMatch(/^teardown_instance_not_visible/);
-    expect(f.alerts()).toHaveLength(1);
-
-    // Past the blocked-retirement deadline the stranded sweep forces a retry; its failure must
-    // not replace the named reason with its catch-all.
-    await f.sweep(new Date(NOW.getTime() + config.blockedRetirementMs + 60_000));
-    expect(f.gets.length).toBeGreaterThan(2);
     expect(f.deletes).toEqual([]);
     expect(f.node()).toMatchObject({
       proof: null,
       reason: expect.stringMatching(/^teardown_instance_not_visible/),
     });
+    expect(f.alerts()).toHaveLength(1);
+
+    // Past the deadline a named refusal still keeps its failure backoff: the next tick does not
+    // read the provider again (the refusal backoff alone would have shrunk to zero).
+    await f.sweep(new Date(retryAt + 6 * 60_000));
+    expect(f.gets).toHaveLength(2);
+    expect(f.node().reason).toMatch(/^teardown_instance_not_visible/);
+  });
+
+  it('the stranded-node deadline retry keeps the named reason instead of its catch-all', async () => {
+    const f = await rotationFixture();
+    f.accounts.set('other-account', new Map());
+    await f.replace('other-account');
+    await f.sweep();
+    expect(f.node().reason).toMatch(/^teardown_instance_not_visible/);
+
+    const config = resolveCleanupConfig(f.env);
+    const at = new Date(NOW.getTime() + config.failureBackoffMs + 60_000);
+    vi.setSystemTime(at);
+    await sweepStrandedNodes(f.db, f.env, at, config, emptyResult());
+
+    expect(f.gets).toHaveLength(2); // the stranded sweep really retried
+    expect(f.deletes).toEqual([]);
+    expect(f.node().reason).toMatch(/^teardown_instance_not_visible/);
+  });
+
+  it('an unreadable current credential is a retryable failure, not a "no credential" verdict', async () => {
+    const f = await rotationFixture();
+    await f.replace();
+    f.sqlite.prepare("UPDATE credentials SET encrypted_token = 'corrupt'").run();
+    f.sqlite.prepare("UPDATE cc_credentials SET encrypted_token = 'corrupt'").run();
+
+    await f.sweep();
+
+    expect(f.deletes).toEqual([]);
+    expect(f.gets).toEqual([]);
+    expect(f.node().proof).toBeNull();
+    expect(f.node().reason ?? '').not.toMatch(/^teardown_/);
+    expect(f.alerts()).toEqual([]);
+  });
+
+  it('keeps looking past a colliding foreign instance and deletes through the account that proves ownership', async () => {
+    const f = await rotationFixture('installation');
+    // The owner's personal account holds a different VM that happens to share the instance ID.
+    f.accounts.set('personal-account', new Map([[INSTANCE, samLabels({ node: 'someone-else' })]]));
+    const personal = await encrypt('personal-account', f.env.ENCRYPTION_KEY as string);
+    f.sqlite
+      .prepare(
+        `INSERT INTO credentials (id, user_id, project_id, provider, credential_type,
+          credential_kind, is_active, encrypted_token, iv, created_at, updated_at)
+        VALUES ('personal', 'user-1', NULL, 'hetzner', 'cloud-provider', 'api-key', 1, ?, ?, ?, ?)`
+      )
+      .run(personal.ciphertext, personal.iv, NOW.toISOString(), NOW.toISOString());
+    await f.regenerate();
+
+    await f.sweep();
+
+    expect(f.gets).toEqual([`personal-account:${INSTANCE}`, `${ORIGINAL_TOKEN}:${INSTANCE}`]);
+    expect(f.deletes).toEqual([`${ORIGINAL_TOKEN}:${INSTANCE}`]);
+    expect(f.accounts.get('personal-account')!.has(INSTANCE)).toBe(true);
+    expect(f.node()).toMatchObject({ status: 'deleted' });
   });
 
   it('a node placed on the platform credential is reached after that credential rotates, even when its owner now has their own credential', async () => {

@@ -81,7 +81,7 @@ export async function recordNodeTeardownBlocked(
   try {
     const now = new Date();
     const nowIso = now.toISOString();
-    await env.DATABASE.prepare(
+    const recorded = await env.DATABASE.prepare(
       `UPDATE nodes SET cleanup_blocked_since=COALESCE(cleanup_blocked_since, ?),
         cleanup_blocked_reason=?
       WHERE id=? AND user_id=? AND status IN ('stopped','destroying')
@@ -96,10 +96,13 @@ export async function recordNodeTeardownBlocked(
         node.runtimeIncarnationId
       )
       .run();
+    // A replaced or already-terminal runtime does not inherit the verdict, or its alert.
+    if (!recorded.meta.changes) return;
     const current = await env.DATABASE.prepare(
-      'SELECT status, cleanup_blocked_since FROM nodes WHERE id=? AND user_id=?'
+      `SELECT status, cleanup_blocked_since FROM nodes WHERE id=? AND user_id=?
+        AND provider_instance_id IS ? AND runtime_incarnation_id IS ?`
     )
-      .bind(node.id, node.userId)
+      .bind(node.id, node.userId, node.providerInstanceId, node.runtimeIncarnationId)
       .first<{ status: string; cleanup_blocked_since: string | null }>();
     if (!current) return;
     await alertNodeCleanupBlocked(

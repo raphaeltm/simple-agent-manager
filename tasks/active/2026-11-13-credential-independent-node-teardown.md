@@ -58,36 +58,39 @@ must not leave nodes running.
    handling).
 2. When it does not resolve (row gone, generation moved, binding absent), collect the node
    owner's current credentials for the node's provider: provisioning resolution
-   (project -> user -> platform) for the node's attribution scope, the user-level resolution when
-   the node is project-attributed, and the current platform credential. Never another user's or
-   project's credential.
+   (project -> user -> platform, via `createProviderForUser`) for the node's attribution scope,
+   then every enabled platform credential for the provider (per-row isolated). Never another
+   user's or project's credential. If a resolution threw and nothing resolved, the attempt is an
+   ordinary retryable failure, not a "no credential" verdict.
 3. With a current credential, re-read the instance immediately before `deleteVM` and require the
    recorded instance ID plus exact, unambiguous labels: managed, node, role, env, installation,
-   incarnation. A mismatch preserves the VM. A credential that cannot see the instance is not
-   absence proof.
+   incarnation. A mismatch preserves the VM and the next credential is tried. A credential that
+   cannot see the instance is not absence proof.
 4. Failure reasons are typed (`NodeTeardownBlockedError`) and named:
    `teardown_credential_unavailable`, `teardown_instance_not_visible`,
    `teardown_instance_ownership_mismatch`, `teardown_ownership_scope_unavailable`. They are
    recorded on the node (`cleanup_blocked_reason`, `cleanup_blocked_since`) from the shared
-   funnel, raise the existing operator alert, and survive cron re-diagnosis.
+   funnel, raise the existing operator alert, survive cron re-diagnosis and the stranded sweep,
+   and keep the full failure backoff (they cannot clear themselves).
 
 ## Implementation checklist
 
-- [ ] `NodeTeardownBlockedError` + reason codes in `strict-node-deletion-shared.ts`
-- [ ] Current-owner credential candidates with per-candidate fault isolation (rule 41)
-- [ ] Ownership proof (ID + labels) right before `deleteVM` on the fallback path, reusing
+- [x] `NodeTeardownBlockedError` + reason codes in `strict-node-deletion-shared.ts`
+- [x] Current-owner credential candidates with per-candidate fault isolation (rule 41)
+- [x] Ownership proof (ID + labels) right before `deleteVM` on the fallback path, reusing
       `buildNodeProviderLabels` / `hasAmbiguousLabel`
-- [ ] Record blocked reason + alert from `deleteNodeResourcesStrict` (shared funnel)
-- [ ] Cron `handleCleanupFailure` keeps the typed reason; stranded sweep does not overwrite it
-- [ ] Owner DELETE response names the blocked reason
-- [ ] Tests (real SQL): incident shape through `replaceUserGcpCredential`, generation rotation,
+- [x] Record blocked reason + alert from `deleteNodeResourcesStrict` (shared funnel)
+- [x] Cron `handleCleanupFailure` keeps the typed reason; stranded sweep does not overwrite it
+- [x] Owner DELETE response names the blocked reason
+- [x] Tests (real SQL): incident shape through `replaceUserGcpCredential`, generation rotation,
       attack cases with owner controls, two installations, no-label instance, not-visible ->
       blocked + alert + two-sweep, already-absent on pinned path, owner DELETE / cron /
       NodeLifecycle entry points
-- [ ] Discrimination runs recorded
-- [ ] Docs: security architecture / node cleanup docs that describe credential rotation
-- [ ] Idea note for Raphaël: disconnecting a cloud account while nodes are alive (product
-      decision), `capacity_source_id` NULL on GCP nodes
+- [x] Discrimination runs recorded (table in the PR body)
+- [x] Docs: security architecture / node cleanup docs that describe credential rotation
+- [x] Idea note for Raphaël: disconnecting a cloud account while nodes are alive (product
+      decision), `capacity_source_id` NULL on GCP nodes (idea 01M76T4XXVQS1TX8VQM2BRPWFG, note
+      2026-11-13 19:33Z)
 
 ## Acceptance criteria
 
@@ -106,3 +109,15 @@ must not leave nodes running.
 - `apps/api/.claude/rules/71-tightening-a-column-can-delete-a-capability.md`
 - `packages/providers/.claude/rules/56-destructive-provider-ownership-proof.md`
 - `.claude/rules/28-credential-resolution-fallback-tests.md`, `.claude/rules/74`, rule 47, rule 62
+
+## Review follow-ups
+
+- Deferred (LOW, security-auditor #4): `node-manual-deletion.ts` `providerStillHasServer` still
+  checks only the pinned credential. Manual removal is offered only after strict delete failed, and
+  strict delete now removes any VM a current credential can prove, so the residual is a VM whose
+  delete failed transiently and that the owner then attests. Tracked on idea
+  01M76T4XXVQS1TX8VQM2BRPWFG.
+- Per-provider label encodings (Scaleway/Vultr/DigitalOcean tags, UpCloud labels, Infomaniak
+  metadata) are not re-tested here; they are decoded by the same adapters provider-orphan
+  reconciliation already relies on, and `nodeProviderLabelsMatch` is the same comparison.
+- Staging verification: pending.

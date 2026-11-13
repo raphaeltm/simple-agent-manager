@@ -121,7 +121,7 @@ function putInstance(project: string, instance: FakeInstance) {
 }
 
 /** Place a node exactly as provisioning does: resolve the owner's credential, pin its binding. */
-async function placeNode(): Promise<string> {
+async function placeNode(nodeRole: 'workspace' | 'deployment' = 'workspace'): Promise<string> {
   const db = drizzle(env.DATABASE, { schema });
   const resolved = await createProviderForUser(db, OWNER, ENCRYPTION_KEY, env, 'gcp', null);
   const binding = resolved?.exactCredentialBinding;
@@ -132,7 +132,7 @@ async function placeNode(): Promise<string> {
     name: 'gcp node',
     status: 'running',
     runtime: 'vm',
-    nodeRole: 'workspace',
+    nodeRole,
     nodeClass: 'managed',
     vmSize: 'medium',
     vmLocation: 'europe-west1-b',
@@ -279,6 +279,60 @@ describe('node teardown after the GCP connection is saved again (incident 2026-1
     expect(response.status).toBe(409);
     expect(cloud.deleteCalls).toEqual([]);
     expect(nodeRow()).toMatchObject({ reason: 'teardown_instance_ownership_mismatch' });
+  });
+
+  it.each([
+    ['deployment node with its deployment label', 'deployment', 'deployment', true],
+    ['deployment node whose VM is labelled as a workspace', 'deployment', 'workspace', false],
+    ['workspace node whose VM is labelled as a deployment', 'workspace', 'deployment', false],
+  ] as const)('%s', async (_name, nodeRole, roleLabel, deleted) => {
+    await placeNode(nodeRole);
+    putInstance('sam-staging-infra', { id: INSTANCE_ID, labels: samLabels({ role: roleLabel }) });
+    await replaceUserGcpCredential(env, OWNER, gcpCredential('sam-staging-infra'));
+
+    const response = await ownerDelete();
+
+    expect(response.status).toBe(deleted ? 200 : 409);
+    expect(cloud.deleteCalls).toEqual(
+      deleted ? [{ project: 'sam-staging-infra', id: INSTANCE_ID }] : []
+    );
+    if (!deleted) {
+      expect(nodeRow()).toMatchObject({ reason: 'teardown_instance_ownership_mismatch' });
+    }
+  });
+
+  it('records a blocked verdict only on the runtime incarnation that was refused', async () => {
+    await placeNode();
+    const { recordNodeTeardownBlocked } = await import(
+      '../../../src/services/node-teardown-blocked'
+    );
+    const { NodeTeardownBlockedError } = await import(
+      '../../../src/services/node-teardown-authority'
+    );
+    sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = ?").run(NODE_ID);
+    const db = drizzle(env.DATABASE, { schema });
+    const [stale] = await db.select().from(schema.nodes);
+    // The node was re-provisioned after the refused attempt read it.
+    sqlite.prepare("UPDATE nodes SET runtime_incarnation_id = 'replacement' WHERE id = ?").run(NODE_ID);
+
+    await recordNodeTeardownBlocked(
+      env,
+      stale!,
+      new NodeTeardownBlockedError('teardown_instance_not_visible', 'test')
+    );
+    expect(nodeRow()).toMatchObject({ reason: null, alertedAt: null });
+
+    // Control: the same verdict on the current incarnation is recorded and alerted.
+    const [current] = await db.select().from(schema.nodes);
+    await recordNodeTeardownBlocked(
+      env,
+      current!,
+      new NodeTeardownBlockedError('teardown_instance_not_visible', 'test')
+    );
+    expect(nodeRow()).toMatchObject({
+      reason: 'teardown_instance_not_visible',
+      alertedAt: expect.any(String),
+    });
   });
 
   it('a reconnect to a different GCP project blocks visibly instead of deleting or retrying silently', async () => {

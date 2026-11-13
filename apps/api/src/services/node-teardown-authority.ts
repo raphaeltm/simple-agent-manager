@@ -15,8 +15,11 @@
  * own condition, so the node can surface it instead of retrying silently (rules 71, 74).
  */
 import type { ProviderRequestContext } from '@simple-agent-manager/providers';
+import { timestampVersion } from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider } from '@simple-agent-manager/shared';
+import { and, asc, eq } from 'drizzle-orm';
 
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
@@ -26,8 +29,10 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
-import { getPlatformCloudCredential } from './platform-credentials';
-import { hasExactProviderCredentialGenerationProof } from './provider-credential-exact';
+import {
+  fingerprintEncryptedProviderCredential,
+  hasExactProviderCredentialGenerationProof,
+} from './provider-credential-exact';
 import { createProviderForUser } from './provider-credentials';
 import {
   getStrictNodeCredentialContext,
@@ -100,9 +105,17 @@ async function resolvePinnedCredential(
  * The node owner's current credentials for the node's provider, in provisioning order. Scope is
  * the node's own credential attribution (user, plus project when the node was project-attributed),
  * resolved by `createProviderForUser` exactly as provisioning resolves it (project, then user,
- * then platform), followed by the installation's current platform credential so a node placed on
- * the platform credential stays reachable when its owner has since added their own. Never another
- * user's or another project's credential: no lookup here is keyed by provider name alone.
+ * then platform), followed by every enabled platform credential for the provider, so a node placed
+ * on the platform credential stays reachable when its owner has since added their own. Never
+ * another user's or another project's credential: no lookup here is keyed by provider name alone.
+ *
+ * Deliberate difference from rule 28's "an inactive scoped credential blocks fallback": that rule
+ * stops a deactivated credential from being silently replaced for NEW work. Here the platform rows
+ * are tried even when the owner's project resolution halts, because teardown only ever deletes an
+ * instance that proves, by its own labels, that it is this node's VM (`proveNodeInstanceOwnership`).
+ *
+ * `failed` is true when any resolution threw (a transient D1 or decryption fault, or a malformed
+ * row). An empty result after a failure is not proof the owner has no credential.
  */
 async function resolveCurrentOwnerCredentials(
   db: NodeDb,
@@ -110,11 +123,12 @@ async function resolveCurrentOwnerCredentials(
   userId: string,
   env: Env,
   targetProvider: CredentialProvider
-): Promise<ProviderForUserResult[]> {
+): Promise<{ candidates: ProviderForUserResult[]; failed: boolean }> {
   const { attributionUserId, attributionProjectId } = getStrictNodeCredentialContext(node, userId);
   const encryptionKey = getCredentialEncryptionKey(env);
   const candidates: ProviderForUserResult[] = [];
   const seen = new Set<string>();
+  let failed = false;
   const add = (result: ProviderForUserResult | null) => {
     if (!result || result.providerName !== targetProvider) return;
     const key =
@@ -127,7 +141,8 @@ async function resolveCurrentOwnerCredentials(
     try {
       add(await resolve());
     } catch (error) {
-      // One unreadable credential must not hide the next tier (rule 41).
+      // One unreadable credential must not hide the next one (rule 41).
+      failed = true;
       log.warn('node_teardown.current_credential_unreadable', {
         nodeId: node.id,
         provider: targetProvider,
@@ -147,25 +162,50 @@ async function resolveCurrentOwnerCredentials(
       attributionProjectId
     )
   );
-  await isolate('platform', async () => {
-    const platform = await getPlatformCloudCredential(db, encryptionKey, targetProvider);
-    if (!platform?.credentialId) return null;
-    return createProviderForUser(
-      db,
-      attributionUserId,
-      encryptionKey,
-      env,
-      targetProvider,
-      attributionProjectId,
-      {
-        credentialSource: 'platform',
-        credentialReference: `platform_credentials:${platform.credentialId}`,
-        credentialVersion: platform.credentialVersion,
-        credentialFingerprint: platform.credentialFingerprint,
-      }
+  let platformRows: Array<typeof schema.platformCredentials.$inferSelect> = [];
+  try {
+    platformRows = await db
+      .select()
+      .from(schema.platformCredentials)
+      .where(
+        and(
+          eq(schema.platformCredentials.credentialType, 'cloud-provider'),
+          eq(schema.platformCredentials.provider, targetProvider),
+          eq(schema.platformCredentials.isEnabled, true)
+        )
+      )
+      .orderBy(asc(schema.platformCredentials.id));
+  } catch (error) {
+    failed = true;
+    log.warn('node_teardown.platform_credentials_unreadable', {
+      nodeId: node.id,
+      provider: targetProvider,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  for (const row of platformRows) {
+    // The exact path decrypts and re-checks this generation; nothing is decrypted twice.
+    await isolate(`platform:${row.id}`, async () =>
+      createProviderForUser(
+        db,
+        attributionUserId,
+        encryptionKey,
+        env,
+        targetProvider,
+        attributionProjectId,
+        {
+          credentialSource: 'platform',
+          credentialReference: `platform_credentials:${row.id}`,
+          credentialVersion: timestampVersion(row.updatedAt ?? row.createdAt),
+          credentialFingerprint: await fingerprintEncryptedProviderCredential(
+            row.encryptedToken,
+            row.iv
+          ),
+        }
+      )
     );
-  });
-  return candidates;
+  }
+  return { candidates, failed };
 }
 
 /**
@@ -193,13 +233,26 @@ export async function resolveStrictNodeTeardownAuthority(
     return { kind: 'pinned', providerResult: pinned };
   }
 
-  const candidates = await resolveCurrentOwnerCredentials(db, node, userId, env, targetProvider);
+  const { candidates, failed } = await resolveCurrentOwnerCredentials(
+    db,
+    node,
+    userId,
+    env,
+    targetProvider
+  );
   log.warn('node_teardown.pinned_credential_unresolved', {
     nodeId: node.id,
     provider: targetProvider,
     placementCredentialSource: node.placementCredentialSource,
     currentCredentialSources: candidates.map((candidate) => candidate.credentialSource),
+    resolutionFailed: failed,
   });
+  if (candidates.length === 0 && failed) {
+    // Inconclusive: an ordinary failure, retried on the normal backoff, never a blocked verdict.
+    throw new Error(
+      `Cannot strictly delete node ${node.id}: current credential resolution failed; will retry`
+    );
+  }
   if (candidates.length === 0) {
     throw new NodeTeardownBlockedError(
       'teardown_credential_unavailable',
@@ -242,8 +295,9 @@ function expectedNodeOwnershipLabels(node: NodeRow, env: Env): Record<string, st
  * proves ownership: same provider instance ID, and every exact SAM ownership label. Call this
  * immediately before `deleteVM`.
  *
- * - An instance that is visible but not provably this node's is preserved: the first such answer
- *   stops the search, because no other credential can make a foreign VM ours.
+ * - An instance that is visible but not provably this node's is never deleted. The search moves on
+ *   to the next credential, since an account-scoped ID can collide; if no credential proves
+ *   ownership, the mismatch is the verdict.
  * - Not found through every credential is NOT absence proof: a wrong-account 404 looks the same as
  *   a deleted VM.
  * - A failed read is inconclusive; it is rethrown as an ordinary error so the next retry decides.
@@ -260,6 +314,7 @@ export async function proveNodeInstanceOwnership(
   }
   const labels = expectedNodeOwnershipLabels(node, env);
   let readFailure: unknown;
+  let mismatch: NodeTeardownBlockedError | undefined;
   for (const candidate of candidates) {
     let instance;
     try {
@@ -278,16 +333,20 @@ export async function proveNodeInstanceOwnership(
     }
     if (!instance) continue;
     if (instance.id !== instanceId || !nodeProviderLabelsMatch(instance.labels, labels)) {
-      throw new NodeTeardownBlockedError(
+      // Not this node's VM through this account. Another candidate (e.g. the platform account
+      // that actually placed it) may still prove ownership; the foreign instance is never deleted.
+      mismatch = new NodeTeardownBlockedError(
         'teardown_instance_ownership_mismatch',
-        `node=${node.id} instance=${instanceId}: the instance visible to the current ` +
-          `${candidate.credentialSource} credential does not carry this node's exact SAM ` +
-          'ownership labels; it was preserved'
+        `node=${node.id} instance=${instanceId}: the instance visible to the owner's current ` +
+          `${candidate.credentialSource ?? 'cloud'} credential does not carry this node's exact ` +
+          'SAM ownership labels; it was preserved'
       );
+      continue;
     }
     return candidate;
   }
   if (readFailure !== undefined) throw readFailure;
+  if (mismatch) throw mismatch;
   throw new NodeTeardownBlockedError(
     'teardown_instance_not_visible',
     `node=${node.id} instance=${instanceId}: no current credential of the node owner can see ` +
