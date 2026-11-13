@@ -1293,6 +1293,38 @@ export function estimateExceedsReservation(
   );
 }
 
+/**
+ * Columns each terminal-version table hashes, as migration 076's triggers must watch them. Exposed
+ * so a test can pin the frozen trigger SQL to the live hash definition: adding a hashed column
+ * without a new trigger migration would silently weaken the flip's O(1) proof.
+ */
+export function archiveTerminalHashedColumns(): Record<string, readonly string[]> {
+  return {
+    chat_sessions: CHAT_SESSION_ANCHOR_COLUMNS,
+    chat_messages: ARCHIVE_TABLE_SPECS.chat_messages.columns,
+    chat_messages_grouped: ARCHIVE_TABLE_SPECS.chat_messages_grouped.columns,
+    tool_payload_archives: ARCHIVE_TABLE_SPECS.tool_payload_archives.columns,
+  };
+}
+
+/** Triggers migration 076 installs: three per covered table, six tables. */
+export const ARCHIVE_WRITE_GENERATION_TRIGGER_COUNT = 18;
+
+/**
+ * Whether every write-generation trigger exists. The O(1) flip proof is only as good as the
+ * triggers; a later migration that recreated a covered table would silently drop its triggers
+ * and the generation would stop moving, so the flip re-hashes instead of trusting it.
+ */
+export function archiveWriteGenerationFenceInstalled(sql: SqlStorage): boolean {
+  const row = sql
+    .exec(
+      `SELECT COUNT(*) AS count FROM sqlite_master
+       WHERE type = 'trigger' AND name LIKE 'archive_write_generation_%'`
+    )
+    .toArray()[0];
+  return Number(row?.count ?? 0) === ARCHIVE_WRITE_GENERATION_TRIGGER_COUNT;
+}
+
 /** Current archive write generation of a session (migration 076); 0 before any counted write. */
 export function readArchiveWriteGeneration(sql: SqlStorage, sessionId: string): number {
   const row = sql
@@ -1412,6 +1444,16 @@ export function completeArchiveSourcePrepare(
   const current = readSourceIntent(sql, input.sessionId);
   const state = assertSameSourceIntentMigration(current, input);
   if (!begun.existing && current?.source_intent_token !== input.sourceIntentToken) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_intent_mismatch',
+      'ProjectData archive source intent was replaced while it was being hashed'
+    );
+  }
+  if (
+    begun.existing &&
+    (current?.created_at !== begun.existing.created_at ||
+      current?.migration_id !== begun.existing.migration_id)
+  ) {
     throw new ProjectDataArchiveInvariantError(
       'source_intent_mismatch',
       'ProjectData archive source intent was replaced while it was being hashed'
@@ -2206,21 +2248,51 @@ function compareUtf8Bytes(left: string, right: string): number {
  *   re-proves the root unchanged since then (`finalizeSourceDelete` terminal version), so the
  *   exported rows are all of the root's rows.
  */
+/**
+ * Verdicts that hold however often the copy is re-read: the shard's own receipts, order, identity,
+ * counts or components disagree with what the root exported. Anything else (an R2 5xx, a stream
+ * error, an object that is momentarily unreadable, out-of-memory) is retried by the next call
+ * from the saved progress, and only poisons the migration through the coordinator's
+ * no-progress attempt count.
+ */
+const DETERMINISTIC_VERIFY_FAILURES = new Set([
+  'target_chunk_inventory_gap',
+  'target_chunk_identity_mismatch',
+  'target_chunk_receipt_mismatch',
+  'target_chunk_order_mismatch',
+  'target_message_count_mismatch',
+  'target_component_mismatch',
+  'target_terminal_version_mismatch',
+  'target_not_compact',
+]);
+
 export async function verifyArchiveTargetPage(
   sql: SqlStorage,
   env: Env,
   input: ArchiveTargetVerifyPageInput,
-  options: { yieldBetweenPages?: () => Promise<void> } = {}
+  options: { yieldBetweenPages?: () => Promise<void>; hashPageRows?: number } = {}
 ): Promise<ArchiveTargetVerifyPageResult> {
   let progress: VerifyProgress | null = null;
-  const empty = (): ArchiveTargetVerifyPageResult => ({
+  // Chunks this call verified, credited even when it stops on an error or a timeout: they are in
+  // the saved progress and will not be read again.
+  const counted = { chunks: 0, rows: 0 };
+  const partial = (): ArchiveTargetVerifyPageResult => ({
     complete: false,
-    chunksVerified: 0,
-    rowsVerified: 0,
+    chunksVerified: counted.chunks,
+    rowsVerified: counted.rows,
     nextOrdinal: progress?.nextOrdinal ?? 0,
     totalRowsVerified: progress?.rows ?? 0,
   });
   try {
+    if (!isTerminalComponents(input.expectedComponents)) {
+      return {
+        ...partial(),
+        failure: {
+          reason: 'invalid_input',
+          message: 'Archive verification requires the root terminal-version components',
+        },
+      };
+    }
     const target = readTargetSession(sql, input.sessionId);
     const state = validateTargetOwner(target, input);
     if (state !== 'sealed' && state !== 'published') {
@@ -2247,11 +2319,13 @@ export async function verifyArchiveTargetPage(
       input.migrationId,
       input.terminalVersionSha256
     );
-    if (progress.failure) return { ...empty(), failure: progress.failure };
-    if (progress.complete) return { ...empty(), complete: true };
-    const outcome = await verifyChunksAndComponents(sql, env, input, target, progress, options);
-    return outcome;
+    if (progress.failure) return { ...partial(), failure: progress.failure };
+    if (progress.complete) return { ...partial(), complete: true };
+    return await verifyChunksAndComponents(sql, env, input, target, progress, counted, options);
   } catch (error) {
+    const deterministic =
+      error instanceof ProjectDataArchiveInvariantError &&
+      DETERMINISTIC_VERIFY_FAILURES.has(error.reason);
     const failure = {
       reason:
         error instanceof ProjectDataArchiveInvariantError
@@ -2260,13 +2334,21 @@ export async function verifyArchiveTargetPage(
       message: error instanceof Error ? error.message : String(error),
     };
     if (progress) {
-      // A read that ran out of time is not a verdict on the copy: keep what was verified and let
-      // the next call continue from it. Anything else is recorded so it is not re-read.
-      if (!compactArchive.isArchiveReadOutOfTime(error)) progress.failure = failure;
+      // Keep what was verified either way. Only a deterministic verdict is recorded; a read that
+      // ran out of time or failed transiently continues from the saved progress next call.
+      if (deterministic) progress.failure = failure;
       writeVerifyProgress(sql, input.sessionId, progress);
     }
-    return compactArchive.isArchiveReadOutOfTime(error) ? empty() : { ...empty(), failure };
+    return compactArchive.isArchiveReadOutOfTime(error) ? partial() : { ...partial(), failure };
   }
+}
+
+function isTerminalComponents(value: unknown): value is ArchiveTerminalComponents {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    parseTerminalComponents(JSON.stringify(value)) !== null
+  );
 }
 
 function writeVerifyProgress(sql: SqlStorage, sessionId: string, progress: VerifyProgress): void {
@@ -2283,15 +2365,14 @@ async function verifyChunksAndComponents(
   input: ArchiveTargetVerifyPageInput,
   target: Record<string, unknown> | null,
   progress: VerifyProgress,
-  options: { yieldBetweenPages?: () => Promise<void> }
+  counted: { chunks: number; rows: number },
+  options: { yieldBetweenPages?: () => Promise<void>; hashPageRows?: number }
 ): Promise<ArchiveTargetVerifyPageResult> {
   const expectedMessageCount = strictInteger(
     target?.expected_message_count,
     'target.expected_message_count'
   );
   const perChunkTimeoutMs = compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
-  let chunksVerified = 0;
-  let rowsVerified = 0;
   let exhausted = true;
   try {
     for await (const chunk of compactArchive.compactRawChunks(sql, env, input.sessionId, {
@@ -2346,8 +2427,8 @@ async function verifyChunksAndComponents(
       progress.lastKey = lastKey;
       progress.nextOrdinal++;
       progress.rows += chunk.rows.length;
-      chunksVerified++;
-      rowsVerified += chunk.rows.length;
+      counted.chunks++;
+      counted.rows += chunk.rows.length;
       if (Date.now() >= input.deadlineAt) {
         exhausted = false;
         break;
@@ -2360,8 +2441,8 @@ async function verifyChunksAndComponents(
   }
   const result = (complete: boolean): ArchiveTargetVerifyPageResult => ({
     complete,
-    chunksVerified,
-    rowsVerified,
+    chunksVerified: counted.chunks,
+    rowsVerified: counted.rows,
     nextOrdinal: progress.nextOrdinal,
     totalRowsVerified: progress.rows,
   });
@@ -2382,7 +2463,9 @@ async function verifyChunksAndComponents(
       'Compact archive verified rows do not match the prepared source count'
     );
   }
-  await assertTargetComponentsMatch(sql, input, options.yieldBetweenPages);
+  // Saved first, so a reset during the component hash does not re-read every chunk.
+  writeVerifyProgress(sql, input.sessionId, progress);
+  await assertTargetComponentsMatch(sql, input, options.hashPageRows, options.yieldBetweenPages);
   progress.complete = true;
   writeVerifyProgress(sql, input.sessionId, progress);
   return result(true);
@@ -2397,6 +2480,7 @@ async function verifyChunksAndComponents(
 async function assertTargetComponentsMatch(
   sql: SqlStorage,
   input: ArchiveTargetVerifyPageInput,
+  hashPageRows: number | undefined,
   yieldBetweenPages?: () => Promise<void>
 ): Promise<void> {
   const expected = input.expectedComponents;
@@ -2414,7 +2498,7 @@ async function assertTargetComponentsMatch(
     throw mismatch('session anchor');
   }
   if (expected.commentThreads !== 0 || expected.commentReplies !== 0) throw mismatch('comments');
-  const pageRows = resolveHashPageRows(undefined);
+  const pageRows = resolveHashPageRows(hashPageRows);
   if (
     (await tableAggregateSha256(
       sql,
@@ -4061,8 +4145,9 @@ export function abandonArchiveTargetSession(
 }
 
 export type ArchiveTargetAbandonPageResult = {
-  /** True when the target session is gone (or never existed); false while rows remain. */
+  /** True when this call deleted the target session (its last page). */
   removed: boolean;
+  /** True while the target still holds rows; false once it is gone or never existed. */
   remaining: boolean;
   rowsDeleted: number;
 };
@@ -4081,7 +4166,7 @@ export function abandonArchiveTargetSessionPage(
   transactionSync: <T>(callback: () => T) => T = (callback) => callback()
 ): ArchiveTargetAbandonPageResult {
   const target = readTargetSession(sql, input.sessionId);
-  if (!target) return { removed: true, remaining: false, rowsDeleted: 0 };
+  if (!target) return { removed: false, remaining: false, rowsDeleted: 0 };
   const state = validateTargetOwner(target, input);
   if (state === 'published' || state === 'rehome_exported') {
     throw new ProjectDataArchiveInvariantError(
@@ -4258,7 +4343,11 @@ export async function finalizeSourceDelete(
   // `archiveSourceFinalizeDelete`, re-hash the whole session as before.
   const preparedGeneration = optionalInteger(intent?.prepared_write_generation);
   let lastMessageAt: number | null;
-  if (options.proveByWriteGeneration && preparedGeneration !== null) {
+  if (
+    options.proveByWriteGeneration &&
+    preparedGeneration !== null &&
+    archiveWriteGenerationFenceInstalled(sql)
+  ) {
     if (readArchiveWriteGeneration(sql, input.sessionId) !== preparedGeneration) {
       throw new ProjectDataArchiveInvariantError(
         'terminal_version_changed',
@@ -4598,6 +4687,10 @@ export function reclaimArchiveSourcePage(
     const databaseSizeAfterBytes = databaseSize(sql);
     if (!remaining) {
       sql.exec('DELETE FROM do_meta WHERE key = ?', RECLAIM_PENDING_META_PREFIX + input.sessionId);
+      sql.exec(
+        'DELETE FROM project_data_archive_source_write_generation WHERE session_id = ?',
+        input.sessionId
+      );
       // The reclaim evidence the flip recorded as "nothing freed yet" becomes the real
       // post-reclaim size once the last row is gone.
       sql.exec(

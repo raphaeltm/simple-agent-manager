@@ -1352,6 +1352,7 @@ export class ProjectData extends DurableObject<Env> {
     return this.withArchiveTranscriptLock(() =>
       measureArchiveSql(this.sql, input.sessionId, 'target_seal', (sql) =>
         archiveSharding.verifyArchiveTargetPage(sql, this.env, input, {
+          hashPageRows: this.archiveHashPageRows(),
           // Hashing the shard's grouped and tool rows yields between pages so archived-session
           // reads on this shard are served meanwhile; the target is sealed, so its rows are fixed.
           yieldBetweenPages: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
@@ -1360,6 +1361,10 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  /**
+   * One-shot target abandon. Current coordinators use `archiveTargetAbandonPage`; this stays for
+   * a previous build's coordinator calling a new object during a rollout.
+   */
   archiveTargetAbandonSession(
     input: archiveSharding.ArchiveTargetAbandonInput
   ): Promise<archiveSharding.ArchiveTargetAbandonResult> {

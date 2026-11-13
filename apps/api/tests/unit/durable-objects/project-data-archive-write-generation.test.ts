@@ -17,6 +17,9 @@ import { describe, expect, it } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
+  ARCHIVE_WRITE_GENERATION_TRIGGER_COUNT,
+  archiveTerminalHashedColumns,
+  archiveWriteGenerationFenceInstalled,
   beginArchiveSourcePrepare,
   completeArchiveSourcePrepare,
   computeTerminalVersion,
@@ -344,6 +347,54 @@ describe('archive write-generation fence', () => {
       const flipped = await flipArchiveSource(
         recorder.sql,
         flipInput('legacy', prepared.terminalVersionSha256)
+      );
+      expect('refused' in flipped).toBe(false);
+      expect(recorder.stats.messageScans).toBeGreaterThan(0);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe('archive write-generation triggers match the terminal-version hash', () => {
+  it('watches every hashed column of every hashed table, and the flip notices a missing trigger', async () => {
+    const { db, sql } = makeSql();
+    try {
+      const triggers = sql
+        .exec(
+          `SELECT name, tbl_name, sql FROM sqlite_master
+           WHERE type = 'trigger' AND name LIKE 'archive_write_generation_%'`
+        )
+        .toArray() as Array<{ name: string; tbl_name: string; sql: string }>;
+      expect(triggers).toHaveLength(ARCHIVE_WRITE_GENERATION_TRIGGER_COUNT);
+      for (const [table, columns] of Object.entries(archiveTerminalHashedColumns())) {
+        const update = triggers.find(
+          (trigger) => trigger.name === `archive_write_generation_${table}_update`
+        );
+        expect(update, table).toBeDefined();
+        for (const column of columns) {
+          expect(update?.sql, `${table}.${column}`).toContain(`OLD.${column} IS NOT NEW.${column}`);
+        }
+        for (const event of ['insert', 'delete']) {
+          expect(
+            triggers.some(
+              (trigger) => trigger.name === `archive_write_generation_${table}_${event}`
+            )
+          ).toBe(true);
+        }
+      }
+
+      // A recreated table drops its triggers; the flip then re-hashes instead of trusting the fence.
+      seedSession(sql, 'fence', 20);
+      const prepared = await prepare(sql, 'fence');
+      markReadyToFlip(sql, 'fence');
+      expect(archiveWriteGenerationFenceInstalled(sql)).toBe(true);
+      sql.exec('DROP TRIGGER archive_write_generation_chat_messages_update');
+      expect(archiveWriteGenerationFenceInstalled(sql)).toBe(false);
+      const recorder = recordReads(sql);
+      const flipped = await flipArchiveSource(
+        recorder.sql,
+        flipInput('fence', prepared.terminalVersionSha256)
       );
       expect('refused' in flipped).toBe(false);
       expect(recorder.stats.messageScans).toBeGreaterThan(0);

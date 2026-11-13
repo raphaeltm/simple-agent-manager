@@ -104,6 +104,40 @@ export class ProjectDataTestDouble extends ProjectData {
     return super.archiveSourceEstimateWrites(sessionId, factor, maxMessages);
   }
 
+  /** Remaining R2 reads that fail (a transient 5xx) inside `archiveTargetVerifyPage`. */
+  private verifyReadFailuresForTest = 0;
+
+  failNextArchiveVerifyReadsForTest(count: number): void {
+    this.verifyReadFailuresForTest = count;
+  }
+
+  override async archiveTargetVerifyPage(
+    input: archiveSharding.ArchiveTargetVerifyPageInput
+  ): Promise<archiveSharding.ArchiveTargetVerifyPageResult> {
+    if (this.verifyReadFailuresForTest <= 0) return super.archiveTargetVerifyPage(input);
+    const env = this.env as { PROJECT_DATA_ARCHIVE_R2?: R2Bucket };
+    const bucket = env.PROJECT_DATA_ARCHIVE_R2;
+    if (!bucket) return super.archiveTargetVerifyPage(input);
+    const flaky = new Proxy(bucket, {
+      get: (target, property, receiver) => {
+        if (property === 'get' && this.verifyReadFailuresForTest > 0) {
+          return async () => {
+            this.verifyReadFailuresForTest--;
+            throw new Error('injected R2 get failure (503)');
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    env.PROJECT_DATA_ARCHIVE_R2 = flaky;
+    try {
+      return await super.archiveTargetVerifyPage(input);
+    } finally {
+      env.PROJECT_DATA_ARCHIVE_R2 = bucket;
+    }
+  }
+
   failNextArchiveFlipsForTest(count: number): void {
     this.flipFailuresForTest = count;
   }

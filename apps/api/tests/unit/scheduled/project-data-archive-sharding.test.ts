@@ -288,11 +288,18 @@ function createFakeTarget() {
         sha256: chunk.sha256,
       };
     }),
-    archiveTargetAbandonPage: vi.fn(async () => ({
-      removed: true,
-      remaining: false,
-      rowsDeleted: 0,
-    })),
+    // The paged abandon: same preconditions as the one-shot abandon, one page for this fixture.
+    archiveTargetAbandonPage: vi.fn(async (input: { sourceIntactVerified?: boolean }) => {
+      if (state === 'rehome_exported') throw new Error('target_not_abandonable');
+      if (state === 'sealed' && input.sourceIntactVerified !== true) {
+        throw new Error('target_sealed_requires_source_proof');
+      }
+      const removed = chunks.length > 0 || state !== 'prepared';
+      const rowsDeleted = chunks.reduce((sum, chunk) => sum + chunk.rowCount, 0);
+      chunks.length = 0;
+      state = 'prepared';
+      return { removed, remaining: false, rowsDeleted };
+    }),
     // Compact targets re-read R2 in pages before the flip; this fake reports one complete page.
     archiveTargetVerifyPage: vi.fn(async () => ({
       complete: true,
@@ -2324,9 +2331,9 @@ describe('archive-sharding abandon control', () => {
         restoredToRoot: true,
         sourceIntentRemoved: true,
         targetRemoved: true,
-        targetRowsDeleted: 4,
+        targetRowsDeleted: 3,
       });
-      expect(target.archiveTargetAbandonSession).toHaveBeenCalledWith(
+      expect(target.archiveTargetAbandonPage).toHaveBeenCalledWith(
         expect.objectContaining({ sourceIntactVerified: true, migrationId: MIGRATION_ID })
       );
       expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({
@@ -2438,7 +2445,7 @@ describe('archive-sharding abandon control', () => {
           })
         ).rejects.toMatchObject({ reason: 'abandon_requires_source_intact' });
       }
-      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(target.archiveTargetAbandonPage).not.toHaveBeenCalled();
       expect(source.archiveSourceAbandonIntent).not.toHaveBeenCalled();
       expect(readLocationRow(sqlite, 'session-lagging')).toMatchObject({
         location_state: 'migrating',
@@ -2529,7 +2536,7 @@ describe('archive-sharding abandon control', () => {
         ).rejects.toMatchObject({ reason: 'abandon_reason_required' });
       }
       expect(source.archiveSourceInspectIntent).not.toHaveBeenCalled();
-      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(target.archiveTargetAbandonPage).not.toHaveBeenCalled();
       expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({ state: 'failed' });
       expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
     } finally {
@@ -2566,7 +2573,7 @@ describe('archive-sharding abandon control', () => {
 
       expect(source.archiveSourceInspectIntent).toHaveBeenCalledTimes(1);
       expect(source.archiveSourceAbandonIntent).toHaveBeenCalledTimes(1);
-      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(target.archiveTargetAbandonPage).not.toHaveBeenCalled();
       expect((await target.archiveTargetInspectSession()).state).toBe('sealed');
       // The reservation is released so a sweep can finish publishing; the journal and the
       // location are left exactly as they were.

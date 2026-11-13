@@ -685,4 +685,79 @@ describe('resumable archive cursor', () => {
     expect(await source.estimateCallCountForTest()).toBeGreaterThan(before);
     expect(await readJournal(projectId, sessionId)).not.toBeNull();
   });
+  it('resumes verification after a transient R2 read failure instead of recording a verdict', async () => {
+    const { projectId, sessionId, messageIds } = await seedCandidate('verifyblip', 40);
+    const r2 = env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket;
+    let armed = false;
+    // Once the copy is sealed (the manifest is its last write), the shard's next R2 read fails.
+    const arming = new Proxy(r2, {
+      get(target, property, receiver) {
+        if (property === 'put') {
+          return async (key: string, ...rest: unknown[]) => {
+            const result = await (target.put as (...args: unknown[]) => Promise<unknown>)(
+              key,
+              ...rest
+            );
+            if (!armed && key.endsWith('/manifest.json')) {
+              armed = true;
+              const owner = (await readLocation(projectId, sessionId))?.owner_name ?? '';
+              await projectDataStub(owner).failNextArchiveVerifyReadsForTest(1);
+            }
+            return result;
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const first = await withR2(arming as R2Bucket, () => tick());
+    expect(armed).toBe(true);
+    expect(first).toMatchObject({ failed: 1, poisoned: 0 });
+    expect((await readJournal(projectId, sessionId))?.state).toBe('recovery_manifest_persisted');
+
+    const second = await tick();
+    expect(second).toMatchObject({ migrated: 1, failed: 0, poisoned: 0 });
+    expect((await readJournal(projectId, sessionId))?.state).toBe('published');
+    await withArchiveEnv(sweepEnv(), async () => {
+      expect(await readAllMessageIds(projectId, sessionId)).toEqual(messageIds);
+    });
+  });
+  it('re-prepares an in-flight migration whose intent predates the write-generation fence, then publishes', async () => {
+    const { projectId, sessionId, source, messageIds } = await seedCandidate(
+      'legacyintent',
+      LARGE_MESSAGES
+    );
+    const first = await tick({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' });
+    expect(first.yielded ?? 0).toBe(1);
+    // What an intent prepared by the previous build looks like: no generation, no components.
+    await runInDurableObject(source, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE project_data_archive_source_intents
+         SET prepared_write_generation = NULL, terminal_components_json = NULL
+         WHERE session_id = ?`,
+        sessionId
+      );
+    });
+    for (let ticks = 0; ticks < 60; ticks++) {
+      const stats = await tick();
+      expect(stats.poisoned).toBe(0);
+      expect(stats.failed).toBe(0);
+      if ((await readJournal(projectId, sessionId))?.state === 'published') break;
+    }
+    expect((await readJournal(projectId, sessionId))?.state).toBe('published');
+    const recorded = await runInDurableObject(
+      source,
+      async (_instance, state) =>
+        state.storage.sql
+          .exec(
+            `SELECT terminal_components_json FROM project_data_archive_source_intents WHERE session_id = ?`,
+            sessionId
+          )
+          .toArray()[0]?.terminal_components_json
+    );
+    expect(typeof recorded).toBe('string');
+    await withArchiveEnv(sweepEnv(), async () => {
+      expect(await readAllMessageIds(projectId, sessionId)).toEqual(messageIds);
+    });
+  });
 });

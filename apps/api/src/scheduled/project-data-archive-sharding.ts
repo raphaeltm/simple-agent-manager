@@ -6,7 +6,6 @@ import type {
   ArchiveSourceFlipRefusal,
   ArchiveSourceInspectIntentResult,
   ArchiveSourcePrepareResult,
-  ArchiveTargetAbandonResult,
   ArchiveTerminalComponents,
   ArchiveTargetInspectResult,
 } from '../durable-objects/project-data/archive-sharding';
@@ -3588,9 +3587,26 @@ async function migrateClaimedCandidate(
         `ProjectData archive migration ${migration.migration_id} cannot resume: its source intent no longer matches the journal`
       );
     }
-    terminalVersionSha256 = local.terminalVersionSha256;
-    messageCount = local.messageCount;
-    migration = await reattachClaimToken(env, source, migration, now);
+    if (local.terminalComponents) {
+      terminalVersionSha256 = local.terminalVersionSha256;
+      messageCount = local.messageCount;
+      migration = await reattachClaimToken(env, source, migration, now);
+    } else {
+      // Prepared before the write-generation fence (DO migration 076): re-run the yielding prepare
+      // once, so the flip can prove the root unchanged in O(1) and verification has the root's
+      // components. It re-proves the same terminal version (or fails closed) and rotates the token.
+      const reprepared = await ensureSourcePrepared(env, config, source, migration, now);
+      markPhase('prepare');
+      if (reprepared.refusal) {
+        throw new ProjectDataArchiveCoordinatorStateError(
+          'precopy_refusal_after_intent',
+          `ProjectData archive migration ${migration.migration_id} was refused at re-prepare (${reprepared.refusal.reason})`
+        );
+      }
+      migration = reprepared.migration;
+      terminalVersionSha256 = reprepared.prepared.terminalVersionSha256;
+      messageCount = reprepared.prepared.messageCount;
+    }
   } else {
     const preparedResult = await ensureSourcePrepared(env, config, source, migration, now);
     markPhase('prepare');
@@ -3661,22 +3677,14 @@ async function migrateClaimedCandidate(
       ? (inspected.terminalComponents ?? null)
       : null;
     if (migration.storage_format === COMPACT_ARCHIVE_FORMAT && !terminalComponents) {
-      // Prepared before the root recorded terminal-version components (pre-076 intent): keep the
-      // whole-session recompute that proof needs.
-      await target.archiveTargetSeal({
-        ...sourcePrepareInput(
-          migration,
-          requireStringField(migration, 'source_intent_token'),
-          now,
-          config.sessionGraceMs
-        ),
-        terminalVersionSha256,
-        expectedChunkHashes: (
-          await target.archiveTargetInspectSession(targetInspectInput(migration))
-        ).chunks.map((chunk) => chunk.sha256),
-      });
-      progress.units++;
-    } else if (migration.storage_format === COMPACT_ARCHIVE_FORMAT && terminalComponents) {
+      // Every prepare since migration 076 records components, and a resumed claim re-prepares an
+      // intent that lacks them, so this is an intent removed or replaced under the claim.
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'terminal_components_missing',
+        `ProjectData archive migration ${migration.migration_id} has no root terminal components to verify against`
+      );
+    }
+    if (migration.storage_format === COMPACT_ARCHIVE_FORMAT && terminalComponents) {
       const expectedComponents = terminalComponents;
       // Re-read the R2 copy and compare the shard's own rows with the root's components before
       // the flip lets the root reclaim its rows, in bounded pages that resume across ticks
@@ -3698,14 +3706,15 @@ async function migrateClaimedCandidate(
           ),
           now,
         });
+        // Chunks this call verified are saved on the shard, so they count even if it then failed.
+        progress.units += page.chunksVerified;
+        chunksVerified += page.chunksVerified;
         if (page.failure) {
           throw new ProjectDataArchiveCoordinatorStateError(
             `target_verification_failed:${page.failure.reason}`,
             `ProjectData archive migration ${migration.migration_id} failed R2 verification: ${page.failure.message}`
           );
         }
-        progress.units += page.chunksVerified;
-        chunksVerified += page.chunksVerified;
         if (page.complete) break;
         if (page.chunksVerified === 0) {
           throw new ProjectDataArchiveCoordinatorStateError(
@@ -4278,7 +4287,7 @@ export async function abandonProjectDataArchiveMigration(
   }
 
   let sourceResult: ArchiveSourceAbandonIntentResult;
-  let targetResult: ArchiveTargetAbandonResult;
+  let targetResult: { removed: boolean; rowsDeleted: number };
   try {
     const source = await ensureOwnerStub(env, migration.source_owner_name, migration.project_id);
     const target = await ensureOwnerStub(env, migration.target_owner_name, migration.project_id);
@@ -4305,15 +4314,24 @@ export async function abandonProjectDataArchiveMigration(
       ...sourceInspectInput(migration),
       now,
     });
-    targetResult = await target.archiveTargetAbandonSession({
-      ...targetInspectInput(migration),
-      migrationId: migration.migration_id,
-      // Set only because the source abandon above returned without refusing: the source
-      // transcript was intact under the root object's lock an instant ago and no path can
-      // delete it without the intent row that call just removed.
-      sourceIntactVerified: true,
-      now,
-    });
+    // In bounded pages: a large copy's grouped rows and search documents each need an FTS
+    // delete marker, and one transaction for all of them risks the object's CPU limit.
+    targetResult = { removed: false, rowsDeleted: 0 };
+    for (;;) {
+      const page = await target.archiveTargetAbandonPage({
+        ...targetInspectInput(migration),
+        migrationId: migration.migration_id,
+        // Set only because the source abandon above returned without refusing: the source
+        // transcript was intact under the root object's lock an instant ago and no path can
+        // delete it without the intent row that call just removed.
+        sourceIntactVerified: true,
+        maxRows: resolveConfig(env).chunkRows,
+        now,
+      });
+      targetResult.removed ||= page.removed;
+      targetResult.rowsDeleted += page.rowsDeleted;
+      if (!page.remaining) break;
+    }
   } catch (error) {
     await releaseAbandonLease(env, fenced).catch((releaseError: unknown) => {
       log.warn('project_data_archive_abandon_lease_release_failed', {
@@ -4370,11 +4388,7 @@ export async function abandonProjectDataArchiveMigration(
     restoredToRoot: (locationResult?.meta.changes ?? 0) > 0,
     sourceIntentRemoved: sourceResult.removed,
     targetRemoved: targetResult.removed,
-    targetRowsDeleted:
-      targetResult.messagesDeleted +
-      targetResult.groupedRowsDeleted +
-      targetResult.toolArchiveRowsDeleted +
-      targetResult.chunksDeleted,
+    targetRowsDeleted: targetResult.rowsDeleted,
   };
 }
 

@@ -205,7 +205,7 @@ Checklist:
       suite drives 10,500- and 20,000-message sessions to publication; unit and Workers suites
       updated.
 - [x] Docs: `configuration.md` archive section, `wrangler.toml` comments.
-- [ ] Discrimination runs per guard (renewal, reserve-once, progress reset, unwind, verification).
+- [x] Discrimination runs per guard (rounds 1-3 recorded in Notes).
 - [ ] Local specialist review; CI; staging on the compact config; parent review of the exact SHA.
 
 Review round 1 (2026-11-13, head ab10ea984) and fixes (commit 327f3db1f):
@@ -247,7 +247,8 @@ Review round 1 (2026-11-13, head ab10ea984) and fixes (commit 327f3db1f):
   durability; the window is one tick at most); orphaned R2 objects after an unwind (storage only;
   bounded by refusals per day); routing `frozen` reads to root; exponential backoff for repeated
   flip refusals (bounded to one copy per session per day by the 1-day refusal window and visible
-  as `flipUnwound`).
+  as `flipUnwound`). Backlog: `tasks/backlog/2026-11-13-archive-verify-r2-recheck-and-orphans.md`,
+  `tasks/backlog/2026-11-13-archive-frozen-reads-and-unwind-backoff.md`.
 
 Measurement (2026-11-13, local better-sqlite3 + node:crypto, NOT production): 100,000 messages
 (512 B bodies) + 50,000 grouped rows: prepare hash 1,820 ms over 302 yields, longest uninterrupted
@@ -272,8 +273,10 @@ and reads the whole transcript back (upper bound ~2.3 ms/msg); 10,500 messages i
 
 Bounds at the outer probable limit (100k messages, rule 81), production-derived projections:
 copy ~1.1 s per 500-row chunk (200 chunks, ~220 s, ~4-5 ticks of 60 s); verification ~0.4-0.8
-ms/msg in R2-timeout-bounded pages (~40-80 s, 1-2 ticks); flip ~9 s on the root (one RPC, the
-largest single root block); reclaim ~10-60 s in 500-row pages (1-2 ticks). Total ~7-10 ticks
+ms/msg in R2-timeout-bounded pages (~40-80 s, 1-2 ticks); prepare hash ~3 s in yielding
+500-row slices (local 1.8 s, longest slice 70 ms); flip O(1) via the write generation (local
+1 ms; superseded the earlier ~9 s recompute projection); reclaim ~10-60 s in 500-row pages
+(1-2 ticks). Total ~7-10 ticks
 (~2-3 h at the 18-min cadence), readable throughout. One reservation of ~445k writes.
 
 Production after #2700 (read-only D1 `sam-prod`, 2026-11-13 01:55Z, normal operation only):
@@ -289,14 +292,17 @@ Production after #2700 (read-only D1 `sam-prod`, 2026-11-13 01:55Z, normal opera
   > 10k 202 / 4.10M (the PR B target). Sleeping: 290 sessions / 843k msgs.
 - Open question: 24 `active_session_state` refusals remain after dropping `'error'`; these are
   `prompting`/`recovering` or `runtime_work_state` active/settling on sessions terminal for the whole
-  grace. Not yet attributed (needs a DO-side read); tracked here, not changed in PR B.
+  grace. Not yet attributed (needs a DO-side read); not changed in PR B. Backlog:
+  `tasks/backlog/2026-11-13-archive-active-session-state-refusals.md`.
 
 Audit notes:
 
 - Root-local maintenance while rows await reclaim (PR A audit, unchanged): tool-payload cleanup
   can strip a leftover row's payload during the reclaim window; bounded to one cadence. Before the
-  flip, transcript writes are fenced by the source intent and the flip's terminal-version recompute
-  catches anything that slips through, which now unwinds instead of poisoning.
+  flip, transcript writes are fenced by the source intent and the write-generation triggers count
+  any write that slips through (materialization, grouped-FTS cleanup, tool-payload cleanup, late
+  callbacks such as `markAgentCompleted`); the flip then refuses and the migration unwinds instead
+  of poisoning. The cost is a wasted copy at most once per session per refusal window.
 - `source_deleted` = flipped and published, reclaim may be outstanding; the root marker
   (`archive_reclaim_pending:`) drives reclaim, not the journal.
 - Mixed version: old coordinators keep calling `archiveSourceFinalizeDelete` (throwing contract)
@@ -357,6 +363,28 @@ a 1,284-write receipt, ProjectData DO p99 unchanged.
   coordinator `01M77TZWBDJHQ3Z87V2NYZMFK1` reviews the exact head SHA.
 - 2026-11-12 17:06Z workspace was recycled while paused; untracked `.do-state.md` was lost.
   Keep durable state here and push.
+
+Review round 2 (re-review at bf61a717c) and fixes:
+
+- All three reviewers: HIGH a transient R2 read error during verification was persisted as a
+  permanent verdict (poison after one blip). Fixed: only deterministic mismatches are recorded
+  (`DETERMINISTIC_VERIFY_FAILURES`); other errors keep progress and retry.
+- MEDIUM: chunks verified before a timeout/error were not credited. Fixed: `counted` returned on
+  every path and added to claim progress before the failure is raised.
+- MEDIUM: legacy (pre-076) intents took a whole-session seal and flip, and the legacy re-seal
+  counted as progress. Fixed: a resumed claim re-prepares such an intent (yielding hash, records
+  generation and components); the legacy coordinator seal branch is removed.
+- MEDIUM: the fence fails open if triggers are missing or columns drift. Fixed: the flip re-hashes
+  unless all 18 triggers exist (`archiveWriteGenerationFenceInstalled`); a test pins every trigger
+  column to `archiveTerminalHashedColumns()`.
+- MEDIUM: operator abandon used the unpaged target delete. Fixed: paged loop.
+- LOW: intent replaced during re-prepare (now detected by `created_at`), generation rows never
+  deleted (dropped with the last reclaim page), shard component hash page size (configured).
+- Deferred (MEDIUM/LOW, backlog files above): R2 re-check between a completed verification and a
+  delayed flip; orphaned R2 objects after an unwind; `frozen` reads; repeated-refusal backoff;
+  verify `do_meta` verdict rows kept per archived session (~200 B each on the shard).
+- Discrimination round 3: deterministic-only verdicts (transient verify test), legacy re-prepare
+  (pre-fence intent test) — both red when reverted.
 
 Discrimination, round 2 (each guard reverted alone; the intended test went red, the others
 stayed green): flip write-generation proof (workers bypass-writer test and unit flip test),
