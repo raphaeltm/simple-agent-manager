@@ -42,7 +42,19 @@ export interface ConnectionLink {
   description: string;
   /** SAM docs path */
   href: string;
-  icon: 'clock' | 'github' | 'webhook' | 'mail' | 'plug' | 'chat' | 'key' | 'bell' | 'container' | 'rocket' | 'gauge' | 'route';
+  icon:
+    | 'clock'
+    | 'github'
+    | 'webhook'
+    | 'mail'
+    | 'plug'
+    | 'chat'
+    | 'key'
+    | 'bell'
+    | 'container'
+    | 'rocket'
+    | 'gauge'
+    | 'route';
 }
 
 export interface IntegrationSection {
@@ -52,11 +64,17 @@ export interface IntegrationSection {
   description: string;
 }
 
-export function feature(title: string, description: string): { title: string; description: string } {
+export function feature(
+  title: string,
+  description: string
+): { title: string; description: string } {
   return { title, description };
 }
 
-export function step(stepTitle: string, description: string): { step: string; description: string } {
+export function step(
+  stepTitle: string,
+  description: string
+): { step: string; description: string } {
   return { step: stepTitle, description };
 }
 

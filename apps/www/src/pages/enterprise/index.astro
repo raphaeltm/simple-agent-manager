@@ -95,13 +95,13 @@ const notYet = [
 
     <section class="section" id="what-runs-where">
       <div class="container">
-        <header class="ent-section-header animate-on-scroll">
+        <div class="ent-section-header animate-on-scroll">
           <span class="section-label">Architecture</span>
           <h2 class="section-title">What runs where</h2>
           <p class="section-subtitle">
             Three places, all under contracts you hold. The SAM project operates none of them.
           </p>
-        </header>
+        </div>
         <WhatRunsWhere />
       </div>
     </section>
@@ -110,10 +110,10 @@ const notYet = [
 
     <section class="section" id="review">
       <div class="container">
-        <header class="ent-section-header animate-on-scroll">
+        <div class="ent-section-header animate-on-scroll">
           <span class="section-label">Security review</span>
           <h2 class="section-title">Short answers to the usual questions</h2>
-        </header>
+        </div>
         <div class="answer-grid">
           {answers.map((a) => (
             <a href={a.href} class="answer-card animate-on-scroll">
@@ -129,10 +129,10 @@ const notYet = [
 
     <section class="section" id="product">
       <div class="container">
-        <header class="ent-section-header animate-on-scroll">
+        <div class="ent-section-header animate-on-scroll">
           <span class="section-label">In the product</span>
           <h2 class="section-title">Membership and spend, from the real app</h2>
-        </header>
+        </div>
         <div class="shot-grid">
           <ShotFrame
             src="/images/features/sam-collab-members-access.png"
@@ -152,14 +152,14 @@ const notYet = [
 
     <section class="section" id="not-yet">
       <div class="container">
-        <header class="ent-section-header animate-on-scroll">
+        <div class="ent-section-header animate-on-scroll">
           <span class="section-label">Not yet</span>
           <h2 class="section-title">What SAM does not do yet</h2>
           <p class="section-subtitle">
             Better to know now than in week three of a rollout. If one of these blocks you, email
             <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> so it gets counted.
           </p>
-        </header>
+        </div>
         <ul class="not-yet-list">
           {notYet.map((n) => (
             <li class="animate-on-scroll">
@@ -175,11 +175,11 @@ const notYet = [
 
     <section class="section" id="comparison">
       <div class="container">
-        <header class="ent-section-header animate-on-scroll">
+        <div class="ent-section-header animate-on-scroll">
           <span class="section-label">Comparison</span>
           <h2 class="section-title">SAM, a managed platform, or building your own</h2>
           <p class="section-subtitle">Typical trade-offs. Individual managed products vary.</p>
-        </header>
+        </div>
         <ComparisonTable
           caption="How SAM compares with a typical managed agent platform and an internal build."
           rowHeader="Question"
@@ -203,10 +203,10 @@ const notYet = [
 
     <section class="section" id="deep-dives">
       <div class="container">
-        <header class="ent-section-header animate-on-scroll">
+        <div class="ent-section-header animate-on-scroll">
           <span class="section-label">Details</span>
           <h2 class="section-title">Go deeper</h2>
-        </header>
+        </div>
         <div class="deep-grid">
           {enterprisePages.map((p) => (
             <a href={`/enterprise/${p.slug}/`} class="deep-card animate-on-scroll">
@@ -303,6 +303,11 @@ const notYet = [
 
   .ent-section-header .section-subtitle {
     margin: 0;
+  }
+
+  .ent-section-header a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .answer-grid,

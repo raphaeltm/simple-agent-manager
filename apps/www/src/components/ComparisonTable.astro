@@ -187,6 +187,15 @@ const { caption, rowHeader, columns, rows, highlightColumn } = Astro.props;
       gap: 12px;
     }
 
+    .cmp-caption {
+      display: block;
+    }
+
+    .cmp-table td > * {
+      justify-self: start;
+      align-self: start;
+    }
+
     .cmp-table td::before {
       content: attr(data-label);
       font-weight: 500;

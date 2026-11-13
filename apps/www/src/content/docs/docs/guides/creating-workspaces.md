@@ -38,7 +38,7 @@ Everything below — providers, VM sizes, the terminal, stop/restart/delete — 
 
 ## Where your workspaces run: Bring Your Own Cloud
 
-VM workspaces run on a real cloud VM. On the **hosted platform**, compute is usually provided for you, so you can start working without connecting anything. On a **self-hosted instance**, or when you want VMs billed directly to your own account, SAM follows a **Bring Your Own Cloud (BYOC)** model: you connect a cloud provider once, and every VM runs on your account.
+VM workspaces run on a real cloud VM. If your installation's administrator connected a shared cloud account, compute is provided for you, so you can start working without connecting anything. Otherwise, or when you want VMs billed directly to your own account, SAM follows a **Bring Your Own Cloud (BYOC)** model: you connect a cloud provider once, and every VM runs on your account.
 
 SAM supports seven providers:
 
@@ -197,5 +197,5 @@ resource requirements.
 :::
 
 :::note
-Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud). On the hosted platform, compute is typically provided for you.
+Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported and a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud), unless your installation's administrator provides compute for you.
 :::

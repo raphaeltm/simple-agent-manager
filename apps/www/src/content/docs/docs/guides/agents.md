@@ -82,15 +82,15 @@ Mistral Vibe is installed via `uv` (Python package manager) and requires Python 
 
 SAM installs OpenCode `2.2.5-sam-s1` (v2.2.5 with SAM's live-steering patch, built from source and published as SAM GitHub release binaries) with SHA-256 verification, including Linux x64 and arm64 on glibc and musl. VM devcontainers and Instant sessions use the same installer. ACP runs a private server for each agent process; session data stays in OpenCode’s XDG data directory and is included in sleep/wake snapshots. Custom OpenAI-compatible providers use OpenCode’s bundled implementation and do not need a separate npm dependency install.
 
-| Property                         | Value                                                                                                 |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Provider**                     | OpenCode (SST)                                                                                        |
-| **Default Inference Provider**   | OpenCode Zen                                                                                          |
-| **Advanced Inference Providers** | OpenCode Go, SAM Platform (Workers AI), Scaleway, Google Vertex, OpenAI-compatible, Anthropic, custom |
-| **API Key**                      | `OPENCODE_API_KEY` for OpenCode Zen and OpenCode Go                                                   |
-| **Get a Key**                    | [OpenCode auth](https://opencode.ai/auth)                                                             |
+| Property                       | Value                                                |
+| ------------------------------ | ---------------------------------------------------- |
+| **Provider**                   | OpenCode (SST)                                       |
+| **Default Inference Provider** | OpenCode Zen                                         |
+| **Other Inference Providers**  | OpenCode Go, Custom (any OpenAI-compatible endpoint) |
+| **API Key**                    | `OPENCODE_API_KEY` for OpenCode Zen and OpenCode Go  |
+| **Get a Key**                  | [OpenCode auth](https://opencode.ai/auth)            |
 
-OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from Models.dev through its authenticated model-catalog API, with a static fallback if that upstream catalog is unavailable. Select OpenCode Go in agent settings to use Go-only models such as `opencode-go/kimi-k3.1-pro`. Advanced configurations can use SAM Platform inference without a user API key, or another user-selected inference provider. If you explicitly select Scaleway and already have a Scaleway cloud provider credential configured, OpenCode can reuse that credential — no separate API key required.
+OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from Models.dev through its authenticated model-catalog API, with a static fallback if that upstream catalog is unavailable. Select OpenCode Go in agent settings to use Go-only models such as `opencode-go/kimi-k3.1-pro`. Select **Custom** to point OpenCode at any OpenAI-compatible endpoint with its own base URL and API key, such as a model server you host yourself (`OPENCODE_PROVIDERS` in `packages/shared/src/types/agent-settings.ts`).
 
 ### Amp
 
@@ -181,8 +181,8 @@ A few things worth knowing:
 - **Your chosen scope.** The dialog says where the account goes. From personal settings it reads
   **This account will be saved as your personal default.** From a project it reads **This account will
   be saved for this project. Your personal default stays unchanged.**
-- **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments
-  running on Cloudflare Containers (SAM's default runtime). If the button isn't shown, use the manual
+- **Availability.** Guided sign-in is available on deployments running Cloudflare Containers (SAM's default
+  runtime). If the button isn't shown, use the manual
   API key or token fields in the same panel.
 
 If Claude sign-in fails, the dialog says why and offers **Try again**, which starts a fresh attempt.

@@ -149,6 +149,12 @@ const next = index < enterprisePages.length - 1 ? enterprisePages[index + 1] : n
     margin-bottom: 6px;
   }
 
+  .ent-prose :global(p a),
+  .ent-prose :global(li a) {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
   .ent-prose :global(strong) {
     color: var(--color-fg-primary);
     font-weight: 600;

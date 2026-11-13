@@ -12,6 +12,27 @@ const PAGES: { path: string; slug: string; heading: string | RegExp }[] = [
     slug: 'features-multiplayer',
     heading: /whole team's agents/i,
   },
+  { path: '/integrations/', slug: 'integrations-index', heading: /What SAM works with/i },
+  {
+    path: '/integrations/claude-code/',
+    slug: 'integrations-claude-code',
+    heading: /^Claude Code$/,
+  },
+  { path: '/integrations/upcloud/', slug: 'integrations-upcloud', heading: /^UpCloud$/ },
+  { path: '/enterprise/', slug: 'enterprise-index', heading: /infrastructure you own/i },
+  {
+    path: '/enterprise/security/',
+    slug: 'enterprise-security',
+    heading: /The VM is the boundary/i,
+  },
+  {
+    path: '/enterprise/compliance/',
+    slug: 'enterprise-compliance',
+    heading: /Where your data lives/i,
+  },
+  { path: '/enterprise/governance/', slug: 'enterprise-governance', heading: /Who can do what/i },
+  { path: '/enterprise/cost-control/', slug: 'enterprise-cost-control', heading: /Three bills/i },
+  { path: '/integrations/gitlab/', slug: 'integrations-gitlab', heading: /^GitLab$/ },
 ];
 
 for (const { path, slug, heading } of PAGES) {
