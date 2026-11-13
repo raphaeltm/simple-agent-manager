@@ -268,6 +268,16 @@ describe('cleanup cron tears a node down after its placement credential rotates'
     expect(f.deletes).toEqual([]);
     expect(f.node().reason).toMatch(/^teardown_instance_not_visible/);
     expect(f.alerts()).toHaveLength(1);
+
+    // Past the blocked-retirement deadline the stranded sweep forces a retry; its failure must
+    // not replace the named reason with its catch-all.
+    await f.sweep(new Date(NOW.getTime() + config.blockedRetirementMs + 60_000));
+    expect(f.gets.length).toBeGreaterThan(2);
+    expect(f.deletes).toEqual([]);
+    expect(f.node()).toMatchObject({
+      proof: null,
+      reason: expect.stringMatching(/^teardown_instance_not_visible/),
+    });
   });
 
   it('a node placed on the platform credential is reached after that credential rotates, even when its owner now has their own credential', async () => {

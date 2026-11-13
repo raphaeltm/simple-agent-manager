@@ -266,6 +266,21 @@ describe('node teardown after the GCP connection is saved again (incident 2026-1
     expect(nodeRow()).toBeUndefined();
   });
 
+  it('preserves an instance whose provider ID differs from the recorded one, even with matching labels', async () => {
+    await placeNode();
+    // GCP looks instances up by ID or name; a different instance answering for this node's
+    // lookup is not the VM SAM recorded.
+    putInstance('sam-staging-infra', { id: '999', labels: samLabels() });
+    cloud.projects.get('sam-staging-infra')!.set(INSTANCE_ID, { id: '999', labels: samLabels() });
+    await replaceUserGcpCredential(env, OWNER, gcpCredential('sam-staging-infra'));
+
+    const response = await ownerDelete();
+
+    expect(response.status).toBe(409);
+    expect(cloud.deleteCalls).toEqual([]);
+    expect(nodeRow()).toMatchObject({ reason: 'teardown_instance_ownership_mismatch' });
+  });
+
   it('a reconnect to a different GCP project blocks visibly instead of deleting or retrying silently', async () => {
     await placeNode();
     putInstance('sam-staging-infra', { id: INSTANCE_ID, labels: samLabels() });
