@@ -5,7 +5,7 @@
  */
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { sealSecrets } from '../../../deploy/selfhost/key-agent/bundle.ts';
@@ -17,7 +17,15 @@ import { OBJECTSTORE_IMAGE } from '../backup-lib';
 import { resolveEsbuild } from '../celld-binary.js';
 import { freePort, REPO_ROOT, type Running, start, waitFor } from './harness';
 
-export const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status === 0;
+/**
+ * The docker CLI from a fixed system directory, never resolved through a caller-controlled PATH
+ * (as harness.ts does for tar and openssl). Empty when docker is not installed.
+ */
+export const DOCKER =
+  ['/usr/bin/docker', '/usr/local/bin/docker', '/bin/docker'].find((path) => existsSync(path)) ??
+  '';
+export const hasDocker =
+  DOCKER !== '' && spawnSync(DOCKER, ['version'], { stdio: 'ignore' }).status === 0;
 
 export interface ObjectStore {
   port: number;
@@ -34,7 +42,7 @@ export interface ObjectStore {
 export async function startObjectStore(key: string, secret: string): Promise<ObjectStore> {
   const port = await freePort();
   const run = spawnSync(
-    'docker',
+    DOCKER,
     [
       'run',
       '-d',
@@ -66,7 +74,7 @@ export async function startObjectStore(key: string, secret: string): Promise<Obj
     env: () => ({ AWS_ACCESS_KEY_ID: key, AWS_SECRET_ACCESS_KEY: secret, AWS_REGION: 'us-east-1' }),
     mc: (args, extra = []) =>
       spawnSync(
-        'docker',
+        DOCKER,
         [
           'run',
           '--rm',
@@ -85,7 +93,7 @@ export async function startObjectStore(key: string, secret: string): Promise<Obj
         { encoding: 'utf8' }
       ),
     stop: () => {
-      spawnSync('docker', ['rm', '-f', container]);
+      spawnSync(DOCKER, ['rm', '-f', container]);
     },
   };
   try {
