@@ -19,7 +19,7 @@
  * The same holds for the per-isolate reads every request's auth/config path joins: the admin
  * settings cache and the legacy platform-config read (resolvePlatformConfig, reached for example
  * by every MCP tool listing). Their joiners may wait out the dropped read's deadline plus the
- * join grace, then read for themselves (apps/api/src/lib/shared-flight.ts).
+ * join grace, then read for themselves (packages/worker-core/src/shared-flight.ts).
  */
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -48,8 +48,10 @@ const SETTINGS_CACHE = join(REPO_ROOT, 'apps/api/src/services/admin-settings-cac
 const SHARED_FLIGHT = join(REPO_ROOT, 'apps/api/src/lib/shared-flight.ts');
 const PLATFORM_CONFIG = join(REPO_ROOT, 'apps/api/src/services/platform-config.ts');
 const SETTINGS_RESOLUTION = join(REPO_ROOT, 'apps/api/src/services/admin-settings-resolution.ts');
-const ENSURE_MEMO = join(REPO_ROOT, 'apps/api/src/services/project-data-ensure-memo.ts');
-const COMPACT_R2 = join(REPO_ROOT, 'apps/api/src/project-data-archive/compact-r2.ts');
+// Moved into the ProjectData package by the worker split (#2681); both import worker-core's
+// shared-flight, the same module instance the apps/api shim re-exports.
+const ENSURE_MEMO = join(REPO_ROOT, 'packages/project-data/src/client/project-data-ensure-memo.ts');
+const COMPACT_R2 = join(REPO_ROOT, 'packages/project-data/src/archive/compact-r2.ts');
 /** The settings flight's own deadline in the probe: longer than one slow read. */
 const SETTINGS_READ_TIMEOUT_MS = 3000;
 /** The legacy platform-config read's deadline: performance.configReadTimeoutMs at its default. */

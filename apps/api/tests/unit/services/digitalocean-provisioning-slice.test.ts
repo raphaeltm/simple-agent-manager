@@ -24,7 +24,9 @@
 import { DigitalOceanProvider } from '@simple-agent-manager/providers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createDeploymentProviderPort } from '../../../src/app-deployment-ports/providers';
 import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
 import { createEnvironmentVolume } from '../../../src/services/deployment-volumes';
 import { decrypt } from '../../../src/services/encryption';
 import { createProviderForUser } from '../../../src/services/provider-credentials';
@@ -290,7 +292,8 @@ describe('DigitalOcean deployment volume control-plane vertical slice', () => {
   const env = {
     ENCRYPTION_KEY: 'test-encryption-key',
     DIGITALOCEAN_API_TIMEOUT_MS: '1000',
-  } as unknown as Parameters<typeof createEnvironmentVolume>[1];
+  } as unknown as Env;
+  const providers = createDeploymentProviderPort(env);
 
   beforeEach(() => {
     mockDecrypt.mockResolvedValue(RAW_DIGITALOCEAN_TOKEN);
@@ -316,7 +319,7 @@ describe('DigitalOcean deployment volume control-plane vertical slice', () => {
     const calls: RecordedCall[] = [];
     globalThis.fetch = makeDigitalOceanFetchMock(calls);
 
-    const row = await createEnvironmentVolume(db, env, USER_ID, {
+    const row = await createEnvironmentVolume(db, providers, USER_ID, {
       environmentId: 'env-do-1',
       name: 'app-data',
       sizeGb: 25,
@@ -379,7 +382,7 @@ describe('DigitalOcean deployment volume control-plane vertical slice', () => {
     );
 
     await expect(
-      createEnvironmentVolume(db, env, USER_ID, {
+      createEnvironmentVolume(db, providers, USER_ID, {
         environmentId: 'env-do-1',
         name: 'data',
         sizeGb: 25,

@@ -23,6 +23,7 @@ import { registerProjectCreateRoute } from './project-create';
 import { registerProjectDetailRoute } from './project-detail';
 import { registerProjectUpdateRoute } from './project-update';
 import { registerProjectRuntimeConfigRoutes } from './runtime-config';
+import { registerProjectSecretRequestRoutes } from './secret-requests';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
@@ -148,6 +149,7 @@ crudRoutes.get('/', async (c) => {
 
 registerProjectDetailRoute(crudRoutes);
 registerProjectRuntimeConfigRoutes(crudRoutes);
+registerProjectSecretRequestRoutes(crudRoutes);
 
 registerProjectUpdateRoute(crudRoutes);
 

@@ -1,3 +1,6 @@
+import {
+  timestampVersion,
+} from '@simple-agent-manager/scheduler-core';
 import { isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq, isNotNull, isNull, or } from 'drizzle-orm';
 
@@ -7,7 +10,6 @@ import {
   composableCredentialReference,
   legacyCredentialReference,
   platformCredentialReference,
-  timestampVersion,
 } from './default-capacity-pool-helpers';
 import {
   listManagedGcpCredentialMirrors,

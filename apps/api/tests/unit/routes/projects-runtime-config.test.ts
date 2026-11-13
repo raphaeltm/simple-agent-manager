@@ -40,6 +40,7 @@ describe('projects runtime config routes', () => {
 
     const queryBuilder = {
       from: vi.fn().mockReturnThis(),
+      leftJoin: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
       limit: vi.fn(() => Promise.resolve(limitResponses.shift() ?? [])),
       orderBy: vi.fn(() => Promise.resolve(orderByResponses.shift() ?? [])),
@@ -48,7 +49,8 @@ describe('projects runtime config routes', () => {
     mockDB = {
       select: vi.fn().mockReturnValue(queryBuilder),
       insert: vi.fn().mockReturnThis(),
-      values: vi.fn().mockResolvedValue(undefined),
+      values: vi.fn().mockReturnThis(),
+      onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
       update: vi.fn().mockReturnThis(),
       set: vi.fn().mockReturnThis(),
       delete: vi.fn().mockReturnThis(),
@@ -157,12 +159,16 @@ describe('projects runtime config routes', () => {
 
     expect(res.status).toBe(200);
     expect(mocks.encrypt).toHaveBeenCalledWith('plain-secret', 'test-key');
-    expect(mockDB.update).toHaveBeenCalled();
-    expect(mockDB.set).toHaveBeenCalledWith(
+    // One upsert on (project, key): the existing row is updated in place, never a second row.
+    expect(mockDB.onConflictDoUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        storedValue: 'enc-value',
-        valueIv: 'enc-iv',
-        isSecret: true,
+        set: expect.objectContaining({
+          storedValue: 'enc-value',
+          valueIv: 'enc-iv',
+          isSecret: true,
+          expiresAt: null,
+          secretRequestId: null,
+        }),
       })
     );
   });

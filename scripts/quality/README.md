@@ -34,10 +34,10 @@ different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
   the 2026-08-11 ai-slop debt burn-down, promoted after reaching 0 diagnostics), any new diagnostic
   fails the run with a nonzero exit code — no `--fail-on-findings` flag required. Other scopes
   remain advisory (exit 0 regardless of findings) until their own evidence is promoted.
-- `pnpm quality:shared-flight-joins` (blocking in CI) fails when Worker code (`apps/api/src` and
-  the shared, providers and cloud-init packages) resumes after another request's in-flight read
+- `pnpm quality:shared-flight-joins` (blocking in CI) fails when Worker code (`apps/api/src`, the
+  shared, providers and cloud-init packages, and the worker packages #2681 split out) resumes after another request's in-flight read
   in any way other than `joinSharedFlight` / `settleSharedFlight`
-  (`apps/api/src/lib/shared-flight.ts`). On the self-hosted celld runtime such a promise never
+  (`packages/worker-core/src/shared-flight.ts`). On the self-hosted celld runtime such a promise never
   settles once its starter's client disconnects, and a request that resumes on its settlement
   runs as part of the starter's request and loses its later D1 calls, fetches and timers when
   the starter answers; the helpers wait under the joiner's own timer and, on celld, resume it on
@@ -56,7 +56,7 @@ different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
 
 Boundary guidance and sanctioned Valibot patterns are in
 `.claude/rules/51-runtime-boundary-validation.md`. Current helpers live in
-`apps/api/src/lib/runtime-validation.ts` and `apps/api/src/schemas/_validator.ts`.
+`packages/worker-core/src/runtime-validation.ts` and `apps/api/src/schemas/_validator.ts`.
 
 ## Runtime workflow state
 

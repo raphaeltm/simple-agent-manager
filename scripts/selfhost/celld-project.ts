@@ -33,7 +33,8 @@ export const CELLD_MAIN = 'celld-main.ts';
 /**
  * Runtime switches every celld entry turns on before any request runs. On celld the code that
  * runs when a promise settles belongs to the request that settled it, so a request joining
- * another's in-flight read must resume on its own timer (apps/api/src/lib/shared-flight.ts).
+ * another's in-flight read must resume on its own timer (packages/worker-core/src/shared-flight.ts,
+ * imported through its apps/api/src/lib/shared-flight.ts re-export).
  */
 const CELLD_RUNTIME_IMPORT = `import { resumeSharedFlightJoinsOnOwnTimer } from './${SOURCE_LINK}/lib/shared-flight.ts';`;
 const CELLD_RUNTIME_CALL = 'resumeSharedFlightJoinsOnOwnTimer();';

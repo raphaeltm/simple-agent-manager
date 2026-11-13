@@ -1,22 +1,22 @@
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   persistMessageBatchWithSideEffects,
   persistMessageWithSideEffects,
-} from '../../../src/durable-objects/project-data/message-persistence';
+} from '@simple-agent-manager/project-data/internal/do/message-persistence';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   computeReconciliationAlarmTime,
   getReconciliationCandidates,
   processReconciliationCandidates,
-} from '../../../src/durable-objects/project-data/reconciliation';
+} from '@simple-agent-manager/project-data/internal/do/reconciliation';
 import {
   ensureReconciliationEpisode,
   readReconciliationEpisode,
   writeReconciliationEpisode,
-} from '../../../src/durable-objects/project-data/reconciliation-episode';
-import type { Env } from '../../../src/durable-objects/project-data/types';
+} from '@simple-agent-manager/project-data/internal/do/reconciliation-episode';
+import type { Env } from '@simple-agent-manager/project-data/internal/do/types';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
@@ -29,7 +29,7 @@ vi.mock('../../../src/services/node-agent', async (original) => ({
   nodeAgentRequest: vi.fn(async () => versionedPromptCapabilities('runtime-1')),
   sendPromptToAgentOnNode: boundary.send,
 }));
-vi.mock('../../../src/durable-objects/project-data/task-runtime-liveness', () => ({
+vi.mock('../../../src/services/task-runtime-liveness-local', () => ({
   getLocalTaskRuntimeLiveness: vi.fn(async () => ({
     live: true,
     conclusive: true,

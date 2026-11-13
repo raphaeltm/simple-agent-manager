@@ -18,7 +18,7 @@ import {
 } from '../../services/trigger-action-context';
 import { admitAndSubmitTriggerExecution } from '../../services/trigger-admission';
 import { renderTemplate } from '../../services/trigger-template';
-import { toWebhookTriggerConfig } from '../../services/webhook-trigger-store';
+import { toWebhookTriggerConfig } from '../../services/webhook-trigger-config-rows';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
 
 const actionRoutes = new Hono<{ Bindings: Env }>();
@@ -49,7 +49,10 @@ async function loadSourceConfig(
       .where(eq(schema.webhookTriggerConfigs.triggerId, trigger.id))
       .get();
     if (!row) throw errors.notFound('Webhook trigger');
-    return { sourceType: 'webhook', config: toWebhookTriggerConfig(row) };
+    return {
+      sourceType: 'webhook',
+      config: toWebhookTriggerConfig(row, { BASE_DOMAIN: baseDomain }),
+    };
   }
   if (trigger.sourceType === 'github') {
     const row = await db

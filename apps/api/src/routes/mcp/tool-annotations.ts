@@ -29,6 +29,7 @@ const READ_ONLY_TOOLS = new Set([
   'get_pending_messages',
   'get_project_event_subscription',
   'get_scheduling_queue',
+  'get_trigger',
   'get_workflow_run',
   'list_ai_models',
   'list_library_files',

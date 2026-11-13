@@ -11,6 +11,7 @@ import type { Provider, VolumeCapabilities, VolumeInstance } from '@simple-agent
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createDeploymentProviderPort } from '../../../src/app-deployment-ports/providers';
 import * as schema from '../../../src/db/schema';
 import {
   attachEnvironmentVolumes,
@@ -218,6 +219,8 @@ function createMockDb(initialRows: MockRow[] = [], releaseRows: Array<{ manifest
 }
 
 const mockEnv = {} as unknown as import('../../../src/env').Env;
+// Volume services reach provider-credentials through the worker's provider port.
+const providers = createDeploymentProviderPort(mockEnv);
 
 // =============================================================================
 // resolveVolumeMountRoot
@@ -386,7 +389,7 @@ describe('createEnvironmentVolume', () => {
     setupProvider(provider);
     const db = createMockDb();
 
-    const result = await createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+    const result = await createEnvironmentVolume(db as any, providers, 'user-1', {
       environmentId: 'env-001',
       name: 'data',
       sizeGb: 10,
@@ -420,7 +423,7 @@ describe('createEnvironmentVolume', () => {
     const db = createMockDb();
 
     await expect(
-      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+      createEnvironmentVolume(db as any, providers, 'user-1', {
         environmentId: 'env-001',
         name: '../data',
         sizeGb: 10,
@@ -437,7 +440,7 @@ describe('createEnvironmentVolume', () => {
     const db = createMockDb();
 
     await expect(
-      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+      createEnvironmentVolume(db as any, providers, 'user-1', {
         environmentId: 'env-001',
         name: 'data',
         sizeGb: 10,
@@ -455,7 +458,7 @@ describe('createEnvironmentVolume', () => {
     const db = createMockDb();
 
     await expect(
-      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+      createEnvironmentVolume(db as any, providers, 'user-1', {
         environmentId: 'env-001',
         name: 'data',
         sizeGb: 5,
@@ -472,7 +475,7 @@ describe('createEnvironmentVolume', () => {
     const db = createMockDb();
 
     await expect(
-      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+      createEnvironmentVolume(db as any, providers, 'user-1', {
         environmentId: 'env-001',
         name: 'data',
         sizeGb: 200,
@@ -488,7 +491,7 @@ describe('createEnvironmentVolume', () => {
     const db = createMockDb();
 
     await expect(
-      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+      createEnvironmentVolume(db as any, providers, 'user-1', {
         environmentId: 'env-001',
         name: 'data',
         sizeGb: 10,
@@ -527,7 +530,7 @@ describe('createEnvironmentVolume', () => {
         ),
     });
 
-    const result = await createEnvironmentVolume(db, mockEnv, 'user-1', {
+    const result = await createEnvironmentVolume(db, providers, 'user-1', {
       environmentId: 'env-001',
       name: 'data',
       sizeGb: 10,
@@ -556,7 +559,7 @@ describe('createEnvironmentVolume', () => {
     });
 
     await expect(
-      createEnvironmentVolume(db, mockEnv, 'user-1', {
+      createEnvironmentVolume(db, providers, 'user-1', {
         environmentId: 'env-001',
         name: 'data',
         sizeGb: 10,
@@ -619,7 +622,7 @@ describe('createMissingDeclaredVolumes', () => {
         ),
     });
 
-    const result = await createMissingDeclaredVolumes(db, mockEnv, 'user-1', {
+    const result = await createMissingDeclaredVolumes(db, providers, 'user-1', {
       environmentId: 'env-001',
       volumes: { data: { sizeHintMb: 1024 } },
       location: 'nbg1',
@@ -664,7 +667,7 @@ describe('deleteEnvironmentVolume', () => {
     };
     const db = createMockDb([existingRow]);
 
-    await deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001');
+    await deleteEnvironmentVolume(db as any, providers, 'user-1', 'vol-1', 'env-001');
 
     // Provider deleteVolume was called with correct args
     expect(provider.deleteVolume).toHaveBeenCalledWith({
@@ -700,7 +703,7 @@ describe('deleteEnvironmentVolume', () => {
     );
 
     await expect(
-      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001')
+      deleteEnvironmentVolume(db as any, providers, 'user-1', 'vol-1', 'env-001')
     ).rejects.toThrow('latest release still declares it');
 
     expect(provider.deleteVolume).not.toHaveBeenCalled();
@@ -730,7 +733,7 @@ describe('deleteEnvironmentVolume', () => {
       [{ manifest: JSON.stringify({ version: 1, volumes: { data: null } }) }]
     );
 
-    await deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001', {
+    await deleteEnvironmentVolume(db as any, providers, 'user-1', 'vol-1', 'env-001', {
       allowLatestReleaseDeclaredVolume: true,
     });
 
@@ -762,7 +765,7 @@ describe('deleteEnvironmentVolume', () => {
     const db = createMockDb([attachedRow]);
 
     await expect(
-      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001')
+      deleteEnvironmentVolume(db as any, providers, 'user-1', 'vol-1', 'env-001')
     ).rejects.toThrow('Cannot delete an attached volume');
 
     // Provider was NOT called
@@ -777,7 +780,7 @@ describe('deleteEnvironmentVolume', () => {
     const db = createMockDb([]); // empty
 
     await expect(
-      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-nonexistent', 'env-001')
+      deleteEnvironmentVolume(db as any, providers, 'user-1', 'vol-nonexistent', 'env-001')
     ).rejects.toThrow('Volume not found');
   });
 });
@@ -821,7 +824,7 @@ describe('attachEnvironmentVolumes', () => {
 
     const results = await attachEnvironmentVolumes(
       db as any,
-      mockEnv,
+      providers,
       'user-1',
       'env-001',
       'srv-target',
@@ -856,7 +859,7 @@ describe('attachEnvironmentVolumes', () => {
       .mockRejectedValue(new Error('newer release changed the placement'));
 
     await expect(
-      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1', {
+      attachEnvironmentVolumes(db as any, providers, 'user-1', 'env-001', 'srv-target', 'nbg1', {
         assertExternalMutationAuthority,
       })
     ).rejects.toThrow('newer release changed the placement');
@@ -889,7 +892,7 @@ describe('attachEnvironmentVolumes', () => {
 
       const results = await attachEnvironmentVolumes(
         db as any,
-        mockEnv,
+        providers,
         'user-1',
         'env-001',
         'srv-target',
@@ -933,7 +936,7 @@ describe('attachEnvironmentVolumes', () => {
 
     await attachEnvironmentVolumes(
       db as any,
-      mockEnv,
+      providers,
       'user-1',
       'env-001',
       'scw-server-1',
@@ -962,7 +965,7 @@ describe('attachEnvironmentVolumes', () => {
 
     const results = await attachEnvironmentVolumes(
       db as any,
-      mockEnv,
+      providers,
       'user-1',
       'env-001',
       'srv-1',
@@ -997,7 +1000,7 @@ describe('attachEnvironmentVolumes', () => {
 
     // Server is in Falkenstein — different from volume
     await expect(
-      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-1', 'fsn1')
+      attachEnvironmentVolumes(db as any, providers, 'user-1', 'env-001', 'srv-1', 'fsn1')
     ).rejects.toThrow('Volumes and servers must be co-located');
 
     // Provider was NOT called
@@ -1027,7 +1030,7 @@ describe('attachEnvironmentVolumes', () => {
     const db = createMockDb(volumeRows);
 
     await expect(
-      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1')
+      attachEnvironmentVolumes(db as any, providers, 'user-1', 'env-001', 'srv-target', 'nbg1')
     ).rejects.toThrow('already attached to server');
 
     expect(provider.attachVolume).not.toHaveBeenCalled();
@@ -1057,7 +1060,7 @@ describe('attachEnvironmentVolumes', () => {
 
     const results = await attachEnvironmentVolumes(
       db as any,
-      mockEnv,
+      providers,
       'user-1',
       'env-001',
       'srv-target',
@@ -1105,7 +1108,7 @@ describe('detachEnvironmentVolumes', () => {
 
     const results = await detachEnvironmentVolumes(
       db as any,
-      mockEnv,
+      providers,
       'user-1',
       'env-001',
       'srv-1'
@@ -1149,7 +1152,7 @@ describe('detachEnvironmentVolumes', () => {
     ];
     const db = createMockDb(volumeRows);
 
-    await detachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'scw-server-1');
+    await detachEnvironmentVolumes(db as any, providers, 'user-1', 'env-001', 'scw-server-1');
 
     expect(mockCreateProviderForUser).toHaveBeenCalledWith(
       db,
@@ -1173,7 +1176,7 @@ describe('detachEnvironmentVolumes', () => {
 
     const results = await detachEnvironmentVolumes(
       db as any,
-      mockEnv,
+      providers,
       'user-1',
       'env-001',
       'srv-1'
@@ -1227,7 +1230,7 @@ describe('resolveLinkedDeploymentNodeVolumeTarget', () => {
       .mockRejectedValue(new Error('volume attachment claim is stale'));
 
     await expect(
-      attachEnvironmentVolumesToLinkedNode(db as any, mockEnv, 'user-1', 'env-1', {
+      attachEnvironmentVolumesToLinkedNode(db as any, providers, 'user-1', 'env-1', {
         assertExternalMutationAuthority,
       })
     ).rejects.toThrow('volume attachment claim is stale');

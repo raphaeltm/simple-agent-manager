@@ -25,7 +25,7 @@ The single most important thing about placement is that it happens in two steps,
 second one is the strategy's business.
 
 **Admission** decides whether a host _may_ take a workload. That is
-`evaluateWorkspaceReservationCapacity` (`apps/api/src/services/workspace-resource-capacity.ts`),
+`evaluateWorkspaceReservationCapacity` (`packages/scheduler-core/src/workspace-resource-capacity.ts`),
 which is the only gate for CPU, memory and disk budgets and exclusivity. There is no
 count-based density cap: a host is full when one of its resource budgets is full.
 

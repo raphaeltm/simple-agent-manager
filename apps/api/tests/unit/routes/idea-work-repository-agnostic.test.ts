@@ -24,8 +24,8 @@ import { ideaInstructionLines } from '../../../src/routes/mcp/instruction-idea-c
  */
 const GENERATED_TEXT_SOURCES = [
   '../../../src/routes/mcp/instruction-idea-context.ts',
-  '../../../src/operations/start-work-core.ts',
-  '../../../src/operations/untrusted-text.ts',
+  '../../../../../packages/operations/src/start-work-core.ts',
+  '../../../../../packages/operations/src/untrusted-text.ts',
   '../../../../web/src/components/ideas/StartWorkSheet.tsx',
   '../../../../web/src/components/ideas/useStartWork.ts',
 ] as const;

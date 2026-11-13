@@ -49,7 +49,9 @@ const mocks = vi.hoisted(() => ({
   transitionTaskToTerminal: vi.fn(),
 }));
 
-vi.mock('../../../src/operations/link-core', () => ({ recordLink: mocks.recordLink }));
+vi.mock('@simple-agent-manager/operations/internal/link-core', () => ({
+  recordLink: mocks.recordLink,
+}));
 vi.mock('../../../src/services/jwt', () => ({
   ...mocks.jwt,
   signCurrentWorkspaceCallbackToken: mocks.jwt.signCallbackToken,
@@ -164,7 +166,7 @@ describe('acceptInstantSession records the idea link before the agent starts', (
       launchInput({ sourceIdeaId: 'idea-1', taskMode: 'task' })
     );
 
-    expect(mocks.recordLink).toHaveBeenCalledWith(env, 'project-1', {
+    expect(mocks.recordLink).toHaveBeenCalledWith(expect.objectContaining({ env }), 'project-1', {
       sourceKind: 'session',
       sourceId: 'chat-session-1',
       targetKind: 'idea',

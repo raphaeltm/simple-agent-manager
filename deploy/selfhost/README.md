@@ -318,7 +318,7 @@ off the box, or the cloud key), the install's platform keys and every backup are
 ## Email sign-in
 
 SAM emails a six-digit sign-in code. On a box there is no Cloudflare Email Sending, so the Worker
-sends through SMTP (`apps/api/src/services/agent-email/smtp-client.ts`). Codes go only to
+sends through SMTP (`packages/agent-email/src/smtp-client.ts`). Codes go only to
 addresses that already have an account, and to `BOOTSTRAP_OWNER_EMAIL` until that owner exists,
 exactly as on Cloudflare. Choose one of:
 
@@ -670,7 +670,7 @@ The API Worker no longer joins another request's load unbounded:
 - Each cold request fetches its own runtime secrets (`apps/api/src/selfhost/runtime-secrets.ts`).
 - The settings caches, the platform-configuration cache, the ProjectData ensure memo and the
   archive's per-key R2 operations wait on another request's read only until that read's own
-  deadline plus a grace, then read for themselves (`apps/api/src/lib/shared-flight.ts`).
+  deadline plus a grace, then read for themselves (`packages/worker-core/src/shared-flight.ts`).
 - A request that joined another's read also resumes on a timer of its own, never on the read's
   settlement. On celld the code that runs when a promise settles belongs to the request that
   settled it: a joiner that simply awaited the read ran the rest of its work as part of the other
@@ -919,7 +919,7 @@ service (celld's unauthenticated operator listener, frps's control port, the obj
 its console), any private address, and the cloud metadata server. Two layers stop that:
 
 1. The API checks every URL a user or admin chose before it calls it, and never lets the
-   runtime follow a redirect (`apps/api/src/lib/network-hosts`). User URLs must be public HTTPS.
+   runtime follow a redirect (`packages/worker-core/src/network-hosts`). User URLs must be public HTTPS.
    An admin's OpenAI-compatible endpoint on this machine or its private network (a local model
    server) needs the `llm.openAICompatible.allowPrivateNetwork` admin setting; metadata and
    link-local addresses are refused either way. These checks see names, not DNS answers.

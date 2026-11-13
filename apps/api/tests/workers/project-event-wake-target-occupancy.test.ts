@@ -4,10 +4,10 @@
  * 01M4E7F6JN191Q4B7H3KRB3N7H): an agent message woke a chat, was never acknowledged, and its
  * 24-hour expiry was copied into the chat's CI subscription, so finished CI never woke the chat.
  */
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { runMigrations } from '../../src/durable-objects/migrations';
 import * as svc from '../../src/services/project-data';
 import {
   type ChannelReceipt,

@@ -1,5 +1,5 @@
 import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/shared';
-import { and, eq, isNull, or, type SQL } from 'drizzle-orm';
+import { and, eq, gt, isNull, or, type SQL } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -14,6 +14,18 @@ import {
 } from './profile-runtime-assets';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+/**
+ * A project runtime value is usable only before its `expires_at` (agent-collected secrets with a
+ * TTL, migration 0236). Every reader of project runtime env applies this, so an expired value
+ * fails closed at use time rather than waiting for the daily purge.
+ */
+export function projectRuntimeEnvUnexpired(now = Date.now()): SQL {
+  return or(
+    isNull(schema.projectRuntimeEnvVars.expiresAt),
+    gt(schema.projectRuntimeEnvVars.expiresAt, now)
+  ) as SQL;
+}
 
 // This staging-only process selector must originate from the validated session
 // profile, never from project or skill assets merged into the runtime env.
@@ -198,7 +210,12 @@ async function resolveProjectAssets(
         isSecret: schema.projectRuntimeEnvVars.isSecret,
       })
       .from(schema.projectRuntimeEnvVars)
-      .where(eq(schema.projectRuntimeEnvVars.projectId, workspace.projectId)),
+      .where(
+        and(
+          eq(schema.projectRuntimeEnvVars.projectId, workspace.projectId),
+          projectRuntimeEnvUnexpired()
+        )
+      ),
     db
       .select({
         path: schema.projectRuntimeFiles.filePath,
@@ -326,16 +343,20 @@ export async function getSecretExecutionEnv(
       table: schema.projectRuntimeEnvVars,
       id: schema.projectRuntimeEnvVars.projectId,
       value: context.projectId,
+      // An expired collected secret is not a managed secret any more: selecting it fails closed.
+      usable: projectRuntimeEnvUnexpired(),
     },
     {
       table: schema.profileRuntimeEnvVars,
       id: schema.profileRuntimeEnvVars.profileId,
       value: context.agentProfileId,
+      usable: undefined,
     },
     {
       table: schema.skillRuntimeEnvVars,
       id: schema.skillRuntimeEnvVars.skillId,
       value: context.skillId,
+      usable: undefined,
     },
   ];
   const merged = new Map<
@@ -352,7 +373,9 @@ export async function getSecretExecutionEnv(
         isSecret: scope.table.isSecret,
       })
       .from(scope.table)
-      .where(eq(scope.id, scope.value));
+      .where(
+        scope.usable ? and(eq(scope.id, scope.value), scope.usable) : eq(scope.id, scope.value)
+      );
     for (const row of rows) merged.set(row.key, row);
   }
   for (const name of secretNames) {

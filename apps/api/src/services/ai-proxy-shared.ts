@@ -1,15 +1,16 @@
-/**
- * Shared helpers for AI proxy endpoints (OpenAI-compatible and Anthropic-native).
- *
- * Extracted to avoid duplication between ai-proxy.ts and ai-proxy-anthropic.ts.
- * Covers: model validation, metadata injection, and upstream URL builders.
- * Auth verification and workspace resolution live in ai-proxy-auth.ts and are
- * re-exported here.
- *
- * Upstream auth resolution (Unified Billing vs platform key) lives in ai-billing.ts.
- */
+// Moved to @simple-agent-manager/ai-proxy (worker modularization W5). Re-exported so the
+// worker's existing importers are unchanged. Request auth stays in the worker
+// (./ai-proxy-auth) and is re-exported here as before. `fetchWorkersAIChatCompletion` also stays
+// in the worker: it resolves its target through the admin-configured LLM endpoint
+// (./llm-chat-target), which reads worker settings.
+import {
+  readSafeGatewayErrorDiagnostic,
+  type WorkersAIChatMessage,
+  WorkersAIGatewayError,
+} from '@simple-agent-manager/ai-proxy';
+import { expectJsonRecord } from '@simple-agent-manager/worker-core';
+
 import type { Env } from '../env';
-import { expectJsonRecord } from '../lib/runtime-validation';
 import {
   chatTargetHeaders,
   fetchChatTarget,
@@ -18,7 +19,6 @@ import {
   LlmUnavailableError,
   resolveWorkersAiChatTargetWithin,
 } from './llm-chat-target';
-import { resolveAiGatewayId } from './platform-capabilities';
 
 export {
   AIProxyAuthError,
@@ -28,68 +28,18 @@ export {
   updateAIProxyAgentCredentialAttribution,
   verifyAIProxyAuth,
 } from './ai-proxy-auth';
-
-// =============================================================================
-// Model Validation
-// =============================================================================
-
-/** Check if a model ID is an Anthropic model (requires claude-* prefix). */
-export function isAnthropicModel(modelId: string): boolean {
-  return modelId.startsWith('claude-');
-}
-
-// =============================================================================
-// AI Gateway Metadata
-// =============================================================================
-
-/**
- * Build the `cf-aig-metadata` header value for AI Gateway analytics.
- * https://developers.cloudflare.com/ai-gateway/observability/custom-metadata/
- */
-export function buildAIGatewayMetadata(opts: {
-  userId: string;
-  workspaceId: string;
-  projectId?: string | null;
-  sessionId?: string | null;
-  modelId: string;
-  stream: boolean;
-  hasTools?: boolean;
-  providerId?: string;
-  providerName?: string;
-  providerDialect?: string;
-}): string {
-  return JSON.stringify({
-    userId: opts.userId,
-    workspaceId: opts.workspaceId,
-    projectId: opts.projectId ?? undefined,
-    sessionId: opts.sessionId ?? undefined,
-    modelId: opts.modelId,
-    stream: opts.stream,
-    hasTools: opts.hasTools ?? false,
-    providerId: opts.providerId,
-    providerName: opts.providerName,
-    providerDialect: opts.providerDialect,
-  });
-}
-
-// =============================================================================
-// Upstream URL Builders
-// =============================================================================
-
-/** Build upstream URL for Anthropic Messages API via AI Gateway. */
-export function buildAnthropicGatewayUrl(env: Env): string {
-  const gatewayId = resolveAiGatewayId(env);
-  if (gatewayId) {
-    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages`;
-  }
-  // Fallback: direct Anthropic API (no gateway monitoring)
-  return 'https://api.anthropic.com/v1/messages';
-}
-
-export interface WorkersAIChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
+export {
+  buildAIGatewayMetadata,
+  buildAnthropicCountTokensUrl,
+  buildAnthropicGatewayUrl,
+  isAnthropicModel,
+  readSafeGatewayErrorDiagnostic,
+  UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES,
+  UPSTREAM_ERROR_REASON_MAX_LENGTH,
+  upstreamErrorLogFields,
+  type WorkersAIChatMessage,
+  WorkersAIGatewayError,
+} from '@simple-agent-manager/ai-proxy';
 
 export interface WorkersAIChatCompletionOptions {
   /** Which control-plane caller this is; selects its model on an OpenAI-compatible endpoint. */
@@ -103,134 +53,6 @@ export interface WorkersAIChatCompletionOptions {
   reasoningEffort?: string | null;
   chatTemplateKwargs?: Record<string, unknown>;
   errorDiagnosticMaxLength?: number;
-}
-
-export class WorkersAIGatewayError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly diagnostic: string | undefined
-  ) {
-    super(
-      `Workers AI Gateway request failed with HTTP ${status}${diagnostic ? ` (${diagnostic})` : ''}`
-    );
-    this.name = 'WorkersAIGatewayError';
-  }
-}
-
-function sanitizeGatewayDiagnosticValue(field: string, value: unknown): string | undefined {
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (typeof value !== 'string') return undefined;
-
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-
-  if (field === 'message') {
-    if (/reasoning_effort/i.test(trimmed)) return 'invalid reasoning_effort parameter';
-    if (/chat_template_kwargs|enable_thinking/i.test(trimmed))
-      return 'invalid chat template parameter';
-    if (/max_(?:completion_)?tokens/i.test(trimmed)) return 'invalid output token limit';
-    if (/model/i.test(trimmed)) return 'invalid model parameter';
-    return 'provider rejected request';
-  }
-
-  return /^[A-Za-z0-9_.:-]{1,64}$/.test(trimmed) ? trimmed : '[REDACTED]';
-}
-
-async function readBoundedResponseText(response: Response, maxBytes: number): Promise<string> {
-  if (!response.body) return '';
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-
-  try {
-    while (totalBytes < maxBytes) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const remaining = maxBytes - totalBytes;
-      const chunk = value.slice(0, remaining);
-      chunks.push(chunk);
-      totalBytes += chunk.byteLength;
-      if (chunk.byteLength < value.byteLength) break;
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined);
-  }
-
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
-/** Extract only bounded, allowlisted provider error fields. */
-export async function readSafeGatewayErrorDiagnostic(
-  response: Response,
-  maxLength: number
-): Promise<string | undefined> {
-  if (!Number.isFinite(maxLength) || maxLength <= 0) return undefined;
-  const boundedMaxLength = Math.floor(maxLength);
-  const raw = await readBoundedResponseText(response, boundedMaxLength);
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
-  const record = payload as Record<string, unknown>;
-  const nestedError =
-    record.error && typeof record.error === 'object' && !Array.isArray(record.error)
-      ? (record.error as Record<string, unknown>)
-      : undefined;
-  const firstError =
-    Array.isArray(record.errors) &&
-    record.errors[0] &&
-    typeof record.errors[0] === 'object' &&
-    !Array.isArray(record.errors[0])
-      ? (record.errors[0] as Record<string, unknown>)
-      : undefined;
-  const source = nestedError ?? firstError ?? record;
-  const fields = ['code', 'type', 'param', 'message'] as const;
-  const parts = fields.flatMap((field) => {
-    const sanitized = sanitizeGatewayDiagnosticValue(field, source[field]);
-    return sanitized ? [`${field}=${sanitized}`] : [];
-  });
-  if (parts.length === 0) return undefined;
-  return parts.join(' ').slice(0, boundedMaxLength);
-}
-
-/** Bound on the sanitized reason logged for a failed third-party model call. */
-export const UPSTREAM_ERROR_REASON_MAX_LENGTH = 256;
-/**
- * Bytes of a third-party error body read to find its `code`/`type` (never logged). An
- * OpenAI-style body puts a long `message` first, so a window as small as the reason would cut
- * the JSON before the fields that matter and log nothing.
- */
-export const UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES = 4096;
-
-/**
- * Log fields for a failed model response, consuming its body. A Cloudflare or first-party
- * provider route keeps logging up to 500 characters of the body, as it always has. A
- * third-party endpoint's body is never logged: it can echo the configured key or the prompt, so
- * only an allowlisted, bounded reason (`readSafeGatewayErrorDiagnostic`) is kept.
- */
-export async function upstreamErrorLogFields(
-  response: Response,
-  thirdParty: boolean
-): Promise<{ body?: string; reason?: string }> {
-  if (!thirdParty) {
-    return { body: (await response.text().catch(() => 'Unknown error')).slice(0, 500) };
-  }
-  const reason = await readSafeGatewayErrorDiagnostic(
-    response,
-    UPSTREAM_ERROR_BODY_PARSE_MAX_BYTES
-  ).catch(() => undefined);
-  return reason ? { reason: reason.slice(0, UPSTREAM_ERROR_REASON_MAX_LENGTH) } : {};
 }
 
 export async function fetchWorkersAIChatCompletion(
@@ -282,13 +104,4 @@ export async function fetchWorkersAIChatCompletion(
     ? expectJsonRecord(firstChoice.message, `${options.responseLabel}.message`)
     : undefined;
   return typeof messageRecord?.content === 'string' ? messageRecord.content.trim() : null;
-}
-
-/** Build upstream URL for Anthropic token counting via AI Gateway. */
-export function buildAnthropicCountTokensUrl(env: Env): string {
-  const gatewayId = resolveAiGatewayId(env);
-  if (gatewayId) {
-    return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/anthropic/v1/messages/count_tokens`;
-  }
-  return 'https://api.anthropic.com/v1/messages/count_tokens';
 }

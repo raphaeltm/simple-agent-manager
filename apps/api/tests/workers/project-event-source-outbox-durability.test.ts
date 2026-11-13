@@ -1,7 +1,7 @@
+import type { AdmitProjectEventInput } from '@simple-agent-manager/project-data/internal/do/project-events';
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { AdmitProjectEventInput } from '../../src/durable-objects/project-data/project-events';
 import type { Env } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import {

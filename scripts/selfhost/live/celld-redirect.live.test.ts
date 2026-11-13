@@ -2,7 +2,7 @@
  * The API's guarded fetch on the real celld runtime (`celld dev`, the pinned, checksum-verified
  * release), not a mocked fetch: the guard is only as good as the runtime's `redirect: 'manual'`.
  *
- * A Worker bundles apps/api/src/lib/network-hosts and calls stub servers on loopback. The first
+ * A Worker bundles packages/worker-core/src/network-hosts and calls stub servers on loopback. The first
  * case records why the guard exists: celld's default fetch follows a 302 to an internal service
  * and hands back its body (res.redirected stays false, so nothing downstream can tell).
  */
@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ensureCelldBinary, resolveEsbuild } from '../celld-binary.js';
 import { freePort, LIVE_TMP, REPO_ROOT, type Running, start, waitFor } from './harness';
 
-const NETWORK_HOSTS = join(REPO_ROOT, 'apps/api/src/lib/network-hosts/index.ts');
+const NETWORK_HOSTS = join(REPO_ROOT, 'packages/worker-core/src/network-hosts/index.ts');
 
 const WORKER = `
 import { guardedFetch } from ${JSON.stringify(NETWORK_HOSTS)};

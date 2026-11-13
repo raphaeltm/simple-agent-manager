@@ -37,7 +37,7 @@ const artifactPlatformSchema = v.object({
   variant: v.optional(v.string()),
 });
 
-/** Matches ComposeImageArtifactRequest (services/compose-image-artifacts.ts)
+/** Matches ComposeImageArtifactRequest (`@simple-agent-manager/app-deployment` compose-image-artifacts)
  * exactly. serviceName/sourceRef are required here (not deferred to
  * createComposeImageArtifactUploads's internal check) so a missing field
  * fails closed with 400 instead of the plain Error createComposeImageArtifactUploads

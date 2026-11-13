@@ -1,3 +1,6 @@
+import {
+  parseProviderLimitWait,
+} from '@simple-agent-manager/scheduler-core';
 import type * as v from 'valibot';
 
 import type { Task } from '../../db/schema';
@@ -8,7 +11,6 @@ import {
   parkTaskForProviderLimit,
   repairProviderLimitIntents,
 } from '../../services/provider-limit-parking';
-import { parseProviderLimitWait } from '../../services/provider-limit-policy';
 
 /** Called only behind authenticated workspace and stale-callback fences. */
 export async function handleProviderLimitCallback(

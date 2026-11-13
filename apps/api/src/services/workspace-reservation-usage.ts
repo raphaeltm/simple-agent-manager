@@ -1,9 +1,16 @@
 /**
- * Active workspace reservation usage on a node: the declared reservations still holding capacity
- * and the running-container memory observations that may be credited against measured use. Split
- * out of `workspace-resource-capacity.ts` (rule 18), which re-exports everything here.
+ * D1 side of active workspace reservation usage: the SQL constants of the admission statements
+ * and the loader that reads declared reservations and running-container memory observations for
+ * a set of nodes. The usage shape and its parsers are pure and live in `scheduler-core`.
  */
-import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
+import {
+  type ActiveWorkspaceReservationUsage,
+  addReservationUsage,
+  emptyUsage,
+  parseResolvedResourceReservation,
+  parseTimestampMs,
+  RESOURCE_REQUIREMENTS_SOURCES,
+} from '@simple-agent-manager/scheduler-core';
 
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 
@@ -11,45 +18,10 @@ export const ACTIVE_WORKSPACE_RESERVATION_STATUSES = ['running', 'creating', 're
 export const ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL = ACTIVE_WORKSPACE_RESERVATION_STATUSES.map(
   (status) => `'${status}'`
 ).join(', ');
-export const RESOURCE_REQUIREMENTS_SOURCE_SQL =
-  "'task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'";
+export const RESOURCE_REQUIREMENTS_SOURCE_SQL = RESOURCE_REQUIREMENTS_SOURCES.map(
+  (source) => `'${source}'`
+).join(', ');
 const D1_BIND_LIMIT = D1_MAX_BOUND_PARAMETERS;
-
-export interface ActiveWorkspaceReservationUsage {
-  activeCount: number;
-  /**
-   * Workspaces still starting on the node (`status = 'creating'`): reserved but not yet
-   * dispatched, building, or waiting for the node's single build slot. The node builds one
-   * workspace at a time, so this is the startup queue a new placement would join. Only
-   * `loadActiveWorkspaceReservationUsage` knows row status; other aggregations report 0.
-   */
-  startupBacklog: number;
-  invalidCount: number;
-  exclusiveCount: number;
-  cpuMillis: number;
-  memoryMb: number;
-  /** Fresh running-container usage already included in the node memory reading. */
-  observedMemoryCredits?: Array<{ memoryMb: number; collectedAt: number; heartbeatAt: number }>;
-  diskMb: number;
-}
-
-export function isResolvedResourceReservation(
-  value: unknown
-): value is ResolvedResourceReservation {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  return (
-    (record.version === 1 || record.version === 2 || record.version === 3) &&
-    positiveInteger(record.cpuMillis) !== null &&
-    positiveInteger(record.memoryMb) !== null &&
-    nonNegativeInteger(record.diskMb) !== null &&
-    typeof record.exclusiveNode === 'boolean' &&
-    typeof record.source === 'string' &&
-    ['task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'].includes(
-      record.source
-    )
-  );
-}
 
 export async function loadActiveWorkspaceReservationUsage(
   database: D1Database,
@@ -143,65 +115,4 @@ function observedWorkspaceMemoryCredit(row: {
   } catch {
     return null;
   }
-}
-
-export function aggregateWorkspaceReservationRows(
-  rows: ReadonlyArray<{ resolvedReservationJson: string | null }>
-): ActiveWorkspaceReservationUsage {
-  const usage = emptyUsage();
-  for (const row of rows) {
-    usage.activeCount += 1;
-    addReservationUsage(usage, row.resolvedReservationJson);
-  }
-  return usage;
-}
-
-function addReservationUsage(usage: ActiveWorkspaceReservationUsage, value: string | null): void {
-  const reservation = parseResolvedResourceReservation(value);
-  if (!reservation) {
-    usage.invalidCount += 1;
-    return;
-  }
-  usage.cpuMillis += reservation.cpuMillis;
-  usage.memoryMb += reservation.memoryMb;
-  usage.diskMb += reservation.diskMb;
-  if (reservation.exclusiveNode) usage.exclusiveCount += 1;
-}
-
-export function emptyUsage(): ActiveWorkspaceReservationUsage {
-  return {
-    activeCount: 0,
-    startupBacklog: 0,
-    invalidCount: 0,
-    exclusiveCount: 0,
-    cpuMillis: 0,
-    memoryMb: 0,
-    diskMb: 0,
-  };
-}
-
-export function parseResolvedResourceReservation(
-  value: string | null | undefined
-): ResolvedResourceReservation | null {
-  if (!value) return null;
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return isResolvedResourceReservation(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-export function parseTimestampMs(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-export function positiveInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
-}
-
-export function nonNegativeInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }

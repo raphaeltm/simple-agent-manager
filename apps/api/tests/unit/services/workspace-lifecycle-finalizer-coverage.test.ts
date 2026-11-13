@@ -170,7 +170,7 @@ function routesThroughSharedFinalizer(source: string): boolean {
 }
 
 describe('workspace/node terminal writers route through shared lifecycle finalizer', () => {
-  const terminalWriterFiles = collectSourceFiles(SRC_ROOT)
+  const terminalWriterFiles = collectSourceFiles()
     .map((file) => {
       const source = readFileSync(file, 'utf8');
       return {

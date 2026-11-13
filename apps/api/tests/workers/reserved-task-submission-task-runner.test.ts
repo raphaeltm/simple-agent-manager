@@ -1,3 +1,6 @@
+import {
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -28,7 +31,6 @@ import {
   type TaskRunnerReservedSubmissionGuard,
 } from '../../src/services/task-runner-start-guard';
 import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { seedReadyNode } from './helpers/ready-node';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';

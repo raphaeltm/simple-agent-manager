@@ -15,9 +15,17 @@ const cancelVm = vi.hoisted(() =>
     throw new Error('VM returned 404');
   })
 );
-vi.mock('../../../src/services/deployment-publish-job-settings', () => ({
-  getDeploymentPublishJobSettings: async () => ({ cancelTimeoutMs: 10 }),
-}));
+// The cancel timeout reaches app-deployment through the worker's settings port.
+vi.mock('../../../src/services/admin-settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/services/admin-settings')>();
+  return {
+    ...actual,
+    resolveAdminSetting: (async (env, name) =>
+      name === 'deployments.publishJobCancelTimeoutMs'
+        ? 10
+        : actual.resolveAdminSetting(env, name)) as typeof actual.resolveAdminSetting,
+  };
+});
 vi.mock('../../../src/routes/mcp/workspace-tools', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/routes/mcp/workspace-tools')>()),
   cancelBuildPublishJobOnVm: cancelVm,
@@ -205,6 +213,15 @@ describe('publish callback routes with real SQL', () => {
     expect(result.error).toBeUndefined();
     expect(JSON.parse(result.result!.content[0]!.text as string).status).toBe('canceled');
     expect(cancelVm).toHaveBeenCalledOnce();
+    // Workspace, requester, node, job, then the configured cancel timeout.
+    expect(cancelVm).toHaveBeenCalledWith(
+      expect.anything(),
+      'workspace',
+      expect.any(String),
+      expect.any(String),
+      'job',
+      10
+    );
     expect(lifecycle).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ status: 'canceled' })

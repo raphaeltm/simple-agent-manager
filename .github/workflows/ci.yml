@@ -58,6 +58,14 @@ jobs:
             api:
               - 'apps/api/**'
               - 'packages/shared/**'
+              - 'packages/worker-core/**'
+              - 'packages/app-deployment/**'
+              - 'packages/project-data/**'
+              - 'packages/repo-hosting/**'
+              - 'packages/scheduler-core/**'
+              - 'packages/agent-email/**'
+              - 'packages/operations/**'
+              - 'packages/ai-proxy/**'
               - 'packages/task-runner/**'
               - 'packages/config/**'
               - 'scripts/quality/*migration*.ts'
@@ -77,6 +85,14 @@ jobs:
               - 'packages/vm-agent/internal/config/**'
               - 'apps/api/src/**'
               - 'packages/shared/src/**'
+              - 'packages/worker-core/src/**'
+              - 'packages/app-deployment/src/**'
+              - 'packages/project-data/src/**'
+              - 'packages/repo-hosting/src/**'
+              - 'packages/scheduler-core/src/**'
+              - 'packages/agent-email/src/**'
+              - 'packages/operations/src/**'
+              - 'packages/ai-proxy/src/**'
               - 'sonar-project.properties'
               - '.claude/rules/36-cli-quality.md'
             devcontainer:
@@ -392,9 +408,13 @@ jobs:
     name: Test
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
-    # Normal runs take 12-20 min; on slower runners 3 runs on 2026-11-08 were
-    # cancelled at the old 20-min limit with no failing suite.
-    timeout-minutes: 30
+    # Normal runs took 12-20 min; on slower runners 3 runs on 2026-11-08 were
+    # cancelled at the old 20-min limit with no failing suite. After the worker
+    # was split into packages (2026-11-12) the same suites run as eight more
+    # turbo tasks and took 27 min, then hit the 30-min limit with no failing
+    # suite (run 43273493049). 45 is a stopgap until PR runs test only what
+    # changed (idea 01M77GBTAM775FAKY72RT4HMDV).
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -615,6 +635,14 @@ jobs:
       - name: Enforce source file size limits
         run: pnpm quality:file-sizes
 
+      # The self-host scripts and both self-host suites load API modules (runtime-secrets.ts, the
+      # shared-flight helper), which since the worker package split (#2681) import workspace
+      # packages such as worker-core. Those resolve through their built dist/ (types included),
+      # as `pnpm selfhost:deploy` does after building them (deploy.ts buildApiDependencies), so
+      # build before the scripts typecheck and both suites.
+      - name: Build the API Worker's workspace dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+
       - name: Type check deployment scripts
         run: |
           npx tsc --project scripts/deploy/tsconfig.json --noEmit
@@ -646,12 +674,7 @@ jobs:
       # fragments against stub upstreams, and the pinned frpc/frps 0.72.0 (checksum-verified)
       # with the generated frpc.toml: gateway 404s and path tricks, X-SAM-* stripping, the 101
       # Set-Cookie rule, frpc certificate verification, the NewWorkConn plugin payload.
-      # The sealed-secrets live tests bundle API modules (runtime-secrets.ts and its imports) with
-      # celld's esbuild, which resolves workspace packages through their built dist/, as
-      # `pnpm selfhost:deploy` does after building them (deploy.ts buildApiDependencies).
-      - name: Build the API Worker's workspace dependencies for the live tests
-        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
-
+      # The sealed-secrets live tests bundle the same modules with celld's esbuild.
       - name: Run self-host live tests (Caddy in Docker, real frp, celld, fence in a namespace)
         run: pnpm selfhost:live-test
 

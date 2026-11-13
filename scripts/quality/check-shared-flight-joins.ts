@@ -6,7 +6,8 @@
  * runtime every async op belongs to the request that started it and is dropped when that
  * request's client disconnects, so such a promise can never settle and every request that joined
  * it hangs until its own client gives up or the 300 s handler budget runs out (task H2,
- * apps/api/src/lib/shared-flight.ts, scripts/selfhost/live/shared-flight-cancel.live.test.ts).
+ * packages/worker-core/src/shared-flight.ts,
+ * scripts/selfhost/live/shared-flight-cancel.live.test.ts).
  *
  * The sanctioned way to join another request's flight is `joinSharedFlight` /
  * `settleSharedFlight`, which wait under a timer the JOINING request owns. Passing the flight to
@@ -60,10 +61,26 @@ export const SCANNED_PROJECTS = [
   { tsconfig: 'packages/shared/tsconfig.json', glob: 'packages/shared/src/**/*.ts' },
   { tsconfig: 'packages/providers/tsconfig.json', glob: 'packages/providers/src/**/*.ts' },
   { tsconfig: 'packages/cloud-init/tsconfig.json', glob: 'packages/cloud-init/src/**/*.ts' },
+  // Worker modules the package split (#2681) moved out of apps/api/src; they still run in this
+  // Worker, so a join of another request's flight there hangs the same way on celld.
+  { tsconfig: 'packages/worker-core/tsconfig.json', glob: 'packages/worker-core/src/**/*.ts' },
+  {
+    tsconfig: 'packages/scheduler-core/tsconfig.json',
+    glob: 'packages/scheduler-core/src/**/*.ts',
+  },
+  { tsconfig: 'packages/project-data/tsconfig.json', glob: 'packages/project-data/src/**/*.ts' },
+  { tsconfig: 'packages/operations/tsconfig.json', glob: 'packages/operations/src/**/*.ts' },
+  {
+    tsconfig: 'packages/app-deployment/tsconfig.json',
+    glob: 'packages/app-deployment/src/**/*.ts',
+  },
+  { tsconfig: 'packages/ai-proxy/tsconfig.json', glob: 'packages/ai-proxy/src/**/*.ts' },
+  { tsconfig: 'packages/agent-email/tsconfig.json', glob: 'packages/agent-email/src/**/*.ts' },
+  { tsconfig: 'packages/repo-hosting/tsconfig.json', glob: 'packages/repo-hosting/src/**/*.ts' },
 ] as const;
 
 export const ALLOW_DIRECTIVE = 'shared-flight-join-allowed:';
-/** The sanctioned joins (apps/api/src/lib/shared-flight.ts): they resume the joiner on its own timer. */
+/** The sanctioned joins (worker-core shared-flight.ts): the joiner resumes on its own timer. */
 export const SANCTIONED_JOINS = new Set(['joinSharedFlight', 'settleSharedFlight']);
 const CONTINUATIONS = new Set(['then', 'catch', 'finally']);
 const TRACED_METHODS = new Set(['get', 'at', 'find', 'then', 'catch', 'finally']);
@@ -423,7 +440,7 @@ function main(): void {
       console.error(
         `✗ ${f.file}:${f.line} ${describeFinding(f)}: ${f.code}\n` +
           '  Join another request’s flight with joinSharedFlight/settleSharedFlight ' +
-          '(apps/api/src/lib/shared-flight.ts).'
+          '(packages/worker-core/src/shared-flight.ts).'
       );
     }
     console.log(`shared-flight-joins: ${scanned} files, ${findings.length} finding(s)`);

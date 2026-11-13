@@ -16,6 +16,7 @@ export default defineConfig({
     // Transform this Workers-only dependency so its runtime import uses the test alias.
     server: { deps: { inline: ['@cloudflare/workers-oauth-provider'] } },
     globals: true,
+    setupFiles: ['./tests/setup/project-data-ports.ts', './tests/setup/repo-hosting-ports.ts'],
     include: ['tests/**/*.test.ts'],
     // tests/hosted-git runs the real git CLI against Miniflare: pnpm test:hosted-git.
     exclude: ['tests/workers/**', 'tests/hosted-git/**'],

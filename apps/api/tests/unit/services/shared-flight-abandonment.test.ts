@@ -19,6 +19,11 @@
  * `resolveLegacyPlatformConfig` turns the matching case red; registering nothing on abandonment
  * in `ensureOncePerIsolate` turns the ensure case red (three extra ensures instead of one).
  */
+import {
+  DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS,
+  ensureOncePerIsolate,
+  resetProjectDataEnsureMemo,
+} from '@simple-agent-manager/project-data/internal/client/project-data-ensure-memo';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -38,11 +43,6 @@ import {
   __resetPlatformConfigCacheForTest,
   resolvePlatformConfig,
 } from '../../../src/services/platform-config';
-import {
-  DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS,
-  ensureOncePerIsolate,
-  resetProjectDataEnsureMemo,
-} from '../../../src/services/project-data-ensure-memo';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 import { createEnv } from '../../helpers/platform-config-counting-fixture';
 
