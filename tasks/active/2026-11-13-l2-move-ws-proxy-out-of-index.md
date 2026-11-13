@@ -51,11 +51,13 @@ other slices. L2 lands only the file layout, with main's current behaviour.
 - [x] New `routes/workspace-subdomain-proxy.ts` from main's lines 258-732 with the port block
       delegated
 - [x] `index.ts`: `app.use('*', workspaceSubdomainProxy)` at the same position; unused imports removed
-- [x] Source-contract tests repointed to the new file (path edits only)
+- [x] Source-contract tests repointed to the new file (path edits; `multi-workspace-nodes.test.ts`
+      also asserts `index.ts` still mounts `workspaceSubdomainProxy`, replacing the old `ws_proxy_route`
+      check on `index.ts` so a deleted registration still fails a test)
 - [x] Remove `apps/api/src/index.ts` from the file-size exemption list
 - [x] Mechanical pure-move proof (`.tmp/l2/verify_pure_move.py`, output in PR)
 - [x] Local gates: build, typecheck, check:fast, api unit (15,018 pass / 4 skip / 0 fail) + entry-level Workers tests (88), file sizes, ast-checks (0 errors, none in touched files), source-contract check
-- [ ] Reviews: cloudflare-specialist PASS, architecture-reviewer PASS, task-completion-validator
+- [x] Reviews: cloudflare-specialist PASS, architecture-reviewer PASS, task-completion-validator PASS (LOW notes only)
 - [ ] Staging: workspace UI (terminal + agent chat), port URL, public port, expired/missing cookie
       401 page compared with production; cleanup
 - [ ] Draft PR with hold line, `needs-human-review`; CodeRabbit via workflow dispatch; report
