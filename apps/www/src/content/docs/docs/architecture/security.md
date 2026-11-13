@@ -183,13 +183,35 @@ tool output, repository data, and credentials are never copied into this signal.
 
 Destructive runtime requests are bound to a server-written node incarnation, the
 exact provider credential reference used for provisioning, and a SHA-256
-fingerprint of that encrypted credential generation. The fingerprint prevents a
-later in-place credential rotation from redirecting teardown to a different
-provider account whose VM identifier happens to collide. SAM rechecks the
+fingerprint of that encrypted credential generation. SAM rechecks the
 workspace, node owner, project/session ownership, provider instance, and runtime
-incarnation immediately before a VM-agent deletion request. Managed provider
-teardown fails closed when a legacy node has no exact provider-account binding;
-it never substitutes whichever credential happens to be active later.
+incarnation immediately before a VM-agent deletion request.
+
+Deleting a managed VM does not depend on the credential that created it, so
+rotating, re-saving or reconnecting a cloud credential never strands running
+VMs (`resolveStrictNodeTeardownAuthority()` in
+`apps/api/src/services/node-teardown-authority.ts`):
+
+- While the provisioning credential still resolves to its exact generation, SAM
+  deletes through it.
+- Otherwise SAM uses the node owner's current credentials for that provider: the
+  provisioning order for the node's own user and project (project, then user,
+  then platform), then the installation's platform credential. It never uses
+  another user's or another project's credential.
+- With a current credential, ownership is proven from the VM itself
+  (`proveNodeInstanceOwnership()`). Immediately before the provider delete, SAM
+  re-reads the instance and requires the recorded provider instance ID plus the
+  exact SAM labels: managed, node, role, environment, installation and runtime
+  incarnation. A missing, duplicated or different label preserves the VM. This
+  also covers a credential rotated to a different account whose VM identifier
+  happens to collide.
+- A credential that cannot see the instance is not proof the VM is gone. The
+  node stays `destroying` with a named `cleanup_blocked_reason`
+  (`teardown_credential_unavailable`, `teardown_instance_not_visible`,
+  `teardown_instance_ownership_mismatch` or
+  `teardown_ownership_scope_unavailable`) and SAM raises its operator alert
+  (`recordNodeTeardownBlocked()` in `node-teardown-blocked.ts`), instead of
+  retrying silently.
 
 ## Credential Encryption
 
