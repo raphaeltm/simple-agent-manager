@@ -113,6 +113,7 @@ disconnecting. The shared-flight timer only covers a flight that never settles. 
 settings flight joined by a concurrent authenticated request reproduces it every time.
 
 Fix (branch `sam/r6-joiner-own-turn`):
+
 - [x] `joinSharedFlight` on celld: the flight's settlement only records the outcome; the joiner
       wakes on its own 10 ms timer. Cloudflare keeps the direct resume (no added timer).
 - [x] The generated celld entry turns the switch on at startup, in both key modes
@@ -126,3 +127,37 @@ Fix (branch `sam/r6-joiner-own-turn`):
       0 of 128 requests hung (worst 4.6 s; #2706 alone: 13 of 128 to the 60 s cap). 30 min soak:
       0 poller failures in 3,599 probes. Details: idea `01M77QE3GR2JRA7DSQQENMJZDE`, note
       "BOX ROUND R6 (hang fix)".
+
+## R7: reconcile with #2707 (F1) and verify on the box (2026-11-13)
+
+#2707 converted the remaining unbounded joins (platform config, credential and legacy-KV rows,
+the ensure memo, the setup-session alarm) to `joinSharedFlight` / `settleSharedFlight` and added
+`pnpm quality:shared-flight-joins`. It did not change the helper itself, so the merge conflict was
+only in `platform-config-core.ts` (both sides had converted the same join; F1's bounded-retry
+version kept) and the live test (F1 moved it onto the shared celld lab).
+
+Decision: every join needs the own-timer resume, and it gets it from the one helper. R6's
+mechanism (a continuation belongs to the request whose op settled the promise) does not depend on
+which flight was joined, and the live test below confirms it for each kind.
+
+- [x] Merge `sam/selfhost-pass-2` (4cfbe497d) into `sam/r6-joiner-own-turn`; one helper, one
+      behaviour (`apps/api/src/lib/shared-flight.ts`), every join goes through it.
+- [x] Live test: one case per kind of join through its real code (settings cache, platform
+      config, credential rows, legacy KV, ensure memo, archive R2 operation, a Durable Object
+      field shaped like `CredentialSetupSession.resumeCleanup`). Join cases use a delay server
+      that holds every request: the agent proxy holds only new connections, and a pooled
+      connection once made the DO case's "slow" read instant.
+- [x] Revert proof 1 (startup switch removed): the six stateless kinds went red (second request
+      hung to the 15 s cap); the Durable Object case stayed green. On celld 0.6.3 an object's ops
+      survive one of its requests answering, so that case is a labelled control.
+- [x] Guard extended to the final pattern: a `.then`/`.catch`/`.finally` on a shared flight, a
+      shared flight handed to any function other than the two helpers, and fields of a class with
+      a module-scope instance (the admin-settings cache shape) are findings. Its new tests were red
+      against F1's guard (3 of 10).
+- [x] The extended guard found one more join: `compact-r2.ts` `timedR2` raced another caller's R2
+      operation with its own timer, reachable from the stateless archive cron. Converted to the
+      helper (`joinR2Operation`); Cloudflare semantics identical (same race, same error class).
+      Revert proof 2 (only this conversion reverted): only the R2 live case went red.
+- [x] F1's per-site abandonment tests and the compact-r2 join test run in both join modes.
+- [ ] CI green on the branch (manual dispatch); Code Quality dependency-evidence failure cleared
+- [ ] Box: backup, deploy, health, `secrets status`, `verify-fence`, R6 load + 30 min soak, smoke

@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
+import { __setSharedFlightResumeOnOwnTimerForTest } from '../../../src/lib/shared-flight';
 import {
   ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES,
   COMPACT_ARCHIVE_MAX_OBJECT_BYTES,
@@ -655,57 +656,70 @@ describe('compact archive bounded failures', () => {
     expect(bucket.put).toHaveBeenCalledTimes(2);
   });
 
-  it('does not race a retry against a timed-out immutable provider write', async () => {
-    let finishPut: ((value: R2Object) => void) | undefined;
-    const stored = new Map<string, Uint8Array>();
-    const bucket = {
-      head: vi.fn(async (key: string) => {
-        const body = stored.get(key);
-        return body
-          ? ({
-              size: body.byteLength,
-              customMetadata: {
-                archiveBodySha256: await crypto.subtle
-                  .digest('SHA-256', body)
-                  .then((digest) =>
-                    Array.from(new Uint8Array(digest), (byte) =>
-                      byte.toString(16).padStart(2, '0')
-                    ).join('')
-                  ),
-              },
-            } as R2Object)
-          : null;
-      }),
-      put: vi.fn(
-        (key: string, body: Uint8Array) =>
-          new Promise<R2Object>((resolve) => {
-            stored.set(key, new Uint8Array(body));
-            finishPut = resolve;
-          })
-      ),
-      get: vi.fn(),
-    } as unknown as R2Bucket;
+  it.each([
+    { runtime: 'Cloudflare', ownTimer: false },
+    { runtime: 'celld', ownTimer: true },
+  ])(
+    'does not race a retry against a timed-out immutable provider write ($runtime join)',
+    async ({ ownTimer }) => {
+      // Both join modes of lib/shared-flight.ts: on celld a joiner resumes on its own timer.
+      __setSharedFlightResumeOnOwnTimerForTest(ownTimer);
+      onTestFinished(() => __setSharedFlightResumeOnOwnTimerForTest(false));
+      let finishPut: ((value: R2Object) => void) | undefined;
+      const stored = new Map<string, Uint8Array>();
+      const bucket = {
+        head: vi.fn(async (key: string) => {
+          const body = stored.get(key);
+          return body
+            ? ({
+                size: body.byteLength,
+                customMetadata: {
+                  archiveBodySha256: await crypto.subtle
+                    .digest('SHA-256', body)
+                    .then((digest) =>
+                      Array.from(new Uint8Array(digest), (byte) =>
+                        byte.toString(16).padStart(2, '0')
+                      ).join('')
+                    ),
+                },
+              } as R2Object)
+            : null;
+        }),
+        put: vi.fn(
+          (key: string, body: Uint8Array) =>
+            new Promise<R2Object>((resolve) => {
+              stored.set(key, new Uint8Array(body));
+              finishPut = resolve;
+            })
+        ),
+        get: vi.fn(),
+      } as unknown as R2Bucket;
 
-    await expect(
-      writeImmutableJson(bucket, 'pending.json', { ok: true }, 250)
-    ).rejects.toMatchObject({
-      name: 'CompactArchiveTimeoutError',
-      stage: 'put',
-    });
-    await expect(writeImmutableJson(bucket, 'pending.json', { ok: true }, 5)).rejects.toMatchObject(
-      {
+      await expect(
+        writeImmutableJson(bucket, 'pending.json', { ok: true }, 250)
+      ).rejects.toMatchObject({
+        name: 'CompactArchiveTimeoutError',
+        stage: 'put',
+      });
+      await expect(
+        writeImmutableJson(bucket, 'pending.json', { ok: true }, 5)
+      ).rejects.toMatchObject({
         name: 'CompactArchiveTimeoutError',
         stage: 'head_pending',
-      }
-    );
-    expect(bucket.put).toHaveBeenCalledTimes(1);
-    finishPut?.({} as R2Object);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await expect(
-      writeImmutableJson(bucket, 'pending.json', { ok: true }, 50)
-    ).resolves.toBeUndefined();
-    expect(bucket.put).toHaveBeenCalledTimes(1);
-  });
+      });
+      expect(bucket.put).toHaveBeenCalledTimes(1);
+      // A writer that joins the still-pending PUT inside its deadline answers once the PUT lands,
+      // without a second provider write.
+      const joiner = writeImmutableJson(bucket, 'pending.json', { ok: true }, 2_000);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      finishPut?.({} as R2Object);
+      await expect(joiner).resolves.toBeUndefined();
+      await expect(
+        writeImmutableJson(bucket, 'pending.json', { ok: true }, 50)
+      ).resolves.toBeUndefined();
+      expect(bucket.put).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('rejects oversized metadata before fetching and cancels a stalled object read', async () => {
     const { bucket } = memoryR2();
