@@ -61,28 +61,42 @@ Enterprise
 
 ## Implementation checklist
 
-- [ ] Integrations data: fix OpenCode, Mistral Vibe, Gemini, Claude Code, Codex, GCP, UpCloud, Vultr, Scaleway,
+- [x] Integrations data: fix OpenCode, Mistral Vibe, Gemini, Claude Code, Codex, GCP, UpCloud, Vultr, Scaleway,
       Infomaniak formatting, Hetzner/GCP account FAQs, Workers AI, GitHub; add Amp and GitLab; Antigravity uses Google logo
-- [ ] Integrations data: new categories (agents, compute, code hosting, platform AI) plus link-only "connect and automate" items to docs
-- [ ] Integrations hub: sections by buyer question, agent comparison table, cloud comparison table, no duplicated card labels,
+- [x] Integrations data: new categories (agents, compute, code hosting, platform AI) plus link-only "connect and automate" items to docs
+- [x] Integrations hub: sections by buyer question, agent comparison table, cloud comparison table, no duplicated card labels,
       shared `CtaFooter`, base-domain-derived URLs, accurate meta description
-- [ ] Detail template: dynamic step heading, adaptive grids, shared footer, honest external link label, no HowTo JSON-LD
-- [ ] Enterprise index: self-hosted framing, what-runs-where, data-location table, security answers, not-yet list,
+- [x] Detail template: dynamic step heading, adaptive grids, shared footer, honest external link label, no HowTo JSON-LD
+- [x] Enterprise index: self-hosted framing, what-runs-where, data-location table, security answers, not-yet list,
       real screenshots, mobile-safe comparison, support CTA
-- [ ] Enterprise subpages: fix every inaccurate claim; fix header layout; support CTA
-- [ ] CtaFooter variant for support framing on enterprise pages
-- [ ] Docs sync: `docs/guides/agents.md` OpenCode section; `docs/architecture/security.md` hosted wording
-- [ ] Grep rest of www for the same false claims and fix
-- [ ] Drift test: every agent in `AGENT_TYPE_VALUES` has an integration entry; listed models exist in the catalog
-- [ ] Playwright: add /integrations/, an integration detail page and /enterprise/ to marketing-pages overflow + axe spec
+- [x] Enterprise subpages: fix every inaccurate claim; fix header layout; support CTA
+- [x] CtaFooter variant for support framing on enterprise pages
+- [x] Docs sync: `docs/guides/agents.md` OpenCode section; `docs/architecture/security.md` hosted wording
+- [x] Grep rest of www for the same false claims and fix
+- [x] Drift test: every agent in `AGENT_TYPE_VALUES` has an integration entry; listed models exist in the catalog
+- [x] Playwright: add /integrations/, an integration detail page and /enterprise/ to marketing-pages overflow + axe spec
 
 ## Acceptance criteria
 
-- [ ] No claim on either page contradicts the code (each table/claim above fixed)
-- [ ] Every supported agent and cloud provider has an entry; GitHub is not under AI Models
-- [ ] Integrations hub shows comparison tables for agents and clouds
-- [ ] Enterprise page states what runs where, where data lives, and an explicit "not yet" list
-- [ ] Enterprise contact is support@simple-agent-manager.org with support framing, no sales language, no hosted-service implication
-- [ ] No horizontal overflow or serious axe violations at 375px and 1280px on changed pages
-- [ ] Drift test fails if an agent is added without an integration entry
-- [ ] `pnpm --filter @simple-agent-manager/www lint typecheck test build` pass
+- [x] No claim on either page contradicts the code (each table/claim above fixed)
+- [x] Every supported agent and cloud provider has an entry; GitHub is not under AI Models
+- [x] Integrations hub shows comparison tables for agents and clouds
+- [x] Enterprise page states what runs where, where data lives, and an explicit "not yet" list
+- [x] Enterprise contact is support@simple-agent-manager.org with support framing, no sales language, no hosted-service implication
+- [x] No horizontal overflow or serious axe violations at 375px and 1280px on changed pages
+- [x] Drift test fails if an agent is added without an integration entry
+- [x] `pnpm --filter @simple-agent-manager/www lint typecheck test build` pass
+
+## Implementation notes
+
+- Integrations data split into `apps/www/src/data/integrations/` (types, agents, clouds, platform, comparison, registry, index).
+- New shared components: `ComparisonTable.astro` (stacks into labelled cards under 720px), `ShotFrame.astro`,
+  `integrations/IntegrationCard.astro`, `integrations/LinkCard.astro`, `enterprise/EnterpriseDetail.astro`,
+  `enterprise/WhatRunsWhere.astro`. `CtaFooter` gained a `support` variant and relative `/self-host/` links.
+- Removed `public/images/integrations/google.svg`: it was a saved Cloudflare challenge HTML page, unused.
+- The fact-check sub-agent claimed GCP supports volumes; the code says `GCP_VOLUME_CAPABILITIES.supported = false`. Page follows the code.
+- Docs also said "hosted platform" in six places; reworded to installation-administrator wording per Raphaël (no hosted service).
+- Drift test mutation check: removing the Amp matrix row, adding a Devstral badge and flipping GCP volumes each reddened exactly
+  the intended test; restored green.
+- Playwright `marketing-pages.spec.ts` now covers 12 pages x 2 viewports (24 passed). Axe caught colour-only inline links; fixed with underlines.
+- Could not save a project policy for the no-hosted-service decision: project is at 100 active policies. Saved as knowledge instead.
