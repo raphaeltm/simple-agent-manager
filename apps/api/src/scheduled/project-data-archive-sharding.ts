@@ -1409,9 +1409,12 @@ async function selectScopedCandidates(
   // Same principle for the affordability ceiling: it exists so the unscoped sweep cannot
   // keep choosing a candidate the write budget must refuse. A named session is an explicit
   // operator request, and `reserveArchiveWrites` still has the final say on its cost.
+  // The unnamed canary packs by `sweepMessageBudget` after this LIMIT, so it keeps that budget
+  // as its SQL ceiling too; otherwise the largest-first LIMIT would return only rows the packer
+  // then drops. The unscoped sweep uses the write-budget ceiling alone.
   const messageCeiling = scope.sessionId
     ? Math.max(config.sweepMessageBudget, config.sweepMessageCeiling)
-    : config.sweepMessageCeiling;
+    : Math.min(config.sweepMessageBudget, config.sweepMessageCeiling);
   const rows = await env.DATABASE.prepare(
     `SELECT ss.project_id, ss.id AS session_id, ss.message_count
      FROM session_summaries ss
@@ -3244,8 +3247,9 @@ async function reclaimPendingSources(
       return;
     }
   }
+  // Past the deadline the pass still LISTS each project (one indexed `do_meta` read) so the
+  // pending and stuck counts stay true; it only stops deleting.
   for (const projectId of projects) {
-    if (Date.now() >= deadlineAt) return;
     let pending: Array<{ sessionId: string; migrationId: string; flippedAt?: number | null }>;
     let source: DurableObjectStub<ProjectData>;
     try {
@@ -3395,6 +3399,9 @@ async function migrateClaimedCandidate(
     phaseMark = at;
   };
 
+  // The lease is claimed from the tick's start time, and the tick-start reclaim pass may have
+  // used part of the wall budget before this claim; renew before the first step needs it.
+  migration = await renewLeaseIfDue(env, config, migration);
   const local = await inspectSourceIntent(source, migration);
   migration = await alignJournalToLocalSourceProof(env, migration, local, now);
   if (migration.state === 'source_deleted') {
@@ -3441,11 +3448,12 @@ async function migrateClaimedCandidate(
       await refusePreCopyMigration(env, preparedResult.migration, preparedResult.refusal, now);
       return { migrated: false, refused: true, recoveredCrashGap: false, chunksCopied, rowsCopied };
     }
-    migration = preparedResult.migration;
+    migration = await renewLeaseIfDue(env, config, preparedResult.migration);
     terminalVersionSha256 = preparedResult.prepared.terminalVersionSha256;
     messageCount = preparedResult.prepared.messageCount;
     migration = await ensureTargetPrepared(env, target, migration, preparedResult.prepared, now);
   }
+  migration = await renewLeaseIfDue(env, config, migration);
   migration = await enterCopying(env, migration, now);
 
   if (migration.state === 'copying') {
@@ -3508,6 +3516,12 @@ async function migrateClaimedCandidate(
           ),
           now,
         });
+        if (page.failure) {
+          throw new ProjectDataArchiveCoordinatorStateError(
+            `target_verification_failed:${page.failure.reason}`,
+            `ProjectData archive migration ${migration.migration_id} failed R2 verification: ${page.failure.message}`
+          );
+        }
         progress.units += page.chunksVerified;
         chunksVerified += page.chunksVerified;
         if (page.complete) break;

@@ -1896,6 +1896,12 @@ export type ArchiveTargetVerifyPageResult = {
   nextOrdinal: number;
   /** Rows verified so far across every call for this migration. */
   totalRowsVerified: number;
+  /**
+   * Set when the copy did not verify: a missing or unreadable R2 object, a hash, order, identity
+   * or count mismatch. Returned rather than thrown so the reason crosses the RPC boundary
+   * (rule 63); the coordinator fails the migration and the root keeps every row.
+   */
+  failure?: { reason: string; message: string };
 };
 
 /**
@@ -1986,6 +1992,31 @@ function compareMessageOrderKeys(
  *   exported rows are all of the root's rows.
  */
 export async function verifyArchiveTargetPage(
+  sql: SqlStorage,
+  env: Env,
+  input: ArchiveTargetVerifyPageInput
+): Promise<ArchiveTargetVerifyPageResult> {
+  try {
+    return await verifyArchiveTargetPageOrThrow(sql, env, input);
+  } catch (error) {
+    return {
+      complete: false,
+      chunksVerified: 0,
+      rowsVerified: 0,
+      nextOrdinal: 0,
+      totalRowsVerified: 0,
+      failure: {
+        reason:
+          error instanceof ProjectDataArchiveInvariantError
+            ? error.reason
+            : 'target_chunk_read_failed',
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}
+
+async function verifyArchiveTargetPageOrThrow(
   sql: SqlStorage,
   env: Env,
   input: ArchiveTargetVerifyPageInput

@@ -245,6 +245,10 @@ function createFakeSource(options: FakeSourceOptions = {}) {
       rowCount: 0,
       sha256: 'copy',
     })),
+    // The coordinator flips through `archiveSourceFlip`; its accepted path is the finalize below.
+    archiveSourceFlip: vi.fn(async (input: unknown) =>
+      (source.archiveSourceFinalizeDelete as (value: unknown) => Promise<unknown>)(input)
+    ),
     archiveSourceMarkCopyBackRestored: vi.fn(async () => true),
     archiveSourceAbandonIntent: vi.fn(async () => {
       if (state === 'source_deleted') {
@@ -278,6 +282,14 @@ function createFakeTarget() {
         sha256: chunk.sha256,
       };
     }),
+    // Compact targets re-read R2 in pages before the flip; this fake reports one complete page.
+    archiveTargetVerifyPage: vi.fn(async () => ({
+      complete: true,
+      chunksVerified: 1,
+      rowsVerified: 0,
+      nextOrdinal: 1,
+      totalRowsVerified: 0,
+    })),
     archiveTargetSeal: vi.fn(async () => {
       state = 'sealed';
       return { aggregateSha256: TARGET_SHA, messageCount: 2, groupedCount: 1, toolArchiveCount: 0 };
