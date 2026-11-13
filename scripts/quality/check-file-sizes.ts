@@ -40,7 +40,6 @@ export const EXEMPT_FILES = new Set([
   'packages/vm-agent/internal/acp/gateway.go',
   'packages/vm-agent/internal/server/workspaces.go',
   // Pre-existing TypeScript files (tracked for future splitting)
-  'apps/api/src/index.ts',
   'apps/api/src/scheduled/stuck-tasks.ts',
   'packages/terminal/src/MultiTerminal.tsx',
   'packages/acp-client/src/hooks/useAcpSession.ts',
