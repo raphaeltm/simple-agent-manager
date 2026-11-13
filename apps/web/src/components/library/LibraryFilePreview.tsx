@@ -22,6 +22,8 @@ export interface LibraryFilePreviewProps {
   fileId: string;
   /** Shown while the metadata loads, so the viewer opens with the file's name. */
   filename?: string;
+  /** Open the comments panel on this thread, from a comment deep link. */
+  commentThreadId?: string | null;
   onClose: () => void;
 }
 
@@ -85,6 +87,7 @@ export function LibraryFilePreview({
   projectId,
   fileId,
   filename,
+  commentThreadId = null,
   onClose,
 }: LibraryFilePreviewProps) {
   const queryScope = useQueryScope();
@@ -110,6 +113,7 @@ export function LibraryFilePreview({
       previewUrl={getLibraryFilePreviewUrl(projectId, fileId)}
       onClose={onClose}
       onDownload={() => downloadLibraryFile(projectId, fileId)}
+      initialCommentThreadId={commentThreadId}
     />
   );
 }
