@@ -5,8 +5,8 @@
 import { join } from 'node:path';
 
 import { EXTERNAL_SECRETS, NOT_ROTATED, type RotatableKey } from './rotate-catalog';
-import type { Journal } from './rotate-store';
 import { DEFAULT_STORED_LIFETIME_MINUTES } from './rotate-steps-data';
+import type { Journal } from './rotate-store';
 
 const PROCEDURE_TEXT: Record<RotatableKey['procedure'], string> = {
   swap: 'new value, deploy, check',

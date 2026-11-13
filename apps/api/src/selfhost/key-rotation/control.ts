@@ -11,8 +11,8 @@
  *   { op: 'pass', target: 'library' | 'better-auth', mode, cursor, limit?, budgetMs? }
  * Answers carry counts and row ids only, never a value or a key.
  */
-import type { BetterAuthSecretsEnv } from '../../lib/better-auth-secrets';
 import type { Env } from '../../env';
+import type { BetterAuthSecretsEnv } from '../../lib/better-auth-secrets';
 import { log } from '../../lib/logger';
 import {
   type AcpInteractionConfigEnv,
