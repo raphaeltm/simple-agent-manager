@@ -1,6 +1,6 @@
 # W2: extract scheduler-core (pure placement and capacity decisions)
 
-Brief: `tasks/active/2026-11-12-worker-modularization.md` (section "W2: scheduler-core").
+Brief: `tasks/archive/2026-11-12-worker-modularization.md` (section "W2: scheduler-core").
 SAM task `01M77GDKCKBZP0432E0K38PBBF`. Coordinator task `01M77BJHHNW5714E98DEEMBCZA`.
 Branch `sam/w2-scheduler-core-extract-38pbbf`, draft PR into the core branch
 `sam/help-identify-parts-worker-embcza`. Channel `feature.worker-modularization`.
@@ -47,7 +47,7 @@ Moves as the pure half of a split file: `workspace-resource-capacity` (evaluatio
       apply the W0 template, switch imports to `@simple-agent-manager/scheduler-core`,
       move pure tests and the simulation tests into the package.
 - [x] Test file and case counts before and after recorded below.
-- [ ] Local gates, specialist review, CI (`gh workflow run ci.yml --ref <branch>`).
+- [x] Local gates, specialist review, CI (`gh workflow run ci.yml --ref <branch>`). (run 43203095013 green on 43350123a; PR #2682 merged into the core branch)
 
 ## Progress log
 

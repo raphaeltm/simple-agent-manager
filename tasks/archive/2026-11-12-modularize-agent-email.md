@@ -1,6 +1,6 @@
 # W6: extract agent-email into a package
 
-Brief: `tasks/active/2026-11-12-worker-modularization.md` ("W6: agent-email", "Package template").
+Brief: `tasks/archive/2026-11-12-worker-modularization.md` ("W6: agent-email", "Package template").
 Taken by the W2 agent (SAM task `01M77GDKCKBZP0432E0K38PBBF`) at the coordinator's request
 (coordinator task `01M77BJHHNW5714E98DEEMBCZA`). Branch `sam/w6-agent-email`, draft PR into the
 core branch `sam/help-identify-parts-worker-embcza`.

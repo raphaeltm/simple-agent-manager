@@ -5,7 +5,7 @@
 Agent email: the per-trigger `agent+<key>@agents.<BASE_DOMAIN>` addresses. It covers inbound
 delivery (store, then start the email's trigger), retries from storage, replies from a task, the
 loopback test, and the admin setup of Cloudflare Email Routing and Email Sending. Part of the
-worker modularization (`tasks/active/2026-11-12-worker-modularization.md`, workstream W6).
+worker modularization (`tasks/archive/2026-11-12-worker-modularization.md`, workstream W6).
 
 The package does its own D1 work through `@simple-agent-manager/worker-core/schema`, and uses
 worker-core for logging, ids, validation, timeouts and errors. It reads only `AgentEmailEnv`

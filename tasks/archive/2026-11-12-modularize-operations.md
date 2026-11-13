@@ -1,6 +1,6 @@
 # W3: operations package and shared tool logic
 
-Workstream W3 of `tasks/active/2026-11-12-worker-modularization.md` (core branch
+Workstream W3 of `tasks/archive/2026-11-12-worker-modularization.md` (core branch
 `sam/help-identify-parts-worker-embcza`, coordinator task `01M77BJHHNW5714E98DEEMBCZA`).
 SAM task `01M77GDY92WVEJAYW63F4TSC50`, branch `sam/w3-operations-turn-shared-4tsc50`, draft PR #2685.
 
