@@ -85,6 +85,11 @@ export interface StepState {
   previousRows?: RowRef[];
   /** Set only by a complete verify pass with nothing left under the old key (rotate-run.ts). */
   proof?: { at: string; current: number; unreadable: number };
+  /**
+   * encryption-key: BETTER_AUTH_SECRET was unset (or equal) and was pinned to the old value, so
+   * the old value signs sessions until the better-auth-secret step is done (rotate-report.ts).
+   */
+  signInSecretPinned?: boolean;
   /** encryption-key: active reverse-tunnel leases created before the switch (null = unknown). */
   legacyTunnelLeases?: number | null;
   /** Where `rotate --resume` picks a blocked step up again. */

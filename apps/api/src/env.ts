@@ -216,8 +216,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   JWT_PUBLIC_KEY: string;
   // Self-hosted JWT key rotation (services/jwt-keys.ts). Unset = one key, kid `key-YYYY-MM`.
   JWT_KEY_ID?: string; // kid for the current key when signing and in /.well-known/jwks.json; unset = `key-YYYY-MM`
-  JWT_PUBLIC_KEY_PREVIOUS?: string; // SPKI PEM of the previous public key, accepted and published while the window is open
-  JWT_PREVIOUS_KEY_ID?: string; // kid published for the previous key; unset = `key-YYYY-MM` (the kid old tokens carry)
+  JWT_PUBLIC_KEY_PREVIOUS?: string; // SPKI PEM of the previous public key: still accepted for callback tokens while the window is open, never published in a JWKS
+  JWT_PREVIOUS_KEY_ID?: string; // label of the previous key in logs only (never published); unset = `key-YYYY-MM` (the kid old tokens carry)
   JWT_PUBLIC_KEY_PREVIOUS_UNTIL?: string; // ISO-8601 instant with offset ending the overlap; absent/unparseable = previous key ignored
   ENCRYPTION_KEY: string;
   // Purpose-specific secret overrides (fall back to ENCRYPTION_KEY when unset)

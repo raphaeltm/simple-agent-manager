@@ -3,7 +3,7 @@
  *
  * Enumerated from the schema and the writers, and machine-checked: a test fails when a table
  * gains an `iv` / `*_iv` column that is not listed here or in NOT_ROTATED_IV_COLUMNS
- * (tests/unit/selfhost/key-rotation-locations.test.ts). Writers per table: see the inventory in
+ * (tests/unit/selfhost/key-rotation.test.ts, 'the D1 location registry'). Writers per table: see the inventory in
  * tasks/active/2026-11-13-selfhost-platform-key-rotation.md.
  *
  * Rows hold ciphertext only when the IV is non-empty: `is_secret = 0` runtime values are stored

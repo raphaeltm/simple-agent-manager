@@ -85,6 +85,12 @@ export function selectKeys(
           );
         return key;
       });
+  const signIn = rotatableKey('better-auth-secret');
+  if (signIn && !chosen.includes(signIn) && chosen.some((key) => signsSessionsWith(key, bundle))) {
+    // Rotating ENCRYPTION_KEY pins the sign-in secret to its old value (it fell back to it), so
+    // the old key would keep signing every session. Replace it in the same run (review V1 M2).
+    chosen.push(signIn);
+  }
   for (const key of chosen) {
     const missing = key.secrets.filter((name) => !bundle[name] && name !== 'BETTER_AUTH_SECRET');
     if (missing.length > 0) {
@@ -93,6 +99,19 @@ export function selectKeys(
   }
   // Catalog order, whatever order the operator typed.
   return ROTATABLE_KEYS.filter((key) => chosen.includes(key));
+}
+
+/**
+ * Whether rotating `key` leaves its old value signing sessions: ENCRYPTION_KEY is the
+ * BetterAuth secret whenever BETTER_AUTH_SECRET is unset (or holds the same value), and the
+ * rotation pins that value before switching (rotate-steps-data.ts forwardPatch).
+ */
+export function signsSessionsWith(
+  key: RotatableKey,
+  bundle: Readonly<Record<string, string>>
+): boolean {
+  if (key.secrets[0] !== 'ENCRYPTION_KEY') return false;
+  return !bundle.BETTER_AUTH_SECRET || bundle.BETTER_AUTH_SECRET === bundle.ENCRYPTION_KEY;
 }
 
 /** Plaintext files the deploy lays over the bundle would undo (or leak) a rotation. */

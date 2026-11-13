@@ -49,7 +49,7 @@ function externalLines(bundle: Readonly<Record<string, string>>): string[] {
   const lines = [
     'Not rotated by this command (do these yourself; each is also in deploy/selfhost/README.md):',
   ];
-  const present = Object.keys(bundle).sort();
+  const present = Object.keys(bundle).sort((a, b) => a.localeCompare(b));
   for (const external of EXTERNAL_SECRETS) {
     const names = present.filter((name) => external.match.test(name));
     if (names.length > 0) lines.push(`  ${names.join(', ')}: ${external.where}`);
@@ -83,9 +83,9 @@ export function formatPlan(
       lines.push(
         `     finishes: \`rotate --resume\` at least ${minutes} min after the switch (interaction details and bootstrap tokens expire first)`
       );
-      if (!bundle.BETTER_AUTH_SECRET)
+      if (!bundle.BETTER_AUTH_SECRET || bundle.BETTER_AUTH_SECRET === bundle.ENCRYPTION_KEY)
         lines.push(
-          '     pins BETTER_AUTH_SECRET to the current value first (rotate better-auth-secret to replace it)'
+          '     pins BETTER_AUTH_SECRET to the current value first: session cookies are signed with it. better-auth-secret (also in this plan) then replaces it, so every user signs in again once; until that step is done the old value is not retired'
         );
       if (!bundle.TOKEN_HASH_KEY)
         lines.push('     pins TOKEN_HASH_KEY to the current value (kept on purpose, see below)');
@@ -98,6 +98,15 @@ export function formatPlan(
   });
   lines.push(...externalLines(bundle));
   return lines;
+}
+
+const SIGNING_WARNING =
+  'NOT retired: the old value still signs every session as BETTER_AUTH_SECRET until better-auth-secret is done (pnpm selfhost:secrets rotate better-auth-secret)';
+
+/** The encryption-key step pinned the sign-in secret and nothing has replaced it yet. */
+export function stillSigningSessions(journal: Journal): boolean {
+  if (!journal.steps['encryption-key']?.signInSecretPinned) return false;
+  return journal.steps['better-auth-secret']?.phase !== 'done';
 }
 
 export function formatSummary(
@@ -117,6 +126,9 @@ export function formatSummary(
       const ids = step.baseline.rows.slice(0, 20).map((r) => `${r.location}/${r.id}.${r.column}`);
       detail += `; ${step.baseline.unreadable} value(s) were unreadable before the rotation and were left untouched: ${ids.join(', ')}${step.baseline.unreadable > ids.length ? ', ...' : ''}`;
     }
+    if (name === 'encryption-key' && stillSigningSessions(journal)) {
+      detail += `; ${SIGNING_WARNING}`;
+    }
     if (step.legacyTunnelLeases) {
       detail += `; ${step.legacyTunnelLeases} reverse-tunnel node(s) created before the switch still use a tunnel credential derived from the old key: replace them`;
     }
@@ -128,9 +140,13 @@ export function formatSummary(
     );
     return lines;
   }
-  const replaced = journal.keys.filter((name) => journal.steps[name]?.phase === 'done');
+  const signing = stillSigningSessions(journal);
+  const replaced = journal.keys.filter(
+    (name) => journal.steps[name]?.phase === 'done' && !(signing && name === 'encryption-key')
+  );
   lines.push(
     'Done. The bundle was resealed without any transitional value.',
+    signing ? `encryption-key: ${SIGNING_WARNING}.` : '',
     `Old copies of ${replaced.join(', ') || 'nothing'} are now worthless for signing or decrypting new data, so these are now meaningful:`,
     '  pnpm selfhost:secrets plaintext --purge --confirm <CELLD_BUCKET>   (old celld deploy versions)',
     '  deleting backups taken before this rotation: they hold the old keys AND the data encrypted under them, so they stay as sensitive as before; keep only what you need for recovery',

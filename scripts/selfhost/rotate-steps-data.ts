@@ -66,7 +66,12 @@ async function forwardPatch(ctx: StepContext, kind: Kind): Promise<Patch> {
     const pins: Record<string, string> = {};
     if (name === 'ENCRYPTION_KEY') {
       // Behaviour-preserving pins: both fall back to ENCRYPTION_KEY when unset.
-      if (!base.BETTER_AUTH_SECRET) pins.BETTER_AUTH_SECRET = old;
+      if (!base.BETTER_AUTH_SECRET || base.BETTER_AUTH_SECRET === old) {
+        pins.BETTER_AUTH_SECRET = old;
+        // The old value keeps signing sessions until better-auth-secret replaces it; rotate-run.ts
+        // chains that step, and the summary says so while it is not done.
+        ctx.step.signInSecretPinned = true;
+      }
       if (!base.TOKEN_HASH_KEY) pins.TOKEN_HASH_KEY = old;
     }
     return { set: { ...pins, ...fresh, [`${name}_PREVIOUS`]: old, [CONTROL_KEY]: control } };

@@ -5,9 +5,12 @@
  * local-forward, identity) with `JWT_PRIVATE_KEY`. A self-hosted install rotates that key by
  * setting the new pair as current and the old public key as `JWT_PUBLIC_KEY_PREVIOUS`, bounded by
  * `JWT_PUBLIC_KEY_PREVIOUS_UNTIL`. While the window is open the Worker verifiers still accept
- * tokens the old key signed (VM agents treat a 401 on their callback token as terminal), and both
- * JWKS documents publish the old key so VM agents and federated verifiers keep validating tokens
- * minted before the rotation.
+ * callback tokens the old key signed (VM agents treat a 401 on their callback token as terminal;
+ * jwt-verify.ts `verifyCallbackToken`), and only those, only after the current key fails the
+ * signature check. Neither JWKS document publishes the old key: `/.well-known/jwks.json`
+ * (jwt-verify.ts `getJWKS`) and the workload-identity set (workload-identity-token.ts) carry the
+ * current key alone, because a published old key would let whoever holds it forge the
+ * short-lived tokens VM agents verify against that set.
  *
  * With none of the rotation variables set, behaviour is exactly the pre-rotation behaviour: one
  * key, kid `key-YYYY-MM`.
@@ -58,7 +61,7 @@ export function parsePreviousJwtKeyUntil(value: string | undefined): number | nu
 export interface PreviousJwtKey {
   /** SPKI PEM of the previous public key. */
   publicKeyPem: string;
-  /** kid published for the previous key in /.well-known/jwks.json. */
+  /** Label of the previous key in logs (`jwt.previous_key_accepted`); never published. */
   kid: string;
   /** End of the overlap window (epoch ms, exclusive). */
   untilMs: number;

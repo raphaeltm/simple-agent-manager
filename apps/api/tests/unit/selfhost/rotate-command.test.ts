@@ -248,9 +248,17 @@ describe('rotate encryption-key', () => {
     expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('waiting');
     expect(mid.ENCRYPTION_KEY_PREVIOUS).toBe(old);
     expect(mid.ENCRYPTION_KEY).not.toBe(old);
-    // Behaviour-preserving pins for the two derived keys.
-    expect(mid.BETTER_AUTH_SECRET).toBe(old);
+    // TOKEN_HASH_KEY is pinned to the old value on purpose (API token lookups keep working).
     expect(mid.TOKEN_HASH_KEY).toBe(old);
+    // BETTER_AUTH_SECRET was unset, so the old key signed every session: the run chains
+    // better-auth-secret, which replaces the pinned value at once (review V1 M2).
+    const journal = readJournal(stateDir);
+    expect(journal?.keys).toEqual(['encryption-key', 'better-auth-secret']);
+    expect(journal?.steps['encryption-key']?.signInSecretPinned).toBe(true);
+    expect(journal?.steps['better-auth-secret']?.phase).toBe('done');
+    expect(mid.BETTER_AUTH_SECRET).toBeTruthy();
+    expect(mid.BETTER_AUTH_SECRET).not.toBe(old);
+    expect(mid.BETTER_AUTH_SECRET_PREVIOUS).toBeUndefined();
     expect(
       await decryptWithKeyOnly(
         credential('c-agent').c,
