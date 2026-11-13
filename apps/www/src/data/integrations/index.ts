@@ -1,5 +1,6 @@
-export { type AgentMatrixRow, agentIntegrations, agentMatrix } from './agents';
-export { type CloudMatrixRow, cloudIntegrations, cloudMatrix } from './clouds';
+export { agentIntegrations } from './agents';
+export { cloudIntegrations } from './clouds';
+export { type AgentMatrixRow, agentMatrix, type CloudMatrixRow, cloudMatrix } from './comparison';
 export { getBySlug, getRelated, integrations, sections } from './registry';
 export {
   automationLinks,

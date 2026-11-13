@@ -402,36 +402,3 @@ export const cloudIntegrations: Integration[] = [
     docsPath: '/docs/guides/google-cloud/',
   },
 ];
-
-/** One row per provider in the hub's comparison table. */
-export interface CloudMatrixRow {
-  slug: string;
-  locations: string;
-  volumes: boolean;
-  credential: string;
-}
-
-export const cloudMatrix: CloudMatrixRow[] = [
-  { slug: 'hetzner', locations: '5 · DE, FI, US', volumes: true, credential: 'API token' },
-  { slug: 'scaleway', locations: '8 · FR, NL, PL', volumes: true, credential: 'API key' },
-  { slug: 'infomaniak', locations: '2 · CH', volumes: true, credential: 'Application credential' },
-  { slug: 'vultr', locations: '9 · EU, NA, Asia, AU', volumes: true, credential: 'API key' },
-  {
-    slug: 'digitalocean',
-    locations: '10 · EU, NA, Asia, AU',
-    volumes: true,
-    credential: 'Access token',
-  },
-  {
-    slug: 'upcloud',
-    locations: '10 · EU, US, SG, AU',
-    volumes: true,
-    credential: 'API subaccount',
-  },
-  {
-    slug: 'gcp',
-    locations: '8 zones · US, EU, Asia',
-    volumes: false,
-    credential: 'Google sign-in (WIF) or key',
-  },
-];

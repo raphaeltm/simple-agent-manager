@@ -15,8 +15,9 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { agentIntegrations, agentMatrix } from '../src/data/integrations/agents';
-import { cloudIntegrations, cloudMatrix } from '../src/data/integrations/clouds';
+import { agentIntegrations } from '../src/data/integrations/agents';
+import { cloudIntegrations } from '../src/data/integrations/clouds';
+import { agentMatrix, cloudMatrix } from '../src/data/integrations/comparison';
 import { getRelated, integrations } from '../src/data/integrations/registry';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
