@@ -468,10 +468,34 @@ describe('resumable archive cursor', () => {
     // A lease far shorter than the tick: without renewal the fence is lost mid-copy and the
     // claim fails with lease_fence_lost. Long enough to survive the tick's setup before the claim.
     // At wall-clock time, because the lease is claimed from the tick's `now`.
-    const stats = await withArchiveEnv(
-      sweepEnv({ PROJECT_DATA_ARCHIVE_LEASE_MS: '400', PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '2000' }),
-      () => runProjectDataArchiveSharding(testEnv, new Date())
+    // Every chunk put is slowed so the copy is certain to outlast the lease several times over:
+    // a claim that happened to finish inside 400 ms would pass with renewal deleted.
+    const { bucket, puts } = countingR2(env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket);
+    const slow = new Proxy(bucket, {
+      get(target, property, receiver) {
+        if (property === 'put') {
+          return async (...args: unknown[]) => {
+            await new Promise((resolve) => setTimeout(resolve, 40));
+            return (target.put as (...rest: unknown[]) => Promise<unknown>)(...args);
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const startedAt = Date.now();
+    const stats = await withR2(slow as R2Bucket, () =>
+      withArchiveEnv(
+        sweepEnv({
+          PROJECT_DATA_ARCHIVE_LEASE_MS: '400',
+          PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '2000',
+        }),
+        () => runProjectDataArchiveSharding(testEnv, new Date())
+      )
     );
+    // The claim held its fence well past the original expiry and kept copying.
+    expect(Date.now() - startedAt).toBeGreaterThan(3 * 400);
+    expect(puts.size * 40).toBeGreaterThan(3 * 400);
     const journal = await readJournal(projectId, sessionId);
     expect(journal?.error_message ?? null).toBeNull();
     expect(stats.failed).toBe(0);

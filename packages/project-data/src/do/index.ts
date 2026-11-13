@@ -1111,7 +1111,7 @@ export class ProjectData extends DurableObject<Env> {
     projectId: string;
     limit: number;
     sessionId?: string | null;
-  }): Array<{ sessionId: string; migrationId: string }> {
+  }): Array<{ sessionId: string; migrationId: string; flippedAt: number | null; fenced: boolean }> {
     return archiveSharding.listArchiveSourceReclaimPending(this.sql, input);
   }
 

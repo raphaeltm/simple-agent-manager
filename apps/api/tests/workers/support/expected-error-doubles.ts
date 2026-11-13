@@ -91,6 +91,28 @@ export class ProjectDataTestDouble extends ProjectData {
 
   /** How many times the coordinator asked this object for a write estimate. */
   private estimateCallsForTest = 0;
+  /** How many times the coordinator listed this object's pending reclaims. */
+  private reclaimListingsForTest = 0;
+  /** Added latency per listing: stands in for a cold root object in another region. */
+  private reclaimListingDelayMsForTest = 0;
+
+  reclaimListingCountForTest(): number {
+    return this.reclaimListingsForTest;
+  }
+
+  setReclaimListingDelayForTest(ms: number): void {
+    this.reclaimListingDelayMsForTest = ms;
+  }
+
+  override async archiveSourceListReclaimPending(
+    input: Parameters<ProjectData['archiveSourceListReclaimPending']>[0]
+  ): Promise<ReturnType<ProjectData['archiveSourceListReclaimPending']>> {
+    this.reclaimListingsForTest++;
+    if (this.reclaimListingDelayMsForTest > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.reclaimListingDelayMsForTest));
+    }
+    return super.archiveSourceListReclaimPending(input);
+  }
 
   estimateCallCountForTest(): number {
     return this.estimateCallsForTest;

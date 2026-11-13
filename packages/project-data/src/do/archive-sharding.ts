@@ -41,10 +41,7 @@ import {
   createCanonicalRowsHasher,
   sha256Hex,
 } from '../archive/hashing';
-import {
-  type ArchiveWriteReservation,
-  estimateArchiveWrites,
-} from '../archive/write-budget';
+import { type ArchiveWriteReservation, estimateArchiveWrites } from '../archive/write-budget';
 import {
   MESSAGE_COMMENT_REPLY_COUNT_SQL,
   MESSAGE_COMMENT_THREAD_COUNT_SQL,
@@ -4556,7 +4553,11 @@ function sourceStillOwnsRows(sql: SqlStorage, sessionId: string): boolean {
   return Number(row?.present ?? 0) === 1;
 }
 
-const LIST_RECLAIM_PENDING_SQL = `SELECT i.session_id, i.migration_id, i.source_deleted_at
+const LIST_RECLAIM_PENDING_SQL = `SELECT i.session_id, i.migration_id, i.source_deleted_at,
+    EXISTS (
+      SELECT 1 FROM do_meta fence
+      WHERE fence.key = ? || i.session_id AND fence.value = i.migration_id
+    ) AS fenced
   FROM do_meta pending
   JOIN project_data_archive_source_intents i
     ON i.session_id = substr(pending.key, ?)
@@ -4565,10 +4566,6 @@ const LIST_RECLAIM_PENDING_SQL = `SELECT i.session_id, i.migration_id, i.source_
     AND i.project_id = ?
     AND i.state = 'source_deleted'
     AND (? IS NULL OR i.session_id = ?)
-    AND NOT EXISTS (
-      SELECT 1 FROM do_meta fence
-      WHERE fence.key = ? || i.session_id AND fence.value = i.migration_id
-    )
   ORDER BY pending.key ASC
   LIMIT ?`;
 
@@ -4576,16 +4573,19 @@ const LIST_RECLAIM_PENDING_SQL = `SELECT i.session_id, i.migration_id, i.source_
  * Sessions whose archive flip has committed (`source_deleted` intent) and whose transcript rows
  * have not all been reclaimed. Read from the marker the flip writes, so a reclaim interrupted by
  * a crash, a deadline, or an older coordinator that published without reclaiming is still
- * found. Sessions fenced by an in-progress copy-back of the same migration are left out.
+ * found. A session fenced by an in-progress copy-back of the same migration is returned with
+ * `fenced: true`: its rows must not be reclaimed, but it is still pending, so a complete listing
+ * that omits a session proves that session has nothing left to reclaim.
  */
 export function listArchiveSourceReclaimPending(
   sql: SqlStorage,
   input: { projectId: string; limit: number; sessionId?: string | null }
-): Array<{ sessionId: string; migrationId: string; flippedAt: number | null }> {
+): Array<{ sessionId: string; migrationId: string; flippedAt: number | null; fenced: boolean }> {
   const sessionId = input.sessionId ?? null;
   return sql
     .exec(
       LIST_RECLAIM_PENDING_SQL,
+      COPY_BACK_IN_PROGRESS_META_PREFIX,
       RECLAIM_PENDING_META_PREFIX.length + 1,
       RECLAIM_PENDING_META_PREFIX,
       // The smallest string greater than every key with the prefix (':' + 1 = ';').
@@ -4593,7 +4593,6 @@ export function listArchiveSourceReclaimPending(
       input.projectId,
       sessionId,
       sessionId,
-      COPY_BACK_IN_PROGRESS_META_PREFIX,
       Math.max(1, Math.floor(input.limit))
     )
     .toArray()
@@ -4601,6 +4600,7 @@ export function listArchiveSourceReclaimPending(
       sessionId: strictString(row.session_id, 'source_intent.session_id'),
       migrationId: strictString(row.migration_id, 'source_intent.migration_id'),
       flippedAt: optionalInteger(row.source_deleted_at),
+      fenced: Number(row.fenced) === 1,
     }));
 }
 

@@ -420,3 +420,73 @@ and refunded` (resumable-cursor suite, real DO/D1/R2). Discrimination: with the 
   commented out, `budgetWindowExhausted` is 1 and the test is red; restored, green.
 - PR summary corrected: the first prepare still traverses the whole session, in bounded yielding
   pages outside the transcript lock, with a generation re-check under the lock.
+
+### Staging finding on 9d02820 (2026-11-13): the reclaim pass starved the sweep
+
+- Setup: staging deploy of 9d02820 with temporary vars `PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS=259200000`
+  and `PROJECT_DATA_ARCHIVE_WALL_TIME_MS=3000` (confirmed on the deployed Worker), to give real
+  ticks a workload, since every remaining 7-day candidate was already frozen. 74 real sessions were
+  eligible (86 in the 3-7 d band, 12 blocked by live snapshots), with no journal rows.
+- Symptom: ticks at 07:31 and 07:36Z ran (`run_count` 4068 to 4069) but journaled nothing. The 07:36
+  tick took exactly 20 s against a 3 s wall.
+- Cause: `reclaimPendingSources` ran first on every tick. It selected up to
+  `max(sweepProjects, sweepSessions)` = 50 projects with ANY `source_deleted`/`published` journal row
+  (21 on staging) and made 2 root-DO RPCs per project (`ensureProjectId` plus
+  `archiveSourceListReclaimPending`), deliberately even past the deadline. D1 had no record that a
+  reclaim had completed, so every tick re-listed every recently published project. The candidate
+  batch then started out of time. In production this would be up to 100 root-DO RPCs per 5-minute
+  tick (the rule 47 cron budget is 30/tick), every tick, for nothing.
+- Fix: D1 migration 0237 adds `project_data_archive_migrations.reclaim_pending INTEGER NOT NULL
+DEFAULT 1` plus a partial index. The pass selects only projects with a flagged flipped row.
+  - The default covers pre-existing rows, rows an older coordinator writes during a deploy, and
+    crash-gap rows (still `recovery_manifest_persisted` until the claim resume aligns them).
+  - The flag is cleared by a completed reclaim (post-flip or pending pass), or by a complete
+    listing (`pending.length < limit`) that omits a row snapshotted from D1 BEFORE the listing.
+  - That snapshot is the fence against a concurrent flip: the root commits the flip before the
+    journal CAS, so a row already flipped in D1 at snapshot time has its marker visible to the
+    listing. A timestamp margin was rejected because journal times are the claim's start, not
+    the flip's time (parent review).
+  - The DO listing now returns copy-back-fenced sessions with `fenced: true` instead of omitting
+    them, so an omission really means no marker. The pass skips fenced sessions as before.
+- I/O: steady state is 1 D1 read per tick and 0 root-DO RPCs. A project with a real leftover
+  costs 1 D1 snapshot read plus 2 RPCs plus the reclaim pages.
+- Production one-time drain (read-only prod D1, 2026-11-13): 3,721 flipped rows in 30 projects,
+  at most 2,930 in one. The first tick lists all 30 once (about the per-tick cost without the
+  fix). Small projects clear in that listing. The large project clears 50 rows per tick, so about
+  59 ticks (~5 h at 5 min) at 1 listing per tick, then 0.
+- Tests: new `apps/api/tests/workers/project-data-archive-reclaim-flag.test.ts` (5 scenarios,
+  real DO/D1/R2):
+  1. 12 clean published projects with 150 ms listings plus 1 candidate under a 600 ms wall: the
+     candidate migrates and the clean roots are never listed.
+  2. An older or default flag is listed once, then cleared and never listed again.
+  3. A leftover keeps its flag until it is reclaimed.
+  4. Crash gap: the journal is reset to `recovery_manifest_persisted` with location `migrating`
+     over a flipped root. The rows are reclaimed and the flag cleared.
+  5. Canary race: a row flagged during the listing, timed as an earlier claim, keeps its flag.
+- Discrimination, run before the workspace recycle (each reverted alone, then restored
+  byte-identical):
+  - (a) dropping the `reclaim_pending = 1` filter: the starvation test (8 s, candidate not
+    migrated) and "never again" go red;
+  - (b) reading the snapshot after the listing: the race test goes red;
+  - (c) making `renewLeaseIfDue` a no-op: the strengthened renewal test goes red;
+  - (d) excluding fenced sessions from the listing: the copy-back fence test goes red.
+- The workspace was recycled during the provider pause (08:12-11:00Z) before this was committed.
+  The patch was reapplied from the session transcript and re-validated (see below).
+
+### CodeRabbit review of 9d02820 (07:33Z, CHANGES_REQUESTED)
+
+- Minor: the unit `archiveSourceFlip` fake delegated to the old delete-at-flip finalize. It now
+  returns zero deletions and unchanged size; the first `archiveSourceReclaimPage` reports the
+  deletions.
+- Nitpick: the renewal test could pass without renewal. R2 puts are now slowed by 40 ms, so the
+  claim outlasts the 400 ms lease more than 3 times over. Proven by (c).
+- Nitpick: the copy-back fence test never reached reclaim. It now calls `archiveSourceReclaimPage`
+  directly inside the fence (0 deleted, `copyBackInProgress: true`), and a marker under the fence
+  is listed as fenced, skipped, and keeps its flag. Proven by (d).
+
+### Staging read checks (Playwright, 06:57Z, on d41148b29)
+
+- An archived r2-gzip session (`4745a38a`, 209 messages) renders in the app via the
+  token-login session; the messages API returned 200 (200 rows, hasMore).
+- The workspace 404s on that page predate this PR (a root-resident session shows the same).
+  Filed `tasks/backlog/2026-11-13-chat-page-fetches-deleted-workspace.md`.

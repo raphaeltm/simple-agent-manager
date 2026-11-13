@@ -3250,6 +3250,63 @@ type MigrateCandidateResult = {
   chunksVerified?: number;
 };
 
+/**
+ * Records in D1 that these flipped sessions' root rows are gone (`reclaim_pending`, migration
+ * 0237), so the start-of-tick pass stops visiting their project. Best effort: a failure leaves
+ * the flag set, which costs one more listing on a later tick, never a stranded row.
+ */
+async function clearReclaimPending(env: Env, migrationIds: string[]): Promise<void> {
+  if (migrationIds.length === 0) return;
+  try {
+    await env.DATABASE.prepare(
+      `UPDATE project_data_archive_migrations SET reclaim_pending = 0
+       WHERE migration_id IN (${placeholders(migrationIds.length)})
+         AND reclaim_pending = 1
+         AND state IN ('source_deleted', 'published')`
+    )
+      .bind(...migrationIds)
+      .run();
+  } catch (error) {
+    log.warn('project_data_archive_reclaim_flag_clear_failed', {
+      migrationIds,
+      ...serializeError(error),
+    });
+  }
+}
+
+/**
+ * The project's flipped journal rows whose reclaim is not yet confirmed, bounded to one listing's
+ * worth. Only these may be cleared by the listing that follows, which is what makes the clear
+ * safe against a flip committed concurrently (see the caller). A failed read clears nothing.
+ */
+async function readFlaggedReclaimMigrationIds(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  projectId: string,
+  sessionId: string | undefined
+): Promise<string[]> {
+  try {
+    const rows = await env.DATABASE.prepare(
+      `SELECT migration_id FROM project_data_archive_migrations
+       WHERE project_id = ?
+         ${sessionId ? 'AND session_id = ?' : ''}
+         AND reclaim_pending = 1
+         AND state IN ('source_deleted', 'published')
+       ORDER BY migration_id
+       LIMIT ?`
+    )
+      .bind(projectId, ...(sessionId ? [sessionId] : []), config.sweepSessions)
+      .all<{ migration_id: string }>();
+    return (rows.results ?? []).map((row) => row.migration_id);
+  } catch (error) {
+    log.warn('project_data_archive_reclaim_flag_read_failed', {
+      projectId,
+      ...serializeError(error),
+    });
+    return [];
+  }
+}
+
 async function reclaimFlippedSession(
   source: DurableObjectStub<ProjectData>,
   input: { projectId: string; sessionId: string; migrationId: string },
@@ -3322,8 +3379,9 @@ function noteReclaimStuck(
  * Finish reclaims a previous tick did not complete: a deadline, a reset, or a coordinator from
  * before paged reclaim publishing the journal straight to `published`. Pending work is read
  * from each root object's own intents and rows, never from journal state, so none of those
- * paths can strand rows. Projects are those with the most recent publishes, because leftovers
- * come from recent flips.
+ * paths can strand rows. Projects are those with a flipped journal row whose reclaim D1 has not
+ * seen complete (`reclaim_pending`, migration 0237), most recent publishes first, so a tick
+ * wakes no root object when nothing is left to reclaim.
  */
 async function reclaimPendingSources(
   env: Env,
@@ -3347,7 +3405,8 @@ async function reclaimPendingSources(
             `SELECT m.project_id FROM project_data_archive_migrations m
              LEFT JOIN project_data_archive_circuit_breakers breaker
                ON breaker.project_id = m.project_id
-             WHERE m.state IN ('source_deleted', 'published')
+             WHERE m.reclaim_pending = 1
+               AND m.state IN ('source_deleted', 'published')
                AND COALESCE(breaker.state, 'closed') = 'closed'
              GROUP BY m.project_id
              ORDER BY MAX(COALESCE(m.published_at, m.source_deleted_at, m.updated_at)) DESC,
@@ -3367,8 +3426,17 @@ async function reclaimPendingSources(
   // Past the deadline the pass still LISTS each project (one indexed `do_meta` read) so the
   // pending and stuck counts stay true; it only stops deleting.
   for (const projectId of projects) {
-    let pending: Array<{ sessionId: string; migrationId: string; flippedAt?: number | null }>;
+    let pending: Array<{
+      sessionId: string;
+      migrationId: string;
+      flippedAt?: number | null;
+      fenced?: boolean;
+    }>;
     let source: DurableObjectStub<ProjectData>;
+    // Snapshot BEFORE the listing: a row already flipped in D1 had its root marker written
+    // first (the flip commits in the root, then the journal CAS), so the listing below sees that
+    // marker if any rows remain. A row flipped after this read is not in the snapshot.
+    const flagged = await readFlaggedReclaimMigrationIds(env, config, projectId, scope?.sessionId);
     try {
       source = await ensureOwnerStub(env, projectId, projectId);
       pending = await source.archiveSourceListReclaimPending({
@@ -3385,7 +3453,19 @@ async function reclaimPendingSources(
       });
       continue;
     }
+    // A listing shorter than its limit is complete (fenced sessions included), so a snapshotted
+    // row it does not name has no root rows left. Clearing it is what keeps later ticks from
+    // waking this object again.
+    if (pending.length < config.sweepSessions) {
+      const listed = new Set(pending.map((item) => item.migrationId));
+      await clearReclaimPending(
+        env,
+        flagged.filter((migrationId) => !listed.has(migrationId))
+      );
+    }
     for (const item of pending) {
+      // A copy-back is restoring this session: its rows are not reclaimable, and it is not stuck.
+      if (item.fenced) continue;
       const stuck = (cause: string) =>
         noteReclaimStuck(config, stats, {
           projectId,
@@ -3433,6 +3513,8 @@ async function reclaimPendingSources(
         if (result.remaining) {
           stats.reclaimPending = (stats.reclaimPending ?? 0) + 1;
           stuck('rows_remaining');
+        } else {
+          await clearReclaimPending(env, [item.migrationId]);
         }
       } catch (error) {
         stats.reclaimPending = (stats.reclaimPending ?? 0) + 1;
@@ -3785,6 +3867,7 @@ async function migrateClaimedCandidate(
       });
       return { rowsDeleted: 0, bytesReclaimed: 0, remaining: true };
     });
+    if (!reclaim.remaining) await clearReclaimPending(env, [migration.migration_id]);
     markPhase('reclaim');
     log.info('project_data_archive_candidate_migrated', {
       migrationId: migration.migration_id,

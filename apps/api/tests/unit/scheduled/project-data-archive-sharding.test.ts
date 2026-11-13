@@ -157,6 +157,8 @@ function createFakeSource(options: FakeSourceOptions = {}) {
       : null;
   let r2ManifestKey: string | null =
     state === 'recovery_manifest_persisted' || state === 'source_deleted' ? MANIFEST_KEY : null;
+  // Root rows a flip left in place for reclaim.
+  let reclaimable = false;
   const prepareTokens: string[] = [];
   const source = {
     ensureProjectId: vi.fn(async () => undefined),
@@ -231,14 +233,21 @@ function createFakeSource(options: FakeSourceOptions = {}) {
         databaseSizeAfterBytes: 500,
       };
     }),
-    // The flip leaves the rows in place; this fake root has none left to reclaim.
-    archiveSourceReclaimPage: vi.fn(async () => ({
-      messagesDeleted: 0,
-      groupedRowsDeleted: 0,
-      ftsRowsDeleted: 0,
-      toolArchiveRowsDeleted: 0,
-      remaining: false,
-    })),
+    // The flip leaves the rows in place; the first reclaim page deletes them all, later pages
+    // find nothing.
+    archiveSourceReclaimPage: vi.fn(async () => {
+      const page = {
+        messagesDeleted: reclaimable ? 2 : 0,
+        groupedRowsDeleted: reclaimable ? 1 : 0,
+        ftsRowsDeleted: reclaimable ? 1 : 0,
+        toolArchiveRowsDeleted: 0,
+        databaseSizeBeforeBytes: 1000,
+        databaseSizeAfterBytes: reclaimable ? 500 : 1000,
+        remaining: false,
+      };
+      reclaimable = false;
+      return page;
+    }),
     archiveSourceListReclaimPending: vi.fn(async () => []),
     archiveSourceRestoreChunk: vi.fn(async () => ({
       idempotent: false,
@@ -251,10 +260,24 @@ function createFakeSource(options: FakeSourceOptions = {}) {
       token = input.sourceIntentToken;
       return true;
     }),
-    // The coordinator flips through `archiveSourceFlip`; its accepted path is the finalize below.
-    archiveSourceFlip: vi.fn(async (input: unknown) =>
-      (source.archiveSourceFinalizeDelete as (value: unknown) => Promise<unknown>)(input)
-    ),
+    // The coordinator flips through `archiveSourceFlip`, which deletes nothing: the rows stay
+    // until `archiveSourceReclaimPage` removes them.
+    archiveSourceFlip: vi.fn(async () => {
+      state = 'source_deleted';
+      targetAggregateSha256 = TARGET_SHA;
+      r2ManifestKey = MANIFEST_KEY;
+      reclaimable = true;
+      return {
+        idempotent: false,
+        lastMessageAt: 1200,
+        messagesDeleted: 0,
+        groupedRowsDeleted: 0,
+        ftsRowsDeleted: 0,
+        toolArchiveRowsDeleted: 0,
+        databaseSizeBeforeBytes: 1000,
+        databaseSizeAfterBytes: 1000,
+      };
+    }),
     archiveSourceMarkCopyBackRestored: vi.fn(async () => true),
     archiveSourceAbandonIntent: vi.fn(async () => {
       if (state === 'source_deleted') {

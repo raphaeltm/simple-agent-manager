@@ -211,12 +211,53 @@ describe('archive flip then paged reclaim', () => {
     });
     expect((await rootRowCounts(source, sessionId)).messages).toBe(MESSAGES);
 
+    // The fence itself: a reclaim page asked for directly refuses and deletes nothing.
+    const direct = await source.archiveSourceReclaimPage({
+      projectId,
+      sessionId,
+      migrationId,
+      maxRows: 1_000,
+    });
+    expect(direct).toMatchObject({
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      remaining: true,
+      copyBackInProgress: true,
+    });
+    expect((await rootRowCounts(source, sessionId)).messages).toBe(MESSAGES);
+
+    // Reclaim finished before the copy-back started, so the root holds no reclaim marker and
+    // the restored rows are not pending. Defence in depth for a marker under the fence (the
+    // copy-back drains reclaim first, so it should not coexist with the fence): the listing names
+    // the session as fenced, the pass skips it, and its D1 flag survives, because a complete
+    // listing proves a session clean only by omitting it.
+    await runInDurableObject(source, async (_instance, state) => {
+      state.storage.sql.exec(
+        'INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)',
+        `archive_reclaim_pending:${sessionId}`,
+        migrationId
+      );
+    });
+    await env.DATABASE.prepare(
+      'UPDATE project_data_archive_migrations SET reclaim_pending = 1 WHERE migration_id = ?'
+    )
+      .bind(migrationId)
+      .run();
+    const listings = await source.reclaimListingCountForTest();
     // A sweep in that window must leave the restored rows alone.
     const tick = await withArchiveEnv(sweepEnv(), () =>
       runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 120_000))
     );
+    expect(await source.reclaimListingCountForTest()).toBe(listings + 1);
     expect(tick.reclaimedRows ?? 0).toBe(0);
     expect((await rootRowCounts(source, sessionId)).messages).toBe(MESSAGES);
+    const flag = await env.DATABASE.prepare(
+      'SELECT reclaim_pending FROM project_data_archive_migrations WHERE migration_id = ?'
+    )
+      .bind(migrationId)
+      .first<{ reclaim_pending: number }>();
+    expect(flag?.reclaim_pending).toBe(1);
 
     // Retrying the copy-back completes it.
     await withArchiveEnv(sweepEnv(), () =>

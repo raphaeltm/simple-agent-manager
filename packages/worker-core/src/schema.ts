@@ -4378,6 +4378,11 @@ export const projectDataArchiveMigrations = sqliteTable(
     publishedAt: integer('published_at'),
     poisonedAt: integer('poisoned_at'),
     frozenAt: integer('frozen_at'),
+    /**
+     * 1 until the flipped session's root rows are confirmed reclaimed (migration 0237). The
+     * start-of-tick reclaim pass visits only projects with a flagged flipped row.
+     */
+    reclaimPending: integer('reclaim_pending').notNull().default(1),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
@@ -4404,6 +4409,9 @@ export const projectDataArchiveMigrations = sqliteTable(
       table.sessionId,
       table.state
     ),
+    reclaimPendingIdx: index('idx_archive_migrations_reclaim_pending')
+      .on(table.projectId, table.state)
+      .where(sql`reclaim_pending = 1`),
   })
 );
 
