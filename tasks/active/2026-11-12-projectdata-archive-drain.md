@@ -218,6 +218,21 @@ ms/msg in R2-timeout-bounded pages (~40-80 s, 1-2 ticks); flip ~9 s on the root 
 largest single root block); reclaim ~10-60 s in 500-row pages (1-2 ticks). Total ~7-10 ticks
 (~2-3 h at the 18-min cadence), readable throughout. One reservation of ~445k writes.
 
+Production after #2700 (read-only D1 `sam-prod`, 2026-11-13 01:55Z, normal operation only):
+
+- Since the 00:20Z deploy (~1.5 h, ~5 ticks): 9 publishes, 68,352 messages (max 9,394, avg ~7.6k),
+  i.e. ~13.7k messages per tick, versus 1 session per tick before. Measured, small sample.
+  Projection at 80 ticks/day: ~1.1M messages/day of 10k-capped sessions against ~85k ingress.
+- Refusals since deploy: 24 `active_session_state`, 4 `message_comments_present`; 28 reservations
+  released (517,454 writes) — every refusal refunded. No failed or poisoned migrations; all 3
+  breakers closed; cadence `succeeded`, `consecutive_budget_stalls` 0.
+- Write budget window 2026-11-13: 165,678 of 2.4M reserved.
+- Eligible root backlog (stopped/failed, root): le1k 2,941 / 575k msgs; 1k-10k 499 / 1.92M;
+  > 10k 202 / 4.10M (the PR B target). Sleeping: 290 sessions / 843k msgs.
+- Open question: 24 `active_session_state` refusals remain after dropping `'error'`; these are
+  `prompting`/`recovering` or `runtime_work_state` active/settling on sessions terminal for the whole
+  grace. Not yet attributed (needs a DO-side read); tracked here, not changed in PR B.
+
 Audit notes:
 
 - Root-local maintenance while rows await reclaim (PR A audit, unchanged): tool-payload cleanup
