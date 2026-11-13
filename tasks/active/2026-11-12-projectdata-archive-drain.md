@@ -204,5 +204,11 @@ a 1,284-write receipt, ProjectData DO p99 unchanged.
   New file: `apps/api/tests/workers/project-data-archive-drain-relief.test.ts`. No DO or D1
   migrations.
 
+- 2026-11-13 00:50Z handoff: task `01M795CM7DAPCSF4E94AJK09CP` (replacement sole owner, previous
+  task `01M784YVJMQN6Z49XJRTJDVKPV` cancelled by user). PR A rebased from the old #2700 branch
+  (`578d1fdeb`) onto main `671c230c3` (#2700 squash tree is identical to that branch tip); 5 commits
+  replayed cleanly; typecheck, eslint and 7 archive Workers suites (113 tests) green; #2702
+  retargeted to `main`. PR B goes on a branch stacked on PR A. All PRs stay DRAFT until the parent
+  coordinator `01M77TZWBDJHQ3Z87V2NYZMFK1` reviews the exact head SHA.
 - 2026-11-12 17:06Z workspace was recycled while paused; untracked `.do-state.md` was lost.
   Keep durable state here and push.
