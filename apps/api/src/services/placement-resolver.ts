@@ -1,3 +1,40 @@
+import {
+  buildCapacityPoolSelection,
+  capacityPlacementSnapshotForTaskStart,
+  collectStoredResourceRequirementLayers,
+  directPlacementAuditSnapshot,
+  hasNoCapacityPoolCandidates,
+  mergeResourceRequirementLayers,
+  noEligibleCapacityCandidateMessage,
+  normalizeCredentialAttribution,
+  type PlacementCredentialAttribution,
+  type PlacementCredentialLookup,
+  type PlacementCredentialResolutionFailure,
+  type PlacementCredentialSourceResult,
+  type PlacementProfileDefaults,
+  PlacementResolutionError,
+  type PlacementRuntimeResolution,
+  preferCapacityCandidatesInLocation,
+  resolveCredentialLookup,
+  resolveDevcontainerConfigName,
+  resolveEffectiveNodeHostMemoryReserveMb,
+  resolvePreferredVmLocation,
+  resolveProvider,
+  resolveTaskMode,
+  resolveVmLocation,
+  resolveVmSize,
+  resolveVmSizeSource,
+  resolveWorkloadRole,
+  resolveWorkspaceProfile,
+  ResourceRequirementsValidationError,
+  type TaskStartCapacityCandidate,
+  type TaskStartCapacityPoolSelection,
+  type TaskStartPlacement,
+  type TaskStartPlacementInput,
+  type TaskStartPlacementWithCredential,
+  validateResolvedLocation,
+  type WorkspaceRuntimeDecision,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   AgentProfileRuntime,
   CredentialSource,
@@ -15,55 +52,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
-import { preferCapacityCandidatesInLocation } from './placement-capacity-ranking';
-import {
-  normalizeCredentialAttribution,
-  resolveCredentialLookup,
-  resolveDevcontainerConfigName,
-  resolvePreferredVmLocation,
-  resolveProvider,
-  resolveTaskMode,
-  resolveVmLocation,
-  resolveVmSize,
-  resolveVmSizeSource,
-  resolveWorkloadRole,
-  resolveWorkspaceProfile,
-  validateResolvedLocation,
-} from './placement-field-resolution';
-import {
-  noEligibleCapacityCandidateMessage,
-  PlacementResolutionError,
-} from './placement-resolution-error';
-import {
-  buildCapacityPoolSelection,
-  capacityPlacementSnapshotForTaskStart,
-  directPlacementAuditSnapshot,
-  hasNoCapacityPoolCandidates,
-} from './placement-resolver-capacity';
-import type {
-  PlacementCredentialAttribution,
-  PlacementCredentialLookup,
-  PlacementCredentialResolutionFailure,
-  PlacementCredentialSourceResult,
-  PlacementProfileDefaults,
-  PlacementRuntimeResolution,
-  TaskStartCapacityCandidate,
-  TaskStartCapacityPoolSelection,
-  TaskStartPlacement,
-  TaskStartPlacementInput,
-  TaskStartPlacementWithCredential,
-} from './placement-resolver-types';
 import { resolveCredentialSource } from './provider-credentials';
-import {
-  collectStoredResourceRequirementLayers,
-  mergeResourceRequirementLayers,
-  ResourceRequirementsValidationError,
-} from './resource-requirements-input';
-import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-capacity';
-import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
-export type { RankCapacityCandidatesInput } from './placement-resolver-capacity';
 export {
+  type CapacityAwareNodePlacementRow,
   capacityPlacementSnapshotForCandidate,
   capacityPlacementSnapshotForTaskStart,
   capacityPoolNoCandidatesError,
@@ -71,35 +63,32 @@ export {
   capacityPoolSnapshotForPool,
   directPlacementAuditSnapshot,
   hasNoCapacityPoolCandidates,
+  type PlacementCredentialAttribution,
+  type PlacementCredentialAttributionInput,
+  type PlacementCredentialLookup,
+  type PlacementCredentialProjectPolicy,
+  type PlacementCredentialResolutionFailure,
+  type PlacementCredentialSourceResult,
+  type PlacementEntryPoint,
+  type PlacementExplicitOverrides,
+  type PlacementProfileDefaults,
+  type PlacementProfileVmSizeSource,
+  type PlacementProjectDefaults,
+  PlacementResolutionError,
+  type PlacementResolutionErrorCode,
+  type PlacementRuntimeResolution,
+  type PlacementTaskModeDefault,
   rankCapacityCandidatesForRuntime,
+  type RankCapacityCandidatesInput,
   resolveReusableNodeCapacitySnapshot,
-} from './placement-resolver-capacity';
-export type {
-  CapacityAwareNodePlacementRow,
-  PlacementCredentialAttribution,
-  PlacementCredentialAttributionInput,
-  PlacementCredentialLookup,
-  PlacementCredentialProjectPolicy,
-  PlacementCredentialResolutionFailure,
-  PlacementCredentialSourceResult,
-  PlacementEntryPoint,
-  PlacementExplicitOverrides,
-  PlacementProfileDefaults,
-  PlacementProfileVmSizeSource,
-  PlacementProjectDefaults,
-  PlacementResolutionErrorCode,
-  PlacementRuntimeResolution,
-  PlacementTaskModeDefault,
-  TaskStartCapacityCandidate,
-  TaskStartCapacityPoolSelection,
-  TaskStartPlacement,
-  TaskStartPlacementInput,
-  TaskStartPlacementWithCredential,
-} from './placement-resolver-types';
+  type TaskStartCapacityCandidate,
+  type TaskStartCapacityPoolSelection,
+  type TaskStartPlacement,
+  type TaskStartPlacementInput,
+  type TaskStartPlacementWithCredential,
+} from '@simple-agent-manager/scheduler-core';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
-
-export { PlacementResolutionError } from './placement-resolution-error';
 
 export function resolvePlacementRuntimePreference(input: {
   explicitRuntime?: AgentProfileRuntime | null;

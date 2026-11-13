@@ -3,6 +3,11 @@
  * session when it has to. Split out of `vm-prompt-delivery-adapter.ts`
  * (`.claude/rules/18-file-size-limits.md`), which re-exports these types.
  */
+import type {
+  VmPromptDeliverySourceTaskGuard,
+  VmPromptDeliveryTarget,
+} from '@simple-agent-manager/project-data';
+
 import type { PromptDeliveryResult } from '../durable-objects/project-data/prompt-delivery';
 import { IN_PLACE_WAKEABLE_STATUSES } from '../durable-objects/vm-agent-container-recovery';
 import type { Env } from '../env';
@@ -11,7 +16,6 @@ import {
   reportSessionRecoveryRefusal,
   type SessionRecoveryResult,
 } from './session-recovery';
-import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
 import { sessionSleepClaimLeaseMs } from './session-snapshot-sleep-claim';
 import { signalSessionWakeReadyBestEffort } from './session-wake-ready';
@@ -20,24 +24,8 @@ import {
   isSessionWakeReadyCurrent,
 } from './session-wake-ready-authority';
 
-export interface VmPromptDeliveryTarget {
-  projectId: string;
-  chatSessionId: string;
-  workspaceId: string;
-  nodeId: string;
-  agentSessionId: string;
-  userId: string;
-  runtimeIdentity: string;
-  runtime: string;
-}
-
-export interface VmPromptDeliverySourceTaskGuard {
-  taskId: string;
-  projectId: string;
-  chatSessionId: string;
-  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
-  requiredProjectMemberId?: string | null;
-}
+/** ProjectData owns the delivery contract these describe; re-exported for worker callers. */
+export type { VmPromptDeliverySourceTaskGuard, VmPromptDeliveryTarget };
 
 export type TargetResolution =
   | { kind: 'ready'; target: VmPromptDeliveryTarget }

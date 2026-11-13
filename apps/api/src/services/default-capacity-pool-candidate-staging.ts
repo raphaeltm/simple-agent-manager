@@ -1,8 +1,8 @@
+import { capacityCandidateBaseId } from '@simple-agent-manager/scheduler-core';
 import { and, eq, getTableColumns, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
-import { capacityCandidateBaseId } from './capacity-pool-workload-roles';
 import type {
   Db,
   EnsureCandidatesForSourceOptions,

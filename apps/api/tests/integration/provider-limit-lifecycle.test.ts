@@ -10,6 +10,29 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import {
+  createAttentionMarker,
+  listActiveAttentionMarkers,
+  resolveAttentionMarkers,
+} from '@simple-agent-manager/project-data/internal/do/attention';
+import {
+  type DurabilityFoundationHooks,
+  processPromptDeliveryAlarm,
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import { persistMessage } from '@simple-agent-manager/project-data/internal/do/messages';
+import {
+  OWNER_ONLY_SCHEDULE,
+  requireScheduleAction,
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-authority';
+import { runScheduleAlarm } from '@simple-agent-manager/project-data/internal/do/project-event-schedules-runner';
+import {
+  cancelSchedule,
+  createSchedule,
+  getSchedule,
+} from '@simple-agent-manager/project-data/internal/do/project-event-schedules-storage';
+import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
+import { syncProviderLimitAttention } from '@simple-agent-manager/project-data/internal/do/provider-limit-attention';
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
 import { getTableName, is } from 'drizzle-orm';
@@ -19,29 +42,6 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import {
-  createAttentionMarker,
-  listActiveAttentionMarkers,
-  resolveAttentionMarkers,
-} from '../../src/durable-objects/project-data/attention';
-import {
-  type DurabilityFoundationHooks,
-  processPromptDeliveryAlarm,
-} from '../../src/durable-objects/project-data/durability-foundation';
-import { resolveDurableExecutionConfig } from '../../src/durable-objects/project-data/durable-execution-config';
-import { persistMessage } from '../../src/durable-objects/project-data/messages';
-import {
-  OWNER_ONLY_SCHEDULE,
-  requireScheduleAction,
-} from '../../src/durable-objects/project-data/project-event-schedules-authority';
-import { runScheduleAlarm } from '../../src/durable-objects/project-data/project-event-schedules-runner';
-import {
-  cancelSchedule,
-  createSchedule,
-  getSchedule,
-} from '../../src/durable-objects/project-data/project-event-schedules-storage';
-import { admitProjectEvent } from '../../src/durable-objects/project-data/project-events';
-import { syncProviderLimitAttention } from '../../src/durable-objects/project-data/provider-limit-attention';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { taskCallbackRoute } from '../../src/routes/tasks/callback';

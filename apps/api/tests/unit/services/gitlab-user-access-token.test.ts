@@ -10,8 +10,8 @@ vi.mock('../../../src/auth', () => ({
   createAuth: mocks.createAuth,
 }));
 
-vi.mock('../../../src/lib/logger', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
+vi.mock('@simple-agent-manager/worker-core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/worker-core')>()),
   log: {
     warn: mocks.logWarn,
     info: mocks.logInfo,

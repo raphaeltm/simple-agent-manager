@@ -5,6 +5,9 @@
  * credential, persistence, resource accounting or admission helper is mocked.
  * Schema-derived SQLite proves predicates; shipped migration/FK tests remain separate.
  */
+import {
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -26,7 +29,6 @@ import {
   type TaskStartCapacityCandidate,
 } from '../../../src/services/placement-resolver';
 import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
 import { ensurePoolsWithStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import {

@@ -14,7 +14,7 @@ below remains tracked here.
 
 `defaultPoolEffectiveState()` (`apps/api/src/services/default-capacity-pool-summaries.ts`) returns
 `migration-pending` whenever `capacity_pools.migration_state != 'complete'`, and
-`buildCapacityPoolSelection()` (`apps/api/src/services/placement-resolver-capacity.ts`) returns zero
+`buildCapacityPoolSelection()` (`packages/scheduler-core/src/placement-resolver-capacity.ts`) returns zero
 candidates for any pool that is not `configured-ready`. Any one source whose catalog changed takes the
 whole pool offline, including sources whose catalogs are fully published and unchanged.
 

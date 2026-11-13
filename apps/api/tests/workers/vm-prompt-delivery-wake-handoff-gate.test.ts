@@ -7,12 +7,12 @@
  * claim naming another project's task reads as no claiming task (rule 11). The real-ordering
  * wake test is `vm-wake-event-delivery-handoff.test.ts`.
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
+import { acceptPromptDelivery } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import type { SessionWakeReadyInput } from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
-import { acceptPromptDelivery } from '../../src/durable-objects/project-data/prompt-delivery';
-import type { SessionWakeReadyInput } from '../../src/durable-objects/project-data/session-wake-ready';
 import type { Env } from '../../src/env';
 import { resolveVmPromptDeliveryTarget } from '../../src/services/vm-prompt-delivery-target';
 import {

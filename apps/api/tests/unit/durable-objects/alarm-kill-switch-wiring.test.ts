@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 const alarmSources = [
   'node-lifecycle.ts',
-  'project-data/index.ts',
+  // ProjectData lives in its own package (packages/project-data).
+  '../../../../packages/project-data/src/do/index.ts',
   'project-orchestrator/index.ts',
   'task-runner/index.ts',
   'diagnosis-runner.ts',
@@ -15,7 +16,7 @@ describe('alarm kill-switch wiring', () => {
   it.each(alarmSources)('%s defers before running alarm work', (relativePath) => {
     const source = readFileSync(
       new URL(`../../../src/durable-objects/${relativePath}`, import.meta.url),
-      'utf8',
+      'utf8'
     );
     const alarmStart = source.indexOf('async alarm(): Promise<void>');
     expect(alarmStart).toBeGreaterThan(-1);

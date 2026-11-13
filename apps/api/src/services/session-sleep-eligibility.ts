@@ -1,3 +1,7 @@
+import {
+  parseProviderLimitWait,
+  providerLimitNeedsImmediateSleep,
+} from '@simple-agent-manager/scheduler-core';
 import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -7,7 +11,6 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { resolveAdminSetting } from './admin-settings';
 import { recordNodeLifecycleDecision } from './node-lifecycle-decisions';
 import * as projectDataService from './project-data';
-import { parseProviderLimitWait, providerLimitNeedsImmediateSleep } from './provider-limit-policy';
 import {
   classifySessionIdleness,
   DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES,

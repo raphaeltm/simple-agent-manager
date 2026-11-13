@@ -20,6 +20,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { createDeploymentSecretCipher } from '../../src/app-deployment-ports/secret-cipher';
 import * as schema from '../../src/db/schema';
 import { ulid } from '../../src/lib/ulid';
 import {
@@ -34,6 +35,7 @@ const PREFIX = `decfg-${Date.now()}`;
 const USER_ID = `${PREFIX}-user`;
 const PROJECT_ID = `${PREFIX}-proj`;
 const ENCRYPTION_KEY = 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=';
+const cipher = createDeploymentSecretCipher(ENCRYPTION_KEY);
 
 let db: ReturnType<typeof drizzle<typeof schema>>;
 
@@ -41,7 +43,7 @@ async function makeEnvironment(name: string): Promise<string> {
   const id = `${PREFIX}-env-${name}`;
   await env.DATABASE.prepare(
     `INSERT INTO deployment_environments (id, project_id, name, status, created_at, updated_at)
-     VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
   )
     .bind(id, PROJECT_ID, name)
     .run();
@@ -53,15 +55,21 @@ beforeAll(async () => {
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO users (id, email, github_id, name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`,
+     VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`
   )
-    .bind(USER_ID, `decfg-user-${PREFIX}` + '@example.test', '880001', 'Cfg User', 'https://example.com/a.png')
+    .bind(
+      USER_ID,
+      `decfg-user-${PREFIX}` + '@example.test',
+      '880001',
+      'Cfg User',
+      'https://example.com/a.png'
+    )
     .run();
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO github_installation_accounts
        (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
-     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`
   )
     .bind(PROJECT_ID + '-inst', 'test-owner', 'test-owner')
     .run();
@@ -69,7 +77,7 @@ beforeAll(async () => {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO github_installations
        (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`
   )
     .bind(PROJECT_ID + '-inst', USER_ID, PROJECT_ID + '-inst', PROJECT_ID + '-inst', 'test-owner')
     .run();
@@ -77,9 +85,17 @@ beforeAll(async () => {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO projects
        (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`
   )
-    .bind(PROJECT_ID, USER_ID, 'decfg-project', 'decfg-project', PROJECT_ID + '-inst', 'test-owner/test-repo', USER_ID)
+    .bind(
+      PROJECT_ID,
+      USER_ID,
+      'decfg-project',
+      'decfg-project',
+      PROJECT_ID + '-inst',
+      'test-owner/test-repo',
+      USER_ID
+    )
     .run();
 });
 
@@ -92,21 +108,21 @@ describe('buildDeploymentEnvironmentConfigResponse', () => {
       envKey: 'NODE_ENV',
       value: 'production',
       isSecret: false,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
     await upsertDeploymentEnvironmentConfigVar(db, {
       environmentId: envId,
       envKey: 'PUBLIC_APP_DOMAIN',
       value: 'app.example.com',
       isSecret: false,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
     await upsertDeploymentEnvironmentConfigVar(db, {
       environmentId: envId,
       envKey: 'DATABASE_URL',
       value: 'postgres://user:s3cr3tpassword@db/app',
       isSecret: true,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
 
     const response = await buildDeploymentEnvironmentConfigResponse(db, envId);
@@ -153,14 +169,14 @@ describe('upsert / delete lifecycle', () => {
       envKey: 'LOG_LEVEL',
       value: 'info',
       isSecret: false,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
     await upsertDeploymentEnvironmentConfigVar(db, {
       environmentId: envId,
       envKey: 'LOG_LEVEL',
       value: 'debug',
       isSecret: false,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
 
     const response = await buildDeploymentEnvironmentConfigResponse(db, envId);
@@ -177,14 +193,14 @@ describe('upsert / delete lifecycle', () => {
       envKey: 'API_TOKEN',
       value: 'plain-at-first',
       isSecret: false,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
     await upsertDeploymentEnvironmentConfigVar(db, {
       environmentId: envId,
       envKey: 'API_TOKEN',
       value: 'now-a-real-secret-value',
       isSecret: true,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
 
     const response = await buildDeploymentEnvironmentConfigResponse(db, envId);
@@ -209,7 +225,7 @@ describe('upsert / delete lifecycle', () => {
       envKey: 'TEMP',
       value: 'x',
       isSecret: false,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
     await deleteDeploymentEnvironmentConfigVar(db, envId, 'TEMP');
     const response = await buildDeploymentEnvironmentConfigResponse(db, envId);
@@ -224,21 +240,21 @@ describe('interpolation env resolution (build vs runtime boundary)', () => {
       envKey: 'PUBLIC_APP_DOMAIN',
       value: 'app.example.com',
       isSecret: false,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
     await upsertDeploymentEnvironmentConfigVar(db, {
       environmentId: envId,
       envKey: 'DATABASE_URL',
       value: 'postgres://user:topsecretvalue@db/app',
       isSecret: true,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
     await upsertDeploymentEnvironmentConfigVar(db, {
       environmentId: envId,
       envKey: 'STRIPE_KEY',
       value: 'sk_live_anotherbigsecret',
       isSecret: true,
-      encryptionKey: ENCRYPTION_KEY,
+      cipher,
     });
   }
 
@@ -246,7 +262,7 @@ describe('interpolation env resolution (build vs runtime boundary)', () => {
     const envId = await makeEnvironment('runtime');
     await seedMixed(envId);
 
-    const resolved = await loadDeploymentInterpolationEnv(db, envId, ENCRYPTION_KEY);
+    const resolved = await loadDeploymentInterpolationEnv(db, envId, cipher);
 
     // Plain variable present.
     expect(resolved.values.PUBLIC_APP_DOMAIN).toBe('app.example.com');
@@ -288,13 +304,13 @@ describe('interpolation env resolution (build vs runtime boundary)', () => {
     await env.DATABASE.prepare(
       `INSERT INTO deployment_environment_config_vars
        (id, environment_id, env_key, stored_value, value_iv, is_secret, created_at, updated_at)
-       VALUES (?, ?, 'BROKEN', 'not-real-ciphertext', NULL, 1, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, 'BROKEN', 'not-real-ciphertext', NULL, 1, datetime('now'), datetime('now'))`
     )
       .bind(ulid(), envId)
       .run();
 
-    await expect(loadDeploymentInterpolationEnv(db, envId, ENCRYPTION_KEY)).rejects.toThrow(
-      /missing an IV/,
+    await expect(loadDeploymentInterpolationEnv(db, envId, cipher)).rejects.toThrow(
+      /missing an IV/
     );
   });
 });

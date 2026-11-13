@@ -1,10 +1,10 @@
+import { capacityPlacementAuthorityGeneration } from '@simple-agent-manager/scheduler-core';
 import type { ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { capacityPlacementAuthorityGeneration } from '../../../src/services/capacity-pool-authority';
 import * as poolClock from '../../../src/services/capacity-pool-clock';
 import { ensureCandidatesForSource } from '../../../src/services/default-capacity-pool-candidates';
 import { CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE } from '../../../src/services/default-capacity-pool-helpers';

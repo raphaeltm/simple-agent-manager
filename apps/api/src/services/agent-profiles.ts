@@ -1,3 +1,7 @@
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   AgentEffort,
   AgentProfile,
@@ -26,10 +30,6 @@ import {
   baseProfileInsertValues,
   toBaseProfileFields,
 } from './profile-fields';
-import {
-  ResourceRequirementsValidationError,
-  serializeResourceRequirementsInput,
-} from './resource-requirements-input';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 

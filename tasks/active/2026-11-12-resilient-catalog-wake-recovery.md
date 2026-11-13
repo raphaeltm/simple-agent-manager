@@ -3,6 +3,8 @@
 Idea: 01M77P985TDMCJ28JTTQHEYMC7. SAM task 01M77Q6A32CJRZAE06QE8NH1YJ.
 Coordinator task 01M77NV1B621TKTV79272F7YX3. Sol / openai-codex.
 
+Current status (2026-11-13): one coordinator-authorized code-only port to main527f16b9580ad7cd762c60ea7e711175dd843ada is under validation. The current unpublished catalog migration is0239; the0237 catalog references below describe earlier unshipped validation. Main's applied0237_archive_reclaim_pending.sql is preserved unchanged. No staging or release authorization is implied by this port.
+
 ## Problem and authorization
 
 An established pool became migration-pending mid-refresh, hiding validated capacity and permanently refusing a healthy sleeping conversation's accepted wake. All four changes are approved: retain committed capacity safely; durably continue refreshes; preserve retryable wake intent; test interruption/restart/recovery. Additional evidence: harmless pool revisions reject still-authorized existing nodes.
@@ -130,3 +132,28 @@ The requested complete-file run then exposed a second concrete synchronization r
 The potential initial project-chat anchoring behavior is preserved separately in SAM Idea01M787CPKEVRF6BDWHVY4MZGMS. Existing newest-page project-chat unit tests mock Virtuoso; the real-browser newest-turn check found in the targeted search covers the separate /sam surface. That does not prove the exact project-chat geometry correct. The follow-up carries the unchanged-head reproduction and observed initial-window evidence without claiming a confirmed production issue or expanding this patch.
 
 The coordinator independently closed the historical authority finding at986; this test-only correction requires a new full-SHA review and CI. CodeRabbit was requested once through the trusted workflow and observed for15minutes; quota prevented a review, satisfying the best-effort gate unless a later actual review arrives. Required real staging remains blocked by physical cleanup. Combined28ba validation applies only to old force83plus core986; final integration must include the corrected independently reviewed force head. Keep this task active and the PR draft with its required review marker.
+
+## Current-main package port and migration collision
+
+Main527f16b9580ad7cd762c60ea7e711175dd843ada includes the merged worker modularization and archive4d6fccde2f992fa46679775a1096edb54ebbb090. Its applied0237_archive_reclaim_pending.sql collided with this branch's unpublished catalog0237. Fresh main and force-resume636 inventory reserves peer0238_provider_limit_recovery_scan_index.sql; catalog moves only its unpublished migration to0239_capacity_catalog_publication.sql. Applied archive0237 is byte-identical to main; catalog0239 is byte-identical to the original unpublished catalog migration. The native migration helper now reads0239. The four staged lifecycle harness sources contain no migration filenames or moved implementation paths, so their source needs no port edit.
+
+The twelve merge conflicts were resolved at the extracted ownership boundaries:
+
+- Catalog schema additions live in packages/worker-core/src/schema.ts; apps/api/src/db/schema.ts remains the main compatibility re-export.
+- The typed placement failure lives in packages/scheduler-core/src/placement-resolver-types.ts and its curated public entry point. D1 loading, atomic publication and final placement admission remain in the worker.
+- Wake activation guard, readiness, session transitions and DO orchestration live in packages/project-data/src/do; the client wake options live in src/client/project-data.ts. API compatibility files retain the main re-exports.
+- The existing shared exact D1 readiness query lives in packages/project-data/src/do/session-wake-ready-authority.ts and is exported through the public package entry. The worker re-exports it and retains the historical receipt proof with full post-getSession revalidation pinned to the same current task. Neither query nor its bindings changed semantically.
+- SnapshotWakeClaimInput carries optional allowRestored through the existing sessions port for deferred activation. Captured node/generation, local activation token, wake-ready lock, null rejection/valid duplicate-zero acknowledgment and lifecycle emission order are retained.
+- Native/Workers tests use extracted public or permitted internal test entry points. All925original test declarations across31modified suites remain. Publication interruption/fencing, refresh-work and continuation-cron tests are unchanged; accepted-wake/handoff suites change import paths only.
+
+The new catalog-publication-current-chain test executes all256actual migrations for a clean installation and upgrades seeded data after applied archive0237 through catalog0239. Both cases pass. They preserve complete archive reclaim/proof rows and existing source/candidate/pool fields, verify selective committed-publication backfill, exercise new private staging/refresh writes and check foreign keys. The peer's0238 is intentionally absent here and remains part of the later separate combined validation.
+
+Local static Cloudflare/constitution/documentation and security reviews find no port regression. Test/completion review confirms retained acceptance coverage; fresh broad/Workers execution and real staging remain separate gates. The initial dependency/API build found two imports still pointing at removed modules; both were corrected to public package entry points and the API build passes. Migration safety (244FKrelationships/zero new violations), ordering and node-pool boundary checks pass. Final validation results, immutable new head, CI and final coordinator review will be recorded before handoff.
+
+- [x] Preserve applied archive0237; reserve unpublished catalog0239 beside peer0238.
+- [x] Resolve moved implementation/schema/test conflicts without restoring duplicate worker implementations.
+- [x] Add real clean-install/current-main-upgrade migration coverage; retain prior interruption/fencing/recovery assertions.
+- [x] Run local static specialist reviews and address import/wiring findings.
+- [ ] Finish fresh native/Workers and quality validation on the immutable port.
+- [ ] Push current PR head, reconcile required CI and best-effort review evidence, provide full-SHA/port-map handoff.
+- [ ] Obtain final independent coordinator code review before one final combined refresh; physical cleanup, required real staging and final release approval remain open.

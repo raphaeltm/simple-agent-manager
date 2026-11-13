@@ -81,8 +81,10 @@ const harness = vi.hoisted(() => ({
 }));
 
 // Only `log` is replaced; the real `serializeError` redacts messages as it does in production.
-vi.mock('../../../src/lib/logger', async (load) => ({
-  ...(await load<typeof import('../../../src/lib/logger')>()),
+// The worker's `lib/logger` re-exports worker-core's `log`, which app-deployment uses directly,
+// so the package entry is mocked to reach both.
+vi.mock('@simple-agent-manager/worker-core', async (load) => ({
+  ...(await load<typeof import('@simple-agent-manager/worker-core')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 

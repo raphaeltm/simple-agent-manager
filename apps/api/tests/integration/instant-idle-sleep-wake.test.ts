@@ -15,6 +15,22 @@
  * ProjectData RPC hop — whose session transitions still run ProjectData's real
  * functions against the same SQLite.
  */
+import * as attention from '@simple-agent-manager/project-data/internal/do/attention';
+import { processPromptDeliveryAlarm } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import * as mailbox from '@simple-agent-manager/project-data/internal/do/mailbox';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import {
+  acceptPromptDelivery,
+  nudgePromptDeliveriesForTarget,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { resolveSessionAccess } from '@simple-agent-manager/project-data/internal/do/session-access';
+import { getSession } from '@simple-agent-manager/project-data/internal/do/session-reads';
+import {
+  applySessionWakeReady,
+  isSessionWakeReadyCurrent,
+  type SessionWakeReadyInput,
+} from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
+import * as sessions from '@simple-agent-manager/project-data/internal/do/sessions';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -22,22 +38,6 @@ import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
-import * as attention from '../../src/durable-objects/project-data/attention';
-import { processPromptDeliveryAlarm } from '../../src/durable-objects/project-data/durability-foundation';
-import * as mailbox from '../../src/durable-objects/project-data/mailbox';
-import {
-  acceptPromptDelivery,
-  nudgePromptDeliveriesForTarget,
-} from '../../src/durable-objects/project-data/prompt-delivery';
-import { resolveSessionAccess } from '../../src/durable-objects/project-data/session-access';
-import { getSession } from '../../src/durable-objects/project-data/session-reads';
-import {
-  applySessionWakeReady,
-  isSessionWakeReadyCurrent,
-  type SessionWakeReadyInput,
-} from '../../src/durable-objects/project-data/session-wake-ready';
-import * as sessions from '../../src/durable-objects/project-data/sessions';
 import { VmAgentContainer } from '../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';

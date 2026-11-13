@@ -36,7 +36,7 @@ app.use('*', async (c, next) => {
 });
 ```
 
-Throw `AppError` (from `middleware/error.ts`) in route handlers — the global `app.onError()` handler catches them.
+Throw `AppError` (from `@simple-agent-manager/worker-core`, re-exported by `middleware/error.ts`) in route handlers — the global `app.onError()` handler catches them.
 
 ## Route Handler Pattern
 

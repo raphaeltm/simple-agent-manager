@@ -118,9 +118,9 @@ Workflow prompts in `.codex/prompts/` (Codex) and `.claude/commands/` (Claude Co
 Per-project data (chat sessions, messages, activity events, and canonical `project_event_*` event-subscription records) is stored in a `ProjectData` Durable Object with embedded SQLite:
 
 - **Access**: `env.PROJECT_DATA.idFromName(projectId)` → deterministic DO stub
-- **Service layer**: `apps/api/src/services/project-data.ts` — typed wrapper for all DO RPC calls
-- **DO class**: `apps/api/src/durable-objects/project-data/` — Durable Object implementation split by concern; constructor/migrations are under this directory
-- **Migrations**: `apps/api/src/durable-objects/migrations.ts` — append-only, tracked in `migrations` table
+- **Service layer**: `packages/project-data/src/client/project-data.ts` — typed wrapper for all DO RPC calls
+- **DO class**: `packages/project-data/src/do/` — Durable Object implementation split by concern; constructor/migrations are under this directory
+- **Migrations**: `packages/project-data/src/do/migrations.ts` — append-only, tracked in `migrations` table
 - **WebSocket**: Hibernatable WebSockets for real-time event streaming
 - **D1 sync**: `scheduleSummarySync()` debounces summary updates to D1
 - **Architecture docs**: `apps/www/src/content/docs/docs/architecture/overview.md`

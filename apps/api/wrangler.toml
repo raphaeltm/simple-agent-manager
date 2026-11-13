@@ -107,16 +107,15 @@ PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "2"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT = "100"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
-# This interval IS the drain rate: a tick archives exactly one session, because
-# PROJECT_DATA_ARCHIVE_WALL_TIME_MS is checked only between candidates and a real candidate takes
-# 43-83 s. 18 min (was one hour until 2026-09-27) triples it to one claim every 20 minutes. It is
-# deliberately short of 20: the */5 cron reaches the archive step 1m15s-3m30s into each invocation,
-# and at a whole-hour interval claims kept missing their tick by seconds (37 claims averaged 62.7 min
-# apart). 18 is never due on the third five-minute tick and is due on the fourth unless the archive
-# step starts over two minutes earlier than at the previous claim (the observed spread is 2m15s),
-# which pushes that one claim to 25 minutes. Per-tick copy work
-# stays bounded by _WALL_TIME_MS, _SWEEP_SESSIONS and _SWEEP_MESSAGE_BUDGET; daily volume by
-# _DAILY_WRITE_BUDGET. Load review: tasks/archive/2026-09-27-triple-archive-drain-speed.md and the
+# The sweep claims a tick every 18 min (80 a day). Until 2026-11-12 a tick archived exactly one
+# session, because _WALL_TIME_MS (10 s) was below one small session's fixed cost; since then a
+# tick keeps working for _WALL_TIME_MS. 18 min rather than 20: the */5 cron reaches the archive
+# step 1m15s-3m30s into each invocation, and at whole multiples claims kept missing their tick by
+# seconds (37 hourly claims averaged 62.7 min apart). 18 is never due on the third five-minute
+# tick and is due on the fourth unless the archive step starts over two minutes earlier than at
+# the previous claim (the observed spread is 2m15s), which pushes that one claim to 25 minutes.
+# Per-tick work is bounded by _WALL_TIME_MS and _SWEEP_SESSIONS; daily volume by
+# _DAILY_WRITE_BUDGET. Load review: tasks/active/2026-11-12-projectdata-archive-drain.md and the
 # archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.
 # 2026-10-03: a billing firebreak (#2216) set this back to one hour and was reverted the same day.
 # The cost spike it reacted to came from Containers, Workers AI and R2 snapshot uploads, not from
@@ -124,47 +123,32 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 # (it hit the cap on 2026-10-02). This drain is storage protection, not a cost lever: do not slow
 # it to save money.
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "1080000"
-# Only `migrating` fences per tick; the real throughput bound is _DAILY_WRITE_BUDGET. Each
-# fenced session costs ~3 D1 writes plus an unbounded chunk copy, and the tick's wall-time
-# gate is only checked BETWEEN candidates. A refused candidate opens no fence and consumes
-# no slot.
-#
-# This is NOT a throughput lever while _WALL_TIME_MS is below one candidate's real duration:
-# largest-first selection under a cumulative message budget fences ONE candidate that consumes
-# nearly the whole budget, the wall gate is only checked BETWEEN candidates, and a single
-# candidate already exceeds it. What this value does bind is the reclaimable-migration limit
-# and the candidate over-fetch LIMIT (min(limit, _SWEEP_PROJECTS * this) + _FALLTHROUGH_DEPTH),
-# i.e. how much in-flight work one tick can resume. Code default is 10. Do not raise it
-# expecting more drain without first raising _WALL_TIME_MS past a candidate's real duration.
-PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "8"
-# Cumulative message_count of NEW candidates one tick may journal. This is a selector
-# ceiling, not an exact throughput promise: reserveArchiveWrites reserves the
-# estimateArchiveWrites result, computed as 1000 + factor * inventory units per session.
-# Inventory units include raw messages, tool-payload rows, grouped rows, and grouped FTS bytes.
-# This budget is ALSO the per-candidate ceiling (`sweepMessageCeiling` = min(this, the ceiling
-# derived from _DAILY_WRITE_BUDGET)), and when _COMPACT_ENABLED is true selectCandidates binds
-# it into `AND ss.message_count <= ?`. A session larger than this is therefore not deferred —
-# it is INVISIBLE to every tick until the budget is raised. Treat a change here as a change to
-# WHICH sessions can ever be archived, not only to how fast.
-#
-# 2026-09-20: 10000 (was 5000). Step 1 of a staged raise toward the code default of 20000;
-# promote only on staged evidence, never as a routine bump. MAX is 5_000_000.
-# Two constraints to keep in mind when changing it:
-#   - Bigger candidates are the better buy per write (the fixed 1000-unit per-session
-#     reservation amortises further), but the allowance then admits fewer sessions per UTC
-#     window than the cadence has ticks, so _DAILY_WRITE_BUDGET becomes the binding
-#     constraint and later ticks report `window_exhausted` — normal backpressure, not an alert.
-#   - Per-candidate risk scales with the candidate: chunk count, seal read-back, lease headroom
-#     against _LEASE_MS, and the cost of a failed attempt (copySourceChunks restarts at ordinal
-#     0 and re-reserves the full estimate; _POISON_AFTER_ATTEMPTS failures strand the session).
-# Sizing evidence, rollout stages and the production measurements behind this value live in
-# tasks/archive/2026-09-20-archive-sweep-throughput-step3.md and PR #2109. Behaviour is pinned by
-# tests/unit/project-data-archive/sweep-message-budget-shipped.test.ts and
-# tests/workers/project-data-archive-sweep-throughput.test.ts.
+# Most sessions one tick may copy. A candidate refused by the write budget or by the root object
+# takes no slot, so this caps work done, not candidates looked at. It also sets the
+# reclaimable-migration limit and the candidate over-fetch LIMIT
+# (min(limit, _SWEEP_PROJECTS * this) + _FALLTHROUGH_DEPTH). At _WALL_TIME_MS = 60 s a tick
+# publishes ~6 small sessions (8-14 s each, measured 2026-11-12), so 50 is a safety cap that
+# wall time reaches first; it binds only for a run of near-empty sessions. Code default is 10.
+PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "50"
+# Cumulative message_count the operator-scoped canary packs into one run (largest first), and its
+# SQL ceiling for unnamed sessions. Since 2026-11-13 the UNSCOPED sweep no longer uses it: a
+# migration is a resumable cursor that copies, verifies and reclaims across ticks, so the only
+# per-session limit there is the ceiling derived from _DAILY_WRITE_BUDGET (`sweepMessageCeiling`).
+# Until then this was a per-candidate selection ceiling, and every session above it (77% of
+# eligible messages on 2026-11-11) was invisible to every tick.
+# History: 5000 until 2026-09-20, then 10000 (tasks/archive/2026-09-20-archive-sweep-throughput-step3.md,
+# PR #2109). Code default 20000, MAX 5_000_000. Pinned by
+# tests/unit/project-data-archive/sweep-message-budget-shipped.test.ts.
 PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "10000"
-# Soft budget checked between candidates; 10 s allows one ordinary candidate while limiting
-# tail draining in a single cron tick (code fallback stays 5 s).
-PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "10000"
+# Tick deadline. Checked between candidates and, since 2026-11-13, inside a migration too: a
+# migration that has advanced pauses at the deadline (copy chunk, R2 verification page or phase
+# boundary) and the next tick resumes it, so a tick runs up to this plus one in-flight RPC. The
+# longest are an R2 verification page (bounded by _R2_TIMEOUT_MS per call) and the prepare's
+# terminal-version hash, which yields between 500-row pages (100k messages: 1.8 s locally in
+# slices of at most 70 ms); the flip is an O(1) write-generation check. Production after the
+# 60 s tick shipped (2026-11-13, first ~5 ticks): 68,352 messages in 9 sessions, ~13.7k per tick;
+# 10 s fit exactly one small session before 2026-11-12. Code fallback stays 5 s.
+PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "60000"
 PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS = "4"
 PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY = "4"
 PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS = "1"

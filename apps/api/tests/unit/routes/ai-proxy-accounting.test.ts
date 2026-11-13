@@ -51,7 +51,9 @@ vi.mock('../../../src/middleware/rate-limit', () => ({
     `${prefix}:${userId}:${window}`,
   getCurrentWindowStart: () => 1000,
 }));
-vi.mock('../../../src/services/ai-token-budget', () => ({
+// The package's accounting calls these from inside the package; mock its module, not the
+// worker re-export (worker modularization W5).
+vi.mock('@simple-agent-manager/ai-proxy/internal/ai-token-budget', () => ({
   // No admin allowance: the model-tier gate allows every tier (covered in ai-proxy-model-tiers.test.ts).
   getAdminAiAllowance: async () => null,
   checkAiUsageGate: (...args: unknown[]) => mockCheckAiUsageGate(...args),
@@ -409,9 +411,7 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     await res.text();
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.openai.com/v1/responses');
-    expect(init.body).toBe(
-      JSON.stringify({ model: 'gpt-6.1-sol', input: 'Use a tool', tools })
-    );
+    expect(init.body).toBe(JSON.stringify({ model: 'gpt-6.1-sol', input: 'Use a tool', tools }));
     expectUsageIncrement(6, 2);
   });
 

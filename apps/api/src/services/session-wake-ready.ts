@@ -1,4 +1,5 @@
-import type { ProjectData } from '../durable-objects/project-data';
+import type { ProjectData } from '@simple-agent-manager/project-data/durable-object';
+
 import type { SessionWakeReadyInput } from '../durable-objects/project-data/session-wake-ready';
 import { parseEnvInt } from '../durable-objects/task-runner/helpers';
 import type { Env } from '../env';

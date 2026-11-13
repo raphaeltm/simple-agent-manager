@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { hmacToken } from '../../../src/routes/api-tokens';
 import { connectorMcpRoutes, createConnectorServer } from '../../../src/routes/connector-mcp';
 import { invalidateAdminSettings } from '../../../src/services/admin-settings';
@@ -100,6 +101,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
       createConnectorServer(
         {
           env,
+          ports: createOperationPorts(env),
           actor: { userId: 'owner', via: 'pat', scopes: new Set(['sam.read', 'sam.write']) },
           requestId: 'test',
         },

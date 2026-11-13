@@ -1,3 +1,7 @@
+import {
+  type ConcreteCapacitySnapshot,
+  normalizeConcreteSnapshot,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   CapacityPoolScope,
@@ -12,11 +16,6 @@ import {
   buildAnyDefaultCapacityPoolExclusionSql,
   buildHigherPrecedenceDefaultCapacityPoolExclusionSql,
 } from './capacity-pool-precedence';
-import { capacityCandidateSatisfiesWorkloadRole } from './capacity-pool-workload-roles';
-import {
-  type ConcreteCapacitySnapshot,
-  normalizeConcreteSnapshot,
-} from './placement-authority-snapshot';
 
 export type PlacementSqlBind = string | number | null;
 export type PlacementAuthorityNodeClass = 'managed' | 'user-owned';
@@ -246,13 +245,6 @@ export function buildPlacementAuthoritySqlPredicate(
   );
 
   return { sql: clauses.join('\n'), binds };
-}
-
-export function capacityCandidateWorkloadRoleEligible(
-  candidateRole: string | null | undefined,
-  requestedRole: CapacityWorkloadRole
-): boolean {
-  return capacityCandidateSatisfiesWorkloadRole(candidateRole, requestedRole);
 }
 
 export function capacityCandidateWorkloadRoleSql(

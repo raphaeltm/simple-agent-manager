@@ -1,11 +1,13 @@
 /**
  * What the shipped `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` costs and buys.
  *
- * The behavioural half lives in `tests/workers/project-data-archive-sweep-throughput.test.ts`,
- * which drives the real sweep and proves the budget is a SELECTION ceiling: below it a larger
- * session is invisible, at it the session archives with its transcript intact. These cases
- * cover the half that behaviour test cannot see — what the ceiling does to the daily write
- * allowance, which is a different binding constraint and an operating-cost question.
+ * Since 2026-11-13 the unscoped sweep no longer selects by this budget: a migration is a
+ * resumable cursor and the only per-session selection limit is the ceiling derived from the
+ * daily write allowance (`tests/workers/project-data-archive-sweep-throughput.test.ts` drives a
+ * session above it to publication). The budget remains the operator-scoped canary's packing
+ * budget. These cases pin what sessions of this size cost the daily write allowance, which is
+ * the binding constraint and an operating-cost question. The history below records why the
+ * value was raised while it was still a selection ceiling.
  *
  * Measured in production on 2026-09-20 (root ProjectData object at ~99.85% of its configured
  * 10 GB limit):
@@ -33,15 +35,15 @@
  * The reservation runs against a real SQLite engine through `createSqliteD1`, not a stub,
  * because the thing under test is a conditional UPDATE predicate (`.claude/rules/28`).
  */
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
 import {
   ARCHIVE_WRITE_FIXED_RESERVATION,
   archiveAffordableMessageCeiling,
   archiveWriteBudgetConfig,
   reserveArchiveWrites,
-} from '../../../src/project-data-archive/write-budget';
+} from '@simple-agent-manager/project-data/internal/archive/write-budget';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   PREVIOUS_SWEEP_MESSAGE_BUDGET,
   SHIPPED_DAILY_WRITE_BUDGET,
@@ -178,12 +180,11 @@ describe('shipped archive sweep message budget', () => {
       allowance
     );
 
-    // A tick can only fence one budget's worth of messages, and a candidate at the ceiling
-    // consumes nearly all of it, so the daily CEILING is
-    // min(affordable sessions, ticks per day) x budget. This is an upper bound on what the
-    // sweep could move, not a forecast: selection is global and largest-first, so how much of
-    // it any one project receives depends on the other projects competing for the same ticks
-    // and the same allowance.
+    // A comparison of the two ceilings at one ceiling-sized session per tick, the shape this
+    // case was written for (2026-09-20). Since 2026-11-12 a tick keeps working for
+    // `_WALL_TIME_MS` rather than stopping at one budget's worth, so this is the floor of what
+    // either ceiling admits, not the daily drain; `write-budget-shipped-factor.test.ts` checks
+    // the allowance against a full wall-time tick.
     const shippedPerDay = Math.min(shippedSessions, ticksPerDay) * SHIPPED_SWEEP_MESSAGE_BUDGET;
     const previousPerDay = Math.min(previousSessions, ticksPerDay) * PREVIOUS_SWEEP_MESSAGE_BUDGET;
 

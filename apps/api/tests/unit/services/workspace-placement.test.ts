@@ -1,3 +1,8 @@
+import {
+  evaluateWorkspaceReservationCapacity,
+  type PlacementAdmissionPolicy,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
@@ -13,11 +18,8 @@ import {
   reserveWorkspaceRestart,
 } from '../../../src/services/workspace-placement';
 import {
-  evaluateWorkspaceReservationCapacity,
   loadActiveWorkspaceReservationUsage,
-  type PlacementAdmissionPolicy,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../../src/services/workspace-resource-capacity';
+} from '../../../src/services/workspace-reservation-usage';
 import {
   createAllSchemaTables,
   createSqliteD1,

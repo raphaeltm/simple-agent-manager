@@ -5,9 +5,11 @@
  * in DO SQLite migration definitions.
  */
 
-import { describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 import { extractSqlFromTypeScript } from './check-do-migration-safety';
 
@@ -100,11 +102,10 @@ describe('DO migration safety check', () => {
 
 describe('DO migration safety — current migrations are non-destructive', () => {
   it('no DROP TABLE in DO migrations', () => {
-    const { readFileSync } = require('node:fs');
     const migrations = readFileSync(
       join(
         import.meta.dirname,
-        '../../apps/api/src/durable-objects/migrations.ts'
+        '../../packages/project-data/src/do/migrations.ts'
       ),
       'utf-8'
     );
@@ -127,11 +128,10 @@ describe('DO migration safety — current migrations are non-destructive', () =>
   });
 
   it('no DELETE FROM without WHERE in DO migrations', () => {
-    const { readFileSync } = require('node:fs');
     const migrations = readFileSync(
       join(
         import.meta.dirname,
-        '../../apps/api/src/durable-objects/migrations.ts'
+        '../../packages/project-data/src/do/migrations.ts'
       ),
       'utf-8'
     );
@@ -151,12 +151,11 @@ describe('DO migration safety — current migrations are non-destructive', () =>
     }
   });
 
-  it('all DO migrations use safe patterns (CREATE TABLE, ALTER TABLE, CREATE [UNIQUE] INDEX)', () => {
-    const { readFileSync } = require('node:fs');
+  it('all DO migrations use safe patterns (CREATE TABLE, ALTER TABLE, CREATE [UNIQUE] INDEX, non-destructive CREATE TRIGGER)', () => {
     const migrations = readFileSync(
       join(
         import.meta.dirname,
-        '../../apps/api/src/durable-objects/migrations.ts'
+        '../../packages/project-data/src/do/migrations.ts'
       ),
       'utf-8'
     );
@@ -177,6 +176,9 @@ describe('DO migration safety — current migrations are non-destructive', () =>
       /UPDATE\s+\w+\s+SET\s+[\s\S]*WHERE/i, // UPDATE with WHERE is fine
       /INSERT\s+INTO/i,
       /INSERT\s+OR\s+IGNORE/i,
+      // A trigger only adds behaviour; it is safe while its body neither deletes nor drops
+      // anything (migration 076's write-generation triggers only upsert a counter row).
+      /^(?![\s\S]*\b(?:DELETE\s+FROM|DROP)\b)CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\b/i,
     ];
 
     for (const sql of sqlBlocks) {

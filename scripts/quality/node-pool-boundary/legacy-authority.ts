@@ -34,7 +34,12 @@ import {
  * Tier 1 (authority sinks) is enforced across the whole allocation control plane
  * so a NEW module cannot escape by not being on a list.
  */
-const AUTHORITY_SINK_ROOTS = ['apps/api/src', 'packages/providers/src'] as const;
+const AUTHORITY_SINK_ROOTS = [
+  'apps/api/src',
+  'packages/providers/src',
+  'packages/scheduler-core/src',
+  'packages/operations/src',
+] as const;
 
 const COMPARISON_OPERATORS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.EqualsEqualsToken,

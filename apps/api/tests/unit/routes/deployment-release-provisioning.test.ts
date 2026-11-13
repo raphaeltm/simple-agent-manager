@@ -167,7 +167,7 @@ vi.mock('drizzle-orm', () => ({
   isNull: (col: unknown) => ['isNull', col],
 }));
 
-vi.mock('../../../src/db/schema', () => ({
+vi.mock('@simple-agent-manager/worker-core/schema', () => ({
   deploymentEnvironments: {
     id: 'de.id',
     projectId: 'de.projectId',

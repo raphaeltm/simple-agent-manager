@@ -1,6 +1,6 @@
 /**
  * Email sign-in: BetterAuth's emailOTP plugin, sending a six-digit code through the agent email
- * send binding (`./agent-email/provider.ts`) from `sign-in@agents.<BASE_DOMAIN>`.
+ * send binding (`packages/agent-email/src/provider.ts`) from `sign-in@agents.<BASE_DOMAIN>`.
  *
  * It exists only where the deploy prepared Email Sending (`hasAgentEmailBinding`): installer
  * installs and GitHub Actions deploys whose token has the email permissions. Turning inbound

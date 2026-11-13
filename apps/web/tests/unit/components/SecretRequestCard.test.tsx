@@ -422,4 +422,39 @@ describe('secret request card in chat', () => {
     expect(screen.queryByTestId('secret-request-card')).not.toBeInTheDocument();
     expect(getSecretRequest).not.toHaveBeenCalled();
   });
+
+  it('renders the input form from Codex sparse rows (no toolName, result only in content)', async () => {
+    // Codex: dotted title and no toolName on the call; the completed update names no tool and
+    // carries the result only as message content (production regression, 2026-11-12).
+    getSecretRequest.mockResolvedValue(response());
+    const base = { sessionId: 'sess-1', role: 'tool', createdAt: 1_762_340_000_000 } as const;
+    const items = chatMessagesToConversationItems([
+      {
+        ...base,
+        id: 'codex-start',
+        content: '(tool call)',
+        toolMetadata: {
+          toolCallId: 'call_codex',
+          title: 'mcp.sam-mcp.request_secret',
+          kind: 'execute',
+          status: 'in_progress',
+        } as unknown as null,
+      },
+      {
+        ...base,
+        id: 'codex-done',
+        content: JSON.stringify({
+          message: 'Secret request recorded.',
+          secretRequest: { id: REQUEST_ID },
+        }),
+        toolMetadata: { toolCallId: 'call_codex', status: 'completed' } as unknown as null,
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    render(<AcpConversationItemView item={items[0]!} projectId={PROJECT_ID} />);
+
+    expect(await screen.findByTestId('secret-request-card')).toBeInTheDocument();
+    expect(getSecretRequest).toHaveBeenCalledWith(PROJECT_ID, REQUEST_ID, expect.anything());
+    expect(valueInput()).toHaveAttribute('type', 'password');
+  });
 });

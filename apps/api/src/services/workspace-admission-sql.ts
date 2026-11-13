@@ -3,6 +3,9 @@
  * the node scope, the requested and active reservations, and the eligibility predicate.
  * Split out of `workspace-placement.ts` (`.claude/rules/18-file-size-limits.md`).
  */
+import {
+  type WorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
 import { resolveResourceReservation } from '@simple-agent-manager/shared';
 
 import { lifetimeAdmissionCutoffSql } from './node-lifetime-admission';
@@ -11,8 +14,7 @@ import type { WorkspacePlacementInput } from './workspace-placement';
 import {
   ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
   RESOURCE_REQUIREMENTS_SOURCE_SQL,
-  type WorkspaceAdmissionPolicy,
-} from './workspace-resource-capacity';
+} from './workspace-reservation-usage';
 
 /** Shared admission reads and parameter ordering for both atomic workspace mutations. */
 export function buildWorkspaceAdmissionSql(
@@ -207,7 +209,7 @@ export function workspaceAdmissionEligibilitySql(): string {
 }
 
 /**
- * SQL twin of `measuredHostOverheadMb` (`workspace-resource-capacity.ts`): the host reserve, or the
+ * SQL twin of `measuredHostOverheadMb` (`packages/scheduler-core/src/workspace-resource-capacity.ts`): the host reserve, or the
  * measured use no workspace observation explains when that is larger. Charging measured use on top
  * of the reserve counted host overhead twice; see the evaluator for the condition this encodes.
  */
@@ -335,4 +337,40 @@ function finalMeasuredPressurePredicateSql(): string {
         < policy.disk_pressure_threshold_percent
     )
   )`;
+}
+
+/**
+ * The exact node columns `resolveTrustedWorkspaceNodeCapacity` reads, as an
+ * aliased SQL projection. Every node query whose rows feed capacity evaluation
+ * or legacy-adoption evaluation must include this fragment: a projection that
+ * omits it makes `providerInstanceId`/`observedHardwareSource` undefined, so
+ * every node resolves to "no trusted observed hardware" and is silently rejected
+ * — advisory selection then disagrees with the final admission SQL, which reads
+ * the same columns directly off the row.
+ */
+export function trustedWorkspaceNodeCapacityColumnsSql(alias = ''): string {
+  if (alias && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+    throw new Error(`Unsafe SQL alias: ${alias}`);
+  }
+  const prefix = alias ? `${alias}.` : '';
+  return `${prefix}node_class AS nodeClass,
+       ${prefix}node_role AS nodeRole,
+       ${prefix}provider_instance_id AS providerInstanceId,
+       ${prefix}observed_provider_instance_type AS observedProviderInstanceType,
+       ${prefix}observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
+       ${prefix}observed_provider_instance_memory_mb AS observedProviderInstanceMemoryMb,
+       ${prefix}observed_provider_instance_disk_gb AS observedProviderInstanceDiskGb,
+       ${prefix}observed_hardware_source AS observedHardwareSource`;
+}
+
+/** Row shape produced by `trustedWorkspaceNodeCapacityColumnsSql`. */
+export interface TrustedWorkspaceNodeCapacityRow {
+  nodeRole?: string | null;
+  nodeClass: string | null;
+  providerInstanceId: string | null;
+  observedProviderInstanceType: string | null;
+  observedProviderInstanceVcpuCount: number | null;
+  observedProviderInstanceMemoryMb: number | null;
+  observedProviderInstanceDiskGb: number | null;
+  observedHardwareSource: string | null;
 }

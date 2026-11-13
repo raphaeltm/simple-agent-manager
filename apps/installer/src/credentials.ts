@@ -83,7 +83,7 @@ const RUNTIME_ACCOUNT = [
   'AI Gateway Read',
   'AI Gateway Run',
   'Account Settings Read',
-  // Agent email setup in the app reads the sending domain (services/agent-email/setup.ts).
+  // Agent email setup in the app reads the sending domain (packages/agent-email/src/setup.ts).
   'Email Sending Read',
 ];
 const DEPLOY_ZONE = [

@@ -1,3 +1,10 @@
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { VMSize } from '@simple-agent-manager/shared';
 import {
   DEFAULT_RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH,
@@ -33,13 +40,6 @@ import type {
   ReservedTaskSubmissionResult,
   ResolvedReservedTaskSubmissionDependencies,
 } from './reserved-task-submission-contracts';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  firstResourceRequirementLayerJson,
-  ResourceRequirementsValidationError,
-} from './resource-requirements-input';
 import { resolveSkillProfile } from './skills';
 import { type startTaskRunnerDO } from './task-runner-do';
 import {

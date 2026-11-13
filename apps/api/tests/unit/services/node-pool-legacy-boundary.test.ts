@@ -507,7 +507,7 @@ describe('node-pool legacy authority: reviewed exceptions are narrow', () => {
     expect(
       authorityFindings(
         file(
-          'apps/api/src/services/legacy-node-pool-compatibility.ts',
+          'packages/scheduler-core/src/legacy-node-pool-compatibility.ts',
           [
             "import { canSatisfyVmSize } from '@simple-agent-manager/shared';",
             'export function matches(node: string, want: string) { return canSatisfyVmSize(node, want); }',
@@ -526,7 +526,7 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
       'return input.vmSize;',
     ],
     [
-      'apps/api/src/services/capacity-pool-authority.ts',
+      'packages/scheduler-core/src/capacity-pool-authority.ts',
       'capacityCandidateAuthorityGeneration',
       'return hash([input.machineSize]);',
     ],
@@ -536,7 +536,7 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
       'return input.machineSize;',
     ],
     [
-      'apps/api/src/services/placement-field-resolution.ts',
+      'packages/scheduler-core/src/placement-field-resolution.ts',
       'resolveVmSize',
       'return input.vmSizeOverride ?? fallback;',
     ],
@@ -553,7 +553,7 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
   });
 
   it('does not let a compatibility helper forward labels into a native sink', () => {
-    const path = 'apps/api/src/services/placement-resolver-capacity.ts';
+    const path = 'packages/scheduler-core/src/placement-resolver-capacity.ts';
     expect(
       authorityFindings(
         file(

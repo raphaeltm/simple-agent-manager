@@ -2,6 +2,16 @@ import { Buffer } from 'node:buffer';
 
 import { getProviderInstanceOfferings } from '@simple-agent-manager/providers';
 import {
+  buildCapacityPoolSelection,
+  capacityCandidateBaseId,
+  capacityCandidateIdForRole,
+  capacityCandidateRoleFromId,
+  capacityCandidateSatisfiesWorkloadRole,
+  emptyUsage,
+  evaluateWorkspaceReservationCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '@simple-agent-manager/scheduler-core';
+import {
   getDefaultLocationForProvider,
   getLocationsForProvider,
   type ProviderInstanceOffering,
@@ -18,12 +28,6 @@ import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/c
 import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
 import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
 import { capacityPoolRefreshSettings } from '../../../src/services/capacity-pool-refresh-settings';
-import {
-  capacityCandidateBaseId,
-  capacityCandidateIdForRole,
-  capacityCandidateRoleFromId,
-  capacityCandidateSatisfiesWorkloadRole,
-} from '../../../src/services/capacity-pool-workload-roles';
 import { initialStatusForProviderOffering } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
@@ -49,13 +53,7 @@ import {
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
-import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
 import { listUserProviderCatalogSeeds } from '../../../src/services/provider-catalogs';
-import {
-  emptyUsage,
-  evaluateWorkspaceReservationCapacity,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../../src/services/workspace-resource-capacity';
 import {
   applyCapacityPoolSchemaMigrations,
   catalogPublicationMigrationSql,

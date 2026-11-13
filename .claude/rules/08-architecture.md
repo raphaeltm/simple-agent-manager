@@ -13,14 +13,19 @@ No database is required for the MVP.
 ```
 @simple-agent-manager/shared
     ^
-@simple-agent-manager/providers
+@simple-agent-manager/providers   @simple-agent-manager/worker-core   @simple-agent-manager/scheduler-core
+    ^                                 ^                                   ^
+worker module packages: project-data, operations, app-deployment, ai-proxy, agent-email, repo-hosting
     ^
 @simple-agent-manager/api
     ^
 @simple-agent-manager/web
 ```
 
-Build order matters: shared -> providers -> api/web
+Build order matters: shared -> providers / worker-core / scheduler-core -> worker module packages -> api/web.
+Of the worker module packages, project-data also depends on scheduler-core and app-deployment on providers.
+Worker module packages never import from `apps/*`; the worker imports them through public entry points only
+(`eslint.config.mjs`, `boundaryRules`).
 
 ### Adding New Features
 1. Check if types need to be added to `packages/shared`
@@ -69,7 +74,7 @@ Before making ANY changes related to features, workflows, state machines, valida
 1. Research relevant feature specifications:
    - `specs/` — Feature specs with user stories, requirements, acceptance criteria
    - `specs/*/data-model.md` — State machines, entity relationships, constraints
-   - `apps/api/src/db/schema.ts` — Current database schema and constraints
+   - `packages/worker-core/src/schema.ts` — Current database schema and constraints
    - `apps/api/src/routes/` — Existing API behavior and validation
 
 2. Use sequential thinking to:

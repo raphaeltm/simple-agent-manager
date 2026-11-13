@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs';
 
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { getPullRequestStates } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { getPullRequestStates } from '../../../src/operations/pull-request-core';
-import type { OperationContext } from '../../../src/operations/types';
+import { createOperationPorts } from '../../../src/operation-ports';
 import { handleGitHubWebhook } from '../../../src/routes/github-webhook';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -168,6 +169,7 @@ describe('verified GitHub PR webhooks', () => {
     const state = await getPullRequestStates(
       {
         env,
+        ports: createOperationPorts(env),
         actor: { userId: 'user', via: 'web', scopes: new Set(['sam.read']) },
         requestId: 'test',
       } satisfies OperationContext,

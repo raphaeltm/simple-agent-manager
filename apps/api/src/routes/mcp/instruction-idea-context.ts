@@ -11,16 +11,17 @@
  * prompt-injection channel into every later session. It travels inside the shared
  * untrusted-data envelope, capped by an admin setting.
  */
-import type { LinkRelation } from '@simple-agent-manager/shared';
-
-import type { Env } from '../../env';
-import { log } from '../../lib/logger';
-import { listLinks } from '../../operations/link-core';
+import { listLinks } from '@simple-agent-manager/operations';
 import {
   neutralizeUntrustedText,
   type UntrustedTextBlock,
   untrustedTextBlock,
-} from '../../operations/untrusted-text';
+} from '@simple-agent-manager/operations';
+import type { LinkRelation } from '@simple-agent-manager/shared';
+
+import type { Env } from '../../env';
+import { log } from '../../lib/logger';
+import { operationDeps } from '../../operation-ports';
 import { resolveAdminSettingDetails } from '../../services/admin-settings';
 
 /** The relations Start work writes. `linked` is an explicit tag, not a work intent. */
@@ -55,7 +56,7 @@ export async function resolveInstructionIdeaContext(
   projectId: string,
   chatSessionId: string
 ): Promise<InstructionIdeaContext | null> {
-  const links = (await listLinks(env, projectId, 'session', chatSessionId)).filter(
+  const links = (await listLinks(operationDeps(env), projectId, 'session', chatSessionId)).filter(
     (link) =>
       link.sourceKind === 'session' &&
       link.sourceId === chatSessionId &&

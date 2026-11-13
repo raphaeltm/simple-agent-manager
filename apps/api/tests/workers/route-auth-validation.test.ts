@@ -33,13 +33,13 @@
  *
  * - H4: Workspace count filter (excludes 'deleted'/'error') requires user auth.
  */
+import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { importPKCS8, SignJWT } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { Env } from '../../src/env';
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
 import { finalizeWorkspaceStopOnNode } from '../../src/services/workspace-eviction-lifecycle';

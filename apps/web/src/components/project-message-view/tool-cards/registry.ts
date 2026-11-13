@@ -13,6 +13,7 @@ import { extractHumanInputRequest, isHumanInputCardTool } from './human-input-ca
 import { HumanInputCard } from './HumanInputCard';
 import { extractSecretRequestId, isSecretRequestCardTool } from './secret-request-card-data';
 import { SecretRequestCard } from './SecretRequestCard';
+import { isTypedCardToolName } from './typed-card-tools';
 
 /** Props every typed tool-call card receives. */
 export interface ToolCardProps {
@@ -62,6 +63,12 @@ export function matchToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
 }
 
 function resolveToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
+  // One list of card tools for the registry and the message converter (TYPED_CARD_TOOLS): a card
+  // missing from it never renders, rather than rendering only for harnesses that repeat the tool
+  // name on every row.
+  if (!isTypedCardToolName(item.toolName ?? item.title)) {
+    return null;
+  }
   // Operations approval request: the card needs the approval ID from the result. While the
   // call runs, or when it failed, the generic card shows it (and any error) instead.
   if (isApprovalCardTool(item)) {
@@ -78,8 +85,7 @@ function resolveToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
   if (isSecretRequestCardTool(item)) {
     return item.status !== 'failed' && extractSecretRequestId(item) ? SecretRequestCard : null;
   }
-  const base = normalizeToolName(item.toolName ?? item.title);
-  if (!base || !DOCUMENT_CARD_TOOLS.has(base)) {
+  if (!DOCUMENT_CARD_TOOLS.has(normalizeToolName(item.toolName ?? item.title) ?? '')) {
     return null;
   }
   // Name says "library tool"; the payload is the authority on whether we can
