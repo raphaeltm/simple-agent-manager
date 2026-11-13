@@ -5,9 +5,11 @@
  * in DO SQLite migration definitions.
  */
 
-import { describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 
 import { extractSqlFromTypeScript } from './check-do-migration-safety';
 
@@ -100,7 +102,6 @@ describe('DO migration safety check', () => {
 
 describe('DO migration safety — current migrations are non-destructive', () => {
   it('no DROP TABLE in DO migrations', () => {
-    const { readFileSync } = require('node:fs');
     const migrations = readFileSync(
       join(
         import.meta.dirname,
@@ -127,7 +128,6 @@ describe('DO migration safety — current migrations are non-destructive', () =>
   });
 
   it('no DELETE FROM without WHERE in DO migrations', () => {
-    const { readFileSync } = require('node:fs');
     const migrations = readFileSync(
       join(
         import.meta.dirname,
@@ -152,7 +152,6 @@ describe('DO migration safety — current migrations are non-destructive', () =>
   });
 
   it('all DO migrations use safe patterns (CREATE TABLE, ALTER TABLE, CREATE [UNIQUE] INDEX, non-destructive CREATE TRIGGER)', () => {
-    const { readFileSync } = require('node:fs');
     const migrations = readFileSync(
       join(
         import.meta.dirname,
