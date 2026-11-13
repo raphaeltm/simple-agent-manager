@@ -1,8 +1,4 @@
-import {
-  hasAmbiguousLabel,
-  type ProviderRequestContext,
-  type VMInstance,
-} from '@simple-agent-manager/providers';
+import { type ProviderRequestContext } from '@simple-agent-manager/providers';
 import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -11,11 +7,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { captureNodeLogsBeforeTeardown } from './node-log-capture';
-import {
-  buildNodeProviderLabels,
-  resolveEnvironmentLabel,
-  resolveInstallationId,
-} from './node-provider-labels';
 import { releaseNodeTunnels } from './node-tunnel-cleanup';
 import {
   type ContainerWorkspaceDeletionAuthority,
@@ -29,11 +20,10 @@ import {
   type NodeRow,
   requireSameNodeIncarnation,
   requireStrictNode,
-  requireStrictNodeProvider,
   resolveStrictNodeProvider,
 } from './strict-node-deletion-shared';
 import { deleteStrictNodeDnsRecord } from './strict-node-dns-cleanup';
-import { getProvisioningTimeoutMs } from './timeout';
+import { reconcileStrictProviderlessVm } from './strict-node-providerless-reconcile';
 import { destroyVmAgentContainer } from './vm-agent-container';
 
 export type StrictNodeDeletionResult = {
@@ -86,142 +76,6 @@ async function deleteStrictProviderInstance(
   if (requestContext)
     await providerResult.provider.deleteVM(node.providerInstanceId, requestContext);
   else await providerResult.provider.deleteVM(node.providerInstanceId);
-  return 'deleted';
-}
-
-function providerInventoryMatchesLabels(
-  server: VMInstance,
-  labels: Record<string, string>
-): boolean {
-  return Object.entries(labels).every(
-    ([key, value]) => !hasAmbiguousLabel(server.labels, key) && server.labels[key] === value
-  );
-}
-
-function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstance): boolean {
-  return (
-    current.id === discovered.id &&
-    current.createdAt === discovered.createdAt &&
-    current.location === discovered.location &&
-    current.serverType === discovered.serverType
-  );
-}
-
-/**
- * Resolve a stale providerless destroy claim against the exact provider inventory.
- *
- * This path is deliberately narrower than ordinary strict deletion: the row must
- * already be destroying, carry a complete server-authored placement snapshot, and
- * resolve the exact credential generation used for allocation. Provider filtering is
- * never trusted by itself; every returned server must repeat the node, incarnation,
- * environment, installation, role, and managed labels locally. A discovered server is
- * re-read immediately before deletion. Only Hetzner's fail-closed, fully paginated
- * inventory is accepted here. Empty inventory cannot prove allocation finality;
- * retain the unresolved record so a late resource remains discoverable.
- */
-async function reconcileStrictProviderlessVm(
-  db: NodeDb,
-  node: NodeRow,
-  userId: string,
-  env: Env,
-  requestContext?: ProviderRequestContext,
-  beforeDestroy?: () => Promise<void>
-): Promise<StrictNodeDeletionResult['providerVm']> {
-  if (node.status !== 'destroying' || !hasManagedVmPlacementProof(node)) {
-    throw new Error(
-      `Cannot confirm managed VM termination for node ${node.id}: instance identity is missing`
-    );
-  }
-  // A fresh createVM may still be in flight. Keep every deployment entry
-  // point (including direct node Stop) quarantined until the existing recovery
-  // window passes for workspace nodes too; an empty inventory can be transient.
-  if (
-    !Number.isFinite(Date.parse(node.createdAt)) ||
-    Date.now() - Date.parse(node.createdAt) < getProvisioningTimeoutMs(env)
-  ) {
-    throw new Error('Node allocation is still within its provisioning recovery window');
-  }
-  // Only Hetzner currently guarantees that a successful filtered inventory read is
-  // complete. Other adapters may deliberately return partial multi-region inventory,
-  // so an empty generic list cannot prove provider-side absence.
-  if (node.cloudProvider !== 'hetzner') {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: provider inventory completeness is not guaranteed`
-    );
-  }
-  const installationId = resolveInstallationId(env);
-  const environmentLabel = resolveEnvironmentLabel(env);
-  if (!installationId || !environmentLabel || !node.runtimeIncarnationId) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: exact ownership scope is unavailable`
-    );
-  }
-
-  const labels = buildNodeProviderLabels({
-    nodeId: node.id,
-    isDeploymentNode: node.nodeRole === 'deployment',
-    environmentLabel,
-    installationId,
-    runtimeIncarnationId: node.runtimeIncarnationId,
-  });
-  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
-  if (providerResult.providerName !== node.cloudProvider) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: persisted provider binding did not resolve exactly`
-    );
-  }
-  const servers = requestContext
-    ? await providerResult.provider.listVMs(labels, requestContext)
-    : await providerResult.provider.listVMs(labels);
-
-  if (servers.some((server) => !providerInventoryMatchesLabels(server, labels))) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: provider inventory returned foreign or ambiguous ownership`
-    );
-  }
-  if (servers.length > 1) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: provider inventory returned duplicate exact ownership`
-    );
-  }
-
-  const discovered = servers[0];
-  if (!discovered) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: allocation remains unresolved despite empty inventory`
-    );
-  }
-  const createdAt = Date.parse(discovered.createdAt);
-  const nodeCreatedAt = Date.parse(node.createdAt);
-  if (
-    !Number.isFinite(createdAt) ||
-    !Number.isFinite(nodeCreatedAt) ||
-    createdAt < Math.floor(nodeCreatedAt / 1000) * 1000 ||
-    createdAt > Date.now() ||
-    discovered.location !== node.vmLocation ||
-    discovered.serverType !== node.providerInstanceType
-  ) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: provider inventory identity is inconsistent`
-    );
-  }
-
-  const current = requestContext
-    ? await providerResult.provider.getVM(discovered.id, requestContext)
-    : await providerResult.provider.getVM(discovered.id);
-  if (
-    !current ||
-    !sameProviderInventoryIdentity(current, discovered) ||
-    !providerInventoryMatchesLabels(current, labels)
-  ) {
-    throw new Error(
-      `Cannot reconcile providerless VM ${node.id}: exact ownership changed before deletion`
-    );
-  }
-  await requireSameNodeIncarnation(db, node, 'providerless inventory delete');
-  await beforeDestroy?.();
-  if (requestContext) await providerResult.provider.deleteVM(current.id, requestContext);
-  else await providerResult.provider.deleteVM(current.id);
   return 'deleted';
 }
 
