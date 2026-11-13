@@ -62,9 +62,10 @@ describe('admin analytics routes', () => {
 
   it('GET /dau queries the Cloudflare analytics SQL API when an account is configured (Cloudflare behaviour)', async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ data: [{ date: '2026-11-09', unique_users: '4' }] }), {
-        status: 200,
-      })
+      new Response(
+        JSON.stringify({ data: [{ date: '2026-11-09', unique_users: '4' }] }),
+        { status: 200 }
+      )
     );
 
     const res = await app().request('/api/admin/analytics/dau', {}, cloudflare());
@@ -76,9 +77,7 @@ describe('admin analytics routes', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(
-      'https://api.cloudflare.com/client/v4/accounts/account-1/analytics_engine/sql'
-    );
+    expect(url).toBe('https://api.cloudflare.com/client/v4/accounts/account-1/analytics_engine/sql');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer token-1');
     expect(String(init.body)).toContain('sam_analytics');
   });
@@ -99,10 +98,11 @@ describe('admin analytics routes', () => {
   );
 
   it('answers 404 when only the account id is set (the token is half of the credential)', async () => {
-    const res = await app().request('/api/admin/analytics/dau', {}, {
-      ...baseEnv,
-      CF_ACCOUNT_ID: 'account-1',
-    } as Env);
+    const res = await app().request(
+      '/api/admin/analytics/dau',
+      {},
+      { ...baseEnv, CF_ACCOUNT_ID: 'account-1' } as Env
+    );
 
     expect(res.status).toBe(404);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -190,9 +190,7 @@ describe('queryWorkerLogs', () => {
     expect(url).toContain('/accounts/account-1/workers/observability/telemetry/query');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer token-1');
     expect(JSON.parse(String(init.body))).toMatchObject({
-      parameters: {
-        filters: expect.arrayContaining([expect.objectContaining({ value: 'sam-api-staging' })]),
-      },
+      parameters: { filters: expect.arrayContaining([expect.objectContaining({ value: 'sam-api-staging' })]) },
     });
     expect(result.logs).toHaveLength(1);
     expect(result.logs[0]).toMatchObject({ level: 'error' });
