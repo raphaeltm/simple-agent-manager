@@ -50,6 +50,19 @@ export {
   DEFAULT_AGENT_EMAIL_SMTP_TIMEOUT_MS,
 } from './setting-definitions';
 export {
+  allowedAdditions,
+  CLOUDFLARE_ROUTING_DKIM_SELECTOR,
+  CLOUDFLARE_ROUTING_SPF,
+  consentTokenFor,
+  describeChange,
+  describeChanges,
+  differencesFromBaseline,
+  firstRoutingRecords,
+  subaddressingChange,
+  toMailRecord,
+} from './setup-changes';
+export { AgentEmailMainDomainChangedError, AgentEmailSetupRefusedError } from './setup-errors';
+export {
   sendSmtpMessage,
   type SmtpConnect,
   type SmtpDelivery,
@@ -68,17 +81,4 @@ export {
   type SmtpEnv,
   type SmtpTlsMode,
 } from './smtp-config';
-export { type BuiltMessage, buildSmtpMessage, dotStuff, SmtpMessageError } from './smtp-message';
-export {
-  allowedAdditions,
-  CLOUDFLARE_ROUTING_DKIM_SELECTOR,
-  CLOUDFLARE_ROUTING_SPF,
-  consentTokenFor,
-  describeChange,
-  describeChanges,
-  differencesFromBaseline,
-  firstRoutingRecords,
-  subaddressingChange,
-  toMailRecord,
-} from './setup-changes';
-export { AgentEmailMainDomainChangedError, AgentEmailSetupRefusedError } from './setup-errors';
+export { buildSmtpMessage, type BuiltMessage, dotStuff, SmtpMessageError } from './smtp-message';

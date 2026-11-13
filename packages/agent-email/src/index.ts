@@ -112,7 +112,6 @@ export {
   type OutboundAgentEmail,
   systemEmailTransportFor,
 } from './provider';
-export { type SmtpConnect } from './smtp-client';
 export { type AgentEmailRecoveryStats, runAgentEmailRecovery } from './recovery';
 export {
   AgentEmailReplyError,
@@ -173,6 +172,7 @@ export {
   replaceSetupAttempt,
   type StoredSetupAttempt,
 } from './setup-state';
+export { type SmtpConnect } from './smtp-client';
 export {
   loadEmailTriggerConfig,
   parseAllowedSenders,

@@ -6,8 +6,8 @@
  */
 import { DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS } from '@simple-agent-manager/shared';
 
-import type { AiProxyEnv } from './env';
 import type { UsageByDay, UsageByModel } from './ai-gateway-logs';
+import type { AiProxyEnv } from './env';
 
 export interface AiModelUsageRow {
   date: string;

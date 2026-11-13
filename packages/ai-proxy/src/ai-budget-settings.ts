@@ -12,10 +12,10 @@ import {
   DEFAULT_AI_USAGE_MIN_DAILY_TOKEN_LIMIT,
   DEFAULT_AI_USAGE_MIN_MONTHLY_COST_CAP_USD,
 } from '@simple-agent-manager/shared';
-
-import type { AiProxyEnv } from './env';
 import { expectJsonRecord } from '@simple-agent-manager/worker-core';
+
 import { isMonthlyCostCapAvailable } from './ai-gateway-availability';
+import type { AiProxyEnv } from './env';
 
 export interface AiBudgetLimits {
   maxDailyTokens: number;

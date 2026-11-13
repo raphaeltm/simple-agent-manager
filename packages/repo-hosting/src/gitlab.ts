@@ -12,12 +12,12 @@ import { eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
+import type { Env, RepoHostingRequestContext } from './env';
 import {
   assertGitLabHostAllowed,
   DEFAULT_GITLAB_API_TIMEOUT_MS,
   gitLabRequestError,
 } from './gitlab-host-policy';
-import type { Env, RepoHostingRequestContext } from './env';
 import { repoHostingPorts } from './ports';
 import {
   availableUserAccessToken,

@@ -4,12 +4,12 @@
  */
 import { AI_MONTHLY_COST_CACHE_KV_PREFIX } from '@simple-agent-manager/shared';
 
-import type { AiProxyEnv } from './env';
 import { getUserBudgetSettings } from './ai-budget-settings';
+import { hasLocalAiCostMetering, isMonthlyCostCapAvailable } from './ai-gateway-availability';
 // Cycle with ai-token-budget.ts (it re-exports this module); both sides use the other's functions
 // only inside function bodies, so evaluation order does not matter.
 import { getProviderUsage } from './ai-token-budget';
-import { hasLocalAiCostMetering, isMonthlyCostCapAvailable } from './ai-gateway-availability';
+import type { AiProxyEnv } from './env';
 
 // =============================================================================
 // Monthly Cost Cap Enforcement (KV-cached, written by cron)

@@ -4,6 +4,6 @@
 export {
   DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS,
   joinSharedFlight,
-  SharedFlightAbandonedError,
   settleSharedFlight,
+  SharedFlightAbandonedError,
 } from '@simple-agent-manager/worker-core';

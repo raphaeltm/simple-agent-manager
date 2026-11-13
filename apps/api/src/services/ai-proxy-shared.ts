@@ -3,13 +3,12 @@
 // (./ai-proxy-auth) and is re-exported here as before. `fetchWorkersAIChatCompletion` also stays
 // in the worker: it resolves its target through the admin-configured LLM endpoint
 // (./llm-chat-target), which reads worker settings.
-import { expectJsonRecord } from '@simple-agent-manager/worker-core';
-
 import {
   readSafeGatewayErrorDiagnostic,
   type WorkersAIChatMessage,
   WorkersAIGatewayError,
 } from '@simple-agent-manager/ai-proxy';
+import { expectJsonRecord } from '@simple-agent-manager/worker-core';
 
 import type { Env } from '../env';
 import {

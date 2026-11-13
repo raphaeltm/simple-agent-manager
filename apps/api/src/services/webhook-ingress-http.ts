@@ -1,7 +1,7 @@
 /** Request plumbing shared by the two public webhook addresses (token and signed). */
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { clientIpFromHeaders } from '../lib/client-ip';
+import { log } from '../lib/logger';
 import {
   checkRateLimit,
   createRateLimitKey,

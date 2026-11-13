@@ -48,6 +48,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => USER,
 }));
 
+import { priceModelUsageUsd } from '@simple-agent-manager/ai-proxy';
+
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { agentsCatalogRoutes } from '../../../src/routes/agents-catalog';
@@ -56,7 +58,6 @@ import { aiProxyAnthropicRoutes } from '../../../src/routes/ai-proxy-anthropic';
 import { usageRoutes } from '../../../src/routes/usage';
 import { updateAdminSettings } from '../../../src/services/admin-settings-mutations';
 import { __resetAdminSettingsCacheForTest } from '../../../src/services/admin-settings-resolution';
-import { priceModelUsageUsd } from '@simple-agent-manager/ai-proxy';
 import {
   buildMonthlyCostCacheKey,
   getLocalMonthlyAiCostUsd,

@@ -10,12 +10,12 @@ import {
 } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 
+import { resolveAiGatewayId } from './ai-gateway-availability';
 import {
   type GatewayLogsPorts,
   getGatewayPeriodBounds,
   iterateGatewayLogs,
 } from './ai-gateway-logs';
-import { resolveAiGatewayId } from './ai-gateway-availability';
 import type { AiProxyEnv } from './env';
 
 const DEFAULT_MONTHLY_COST_AGGREGATION_MAX_PAGES = 200;

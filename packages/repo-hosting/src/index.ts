@@ -66,8 +66,8 @@ export {
 export {
   assertGitLabHostAllowed,
   DEFAULT_GITLAB_API_TIMEOUT_MS,
-  gitLabHostVerdict,
   type GitLabHostVerdict,
+  gitLabHostVerdict,
   gitLabRequestError,
 } from './gitlab-host-policy';
 export { type RepoBrowser, resolveRepoBrowser } from './repo-browse';

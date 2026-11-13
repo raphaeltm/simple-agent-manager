@@ -3,8 +3,6 @@
  * through the Node-backed `cloudflare:sockets` double, so the protocol, TLS upgrade and
  * certificate checks run over real sockets.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-
 import {
   buildSmtpMessage,
   createSmtpAgentEmailSender,
@@ -12,6 +10,7 @@ import {
   type SmtpConfig,
   SmtpError,
 } from '@simple-agent-manager/agent-email/definitions';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   createTestTlsCertificates,

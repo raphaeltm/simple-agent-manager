@@ -1,6 +1,6 @@
+import type { S3Client } from '@aws-sdk/client-s3';
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { S3Client } from '@aws-sdk/client-s3';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
 import type { AppDeploymentEnv } from './env';

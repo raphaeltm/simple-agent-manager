@@ -42,6 +42,20 @@ export {
   type LogLevel,
   serializeError,
 } from './logger';
+export {
+  assertOutboundUrl,
+  classifyHost,
+  DEFAULT_OUTBOUND_MAX_REDIRECTS,
+  guardedFetch,
+  type HostClass,
+  isAcceptableOperatorEndpoint,
+  isForbiddenEndpointHost,
+  isPrivateNetworkHost,
+  MAX_OUTBOUND_REDIRECTS,
+  type OutboundPolicy,
+  type OutboundRefusalReason,
+  OutboundRequestRefusedError,
+} from './network-hosts';
 export { parsePositiveInt, requireRouteParam } from './route-helpers';
 export { mapRows, parseRow, parseRowOrNull } from './row-parsing';
 export {
@@ -58,20 +72,6 @@ export {
   readResponseJson,
   RuntimeValidationError,
 } from './runtime-validation';
-export {
-  assertOutboundUrl,
-  classifyHost,
-  DEFAULT_OUTBOUND_MAX_REDIRECTS,
-  guardedFetch,
-  type HostClass,
-  isAcceptableOperatorEndpoint,
-  isForbiddenEndpointHost,
-  isPrivateNetworkHost,
-  MAX_OUTBOUND_REDIRECTS,
-  type OutboundPolicy,
-  type OutboundRefusalReason,
-  OutboundRequestRefusedError,
-} from './network-hosts';
 export {
   DEFAULT_SEARCH_QUERY_MAX_LENGTH,
   DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
@@ -93,7 +93,7 @@ export {
 export {
   DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS,
   joinSharedFlight,
-  SharedFlightAbandonedError,
   settleSharedFlight,
+  SharedFlightAbandonedError,
 } from './shared-flight';
 export { ulid } from './ulid';

@@ -1,12 +1,12 @@
 import type { PlatformConfigPort } from '@simple-agent-manager/repo-hosting/ports';
 
 import type { Env } from '../env';
+import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
 import {
   getGitHubAppConfig,
   getGitHubOAuthConfig,
   getGitLabOAuthConfig,
 } from '../services/platform-config';
-import { resolveOutboundMaxRedirects } from '../services/outbound-fetch-settings';
 
 /**
  * Repo hosting reads GitHub App and OAuth settings through the worker's platform-config
