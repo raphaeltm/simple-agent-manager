@@ -435,6 +435,8 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
       'docker',
       [
         'run',
+        '--user',
+        `${uid}:${process.getgid?.() ?? 0}`,
         '--rm',
         '--network',
         'host',
