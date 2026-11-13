@@ -1008,14 +1008,41 @@ export class ProjectData extends DurableObject<Env> {
     return estimateArchiveWrites(this.sql, sessionId, factor, maxMessages);
   }
 
+  /**
+   * Prepare the archive source intent without holding the transcript lock through the hash.
+   *
+   * The lock serializes every transcript write in the project (`persistMessage` takes it), so
+   * hashing a 100k-message session under it would stall message persistence for every session
+   * for seconds. Instead: fence the session and read its write generation under the lock, hash
+   * in pages while yielding to other requests, then re-check the generation under the lock. The
+   * write-generation triggers (migration 076) count every write to the hashed rows, including
+   * writers that bypass the transcript fence, so an unchanged generation proves the pages saw
+   * one consistent session.
+   */
   async archiveSourcePrepareIntent(
     input: archiveSharding.ArchiveSourcePrepareInput
   ): Promise<archiveSharding.ArchiveSourcePrepareOutcome> {
+    const prepared = { ...input, hashPageRows: input.hashPageRows ?? this.archiveHashPageRows() };
+    // The inventory estimate reads only; a write landing between it and the fence below is
+    // still caught by the terminal-version hash that follows.
+    const estimateExceedsReservation = archiveSharding.estimateExceedsReservation(
+      this.sql,
+      prepared
+    );
+    const begun = await this.withArchiveTranscriptLock(() =>
+      archiveSharding.beginArchiveSourcePrepare(this.sql, prepared, { estimateExceedsReservation })
+    );
+    if (begun.kind === 'refused') return begun.refusal;
+    const terminalVersion = await archiveSharding.computeTerminalVersion(
+      this.sql,
+      prepared.sessionId,
+      {
+        hashPageRows: prepared.hashPageRows,
+        yieldBetweenPages: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
+      }
+    );
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.prepareArchiveSourceIntentOrRefuse(this.sql, {
-        ...input,
-        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
-      })
+      archiveSharding.completeArchiveSourcePrepare(this.sql, prepared, begun, terminalVersion)
     );
   }
 
@@ -1293,13 +1320,42 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  /** Remove an abandoned target copy in bounded pages (see `abandonArchiveTargetSessionPage`). */
+  archiveTargetAbandonPage(
+    input: archiveSharding.ArchiveTargetAbandonInput & { maxRows: number }
+  ): Promise<archiveSharding.ArchiveTargetAbandonPageResult> {
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.abandonArchiveTargetSessionPage(
+        this.sql,
+        input,
+        this.ctx.storage.transactionSync.bind(this.ctx.storage)
+      )
+    );
+  }
+
+  /** Rotate a resumed claim's source-intent token without a re-prepare. */
+  archiveSourceReattachToken(
+    input: archiveSharding.ArchiveSourceInspectIntentInput & {
+      sourceIntentToken: string;
+      now: number;
+    }
+  ): Promise<boolean> {
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.reattachArchiveSourceToken(this.sql, input)
+    );
+  }
+
   /** One bounded page of the pre-flip R2 verification of a sealed compact target. */
   async archiveTargetVerifyPage(
     input: archiveSharding.ArchiveTargetVerifyPageInput
   ): Promise<archiveSharding.ArchiveTargetVerifyPageResult> {
     return this.withArchiveTranscriptLock(() =>
       measureArchiveSql(this.sql, input.sessionId, 'target_seal', (sql) =>
-        archiveSharding.verifyArchiveTargetPage(sql, this.env, input)
+        archiveSharding.verifyArchiveTargetPage(sql, this.env, input, {
+          // Hashing the shard's grouped and tool rows yields between pages so archived-session
+          // reads on this shard are served meanwhile; the target is sealed, so its rows are fixed.
+          yieldBetweenPages: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
+        })
       )
     );
   }

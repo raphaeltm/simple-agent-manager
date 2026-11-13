@@ -245,6 +245,12 @@ function createFakeSource(options: FakeSourceOptions = {}) {
       rowCount: 0,
       sha256: 'copy',
     })),
+    // A resumed claim rotates its token without re-preparing.
+    archiveSourceReattachToken: vi.fn(async (input: { sourceIntentToken: string }) => {
+      if (!state || state === 'source_deleted') return false;
+      token = input.sourceIntentToken;
+      return true;
+    }),
     // The coordinator flips through `archiveSourceFlip`; its accepted path is the finalize below.
     archiveSourceFlip: vi.fn(async (input: unknown) =>
       (source.archiveSourceFinalizeDelete as (value: unknown) => Promise<unknown>)(input)
@@ -282,6 +288,11 @@ function createFakeTarget() {
         sha256: chunk.sha256,
       };
     }),
+    archiveTargetAbandonPage: vi.fn(async () => ({
+      removed: true,
+      remaining: false,
+      rowsDeleted: 0,
+    })),
     // Compact targets re-read R2 in pages before the flip; this fake reports one complete page.
     archiveTargetVerifyPage: vi.fn(async () => ({
       complete: true,
@@ -3173,7 +3184,7 @@ describe('archive-sharding failed journals wait a retry delay before a sweep rec
   }
 
   async function reclaimed(sqlite: Database.Database, overrides: Partial<Env>, nowDate: Date) {
-    const source = createFakeSource();
+    const source = createFakeSource({ state: 'intent_prepared' });
     const stubs: Record<string, unknown> = { [SOURCE_OWNER]: source };
     const namespace = {
       idFromName: (name: string) => name,
@@ -3233,7 +3244,7 @@ describe('archive-sharding failed journals wait a retry delay before a sweep rec
     try {
       createCoordinatorTables(scoped);
       seedFailedAt(scoped, NOW - 1_000);
-      const source = createFakeSource();
+      const source = createFakeSource({ state: 'intent_prepared' });
       const stubs: Record<string, unknown> = { [SOURCE_OWNER]: source };
       const namespace = {
         idFromName: (name: string) => name,

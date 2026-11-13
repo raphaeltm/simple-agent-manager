@@ -7,6 +7,7 @@ import type {
   ArchiveSourceInspectIntentResult,
   ArchiveSourcePrepareResult,
   ArchiveTargetAbandonResult,
+  ArchiveTerminalComponents,
   ArchiveTargetInspectResult,
 } from '../durable-objects/project-data/archive-sharding';
 import type { Env } from '../env';
@@ -50,9 +51,11 @@ import {
   type ProjectDataArchiveTableName,
 } from '../project-data-archive/contract';
 import {
+  ARCHIVE_BUDGET_WINDOW_MS,
   ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT,
   ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS,
   ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT,
+  ARCHIVE_WRITE_FIXED_RESERVATION,
   archiveAffordableMessageCeiling,
   archiveAffordableWriteUnits,
   archiveWriteBudgetConfig,
@@ -228,6 +231,9 @@ type MigrationRow = {
   lease_epoch: number;
   lease_expires_at: number | null;
   attempt_count: number;
+  /** Read by `readMigration`; absent on rows from the candidate-selection queries. */
+  error_code?: string | null;
+  error_message?: string | null;
 };
 
 type ClaimedMigrationRow = MigrationRow & {
@@ -1182,7 +1188,7 @@ async function readMigration(env: Env, migrationId: string): Promise<MigrationRo
     `SELECT migration_id, project_id, session_id, storage_format, state, source_owner_name, target_owner_name,
             target_generation, source_intent_token, terminal_version_sha256,
             target_aggregate_sha256, r2_manifest_key, lease_owner, lease_epoch,
-            lease_expires_at, attempt_count
+            lease_expires_at, attempt_count, error_code, error_message
      FROM project_data_archive_migrations
      WHERE migration_id = ?`
   )
@@ -1798,7 +1804,10 @@ async function renewLeaseIfDue(
   migration: ClaimedMigrationRow
 ): Promise<ClaimedMigrationRow> {
   const nowMs = Date.now();
+  // Renew only a live lease that is past its half-life. An already expired one is not this
+  // function's call: the next `assertLeaseStillHeld` fails the claim, exactly as before renewal.
   if (migration.lease_expires_at - nowMs > config.leaseMs / 2) return migration;
+  if (migration.lease_expires_at <= nowMs) return migration;
   const expiresAt = nowMs + config.leaseMs;
   const result = await env.DATABASE.prepare(
     `UPDATE project_data_archive_migrations
@@ -1838,20 +1847,81 @@ async function releaseYieldedLease(
   lease: HeldLease,
   migrationId: string,
   progressed: boolean,
-  now: number
-): Promise<void> {
-  await env.DATABASE.prepare(
+  now: number,
+  error?: unknown
+): Promise<boolean> {
+  const result = await env.DATABASE.prepare(
     `UPDATE project_data_archive_migrations
      SET lease_owner = NULL,
          lease_expires_at = NULL,
          attempt_count = CASE WHEN ? = 1 THEN 0 ELSE attempt_count END,
+         -- An unwind in progress keeps its marker; the next claim reads its reason from it.
+         error_code = CASE WHEN error_code = 'flip_unwinding' THEN error_code
+                           ELSE COALESCE(?, error_code) END,
+         error_message = CASE WHEN error_code = 'flip_unwinding' THEN error_message
+                              ELSE COALESCE(?, error_message) END,
          updated_at = ?
      WHERE migration_id = ?
        AND lease_owner = ?
        AND lease_epoch = ?`
   )
-    .bind(progressed ? 1 : 0, now, migrationId, lease.leaseOwner, lease.leaseEpoch)
+    .bind(
+      progressed ? 1 : 0,
+      error === undefined ? null : errorCode(error),
+      error === undefined ? null : errorMessage(error),
+      now,
+      migrationId,
+      lease.leaseOwner,
+      lease.leaseEpoch
+    )
     .run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+/**
+ * Give a resumed claim a fresh source-intent token on the root and in the journal, without
+ * re-running the prepare. The root's token check then rejects any late call from the previous
+ * claim of this migration (a worker that lost its lease mid-RPC).
+ */
+async function reattachClaimToken(
+  env: Env,
+  source: DurableObjectStub<ProjectData>,
+  migration: ClaimedMigrationRow,
+  now: number
+): Promise<ClaimedMigrationRow> {
+  const sourceIntentToken = crypto.randomUUID();
+  const reattached = await source.archiveSourceReattachToken({
+    ...sourceInspectInput(migration),
+    sourceIntentToken,
+    now,
+  });
+  if (!reattached) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'resume_token_reattach_refused',
+      `ProjectData archive migration ${migration.migration_id} could not reattach its source token`
+    );
+  }
+  await assertLeaseStillHeld(env, migration);
+  const result = await env.DATABASE.prepare(
+    `UPDATE project_data_archive_migrations
+     SET source_intent_token = ?, updated_at = ?
+     WHERE migration_id = ? AND lease_owner = ? AND lease_epoch = ?`
+  )
+    .bind(
+      sourceIntentToken,
+      now,
+      migration.migration_id,
+      migration.lease_owner,
+      migration.lease_epoch
+    )
+    .run();
+  if ((result.meta.changes ?? 0) !== 1) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'lease_fence_lost',
+      `ProjectData archive migration ${migration.migration_id} lost its lease fence while reattaching its token`
+    );
+  }
+  return { ...migration, source_intent_token: sourceIntentToken };
 }
 
 async function requireJournalCas(
@@ -2365,35 +2435,77 @@ async function refusePreCopyMigration(
 
 /**
  * Unwind a migration whose flip found the root session changed or busy since it was fenced: a
- * late write that moved its terminal version, an attention marker an alarm raised mid-copy, a
+ * late write that moved its write generation, an attention marker an alarm raised mid-copy, a
  * runtime row. The root still holds every row (the flip writes nothing when it refuses), so the
  * session goes back to `root` with the same refusal marker a pre-copy refusal leaves, and the
  * sweep retries it after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS`. Before this, the
  * disagreement threw, every retry threw again, and the migration poisoned and opened the
  * project breaker, halting the drain for a session nothing was wrong with.
  *
- * Same order as an operator abandon: the source intent is removed first, under the root's
- * transcript lock, which proves the root copy intact at that instant (`sourceIntactVerified`);
- * only then is the shard copy dropped, then the journal and location are unwound in one batch.
+ * Resumable and crash-safe, in this order:
+ * 1. Record the reason on the journal (state unchanged), so a later claim can finish it.
+ * 2. Remove the root source intent under the root's transcript lock. That proves the root copy
+ *    intact at that instant and lifts the root's transcript fence; the location stays
+ *    `migrating`, so reads go to the root and writes stay fenced until step 4.
+ * 3. Delete the shard copy in bounded pages (`archiveTargetAbandonPage`), pausing at the tick
+ *    deadline like any other step.
+ * 4. Freeze the journal with the refusal marker and return the location to `root`, in one batch.
+ * A claim that finds the journal pre-flip with a token but no root intent is in the middle of
+ * this and continues from step 3 (`migrateClaimedCandidate`).
  */
 async function unwindFlipRefusal(
   env: Env,
+  config: ArchiveCoordinatorConfig,
   source: DurableObjectStub<ProjectData>,
   target: DurableObjectStub<ProjectData>,
-  migration: ClaimedMigrationRow,
-  refusal: ArchiveSourceFlipRefusal,
-  now: number
-): Promise<void> {
+  claimedMigration: ClaimedMigrationRow,
+  refusal: { reason: string; message: string },
+  now: number,
+  progress: ClaimProgress,
+  shouldYield: () => boolean
+): Promise<'unwound' | 'yielded'> {
+  let migration = claimedMigration;
   await assertLeaseStillHeld(env, migration);
+  if (migration.error_code !== FLIP_UNWINDING_ERROR_CODE) {
+    const marked = await env.DATABASE.prepare(
+      `UPDATE project_data_archive_migrations
+       SET error_code = ?, error_message = ?, updated_at = ?
+       WHERE migration_id = ? AND lease_owner = ? AND lease_epoch = ?`
+    )
+      .bind(
+        FLIP_UNWINDING_ERROR_CODE,
+        `${refusal.reason}: ${refusal.message}`.slice(0, 1000),
+        now,
+        migration.migration_id,
+        migration.lease_owner,
+        migration.lease_epoch
+      )
+      .run();
+    if ((marked.meta.changes ?? 0) !== 1) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'lease_fence_lost',
+        `ProjectData archive migration ${migration.migration_id} lost its lease fence before unwinding`
+      );
+    }
+    migration = { ...migration, error_code: FLIP_UNWINDING_ERROR_CODE };
+  }
   await source.archiveSourceAbandonIntent({ ...sourceInspectInput(migration), now });
-  await target.archiveTargetAbandonSession({
-    ...targetInspectInput(migration),
-    migrationId: migration.migration_id,
-    // Set only because the source abandon above returned without refusing: the root
-    // transcript was intact under its lock and no path can delete it without that intent.
-    sourceIntactVerified: true,
-    now,
-  });
+  for (;;) {
+    if (shouldYield()) return 'yielded';
+    migration = await renewLeaseIfDue(env, config, migration);
+    await assertLeaseStillHeld(env, migration);
+    const page = await target.archiveTargetAbandonPage({
+      ...targetInspectInput(migration),
+      migrationId: migration.migration_id,
+      // Set only after the root intent is gone (step 2): the root transcript was intact under
+      // its lock, and no path can delete its rows without a `source_deleted` intent.
+      sourceIntactVerified: true,
+      maxRows: config.chunkRows,
+      now,
+    });
+    progress.units++;
+    if (!page.remaining) break;
+  }
   await refusePreCopyMigration(
     env,
     migration,
@@ -2401,7 +2513,11 @@ async function unwindFlipRefusal(
     now,
     { logEvent: 'project_data_archive_flip_unwound' }
   );
+  return 'unwound';
 }
+
+/** Journal `error_code` while a flip refusal is being unwound (state unchanged until frozen). */
+const FLIP_UNWINDING_ERROR_CODE = 'flip_unwinding';
 
 async function ensureTargetPrepared(
   env: Env,
@@ -3362,6 +3478,23 @@ async function migrateCandidate(
   return result;
 }
 
+/** The refusal an interrupted unwind recorded on its journal (`unwindFlipRefusal` step 1). */
+function unwindReasonFromJournal(migration: MigrationRow): { reason: string; message: string } {
+  if (migration.error_code === FLIP_UNWINDING_ERROR_CODE && migration.error_message) {
+    const separator = migration.error_message.indexOf(': ');
+    if (separator > 0) {
+      return {
+        reason: migration.error_message.slice(0, separator),
+        message: migration.error_message.slice(separator + 2),
+      };
+    }
+  }
+  return {
+    reason: 'source_intent_removed',
+    message: 'The root source intent was removed before the migration flipped',
+  };
+}
+
 async function migrateClaimedCandidate(
   env: Env,
   config: ArchiveCoordinatorConfig,
@@ -3387,6 +3520,7 @@ async function migrateClaimedCandidate(
     recoveredCrashGap: false,
     chunksCopied,
     rowsCopied,
+    chunksVerified,
   });
   // Wall time per phase, logged on completion so production ticks quantify what each phase
   // costs the root object and the shard.
@@ -3413,6 +3547,30 @@ async function migrateClaimedCandidate(
     return { migrated: true, recoveredCrashGap: true, chunksCopied, rowsCopied };
   }
 
+  // A prepared migration whose root intent is gone was being unwound (a flip refusal, or a
+  // claim that crashed part way through one): finish it rather than re-preparing on top of a
+  // half-removed shard copy.
+  if (
+    !local.exists &&
+    migration.source_intent_token !== null &&
+    JOURNAL_PHASE_RANK[migration.state] < JOURNAL_PHASE_RANK.source_deleted
+  ) {
+    const unwound = await unwindFlipRefusal(
+      env,
+      config,
+      source,
+      target,
+      migration,
+      unwindReasonFromJournal(migration),
+      now,
+      progress,
+      shouldYield
+    );
+    markPhase('unwind');
+    if (unwound === 'yielded') return yielded();
+    return { migrated: false, unwound: true, recoveredCrashGap: false, chunksCopied, rowsCopied };
+  }
+
   // What later phases need from the prepared source: its terminal version and message count.
   let terminalVersionSha256: string;
   let messageCount: number;
@@ -3432,6 +3590,7 @@ async function migrateClaimedCandidate(
     }
     terminalVersionSha256 = local.terminalVersionSha256;
     messageCount = local.messageCount;
+    migration = await reattachClaimToken(env, source, migration, now);
   } else {
     const preparedResult = await ensureSourcePrepared(env, config, source, migration, now);
     markPhase('prepare');
@@ -3497,9 +3656,31 @@ async function migrateClaimedCandidate(
   }
 
   if (migration.state === 'recovery_manifest_persisted') {
-    if (migration.storage_format === COMPACT_ARCHIVE_FORMAT) {
-      // Re-read the R2 copy before the flip lets the root reclaim its rows, in bounded pages
-      // that resume across ticks (`verifyArchiveTargetPage`).
+    const inspected = await inspectSourceIntent(source, migration);
+    const terminalComponents: ArchiveTerminalComponents | null = inspected.exists
+      ? (inspected.terminalComponents ?? null)
+      : null;
+    if (migration.storage_format === COMPACT_ARCHIVE_FORMAT && !terminalComponents) {
+      // Prepared before the root recorded terminal-version components (pre-076 intent): keep the
+      // whole-session recompute that proof needs.
+      await target.archiveTargetSeal({
+        ...sourcePrepareInput(
+          migration,
+          requireStringField(migration, 'source_intent_token'),
+          now,
+          config.sessionGraceMs
+        ),
+        terminalVersionSha256,
+        expectedChunkHashes: (
+          await target.archiveTargetInspectSession(targetInspectInput(migration))
+        ).chunks.map((chunk) => chunk.sha256),
+      });
+      progress.units++;
+    } else if (migration.storage_format === COMPACT_ARCHIVE_FORMAT && terminalComponents) {
+      const expectedComponents = terminalComponents;
+      // Re-read the R2 copy and compare the shard's own rows with the root's components before
+      // the flip lets the root reclaim its rows, in bounded pages that resume across ticks
+      // (`verifyArchiveTargetPage`).
       for (;;) {
         if (shouldYield()) return yielded();
         migration = await renewLeaseIfDue(env, config, migration);
@@ -3508,6 +3689,7 @@ async function migrateClaimedCandidate(
           ...targetInspectInput(migration),
           migrationId: migration.migration_id,
           terminalVersionSha256,
+          expectedComponents,
           // One R2 timeout's worth of reads per call keeps the shard responsive to other
           // sessions' reads; the tick deadline still bounds the loop.
           deadlineAt: Math.min(
@@ -3540,8 +3722,19 @@ async function migrateClaimedCandidate(
     const finalized = await finalizeSourceAndPublish(env, config, source, migration, now);
     markPhase('finalize');
     if (finalized.refusal) {
-      await unwindFlipRefusal(env, source, target, migration, finalized.refusal, now);
+      const unwound = await unwindFlipRefusal(
+        env,
+        config,
+        source,
+        target,
+        migration,
+        finalized.refusal,
+        now,
+        progress,
+        shouldYield
+      );
       markPhase('unwind');
+      if (unwound === 'yielded') return yielded();
       log.info('project_data_archive_candidate_unwound', {
         migrationId: migration.migration_id,
         projectId: migration.project_id,
@@ -3647,8 +3840,7 @@ async function markFailed(
   migration: MigrationRow,
   now: number,
   error: unknown,
-  lease?: HeldLease,
-  progressed = false
+  lease?: HeldLease
 ): Promise<'failed' | 'poisoned' | 'unchanged'> {
   const current = await readMigration(env, migration.migration_id);
   if (!current || ['source_deleted', 'published', 'poisoned', 'frozen'].includes(current.state)) {
@@ -3667,9 +3859,7 @@ async function markFailed(
     });
     return 'unchanged';
   }
-  // A claim that advanced the migration before failing (a transient R2 or DO error mid-copy)
-  // restarts the no-progress count instead of spending one of its poison attempts.
-  if (!progressed && current.attempt_count >= config.poisonAfterAttempts) {
+  if (current.attempt_count >= config.poisonAfterAttempts) {
     await poisonProjectDataArchiveMigration(env, {
       migrationId: current.migration_id,
       projectId: current.project_id,
@@ -3683,11 +3873,11 @@ async function markFailed(
   const result = await env.DATABASE.prepare(
     `UPDATE project_data_archive_migrations
      SET state = 'failed',
-         error_code = ?,
-         error_message = ?,
+         -- An unwind in progress keeps its marker; the next claim reads its reason from it.
+         error_code = CASE WHEN error_code = 'flip_unwinding' THEN error_code ELSE ? END,
+         error_message = CASE WHEN error_code = 'flip_unwinding' THEN error_message ELSE ? END,
          lease_owner = NULL,
          lease_expires_at = NULL,
-         attempt_count = CASE WHEN ? = 1 THEN 0 ELSE attempt_count END,
          updated_at = ?
      WHERE migration_id = ?
        AND state NOT IN ('source_deleted', 'published', 'poisoned', 'frozen')
@@ -3696,7 +3886,6 @@ async function markFailed(
     .bind(
       errorCode(error),
       errorMessage(error),
-      progressed ? 1 : 0,
       now,
       current.migration_id,
       ...(lease ? [lease.leaseOwner, lease.leaseEpoch] : [])
@@ -4397,11 +4586,46 @@ async function processArchiveMigrationBatch(input: {
     ensuredOwners.set(projectId, pending);
     return pending;
   };
+  // Today's reserved total, read once per batch and kept current with this batch's own
+  // reservations. It lets `reserve` refuse a candidate whose lower-bound estimate cannot fit
+  // without asking the root object to scan the session: after the day's pool is spent, every
+  // tick would otherwise scan up to `sweepSessions + sweepFallthroughDepth` of the largest
+  // sessions just to be refused.
+  let reservedToday: number | null = null;
+  const readReservedToday = async (): Promise<number> => {
+    if (reservedToday !== null) return reservedToday;
+    const window = Math.floor(input.now / ARCHIVE_BUDGET_WINDOW_MS) * ARCHIVE_BUDGET_WINDOW_MS;
+    const row = await input.env.DATABASE.prepare(
+      `SELECT window_started_at, reserved_writes FROM project_data_archive_write_budget WHERE id = 'global'`
+    ).first<{ window_started_at: number; reserved_writes: number }>();
+    reservedToday = row && row.window_started_at >= window ? Number(row.reserved_writes) : 0;
+    return reservedToday;
+  };
   const reserve = async (
     projectId: string,
-    sessionId: string
+    sessionId: string,
+    messageCount: number
   ): Promise<ArchiveWriteReservation | null> => {
     const { allowance, factor } = archiveWriteBudgetConfig(input.env);
+    // Every message row costs at least one estimate unit, so this is a floor on the estimate.
+    const lowerBound = ARCHIVE_WRITE_FIXED_RESERVATION + factor * Math.max(0, messageCount);
+    const floorRefusal: ArchiveWriteRefusalReason | null =
+      lowerBound > allowance
+        ? 'exceeds_allowance'
+        : lowerBound > allowance - (await readReservedToday())
+          ? 'window_exhausted'
+          : null;
+    if (floorRefusal) {
+      recordBudgetRefusal(input.stats, floorRefusal);
+      log.info('project_data_archive_write_budget_floor_refused', {
+        projectId,
+        sessionId,
+        lowerBound,
+        allowance,
+        reason: floorRefusal,
+      });
+      return null;
+    }
     // The estimate's own cap is the affordable UNIT count, not the message ceiling: any
     // session whose real row inventory exceeds what the allowance can pay for is
     // unaffordable regardless of how `session_summaries.message_count` reported it, and the
@@ -4439,6 +4663,7 @@ async function processArchiveMigrationBatch(input: {
       else log.warn('project_data_archive_write_budget_unaffordable', detail);
       return null;
     }
+    reservedToday = (reservedToday ?? 0) + estimatedWrites;
     log.info('project_data_archive_write_budget_reserved', {
       projectId,
       sessionId,
@@ -4508,14 +4733,37 @@ async function processArchiveMigrationBatch(input: {
       const error = caught instanceof ClaimedMigrationFailure ? caught.cause : caught;
       const lease = caught instanceof ClaimedMigrationFailure ? caught.lease : undefined;
       const progressed = caught instanceof ClaimedMigrationFailure && caught.progressed;
+      if (progressed && lease) {
+        // The claim moved the migration forward before this error (an R2 timeout or a DO reset
+        // mid-copy, typically). Keep its phase and let the next tick resume it, rather than
+        // `failed`: that would add the failed-retry delay and, via `failed` -> `leased`, a full
+        // re-prepare. A failure that recurs without progress takes the `markFailed` path below on
+        // the next claim, so a permanent fault still poisons.
+        const released = await releaseYieldedLease(
+          input.env,
+          lease,
+          migration.migration_id,
+          true,
+          Date.now(),
+          error
+        ).catch(() => false);
+        input.stats.failed++;
+        log.warn(input.candidateFailedEvent, {
+          migrationId: migration.migration_id,
+          projectId: migration.project_id,
+          sessionId: migration.session_id,
+          resumesNextTick: released,
+          ...serializeError(error),
+        });
+        return false;
+      }
       const failureState = await markFailed(
         input.env,
         input.config,
         migration,
         input.now,
         error,
-        lease,
-        progressed
+        lease
       ).catch((markError) => {
         log.error(input.markFailedErrorEvent, {
           migrationId: migration.migration_id,
@@ -4563,7 +4811,7 @@ async function processArchiveMigrationBatch(input: {
     if (outOfTime()) return;
     const reservation =
       input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
-        ? await reserve(candidate.project_id, candidate.session_id)
+        ? await reserve(candidate.project_id, candidate.session_id, Number(candidate.message_count))
         : undefined;
     if (reservation === null) continue;
     const migration = await createCandidateJournal(input.env, candidate, input.now);

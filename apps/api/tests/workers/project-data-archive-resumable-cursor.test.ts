@@ -194,6 +194,7 @@ describe('resumable archive cursor', () => {
 
     let ticks = 0;
     let yields = 0;
+    let verifiedChunks = 0;
     let reservationAfterFirstTick: number | null = null;
     await withR2(bucket, async () => {
       for (; ticks < 60;) {
@@ -202,6 +203,7 @@ describe('resumable archive cursor', () => {
         expect(stats.failed).toBe(0);
         expect(stats.poisoned).toBe(0);
         yields += stats.yielded ?? 0;
+        verifiedChunks += stats.verifiedChunks ?? 0;
         if (reservationAfterFirstTick === null && (await readJournal(projectId, sessionId))) {
           reservationAfterFirstTick = await reservedWrites();
         }
@@ -244,6 +246,21 @@ describe('resumable archive cursor', () => {
       expect((await readLocation(projectId, sessionId))?.location_state).toBe('archive_shard');
       expect(await readAllMessageIds(projectId, sessionId)).toEqual(messageIds);
     });
+    // The pre-flip R2 verification resumed across ticks without re-reading: every raw chunk was
+    // verified exactly once.
+    const owner = (await readLocation(projectId, sessionId))?.owner_name ?? '';
+    const rawChunks = await runInDurableObject(projectDataStub(owner), async (_instance, state) =>
+      Number(
+        state.storage.sql
+          .exec(
+            'SELECT COUNT(*) AS n FROM project_data_archive_raw_chunks WHERE session_id = ?',
+            sessionId
+          )
+          .toArray()[0]?.n
+      )
+    );
+    expect(rawChunks).toBeGreaterThan(1);
+    expect(verifiedChunks).toBe(rawChunks);
   });
 
   it('resumes after a transient R2 failure without re-putting a chunk, and resets the poison count on progress', async () => {
@@ -259,20 +276,21 @@ describe('resumable archive cursor', () => {
     await withR2(bucket, async () => {
       const first = await tick();
       expect(first).toMatchObject({ failed: 1, poisoned: 0 });
-      const failed = await readJournal(projectId, sessionId);
-      // The claim advanced before it failed, so it did not spend a poison attempt.
-      expect(failed).toMatchObject({ state: 'failed', attempt_count: 0 });
+      const paused = await readJournal(projectId, sessionId);
+      // The claim advanced before it failed: it keeps its phase (no `failed` retry delay, no
+      // re-prepare), releases its lease and does not spend a poison attempt.
+      expect(paused).toMatchObject({ state: 'copying', attempt_count: 0, lease_owner: null });
 
       // Even at the poison threshold, a claim that advances before failing is not poisoned.
       await env.DATABASE.prepare(
         'UPDATE project_data_archive_migrations SET attempt_count = 2 WHERE migration_id = ?'
       )
-        .bind(failed!.migration_id)
+        .bind(paused!.migration_id)
         .run();
       const second = await tick();
       expect(second).toMatchObject({ failed: 1, poisoned: 0 });
       expect(await readJournal(projectId, sessionId)).toMatchObject({
-        state: 'failed',
+        state: 'copying',
         attempt_count: 0,
       });
 
@@ -357,19 +375,13 @@ describe('resumable archive cursor', () => {
     });
   });
 
-  it('unwinds when a transcript row changes under the fence before the flip', async () => {
+  it('unwinds when a root writer that skips the transcript fence changes the session mid-migration', async () => {
     const { projectId, sessionId, source } = await seedCandidate('lateedit', LARGE_MESSAGES);
     const first = await tick({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' });
     expect(first.yielded ?? 0).toBe(1);
-    // A writer that bypasses the fence (the class of bug the flip recompute exists to catch).
-    await runInDurableObject(source, async (_instance, state) => {
-      state.storage.sql.exec(
-        `UPDATE chat_messages SET content = content || ' edited'
-         WHERE session_id = ? AND rowid = (SELECT MAX(rowid) FROM chat_messages WHERE session_id = ?)`,
-        sessionId,
-        sessionId
-      );
-    });
+    // A late agent-completion callback stamps `agent_completed_at` on the stopped session. That
+    // DO path does not check the source intent; the write-generation trigger sees it anyway.
+    await source.markAgentCompleted(sessionId);
     let unwound = 0;
     for (let ticks = 0; ticks < 60; ticks++) {
       const stats = await tick();
@@ -378,6 +390,13 @@ describe('resumable archive cursor', () => {
       if ((await readJournal(projectId, sessionId))?.state === 'frozen') break;
     }
     expect(unwound).toBe(1);
+    expect(await readJournal(projectId, sessionId)).toMatchObject({
+      state: 'frozen',
+      error_code: 'precopy_refused',
+    });
+    expect((await readJournal(projectId, sessionId))?.error_message).toMatch(
+      /flip_terminal_version_changed/
+    );
     expect((await readLocation(projectId, sessionId))?.location_state).toBe('root');
     await withArchiveEnv(sweepEnv(), async () => {
       const ids = await readAllMessageIds(projectId, sessionId);
@@ -416,8 +435,16 @@ describe('resumable archive cursor', () => {
     expect(corrupted).toBe(true);
     expect(stats).toMatchObject({ migrated: 0, failed: 1 });
     const journal = await readJournal(projectId, sessionId);
-    expect(journal?.state).toBe('failed');
+    expect(journal?.state).toBe('recovery_manifest_persisted');
     expect(journal?.error_message).toMatch(/failed R2 verification/);
+    // The verdict is recorded on the shard, so later claims make no progress and converge on
+    // poison instead of re-reading the copy forever.
+    const states: string[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await tick();
+      states.push((await readJournal(projectId, sessionId))?.state ?? 'none');
+    }
+    expect(states).toEqual(['failed', 'failed', 'poisoned']);
     // The flip never happened: root intent is not flipped and every row is still there.
     const root = await runInDurableObject(source, async (_instance, state) => ({
       rows: Number(
@@ -490,5 +517,145 @@ describe('resumable archive cursor', () => {
     expect(await rootRows()).toBe(0);
     // workerd's databaseSize subtracts the freelist, so deleted pages show up as freed bytes.
     expect(third.reclaimedBytes ?? 0).toBeGreaterThan(0);
+  });
+  it('poisons a migration whose flip keeps failing after verification, without re-verifying', async () => {
+    const { projectId, sessionId, source } = await seedCandidate('flipfault', 40);
+    await source.failNextArchiveFlipsForTest(10);
+    const observed: Array<{ state: string; verified: number }> = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const stats = await tick();
+      observed.push({
+        state: (await readJournal(projectId, sessionId))?.state ?? 'none',
+        verified: stats.verifiedChunks ?? 0,
+      });
+    }
+    // Tick 1 copies and verifies (progress), so its flip failure keeps the phase. Every later
+    // claim finds the verification already complete, moves nothing, and spends an attempt.
+    expect(observed.map((entry) => entry.state)).toEqual([
+      'recovery_manifest_persisted',
+      'failed',
+      'failed',
+      'poisoned',
+    ]);
+    // Claims after the first verified nothing (a re-verification would have counted as
+    // progress and kept the phase instead of failing).
+    expect(observed.slice(1).every((entry) => entry.verified === 0)).toBe(true);
+    // Nothing flipped: the root still owns the whole transcript.
+    const rows = await runInDurableObject(source, async (_instance, state) =>
+      Number(
+        state.storage.sql
+          .exec('SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = ?', sessionId)
+          .toArray()[0]?.n
+      )
+    );
+    expect(rows).toBe(40);
+    await source.failNextArchiveFlipsForTest(0);
+  });
+
+  it('refuses to flip when the shard copy of the session anchor differs from the root', async () => {
+    const { projectId, sessionId, source } = await seedCandidate('anchor', 40);
+    const r2 = env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket;
+    let tampered = false;
+    // Once the copy is sealed (the manifest is its last write), change the shard's anchor row.
+    const tampering = new Proxy(r2, {
+      get(target, property, receiver) {
+        if (property === 'put') {
+          return async (key: string, ...rest: unknown[]) => {
+            const result = await (target.put as (...args: unknown[]) => Promise<unknown>)(
+              key,
+              ...rest
+            );
+            if (!tampered && key.endsWith('/manifest.json')) {
+              tampered = true;
+              const owner = (await readLocation(projectId, sessionId))?.owner_name ?? '';
+              await runInDurableObject(projectDataStub(owner), async (_instance, state) => {
+                state.storage.sql.exec(
+                  `UPDATE chat_sessions SET topic = 'not the root topic' WHERE id = ?`,
+                  sessionId
+                );
+              });
+            }
+            return result;
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const stats = await withR2(tampering as R2Bucket, () => tick());
+    expect(tampered).toBe(true);
+    expect(stats).toMatchObject({ migrated: 0, failed: 1 });
+    expect((await readJournal(projectId, sessionId))?.error_message).toMatch(
+      /session anchor does not match/
+    );
+    const intent = await runInDurableObject(
+      source,
+      async (_instance, state) =>
+        state.storage.sql
+          .exec(
+            'SELECT state FROM project_data_archive_source_intents WHERE session_id = ?',
+            sessionId
+          )
+          .toArray()[0]?.state
+    );
+    expect(intent).toBe('recovery_manifest_persisted');
+  });
+
+  it('finishes an unwind that was interrupted part way, on the next tick', async () => {
+    const { projectId, sessionId, source } = await seedCandidate('unwindcrash', 40);
+    const r2 = env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket;
+    let marked = false;
+    // A late attention marker appears after the copy is sealed, so this tick's flip refuses.
+    const marking = new Proxy(r2, {
+      get(target, property, receiver) {
+        if (property === 'put') {
+          return async (key: string, ...rest: unknown[]) => {
+            const result = await (target.put as (...args: unknown[]) => Promise<unknown>)(
+              key,
+              ...rest
+            );
+            if (!marked && key.endsWith('/manifest.json')) {
+              marked = true;
+              const owner = (await readLocation(projectId, sessionId))?.owner_name ?? '';
+              // The shard resets on the first page of removing its copy.
+              await projectDataStub(owner).failNextArchiveTargetAbandonPagesForTest(1);
+              await runInDurableObject(source, async (_instance, state) => {
+                state.storage.sql.exec(
+                  `INSERT INTO session_attention_markers (id, session_id, kind, source, created_at)
+                   VALUES (?, ?, 'wake_failed', 'test', ?)`,
+                  crypto.randomUUID(),
+                  sessionId,
+                  tickClock + 86_400_000
+                );
+              });
+            }
+            return result;
+          };
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const first = await withR2(marking as R2Bucket, () => tick());
+    expect(marked).toBe(true);
+    expect(first).toMatchObject({ failed: 1, poisoned: 0 });
+    // Interrupted after the root intent was removed: reads go to the root, writes stay fenced.
+    const midway = await readJournal(projectId, sessionId);
+    expect(midway).toMatchObject({
+      state: 'recovery_manifest_persisted',
+      error_code: 'flip_unwinding',
+    });
+    expect((await readLocation(projectId, sessionId))?.location_state).toBe('migrating');
+
+    const second = await tick();
+    expect(second).toMatchObject({ flipUnwound: 1, poisoned: 0 });
+    expect(await readJournal(projectId, sessionId)).toMatchObject({
+      state: 'frozen',
+      error_code: 'precopy_refused',
+    });
+    expect((await readJournal(projectId, sessionId))?.error_message).toMatch(
+      /flip_unresolved_attention/
+    );
+    expect((await readLocation(projectId, sessionId))?.location_state).toBe('root');
   });
 });

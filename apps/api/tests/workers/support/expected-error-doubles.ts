@@ -83,6 +83,40 @@ export class ProjectDataTestDouble extends ProjectData {
    */
   private reclaimFailuresForTest = 0;
   private copyBackMarkFailuresForTest = 0;
+  /** Remaining injected `archiveSourceFlip` failures: a non-unwindable fault at the flip. */
+  private flipFailuresForTest = 0;
+  /** Remaining injected `archiveTargetAbandonPage` failures: a reset mid-unwind. */
+  private targetAbandonPageFailuresForTest = 0;
+
+  failNextArchiveFlipsForTest(count: number): void {
+    this.flipFailuresForTest = count;
+  }
+
+  failNextArchiveTargetAbandonPagesForTest(count: number): void {
+    this.targetAbandonPageFailuresForTest = count;
+  }
+
+  override async archiveSourceFlip(
+    input: archiveSharding.ArchiveSourceFinalizeDeleteInput
+  ): Promise<
+    archiveSharding.ArchiveSourceFinalizeDeleteResult | archiveSharding.ArchiveSourceFlipRefusal
+  > {
+    if (this.flipFailuresForTest > 0) {
+      this.flipFailuresForTest--;
+      throw new Error('injected archive flip failure');
+    }
+    return super.archiveSourceFlip(input);
+  }
+
+  override async archiveTargetAbandonPage(
+    input: archiveSharding.ArchiveTargetAbandonInput & { maxRows: number }
+  ): Promise<archiveSharding.ArchiveTargetAbandonPageResult> {
+    if (this.targetAbandonPageFailuresForTest > 0) {
+      this.targetAbandonPageFailuresForTest--;
+      throw new Error('injected archive target abandon failure');
+    }
+    return super.archiveTargetAbandonPage(input);
+  }
 
   failNextArchiveReclaimPagesForTest(count: number): void {
     this.reclaimFailuresForTest = count;
