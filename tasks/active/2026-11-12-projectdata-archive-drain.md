@@ -490,3 +490,27 @@ DEFAULT 1` plus a partial index. The pass selects only projects with a flagged f
   token-login session; the messages API returned 200 (200 rows, hasMore).
 - The workspace 404s on that page predate this PR (a root-resident session shows the same).
   Filed `tasks/backlog/2026-11-13-chat-page-fetches-deleted-workspace.md`.
+
+### Staging verification of 78d730816 (2026-11-13, real cron ticks)
+
+- Deploys: 43419240892 (3 s wall), then 43423564515 (production 60 s wall). D1 0237 applied.
+- Backfill vs steady state: 0237 flagged 1,185 published rows in 22 projects. Ticks 4101-4110
+  cleared them per project, 50 per listing (1,185 → 899 → 579 → 427 → 209 → 158 → 108 → 58 → 8 → 0).
+  Tick 4109 read a lagging D1 replica snapshot and cleared nothing new; a stale snapshot only
+  under-clears (each row in it had already flipped, so its marker existed). After tick 4110 the pass
+  query selects 0 projects, so steady-state ticks wake no root object for reclaim.
+- Candidates with the drain (60 s wall, migrations created since 11:50Z):
+  - 29 published (2,305 messages);
+  - 4 `precopy_refused` (`active_session_state`), all refunded (10 receipts / 15,414 writes today);
+  - 0 failed or poisoned; the breaker stayed closed.
+- Flip, then reclaim across ticks: `c156f907` flipped at 11:51:54Z with 0 rows deleted. The pending
+  pass reclaimed it at 12:01:22Z (665 rows, 253,952 bytes) and cleared the flag.
+- Multi-tick copy resume: `8e1dd3ad` yielded in tick 4109 (63.8 s, `copying`, attempt 0) and
+  published in tick 4110.
+- Reads (Playwright, token-login): `c156f907` 606/606 and `f4d7e243` 565/565 unique messages from
+  the shard, both rendered.
+- Search: no REST message search in the app; covered by the Workers suites only.
+- Restore: all 4 temporary vars deleted (none were set before), and `main` redeployed to staging
+  (run 43430902403).
+- Recovery gap during the provider pause (worktree outside the primary checkout lost): idea
+  `01M7A9VY2A3TPGEA5XV9G9G8BT`.
