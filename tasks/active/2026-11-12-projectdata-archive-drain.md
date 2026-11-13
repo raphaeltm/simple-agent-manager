@@ -93,6 +93,7 @@ Research (2026-11-12, current main):
       `published`; root read fence; search dedupe verified; maintenance audit (item 7).
 
 Measurements (2026-11-12):
+
 - Production `candidate_migrated`, 4.4k-9k msgs: prepare 0.38-0.78 s (includes the root terminal
   hash), copy 15.8-23.5 s (11-20 chunks, ~1.1 s/chunk), seal 0.23-0.59 s, manifest 0.47-1.24 s,
   finalize 3.7-9.4 s of which source delete 0.7-5.5 s. Total ~3.5 ms/msg.
@@ -105,6 +106,7 @@ Measurements (2026-11-12):
   Compact seal is O(chunks) and cheap.
 
 PR A design (decided):
+
 - Flip = `finalizeSourceDelete` minus the deletes: same proof checks and terminal-version
   recompute, writes anchors + intent `source_deleted` in one transaction. Journal then goes to
   `published` exactly as today, so journal state meanings do not change (old code in a mixed
@@ -124,6 +126,7 @@ PR A design (decided):
 
 PR A progress (branch `sam/archive-flip-reclaim`, worktree `/workspaces/sam-archive-pra`, commit
 665c77c79, based on PR 1 head 348695314 — rebase onto main after #2700 merges):
+
 - [x] Flip without deletes (`finalizeSourceDelete`), `reclaimArchiveSourcePage`,
       `listArchiveSourceReclaimPending`, RPCs `archiveSourceReclaimPage` /
       `archiveSourceListReclaimPending`, post-flip reclaim + tick-start `reclaimPendingSources`.
@@ -155,9 +158,78 @@ PR A progress (branch `sam/archive-flip-reclaim`, worktree `/workspaces/sam-arch
 
 ### PR B: resumable cursor for every size
 
-- [ ] Deadline threaded into chunk loop/phase boundaries/reclaim; yield releases lease and resets
-      attempts on progress; reserve writes once; estimator cap; flip-or-unwind; remove 10k gate.
-- [ ] Seal/verification bounded and resumable (item 6); measure memory/CPU/lease.
+Branch `sam/archive-resumable-cursor` (stacked on PR A), owner task `01M795CM7DAPCSF4E94AJK09CP`.
+
+Research findings (2026-11-13, from the PR A head):
+
+- Every resumed claim re-ran the root prepare (`ensureSourcePrepared`): full eligibility, write
+  estimate and a FULL terminal-version hash on the root object, once per tick a migration spans.
+- `reserveMigrationAttempt` re-reserved the whole write estimate on every claim of a compact
+  migration that had not flipped.
+- `claimMigrationLease` increments `attempt_count` per claim; poison after 3 claims regardless of
+  progress, so a session needing 4+ ticks could never publish.
+- The compact pre-flip `archiveTargetSeal` re-call ran `readValidatedSeal`, which re-read every R2
+  chunk of the session in ONE RPC (production ~0.4-0.8 ms/msg, so 40-80 s at 100k).
+- Root exact reads failed closed for every active intent state and routing refused `migrating`, so
+  a multi-tick migration would be unreadable for hours.
+- A late writer at the flip (`terminal_version_changed`, a new attention marker) threw, retried,
+  and poisoned toward the project breaker.
+- The 10k gate is `min(SWEEP_MESSAGE_BUDGET=10000, write-budget ceiling)` in the compact SQL; the
+  estimator caps at 100k units, making sessions above ~40-50k messages unaffordable.
+- Production config: factor 2, allowance 2.4M, so the write-budget ceiling is 600k messages at
+  100% overhead; a 100k-message session estimates roughly 445k writes.
+
+Checklist:
+
+- [x] Resume past `target_prepared` without the root prepare (`migrateClaimedCandidate`); flip
+      re-proves the root unchanged.
+- [x] Deadline threaded into the copy chunk loop, verification pages and phase boundaries; a claim
+      yields only after it has made progress (`ClaimProgress`, `shouldYield`).
+- [x] Yield releases the lease and resets `attempt_count` when the claim advanced
+      (`releaseYieldedLease`); a failure after progress also resets it (`markFailed(progressed)`),
+      so poison = `POISON_AFTER_ATTEMPTS` consecutive no-progress claims.
+- [x] Lease renewal at chunk, page and phase boundaries (`renewLeaseIfDue`).
+- [x] Reserve writes once, at journal creation; `reserveMigrationAttempt` deleted.
+- [x] Estimator cap 100k -> 1M units (`ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS`).
+- [x] 10k gate removed from the unscoped sweep; the canary keeps its packing budget.
+- [x] Paged compact R2 verification before the flip (`verifyArchiveTargetPage`, progress in shard
+      `do_meta`), per-call budget `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS`; failures return as values.
+      Resumed seals skip the whole-session recompute (`skipCompactRecoveryRecompute`).
+- [x] Flip-or-unwind: `archiveSourceFlip` returns eligibility / terminal-version refusals;
+      `unwindFlipRefusal` abandons source then target and leaves a `precopy_refused` marker.
+- [x] `migrating` reads route to the root; root reads refuse only after the flip
+      (`isSourceExactReadFenced`); writes stay fenced.
+- [x] PR A carry-overs: deterministic reclaim deadline test; stuck-reclaim operator signal
+      (`reclaimStuck`, `project_data_archive_reclaim_stuck` error log); reclaimed bytes per page.
+- [x] Tests: `tests/workers/project-data-archive-resumable-cursor.test.ts` (8 scenarios); throughput
+      suite drives 10,500- and 20,000-message sessions to publication; unit and Workers suites
+      updated.
+- [x] Docs: `configuration.md` archive section, `wrangler.toml` comments.
+- [ ] Discrimination runs per guard (renewal, reserve-once, progress reset, unwind, verification).
+- [ ] Local specialist review; CI; staging on the compact config; parent review of the exact SHA.
+
+Measurements (2026-11-13, local workerd, NOT production): a 20,000-message production-shaped
+session migrates, verifies, flips and reclaims inside a 46.4 s test that also seeds the session
+and reads the whole transcript back (upper bound ~2.3 ms/msg); 10,500 messages in 23.0 s.
+
+Bounds at the outer probable limit (100k messages, rule 81), production-derived projections:
+copy ~1.1 s per 500-row chunk (200 chunks, ~220 s, ~4-5 ticks of 60 s); verification ~0.4-0.8
+ms/msg in R2-timeout-bounded pages (~40-80 s, 1-2 ticks); flip ~9 s on the root (one RPC, the
+largest single root block); reclaim ~10-60 s in 500-row pages (1-2 ticks). Total ~7-10 ticks
+(~2-3 h at the 18-min cadence), readable throughout. One reservation of ~445k writes.
+
+Audit notes:
+
+- Root-local maintenance while rows await reclaim (PR A audit, unchanged): tool-payload cleanup
+  can strip a leftover row's payload during the reclaim window; bounded to one cadence. Before the
+  flip, transcript writes are fenced by the source intent and the flip's terminal-version recompute
+  catches anything that slips through, which now unwinds instead of poisoning.
+- `source_deleted` = flipped and published, reclaim may be outstanding; the root marker
+  (`archive_reclaim_pending:`) drives reclaim, not the journal.
+- Mixed version: old coordinators keep calling `archiveSourceFinalizeDelete` (throwing contract)
+  and `archiveTargetSeal` without `skipCompactRecoveryRecompute` (whole-session recompute), so a
+  rollout window behaves as before. A downgrade leaves `migrating` sessions unreadable again and
+  re-reserves on resume; verification progress keys are inert.
 
 ## Compact-path staging checks (reusable; run after setting staging PROJECT_DATA_ARCHIVE_COMPACT_ENABLED=true and deploying)
 
@@ -166,7 +238,7 @@ PR A progress (branch `sam/archive-flip-reclaim`, worktree `/workspaces/sam-arch
 2. Wait for a tick: `project_data_archive_global_sweep_cadence.last_started_at` must be after the
    API deploy time; `last_status='succeeded'`; the duration is roughly the wall time when work exists.
 3. D1: `SELECT state, storage_format, error_code, count(*) FROM project_data_archive_migrations
-   WHERE updated_at > now-1h GROUP BY 1,2,3`. Expect `published` rows with
+WHERE updated_at > now-1h GROUP BY 1,2,3`. Expect `published` rows with
    `storage_format='r2-gzip-v1'`, and several per tick (not exactly one).
 4. Logs `project_data_archive_candidate_migrated`: one per publish, with `phaseDurationsMs`.
    `project_data_archive_write_budget_reserved`: one per candidate.

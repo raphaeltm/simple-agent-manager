@@ -141,7 +141,11 @@ async function readAllMessageIds(projectId: string, sessionId: string): Promise<
     ids.push(...result.messages.map((row) => String(row.id)));
     const last = result.messages[result.messages.length - 1];
     if (!result.hasMore || !last) return ids;
-    after = { createdAt: Number(last.createdAt), sequence: Number(last.sequence), id: String(last.id) };
+    after = {
+      createdAt: Number(last.createdAt),
+      sequence: Number(last.sequence),
+      id: String(last.id),
+    };
   }
   throw new Error('transcript paging did not finish');
 }
@@ -192,7 +196,7 @@ describe('resumable archive cursor', () => {
     let yields = 0;
     let reservationAfterFirstTick: number | null = null;
     await withR2(bucket, async () => {
-      for (; ticks < 60; ) {
+      for (; ticks < 60;) {
         const stats = await tick({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' });
         ticks++;
         expect(stats.failed).toBe(0);
@@ -405,7 +409,10 @@ describe('resumable archive cursor', () => {
           .toArray()[0]?.n
       ),
       intent: state.storage.sql
-        .exec('SELECT state FROM project_data_archive_source_intents WHERE session_id = ?', sessionId)
+        .exec(
+          'SELECT state FROM project_data_archive_source_intents WHERE session_id = ?',
+          sessionId
+        )
         .toArray()[0]?.state,
     }));
     expect(root.rows).toBe(40);
@@ -428,9 +435,10 @@ describe('resumable archive cursor', () => {
       journal?.state
     );
   });
+
   it('stops reclaim at the tick deadline, flags a stuck reclaim, then frees the bytes', async () => {
     const pageRows = 7;
-    const { projectId, sessionId, source } = await seedCandidate('reclaimdeadline', 40);
+    const { sessionId, source } = await seedCandidate('reclaimdeadline', 40);
     const rootRows = () =>
       runInDurableObject(source, async (_instance, state) =>
         Number(

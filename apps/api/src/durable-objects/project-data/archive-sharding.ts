@@ -1937,26 +1937,44 @@ function readVerifyProgress(
     .toArray()[0]?.value;
   if (typeof value !== 'string') return fresh;
   try {
-    const parsed = JSON.parse(value) as VerifyProgress;
-    if (
-      parsed.migrationId === migrationId &&
-      parsed.terminalVersionSha256 === terminalVersionSha256 &&
-      Number.isSafeInteger(parsed.nextOrdinal) &&
-      parsed.nextOrdinal >= 0 &&
-      Number.isSafeInteger(parsed.rows) &&
-      parsed.rows >= 0
-    ) {
-      return parsed;
-    }
+    const parsed: unknown = JSON.parse(value);
+    if (isVerifyProgress(parsed, migrationId, terminalVersionSha256)) return parsed;
   } catch {
     // An unreadable progress row only costs a restart from ordinal 0.
   }
   return fresh;
 }
 
+function isVerifyProgress(
+  value: unknown,
+  migrationId: string,
+  terminalVersionSha256: string
+): value is VerifyProgress {
+  if (!value || typeof value !== 'object') return false;
+  const progress = value as Record<string, unknown>;
+  const lastKey = progress.lastKey;
+  const lastKeyValid =
+    lastKey === null ||
+    (Array.isArray(lastKey) &&
+      lastKey.length === 3 &&
+      typeof lastKey[0] === 'number' &&
+      (lastKey[1] === null || typeof lastKey[1] === 'number') &&
+      typeof lastKey[2] === 'string');
+  return (
+    progress.migrationId === migrationId &&
+    progress.terminalVersionSha256 === terminalVersionSha256 &&
+    Number.isSafeInteger(progress.nextOrdinal) &&
+    (progress.nextOrdinal as number) >= 0 &&
+    Number.isSafeInteger(progress.rows) &&
+    (progress.rows as number) >= 0 &&
+    lastKeyValid
+  );
+}
+
 function messageOrderKey(row: ProjectDataArchiveRow): [number, number | null, string] {
   const createdAt = Number(row.created_at);
-  const sequence = row.sequence === null || row.sequence === undefined ? null : Number(row.sequence);
+  const sequence =
+    row.sequence === null || row.sequence === undefined ? null : Number(row.sequence);
   return [createdAt, sequence, String(row.id)];
 }
 
@@ -2113,7 +2131,11 @@ async function verifyArchiveTargetPageOrThrow(
   }
   const key = VERIFY_PROGRESS_META_PREFIX + input.sessionId;
   if (!exhausted) {
-    sql.exec('INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)', key, JSON.stringify(progress));
+    sql.exec(
+      'INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)',
+      key,
+      JSON.stringify(progress)
+    );
     return {
       complete: false,
       chunksVerified,
