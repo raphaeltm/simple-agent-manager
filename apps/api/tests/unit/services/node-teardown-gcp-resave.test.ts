@@ -301,6 +301,37 @@ describe('node teardown after the GCP connection is saved again (incident 2026-1
     }
   });
 
+  it('claims the operator alert only for the runtime and blocked episode the caller observed', async () => {
+    await placeNode();
+    const { alertNodeCleanupBlocked } = await import('../../../src/services/node-teardown-blocked');
+    sqlite
+      .prepare(
+        "UPDATE nodes SET status = 'destroying', cleanup_blocked_since = '2026-11-13T23:00:00.000Z' WHERE id = ?"
+      )
+      .run(NODE_ID);
+    const input = {
+      nodeId: NODE_ID,
+      userId: OWNER,
+      status: 'destroying',
+      blockedSince: '2026-11-13T23:00:00.000Z',
+      reasons: ['teardown_instance_not_visible'],
+      provider: 'gcp',
+      providerInstanceId: INSTANCE_ID,
+      runtimeIncarnationId: INCARNATION,
+      recoveryType: 'node_teardown_blocked',
+    };
+    const now = new Date('2026-11-13T23:05:00.000Z');
+
+    // A stale caller that observed an older incarnation or another episode claims nothing.
+    await alertNodeCleanupBlocked(env, { ...input, runtimeIncarnationId: 'older' }, now, 60_000);
+    await alertNodeCleanupBlocked(env, { ...input, blockedSince: '2026-11-13T22:00:00.000Z' }, now, 60_000);
+    expect(nodeRow()).toMatchObject({ alertedAt: null });
+
+    // Control: the matching runtime and episode is claimed and alerted.
+    await alertNodeCleanupBlocked(env, input, now, 60_000);
+    expect(nodeRow()).toMatchObject({ alertedAt: now.toISOString() });
+  });
+
   it('records a blocked verdict only on the runtime incarnation that was refused', async () => {
     await placeNode();
     const { recordNodeTeardownBlocked } = await import(
@@ -406,6 +437,35 @@ describe('proveNodeInstanceOwnership: provider refusals', () => {
     const { ProviderError } = await import('@simple-agent-manager/providers');
     const result = await prove(new ProviderError('gcp', 403, 'Permission denied'));
     expect(result.message).toMatch(/^teardown_instance_not_visible/);
+  });
+
+  it('a GCP token-exchange refusal (GcpApiError 401/403) cannot see the instance', async () => {
+    const { GcpApiError } = await import('../../../src/services/gcp-errors');
+    for (const statusCode of [401, 403]) {
+      const result = await prove(
+        new GcpApiError({ step: 'sa_impersonation', message: 'Permission denied', statusCode })
+      );
+      expect(result.message).toMatch(/^teardown_instance_not_visible/);
+    }
+  });
+
+  it('a GCP or Hetzner limit stays an ordinary, retryable read failure', async () => {
+    const { GcpApiError } = await import('../../../src/services/gcp-errors');
+    const { ProviderError } = await import('@simple-agent-manager/providers');
+    const cases = [
+      new GcpApiError({ step: 'sts_exchange', message: 'Too many requests', statusCode: 429 }),
+      new GcpApiError({
+        step: 'sa_impersonation',
+        message: 'Forbidden',
+        statusCode: 403,
+        rawBody: '{"error":{"status":"PERMISSION_DENIED","details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}',
+      }),
+      // providerFetch leaves category unknown; the provider code still says it is a limit.
+      new ProviderError('hetzner', 403, 'limit reached', { providerCode: 'rate_limit_exceeded' }),
+    ];
+    for (const error of cases) {
+      expect(await prove(error)).toBe(error);
+    }
   });
 
   it('a rate-limited or quota 403 stays an ordinary, retryable read failure', async () => {

@@ -41,6 +41,7 @@ function alertBlockedNode(
       reasons: refusal.reasons,
       provider: refusal.cloud_provider,
       providerInstanceId: refusal.provider_instance_id,
+      runtimeIncarnationId: refusal.runtime_incarnation_id,
       recoveryType: 'bounded_stranded_node_ownership_blocked',
     },
     now,

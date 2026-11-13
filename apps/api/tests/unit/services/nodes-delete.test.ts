@@ -944,6 +944,55 @@ describe('node resource deletion services', () => {
     });
   });
 
+  it('tries the owner user credential when a project-attributed node\'s project credential cannot see the VM', async () => {
+    nodeRows.push(managedPoolNode({ id: 'project-node', status: 'destroying' }));
+    const projectGetVM = vi.fn(async () => null);
+    const userDeleteVM = vi.fn(async () => {});
+    createProviderForUser.mockImplementation(async (...args: unknown[]) => {
+      if (args[6]) return null; // the pinned project credential no longer resolves
+      if (args[5] === 'project-1') {
+        // The project credential now points at another account.
+        return {
+          provider: { getVM: projectGetVM, deleteVM: providerDeleteVM },
+          providerName: 'hetzner',
+          credentialSource: 'project',
+        };
+      }
+      return {
+        provider: {
+          deleteVM: userDeleteVM,
+          getVM: async () => ({
+            id: 'vm-pool-1',
+            labels: {
+              managed: 'simple-agent-manager',
+              node: 'pool-node-1'.replace('pool-node-1', 'project-node'),
+              role: 'workspace',
+              env: 'staging',
+              installation: '0123456789abcdef0123456789abcdef',
+              incarnation: 'runtime-incarnation-pool-1',
+            },
+          }),
+        },
+        providerName: 'hetzner',
+        credentialSource: 'user',
+      };
+    });
+
+    await deleteNodeResourcesStrict('project-node', 'user-1', ENV);
+
+    expect(projectGetVM).toHaveBeenCalledWith('vm-pool-1');
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(userDeleteVM).toHaveBeenCalledWith('vm-pool-1');
+    expect(createProviderForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      'pool-owner-1',
+      'test-key',
+      ENV,
+      'hetzner',
+      null
+    );
+  });
+
   it('blocks visibly when neither the pinned nor any current owner credential resolves', async () => {
     nodeRows.push(managedPoolNode({ id: 'node-1', status: 'destroying' }));
     createProviderForUser.mockImplementation(async () => null);

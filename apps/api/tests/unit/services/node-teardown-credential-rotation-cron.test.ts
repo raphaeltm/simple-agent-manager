@@ -78,10 +78,16 @@ async function rotationFixture(scope: 'user' | 'installation' = 'user') {
           { status: 401 }
         );
       }
-      const account = accounts.get(token);
+      const account = accounts.get(token.replace(/^read-only:/, ''));
       const labels = account?.get(id);
       if (init?.method === 'DELETE') {
         deletes.push(`${token}:${id}`);
+        if (token.startsWith('read-only')) {
+          return Response.json(
+            { error: { code: 'forbidden', message: 'insufficient permissions for this token' } },
+            { status: 403 }
+          );
+        }
         if (!labels) {
           return Response.json(
             { error: { code: 'not_found', message: 'Server not found' } },
@@ -219,7 +225,8 @@ describe('cleanup cron tears a node down after its placement credential rotates'
   ])('preserves an instance labelled for %s', async (_name, overrides) => {
     const f = await rotationFixture();
     const labels = samLabels(overrides);
-    if ('__sam_internal_ambiguous_label__installation' in overrides) delete labels.installation;
+    // The duplicated-tag case keeps the correct installation value next to the ambiguity marker,
+    // so only the ambiguity guard (hasAmbiguousLabel) can refuse it.
     f.accounts.get(ORIGINAL_TOKEN)!.set(INSTANCE, labels);
     await f.replace();
 
@@ -317,6 +324,44 @@ describe('cleanup cron tears a node down after its placement credential rotates'
       proof: null,
       reason: expect.stringMatching(/^teardown_instance_not_visible/),
       alertedAt: expect.any(String),
+    });
+  });
+
+  it('a credential that can read but not delete the VM is skipped for the next owner credential', async () => {
+    const f = await rotationFixture('installation');
+    // The owner's own key reaches the same account, but read-only: GET works, DELETE is refused.
+    const readOnly = await encrypt(`read-only:${ORIGINAL_TOKEN}`, f.env.ENCRYPTION_KEY as string);
+    f.sqlite
+      .prepare(
+        `INSERT INTO credentials (id, user_id, project_id, provider, credential_type,
+          credential_kind, is_active, encrypted_token, iv, created_at, updated_at)
+        VALUES ('personal', 'user-1', NULL, 'hetzner', 'cloud-provider', 'api-key', 1, ?, ?, ?, ?)`
+      )
+      .run(readOnly.ciphertext, readOnly.iv, NOW.toISOString(), NOW.toISOString());
+    await f.regenerate();
+
+    await f.sweep();
+
+    expect(f.deletes).toEqual([
+      `read-only:${ORIGINAL_TOKEN}:${INSTANCE}`,
+      `${ORIGINAL_TOKEN}:${INSTANCE}`,
+    ]);
+    // Ownership was proven again through the second credential before its delete.
+    expect(f.gets).toEqual([`read-only:${ORIGINAL_TOKEN}:${INSTANCE}`, `${ORIGINAL_TOKEN}:${INSTANCE}`]);
+    expect(f.node()).toMatchObject({ status: 'deleted' });
+  });
+
+  it('blocks visibly when the only credential that proves ownership may not delete', async () => {
+    const f = await rotationFixture();
+    await f.replace(`read-only:${ORIGINAL_TOKEN}`);
+
+    await f.sweep();
+
+    expect(f.deletes).toEqual([`read-only:${ORIGINAL_TOKEN}:${INSTANCE}`]);
+    expect(f.accounts.get(ORIGINAL_TOKEN)!.has(INSTANCE)).toBe(true);
+    expect(f.node()).toMatchObject({
+      proof: null,
+      reason: expect.stringMatching(/^teardown_delete_refused/),
     });
   });
 

@@ -21,6 +21,7 @@ export interface BlockedNodeAlertInput {
   reasons: string[];
   provider: string | null;
   providerInstanceId: string | null;
+  runtimeIncarnationId: string | null;
   recoveryType: string;
 }
 
@@ -37,11 +38,24 @@ export async function alertNodeCleanupBlocked(
 ): Promise<void> {
   const cutoff = new Date(now.getTime() - intervalMs).toISOString();
   const claimed = await env.DATABASE.prepare(
+    // Fenced to the exact runtime and blocked episode the caller observed, so a replaced runtime
+    // that is blocked for its own reason never has its alert claimed with this one's details.
     `UPDATE nodes SET cleanup_blocked_alerted_at=?
     WHERE id=? AND user_id=? AND status=? AND cleanup_blocked_since IS NOT NULL
+      AND cleanup_blocked_since IS ? AND provider_instance_id IS ? AND runtime_incarnation_id IS ?
+      AND runtime_termination_confirmed_at IS NULL
       AND (cleanup_blocked_alerted_at IS NULL OR cleanup_blocked_alerted_at <= ?)`
   )
-    .bind(now.toISOString(), input.nodeId, input.userId, input.status, cutoff)
+    .bind(
+      now.toISOString(),
+      input.nodeId,
+      input.userId,
+      input.status,
+      input.blockedSince,
+      input.providerInstanceId,
+      input.runtimeIncarnationId,
+      cutoff
+    )
     .run();
   if (!claimed.meta.changes) return;
   const context = {
@@ -116,6 +130,7 @@ export async function recordNodeTeardownBlocked(
         reasons: [error.reason],
         provider: node.cloudProvider,
         providerInstanceId: node.providerInstanceId,
+        runtimeIncarnationId: node.runtimeIncarnationId,
         recoveryType: 'node_teardown_blocked',
       },
       now,

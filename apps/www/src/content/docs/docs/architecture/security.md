@@ -196,8 +196,9 @@ VMs (`resolveStrictNodeTeardownAuthority()` in
   deletes through it.
 - Otherwise SAM uses the node owner's current credentials for that provider: the
   provisioning order for the node's own user and project (project, then user,
-  then platform), then every enabled platform credential for that provider. It
-  never uses another user's or another project's credential.
+  then platform), the owner's user credential on its own for a project node,
+  then every enabled platform credential for that provider. It never uses
+  another user's or another project's credential.
 - With a current credential, ownership is proven from the VM itself
   (`proveNodeInstanceOwnership()`). Immediately before the provider delete, SAM
   re-reads the instance and requires the recorded provider instance ID plus the
@@ -209,12 +210,15 @@ VMs (`resolveStrictNodeTeardownAuthority()` in
 - A credential that cannot see the instance is not proof the VM is gone. The
   node stays `destroying` with a named `cleanup_blocked_reason`
   (`teardown_credential_unavailable`, `teardown_instance_not_visible`,
-  `teardown_instance_ownership_mismatch` or
-  `teardown_ownership_scope_unavailable`) and SAM raises its operator alert
+  `teardown_instance_ownership_mismatch`,
+  `teardown_ownership_scope_unavailable` or `teardown_delete_refused`) and SAM raises its operator alert
   (`recordNodeTeardownBlocked()` in `node-teardown-blocked.ts`), instead of
   retrying silently. A credential that could not be read at all (a transient
   storage or decryption failure) is an ordinary failure and is retried on the
-  normal backoff, not reported as missing.
+  normal backoff, not reported as missing. A credential that can read the VM but
+  is refused permission to delete it is skipped, and the next credential has to
+  prove ownership again before its own delete
+  (`deleteWithCurrentOwnerCredential()`).
 
 ## Credential Encryption
 

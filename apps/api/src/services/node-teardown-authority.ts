@@ -23,6 +23,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { GcpApiError } from './gcp-errors';
 import {
   buildNodeProviderLabels,
   nodeProviderLabelsMatch,
@@ -53,6 +54,8 @@ export const NODE_TEARDOWN_BLOCKED_REASONS = [
   'teardown_instance_ownership_mismatch',
   /** This installation or node record lacks the identity needed to prove ownership at all. */
   'teardown_ownership_scope_unavailable',
+  /** Every credential that proved ownership was refused permission to delete the instance. */
+  'teardown_delete_refused',
 ] as const;
 
 export type NodeTeardownBlockedReason = (typeof NODE_TEARDOWN_BLOCKED_REASONS)[number];
@@ -105,7 +108,8 @@ async function resolvePinnedCredential(
  * The node owner's current credentials for the node's provider, in provisioning order. Scope is
  * the node's own credential attribution (user, plus project when the node was project-attributed),
  * resolved by `createProviderForUser` exactly as provisioning resolves it (project, then user,
- * then platform), followed by every enabled platform credential for the provider, so a node placed
+ * then platform), then the user tier on its own for a project-attributed node, then every enabled
+ * platform credential for the provider, so a node placed
  * on the platform credential stays reachable when its owner has since added their own. Never
  * another user's or another project's credential: no lookup here is keyed by provider name alone.
  *
@@ -162,6 +166,14 @@ async function resolveCurrentOwnerCredentials(
       attributionProjectId
     )
   );
+  if (attributionProjectId) {
+    // `createProviderForUser` returns only the first tier that resolves. A project credential that
+    // now points at another account would hide the owner's own user credential, so resolve the
+    // user tier separately. Each candidate still has to prove ownership before any delete.
+    await isolate('user', () =>
+      createProviderForUser(db, attributionUserId, encryptionKey, env, targetProvider, null)
+    );
+  }
   let platformRows: Array<typeof schema.platformCredentials.$inferSelect> = [];
   try {
     platformRows = await db
@@ -365,15 +377,90 @@ export async function proveNodeInstanceOwnership(
 }
 
 /**
- * The provider refused this credential, so it can never answer for the instance. Trust the
- * provider's own category first: GCP and Hetzner also answer 403 for rate limits and quotas, which
- * are temporary (rule 72). A bare 401/403 counts only when the provider gave no category.
+ * Delete the node's instance through the first current owner credential that proves ownership
+ * and is allowed to delete. A credential can be able to read the VM but not delete it (a read-only
+ * Hetzner token, a GCP identity with viewer rights only). When the provider definitively refuses
+ * the DELETE itself (`isCredentialRejection`), that credential is dropped and ownership is proven
+ * again through the remaining ones before the next delete. Any other delete failure (timeout,
+ * 5xx, rate limit) is ambiguous: it is rethrown without trying another credential.
+ * `beforeDelete` runs between each proof and its delete (the incarnation fence).
  */
-function isCredentialRejection(error: unknown): boolean {
-  if (!(error instanceof ProviderError)) return false;
-  if (error.category === 'auth_error') return true;
-  return (
-    (error.statusCode === 401 || error.statusCode === 403) &&
-    (error.category === undefined || error.category === 'unknown')
+export async function deleteWithCurrentOwnerCredential(
+  node: NodeRow,
+  env: Env,
+  candidates: readonly ProviderForUserResult[],
+  beforeDelete: () => Promise<void>,
+  requestContext?: ProviderRequestContext
+): Promise<void> {
+  const instanceId = node.providerInstanceId;
+  if (!instanceId) {
+    throw new Error(`Cannot delete node ${node.id} through a current credential: instance ID is missing`);
+  }
+  let remaining = [...candidates];
+  let refused = false;
+  while (remaining.length > 0) {
+    let proven: ProviderForUserResult;
+    try {
+      proven = await proveNodeInstanceOwnership(node, env, remaining, requestContext);
+    } catch (error) {
+      // After a delete refusal, "no other credential can see it" means the VM is visible only to
+      // a credential that may not delete it: name that condition instead.
+      if (
+        refused &&
+        error instanceof NodeTeardownBlockedError &&
+        error.reason === 'teardown_instance_not_visible'
+      ) {
+        break;
+      }
+      throw error;
+    }
+    await beforeDelete();
+    try {
+      if (requestContext) await proven.provider.deleteVM(instanceId, requestContext);
+      else await proven.provider.deleteVM(instanceId);
+      return;
+    } catch (error) {
+      if (requestContext?.signal?.aborted || !isCredentialRejection(error)) throw error;
+      refused = true;
+      log.warn('node_teardown.delete_refused', {
+        nodeId: node.id,
+        credentialSource: proven.credentialSource,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      remaining = remaining.filter((candidate) => candidate !== proven);
+    }
+  }
+  throw new NodeTeardownBlockedError(
+    'teardown_delete_refused',
+    `node=${node.id} instance=${instanceId}: every current credential that proved ownership was ` +
+      'refused permission to delete the instance'
   );
+}
+
+/**
+ * The provider refused this credential, so it can never answer for the instance (reads) or act on
+ * it (deletes). Trust the provider's own category first. Rate limits and quotas are temporary even
+ * when a provider reports them as 403 (rule 72), so a bare 401/403 counts only when no category,
+ * provider code or response text says "limit", "quota" or "rate". GCP token exchange and
+ * service-account impersonation fail with `GcpApiError` (not `ProviderError`) and go through the
+ * same test, so a revoked GCP identity gives a named verdict instead of a silent retry.
+ */
+export function isCredentialRejection(error: unknown): boolean {
+  if (error instanceof ProviderError) {
+    if (error.category === 'auth_error') return true;
+    if (error.category !== undefined && error.category !== 'unknown') return false;
+    return isRefusalStatus(error.statusCode) && !mentionsTemporaryLimit(error.providerCode, error.message);
+  }
+  if (error instanceof GcpApiError) {
+    return isRefusalStatus(error.statusCode) && !mentionsTemporaryLimit(error.rawBody, error.message);
+  }
+  return false;
+}
+
+function isRefusalStatus(statusCode: number | undefined): boolean {
+  return statusCode === 401 || statusCode === 403;
+}
+
+function mentionsTemporaryLimit(...texts: Array<string | undefined>): boolean {
+  return texts.some((text) => !!text && /rate|quota|limit/i.test(text));
 }

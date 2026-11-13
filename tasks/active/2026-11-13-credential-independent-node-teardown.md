@@ -68,7 +68,7 @@ must not leave nodes running.
    cannot see the instance is not absence proof.
 4. Failure reasons are typed (`NodeTeardownBlockedError`) and named:
    `teardown_credential_unavailable`, `teardown_instance_not_visible`,
-   `teardown_instance_ownership_mismatch`, `teardown_ownership_scope_unavailable`. They are
+   `teardown_instance_ownership_mismatch`, `teardown_ownership_scope_unavailable`, `teardown_delete_refused`. They are
    recorded on the node (`cleanup_blocked_reason`, `cleanup_blocked_since`) from the shared
    funnel, raise the existing operator alert, survive cron re-diagnosis and the stranded sweep,
    and keep the full failure backoff (they cannot clear themselves).
@@ -121,3 +121,10 @@ must not leave nodes running.
   metadata) are not re-tested here; they are decoded by the same adapters provider-orphan
   reconciliation already relies on, and `nodeProviderLabelsMatch` is the same comparison.
 - Staging verification: pending.
+- CodeRabbit review (2026-11-13 23:23Z, six findings) addressed:
+  - User-tier candidate for project-attributed nodes.
+  - GcpApiError and limit-aware refusal classification.
+  - Continue to the next credential after a definitive delete refusal (new reason `teardown_delete_refused`).
+  - Alert claim fenced to the runtime and episode.
+  - Ambiguity test keeps the matching label.
+  - Hetzner 403 classification handled in this module's classifier, not `HetznerProvider.getVM` (shared by other callers, rule 67).

@@ -8,8 +8,8 @@ import type { Env } from '../env';
 import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { captureNodeLogsBeforeTeardown } from './node-log-capture';
 import {
+  deleteWithCurrentOwnerCredential,
   NodeTeardownBlockedError,
-  proveNodeInstanceOwnership,
   resolveStrictNodeTeardownAuthority,
 } from './node-teardown-authority';
 import { recordNodeTeardownBlocked } from './node-teardown-blocked';
@@ -79,21 +79,23 @@ async function deleteStrictProviderInstance(
   await beforeDestroy?.();
   // Black box recorder: bounded and best-effort, never blocks teardown beyond its timeout.
   await captureNodeLogsBeforeTeardown(env, node);
-  let provider = authority.kind === 'pinned' ? authority.providerResult.provider : null;
-  if (!provider) {
+  if (authority.kind === 'pinned') {
+    const provider = authority.providerResult.provider;
+    if (requestContext) await provider.deleteVM(providerInstanceId, requestContext);
+    else await provider.deleteVM(providerInstanceId);
+  } else {
     // The placement credential no longer resolves (rotated, re-saved, reconnected). Ownership
-    // comes from the instance itself, read immediately before the delete.
-    const proven = await proveNodeInstanceOwnership(
+    // comes from the instance itself, read immediately before each delete.
+    await deleteWithCurrentOwnerCredential(
       node,
       env,
-      authority.kind === 'current_owner_credential' ? authority.candidates : [],
+      authority.candidates,
+      async () => {
+        await requireSameNodeIncarnation(db, node, 'provider delete after ownership proof');
+      },
       requestContext
     );
-    await requireSameNodeIncarnation(db, node, 'provider delete after ownership proof');
-    provider = proven.provider;
   }
-  if (requestContext) await provider.deleteVM(providerInstanceId, requestContext);
-  else await provider.deleteVM(providerInstanceId);
   return 'deleted';
 }
 
