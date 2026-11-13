@@ -1,8 +1,10 @@
 /**
- * Choosing an account for one run, through the real `POST /api/projects/:projectId/tasks/submit`
- * handler (rule 62). The account check runs against a real SQLite engine: another person's
- * account, a paused one and one for a different agent are refused with no task written, and
- * the caller's own account is stored on the task (owner control, rule 28).
+ * Start work through the real `POST /api/projects/:projectId/tasks/submit` handler.
+ *
+ * Everything is driven through the route, not through `submitTaskImplementation`
+ * directly, so the schema, the auth middleware and the submit flow all participate
+ * (rule 62). The idea gate and the per-run account check run against a real SQLite
+ * engine with foreign-owner attack cases and owner controls (rules 11, 28).
  */
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -17,6 +19,7 @@ import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helper
 import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
 const authState = vi.hoisted(() => ({ userId: 'user-1' }));
+const calls = vi.hoisted(() => [] as string[]);
 const mocks = vi.hoisted(() => ({
   requireRepositoryUserAccess: vi.fn(),
   recordLink: vi.fn(),
@@ -123,6 +126,7 @@ async function createEnv() {
   seedProjectWithMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
   seedProjectWithMember(sqlite, { projectId: 'project-2', userId: 'user-1', role: 'owner' });
   seedCloudCredential(sqlite, { id: 'cloud-1', userId: 'user-1', projectId: 'project-1' });
+  seedIdeas(sqlite);
   seedAccounts(sqlite);
   const fixture = {
     sqlite,
@@ -141,6 +145,30 @@ async function createEnv() {
     env: fixture.env,
   });
   return fixture;
+}
+
+function seedIdeas(sqlite: Database.Database): void {
+  const insert = sqlite.prepare(
+    `INSERT INTO tasks (id, project_id, user_id, title, description, status, is_idea, priority,
+       task_mode, dispatch_depth, triggered_by, created_by, created_at, updated_at)
+     VALUES (?, ?, 'user-1', ?, ?, ?, ?, 0, 'task', 0, 'user', 'user-1',
+       '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`
+  );
+  insert.run(
+    'idea-open',
+    'project-1',
+    'Retry failed webhook deliveries',
+    'Use the 3-day window.',
+    'draft',
+    1
+  );
+  insert.run('idea-done', 'project-1', 'Already shipped', null, 'completed', 1);
+  insert.run('idea-parked', 'project-1', 'Parked for now', null, 'cancelled', 1);
+  insert.run('task-ordinary', 'project-1', 'An ordinary task', null, 'queued', 0);
+  // Draft, same project, not an idea — only `is_idea` separates it from `idea-open`, so the
+  // refusal below cannot pass merely because the status differs (program decision 16).
+  insert.run('task-ordinary-draft', 'project-1', 'An ordinary draft task', null, 'draft', 0);
+  insert.run('idea-foreign', 'project-2', 'Another project idea', null, 'draft', 1);
 }
 
 const NOW = '2026-11-13T00:00:00.000Z';
@@ -180,10 +208,270 @@ function submit(app: Hono<{ Bindings: Env }>, env: Env, body: Record<string, unk
   );
 }
 
+function linkRows(sqlite: Database.Database): number {
+  return (sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get() as { count: number }).count;
+}
+
+describe('POST /tasks/submit with sourceIdeaId', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    calls.length = 0;
+    authState.userId = 'user-1';
+    mocks.requireRepositoryUserAccess.mockResolvedValue(undefined);
+    mocks.recordLink.mockImplementation(() => {
+      calls.push('recordLink');
+      return Promise.resolve();
+    });
+    mocks.createSession.mockResolvedValue('session-1');
+    mocks.persistMessage.mockResolvedValue(undefined);
+    mocks.recordActivityEvent.mockResolvedValue(undefined);
+    mocks.stopSession.mockImplementation(() => {
+      calls.push('stopSession');
+      return Promise.resolve();
+    });
+    mocks.updateSessionTopic.mockResolvedValue(true);
+    mocks.startTaskRunnerDO.mockImplementation(() => {
+      calls.push('startTaskRunnerDO');
+      return Promise.resolve();
+    });
+    mocks.getTaskRunnerStatus.mockResolvedValue(null);
+    mocks.getTaskTitleConfig.mockReturnValue({});
+    mocks.truncateTitle.mockReturnValue('Work on the idea');
+    mocks.generateTaskTitle.mockResolvedValue('Work on the idea');
+    mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'Match the window.' });
+  });
+
+  it('records works_on before the task runner starts (VM path)', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const response = await submit(createApp(), env, {
+        message: 'Match the window.',
+        taskMode: 'task',
+        sourceIdeaId: 'idea-open',
+      });
+      expect(response.status).toBe(202);
+      expect(mocks.recordLink).toHaveBeenCalledWith(expect.objectContaining({ env }), 'project-1', {
+        sourceKind: 'session',
+        sourceId: 'session-1',
+        targetKind: 'idea',
+        targetId: 'idea-open',
+        relation: 'works_on',
+        origin: 'explicit',
+        context: null,
+      });
+      // Liveness beside the ordering claim: both ran, and the link ran first.
+      expect(calls).toEqual(['recordLink', 'startTaskRunnerDO']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('records discusses when the start is a conversation', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      await submit(createApp(), env, {
+        message: 'Talk it through.',
+        taskMode: 'conversation',
+        sourceIdeaId: 'idea-open',
+      });
+      expect(mocks.recordLink.mock.calls[0]?.[2]).toMatchObject({ relation: 'discusses' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  // Control: the suite must not pass with the link write deleted outright.
+  it('records nothing and still starts when no idea is supplied', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const response = await submit(createApp(), env, { message: 'Plain task.', taskMode: 'task' });
+      expect(response.status).toBe(202);
+      expect(mocks.recordLink).not.toHaveBeenCalled();
+      expect(calls).toEqual(['startTaskRunnerDO']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('aborts the start when the link cannot be written, leaving no queued task', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      mocks.recordLink.mockImplementation(() => Promise.reject(new Error('DO unavailable')));
+      const before = linkRows(sqlite);
+      const response = await submit(createApp(), env, {
+        message: 'Match the window.',
+        taskMode: 'task',
+        sourceIdeaId: 'idea-open',
+      });
+      expect(response.status).toBe(500);
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+      expect(calls).toContain('stopSession');
+      const queued = sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM tasks WHERE status = 'queued' AND id != 'task-ordinary'"
+        )
+        .get() as { count: number };
+      expect(queued.count).toBe(0);
+      // The submitted task row exists but is terminal, not left queued for the runner.
+      expect(linkRows(sqlite)).toBe(before + 1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  // What this proves and what it does not: the route always asks for the SAME
+  // (source, target, relation) triple for a given chat and idea, which is the shape
+  // T1's store upserts rather than duplicating (its own DO tests cover that). It does
+  // not drive a real retry — a second `POST /tasks/submit` mints a new task and a new
+  // session, so the only production path that re-links one session is a replayed SAM
+  // dispatch reservation, which this route cannot reach.
+  it('always asks for the same link triple for a given chat and idea', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const app = createApp();
+      const body = { message: 'Match the window.', taskMode: 'task', sourceIdeaId: 'idea-open' };
+      await submit(app, env, body);
+      await submit(app, env, body);
+      expect(mocks.recordLink).toHaveBeenCalledTimes(2);
+      expect(mocks.recordLink.mock.calls[0]?.[2]).toEqual(mocks.recordLink.mock.calls[1]?.[2]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('404s an idea belonging to another project, before any task is created', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const before = linkRows(sqlite);
+      const response = await submit(createApp(), env, {
+        message: 'Match the window.',
+        taskMode: 'task',
+        sourceIdeaId: 'idea-foreign',
+      });
+      expect(response.status).toBe(404);
+      expect(linkRows(sqlite)).toBe(before);
+      expect(mocks.createSession).not.toHaveBeenCalled();
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('404s an ordinary task used as an idea', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const response = await submit(createApp(), env, {
+        message: 'Match the window.',
+        taskMode: 'task',
+        sourceIdeaId: 'task-ordinary',
+      });
+      expect(response.status).toBe(404);
+      expect(mocks.createSession).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  /*
+   * The discriminating version of the test above. `task-ordinary` is `queued`, which the OLD
+   * `status = 'draft'` rule excluded too — so that test passes under either definition and
+   * cannot tell them apart. This row is `draft` in the same project, differing only in
+   * `is_idea = 0`: exactly what the old rule would have accepted as an idea.
+   */
+  it('404s an ordinary DRAFT task, which the old status rule would have accepted', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const refused = await submit(createApp(), env, {
+        message: 'Match the window.',
+        taskMode: 'task',
+        sourceIdeaId: 'task-ordinary-draft',
+      });
+      expect(refused.status).toBe(404);
+      expect(mocks.createSession).not.toHaveBeenCalled();
+
+      // Owner control: a real idea on the same path still starts, so the refusal above is the
+      // flag and not the route being broken for everything.
+      const accepted = await submit(createApp(), env, {
+        message: 'Match the window.',
+        taskMode: 'task',
+        sourceIdeaId: 'idea-open',
+      });
+      expect(accepted.status).toBe(202);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each([
+    ['idea-done', /idea is done/i],
+    ['idea-parked', /idea is parked/i],
+  ])('409s %s with a message that says what to do', async (ideaId, pattern) => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const before = linkRows(sqlite);
+      const response = await submit(createApp(), env, {
+        message: 'Match the window.',
+        taskMode: 'task',
+        sourceIdeaId: ideaId,
+      });
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { message: string }).message).toMatch(pattern);
+      expect(linkRows(sqlite)).toBe(before);
+      expect(mocks.createSession).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  // The Instant branch records the link inside `acceptInstantSession`, which is covered
+  // by instant-session-idea-link.test.ts. What the route owes it is the validated id.
+  it('passes the validated idea to the Instant branch', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      sqlite
+        .prepare(
+          `INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime,
+             task_mode, is_builtin, created_at, updated_at)
+           VALUES ('profile-instant', 'project-1', 'user-1', 'Brainstormer', 'claude-code',
+             'cf-container', 'conversation', 0, '2026-10-24T00:00:00.000Z', '2026-10-24T00:00:00.000Z')`
+        )
+        .run();
+      mocks.acceptInstantSession.mockResolvedValue({
+        taskId: 'task-instant',
+        chatSessionId: 'session-instant',
+      });
+      mocks.continueInstantSessionLaunch.mockResolvedValue(undefined);
+
+      const response = await submit(createApp(), env, {
+        message: 'Talk it through.',
+        agentProfileId: 'profile-instant',
+        taskMode: 'conversation',
+        sourceIdeaId: 'idea-open',
+      });
+
+      expect(response.status).toBe(202);
+      expect(mocks.acceptInstantSession).toHaveBeenCalledTimes(1);
+      expect(mocks.acceptInstantSession.mock.calls[0]?.[2]).toMatchObject({
+        sourceIdeaId: 'idea-open',
+        taskMode: 'conversation',
+      });
+      // The route must not also write the link itself — that would double-write.
+      expect(mocks.recordLink).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+/** Tasks the submit created: everything except the ideas and tasks `seedIdeas` wrote. */
+const SUBMITTED = `SELECT id, agent_configuration_id AS account FROM tasks
+  WHERE id NOT IN ('idea-open', 'idea-done', 'idea-parked', 'task-ordinary',
+                   'task-ordinary-draft', 'idea-foreign')`;
+
 function taskRows(sqlite: Database.Database) {
-  return sqlite.prepare('SELECT agent_configuration_id AS account FROM tasks').all() as Array<{
-    account: string | null;
-  }>;
+  return (sqlite.prepare(SUBMITTED).all() as Array<{ account: string | null }>).map(
+    ({ account }) => ({ account })
+  );
 }
 
 describe('POST /tasks/submit with agentConfigurationId', () => {
@@ -354,7 +642,7 @@ describe('POST /tasks/submit with agentConfigurationId', () => {
         agentConfigurationId: 'cfg-work-max',
       });
       expect(response.status).toBe(202);
-      const task = sqlite.prepare('SELECT id FROM tasks').get() as { id: string };
+      const task = sqlite.prepare(SUBMITTED).get() as { id: string };
 
       // The TaskRunner provisions the run's workspace and binds it (mocked out above).
       sqlite.exec(`
