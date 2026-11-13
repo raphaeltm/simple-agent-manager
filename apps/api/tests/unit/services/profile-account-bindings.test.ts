@@ -189,24 +189,60 @@ describe('resolveProfileAccountBindings', () => {
     });
   });
 
-  it('names the credential the real admission selector picks, profile by profile', async () => {
-    const bindings = await bind();
+  it('names the credential the real admission selector picks, for every kind of user', async () => {
+    // A user with no cc rows (legacy only, one inactive project row), and a user whose cc
+    // resolution yields only the platform default while a legacy key exists.
+    await legacy('old-claude', 'old', 'claude-code', null);
+    await legacy('old-codex-proj', 'old', 'openai-codex', 'project-1', 0);
+    await legacy('old-codex', 'old', 'openai-codex', null);
+    await legacy('plat-legacy', 'plat', 'claude-code', null);
     const db = drizzle(env.DATABASE);
-    for (const binding of bindings) {
-      const selected = await getSelectedAgentCredentialReference(
-        db,
-        'owner',
-        binding.agentType,
-        KEY,
-        'project-1',
-        { profileId: binding.profileId, agentType: binding.agentType }
-      );
-      if (binding.state === 'account') {
-        expect(binding.usageReferences, binding.profileId).toContain(selected);
-      } else {
-        expect(selected, binding.profileId).toBeNull();
+    const checked: string[] = [];
+    for (const userId of ['owner', 'mate', 'owner2', 'old', 'plat']) {
+      for (const binding of await bind(userId)) {
+        const selected = await getSelectedAgentCredentialReference(
+          db,
+          userId,
+          binding.agentType,
+          KEY,
+          'project-1',
+          { profileId: binding.profileId, agentType: binding.agentType }
+        );
+        const label = `${userId}/${binding.profileId}`;
+        if (binding.state === 'account') {
+          expect(binding.usageReferences, label).toContain(selected);
+        } else {
+          expect(selected, label).toBeNull();
+        }
+        checked.push(`${label}:${binding.state}`);
       }
     }
+    // The fixture really covers each branch, so a passing loop is not vacuous.
+    expect(checked).toEqual(
+      expect.arrayContaining([
+        'owner/prof-a:account',
+        'owner/prof-paused:paused',
+        'owner/prof-gem:none',
+        'owner/prof-oc:account',
+        'mate/prof-a:account',
+        'old/prof-a:account',
+        'old/prof-codex:paused',
+        'plat/prof-a:account',
+        'owner2/prof-a:none',
+      ])
+    );
+  });
+
+  it('reports no proxy when the installation turns the AI proxy off', async () => {
+    sqlite
+      .prepare(
+        "INSERT INTO agent_settings (id,user_id,agent_type,provider_mode,created_at,updated_at) VALUES ('s0','owner2','claude-code','sam','now','now')"
+      )
+      .run();
+    const list = [{ id: 'p-claude', agentType: 'claude-code' }];
+    expect((await bind('owner2', list))[0]?.state).toBe('sam_ai_proxy');
+    env = { ...env, AI_PROXY_ENABLED: 'false' } as Env;
+    expect((await bind('owner2', list))[0]?.state).toBe('none');
   });
 
   it('a platform credential never counts as an account; SAM proxy only when chosen', async () => {

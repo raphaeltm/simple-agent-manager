@@ -277,7 +277,7 @@ export async function usageGet(
       'Pools are your stored credentials; copies of one stored secret are one pool. Two separately stored logins to the same provider account cannot be told apart and appear as separate pools. poolId is an opaque digest that changes when stored copies are added or replaced; re-read it rather than caching it.',
       'Windows are the provider’s own last-reported numbers, sampled only while an agent runs on that account. freshness "stale" means no sample within staleAfterMinutes; "reset_since_sample" means the window reset after the last sample, so usedPercent restarts from 0. usage.state "never_reported" means SAM has no sample for this account: remaining capacity is unknown, not full. "unavailable" means the usage read failed; retry.',
       'kind "sam_ai_proxy" means the profile has no account of yours and runs on SAM’s AI proxy because you chose SAM as the provider; usage.samAiToday is your SAM AI budget today (UTC, all projects).',
-      'This is the account a new run would use. A skill that switches the agent at start time is not applied here.',
+      'This is the account a new run would select from your stored settings, not a guarantee it starts: a skill that switches the agent at start time is not applied, and a stored credential that can no longer be decrypted or reached is still listed.',
     ],
     link: operationLink(ctx, input.projectId),
   };

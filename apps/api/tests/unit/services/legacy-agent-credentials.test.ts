@@ -108,6 +108,18 @@ describe('legacy agent credential precedence', () => {
     expect((await both('p2')).selected).toBe('credentials:user-row');
   });
 
+  it('falls through to an enabled platform credential, which is never a selectable account', async () => {
+    const platform = await encrypt('sk-platform', KEY);
+    sqlite
+      .prepare(
+        "INSERT INTO platform_credentials (id,credential_type,agent_type,credential_kind,label,encrypted_token,iv,is_enabled,created_by,created_at,updated_at) VALUES ('plat','agent-api-key','claude-code','api-key','p',?,?,1,'admin','now','now')"
+      )
+      .run(platform.ciphertext, platform.iv);
+    const { key, selected } = await both('p1');
+    expect(key).toMatchObject({ credential: 'sk-platform', credentialSource: 'platform' });
+    expect(selected).toBeNull();
+  });
+
   it('skips an inactive user row and another member’s rows', async () => {
     await row('inactive-user', { projectId: null, active: false });
     await row('mate-row', { userId: 'mate', projectId: null });

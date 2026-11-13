@@ -11,6 +11,12 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 
+/**
+ * Safety cap on one user's agent-key rows in one project scope. The unique indexes allow one row
+ * per (agent, kind) per scope, so real users hold a handful; the cap only bounds a pathological read.
+ */
+export const LEGACY_AGENT_CREDENTIAL_ROW_CAP = 500;
+
 export interface LegacyAgentCredentialRow {
   id: string;
   projectId: string | null;
@@ -63,5 +69,6 @@ export async function loadLegacyAgentCredentialRows(
           : isNull(schema.credentials.projectId)
       )
     )
-    .orderBy(asc(schema.credentials.id));
+    .orderBy(asc(schema.credentials.id))
+    .limit(LEGACY_AGENT_CREDENTIAL_ROW_CAP);
 }

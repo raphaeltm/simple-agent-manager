@@ -9,9 +9,8 @@
  *
  * 1. What a run does without a credential of the person's own. The agent-key route
  *    (`routes/workspaces/runtime.ts`, `POST /:id/agent-key`) never hands a platform credential to
- *    a workspace; Claude Code and Codex then run on SAM's AI proxy only when the person chose the
- *    `sam` provider mode for that agent, and every other case fails with "Agent credential not
- *    found". So `sam_ai_proxy` vs `none` is decided from `agent_settings.provider_mode`.
+ *    a workspace; it falls back to SAM's AI proxy only as `samProxyFallbackAvailable` says (the
+ *    same predicate the route uses), and every other case fails with "Agent credential not found".
  * 2. Quota pools. Stored rows with byte-identical `(encrypted_token, iv)` are copies of one secret
  *    (dual-writes and the cc backfill copy ciphertext verbatim; see `run-agent-credential.ts`), so
  *    profiles on any copy share one provider quota. The equality is computed in SQL, so no
@@ -27,9 +26,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../env';
 import { resolveAgentCredentialSelections } from './agent-credential-selection';
-
-/** Agents the agent-key route can start on SAM's AI proxy (`buildPlatformInferenceConfig`). */
-const SAM_PROXY_AGENTS: ReadonlySet<string> = new Set(['claude-code', 'openai-codex']);
+import { samProxyFallbackAvailable } from './sam-ai-proxy-fallback';
 
 /** The SAM AI proxy budget is per person across agents, so it is one pool. */
 export const SAM_AI_PROXY_POOL_ID = 'sam-ai-proxy';
@@ -115,12 +112,12 @@ async function loadPoolsAndModes(env: Env, userId: string) {
     const b = text(row.b);
     if (a && b) pools.union(`credentials:${a}`, `cc_credentials:${b}`);
   }
-  const samMode = new Set<string>();
+  const providerModes = new Map<string, string | null>();
   for (const row of (modes?.results ?? []) as ModeRow[]) {
     const agentType = text(row.agent_type);
-    if (agentType && row.provider_mode === 'sam') samMode.add(agentType);
+    if (agentType) providerModes.set(agentType, text(row.provider_mode));
   }
-  return { pools, samMode };
+  return { pools, providerModes };
 }
 
 /**
@@ -137,7 +134,7 @@ export async function resolveProfileAccountBindings(
   }
 ): Promise<ProfileAccountBinding[]> {
   if (input.profiles.length === 0) return [];
-  const [selections, { pools, samMode }] = await Promise.all([
+  const [selections, { pools, providerModes }] = await Promise.all([
     resolveAgentCredentialSelections(drizzle(env.DATABASE), input),
     loadPoolsAndModes(env, input.userId),
   ]);
@@ -184,7 +181,7 @@ export async function resolveProfileAccountBindings(
           case 'unknown':
             return { ...base, state: 'unknown' };
           case 'none':
-            return SAM_PROXY_AGENTS.has(agentType) && samMode.has(agentType)
+            return samProxyFallbackAvailable(env, agentType, providerModes.get(agentType) ?? null)
               ? { ...base, state: 'sam_ai_proxy', poolId: SAM_AI_PROXY_POOL_ID }
               : { ...base, state: 'none' };
         }

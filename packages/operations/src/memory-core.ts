@@ -1,5 +1,5 @@
 import { KNOWLEDGE_ENTITY_TYPES, type KnowledgeEntityType } from '@simple-agent-manager/shared';
-import { normalizeSearchQuery } from '@simple-agent-manager/worker-core';
+import { log, normalizeSearchQuery } from '@simple-agent-manager/worker-core';
 
 import { bindProfiles, publicProfileAccount } from './account-usage';
 import { operationLink, operationPageLimit } from './connector-read-core';
@@ -85,7 +85,12 @@ export async function listProfiles(
     if (status === 400 || status === 403 || status === 409) {
       throw new OperationError('invalid_input', (error as Error).message);
     }
-    throw new OperationError('unavailable', `Failed to list profiles: ${(error as Error).message}`);
+    // Storage error text (SQL, table names) never reaches an app; it is logged instead.
+    log.warn('operations.list_profiles_failed', {
+      projectId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw new OperationError('unavailable', 'SAM could not list agent profiles right now.');
   }
   const external = ctx.actor.via !== 'workspace-agent';
   const matching = external
