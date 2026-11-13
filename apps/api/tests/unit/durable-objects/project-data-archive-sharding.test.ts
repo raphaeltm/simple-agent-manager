@@ -20,6 +20,7 @@ import {
   prepareArchiveSourceIntentOrRefuse,
   prepareArchiveTarget,
   ProjectDataArchiveInvariantError,
+  reclaimArchiveSourcePage,
   resolveArchiveHashPageRows,
   sealArchiveTarget,
 } from '../../../src/durable-objects/project-data/archive-sharding';
@@ -850,10 +851,12 @@ describe('ProjectData terminal archive sharding bridge', () => {
         tools: 1,
         intent_state: 'recovery_manifest_persisted',
       });
+      // The flip is one transaction: a reset on its last statement (the reclaim marker) must
+      // roll back the anchors and the intent too, so the session stays unflipped and readable.
       const faultSql = {
         exec(query: string, ...params: unknown[]) {
-          if (/^DELETE FROM chat_messages WHERE/i.test(query.trim())) {
-            throw new Error('injected source-delete reset');
+          if (/^INSERT OR REPLACE INTO do_meta/i.test(query.trim())) {
+            throw new Error('injected flip reset');
           }
           return source.sql.exec(query, ...params);
         },
@@ -865,7 +868,33 @@ describe('ProjectData terminal archive sharding bridge', () => {
         finalizeSourceDelete(faultSql, finalizeInput, (callback) =>
           source.db.transaction(callback)()
         )
-      ).rejects.toThrow('injected source-delete reset');
+      ).rejects.toThrow('injected flip reset');
+      expect(
+        source.db
+          .prepare(
+            `SELECT
+               (SELECT COUNT(*) FROM chat_messages WHERE session_id = ?) AS messages,
+               (SELECT COUNT(*) FROM chat_messages_grouped WHERE session_id = ?) AS grouped_rows,
+               (SELECT COUNT(*) FROM tool_payload_archives WHERE session_id = ?) AS tools,
+               (SELECT archive_state FROM chat_sessions WHERE id = ?) AS archive_state`
+          )
+          .get('session-archive', 'session-archive', 'session-archive', 'session-archive')
+      ).toEqual({ messages: 2, grouped_rows: 1, tools: 1, archive_state: null });
+      expect(inspectArchiveSourceIntent(source.sql, finalizeInput)).toMatchObject({
+        state: 'recovery_manifest_persisted',
+      });
+
+      // The flip deletes nothing; the rows are reclaimed afterwards in bounded pages.
+      const finalized = await finalizeSourceDelete(source.sql, finalizeInput, (callback) =>
+        source.db.transaction(callback)()
+      );
+      expect(finalized).toMatchObject({
+        idempotent: false,
+        lastMessageAt: 1200,
+        messagesDeleted: 0,
+        groupedRowsDeleted: 0,
+        toolArchiveRowsDeleted: 0,
+      });
       expect(
         source.db
           .prepare(
@@ -876,20 +905,24 @@ describe('ProjectData terminal archive sharding bridge', () => {
           )
           .get('session-archive', 'session-archive', 'session-archive')
       ).toEqual({ messages: 2, grouped_rows: 1, tools: 1 });
-      expect(inspectArchiveSourceIntent(source.sql, finalizeInput)).toMatchObject({
-        state: 'recovery_manifest_persisted',
-      });
-
-      const finalized = await finalizeSourceDelete(source.sql, finalizeInput, (callback) =>
-        source.db.transaction(callback)()
-      );
-      expect(finalized).toMatchObject({
-        idempotent: false,
-        lastMessageAt: 1200,
-        messagesDeleted: 2,
-        groupedRowsDeleted: 1,
-        toolArchiveRowsDeleted: 1,
-      });
+      const reclaimInput = {
+        projectId: 'project-archive',
+        sessionId: 'session-archive',
+        migrationId: finalizeInput.migrationId,
+        maxRows: 1,
+      };
+      const pages = [];
+      for (;;) {
+        const page = reclaimArchiveSourcePage(source.sql, reclaimInput, (callback) =>
+          source.db.transaction(callback)()
+        );
+        pages.push(page);
+        if (!page.remaining) break;
+      }
+      expect(pages.reduce((sum, page) => sum + page.messagesDeleted, 0)).toBe(2);
+      expect(pages.reduce((sum, page) => sum + page.groupedRowsDeleted, 0)).toBe(1);
+      expect(pages.reduce((sum, page) => sum + page.toolArchiveRowsDeleted, 0)).toBe(1);
+      expect(pages).toHaveLength(4);
       expect(
         source.db
           .prepare('SELECT archive_last_message_at, archive_state FROM chat_sessions WHERE id = ?')
@@ -1659,7 +1692,24 @@ describe('ProjectData archive terminal-version hashing streams bounded pages', (
         hashPageRows: 500,
       });
       expect(finalizeRecorder.maxRowsPerSelect).toBeLessThanOrEqual(500);
-      expect(finalized).toMatchObject({
+      // The flip deletes nothing; paged reclaim removes the rows with bounded selects.
+      expect(finalized).toMatchObject({ messagesDeleted: 0, groupedRowsDeleted: 0 });
+      const reclaimRecorder = recordSelectRows(source.sql);
+      let messagesDeleted = 0;
+      let groupedRowsDeleted = 0;
+      for (;;) {
+        const page = reclaimArchiveSourcePage(reclaimRecorder.sql, {
+          projectId: base.projectId,
+          sessionId: base.sessionId,
+          migrationId: base.migrationId,
+          maxRows: 500,
+        });
+        messagesDeleted += page.messagesDeleted;
+        groupedRowsDeleted += page.groupedRowsDeleted;
+        if (!page.remaining) break;
+      }
+      expect(reclaimRecorder.maxRowsPerSelect).toBeLessThanOrEqual(500);
+      expect({ messagesDeleted, groupedRowsDeleted }).toEqual({
         messagesDeleted: WIDE_SESSION_ROWS,
         groupedRowsDeleted: WIDE_SESSION_ROWS,
       });

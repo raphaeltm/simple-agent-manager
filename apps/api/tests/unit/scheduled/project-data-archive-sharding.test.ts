@@ -231,6 +231,15 @@ function createFakeSource(options: FakeSourceOptions = {}) {
         databaseSizeAfterBytes: 500,
       };
     }),
+    // The flip leaves the rows in place; this fake root has none left to reclaim.
+    archiveSourceReclaimPage: vi.fn(async () => ({
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      ftsRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      remaining: false,
+    })),
+    archiveSourceListReclaimPending: vi.fn(async () => []),
     archiveSourceRestoreChunk: vi.fn(async () => ({
       idempotent: false,
       rowCount: 0,
@@ -994,6 +1003,9 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       const skipped = await runProjectDataArchiveSharding(env, new Date(NOW + 5 * 60 * 1000));
       expect(skipped.skipReason).toBe('cadence_not_due');
       seedSessionSummary(sqlite, { sessionId: 'session-manual-bypass', updatedAt: 2000 });
+      // The primer sweep's pending-reclaim pass may ask the root object for leftovers of the
+      // published primer; what this test pins is that the DRY RUN touches no object.
+      projectDataGet.mockClear();
 
       const manualDryRun = await runScopedProjectDataArchiveCanary(env, {
         projectId: PROJECT_ID,

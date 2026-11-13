@@ -136,6 +136,14 @@ function createArchiveProjectDataNamespace(
       databaseSizeAfterBytes: 10,
       databaseSizeBytes: 10,
     })),
+    // Copy-back drains any flip leftovers first; this fake root has none.
+    archiveSourceReclaimPage: vi.fn(async () => ({
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      ftsRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      remaining: false,
+    })),
     archiveSourceRestoreChunk: vi.fn(async () => true),
     archiveSourceMarkCopyBackRestored: vi.fn(async () => true),
   };
