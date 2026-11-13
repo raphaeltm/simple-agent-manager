@@ -1,6 +1,6 @@
 # W4: extract app deployment into `@simple-agent-manager/app-deployment`
 
-Brief: `tasks/active/2026-11-12-worker-modularization.md` (section W4, "Rules for every
+Brief: `tasks/archive/2026-11-12-worker-modularization.md` (section W4, "Rules for every
 workstream", "How to work"). Coordinator task `01M77BJHHNW5714E98DEEMBCZA`, channel
 `feature.worker-modularization`, idea `01M77GBTAM775FAKY72RT4HMDV`.
 Branch `sam/w4-app-deployment-extract-ngd1ke`, PR base `sam/help-identify-parts-worker-embcza`
@@ -104,5 +104,5 @@ except the two tests).
 - [x] Specialist reviews: security PASS, cloudflare PASS, test-engineer ADDRESSED, architecture ADDRESSED, task-completion PASS
 - [x] CI via `gh workflow run ci.yml --ref sam/w4-app-deployment-extract-ngd1ke`: run 43202697278 green on 6f75a77e8
 - [x] Merge core branch, publish PR URL + head SHA on channel, notify coordinator (6f75a77e8; coordinator approved content)
-- [ ] Merge core 2052fb4b4 (W2 scheduler-core landed): conflicts in ci.yml, env.ts, local-development.md, package.json, ast-checks.ts resolved keeping both sides; no W4 code imports W2-moved files. Local: typecheck clean, package 12 files / 173 cases, apps/api 1063 files passed + 3 skipped / 15751 cases passed + 4 skipped, AST, runtime-boundary, dependency-evidence and node-pool-boundary gates pass. Pushed 5525809e0; its CI run 43225107720 was cancelled when core moved again.
-- [ ] Merge core 6b985656b (W1 project-data + main #2688): conflicts in ci.yml, env.ts, package.json, ast-checks.ts resolved keeping all sides; no W4 code imports W1-moved files. Local: build, typecheck, lint clean; package 12 files / 173 cases; AST, runtime-boundary, dependency-evidence, node-pool-boundary pass. Next: CI on the new head, send SHA + run ID to coordinator, then wait for W5 (ai-proxy) confirmation
+- [x] Merge core 2052fb4b4 (W2 scheduler-core landed): conflicts in ci.yml, env.ts, local-development.md, package.json, ast-checks.ts resolved keeping both sides; no W4 code imports W2-moved files. Local: typecheck clean, package 12 files / 173 cases, apps/api 1063 files passed + 3 skipped / 15751 cases passed + 4 skipped, AST, runtime-boundary, dependency-evidence and node-pool-boundary gates pass. Pushed 5525809e0; its CI run 43225107720 was cancelled when core moved again.
+- [x] Merge core 6b985656b (W1 project-data + main #2688): conflicts in ci.yml, env.ts, package.json, ast-checks.ts resolved keeping all sides; no W4 code imports W1-moved files. Local: build, typecheck, lint clean; package 12 files / 173 cases; AST, runtime-boundary, dependency-evidence, node-pool-boundary pass. Next: CI on the new head, send SHA + run ID to coordinator, then wait for W5 (ai-proxy) confirmation

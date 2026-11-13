@@ -47,7 +47,7 @@ const onboardingAdvisoryFiles = [
 // tasks/archive/2026-08-10-ai-slop-debt-burndown.md.
 const testFileGlobs = ['**/tests/**', '**/*.test.{ts,tsx,mts,cts}', '**/*.spec.{ts,tsx,mts,cts}'];
 
-// Module boundaries for the worker modularization (tasks/active/2026-11-12-worker-modularization.md).
+// Module boundaries for the worker modularization (tasks/archive/2026-11-12-worker-modularization.md).
 // Blocking (`error`) in source and tests alike: a test reaching across a boundary couples the same
 // way production code does. Each pattern is enforced on static imports/exports
 // (`no-restricted-imports`) and on dynamic `import()` and `require()` (`no-restricted-syntax`).

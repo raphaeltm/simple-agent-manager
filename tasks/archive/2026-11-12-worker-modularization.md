@@ -201,19 +201,19 @@ The small kernel every other package needs, so they do not each invent one.
 - [x] W6 merged into core (#2690)
 - [x] W7 merged into core (#2694)
 - [x] Root `CLAUDE.md` structure and build order updated; architecture docs synced
-- [ ] `main` merged into core, CI green on the core PR
-- [ ] One staging deploy of the core branch, full regression of core flows
-- [ ] CodeRabbit requested on the core PR
-- [ ] Raphaël lifts the draft hold; merge; production deploy monitored
+- [x] `main` merged into core, CI green on the core PR (head 13f4b0afb, all checks passed; includes the port of #2700 and the fix #2701)
+- [x] One staging deploy of the core branch, full regression of core flows (three runs; reports in PR #2681 comments 6834394984 and 6843211365, the last with production's compact archive setting on)
+- [x] CodeRabbit requested on the core PR (answered `Review skipped: 1204 files`; recorded in the PR body)
+- [x] Raphaël lifts the draft hold; merge; production deploy monitored (he authorized merging after a production-like staging pass; merged 2026-11-13 04:08 UTC as 57614ec6b; main CI 43363560258 and Deploy Production 43366605168 succeeded; health check 200)
 
 ## Acceptance criteria
 
-- [ ] Each of the eight packages builds, lints, typechecks and tests on its own
-- [ ] No package imports from `apps/*`; the worker uses public entries only; lint enforces both
-- [ ] No package function takes the full worker `Env`
-- [ ] Total test case count is not lower than on `b4ef3fba9`
-- [ ] No migration, binding, route or Durable Object class change in the diff
-- [ ] Staging regression passes on the integrated branch
+- [x] Each of the eight packages builds, lints, typechecks and tests on its own (CI Build, Lint, Type Check and Test on 13f4b0afb; each suite also run locally on the merged tree)
+- [x] No package imports from `apps/*`; the worker uses public entries only; lint enforces both (`boundaryRules` in `eslint.config.mjs`, proven by `scripts/quality/worker-module-boundaries.test.ts`; tests-only `./internal/*` entries exist in project-data, operations and ai-proxy and are rejected in worker source)
+- [x] No package function takes the full worker `Env` (each package declares its own env type; project-data and repo-hosting alias theirs as a local `Env`)
+- [x] Total test case count is not lower than on `b4ef3fba9` (measured on 019b8a7a1 against main at that time: test declarations +23; 1,092 fewer in the worker, 1,115 more in packages)
+- [x] No migration, binding, route or Durable Object class change in the diff (versus main at 019b8a7a1: no `wrangler.toml`, D1 migration or tail-worker diff; DO SQLite migrations import-only; identical worker entry export names; 570 identical route registrations)
+- [x] Staging regression passes on the integrated branch (errors seen were traced to files identical on main and are tracked as separate ideas; see the PR body)
 
 ## Package template
 
@@ -292,9 +292,21 @@ ESLint needs no per-package config: the root `eslint.config.mjs` applies.
     type-checked (`tsconfig.json` excludes `tests`, as in `packages/providers`); Vitest still runs
     them through esbuild.
 
+## Outcome
+
+Shipped 2026-11-13: PR #2681 merged to main as `57614ec6b` and deployed to production. Not exercised on staging before merge: a prompt through the SAM-managed AI proxy, app deployment create/apply, agent email inbound, GitLab, and the production-only storage-relief preflight cron.
+
+Notes on the evidence above:
+
+- The test-count, route-registration and "no binding or migration diff" measurements were taken on `019b8a7a1` against main at that time. Later commits on the branch only merged main, ported #2700 and applied the fix from #2701; they were not re-measured. The squash commit `57614ec6b` itself touches no `wrangler.toml`, D1 migration or tail-worker file. The `wrangler.toml` change and migrations 0235 and 0236 in the same period come from other PRs (#2700, #2664, #2688).
+- `apps/web` changed in two files, comment-only path references. There is no UI change.
+- CodeRabbit skipped its review of #2681 (1,204 files), and the sub-PRs were drafts into the core branch, so it reviewed none of this change. Review came from the specialist reviewers on each sub-PR and the coordinator.
+- The tests-only `./internal/*` entries of project-data, operations and ai-proxy map to every built file of the package; about 160 `apps/api` test files import through them.
+- The list of MCP and /sam tools that are still duplicated, including one open question (`list_ideas` and `find_related_ideas` need a decision), is in `2026-11-12-modularize-operations.md` next to this file.
+
 ## Deferred follow-ups
 
-Recorded on idea `01M77GBTAM775FAKY72RT4HMDV`. None changes behavior.
+Tracked on idea `01M79M6CRX5KSHYEA6GM413061` (the original idea `01M77GBTAM775FAKY72RT4HMDV` is completed). None changes behavior.
 
 - **Env field dedupe.** Package env types repeat fields that `apps/api/src/env.ts` still declares
   (393 in total, 313 of them in `ProjectDataEnv`). `Env extends` each package type, so the compiler

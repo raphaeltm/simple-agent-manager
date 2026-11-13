@@ -1,6 +1,6 @@
 # W1: extract ProjectData into `@simple-agent-manager/project-data`
 
-Workstream W1 of `tasks/active/2026-11-12-worker-modularization.md` (the brief; it overrides the
+Workstream W1 of `tasks/archive/2026-11-12-worker-modularization.md` (the brief; it overrides the
 usual `/do` defaults). Coordinator task `01M77BJHHNW5714E98DEEMBCZA`, channel
 `feature.worker-modularization`, branch `sam/w1-project-data-extract-f1wa0b`, draft PR into the
 core branch `sam/help-identify-parts-worker-embcza`.

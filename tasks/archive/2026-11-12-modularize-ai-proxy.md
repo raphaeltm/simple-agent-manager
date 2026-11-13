@@ -1,6 +1,6 @@
 # W5: extract ai-proxy into @simple-agent-manager/ai-proxy
 
-Workstream W5 of `tasks/active/2026-11-12-worker-modularization.md` (core branch
+Workstream W5 of `tasks/archive/2026-11-12-worker-modularization.md` (core branch
 `sam/help-identify-parts-worker-embcza`). Branch `sam/w5-ai-proxy` from core `79e5e1b71`.
 Draft PR into core. No staging, no CodeRabbit, no merge (coordinator task 01M77BJHHNW5714E98DEEMBCZA).
 
@@ -81,4 +81,4 @@ the token accounting calls `incrementTokenUsage` inside the package (13 cases fa
 - [x] Worker port adapter test (`aiProxyPorts`, 3 cases, proven red with the wrong encryption key), package AGENTS.md, public entry trimmed to used names
 - [x] Registrations: ci.yml + e2e-smoke filters, runtime-boundary, AST scope, build order, api-reference skill path (dependency evidence and runtime-tunables pass unchanged)
 - [x] Local gates; reviews: architecture PASS (MEDIUM dead re-exports and LOW banners fixed), task-completion WARN -> fixed (lint export order in `ai-proxy-shared.ts`)
-- [ ] CI via `gh workflow run ci.yml --ref sam/w5-ai-proxy`; send PR URL, SHA and run ID to coordinator
+- [x] CI via `gh workflow run ci.yml --ref sam/w5-ai-proxy`; send PR URL, SHA and run ID to coordinator (run 43273952003 green on b74670ba5; PR #2699 merged into the core branch)
