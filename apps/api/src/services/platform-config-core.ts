@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
+import { settleSharedFlight } from '../lib/shared-flight';
 import {
   commitAdminSettingsStatements,
   resolveAdminSettingDetailsMany,
@@ -46,6 +47,13 @@ import type {
  * Platform OAuth config changes at most a handful of times in a deployment's lifetime.
  */
 const DEFAULT_PLATFORM_CONFIG_CACHE_MS = 60_000;
+
+/**
+ * How many times one resolve may join another request's read, or retry after a write revoked
+ * its own, before it makes one unregistered read for itself. Bounds the recursion when flights
+ * keep being abandoned or revoked. Internal safety margin, not an operator setting.
+ */
+const MAX_PLATFORM_CONFIG_JOIN_ATTEMPTS = 3;
 
 /*
  * The writers below return nothing ON PURPOSE. A `ResolvedPlatformConfig` carries every platform
@@ -327,7 +335,8 @@ export async function resolvePlatformConfig(
 async function resolveLegacyPlatformConfig(
   env: Env,
   now: number = Date.now(),
-  timeoutMs = DEFAULT_CONFIG_READ_TIMEOUT_MS
+  timeoutMs = DEFAULT_CONFIG_READ_TIMEOUT_MS,
+  joinAttempt = 0
 ): Promise<ResolvedPlatformConfig> {
   // A missing binding is NOT a usable cache key: `undefined === undefined` would make every
   // database-less env share one entry. Such an env also resolves purely from `env` values
@@ -364,15 +373,30 @@ async function resolveLegacyPlatformConfig(
     joinable &&
     joinable.database === database &&
     joinable.generation === platformConfigCacheGeneration &&
-    Date.now() < joinable.deadlineAt
+    Date.now() < joinable.deadlineAt &&
+    joinAttempt < MAX_PLATFORM_CONFIG_JOIN_ATTEMPTS
   ) {
-    const config = await joinable.promise;
+    // Joined under this request's own timer: on celld a flight whose starter's client went away
+    // never settles, its deadline timer included (lib/shared-flight.ts).
+    const joined = await settleSharedFlight(joinable.promise, joinable.deadlineAt);
+    if (joined.abandoned) {
+      // The first caller to notice drops the dead flight and starts the replacement read; the
+      // other waiters, woken by their own timers just after, join that one.
+      if (platformConfigInFlight === joinable) platformConfigInFlight = null;
+      return resolveLegacyPlatformConfig(env, Date.now(), timeoutMs, joinAttempt + 1);
+    }
     if (
       platformConfigCacheGeneration !== joinable.generation ||
       platformConfigInFlight !== joinable
     )
-      return resolveLegacyPlatformConfig(env);
-    return config;
+      return resolveLegacyPlatformConfig(env, Date.now(), timeoutMs, joinAttempt + 1);
+    return joined.value;
+  }
+
+  // Past the attempt bound (flights kept being abandoned or revoked): one read of our own, not
+  // registered and not published, so it cannot displace another request's live flight.
+  if (joinAttempt >= MAX_PLATFORM_CONFIG_JOIN_ATTEMPTS) {
+    return await withDeadline(() => readPlatformConfigFromStore(env), timeoutMs);
   }
 
   const generation = platformConfigCacheGeneration;
@@ -382,14 +406,16 @@ async function resolveLegacyPlatformConfig(
 
   try {
     const config = await promise;
-    if (platformConfigInFlight?.promise !== promise) return resolveLegacyPlatformConfig(env);
+    if (platformConfigInFlight?.promise !== promise)
+      return resolveLegacyPlatformConfig(env, Date.now(), timeoutMs, joinAttempt + 1);
     if (Date.now() >= deadlineAt)
       throw new IoTimeoutError('Platform configuration read exceeded its deadline');
     if (platformConfigCacheGeneration === generation) {
       // No write landed while we were reading, so this result is still current: publish it.
       platformConfigCache = { database, config, expiresAt: now + ttl };
     }
-    if (platformConfigCacheGeneration !== generation) return resolveLegacyPlatformConfig(env);
+    if (platformConfigCacheGeneration !== generation)
+      return resolveLegacyPlatformConfig(env, Date.now(), timeoutMs, joinAttempt + 1);
     return config;
   } finally {
     if (platformConfigInFlight?.promise === promise) {
