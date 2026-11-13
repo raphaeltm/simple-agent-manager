@@ -33,7 +33,9 @@ behave exactly as before. Never run a rotation outside tests. Do not touch the t
       discriminating; live test extended with a platform-config case
 - [x] A5 `quality:shared-flight-joins` guard in CI + planted-violation tests
 - [x] A6 shared live harness `scripts/selfhost/live/celld-lab.ts`; four live tests use it
-- [ ] CI green (manual dispatch) and SonarCloud result recorded
+- [x] A7 review fixes: CredentialSetupSession alarm join bounded (audit, DO state); cap paths
+      never displace a live flight; guard `--file` + CLI exit-code test; `serve` helper
+- [ ] CI green (manual dispatch) and SonarCloud result recorded (PR body)
 
 ## Deliverable B: fixes on #2705 (branch sam/task-k2-build-platform-7g90vj)
 

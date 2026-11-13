@@ -28,6 +28,8 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS } from '../../../apps/api/src/lib/shared-flight';
+import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from '../../../apps/api/src/services/config-read-deadline';
 import { ensureCelldBinary } from '../celld-binary.js';
 import {
   celldNode,
@@ -46,9 +48,8 @@ const PLATFORM_CONFIG = join(REPO_ROOT, 'apps/api/src/services/platform-config.t
 /** The settings flight's own deadline in the probe: longer than one slow read. */
 const SETTINGS_READ_TIMEOUT_MS = 3000;
 /** The legacy platform-config read's deadline: performance.configReadTimeoutMs at its default. */
-const PLATFORM_CONFIG_READ_TIMEOUT_MS = 5000;
-/** lib/shared-flight.ts DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS */
-const JOIN_GRACE_MS = 1000;
+const PLATFORM_CONFIG_READ_TIMEOUT_MS = DEFAULT_CONFIG_READ_TIMEOUT_MS;
+const JOIN_GRACE_MS = DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS;
 /** How long the proxy holds each agent connection: wide enough to abort the first request in. */
 const AGENT_DELAY_MS = 1500;
 /** The first client gives up while the secrets fetch is still in flight. */
@@ -215,15 +216,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not pois
     proxy = startDelayProxy(proxyPort, agentPort, AGENT_DELAY_MS);
     const node = await celldNode(await ensureCelldBinary(join(LIVE_TMP, 'celld-bin')), store);
     celldPort = node.port;
-    celld = node.start();
-    const deployed = node.deploy(project);
-    expect(deployed.status, deployed.stderr + deployed.stdout).toBe(0);
-    await waitFor(
-      'celld to serve the Worker',
-      async () => (await request('/', 10_000)).status === 200,
-      120_000,
-      () => celld?.output() ?? ''
-    );
+    celld = await node.serve(project);
   }, 300_000);
 
   afterAll(async () => {

@@ -111,6 +111,8 @@ export interface CelldNode {
   start: () => Running;
   /** `celld deploy <project>`; the caller asserts on the result. */
   deploy: (project: string) => SpawnSyncReturns<string>;
+  /** Start celld, deploy `project`, and wait until `/` answers 200. */
+  serve: (project: string) => Promise<Running>;
 }
 
 /** A celld node over `store`, serving `bucket` (an s3:// URL inside the `fleet` bucket). */
@@ -122,7 +124,7 @@ export async function celldNode(
   const port = await freePort();
   const internalPort = await freePort();
   const bucketArgs = () => ['--bucket', bucket, '--endpoint', store.url];
-  return {
+  const node: CelldNode = {
     port,
     internalPort,
     bucketArgs,
@@ -147,21 +149,48 @@ export async function celldNode(
           CELLD_ESBUILD: resolveEsbuild(join(REPO_ROOT, 'apps/api')),
         },
       }),
+    serve: async (project) => {
+      const running = node.start();
+      const deployed = node.deploy(project);
+      if (deployed.status !== 0) {
+        await running.stop();
+        throw new Error(`celld deploy failed: ${deployed.stderr}${deployed.stdout}`);
+      }
+      await waitFor(
+        'celld to serve the Worker',
+        async () => (await fetch(`http://127.0.0.1:${port}/`).catch(() => null))?.status === 200,
+        120_000,
+        () => running.output()
+      );
+      return running;
+    },
   };
+  return node;
 }
 
-/** Write a celld project: `worker.js` plus its `wrangler.json`. */
+/**
+ * Write a celld project: the Worker source plus its `wrangler.json`. `bindings` adds top-level
+ * wrangler keys (`d1_databases`, `r2_buckets`, ...); `probeObject` binds the `ProbeDO` class.
+ */
 export function writeProject(
   dir: string,
-  config: { name: string; worker: string; vars: Record<string, string>; probeObject?: boolean }
+  config: {
+    name: string;
+    worker: string;
+    vars: Record<string, string>;
+    probeObject?: boolean;
+    main?: string;
+    bindings?: Record<string, unknown>;
+  }
 ): string {
+  const main = config.main ?? 'worker.js';
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'worker.js'), config.worker);
+  writeFileSync(join(dir, main), config.worker);
   writeFileSync(
     join(dir, 'wrangler.json'),
     JSON.stringify({
       name: config.name,
-      main: 'worker.js',
+      main,
       compatibility_date: '2026-01-01',
       ...(config.probeObject
         ? {
@@ -169,6 +198,7 @@ export function writeProject(
             migrations: [{ tag: 'v1', new_sqlite_classes: ['ProbeDO'] }],
           }
         : {}),
+      ...config.bindings,
       vars: config.vars,
     })
   );

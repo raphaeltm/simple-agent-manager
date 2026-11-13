@@ -110,15 +110,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets on celld', () => 
     agent = startAgent(process.getuid?.() ?? 0);
     const node = await celldNode(await ensureCelldBinary(join(LIVE_TMP, 'celld-bin')), store);
     celldPort = node.port;
-    celld = node.start();
-    const deployed = node.deploy(project);
-    expect(deployed.status, deployed.stderr + deployed.stdout).toBe(0);
-    await waitFor(
-      'celld to serve the Worker',
-      async () => (await fetch(`http://127.0.0.1:${celldPort}/`).catch(() => null))?.status === 200,
-      120_000,
-      () => celld?.output() ?? ''
-    );
+    celld = await node.serve(project);
   }, 300_000);
 
   afterAll(async () => {
