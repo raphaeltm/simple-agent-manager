@@ -10,7 +10,7 @@ on:
 env:
   DEVCONTAINERS_CLI_VERSION: 0.80.2
   GITLEAKS_VERSION: 8.30.1
-  GO_VERSION: '1.26.10'
+  GO_VERSION: '1.26.11'
 
 permissions:
   contents: read
@@ -739,7 +739,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Assert Go version
-        run: go version | grep -E '^go version go1\.26\.10 '
+        run: go version | grep -E '^go version go1\.26\.11 '
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
@@ -862,7 +862,7 @@ jobs:
           cache-dependency-path: packages/vm-agent/go.sum
 
       - name: Assert Go version
-        run: go version | grep -E '^go version go1\.26\.10 '
+        run: go version | grep -E '^go version go1\.26\.11 '
 
       # The real Instant collect route resolves its canonical /workspaces mount.
       - name: Prepare Instant workspace mountpoint
@@ -887,7 +887,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Assert Go version
-        run: go version | grep -E '^go version go1\.26\.10 '
+        run: go version | grep -E '^go version go1\.26\.11 '
 
       - name: Run CLI tests
         working-directory: packages/cli
@@ -952,7 +952,7 @@ jobs:
           cache-dependency-path: packages/vm-agent/go.sum
 
       - name: Assert Go version
-        run: go version | grep -E '^go version go1\.26\.10 '
+        run: go version | grep -E '^go version go1\.26\.11 '
 
       - name: Install devcontainers CLI
         run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
@@ -983,7 +983,7 @@ jobs:
           cache-dependency-path: packages/vm-agent/go.sum
 
       - name: Assert Go version
-        run: go version | grep -E '^go version go1\.26\.10 '
+        run: go version | grep -E '^go version go1\.26\.11 '
 
       - name: Install devcontainers CLI
         run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
