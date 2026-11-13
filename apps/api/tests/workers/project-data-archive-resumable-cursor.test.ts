@@ -250,8 +250,11 @@ describe('resumable archive cursor', () => {
     const { projectId, sessionId, messageIds } = await seedCandidate('transient', 120);
     let putCalls = 0;
     const { bucket, puts } = countingR2(env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket, {
-      // The fourth put fails once, after three chunks have been committed.
-      failPuts: () => ++putCalls === 4,
+      // Puts 4 and 9 fail once each, each after earlier chunks of the same claim committed.
+      failPuts: () => {
+        putCalls++;
+        return putCalls === 4 || putCalls === 9;
+      },
     });
     await withR2(bucket, async () => {
       const first = await tick();
@@ -259,8 +262,22 @@ describe('resumable archive cursor', () => {
       const failed = await readJournal(projectId, sessionId);
       // The claim advanced before it failed, so it did not spend a poison attempt.
       expect(failed).toMatchObject({ state: 'failed', attempt_count: 0 });
+
+      // Even at the poison threshold, a claim that advances before failing is not poisoned.
+      await env.DATABASE.prepare(
+        'UPDATE project_data_archive_migrations SET attempt_count = 2 WHERE migration_id = ?'
+      )
+        .bind(failed!.migration_id)
+        .run();
       const second = await tick();
-      expect(second).toMatchObject({ migrated: 1, failed: 0 });
+      expect(second).toMatchObject({ failed: 1, poisoned: 0 });
+      expect(await readJournal(projectId, sessionId)).toMatchObject({
+        state: 'failed',
+        attempt_count: 0,
+      });
+
+      const third = await tick();
+      expect(third).toMatchObject({ migrated: 1, failed: 0 });
     });
     expect((await readJournal(projectId, sessionId))?.state).toBe('published');
     expect([...puts.values()].every((count) => count === 1)).toBe(true);
