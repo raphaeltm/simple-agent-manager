@@ -635,6 +635,14 @@ jobs:
       - name: Enforce source file size limits
         run: pnpm quality:file-sizes
 
+      # The self-host scripts and both self-host suites load API modules (runtime-secrets.ts, the
+      # shared-flight helper), which since the worker package split (#2681) import workspace
+      # packages such as worker-core. Those resolve through their built dist/ (types included),
+      # as `pnpm selfhost:deploy` does after building them (deploy.ts buildApiDependencies), so
+      # build before the scripts typecheck and both suites.
+      - name: Build the API Worker's workspace dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+
       - name: Type check deployment scripts
         run: |
           npx tsc --project scripts/deploy/tsconfig.json --noEmit
@@ -657,13 +665,6 @@ jobs:
       # control uid (sudo, iproute2, nftables, util-linux setpriv). Both fail, not skip, in CI.
       - name: Install nftables for the egress-fence tests
         run: command -v nft >/dev/null || (sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables)
-
-      # Both self-host suites load API modules (runtime-secrets.ts and its imports), which since
-      # the worker package split (#2681) import workspace packages such as worker-core. Those
-      # resolve through their built dist/, as `pnpm selfhost:deploy` does after building them
-      # (deploy.ts buildApiDependencies), so build before either suite runs.
-      - name: Build the API Worker's workspace dependencies for the self-host tests
-        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
 
       # celld wrangler.json generator, root-only secret files, pinned versions.
       - name: Run self-host packaging tests
