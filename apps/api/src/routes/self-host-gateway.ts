@@ -23,13 +23,15 @@
 import { type Context, Hono } from 'hono';
 
 import type { Env } from '../env';
-import { constantTimeEqual } from '../lib/constant-time';
 import { log } from '../lib/logger';
 import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
 import { parseWorkspaceSubdomain } from '../lib/workspace-subdomain';
 import type { InboundDeps } from '../services/agent-email/inbound';
 import { authorizeFrpsPluginRequest } from '../services/node-reverse-tunnel-authz';
-import { getReverseTunnelGatewaySecret } from '../services/node-reverse-tunnel-config';
+import {
+  getReverseTunnelGatewaySecret,
+  isAcceptedGatewaySecret,
+} from '../services/node-reverse-tunnel-config';
 import {
   GATEWAY_HEADER,
   isGatewayDecisionFor,
@@ -188,7 +190,7 @@ export function createSelfHostGatewayRoutes(
     const secret = getReverseTunnelGatewaySecret(c.env);
     if (!secret) return notFound();
     const presented = basicAuthPassword(c.req.header('Authorization'));
-    if (presented === null || !constantTimeEqual(presented, secret)) {
+    if (presented === null || !isAcceptedGatewaySecret(c.env, presented)) {
       log.warn('self_host_gateway.frps_plugin_unauthenticated', { action: 'rejected' });
       return unauthorized();
     }
@@ -208,7 +210,7 @@ export function createSelfHostGatewayRoutes(
   routes.get('/node-websocket', async (c) => {
     const secret = getReverseTunnelGatewaySecret(c.env);
     if (!secret) return notFound();
-    if (!constantTimeEqual(c.req.header(GATEWAY_SECRET_HEADER) ?? '', secret)) {
+    if (!isAcceptedGatewaySecret(c.env, c.req.header(GATEWAY_SECRET_HEADER) ?? '')) {
       log.warn('self_host_gateway.forward_auth_unauthenticated', { action: 'rejected' });
       return unauthorized();
     }

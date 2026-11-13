@@ -12,6 +12,7 @@
 import type { FileEncryptionMetadata } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
+import { previousEncryptionKeyFor } from './encryption-key-fallback';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,7 +37,11 @@ function base64ToBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-async function importKey(keyBase64: string, usages: string[], extractable = false): Promise<CryptoKey> {
+async function importKey(
+  keyBase64: string,
+  usages: string[],
+  extractable = false
+): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     'raw',
     base64ToBuffer(keyBase64),
@@ -86,21 +91,13 @@ export async function encryptFile(
 
   // 2. Encrypt file data with DEK
   const dataIv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: dataIv },
-    dek,
-    data
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: dataIv }, dek, data);
 
   // 3. Export DEK raw bytes, then wrap with KEK
   const dekRaw = (await crypto.subtle.exportKey('raw', dek)) as ArrayBuffer;
   const dekIv = crypto.getRandomValues(new Uint8Array(12));
   const kek = await importKek(kekBase64, ['encrypt']);
-  const wrappedDek = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: dekIv },
-    kek,
-    dekRaw
-  );
+  const wrappedDek = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: dekIv }, kek, dekRaw);
 
   return {
     ciphertext,
@@ -111,6 +108,74 @@ export async function encryptFile(
       algo: 'AES-256-GCM',
       keyVersion,
     },
+  };
+}
+
+async function unwrapDek(
+  metadata: Pick<FileEncryptionMetadata, 'dekIv' | 'wrappedDek'>,
+  kekBase64: string
+): Promise<ArrayBuffer> {
+  const kek = await importKek(kekBase64, ['decrypt']);
+  return (await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: base64ToBuffer(metadata.dekIv) },
+    kek,
+    base64ToBuffer(metadata.wrappedDek)
+  )) as ArrayBuffer;
+}
+
+/** Whether `kekBase64` unwraps this file's DEK (no fallback, no log; key-rotation checks). */
+export async function fileKeyUnwrapsWith(
+  metadata: Pick<FileEncryptionMetadata, 'dekIv' | 'wrappedDek'>,
+  kekBase64: string
+): Promise<boolean> {
+  return await unwrapDek(metadata, kekBase64).then(
+    () => true,
+    () => false
+  );
+}
+
+/**
+ * Whether this file's body opens with its own data key, unwrapped with `kekBase64` (no fallback,
+ * no log; key-rotation checks). AES-GCM authenticates the whole body, so a body written with
+ * another file's data key, or altered, fails.
+ */
+export async function fileBodyOpensWith(
+  ciphertext: ArrayBuffer,
+  metadata: FileEncryptionMetadata,
+  kekBase64: string
+): Promise<boolean> {
+  try {
+    const dek = await importKey(bufferToBase64(await unwrapDek(metadata, kekBase64)), ['decrypt']);
+    await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToBuffer(metadata.dataIv) },
+      dek,
+      ciphertext
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The same file key wrapped under another KEK (self-hosted key rotation). The file body and its
+ * data IV are unchanged; only the wrapped DEK, its IV and the key version move.
+ */
+export async function rewrapFileKey(
+  metadata: FileEncryptionMetadata,
+  fromKekBase64: string,
+  toKekBase64: string,
+  keyVersion: string = metadata.keyVersion
+): Promise<FileEncryptionMetadata> {
+  const dekRaw = await unwrapDek(metadata, fromKekBase64);
+  const kek = await importKek(toKekBase64, ['encrypt']);
+  const dekIv = crypto.getRandomValues(new Uint8Array(12));
+  const wrappedDek = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: dekIv }, kek, dekRaw);
+  return {
+    ...metadata,
+    wrappedDek: bufferToBase64(wrappedDek),
+    dekIv: bufferToBase64(dekIv.buffer),
+    keyVersion,
   };
 }
 
@@ -126,13 +191,17 @@ export async function decryptFile(
   kekBase64: string
 ): Promise<ArrayBuffer> {
   try {
-    // 1. Unwrap DEK
-    const kek = await importKek(kekBase64, ['decrypt']);
-    const dekRaw = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: base64ToBuffer(metadata.dekIv) },
-      kek,
-      base64ToBuffer(metadata.wrappedDek)
-    );
+    // 1. Unwrap DEK (with the rotation's previous KEK when the given one fails)
+    let dekRaw: ArrayBuffer;
+    try {
+      dekRaw = await unwrapDek(metadata, kekBase64);
+    } catch (error) {
+      const previous = previousEncryptionKeyFor(kekBase64);
+      if (!previous) throw error;
+      dekRaw = await unwrapDek(metadata, previous).catch(() => {
+        throw error;
+      });
+    }
 
     // 2. Import DEK and decrypt file data
     const dek = await importKey(bufferToBase64(dekRaw), ['decrypt']);
@@ -170,9 +239,7 @@ export function metadataToR2CustomMetadata(
 /**
  * Deserialize R2 custom metadata back to encryption metadata.
  */
-export function r2CustomMetadataToMetadata(
-  custom: Record<string, string>
-): FileEncryptionMetadata {
+export function r2CustomMetadataToMetadata(custom: Record<string, string>): FileEncryptionMetadata {
   const wrappedDek = custom['x-enc-wrapped-dek'];
   const dekIv = custom['x-enc-dek-iv'];
   const dataIv = custom['x-enc-data-iv'];

@@ -131,7 +131,7 @@ describe('plaintext listing', () => {
     ]);
     const report = formatPlaintextReport(ROOT, versions, [], '/backups').join('\n');
     expect(report).toContain('2 with plaintext secrets');
-    expect(report).toContain('ENCRYPTION_KEY: cannot be rotated by a SAM command yet');
+    expect(report).toContain('ENCRYPTION_KEY: rotate it with pnpm selfhost:secrets rotate encryption-key');
     expect(report).toContain('GITHUB_CLIENT_SECRET: regenerate it in the GitHub App settings');
     expect(report).not.toContain(SECRET_VALUE);
   });

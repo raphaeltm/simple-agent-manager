@@ -13,6 +13,7 @@ import {
 } from '@simple-agent-manager/cloud-init';
 
 import type { Env } from '../env';
+import { constantTimeEqual } from '../lib/constant-time';
 
 /**
  * Address frps binds per-node proxies on (frps `proxyBindAddr`); the Worker and Caddy share it.
@@ -63,6 +64,7 @@ const CREDENTIAL_LABEL = 'sam-reverse-tunnel-credential:v1';
 export type ReverseTunnelEnv = Pick<
   Env,
   | 'REVERSE_TUNNEL_GATEWAY_SECRET'
+  | 'REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE'
   | 'REVERSE_TUNNEL_PORT_RANGE_START'
   | 'REVERSE_TUNNEL_PORT_RANGE_END'
   | 'REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS'
@@ -194,6 +196,24 @@ export function assertReverseTunnelUpstreamPort(env: ReverseTunnelRangeEnv, port
 export function getReverseTunnelGatewaySecret(env: ReverseTunnelEnv): string | null {
   const secret = env.REVERSE_TUNNEL_GATEWAY_SECRET?.trim() ?? '';
   return secret.length >= MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH ? secret : null;
+}
+
+/**
+ * Whether `presented` is the gateway secret. During a self-hosted rotation the Worker also
+ * accepts REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE, so frps, Caddy and sam-mx can be restarted
+ * with the new value while the Worker answers both (scripts/selfhost/secrets-rotate-steps.ts).
+ * Both comparisons always run (constant time); the alternate needs the same minimum length.
+ * Callers check getReverseTunnelGatewaySecret first: without a primary nothing is accepted.
+ */
+export function isAcceptedGatewaySecret(env: ReverseTunnelEnv, presented: string): boolean {
+  const primary = getReverseTunnelGatewaySecret(env);
+  if (!primary) return false;
+  const alternate = env.REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE?.trim() ?? '';
+  const primaryMatch = constantTimeEqual(presented, primary);
+  const alternateMatch =
+    alternate.length >= MIN_REVERSE_TUNNEL_GATEWAY_SECRET_LENGTH &&
+    constantTimeEqual(presented, alternate);
+  return primaryMatch || alternateMatch;
 }
 
 /** `http://127.0.0.1:{port}`: where the Worker and Caddy reach a reverse-tunnel node's agent. */

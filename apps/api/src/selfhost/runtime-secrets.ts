@@ -27,6 +27,9 @@
 
 import { log } from '../lib/logger';
 import { type JsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
+import { setPreviousEncryptionKeys } from '../services/encryption-key-fallback';
+import { KEY_ROTATION_PATH } from './key-rotation/control-auth';
+import { type AesKeyEnv, previousKeyPairs } from './key-rotation/keys';
 
 export const DEFAULT_KEY_AGENT_TIMEOUT_MS = 3000;
 const AGENT_URL = /^http:\/\/127\.0\.0\.1:\d{1,5}\/v1\/secrets$/;
@@ -231,12 +234,19 @@ export async function loadRuntimeSecrets(env: KeyAgentEnv): Promise<RuntimeSecre
 /**
  * `env` with the secrets laid over it: a new object, the runtime's env is never mutated. A secret
  * may replace a string var (as a secrets.env override did before), never a binding.
+ *
+ * Also registers this bundle's previous AES keys, if a key rotation is in progress
+ * (`<NAME>_PREVIOUS`, key-rotation/keys.ts), as the read fallback of `decrypt` / `decryptFile`
+ * (services/encryption-key-fallback.ts), and clears them when the bundle has none.
  */
 export function withRuntimeSecrets<E extends object>(env: E, secrets: RuntimeSecrets): E {
   const merged: Record<string, unknown> = { ...(env as Record<string, unknown>) };
   for (const [name, value] of Object.entries(secrets)) {
     const existing = merged[name];
     if (existing === undefined || typeof existing === 'string') merged[name] = value;
+  }
+  if (typeof merged.ENCRYPTION_KEY === 'string') {
+    setPreviousEncryptionKeys(previousKeyPairs(merged as unknown as AesKeyEnv));
   }
   return merged as E;
 }
@@ -280,7 +290,18 @@ export function wrapWorker<E extends object>(worker: WorkerHandlers<E>): WorkerH
       } catch (error) {
         return unavailableResponse(error);
       }
-      return await inner(request, withRuntimeSecrets(env, secrets), ctx);
+      const merged = withRuntimeSecrets(env, secrets);
+      // The rotation's control path never reaches the app (key-rotation/control.ts). Loaded on
+      // demand: the handler pulls in the passes and their dependencies, which no other request
+      // (and no tool that loads this module, like the migration preflight) needs.
+      if (new URL(request.url).pathname === KEY_ROTATION_PATH) {
+        const control = await import('./key-rotation/control');
+        return await control.handleKeyRotationRequest(
+          request,
+          merged as unknown as import('./key-rotation/control').KeyRotationEnv
+        );
+      }
+      return await inner(request, merged, ctx);
     };
   }
   if (worker.scheduled) {

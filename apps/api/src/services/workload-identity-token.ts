@@ -59,9 +59,18 @@ export function validateWorkloadAudience(audience: string): void {
   }
 }
 
+async function workloadJwk(publicKeyPem: string) {
+  const key = await exportJWK(await importSPKI(publicKeyPem, 'RS256'));
+  return { ...key, kid: await calculateJwkThumbprint(key), use: 'sig', alg: 'RS256' };
+}
+
+/**
+ * The current key only (signWorkloadIdentityToken signs with keys[0]). A rotated-out key is never
+ * published: workload identity tokens last minutes, and a relying party trusting the previous
+ * key (believed exposed) would accept tokens its holder mints.
+ */
 export async function getWorkloadJWKS(env: Env) {
-  const key = await exportJWK(await importSPKI(env.JWT_PUBLIC_KEY, 'RS256'));
-  return { keys: [{ ...key, kid: await calculateJwkThumbprint(key), use: 'sig', alg: 'RS256' }] };
+  return { keys: [await workloadJwk(env.JWT_PUBLIC_KEY)] };
 }
 
 export function getWorkloadDiscovery(env: Env) {

@@ -8,10 +8,10 @@ import * as v from 'valibot';
 
 import * as schema from './db/schema';
 import type { Env } from './env';
+import { betterAuthSecretOptions } from './lib/better-auth-secrets';
 import { CLIENT_IP_HEADER } from './lib/client-ip';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
-import { getBetterAuthSecret } from './lib/secrets';
 import { clampSessionRefresh, HARD_EXPIRES_AT_FIELD } from './services/agent-sign-in/session-cap';
 import {
   bootstrapOwnerEmail,
@@ -291,7 +291,7 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
     }),
     basePath: '/api/auth',
     baseURL: `https://api.${env.BASE_DOMAIN}`,
-    secret: getBetterAuthSecret(env),
+    ...betterAuthSecretOptions(env),
     trustedOrigins: [
       `https://app.${env.BASE_DOMAIN}`,
       `https://api.${env.BASE_DOMAIN}`,

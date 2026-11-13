@@ -330,7 +330,7 @@ export function celldDeployConfig<C extends { vars: Record<string, string> }>(
   return sealed ? config : { ...config, vars: { ...config.vars, ...secrets } };
 }
 
-function generateAgentSigningKey(): string {
+export function generateAgentSigningKey(): string {
   const { privateKey } = generateKeyPairSync('ed25519');
   return privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
 }

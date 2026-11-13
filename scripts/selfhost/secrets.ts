@@ -13,6 +13,11 @@
  *   plaintext [--backups DIR|gs://...|s3://... ...] [--purge --confirm <CELLD_BUCKET> [--min-age-hours N]]
  *                             old deploy versions and backups holding plaintext secrets, what to
  *                             rotate; with --purge, delete the versions celld no longer reads
+ *   rotate --all | <key> ... [--dry-run] [--skip-backup] [--jwt-overlap-hours N]
+ *          [--stored-lifetime-minutes N]
+ *   rotate --resume | --status
+ *                             replace platform keys (rotate-run.ts); --dry-run prints the plan
+ *                             and what users notice per key
  *
  * Every command prints names, paths, fingerprints and ids only: never a key or a secret value.
  */
@@ -29,6 +34,10 @@ import {
   scanDeployVersions,
   scanRemoteBackups,
 } from './plaintext-scan';
+import { boxRotateDeps } from './rotate-box-deps';
+import { formatSummary } from './rotate-report';
+import { runRotate } from './rotate-run';
+import { readJournal } from './rotate-store';
 import { assertPrivateFile, parseDotenv } from './secret-files';
 import { boxMigrateDeps, boxSwitchDeps } from './secrets-box-deps';
 import { describeKeyFile, verifyKeyCopy } from './secrets-keyfile';
@@ -48,8 +57,27 @@ const { values, positionals } = parseArgs({
     'key-copy': { type: 'string' },
     to: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
+    all: { type: 'boolean', default: false },
+    resume: { type: 'boolean', default: false },
+    status: { type: 'boolean', default: false },
+    'skip-backup': { type: 'boolean', default: false },
+    'jwt-overlap-hours': { type: 'string' },
+    'stored-lifetime-minutes': { type: 'string' },
   },
 });
+
+function positiveNumber(
+  value: string | undefined,
+  flag: string,
+  allowZero = false
+): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || (n === 0 && !allowZero)) {
+    throw new Error(`${flag} must be a ${allowZero ? 'non-negative' : 'positive'} number`);
+  }
+  return n;
+}
 const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
 assertPrivateFile(envFile);
 const box = parseDotenv(readFileSync(envFile, 'utf8'), envFile);
@@ -140,9 +168,39 @@ try {
       for (const line of lines) console.log(line);
       break;
     }
+    case 'rotate': {
+      if (values.status) {
+        const journal = readJournal(stateDir);
+        if (!journal) {
+          console.log('no rotation in progress');
+          break;
+        }
+        for (const line of formatSummary(journal, {}, stateDir)) console.log(line);
+        break;
+      }
+      const ctx = loadBox(envFile, values['state-dir']);
+      await runRotate(
+        {
+          box,
+          stateDir,
+          names: positionals.slice(1),
+          all: values.all,
+          dryRun: values['dry-run'],
+          resume: values.resume,
+          skipBackup: values['skip-backup'],
+          jwtOverlapHours: positiveNumber(values['jwt-overlap-hours'], '--jwt-overlap-hours', true),
+          storedLifetimeMinutes: positiveNumber(
+            values['stored-lifetime-minutes'],
+            '--stored-lifetime-minutes'
+          ),
+        },
+        boxRotateDeps(ctx)
+      );
+      break;
+    }
     default:
       throw new Error(
-        'usage: pnpm selfhost:secrets status|key-file|verify-key-copy <path>|migrate|switch|reseal|plaintext [--box-env PATH] [--state-dir DIR]'
+        'usage: pnpm selfhost:secrets status|key-file|verify-key-copy <path>|migrate|switch|reseal|plaintext|rotate [--box-env PATH] [--state-dir DIR]'
       );
   }
 } catch (error) {

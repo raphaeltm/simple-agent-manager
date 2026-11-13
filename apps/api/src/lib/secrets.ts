@@ -24,3 +24,14 @@ export function getBetterAuthSecret(env: SecretsEnv): string {
 export function getCredentialEncryptionKey(env: SecretsEnv): string {
   return env.CREDENTIAL_ENCRYPTION_KEY || env.ENCRYPTION_KEY;
 }
+
+/**
+ * HMAC key for lookup hashes of high-entropy bearer tokens (API tokens, connector PATs, invite
+ * links, webhook tokens). Only the hash is stored, and the tokens are
+ * 256-bit random values, so the key cannot be used to recover or forge a token. A self-hosted
+ * ENCRYPTION_KEY rotation therefore pins this to the old value instead of invalidating every
+ * issued token (scripts/selfhost/secrets-rotate*.ts). Unset: ENCRYPTION_KEY, as before.
+ */
+export function getTokenHashKey(env: { ENCRYPTION_KEY: string; TOKEN_HASH_KEY?: string }): string {
+  return env.TOKEN_HASH_KEY || env.ENCRYPTION_KEY;
+}

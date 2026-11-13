@@ -7,7 +7,8 @@
  *   anything else (so a request that should never leave Caddy is visible when it does);
  * - node stub: a node agent behind a lease port that accepts WebSocket upgrades.
  *
- * Checked: the public 404 for /api/self-host/gateway on every host and under path tricks, the
+ * Checked: the public 404 for /api/self-host/gateway on every host and under path tricks (and for
+ * the key-rotation control path, /__sam-selfhost/), the
  * stripping of client X-SAM-* headers before forward_auth and before the node, and the 101
  * Set-Cookie rule for port-preview sockets.
  *
@@ -257,6 +258,22 @@ const TRICKS = [
   '/api/self%252dhost/gateway/frps-plugin',
   '/api/self%252Dhost/gateway/node-websocket',
 ];
+
+describe('the key-rotation control path is never served publicly', () => {
+  // The Worker matches the path exactly (selfhost/key-rotation/control.ts), so another spelling
+  // reaches the app's 404; Caddy refuses the canonical forms before celld (sam.d/key-rotation.caddy).
+  it.each(
+    ['api', 'app', 'API'].flatMap((host) =>
+      ['/__sam-selfhost/key-rotation', '/__sam-selfhost/', '/__sam-selfhost/key-rotation?x=1'].map(
+        (path) => [host, path] as const
+      )
+    )
+  )('404 on %s for %s', async (host, path) => {
+    const reply = await send(host, path, {}, false);
+    expect(reply.status, `${host}${path}`).toBe(404);
+    expect(celldSeen.filter((seen) => seen.url.includes('__sam-selfhost'))).toEqual([]);
+  });
+});
 
 describe('internal gateway routes are never served publicly', () => {
   it.each(HOSTS.flatMap((host) => CANONICAL.map((path) => [host, path] as const)))(

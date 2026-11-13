@@ -311,10 +311,10 @@ export function scanRemoteBackups(
 /** How to rotate each kind of secret the listing names. */
 export function rotationAdvice(name: string): string {
   if (name === 'ENCRYPTION_KEY' || name.startsWith('ENCRYPTION_KEY_')) {
-    return 'cannot be rotated by a SAM command yet (stored credentials are encrypted under it). Treat the credentials users stored in SAM as exposed: have them replace cloud tokens and agent keys.';
+    return 'rotate it with pnpm selfhost:secrets rotate encryption-key (dry run first; stored credentials are re-encrypted online). Backups taken before then still hold data under the old key: treat the credentials users stored in SAM as exposed and have them replace cloud tokens and agent keys.';
   }
   if (PLATFORM_KEY_NAMES.includes(name as (typeof PLATFORM_KEY_NAMES)[number])) {
-    return 'a generated platform key; no SAM rotation command yet. Exposure lets someone sign tokens or push messages as this install until it is replaced.';
+    return 'a generated platform key: rotate it with pnpm selfhost:secrets rotate --all (dry run first). Until then, exposure lets someone sign tokens or push messages as this install.';
   }
   if (name.startsWith('GITHUB_')) {
     return 'regenerate it in the GitHub App settings (client secret, private key or webhook secret), put the new value in .state/secrets.env, run pnpm selfhost:deploy, then delete the old one at GitHub.';

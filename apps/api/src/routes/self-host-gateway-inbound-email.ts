@@ -24,7 +24,6 @@
 import type { Context } from 'hono';
 
 import type { Env } from '../env';
-import { constantTimeEqual } from '../lib/constant-time';
 import { log } from '../lib/logger';
 import { normalizeMailbox } from '../services/agent-email/address';
 import {
@@ -33,7 +32,10 @@ import {
   type InboundEmailMessage,
 } from '../services/agent-email/inbound';
 import { isSelfHostInboundEmailConfigured } from '../services/agent-email/self-host-inbound';
-import { getReverseTunnelGatewaySecret } from '../services/node-reverse-tunnel-config';
+import {
+  getReverseTunnelGatewaySecret,
+  isAcceptedGatewaySecret,
+} from '../services/node-reverse-tunnel-config';
 
 export const INBOUND_EMAIL_HEADER = {
   secret: 'X-SAM-Gateway-Secret',
@@ -85,7 +87,7 @@ export async function handleInboundEmailGateway(
 ): Promise<Response> {
   const secret = getReverseTunnelGatewaySecret(c.env);
   if (!secret) return json({ error: 'NOT_FOUND', message: 'Not found' }, 404);
-  if (!constantTimeEqual(c.req.header(INBOUND_EMAIL_HEADER.secret) ?? '', secret)) {
+  if (!isAcceptedGatewaySecret(c.env, c.req.header(INBOUND_EMAIL_HEADER.secret) ?? '')) {
     log.warn('self_host_gateway.inbound_email_unauthenticated', { action: 'rejected' });
     return json({ error: 'UNAUTHORIZED', message: 'Gateway authentication failed' }, 401);
   }
