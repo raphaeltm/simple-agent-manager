@@ -135,6 +135,29 @@ export async function fileKeyUnwrapsWith(
 }
 
 /**
+ * Whether this file's body opens with its own data key, unwrapped with `kekBase64` (no fallback,
+ * no log; key-rotation checks). AES-GCM authenticates the whole body, so a body written with
+ * another file's data key, or altered, fails.
+ */
+export async function fileBodyOpensWith(
+  ciphertext: ArrayBuffer,
+  metadata: FileEncryptionMetadata,
+  kekBase64: string
+): Promise<boolean> {
+  try {
+    const dek = await importKey(bufferToBase64(await unwrapDek(metadata, kekBase64)), ['decrypt']);
+    await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: base64ToBuffer(metadata.dataIv) },
+      dek,
+      ciphertext
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The same file key wrapped under another KEK (self-hosted key rotation). The file body and its
  * data IV are unchanged; only the wrapped DEK, its IV and the key version move.
  */

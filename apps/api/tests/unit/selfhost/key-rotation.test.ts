@@ -409,6 +409,71 @@ describe('ENCRYPTION_KEY rotation over D1', () => {
     expect(await decryptWithKeyOnly(row.encrypted_token, row.iv, NEW)).toBe('saved-by-user');
   });
 
+  it('leaves the mirror and the node fingerprint alone when a user save wins the race on the primary', async () => {
+    // Review V1 L1: c-cloud has a cc_credentials mirror and a node pinning its fingerprint. The
+    // mirror and node UPDATEs run only if the primary now holds the new pair (holdsNew), so a
+    // lost compare-and-set on the primary must leave both exactly as they were.
+    await seedEverything();
+    const mirrorBefore = one<any>(
+      `SELECT encrypted_token, iv FROM cc_credentials WHERE id = 'cc-cloud'`
+    );
+    const fingerprintBefore = one<any>(
+      `SELECT placement_credential_fingerprint AS fp FROM nodes WHERE id = 'n1'`
+    ).fp;
+    const saved = await seal('hetzner-token-saved-by-user', NEW);
+    const originalBatch = d1.batch.bind(d1);
+    let batches = 0;
+    (d1 as any).batch = async (statements: D1PreparedStatement[]) => {
+      batches += 1;
+      // The user's save lands between the page's read and its write batch.
+      sqlite
+        .prepare(`UPDATE credentials SET encrypted_token = ?, iv = ? WHERE id = 'c-cloud'`)
+        .run(saved.ciphertext, saved.iv);
+      return await originalBatch(statements);
+    };
+    const page = await call({
+      op: 'pass',
+      target: 'd1',
+      location: 'credentials',
+      mode: 'migrate',
+      cursor: 'c-broken', // the page holds c-cloud alone
+      limit: 1,
+    });
+    expect(batches).toBe(1); // liveness: the write batch ran
+    expect(page.body).toMatchObject({ migrated: 0, previous: 1 });
+    expect(
+      one<any>(`SELECT encrypted_token, iv FROM cc_credentials WHERE id = 'cc-cloud'`)
+    ).toEqual(mirrorBefore);
+    expect(
+      one<any>(`SELECT placement_credential_fingerprint AS fp FROM nodes WHERE id = 'n1'`).fp
+    ).toBe(fingerprintBefore);
+    // The user's value is the one stored.
+    const row = one<any>(`SELECT encrypted_token, iv FROM credentials WHERE id = 'c-cloud'`);
+    expect(await decryptWithKeyOnly(row.encrypted_token, row.iv, NEW)).toBe(
+      'hetzner-token-saved-by-user'
+    );
+  });
+
+  it('moves the mirror and the fingerprint with the primary when nothing races (control)', async () => {
+    await seedEverything();
+    const page = await call({
+      op: 'pass',
+      target: 'd1',
+      location: 'credentials',
+      mode: 'migrate',
+      cursor: 'c-broken',
+      limit: 1,
+    });
+    expect(page.body).toMatchObject({ migrated: 1 });
+    const primary = one<any>(`SELECT encrypted_token, iv FROM credentials WHERE id = 'c-cloud'`);
+    expect(
+      one<any>(`SELECT encrypted_token, iv FROM cc_credentials WHERE id = 'cc-cloud'`)
+    ).toEqual(primary);
+    expect(
+      one<any>(`SELECT placement_credential_fingerprint AS fp FROM nodes WHERE id = 'n1'`).fp
+    ).toBe(await fingerprintEncryptedProviderCredential(primary.encrypted_token, primary.iv));
+  });
+
   it('serves the old key as a read fallback only while a previous key is registered', async () => {
     const old = await seal('still-old');
     setPreviousEncryptionKeys(previousKeyPairs(env));
@@ -587,6 +652,7 @@ describe('library files', () => {
     );
     // The user's replace lands between the rotation's read and its conditional put.
     bucket.beforePut = (key) => {
+      if (!key.startsWith('library/')) return; // the pass's conditional-write check comes first
       bucket.beforePut = null;
       bucket.set(key, replacement.ciphertext, metadataToR2CustomMetadata(replacement.metadata));
     };
@@ -602,6 +668,83 @@ describe('library files', () => {
     // The next verify sees the replacement under the new key.
     const verify = await call({ op: 'pass', target: 'library', mode: 'verify', cursor: null });
     expect(verify.body).toMatchObject({ previous: 0, current: 1 });
+  });
+});
+
+describe('library files: a store that does not honour conditional writes (review V1 M1)', () => {
+  async function storeFile(key: string, text: string, kek = OLD) {
+    const { ciphertext, metadata } = await encryptFile(
+      new TextEncoder().encode(text).buffer as ArrayBuffer,
+      kek
+    );
+    bucket.set(key, ciphertext, metadataToR2CustomMetadata(metadata));
+  }
+
+  it.each([
+    ['get', /get returned a body for a stale etagMatches/],
+    ['put', /put wrote over a newer object/],
+  ] as const)(
+    'refuses to re-wrap anything when the store ignores onlyIf on %s',
+    async (op, reason) => {
+      await storeFile('library/p1/f1', 'old content');
+      const before = bucket.object('library/p1/f1')!;
+      bucket.ignoreOnlyIf = { [op]: true };
+      const result = await call({ op: 'pass', target: 'library', mode: 'migrate', cursor: null });
+      expect(result.status).toBe(500);
+      expect(result.body.message).toMatch(/does not honour conditional writes/);
+      expect(result.body.message).toMatch(reason);
+      // Nothing written, and the scratch object is gone.
+      expect(bucket.object('library/p1/f1')).toEqual(before);
+      expect(bucket.keys()).toEqual(['library/p1/f1']);
+    }
+  );
+
+  it('a store that honours both: the check passes and leaves no scratch object (control)', async () => {
+    await storeFile('library/p1/f1', 'old content');
+    const result = await call({ op: 'pass', target: 'library', mode: 'migrate', cursor: null });
+    expect(result.body).toMatchObject({ migrated: 1, previous: 0, unreadable: 0 });
+    expect(bucket.keys()).toEqual(['library/p1/f1']);
+  });
+
+  it('verify does not run the write check (it writes nothing)', async () => {
+    await storeFile('library/p1/f1', 'content');
+    bucket.ignoreOnlyIf = { get: true, put: true };
+    const verify = await call({ op: 'pass', target: 'library', mode: 'verify', cursor: null });
+    expect(verify.status).toBe(200);
+    expect(verify.body).toMatchObject({ previous: 1, unreadable: 0 });
+  });
+});
+
+describe('library files: a body that does not match its data key (review V1 M1)', () => {
+  async function encrypted(text: string, kek: string) {
+    return await encryptFile(new TextEncoder().encode(text).buffer as ArrayBuffer, kek);
+  }
+
+  it('verify reports a current-key file whose body is another file’s as unreadable', async () => {
+    const a = await encrypted('file a', NEW);
+    const b = await encrypted('file b', NEW);
+    // a's wrapped key (opens under the current KEK) over b's body: the case a lost race could
+    // leave if a store returned the replaced body. The wrapped-key check alone says "current".
+    bucket.set('library/p1/a', b.ciphertext, metadataToR2CustomMetadata(a.metadata));
+    bucket.set('library/p1/b', b.ciphertext, metadataToR2CustomMetadata(b.metadata));
+    const verify = await call({ op: 'pass', target: 'library', mode: 'verify', cursor: null });
+    expect(verify.body).toMatchObject({ current: 1, unreadable: 1, previous: 0 });
+    expect(verify.body.unreadableRows).toEqual([
+      { location: 'library_files', id: 'library/p1/a', column: 'body' },
+    ]);
+  });
+
+  it('migrate never re-wraps a key over a body it does not open, and reports it', async () => {
+    const a = await encrypted('file a', OLD);
+    const b = await encrypted('file b', OLD);
+    bucket.set('library/p1/a', b.ciphertext, metadataToR2CustomMetadata(a.metadata));
+    const before = bucket.object('library/p1/a')!;
+    const migrate = await call({ op: 'pass', target: 'library', mode: 'migrate', cursor: null });
+    expect(migrate.body).toMatchObject({ migrated: 0, unreadable: 1 });
+    expect(bucket.object('library/p1/a')).toEqual(before);
+    // The baseline verify reports it the same way, so it never blocks the rotation.
+    const verify = await call({ op: 'pass', target: 'library', mode: 'verify', cursor: null });
+    expect(verify.body).toMatchObject({ unreadable: 1, previous: 0 });
   });
 });
 

@@ -23,8 +23,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sealSecrets } from '../../../deploy/selfhost/key-agent/bundle.ts';
 import { createKeyProvider } from '../../../deploy/selfhost/key-agent/providers.ts';
 import { runCommand } from '../backup-cli';
-import { type BoxContext, OBJECTSTORE_IMAGE } from '../backup-lib';
-import { ensureCelldBinary, resolveEsbuild } from '../celld-binary.js';
+import type { BoxContext } from '../backup-lib';
+import { ensureCelldBinary } from '../celld-binary.js';
 import { KEY_CHOICE_FORMAT, writeKeyChoice } from '../key-choice';
 import {
   agentVerifyKey,
@@ -39,38 +39,33 @@ import { boxRotateDeps } from '../rotate-box-deps';
 import { runRotate } from '../rotate-run';
 import { openRotationStore, readJournal } from '../rotate-store';
 import { parseDotenv } from '../secret-files';
-import { freePort, LIVE_TMP, REPO_ROOT, type Running, start, waitFor } from './harness';
+import {
+  type CelldNode,
+  celldNode,
+  hasDocker,
+  type ObjectStore,
+  startObjectStore,
+  writeProject,
+} from './celld-lab';
+import { freePort, LIVE_TMP, REPO_ROOT, type Running, waitFor } from './harness';
 
 const KEY = 'sam-live-rotate';
 const SECRET = 'live-rotate-store-0123456789';
 const IMAGE = 'sam-selfhost-key-agent:live-test';
 const API_SRC = join(REPO_ROOT, 'apps/api/src');
-const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status === 0;
 const uid = process.getuid?.() ?? 0;
 const ROWS = 30;
 
 let root = '';
 let state = '';
 let envFile = '';
-let store = '';
+let store: ObjectStore | undefined;
+let node: CelldNode;
+let agentPort = 0;
 let agentContainer = '';
-let binary = '';
 let celld: Running | undefined;
-let ports: { store: number; celld: number; internal: number; agent: number };
 
 const box = () => parseDotenv(readFileSync(envFile, 'utf8'), envFile);
-const bucketArgs = () => [
-  '--bucket',
-  's3://fleet/celld',
-  '--endpoint',
-  `http://127.0.0.1:${ports.store}`,
-];
-const storeEnv = () => ({
-  AWS_ACCESS_KEY_ID: KEY,
-  AWS_SECRET_ACCESS_KEY: SECRET,
-  AWS_REGION: 'us-east-1',
-});
-
 function ctx(): BoxContext {
   return {
     box: box(),
@@ -90,6 +85,7 @@ import { wrapWorker } from ${JSON.stringify(join(API_SRC, 'selfhost/runtime-secr
 import { D1_LOCATIONS } from ${JSON.stringify(join(API_SRC, 'selfhost/key-rotation/d1-locations.ts'))};
 import { decrypt, encrypt } from ${JSON.stringify(join(API_SRC, 'services/encryption.ts'))};
 import { decryptFile, encryptFile, metadataToR2CustomMetadata, r2CustomMetadataToMetadata } from ${JSON.stringify(join(API_SRC, 'services/file-encryption.ts'))};
+import { conditionalWriteProblem } from ${JSON.stringify(join(API_SRC, 'selfhost/key-rotation/library-conditional.ts'))};
 
 async function setup(env) {
   for (const location of D1_LOCATIONS) {
@@ -121,6 +117,7 @@ export default wrapWorker({
     const path = new URL(request.url).pathname;
     if (path === '/setup') return await setup(env);
     if (path === '/read') return await read(env);
+    if (path === '/conditional') return Response.json({ problem: await conditionalWriteProblem(env.R2) });
     return Response.json({ ok: true });
   },
 });
@@ -128,49 +125,38 @@ export default wrapWorker({
 
 async function deployProbe(): Promise<void> {
   const head = await openRotationStore(box(), state).head();
-  const project = join(root, `project-${Date.now()}`);
-  mkdirSync(project, { recursive: true });
-  writeFileSync(join(project, 'worker.ts'), PROBE);
-  writeFileSync(
-    join(project, 'wrangler.json'),
-    JSON.stringify({
-      name: 'workspaces-api',
-      main: 'worker.ts',
-      compatibility_date: '2026-01-01',
+  const project = writeProject(join(root, `project-${Date.now()}`), {
+    name: 'workspaces-api',
+    main: 'worker.ts',
+    worker: PROBE,
+    bindings: {
       d1_databases: [{ binding: 'DATABASE', database_name: 'main', database_id: 'main' }],
       r2_buckets: [{ binding: 'R2', bucket_name: 'files' }],
-      vars: {
-        SAM_KEY_AGENT_URL: keyAgentUrl({ port: ports.agent }),
-        SAM_SECRET_BUNDLE_ID: head.bundle.bundleId,
-        SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(head.secrets),
-        SAM_INSTALLATION_ID: head.secrets.SAM_INSTALLATION_ID,
-      },
-    })
-  );
-  const result = spawnSync(binary, ['deploy', project, ...bucketArgs()], {
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      ...storeEnv(),
-      CELLD_ESBUILD: resolveEsbuild(join(REPO_ROOT, 'apps/api')),
+    },
+    vars: {
+      SAM_KEY_AGENT_URL: keyAgentUrl({ port: agentPort }),
+      SAM_SECRET_BUNDLE_ID: head.bundle.bundleId,
+      SAM_KEY_AGENT_VERIFY_KEY: agentVerifyKey(head.secrets),
+      SAM_INSTALLATION_ID: head.secrets.SAM_INSTALLATION_ID,
     },
   });
+  const result = node.deploy(project);
   if (result.status !== 0) throw new Error(`celld deploy failed: ${result.stderr}${result.stdout}`);
 }
 
 async function adoptAndCheck(): Promise<{ healthy: boolean; detail: string }> {
-  const reload = await fetch(`http://127.0.0.1:${ports.internal}/reload`, { method: 'POST' }).catch(
-    () => null
-  );
+  const reload = await fetch(`http://127.0.0.1:${node.internalPort}/reload`, {
+    method: 'POST',
+  }).catch(() => null);
   if (!reload?.ok) return { healthy: false, detail: `reload ${reload?.status ?? 'failed'}` };
-  const response = await fetch(`http://127.0.0.1:${ports.celld}/health`).catch(() => null);
+  const response = await fetch(`http://127.0.0.1:${node.port}/health`).catch(() => null);
   return response?.ok
     ? { healthy: true, detail: 'HTTP 200' }
     : { healthy: false, detail: `HTTP ${response?.status ?? 'none'}` };
 }
 
 async function readProbe(): Promise<{ values: string[]; file: string; rotating: boolean }> {
-  const response = await fetch(`http://127.0.0.1:${ports.celld}/read`);
+  const response = await fetch(`http://127.0.0.1:${node.port}/read`);
   expect(response.status, await response.clone().text()).toBe(200);
   return (await response.json()) as { values: string[]; file: string; rotating: boolean };
 }
@@ -217,12 +203,13 @@ function stopAgent(): void {
 
 describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld', () => {
   beforeAll(async () => {
-    ports = {
-      store: await freePort(),
-      celld: await freePort(),
-      internal: await freePort(),
-      agent: await freePort(),
-    };
+    agentPort = await freePort();
+    store = await startObjectStore(KEY, SECRET);
+    node = await celldNode(
+      await ensureCelldBinary(join(LIVE_TMP, 'celld-bin')),
+      store,
+      's3://fleet/celld'
+    );
     mkdirSync(LIVE_TMP, { recursive: true });
     root = mkdtempSync(join(LIVE_TMP, 'key-rotation-'));
     state = join(root, '.state');
@@ -232,12 +219,12 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
       [
         'SAM_DOMAIN=sam.example.com',
         'CELLD_BUCKET=s3://fleet/celld',
-        `S3_ENDPOINT=http://127.0.0.1:${ports.store}`,
+        `S3_ENDPOINT=${store.url}`,
         `AWS_ACCESS_KEY_ID=${KEY}`,
         `AWS_SECRET_ACCESS_KEY=${SECRET}`,
-        `SAM_KEY_AGENT_PORT=${ports.agent}`,
-        `CELLD_PORT=${ports.celld}`,
-        `CELLD_INTERNAL_PORT=${ports.internal}`,
+        `SAM_KEY_AGENT_PORT=${agentPort}`,
+        `CELLD_PORT=${node.port}`,
+        `CELLD_INTERNAL_PORT=${node.internalPort}`,
       ].join('\n') + '\n',
       { mode: 0o600 }
     );
@@ -273,69 +260,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
       }
     );
     expect(build.status, build.stderr).toBe(0);
-    const minio = spawnSync(
-      'docker',
-      [
-        'run',
-        '-d',
-        '--rm',
-        '--network',
-        'host',
-        '-e',
-        `MINIO_ROOT_USER=${KEY}`,
-        '-e',
-        `MINIO_ROOT_PASSWORD=${SECRET}`,
-        '--entrypoint',
-        'minio',
-        OBJECTSTORE_IMAGE,
-        'server',
-        '/data',
-        '--address',
-        `127.0.0.1:${ports.store}`,
-        '--console-address',
-        `127.0.0.1:${await freePort()}`,
-      ],
-      { encoding: 'utf8' }
-    );
-    expect(minio.status, minio.stderr).toBe(0);
-    store = minio.stdout.trim();
-    await waitFor(
-      'object store',
-      async () =>
-        (await fetch(`http://127.0.0.1:${ports.store}/minio/health/live`).catch(() => null))?.ok
-    );
-    const mb = spawnSync(
-      'docker',
-      [
-        'run',
-        '--rm',
-        '--network',
-        'host',
-        '-e',
-        `MC_HOST_src=http://${KEY}:${SECRET}@127.0.0.1:${ports.store}`,
-        '-e',
-        'MC_CONFIG_DIR=/tmp/mc',
-        '--entrypoint',
-        'mc',
-        OBJECTSTORE_IMAGE,
-        'mb',
-        'src/fleet',
-      ],
-      { encoding: 'utf8' }
-    );
-    expect(mb.status, mb.stderr).toBe(0);
-    binary = await ensureCelldBinary(join(LIVE_TMP, 'celld-bin'));
-    celld = start(
-      binary,
-      [
-        ...bucketArgs(),
-        '--listen',
-        `127.0.0.1:${ports.celld}`,
-        '--internal-listen',
-        `127.0.0.1:${ports.internal}`,
-      ],
-      storeEnv()
-    );
+    celld = node.start();
     const run = spawnSync(
       'docker',
       [
@@ -370,7 +295,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
     agentContainer = run.stdout.trim();
     await waitFor(
       'the key agent',
-      async () => (await fetch(`http://127.0.0.1:${ports.agent}/healthz`).catch(() => null))?.ok
+      async () => (await fetch(`http://127.0.0.1:${agentPort}/healthz`).catch(() => null))?.ok
     );
     await deployProbe();
     await waitFor(
@@ -379,15 +304,23 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
       120_000,
       () => celld?.output() ?? ''
     );
-    const seeded = await fetch(`http://127.0.0.1:${ports.celld}/setup`, { method: 'POST' });
+    const seeded = await fetch(`http://127.0.0.1:${node.port}/setup`, { method: 'POST' });
     expect(seeded.status, await seeded.clone().text()).toBe(200);
   }, 600_000);
 
   afterAll(async () => {
     stopAgent();
     await celld?.stop();
-    if (store) spawnSync('docker', ['rm', '-f', store]);
+    store?.stop();
     if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('honours R2 onlyIf.etagMatches on get and put, as the library pass requires (review V1 M1)', async () => {
+    // conditionalWriteProblem is the pass's own check (library-conditional.ts): a stale etag must
+    // return no body on get and must not overwrite on put; a matching etag must write.
+    const response = await fetch(`http://127.0.0.1:${node.port}/conditional`);
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(await response.json()).toEqual({ problem: null });
   });
 
   it('re-encrypts online, resumes after an interruption, and ends readable with the new key alone', async () => {
@@ -423,7 +356,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
     expect(after.file).toBe('library body');
 
     // The control endpoint left with the rotation's bundle.
-    const control = await fetch(`http://127.0.0.1:${ports.celld}/__sam-selfhost/key-rotation`, {
+    const control = await fetch(`http://127.0.0.1:${node.port}/__sam-selfhost/key-rotation`, {
       method: 'POST',
       body: '{"op":"status"}',
     });
@@ -431,30 +364,10 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
 
     // No deploy manifest in the bucket holds either key (they only ever travelled sealed).
     const dump = join(root, 'bucket-dump');
-    const mirror = spawnSync(
-      'docker',
-      [
-        'run',
-        '--user',
-        `${uid}:${process.getgid?.() ?? 0}`,
-        '--rm',
-        '--network',
-        'host',
-        '-v',
-        `${root}:${root}`,
-        '-e',
-        `MC_HOST_src=http://${KEY}:${SECRET}@127.0.0.1:${ports.store}`,
-        '-e',
-        'MC_CONFIG_DIR=/tmp/mc',
-        '--entrypoint',
-        'mc',
-        OBJECTSTORE_IMAGE,
-        'mirror',
-        '--quiet',
-        'src/fleet/celld/deploy',
-        dump,
-      ],
-      { encoding: 'utf8' }
+    if (!store) throw new Error('the object store did not start');
+    const mirror = store.mc(
+      ['mirror', '--quiet', 'src/fleet/celld/deploy', dump],
+      ['--user', `${uid}:${process.getgid?.() ?? 0}`, '-v', `${root}:${root}`]
     );
     expect(mirror.status, mirror.stderr).toBe(0);
     const manifests = readdirSync(dump, { recursive: true, withFileTypes: true })
@@ -462,8 +375,8 @@ describe.skipIf(!hasDocker && !process.env.CI)('encryption-key rotation on celld
       .map((entry) => readFileSync(join(entry.parentPath, entry.name), 'utf8'));
     expect(manifests.length).toBeGreaterThanOrEqual(3);
     for (const text of manifests) {
-      expect(text.includes(oldKey)).toBe(false);
-      expect(text.includes(head.ENCRYPTION_KEY ?? 'unset')).toBe(false);
+      expect(text).not.toContain(oldKey);
+      expect(text).not.toContain(head.ENCRYPTION_KEY ?? 'unset');
     }
     expect(log.join('\n')).toContain('the old value is retired from the Worker');
   }, 600_000);
