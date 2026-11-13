@@ -18,7 +18,7 @@
  */
 import { decryptWithKeyOnly, encrypt } from '../../services/encryption';
 import { fingerprintEncryptedProviderCredential } from '../../services/provider-credential-exact';
-import type { CipherPair, D1Location } from './d1-locations';
+import { type CipherPair, type D1Location, locationIdColumn } from './d1-locations';
 import type { RoleKeys } from './keys';
 
 export type PassMode = 'migrate' | 'verify';
@@ -62,6 +62,7 @@ export const MAX_REPORTED_ROWS = 100;
 function assertIdentifiers(location: D1Location): void {
   const names = [
     location.table,
+    locationIdColumn(location),
     ...(location.mirrors ?? []),
     ...location.pairs.flatMap((p) => [p.ciphertext, p.iv]),
   ];
@@ -90,11 +91,12 @@ function writeStatements(
   fingerprints: { from: string; to: string } | null
 ): D1PreparedStatement[] {
   const { table } = location;
-  const holdsNew = `EXISTS (SELECT 1 FROM ${table} WHERE id = ? AND ${pair.ciphertext} = ? AND ${pair.iv} = ?)`;
+  const idColumn = locationIdColumn(location);
+  const holdsNew = `EXISTS (SELECT 1 FROM ${table} WHERE ${idColumn} = ? AND ${pair.ciphertext} = ? AND ${pair.iv} = ?)`;
   const statements = [
     db
       .prepare(
-        `UPDATE ${table} SET ${pair.ciphertext} = ?, ${pair.iv} = ? WHERE id = ? AND ${pair.ciphertext} = ? AND ${pair.iv} = ?`
+        `UPDATE ${table} SET ${pair.ciphertext} = ?, ${pair.iv} = ? WHERE ${idColumn} = ? AND ${pair.ciphertext} = ? AND ${pair.iv} = ?`
       )
       .bind(to.ciphertext, to.iv, id, from.ciphertext, from.iv),
   ];
@@ -141,9 +143,15 @@ export async function runD1Pass(
     previousRows: [],
     unreadableRows: [],
   };
-  const columns = ['id', ...location.pairs.flatMap((p) => [p.ciphertext, p.iv])].join(', ');
+  const idColumn = locationIdColumn(location);
+  const columns = [
+    `${idColumn} AS id`,
+    ...location.pairs.flatMap((p) => [p.ciphertext, p.iv]),
+  ].join(', ');
   const { results } = await db
-    .prepare(`SELECT ${columns} FROM ${location.table} WHERE id > ? ORDER BY id LIMIT ?`)
+    .prepare(
+      `SELECT ${columns} FROM ${location.table} WHERE ${idColumn} > ? ORDER BY ${idColumn} LIMIT ?`
+    )
     .bind(input.cursor ?? '', input.limit)
     .all<Row>();
   let processed = 0;

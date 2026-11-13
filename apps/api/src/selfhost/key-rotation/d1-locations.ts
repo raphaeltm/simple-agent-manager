@@ -20,6 +20,11 @@ export interface D1Location {
   /** Stable name used in the journal and in reports. */
   name: string;
   table: string;
+  /**
+   * The table's single-column primary key, which pages are ordered and written by. Unset means
+   * `id`; set it for a table keyed by another column (webhook_trigger_configs: `trigger_id`).
+   */
+  idColumn?: string;
   pairs: readonly CipherPair[];
   role: AesKeyRole;
   /**
@@ -124,10 +129,24 @@ export const D1_LOCATIONS: readonly D1Location[] = [
     ],
     role: 'credential',
   },
+  {
+    // Provider signing secrets of signed webhook triggers (webhook-signed-store.ts), keyed by
+    // trigger_id. NULL until a secret is set.
+    name: 'webhook_trigger_configs',
+    table: 'webhook_trigger_configs',
+    idColumn: 'trigger_id',
+    pairs: [{ ciphertext: 'signing_secret_encrypted', iv: 'signing_secret_iv' }],
+    role: 'credential',
+  },
 ];
 
 /** `iv` columns that are deliberately not here, with the reason (checked by the same test). */
 export const NOT_ROTATED_IV_COLUMNS: Readonly<Record<string, string>> = {};
+
+/** The primary-key column a location is paged and written by. */
+export function locationIdColumn(location: D1Location): string {
+  return location.idColumn ?? 'id';
+}
 
 export function d1Location(name: string): D1Location | undefined {
   return D1_LOCATIONS.find((location) => location.name === name);

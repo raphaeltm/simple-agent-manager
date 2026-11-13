@@ -90,7 +90,7 @@ import { conditionalWriteProblem } from ${JSON.stringify(join(API_SRC, 'selfhost
 async function setup(env) {
   for (const location of D1_LOCATIONS) {
     const columns = location.pairs.flatMap((p) => [p.ciphertext + ' TEXT', p.iv + ' TEXT']).join(', ');
-    await env.DATABASE.prepare('CREATE TABLE IF NOT EXISTS ' + location.table + ' (id TEXT PRIMARY KEY, ' + columns + ')').run();
+    await env.DATABASE.prepare('CREATE TABLE IF NOT EXISTS ' + location.table + ' (' + (location.idColumn ?? 'id') + ' TEXT PRIMARY KEY, ' + columns + ')').run();
   }
   await env.DATABASE.prepare('CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, placement_credential_fingerprint TEXT)').run();
   // BetterAuth's OAuth token table: rotate encryption-key chains better-auth-secret over it.

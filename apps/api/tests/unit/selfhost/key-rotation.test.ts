@@ -14,6 +14,7 @@ import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
 import { betterAuthSymmetricKey } from '../../../src/lib/better-auth-secrets';
 import {
   handleKeyRotationRequest,
@@ -26,6 +27,7 @@ import {
 } from '../../../src/selfhost/key-rotation/control-auth';
 import {
   D1_LOCATIONS,
+  locationIdColumn,
   NOT_ROTATED_IV_COLUMNS,
 } from '../../../src/selfhost/key-rotation/d1-locations';
 import { previousKeyPairs, roleKeys } from '../../../src/selfhost/key-rotation/keys';
@@ -49,6 +51,7 @@ import {
   resolveRuntimeFileRows,
 } from '../../../src/services/profile-runtime-assets';
 import { fingerprintEncryptedProviderCredential } from '../../../src/services/provider-credential-exact';
+import { decryptWebhookSigningSecret } from '../../../src/services/webhook-signed-store';
 import { ConditionalR2 } from '../../helpers/conditional-r2';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -197,6 +200,14 @@ async function seedEverything() {
       `INSERT INTO mcp_connections (id, encrypted_url, url_iv, encrypted_token, token_iv, encrypted_headers, headers_iv) VALUES ('m1', ?, ?, ?, ?, ?, ?)`
     )
     .run(url.ciphertext, url.iv, token.ciphertext, token.iv, headers.ciphertext, headers.iv);
+  // Signed webhook triggers: keyed by trigger_id, and NULL until a signing secret is set.
+  const signing = await seal('whsec-signing-secret');
+  const insertWebhook = sqlite.prepare(
+    `INSERT INTO webhook_trigger_configs (trigger_id, token_hash, token_last_four, token_created_at, signing_secret_encrypted, signing_secret_iv)
+     VALUES (?, ?, 'abcd', '2026-11-13T00:00:00.000Z', ?, ?)`
+  );
+  insertWebhook.run('trg-signed', 'hash-signed', signing.ciphertext, signing.iv);
+  insertWebhook.run('trg-unsigned', 'hash-unsigned', null, null);
 }
 
 /** Every ciphertext value in the registry, as (location, id, column, ciphertext, iv). */
@@ -211,7 +222,9 @@ function allValues() {
   for (const location of D1_LOCATIONS) {
     for (const pair of location.pairs) {
       for (const row of sqlite
-        .prepare(`SELECT id, ${pair.ciphertext} AS c, ${pair.iv} AS v FROM ${location.table}`)
+        .prepare(
+          `SELECT ${locationIdColumn(location)} AS id, ${pair.ciphertext} AS c, ${pair.iv} AS v FROM ${location.table}`
+        )
         .all() as any[]) {
         if (row.c && row.v)
           values.push({
@@ -278,7 +291,7 @@ describe('ENCRYPTION_KEY rotation over D1', () => {
     expect(
       before.previous,
       JSON.stringify(allValues().map((v) => v.location + '/' + v.id + '.' + v.column))
-    ).toBe(15);
+    ).toBe(16);
 
     const migrated = await passAll('migrate');
     expect(migrated.migrated).toBe(before.previous - 1); // the mirror moved with its primary
@@ -332,6 +345,63 @@ describe('ENCRYPTION_KEY rotation over D1', () => {
         )
       )[0]?.content
     ).toBe('skill-file-secret');
+    const signedRow = one<{ c: string; v: string }>(
+      `SELECT signing_secret_encrypted AS c, signing_secret_iv AS v FROM webhook_trigger_configs WHERE trigger_id = 'trg-signed'`
+    );
+    await expect(
+      decryptWebhookSigningSecret({ ENCRYPTION_KEY: NEW } as Env, {
+        ciphertext: signedRow.c,
+        iv: signedRow.v,
+      })
+    ).resolves.toBe('whsec-signing-secret');
+    expect(
+      one<any>(
+        `SELECT signing_secret_encrypted AS c, signing_secret_iv AS v FROM webhook_trigger_configs WHERE trigger_id = 'trg-unsigned'`
+      )
+    ).toEqual({ c: null, v: null });
+  });
+
+  it('pages a table keyed by another column (webhook_trigger_configs.trigger_id) one row at a time', async () => {
+    const insert = sqlite.prepare(
+      `INSERT INTO webhook_trigger_configs (trigger_id, token_hash, token_last_four, token_created_at, signing_secret_encrypted, signing_secret_iv)
+       VALUES (?, ?, 'abcd', '2026-11-13T00:00:00.000Z', ?, ?)`
+    );
+    for (const id of ['trg-a', 'trg-b', 'trg-c']) {
+      const sealed = await seal(`secret-${id}`);
+      insert.run(id, `hash-${id}`, sealed.ciphertext, sealed.iv);
+    }
+    // The cursor and every write go by the location's own key column, not `id`.
+    const location = D1_LOCATIONS.find((l) => l.name === 'webhook_trigger_configs');
+    expect(location?.idColumn).toBe('trigger_id');
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let migrated = 0;
+    for (;;) {
+      const { status, body } = await call({
+        op: 'pass',
+        target: 'd1',
+        location: 'webhook_trigger_configs',
+        mode: 'migrate',
+        cursor,
+        limit: 1,
+      });
+      expect(status, JSON.stringify(body)).toBe(200);
+      migrated += body.migrated;
+      if (body.nextCursor && body.nextCursor !== cursor) seen.push(body.nextCursor);
+      cursor = body.nextCursor;
+      if (body.done) break;
+    }
+    expect(seen).toEqual(['trg-a', 'trg-b', 'trg-c']);
+    expect(migrated).toBe(3);
+    for (const id of ['trg-a', 'trg-b', 'trg-c']) {
+      const row = one<{ c: string; v: string }>(
+        `SELECT signing_secret_encrypted AS c, signing_secret_iv AS v FROM webhook_trigger_configs WHERE trigger_id = ?`,
+        id
+      );
+      await expect(decryptWithKeyOnly(row.c, row.v, NEW)).resolves.toBe(`secret-${id}`);
+      await expect(decryptWithKeyOnly(row.c, row.v, OLD)).rejects.toThrow();
+    }
   });
 
   it('rewrites mirror copies with the identical pair and remaps the node fingerprint, so teardown still recognises the account', async () => {
