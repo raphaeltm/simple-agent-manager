@@ -43,10 +43,16 @@ export const SCANNED_PROJECTS = [
   // Worker modules the package split (#2681) moved out of apps/api/src; they still run in this
   // Worker, so a join of another request's flight there hangs the same way on celld.
   { tsconfig: 'packages/worker-core/tsconfig.json', glob: 'packages/worker-core/src/**/*.ts' },
-  { tsconfig: 'packages/scheduler-core/tsconfig.json', glob: 'packages/scheduler-core/src/**/*.ts' },
+  {
+    tsconfig: 'packages/scheduler-core/tsconfig.json',
+    glob: 'packages/scheduler-core/src/**/*.ts',
+  },
   { tsconfig: 'packages/project-data/tsconfig.json', glob: 'packages/project-data/src/**/*.ts' },
   { tsconfig: 'packages/operations/tsconfig.json', glob: 'packages/operations/src/**/*.ts' },
-  { tsconfig: 'packages/app-deployment/tsconfig.json', glob: 'packages/app-deployment/src/**/*.ts' },
+  {
+    tsconfig: 'packages/app-deployment/tsconfig.json',
+    glob: 'packages/app-deployment/src/**/*.ts',
+  },
   { tsconfig: 'packages/ai-proxy/tsconfig.json', glob: 'packages/ai-proxy/src/**/*.ts' },
   { tsconfig: 'packages/agent-email/tsconfig.json', glob: 'packages/agent-email/src/**/*.ts' },
   { tsconfig: 'packages/repo-hosting/tsconfig.json', glob: 'packages/repo-hosting/src/**/*.ts' },
