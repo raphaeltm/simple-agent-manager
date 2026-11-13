@@ -2,7 +2,7 @@ import {
   DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS,
   DEFAULT_TERMINAL_TOKEN_EXPIRY_MS,
 } from '@simple-agent-manager/shared';
-import { decodeJwt, importPKCS8, SignJWT } from 'jose';
+import { decodeJwt, decodeProtectedHeader, importPKCS8, SignJWT } from 'jose';
 
 import type { Env } from '../env';
 import {
@@ -341,6 +341,12 @@ export async function signLocalForwardToken(
  */
 export function shouldRefreshCallbackToken(token: string, env: Env): boolean {
   try {
+    // After a self-hosted key rotation (JWT_KEY_ID set) a token signed under another kid is
+    // refreshed at once, so nodes leave the previous key on their next heartbeat instead of at
+    // half their token's lifetime. Unset JWT_KEY_ID (Cloudflare): unchanged.
+    if (env.JWT_KEY_ID?.trim() && decodeProtectedHeader(token).kid !== currentJwtKeyId(env)) {
+      return true;
+    }
     const claims = decodeJwt(token);
     if (typeof claims.exp !== 'number' || typeof claims.iat !== 'number') {
       return true; // Missing claims — refresh to be safe

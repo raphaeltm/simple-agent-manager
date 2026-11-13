@@ -71,7 +71,9 @@ function parseProviderCredentialReference(
   return null;
 }
 
-export function isExactCredentialSource(value: string | null | undefined): value is CredentialSource {
+export function isExactCredentialSource(
+  value: string | null | undefined
+): value is CredentialSource {
   return value === 'user' || value === 'project' || value === 'platform';
 }
 
@@ -79,6 +81,9 @@ export function isExactCredentialSource(value: string | null | undefined): value
  * Return a non-secret, immutable identity for one stored ciphertext generation. Re-encrypting
  * the same provider token intentionally changes this value because strict teardown must never
  * assume that a mutable credential-row ID still names the account used for provisioning.
+ * One exception: a self-hosted ENCRYPTION_KEY rotation re-encrypts a token it has just decrypted,
+ * so it knows the account is unchanged, and moves nodes.placement_credential_fingerprint to the
+ * new value in the same batch (selfhost/key-rotation/d1-pass.ts).
  */
 export async function fingerprintEncryptedProviderCredential(
   encryptedToken: string,

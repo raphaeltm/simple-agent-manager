@@ -23,9 +23,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 const { usageRoutes } = await import('../../../src/routes/usage');
-const { scheduleHourlyPlatformMaintenance } = await import(
-  '../../../src/scheduled/platform-feedback-hourly'
-);
+const { scheduleHourlyPlatformMaintenance } =
+  await import('../../../src/scheduled/platform-feedback-hourly');
 
 const monthKey = () => {
   const now = new Date();
@@ -59,7 +58,13 @@ function gatewayLogsResponse() {
     JSON.stringify({
       success: true,
       result,
-      result_info: { page: 1, per_page: 50, count: result.length, total_count: result.length, total_pages: 1 },
+      result_info: {
+        page: 1,
+        per_page: 50,
+        count: result.length,
+        total_count: result.length,
+        total_pages: 1,
+      },
     }),
     { status: 200 }
   );
@@ -90,7 +95,12 @@ const parsed = (spy: ReturnType<typeof vi.spyOn>) =>
 
 /** Cloudflare: gateway id from wrangler.toml plus the account credentials. */
 const cloudflare = (): Env =>
-  ({ ...baseEnv, AI_GATEWAY_ID: 'sam', CF_ACCOUNT_ID: 'account-1', CF_API_TOKEN: 'token-1' }) as Env;
+  ({
+    ...baseEnv,
+    AI_GATEWAY_ID: 'sam',
+    CF_ACCOUNT_ID: 'account-1',
+    CF_API_TOKEN: 'token-1',
+  }) as Env;
 /** Self-hosted: the default gateway id var is still there, the account is not. */
 const selfHosted = (): Env => ({ ...baseEnv, AI_GATEWAY_ID: 'sam' }) as Env;
 
@@ -202,7 +212,7 @@ describe('GET /api/usage/ai/budget', () => {
     return testApp;
   }
 
-  it('with a gateway id and an account adds this user\'s month-to-date gateway cost (Cloudflare behaviour)', async () => {
+  it("with a gateway id and an account adds this user's month-to-date gateway cost (Cloudflare behaviour)", async () => {
     const res = await app().request('/api/usage/ai/budget', {}, cloudflare());
     const body = (await res.json()) as { monthCostUsd: number };
 

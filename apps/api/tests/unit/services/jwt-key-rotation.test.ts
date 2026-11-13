@@ -24,6 +24,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
   getJWKS,
+  shouldRefreshCallbackToken,
   signCallbackToken,
   signLocalForwardToken,
   signPortAccessToken,
@@ -116,6 +117,8 @@ interface VerifierCase {
   accepted: Record<string, unknown>;
   /** How this verifier reports a token it does not trust. */
   refusal: Record<string, unknown>;
+  /** Only callback tokens (held by VM agents for hours) may use the rotation's previous key. */
+  previousAccepted: boolean;
 }
 
 const SIGNATURE_REFUSAL = { code: 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED' };
@@ -127,6 +130,7 @@ const verifiers: VerifierCase[] = [
     verify: (token, env) => verifyCallbackToken(token, env, { expectedScope: 'workspace' }),
     accepted: { workspace: 'ws-1', type: 'callback', scope: 'workspace' },
     refusal: { statusCode: 401, error: 'UNAUTHORIZED' },
+    previousAccepted: true,
   },
   {
     name: 'verifyTerminalToken',
@@ -134,6 +138,7 @@ const verifiers: VerifierCase[] = [
     verify: verifyTerminalToken,
     accepted: { workspace: 'ws-1', subject: 'user-1' },
     refusal: SIGNATURE_REFUSAL,
+    previousAccepted: false,
   },
   {
     name: 'verifyPortAccessToken',
@@ -141,6 +146,7 @@ const verifiers: VerifierCase[] = [
     verify: verifyPortAccessToken,
     accepted: { workspace: 'ws-1', port: 3000, subject: 'user-1' },
     refusal: SIGNATURE_REFUSAL,
+    previousAccepted: false,
   },
   {
     name: 'verifyLocalForwardToken',
@@ -161,6 +167,7 @@ const verifiers: VerifierCase[] = [
     verify: verifyLocalForwardToken,
     accepted: { userId: 'user-1', workspaceId: 'ws-1', nodeId: 'node-1', remotePort: 3000 },
     refusal: SIGNATURE_REFUSAL,
+    previousAccepted: false,
   },
 ];
 
@@ -224,11 +231,15 @@ describe('activePreviousJwtKey', () => {
 });
 
 describe.each(verifiers)('$name across a key rotation', (verifier) => {
-  it('accepts a token the previous key signed while the window is open', async () => {
+  it('accepts a previous-key token in the window only if it is a callback token', async () => {
     const token = await verifier.sign(beforeRotationEnv());
-    await expect(verifier.verify(token, rotatedEnv(inOneHour()))).resolves.toMatchObject(
-      verifier.accepted
-    );
+    const result = verifier.verify(token, rotatedEnv(inOneHour()));
+    if (verifier.previousAccepted) {
+      await expect(result).resolves.toMatchObject(verifier.accepted);
+    } else {
+      // Short-lived and re-minted by its holder: the believed-exposed key is not trusted for it.
+      await expect(result).rejects.toMatchObject(verifier.refusal);
+    }
   });
 
   it('accepts a token the current key signs (liveness of the current path)', async () => {
@@ -274,21 +285,12 @@ describe.each(verifiers)('$name across a key rotation', (verifier) => {
 });
 
 describe('claim checks on the previous-key path', () => {
-  async function previousKeyToken(build: (jwt: SignJWT) => SignJWT): Promise<string> {
-    const jwt = new SignJWT({ workspace: 'ws-1', port: 3000 })
+  async function previousKeyCallbackToken(build: (jwt: SignJWT) => SignJWT): Promise<string> {
+    const jwt = new SignJWT({ workspace: 'ws-1', type: 'callback', scope: 'workspace' })
       .setProtectedHeader({ alg: 'RS256', kid: LEGACY_JWT_KEY_ID })
-      .setSubject('user-1')
       .setIssuedAt();
     return build(jwt).sign(await importPKCS8(previous.privateKey, 'RS256'));
   }
-
-  it('refuses a wrong audience: a previous-key terminal token is not a port-access token', async () => {
-    const token = (await signTerminalToken('user-1', 'ws-1', beforeRotationEnv())).token;
-    await expect(verifyPortAccessToken(token, rotatedEnv(inOneHour()))).rejects.toMatchObject({
-      code: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
-      claim: 'aud',
-    });
-  });
 
   it('refuses a wrong audience on the callback verifier with 401', async () => {
     const token = (await signTerminalToken('user-1', 'ws-1', beforeRotationEnv())).token;
@@ -298,47 +300,72 @@ describe('claim checks on the previous-key path', () => {
   });
 
   it('refuses a wrong issuer', async () => {
-    const token = await previousKeyToken((jwt) =>
-      jwt.setIssuer('https://api.other.test').setAudience('port-access').setExpirationTime('5m')
+    const token = await previousKeyCallbackToken((jwt) =>
+      jwt
+        .setIssuer('https://api.other.test')
+        .setAudience('workspace-callback')
+        .setExpirationTime('5m')
     );
-    await expect(verifyPortAccessToken(token, rotatedEnv(inOneHour()))).rejects.toMatchObject({
-      claim: 'iss',
+    await expect(verifyCallbackToken(token, rotatedEnv(inOneHour()))).rejects.toMatchObject({
+      statusCode: 401,
     });
   });
 
   it('refuses an expired token', async () => {
     const past = Math.floor(Date.now() / 1000) - 600;
-    const token = await previousKeyToken((jwt) =>
+    const token = await previousKeyCallbackToken((jwt) =>
       jwt
         .setIssuer(ISSUER)
-        .setAudience('port-access')
+        .setAudience('workspace-callback')
         .setIssuedAt(past)
         .setExpirationTime(past + 60)
     );
-    await expect(verifyPortAccessToken(token, rotatedEnv(inOneHour()))).rejects.toMatchObject({
-      code: 'ERR_JWT_EXPIRED',
+    await expect(verifyCallbackToken(token, rotatedEnv(inOneHour()))).rejects.toMatchObject({
+      statusCode: 401,
     });
   });
 
   it('control: the same hand-built token with valid claims is accepted', async () => {
-    const token = await previousKeyToken((jwt) =>
-      jwt.setIssuer(ISSUER).setAudience('port-access').setExpirationTime('5m')
+    const token = await previousKeyCallbackToken((jwt) =>
+      jwt.setIssuer(ISSUER).setAudience('workspace-callback').setExpirationTime('5m')
     );
-    await expect(verifyPortAccessToken(token, rotatedEnv(inOneHour()))).resolves.toMatchObject({
+    await expect(verifyCallbackToken(token, rotatedEnv(inOneHour()))).resolves.toMatchObject({
       workspace: 'ws-1',
-      port: 3000,
     });
   });
 
-  it('verifyPlatformJwt honours the window at the instant it is given', async () => {
+  it('verifyPlatformJwt honours the window at the instant it is given, and only when allowed', async () => {
     const token = (await signTerminalToken('user-1', 'ws-1', beforeRotationEnv())).token;
     const until = Date.now() + HOUR_MS;
     const env = rotatedEnv(new Date(until).toISOString());
     const options = { issuer: ISSUER, audience: 'workspace-terminal' };
-    await expect(verifyPlatformJwt(token, env, options, until - 1)).resolves.toBeDefined();
-    await expect(verifyPlatformJwt(token, env, options, until)).rejects.toMatchObject(
+    await expect(verifyPlatformJwt(token, env, options, until - 1, true)).resolves.toBeDefined();
+    await expect(verifyPlatformJwt(token, env, options, until, true)).rejects.toMatchObject(
       SIGNATURE_REFUSAL
     );
+    await expect(verifyPlatformJwt(token, env, options, until - 1)).rejects.toMatchObject(
+      SIGNATURE_REFUSAL
+    );
+  });
+});
+
+describe('shouldRefreshCallbackToken after a rotation', () => {
+  it('refreshes a fresh token signed under another kid once JWT_KEY_ID is set', async () => {
+    const oldToken = await signCallbackToken('ws-1', beforeRotationEnv(), {
+      callbackGeneration: null,
+    });
+    expect(shouldRefreshCallbackToken(oldToken, rotatedEnv(inOneHour()))).toBe(true);
+    const newToken = await signCallbackToken('ws-1', rotatedEnv(inOneHour()), {
+      callbackGeneration: null,
+    });
+    expect(shouldRefreshCallbackToken(newToken, rotatedEnv(inOneHour()))).toBe(false);
+  });
+
+  it('control: without JWT_KEY_ID a fresh token is not refreshed (Cloudflare behaviour)', async () => {
+    const token = await signCallbackToken('ws-1', beforeRotationEnv(), {
+      callbackGeneration: null,
+    });
+    expect(shouldRefreshCallbackToken(token, beforeRotationEnv())).toBe(false);
   });
 });
 
@@ -373,24 +400,15 @@ describe('/.well-known/jwks.json', () => {
     expect(decodeProtectedHeader(token).kid).toBe(NEW_KID);
   });
 
-  it('publishes both kids during the window, and VM-agent-style kid lookup verifies old and new tokens', async () => {
+  it('publishes only the current key during the window: VM agents never trust the old key', async () => {
     const env = rotatedEnv(inOneHour());
     const jwks = await getJWKS(env);
-    expect(jwks.keys.map((key) => key.kid)).toEqual([NEW_KID, LEGACY_JWT_KEY_ID]);
-    expect(new Set(jwks.keys.map((key) => key.kid)).size).toBe(2);
-
+    expect(jwks.keys.map((key) => key.kid)).toEqual([NEW_KID]);
     const keySet = createLocalJWKSet(jwks);
     const oldToken = (await signTerminalToken('user-1', 'ws-1', beforeRotationEnv())).token;
     const newToken = (await signTerminalToken('user-1', 'ws-1', env)).token;
-    expect(decodeProtectedHeader(oldToken).kid).toBe(LEGACY_JWT_KEY_ID);
-    expect(decodeProtectedHeader(newToken).kid).toBe(NEW_KID);
-    await expect(jwtVerify(oldToken, keySet, { issuer: ISSUER })).resolves.toBeDefined();
+    await expect(jwtVerify(oldToken, keySet, { issuer: ISSUER })).rejects.toThrow();
     await expect(jwtVerify(newToken, keySet, { issuer: ISSUER })).resolves.toBeDefined();
-  });
-
-  it('publishes the previous key under JWT_PREVIOUS_KEY_ID when set', async () => {
-    const { keys } = await getJWKS(rotatedEnv(inOneHour(), { JWT_PREVIOUS_KEY_ID: 'key-2026-10' }));
-    expect(keys.map((key) => key.kid)).toEqual([NEW_KID, 'key-2026-10']);
   });
 
   it('publishes only the current key after UNTIL', async () => {
@@ -431,20 +449,15 @@ describe('/oidc/.well-known/jwks.json', () => {
     expect((await getWorkloadJWKS(keyEnv(current))).keys).toHaveLength(1);
   });
 
-  it('publishes the previous thumbprint kid during the window and verifies a pre-rotation token', async () => {
+  it('publishes only the current key during the window: relying parties never trust the old key', async () => {
     const env = rotatedEnv(inOneHour());
     const jwks = await getWorkloadJWKS(env);
-    const [currentEntry, previousEntry] = jwks.keys;
-    expect(jwks.keys).toHaveLength(2);
-    expect(currentEntry?.kid).toBe((await getWorkloadJWKS(keyEnv(current))).keys[0]?.kid);
-    expect(previousEntry?.kid).toBe((await getWorkloadJWKS(beforeRotationEnv())).keys[0]?.kid);
-    expect(currentEntry?.kid).not.toBe(previousEntry?.kid);
-
+    expect(jwks.keys).toHaveLength(1);
+    expect(jwks.keys[0]?.kid).toBe((await getWorkloadJWKS(keyEnv(current))).keys[0]?.kid);
     const keySet = createLocalJWKSet(jwks);
     const oldToken = await signWorkloadIdentityToken(beforeRotationEnv(), claims, 'vault.example');
     const newToken = await signWorkloadIdentityToken(env, claims, 'vault.example');
-    expect(decodeProtectedHeader(newToken).kid).toBe(currentEntry?.kid);
-    await expect(jwtVerify(oldToken, keySet, { audience: 'vault.example' })).resolves.toBeDefined();
+    await expect(jwtVerify(oldToken, keySet, { audience: 'vault.example' })).rejects.toThrow();
     await expect(jwtVerify(newToken, keySet, { audience: 'vault.example' })).resolves.toBeDefined();
   });
 

@@ -12,7 +12,7 @@ const PROCEDURE_TEXT: Record<RotatableKey['procedure'], string> = {
   gateway:
     'Worker accepts old and new, restart Caddy/frps/sam-mx with the new value, Worker accepts only the new one',
   overlap:
-    'new key pair with its own kid; the old public key stays accepted and published until the overlap ends, then `rotate --resume` removes it',
+    'new key pair with its own kid, published alone; the Worker still accepts callback tokens signed with the old key until the overlap ends, then `rotate --resume` removes it',
   reencrypt:
     'new key current, old key as read fallback; re-encrypt every stored value in bounded pages, verify, wait for values the passes cannot reach to expire, verify again, retire the old key',
   'better-auth':
@@ -92,7 +92,7 @@ export function formatPlan(
     }
     if (key.procedure === 'overlap') {
       lines.push(
-        `     finishes: \`rotate --resume\` after the ${options.jwtOverlapHours ?? 25} h overlap`
+        `     finishes: \`rotate --resume\` after the ${options.jwtOverlapHours ?? 13} h overlap; until then the old key still verifies callback tokens`
       );
     }
   });
@@ -116,6 +116,9 @@ export function formatSummary(
     if (step.baseline?.unreadable) {
       const ids = step.baseline.rows.slice(0, 20).map((r) => `${r.location}/${r.id}.${r.column}`);
       detail += `; ${step.baseline.unreadable} value(s) were unreadable before the rotation and were left untouched: ${ids.join(', ')}${step.baseline.unreadable > ids.length ? ', ...' : ''}`;
+    }
+    if (step.legacyTunnelLeases) {
+      detail += `; ${step.legacyTunnelLeases} reverse-tunnel node(s) created before the switch still use a tunnel credential derived from the old key: replace them`;
     }
     lines.push(`  ${name}: ${step.phase}${detail}`);
   }

@@ -60,15 +60,17 @@ function createR2() {
 /** Workers AI answers a Whisper call with `{ text }` and a TTS call with a raw audio Response. */
 function createWorkersAi() {
   return {
-    run: vi.fn(async (model: string, _input: unknown, options?: { returnRawResponse?: boolean }) => {
-      if (options?.returnRawResponse) {
-        return new Response(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]), {
-          headers: { 'Content-Type': 'audio/mpeg' },
-        });
+    run: vi.fn(
+      async (model: string, _input: unknown, options?: { returnRawResponse?: boolean }) => {
+        if (options?.returnRawResponse) {
+          return new Response(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]), {
+            headers: { 'Content-Type': 'audio/mpeg' },
+          });
+        }
+        expect(model).toContain('whisper');
+        return { text: 'Hello from the microphone' };
       }
-      expect(model).toContain('whisper');
-      return { text: 'Hello from the microphone' };
-    }),
+    ),
   };
 }
 
@@ -188,7 +190,10 @@ describe('POST /api/tts/synthesize', () => {
   });
 
   it('keeps TTS_ENABLED=false as its own 400, distinct from the unavailable case', async () => {
-    const disabledWithAi = await postSynthesize(app, baseEnv({ AI: createWorkersAi(), TTS_ENABLED: 'false' }));
+    const disabledWithAi = await postSynthesize(
+      app,
+      baseEnv({ AI: createWorkersAi(), TTS_ENABLED: 'false' })
+    );
     const disabledWithoutAi = await postSynthesize(app, baseEnv({ TTS_ENABLED: 'false' }));
 
     expect(disabledWithAi.status).toBe(400);

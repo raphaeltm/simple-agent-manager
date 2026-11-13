@@ -4,7 +4,6 @@ import { type Context, Hono } from 'hono';
 import type { Env } from '../env';
 import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
-import { getTokenHashKey } from '../lib/secrets';
 import {
   checkRateLimit,
   createRateLimitKey,
@@ -147,7 +146,7 @@ async function handleWebhookIngress(
   if (!areWebhookTriggersEnabled(c.env)) return publicError(404, 'Not found');
 
   const limits = getWebhookTriggerLimits(c.env);
-  const ipKey = await fingerprintWebhookRequest(clientIp(c.req.raw), getTokenHashKey(c.env));
+  const ipKey = await fingerprintWebhookRequest(clientIp(c.req.raw), c.env.ENCRYPTION_KEY);
   const ingressRate = await takeRateLimit(
     c.env,
     'webhook-ingress',
@@ -233,9 +232,9 @@ async function handleWebhookIngress(
   const delivery = await createWebhookDelivery(c.env, {
     triggerId: resolved.trigger.id,
     idempotencyKeyHash: idempotencyKey
-      ? await hashWebhookIdempotencyKey(idempotencyKey, getTokenHashKey(c.env))
+      ? await hashWebhookIdempotencyKey(idempotencyKey, c.env.ENCRYPTION_KEY)
       : null,
-    requestFingerprint: await fingerprintWebhookRequest(rawBody, getTokenHashKey(c.env)),
+    requestFingerprint: await fingerprintWebhookRequest(rawBody, c.env.ENCRYPTION_KEY),
     bodyBytes: bodyBytes.byteLength,
     receivedAt,
   });

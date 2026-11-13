@@ -11,7 +11,7 @@
  * (the reseal) is deployed and the report says what is now worth purging and what this command
  * cannot rotate.
  */
-import { existsSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { applyPatch, type RotateDeps, type StepContext } from './rotate-apply';
@@ -31,11 +31,12 @@ import {
   JOURNAL_FORMAT,
   openRotationStore,
   readJournal,
+  rotationDir,
   type RotationStore,
   type StepState,
   writeJournal,
 } from './rotate-store';
-import { readSecretsFile } from './secret-files';
+import { ensurePrivateDir, readSecretsFile } from './secret-files';
 
 export type { RotateDeps };
 
@@ -177,7 +178,46 @@ async function startJournal(
   return journal;
 }
 
+/**
+ * One `rotate` at a time per box: an O_EXCL lock file holding the pid. A lock whose process is
+ * gone (a crash) is taken over; a live one stops the second run.
+ */
+function acquireLock(stateDir: string): () => void {
+  ensurePrivateDir(rotationDir(stateDir));
+  const path = join(rotationDir(stateDir), 'lock');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const fd = openSync(path, 'wx', 0o600);
+      writeSync(fd, String(process.pid));
+      closeSync(fd);
+      return () => rmSync(path, { force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const pid = Number(readFileSync(path, 'utf8').trim());
+      let alive = false;
+      try {
+        if (Number.isInteger(pid) && pid > 0) process.kill(pid, 0);
+        alive = Number.isInteger(pid) && pid > 0;
+      } catch {
+        alive = false;
+      }
+      if (alive) throw new Error(`another pnpm selfhost:secrets rotate is running (pid ${pid})`);
+      rmSync(path, { force: true });
+    }
+  }
+  throw new Error(`could not take the rotation lock ${path}`);
+}
+
 export async function runRotate(input: RotateInput, deps: RotateDeps): Promise<Journal | null> {
+  const release = acquireLock(input.stateDir);
+  try {
+    return await runRotateLocked(input, deps);
+  } finally {
+    release();
+  }
+}
+
+async function runRotateLocked(input: RotateInput, deps: RotateDeps): Promise<Journal | null> {
   const store = input.store ?? openRotationStore(input.box, input.stateDir);
   const existing = readJournal(input.stateDir);
   if (existing && !input.resume) {

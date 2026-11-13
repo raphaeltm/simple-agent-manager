@@ -149,7 +149,7 @@ export const ROTATABLE_KEYS: readonly RotatableKey[] = [
       return { JWT_PRIVATE_KEY: pair.privateKey, JWT_PUBLIC_KEY: pair.publicKey };
     },
     impact:
-      'none if finished after the overlap: the Worker accepts tokens signed with the old key until JWT_PUBLIC_KEY_PREVIOUS_UNTIL and publishes both keys in its JWKS, and nodes swap to new-key callback tokens on their heartbeats. A node that has not heartbeated for the whole overlap loses its control-plane connection (as it would anyway when its token expires)',
+      'none for users: terminals and previews get new-key tokens from the app. Nodes switch to new-key callback tokens on their next heartbeat; workspace callback tokens switch when the VM agent renews them (at half their 24 h life), so the Worker keeps accepting callback tokens signed with the old key until the overlap ends (13 h, --jwt-overlap-hours). During the overlap whoever holds the old key can still forge a callback token; --jwt-overlap-hours 0 removes that window but cuts every running node off (replace them)',
     downtime: 'none',
   },
 ];

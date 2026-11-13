@@ -174,13 +174,33 @@ async function migrateUntilProven(
  */
 export async function assertRetireProof(ctx: StepContext, kind: Kind, tag: string): Promise<void> {
   const { step } = ctx;
-  delete step.proof;
-  step.migrateRounds = 0;
+  // A fresh, complete pass every time: never resume a retire verification from cursors an
+  // earlier run left, which would skip locations checked hours ago.
+  resetData(step);
   ctx.save();
   const failure = await migrateUntilProven(ctx, kind, `${tag}:retire`);
   if (failure || !step.proof) {
     throw new Error(
       `refusing to retire the old key: ${failure ?? 'no verification proves every value reads under the new key'}`
+    );
+  }
+}
+
+/** Nodes whose tunnel credential is still derived from the old key (reported, see control.ts). */
+async function recordLegacyTunnelLeases(ctx: StepContext): Promise<void> {
+  const { step, deps } = ctx;
+  const call = await controlCall(ctx);
+  const status = (await call({ op: 'status', before: step.switchedAt })) as {
+    legacyTunnelLeases?: unknown;
+  };
+  const count = typeof status.legacyTunnelLeases === 'number' ? status.legacyTunnelLeases : null;
+  step.legacyTunnelLeases = count;
+  ctx.save();
+  if (count === null) {
+    deps.log('  WARNING: could not count reverse-tunnel nodes created before the switch');
+  } else if (count > 0) {
+    deps.log(
+      `  WARNING: ${count} reverse-tunnel node(s) created before the switch keep a tunnel credential derived from the old ENCRYPTION_KEY: whoever holds that key and an old backup can still log in to frps as them. Replace them (delete each node; SAM provisions new ones on demand).`
     );
   }
 }
@@ -246,17 +266,19 @@ export async function advanceData(
   }
   const finalPhase = step.reverse ? 'rolled-back' : 'done';
   if (step.phase === 'waiting' || (step.phase === 'staging' && step.stagedFor === finalPhase)) {
-    if (step.phase === 'waiting') {
-      if (deps.now() < Date.parse(step.waitUntil ?? '')) return;
-      try {
-        await assertRetireProof(ctx, kind, tag);
-      } catch (error) {
-        step.phase = 'blocked';
-        step.resumePhase = 'waiting';
-        step.error = message(error);
-        ctx.save();
-        throw error;
-      }
+    if (step.phase === 'waiting' && deps.now() < Date.parse(step.waitUntil ?? '')) return;
+    // Proven right before the old key leaves, also when resuming an interrupted retire.
+    try {
+      await assertRetireProof(ctx, kind, tag);
+    } catch (error) {
+      step.phase = 'blocked';
+      step.resumePhase = 'waiting';
+      step.error = message(error);
+      ctx.save();
+      throw error;
+    }
+    if (kind === 'aes' && keyName(ctx) === 'ENCRYPTION_KEY' && !step.reverse) {
+      await recordLegacyTunnelLeases(ctx);
     }
     await applyPatch(ctx, { remove: previousNames(ctx, kind) }, finalPhase);
     deps.log(`  ${ctx.key.name}: the old value is retired from the Worker`);

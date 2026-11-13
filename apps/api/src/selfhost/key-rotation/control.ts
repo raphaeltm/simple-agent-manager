@@ -59,6 +59,28 @@ function rotatingRoles(env: KeyRotationEnv): Record<AesKeyRole, boolean> {
   };
 }
 
+/**
+ * Active reverse-tunnel leases created before `before` (the switch to the new key): their frp
+ * credential is an HMAC under the old ENCRYPTION_KEY (node-reverse-tunnel-config.ts), so whoever
+ * holds that key and the lease ids can still log in to frps as those nodes until they are
+ * replaced. Reported, not fixed: re-credentialing a live node needs the VM agent. Null when
+ * unknown (no `before`, or the table cannot be read).
+ */
+async function legacyTunnelLeases(db: D1Database, before: string | null): Promise<number | null> {
+  if (!before) return null;
+  try {
+    const row = await db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM node_reverse_tunnel_leases WHERE status = 'active' AND created_at < ?"
+      )
+      .bind(before)
+      .first<{ n: number }>();
+    return typeof row?.n === 'number' ? row.n : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleKeyRotationRequest(
   request: Request,
   env: KeyRotationEnv
@@ -66,6 +88,10 @@ export async function handleKeyRotationRequest(
   const key = env.SAM_KEY_ROTATION_CONTROL_KEY ?? '';
   if (!key) return reply(404, { error: 'NOT_FOUND' });
   if (request.method !== 'POST') return reply(405, { error: 'METHOD_NOT_ALLOWED' });
+  const declared = Number(request.headers.get('content-length') ?? '0');
+  if (!Number.isFinite(declared) || declared > MAX_BODY_BYTES) {
+    return reply(413, { error: 'TOO_LARGE' });
+  }
   const body = await request.text();
   if (body.length > MAX_BODY_BYTES) return reply(413, { error: 'TOO_LARGE' });
   if (!(await verifyKeyRotationRequest(key, request.headers.get(KEY_ROTATION_AUTH_HEADER), body))) {
@@ -85,6 +111,10 @@ export async function handleKeyRotationRequest(
       roles: rotatingRoles(env),
       betterAuth: betterAuthRotating(env),
       locations: [...D1_LOCATIONS.map((l) => l.name), LIBRARY_LOCATION, BETTER_AUTH_LOCATION],
+      legacyTunnelLeases: await legacyTunnelLeases(
+        env.DATABASE,
+        typeof input.before === 'string' ? input.before : null
+      ),
     });
   }
   if (input.op !== 'pass') return reply(400, { error: 'BAD_REQUEST' });

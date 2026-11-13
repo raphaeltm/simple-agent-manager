@@ -46,9 +46,8 @@ vi.mock('../../../src/services/credential-setup-session', async (importOriginal)
   getSetupSessionState: h.getSetupSessionState,
 }));
 
-const { agentCredentialSetupSessionsRoutes } = await import(
-  '../../../src/routes/agent-credential-setup-sessions'
-);
+const { agentCredentialSetupSessionsRoutes } =
+  await import('../../../src/routes/agent-credential-setup-sessions');
 
 function setupDatabase(): Database.Database {
   const sqlite = new Database(':memory:');
@@ -156,25 +155,36 @@ describe('guided credential setup', () => {
     expect(h.leaseSetupSlot).toHaveBeenCalledTimes(1);
     expect(h.startSetupSession).toHaveBeenCalledTimes(1);
     expect(
-      (sqlite.prepare('SELECT COUNT(*) AS n FROM agent_credential_setup_sessions').get() as { n: number }).n
+      (
+        sqlite.prepare('SELECT COUNT(*) AS n FROM agent_credential_setup_sessions').get() as {
+          n: number;
+        }
+      ).n
     ).toBe(1);
   });
 
   it.each([
     ['POST /', '/api/agent-credential-setup-sessions'],
     ['POST /project', '/api/agent-credential-setup-sessions/project'],
-  ])('%s answers 404 when CONTAINER_RUNTIME_AVAILABLE=false and starts nothing', async (_label, path) => {
-    const { sqlite, env } = setupEnv({ CONTAINER_RUNTIME_AVAILABLE: 'false' });
+  ])(
+    '%s answers 404 when CONTAINER_RUNTIME_AVAILABLE=false and starts nothing',
+    async (_label, path) => {
+      const { sqlite, env } = setupEnv({ CONTAINER_RUNTIME_AVAILABLE: 'false' });
 
-    const res = await app().request(path, createRequest, env);
+      const res = await app().request(path, createRequest, env);
 
-    expect(res.status).toBe(404);
-    expect(h.leaseSetupSlot).not.toHaveBeenCalled();
-    expect(h.startSetupSession).not.toHaveBeenCalled();
-    expect(
-      (sqlite.prepare('SELECT COUNT(*) AS n FROM agent_credential_setup_sessions').get() as { n: number }).n
-    ).toBe(0);
-  });
+      expect(res.status).toBe(404);
+      expect(h.leaseSetupSlot).not.toHaveBeenCalled();
+      expect(h.startSetupSession).not.toHaveBeenCalled();
+      expect(
+        (
+          sqlite.prepare('SELECT COUNT(*) AS n FROM agent_credential_setup_sessions').get() as {
+            n: number;
+          }
+        ).n
+      ).toBe(0);
+    }
+  );
 });
 
 describe('isInstantRuntimeAvailable', () => {
@@ -190,7 +200,9 @@ describe('isInstantRuntimeAvailable', () => {
   });
 
   it('is false with the flag and binding present and CONTAINER_RUNTIME_AVAILABLE=false', () => {
-    expect(isInstantRuntimeAvailable(instant({ CONTAINER_RUNTIME_AVAILABLE: 'false' }))).toBe(false);
+    expect(isInstantRuntimeAvailable(instant({ CONTAINER_RUNTIME_AVAILABLE: 'false' }))).toBe(
+      false
+    );
   });
 
   it('keeps its existing conditions: flag off or binding missing is still false', () => {
@@ -226,10 +238,13 @@ describe('container runtime declaration gates the start paths, not only the adve
   });
 
   it('turns the container config and the legacy sandbox off, and only when declared absent', () => {
-    expect(getVmAgentContainerConfig({ ...on, CONTAINER_RUNTIME_AVAILABLE: 'false' } as Env).enabled).toBe(false);
+    expect(
+      getVmAgentContainerConfig({ ...on, CONTAINER_RUNTIME_AVAILABLE: 'false' } as Env).enabled
+    ).toBe(false);
     expect(getVmAgentContainerConfig(on as Env).enabled).toBe(true);
-    expect(getSandboxConfig({ ...on, CONTAINER_RUNTIME_AVAILABLE: 'false' } as Env).enabled).toBe(false);
+    expect(getSandboxConfig({ ...on, CONTAINER_RUNTIME_AVAILABLE: 'false' } as Env).enabled).toBe(
+      false
+    );
     expect(getSandboxConfig(on as Env).enabled).toBe(true);
   });
 });
-

@@ -85,6 +85,8 @@ export interface StepState {
   previousRows?: RowRef[];
   /** Set only by a complete verify pass with nothing left under the old key (rotate-run.ts). */
   proof?: { at: string; current: number; unreadable: number };
+  /** encryption-key: active reverse-tunnel leases created before the switch (null = unknown). */
+  legacyTunnelLeases?: number | null;
   /** Where `rotate --resume` picks a blocked step up again. */
   resumePhase?: Phase;
   /** The phase before the staged transition, for a resumed rollback. */

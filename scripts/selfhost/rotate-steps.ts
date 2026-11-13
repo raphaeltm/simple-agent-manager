@@ -19,8 +19,15 @@ export const JWT_OVERLAP_NAMES = [
   'JWT_PREVIOUS_KEY_ID',
   'JWT_PUBLIC_KEY_PREVIOUS_UNTIL',
 ] as const;
-/** Callback tokens live 24 h (CALLBACK_TOKEN_EXPIRY_MS) and are re-signed after half of it. */
-export const DEFAULT_JWT_OVERLAP_HOURS = 25;
+/**
+ * How long the Worker still accepts callback tokens signed with the old key. Nodes get a new-key
+ * token on their next heartbeat (shouldRefreshCallbackToken refreshes a non-current kid), but a
+ * VM agent offers a workspace callback token for renewal only after half its 24 h lifetime
+ * (CALLBACK_TOKEN_EXPIRY_MS, ratio 0.5): 12 h plus a margin. Terminal, port and local-forward
+ * tokens never use the old key. 0 is a hard cut: running nodes lose their control-plane
+ * connection and must be replaced.
+ */
+export const DEFAULT_JWT_OVERLAP_HOURS = 13;
 
 /** Sets `names` back to their snapshot values; names the snapshot lacks are removed. */
 export function restorePatch(snapshot: Secrets, names: readonly string[]): Patch {
@@ -93,7 +100,8 @@ function writeGatewayEnv(ctx: StepContext, secret: string): boolean {
   const text = readFileSync(path, 'utf8');
   const line = new RegExp(`^${GATEWAY_SECRET}=.*$`, 'm');
   if (!line.test(text)) throw new ApplyFailedError(`${path} has no ${GATEWAY_SECRET} line`);
-  const next = text.replace(line, `${GATEWAY_SECRET}=${secret}`);
+  // A replacer function: a `$` in the value must not be read as a replacement pattern.
+  const next = text.replace(line, () => `${GATEWAY_SECRET}=${secret}`);
   if (next === text) return false;
   writePrivateFile(path, next);
   return true;
@@ -216,12 +224,13 @@ export async function advanceOverlap(ctx: StepContext, overlapHours: number): Pr
         'waiting'
       );
       const head = (await ctx.store.head()).secrets;
+      // The Worker publishes only the current key: VM agents and relying parties never trust
+      // the old one (it is accepted only for callback tokens, by the Worker itself).
       const kids = await jwksKids(ctx);
-      for (const kid of [head.JWT_KEY_ID, head.JWT_PREVIOUS_KEY_ID]) {
-        if (!kids.includes(kid ?? ''))
-          throw new ApplyFailedError(
-            `the JWKS does not publish kid ${kid} (it publishes ${kids.join(', ') || 'nothing'})`
-          );
+      if (kids.length !== 1 || kids[0] !== head.JWT_KEY_ID) {
+        throw new ApplyFailedError(
+          `the JWKS publishes ${kids.join(', ') || 'nothing'}, expected only ${head.JWT_KEY_ID}`
+        );
       }
       step.waitUntil = head.JWT_PUBLIC_KEY_PREVIOUS_UNTIL;
       ctx.save();

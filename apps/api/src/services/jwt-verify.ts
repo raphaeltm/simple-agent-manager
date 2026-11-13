@@ -96,22 +96,28 @@ function isSignatureFailure(error: unknown): boolean {
 }
 
 /**
- * Verify a platform-signed JWT: current key first, then the previous key while its overlap window
- * is open at `nowMs`, and only when the current key rejected the signature. `options` (issuer,
- * audience, ...) apply unchanged on both paths. A previous key that does not verify the signature
- * either, or that cannot be imported, surfaces the current key's error.
+ * Verify a platform-signed JWT: current key first, then — only when `allowPrevious` and the
+ * current key rejected the signature — the previous key while its overlap window is open at
+ * `nowMs`. `options` (issuer, audience, ...) apply unchanged on both paths. A previous key that
+ * does not verify the signature either, or that cannot be imported, surfaces the current key's
+ * error.
+ *
+ * Only callback tokens allow the previous key: VM agents hold them for up to their lifetime and
+ * treat a 401 as terminal. Every other token is short-lived and re-minted by its holder, so a
+ * rotation (which replaces a key believed exposed) must not keep accepting it for those.
  */
 export async function verifyPlatformJwt(
   token: string,
   env: Env,
   options: JWTVerifyOptions,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  allowPrevious = false
 ): Promise<JWTVerifyResult> {
   const currentKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
   try {
     return await jwtVerify(token, currentKey, options);
   } catch (currentError) {
-    if (!isSignatureFailure(currentError)) throw currentError;
+    if (!allowPrevious || !isSignatureFailure(currentError)) throw currentError;
     const previous = activePreviousJwtKey(env, nowMs);
     if (!previous) throw currentError;
 
@@ -165,10 +171,15 @@ export async function verifyCallbackToken(
 
   let payload: JWTPayload;
   try {
-    ({ payload } = await verifyPlatformJwt(token, env, {
-      issuer,
-      audience: CALLBACK_AUDIENCE,
-    }));
+    // Callback tokens are the one kind VM agents hold for hours: accept the rotation's previous
+    // key (bounded by JWT_PUBLIC_KEY_PREVIOUS_UNTIL) so nodes and workspaces survive the change.
+    ({ payload } = await verifyPlatformJwt(
+      token,
+      env,
+      { issuer, audience: CALLBACK_AUDIENCE },
+      Date.now(),
+      true
+    ));
   } catch (error) {
     if (isJoseVerificationFailure(error)) {
       throw callbackTokenUnauthorized();
@@ -349,39 +360,20 @@ export async function verifyLocalForwardToken(
  * Get the JWKS (JSON Web Key Set) for JWT validation.
  * Published at /.well-known/jwks.json for VM Agent to fetch.
  *
- * The current key comes first. The previous key is added while its overlap window is open, under
- * its own kid; if that kid equals the current one it is left out, since a key set with two keys
- * under one kid cannot be resolved by kid.
+ * Only the current key, also during a key rotation: VM agents use this set to accept terminal,
+ * node-management and local-forward tokens, which are short-lived and re-minted with the new key,
+ * so publishing a previous key (believed exposed) would only let its holder forge them. VM agents
+ * resolve keys by kid and refetch the set when they meet the new key's kid.
  */
-export async function getJWKS(env: Env, nowMs: number = Date.now()) {
-  const currentKid = currentJwtKeyId(env);
-  const keys = [
-    {
-      ...(await exportJWK(await importSPKI(env.JWT_PUBLIC_KEY, 'RS256'))),
-      kid: currentKid,
-      use: 'sig',
-      alg: 'RS256',
-    },
-  ];
-
-  const previous = activePreviousJwtKey(env, nowMs);
-  if (!previous) return { keys };
-  if (previous.kid === currentKid) {
-    log.warn('jwt.previous_key_kid_collision', {
-      kid: currentKid,
-      action: 'previous_key_not_published',
-    });
-    return { keys };
-  }
-  try {
-    const jwk = await exportJWK(await importSPKI(previous.publicKeyPem, 'RS256'));
-    keys.push({ ...jwk, kid: previous.kid, use: 'sig', alg: 'RS256' });
-  } catch (error) {
-    log.error('jwt.previous_key_import_failed', {
-      ...serializeError(error),
-      previousKid: previous.kid,
-      action: 'previous_key_not_published',
-    });
-  }
-  return { keys };
+export async function getJWKS(env: Env) {
+  return {
+    keys: [
+      {
+        ...(await exportJWK(await importSPKI(env.JWT_PUBLIC_KEY, 'RS256'))),
+        kid: currentJwtKeyId(env),
+        use: 'sig',
+        alg: 'RS256',
+      },
+    ],
+  };
 }

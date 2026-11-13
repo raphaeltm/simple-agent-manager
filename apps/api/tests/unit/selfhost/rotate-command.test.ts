@@ -6,7 +6,15 @@
  * verifyCallbackToken, the gateway secret check, the decrypt read fallback. Only the box
  * plumbing is simulated: "deploy" means the Worker now runs with the newest bundle.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -228,6 +236,13 @@ describe('rotate encryption-key', () => {
         `INSERT INTO credentials (id, user_id, provider, encrypted_token, iv) VALUES ('c-broken', 'u1', 'x', ?, ?)`
       )
       .run(btoa('z'.repeat(32)), btoa('i'.repeat(12)));
+    // A reverse-tunnel node provisioned before the rotation (credential derived from the old key).
+    sqlite
+      .prepare(
+        `INSERT INTO node_reverse_tunnel_leases (id, node_id, user_id, runtime_incarnation_id, port, credential_hash, status, created_at, updated_at)
+         VALUES ('lease-old', 'n-old', 'u1', 'inc', 20001, 'h', 'active', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`
+      )
+      .run();
     await runRotate(input({ names: ['encryption-key'] }), deps());
     const mid = await head();
     expect(readJournal(stateDir)?.steps['encryption-key']?.phase).toBe('waiting');
@@ -265,6 +280,8 @@ describe('rotate encryption-key', () => {
     // The broken row was reported, never written.
     expect(credential('c-broken').c).toBe(btoa('z'.repeat(32)));
     expect(logs.join('\n')).toContain('credentials/c-broken.encrypted_token');
+    // The node whose tunnel credential is still derived from the old key is named, not hidden.
+    expect(logs.join('\n')).toContain('1 reverse-tunnel node(s) created before the switch');
     // The old key is still in the sealed snapshot until the operator deletes it.
     const journalDir = join(stateDir, 'key-agent', 'rotation');
     const id = readFileSync(join(journalDir, readdir(journalDir)[0]!, 'journal.json'), 'utf8');
@@ -346,6 +363,20 @@ describe('rotate encryption-key', () => {
   });
 });
 
+describe('the rotation lock', () => {
+  it('refuses a second run while one is live, and takes over a lock left by a crash', async () => {
+    const lockDir = join(stateDir, 'key-agent', 'rotation');
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(lockDir, 'lock'), String(process.pid)); // a live process (this one)
+    await expect(runRotate(input({ names: ['preview-signing-key'] }), deps())).rejects.toThrow(
+      /another pnpm selfhost:secrets rotate is running/
+    );
+    writeFileSync(join(lockDir, 'lock'), '999999999'); // no such process: a crashed run
+    await runRotate(input({ names: ['preview-signing-key'] }), deps());
+    expect(existsSync(join(lockDir, 'lock'))).toBe(false);
+  });
+});
+
 describe('rotate jwt-keys', () => {
   it('accepts tokens signed with the old key during the overlap, refuses them after it, and finishes on resume', async () => {
     clock = Date.now();
@@ -354,7 +385,8 @@ describe('rotate jwt-keys', () => {
     const oldToken = await signNodeCallbackToken('node-1', oldEnv, { callbackGeneration: null });
     await runRotate(input({ names: ['jwt-keys'], jwtOverlapHours: 25 }), deps());
     expect(readJournal(stateDir)?.steps['jwt-keys']?.phase).toBe('waiting');
-    expect((await getJWKS(workerEnv())).keys).toHaveLength(2);
+    // Published alone: VM agents never trust the old key; only the Worker accepts it for callbacks.
+    expect((await getJWKS(workerEnv())).keys).toHaveLength(1);
     await expect(verifyCallbackToken(oldToken, workerEnv())).resolves.toMatchObject({
       workspace: 'node-1',
     });

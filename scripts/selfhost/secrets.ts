@@ -66,10 +66,16 @@ const { values, positionals } = parseArgs({
   },
 });
 
-function positiveNumber(value: string | undefined, flag: string): number | undefined {
+function positiveNumber(
+  value: string | undefined,
+  flag: string,
+  allowZero = false
+): number | undefined {
   if (value === undefined) return undefined;
   const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) throw new Error(`${flag} must be a positive number`);
+  if (!Number.isFinite(n) || n < 0 || (n === 0 && !allowZero)) {
+    throw new Error(`${flag} must be a ${allowZero ? 'non-negative' : 'positive'} number`);
+  }
   return n;
 }
 const envFile = resolve(values['box-env'] ?? join(SELFHOST_DIR, '.env'));
@@ -182,7 +188,7 @@ try {
           dryRun: values['dry-run'],
           resume: values.resume,
           skipBackup: values['skip-backup'],
-          jwtOverlapHours: positiveNumber(values['jwt-overlap-hours'], '--jwt-overlap-hours'),
+          jwtOverlapHours: positiveNumber(values['jwt-overlap-hours'], '--jwt-overlap-hours', true),
           storedLifetimeMinutes: positiveNumber(
             values['stored-lifetime-minutes'],
             '--stored-lifetime-minutes'
