@@ -75,7 +75,8 @@ retires the old key` red; restored, all green.
 
 Closed on this branch: M1 (library conditional-write check and body/key check, live on celld), M2
 (encryption-key chains better-auth-secret), L1 (mirror/fingerprint race tests), L2 (JWKS comments,
-test citation), L3 (webhook lookups on the token-hash key), L4 (wait derived from the Worker's
+test citation), L3 (impact documented; webhook fingerprints stay on ENCRYPTION_KEY per the
+earlier security review L6), L4 (wait derived from the Worker's
 settings), L5 (byte-capped control body), L7 (README/catalog wording), Q7c (swapped-body test),
 SonarCloud bugs S2871 x2 and vulnerabilities S4036 x2. Deferred with backlog tasks: M3
 (`tasks/backlog/2026-11-13-selfhost-jwt-overlap-per-node-cutoff.md`), L6

@@ -452,32 +452,6 @@ From that information, I'd like you to derive something interesting to append to
     });
   });
 
-  it('still recognises a duplicate retried across a self-hosted ENCRYPTION_KEY rotation (review V1 L3)', async () => {
-    const submitter = vi.fn<TriggerTaskSubmitter>(async () => ({
-      taskId: 'task-1',
-      sessionId: 'session-1',
-      branchName: 'sam/deployment-failure',
-    }));
-    const app = appWith(submitter);
-    const payload = { deployment: { id: 'dep-rotated', status: 'failed' } };
-    const first = await app.request(deliveryRequest(token, payload, 'across-key'), undefined, env);
-    // The rotation's switch: a new ENCRYPTION_KEY, the lookup key pinned to the old value.
-    const rotated = {
-      ...env,
-      ENCRYPTION_KEY: 'integration-test-webhook-hmac-key-NEW',
-      TOKEN_HASH_KEY: ENCRYPTION_KEY,
-    } as Env;
-    const retried = await app.request(
-      deliveryRequest(token, payload, 'across-key'),
-      undefined,
-      rotated
-    );
-    expect(first.status).toBe(202);
-    expect(retried.status).toBe(202);
-    expect(await retried.json()).toMatchObject({ accepted: true, duplicate: true });
-    expect(submitter).toHaveBeenCalledOnce();
-  });
-
   it('records filtered delivery metadata without reserving or submitting work', async () => {
     sqlite
       .prepare('UPDATE webhook_trigger_configs SET filters_json = ? WHERE trigger_id = ?')
