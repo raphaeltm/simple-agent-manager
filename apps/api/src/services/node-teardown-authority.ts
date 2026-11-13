@@ -14,7 +14,7 @@
  * Every refusal on the current-credential path is a {@link NodeTeardownBlockedError} naming its
  * own condition, so the node can surface it instead of retrying silently (rules 71, 74).
  */
-import type { ProviderRequestContext } from '@simple-agent-manager/providers';
+import { ProviderError, type ProviderRequestContext } from '@simple-agent-manager/providers';
 import { timestampVersion } from '@simple-agent-manager/scheduler-core';
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { and, asc, eq } from 'drizzle-orm';
@@ -323,6 +323,16 @@ export async function proveNodeInstanceOwnership(
         : await candidate.provider.getVM(instanceId);
     } catch (error) {
       if (requestContext?.signal?.aborted) throw error;
+      if (isCredentialRejection(error)) {
+        // A revoked or wrong-scope credential can never answer for this instance: it cannot
+        // see it, which is a verdict, not a transient read failure to retry silently.
+        log.warn('node_teardown.ownership_read_rejected', {
+          nodeId: node.id,
+          credentialSource: candidate.credentialSource,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
       readFailure = error;
       log.warn('node_teardown.ownership_read_failed', {
         nodeId: node.id,
@@ -352,4 +362,14 @@ export async function proveNodeInstanceOwnership(
     `node=${node.id} instance=${instanceId}: no current credential of the node owner can see ` +
       'the instance; it may still exist under a removed or different cloud account'
   );
+}
+
+/**
+ * The provider refused this credential (401/403 or a categorised auth error), so it can never
+ * answer for the instance. Rate limits, capacity and server errors are temporary and excluded
+ * (rule 72). Same classification as `node-manual-deletion.ts`.
+ */
+function isCredentialRejection(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false;
+  return error.statusCode === 401 || error.statusCode === 403 || error.category === 'auth_error';
 }

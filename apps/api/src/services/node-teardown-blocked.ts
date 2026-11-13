@@ -85,7 +85,8 @@ export async function recordNodeTeardownBlocked(
       `UPDATE nodes SET cleanup_blocked_since=COALESCE(cleanup_blocked_since, ?),
         cleanup_blocked_reason=?
       WHERE id=? AND user_id=? AND status IN ('stopped','destroying')
-        AND provider_instance_id IS ? AND runtime_incarnation_id IS ?`
+        AND provider_instance_id IS ? AND runtime_incarnation_id IS ?
+        AND runtime_termination_confirmed_at IS NULL`
     )
       .bind(
         nowIso,

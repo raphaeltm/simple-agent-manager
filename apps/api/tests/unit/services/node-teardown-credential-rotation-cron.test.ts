@@ -72,6 +72,12 @@ async function rotationFixture(scope: 'user' | 'installation' = 'user') {
       const id = match[1]!;
       const token =
         new Headers(init?.headers).get('authorization')?.replace(/^Bearer /, '') ?? '';
+      if (token === 'revoked-key') {
+        return Response.json(
+          { error: { code: 'unauthorized', message: 'unable to authenticate' } },
+          { status: 401 }
+        );
+      }
       const account = accounts.get(token);
       const labels = account?.get(id);
       if (init?.method === 'DELETE') {
@@ -298,6 +304,20 @@ describe('cleanup cron tears a node down after its placement credential rotates'
     expect(f.gets).toHaveLength(2); // the stranded sweep really retried
     expect(f.deletes).toEqual([]);
     expect(f.node().reason).toMatch(/^teardown_instance_not_visible/);
+  });
+
+  it('a revoked current credential is a named "cannot see it" verdict, not a silent retry', async () => {
+    const f = await rotationFixture();
+    await f.replace('revoked-key');
+
+    await f.sweep();
+
+    expect(f.deletes).toEqual([]);
+    expect(f.node()).toMatchObject({
+      proof: null,
+      reason: expect.stringMatching(/^teardown_instance_not_visible/),
+      alertedAt: expect.any(String),
+    });
   });
 
   it('an unreadable current credential is a retryable failure, not a "no credential" verdict', async () => {
