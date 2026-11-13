@@ -103,3 +103,10 @@ prototypes in Library `/design/run-account-prototypes-2026-11-13/` (prototype ro
 - Out of scope (agent-created work, no per-run account UI): MCP `dispatch_task`, /sam `dispatch_task` and `retry_subtask`, reserved SAM submissions, triggers, workflows. They resolve through the profile as before.
 - The account control shows only when there are two or more accounts for the agent (or one is chosen).
 - `roomierProfile` (switch to another profile) is replaced by `roomiestAccount` (switch the account).
+
+## Review and verification
+
+- Local reviewers: security-auditor, ui-ux-specialist, task-completion-validator, cloudflare-specialist. All findings addressed in commit `14e1db7a6` (see the PR's Specialist Review Evidence).
+- Full suites: shared 52 files, web 407 files, api 1002 files (998 + 3 skipped + the one mock fixed in `d387839f7`), all green after fixes.
+- Playwright audits (375x667, 1280x800): `new-chat-profile-usage-audit.spec.ts` 8/8, `profiles-ui-audit.spec.ts`, and the connector test in `nested-session-sidebar-audit.spec.ts` pass. Four other tests in that spec fail on an onboarding overlay unrelated to this change: `tasks/backlog/2026-11-13-nested-sidebar-audit-onboarding-overlay.md`.
+- Staging: deploy run 43512799625 green, migration 0238 applied, API health 200. Live sign-in was not done: every staging sign-in path needs an `exec_with_secrets` approval card, which Raphaël asked not to raise this session; he had said to skip staging unless the API change was complex.
