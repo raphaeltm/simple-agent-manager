@@ -15,6 +15,7 @@ import {
 import { CommentInboxFilters } from '../components/project-message-view/comments/CommentInboxFilters';
 import { CommentInboxRow } from '../components/project-message-view/comments/CommentInboxRow';
 import { useProjectCommentInbox } from '../components/project-message-view/comments/useProjectCommentInbox';
+import { projectLibraryFilePath } from '../lib/project-routes';
 import { commentReaderPath } from './comment-reader/reader-model';
 import { useProjectContext } from './ProjectContext';
 
@@ -59,8 +60,8 @@ export function ProjectComments() {
       // The reader opens the conversation on the commented words, with the thread beside it.
       navigate(commentReaderPath(projectId, item.source.sessionId, item.thread.id));
     } else {
-      const params = new URLSearchParams({ preview: item.source.fileId });
-      navigate(`/projects/${projectId}/library?${params.toString()}`);
+      // The file opens with its comments panel on this thread and the quoted words painted.
+      navigate(projectLibraryFilePath(projectId, item.source.fileId, item.thread.id));
     }
   };
 

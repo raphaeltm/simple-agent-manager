@@ -28,6 +28,7 @@ import {
 } from '../../components/project-message-view/comments/commented-message-label';
 import { QuotedAnchor } from '../../components/project-message-view/comments/CommentPrimitives';
 import { threadCallbacks } from '../../components/project-message-view/comments/MessageCommentPanels';
+import { DEFAULT_PAINTED_STATUSES } from '../../components/project-message-view/comments/useCommentQuoteHighlights';
 import { useCommentsRailViewport } from '../../components/project-message-view/comments/useCommentsRailViewport';
 import { useMessageComments } from '../../components/project-message-view/comments/useMessageComments';
 import { useProjectCommentInbox } from '../../components/project-message-view/comments/useProjectCommentInbox';
@@ -94,11 +95,14 @@ export function ProjectCommentReader() {
     () => messageComments.comments.filter((candidate) => candidate.id !== threadId),
     [messageComments.comments, threadId]
   );
+  // Only open comments are painted by default, as in the chat and the library.
   const otherQuotes = useMemo(
     () =>
       others.flatMap((other) => {
         const itemId = locate(other.anchor.messageId);
-        return itemId && other.anchor.quote ? [{ itemId, quote: other.anchor.quote }] : [];
+        return itemId && other.anchor.quote && DEFAULT_PAINTED_STATUSES.has(other.status)
+          ? [{ itemId, quote: other.anchor.quote }]
+          : [];
       }),
     [locate, others]
   );

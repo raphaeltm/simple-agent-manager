@@ -333,9 +333,12 @@
   }
 
   /*
-   * Comment reader (CSS Custom Highlight API ranges, registered in
-   * pages/comment-reader/quote-highlight.ts): the open comment's quoted words,
-   * and fainter, the words other comments in view are about.
+   * Comment quotes (CSS Custom Highlight API ranges, registered in
+   * components/project-message-view/comments/quote-highlight.ts) in the comment
+   * reader, the project chat and library markdown: the open comment's quoted
+   * words, and fainter, the words other open comments are about. Clicking
+   * painted words opens their comment; the surface carries data-quote-hover
+   * while the pointer is over them (quote-highlight-clicks.ts).
    */
   ::highlight(sam-comment-quote) {
     background-color: color-mix(in srgb, var(--sam-color-warning) 40%, transparent);
@@ -344,6 +347,10 @@
 
   ::highlight(sam-comment-quote-other) {
     background-color: color-mix(in srgb, var(--sam-color-info) 22%, transparent);
+  }
+
+  [data-quote-hover] {
+    cursor: pointer;
   }
 
   .glass-card-glow {
