@@ -94,11 +94,14 @@ export function ProjectCommentReader() {
     () => messageComments.comments.filter((candidate) => candidate.id !== threadId),
     [messageComments.comments, threadId]
   );
+  // Only open comments are painted by default, as in the chat and the library.
   const otherQuotes = useMemo(
     () =>
       others.flatMap((other) => {
         const itemId = locate(other.anchor.messageId);
-        return itemId && other.anchor.quote ? [{ itemId, quote: other.anchor.quote }] : [];
+        return itemId && other.anchor.quote && other.status !== 'resolved'
+          ? [{ itemId, quote: other.anchor.quote }]
+          : [];
       }),
     [locate, others]
   );

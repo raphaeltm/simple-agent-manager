@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { findTextRange, matchableQuote } from '../../../src/pages/comment-reader/quote-highlight';
+import { findTextRange, matchableQuote } from '../../../src/components/project-message-view/comments/quote-highlight';
 
 function rendered(html: string): HTMLElement {
   const root = document.createElement('div');

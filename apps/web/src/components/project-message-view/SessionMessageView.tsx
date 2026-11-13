@@ -217,6 +217,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     projectId,
     onRequestCommentSurface: openComments,
     focusCommentThreadId,
+    commentSurfaceOpen: showComments,
   });
   const showDockedCommentRail = showComments && commentUi.usesDesktopRail;
   const showMobileCommentsDrawer = showComments && !commentUi.usesDesktopRail;

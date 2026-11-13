@@ -55,6 +55,15 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
 }));
 
 import { FileCommentPanel } from '../../../src/components/library/FileCommentPanel';
+import { useLibraryFileComments } from '../../../src/components/library/useLibraryFileComments';
+
+type PanelProps = Omit<React.ComponentProps<typeof FileCommentPanel>, 'fileComments'>;
+
+/** The preview owns the comments controller and hands it to the panel; so does this harness. */
+function PanelWithComments(props: PanelProps) {
+  const fileComments = useLibraryFileComments(PROJECT_ID, FILE_ID);
+  return <FileCommentPanel fileComments={fileComments} {...props} />;
+}
 
 const PROJECT_ID = 'project-1';
 const FILE_ID = 'file-1';
@@ -84,7 +93,7 @@ function makeThread(overrides: Partial<LibraryFileCommentThread> = {}): LibraryF
   };
 }
 
-function renderPanel(props: Partial<React.ComponentProps<typeof FileCommentPanel>> = {}) {
+function renderPanel(props: Partial<PanelProps> = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -92,12 +101,7 @@ function renderPanel(props: Partial<React.ComponentProps<typeof FileCommentPanel
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
   return render(
-    <FileCommentPanel
-      projectId={PROJECT_ID}
-      fileId={FILE_ID}
-      onClose={props.onClose ?? vi.fn()}
-      {...props}
-    />,
+    <PanelWithComments onClose={props.onClose ?? vi.fn()} {...props} />,
     { wrapper }
   );
 }

@@ -7,10 +7,12 @@ import { useFileTextContent } from '../../hooks/useFileTextContent';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import { formatFileSize } from '../../lib/file-utils';
+import type { UiCommentThread } from '../project-message-view/comments/comment-utils';
 import {
   SelectionActionBar,
   SelectionPopover,
 } from '../project-message-view/comments/CommentPrimitives';
+import { useCommentQuoteHighlights } from '../project-message-view/comments/useCommentQuoteHighlights';
 import {
   useCoarsePointer,
   useCommentSelection,
@@ -19,6 +21,7 @@ import { FileCommentPanel } from './FileCommentPanel';
 import { FileLinkedWorkSection } from './FileLinkedWorkSection';
 import { FilePreviewContent, isTooLargeToPreview, previewKindOf } from './FilePreviewContent';
 import type { FileWithTags } from './types';
+import { useLibraryFileComments } from './useLibraryFileComments';
 
 export interface FilePreviewModalProps {
   projectId: string;
@@ -26,6 +29,8 @@ export interface FilePreviewModalProps {
   previewUrl: string;
   onClose: () => void;
   onDownload: () => void;
+  /** Open with the comments panel showing this thread, from a comment deep link. */
+  initialCommentThreadId?: string | null;
 }
 
 export function FilePreviewModal({
@@ -34,10 +39,12 @@ export function FilePreviewModal({
   previewUrl,
   onClose,
   onDownload,
+  initialCommentThreadId = null,
 }: FilePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
-  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(Boolean(initialCommentThreadId));
+  const [focusedThreadId, setFocusedThreadId] = useState<string | null>(initialCommentThreadId);
   const [pendingQuote, setPendingQuote] = useState<string | null>(null);
   const kind = previewKindOf(file);
   const isMarkdown = kind === 'markdown';
@@ -54,6 +61,26 @@ export function FilePreviewModal({
     isMarkdown && mdViewMode === 'rendered',
     previewBodyRef
   );
+
+  // Threads load with a markdown file so their quotes can be painted on it; for other files,
+  // when the comments panel opens. The panel reads this same controller.
+  const fileComments = useLibraryFileComments(projectId, file.id, isMarkdown || commentsOpen);
+  const previewPaneRef = useRef<HTMLElement>(null);
+  const openThread = useCallback((thread: UiCommentThread) => {
+    setFocusedThreadId(thread.id);
+    setCommentsOpen(true);
+  }, []);
+  useCommentQuoteHighlights({
+    containerRef: previewPaneRef,
+    threads: fileComments.comments,
+    // Every thread here is on this file, whose rendered markdown carries the file id as its
+    // comment anchor (`FilePreviewContent`).
+    itemIdOf: () => file.id,
+    activeThreadId: commentsOpen ? focusedThreadId : null,
+    revealKey: focusedThreadId,
+    enabled: isMarkdown && mdViewMode === 'rendered',
+    onOpenThread: openThread,
+  });
 
   const startQuotedComment = useCallback(() => {
     if (!selection) return;
@@ -226,7 +253,10 @@ export function FilePreviewModal({
             icon={<MessageSquare size={18} aria-hidden="true" />}
             aria-pressed={commentsOpen}
             raised={commentsOpen}
-            onClick={() => setCommentsOpen((prev) => !prev)}
+            onClick={() => {
+              if (commentsOpen) setFocusedThreadId(null);
+              setCommentsOpen(!commentsOpen);
+            }}
           />
           <IconButton
             label="Close preview"
@@ -238,6 +268,7 @@ export function FilePreviewModal({
         {/* The artifact pane, and the comments pane beside it (over it on phones). */}
         <div className="relative flex min-h-0 flex-1 gap-2.5 md:gap-[var(--sam-space-gutter)]">
           <section
+            ref={previewPaneRef}
             aria-label={`Preview of ${file.filename}`}
             className={`${paneClassName('quiet')} relative min-h-0 min-w-0 flex-1 ${
               // HTML needs a flex column so its iframe can claim the full height; the other
@@ -272,12 +303,13 @@ export function FilePreviewModal({
               className={`${paneClassName(isMobile ? 'overlay' : 'pane')} absolute inset-0 z-10 overflow-hidden md:relative md:inset-auto md:w-80 md:shrink-0 lg:w-96`}
             >
               <FileCommentPanel
-                projectId={projectId}
-                fileId={file.id}
+                fileComments={fileComments}
+                focusedThreadId={focusedThreadId}
                 pendingQuote={pendingQuote}
                 onClearPendingQuote={() => setPendingQuote(null)}
                 onClose={() => {
                   setPendingQuote(null);
+                  setFocusedThreadId(null);
                   setCommentsOpen(false);
                 }}
               />

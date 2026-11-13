@@ -22,7 +22,6 @@ import {
 } from 'react';
 
 import { AcpConversationItemView } from '../../components/project-message-view/AcpConversationItemView';
-import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
 import {
   boxPlacement,
   itemElement,
@@ -31,7 +30,8 @@ import {
   scrollBoxIntoView,
   targetBox,
   useQuoteHighlights,
-} from './quote-highlight';
+} from '../../components/project-message-view/comments/quote-highlight';
+import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
 
 /** Distance from an edge, in px, at which a reader's own scroll loads more. */
 const EDGE_LOAD_PX = 160;

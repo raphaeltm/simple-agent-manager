@@ -1,14 +1,18 @@
 import { type RefObject, useCallback, useEffect, useMemo, useState } from 'react';
 
-import type { MessageCommentDraft } from './comment-utils';
+import type { MessageCommentDraft, UiMessageCommentThread } from './comment-utils';
 import type { MessageCommentRowState } from './CommentableConversationItem';
 import { SelectionActionBar, SelectionPopover } from './CommentPrimitives';
 import { type CommentActions, MobileSelectedTextCommentComposer } from './MessageCommentPanels';
+import { useCommentQuoteHighlights } from './useCommentQuoteHighlights';
 import { useCoarsePointer, useCommentSelection } from './useCommentSelection';
 import { useCommentsRailViewport } from './useCommentsRailViewport';
 import { type useMessageComments } from './useMessageComments';
 
 type MessageCommentsController = ReturnType<typeof useMessageComments>;
+
+/** Chat rows carry the id of the message they render as their comment anchor. */
+const messageIdOf = (thread: UiMessageCommentThread) => thread.anchor.messageId;
 
 export function useProjectMessageCommentUi({
   messageComments,
@@ -20,6 +24,7 @@ export function useProjectMessageCommentUi({
   projectId,
   onRequestCommentSurface,
   focusCommentThreadId,
+  commentSurfaceOpen = false,
 }: {
   messageComments: MessageCommentsController;
   /** Start threads, including from selected text. Every project member who can see the session. */
@@ -37,6 +42,8 @@ export function useProjectMessageCommentUi({
    * comment reader's "Open in chat" and by older comment notifications). Latched: it may be cleared from the URL before the threads have loaded.
    */
   focusCommentThreadId?: string | null;
+  /** The docked comments rail (or the phone comments drawer) is open. */
+  commentSurfaceOpen?: boolean;
 }) {
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
@@ -64,6 +71,15 @@ export function useProjectMessageCommentUi({
   );
 
   const clearDraft = useCallback(() => setDraft(null), []);
+
+  const selectMessageComments = useCallback(
+    (messageId: string, commentId?: string) => {
+      setActiveMessageId(messageId);
+      setFocusedCommentId(commentId ?? null);
+      if (usesDesktopRail) onRequestCommentSurface?.();
+    },
+    [onRequestCommentSurface, usesDesktopRail]
+  );
 
   const { createThread, reply, resolve, reopen, sendToAgent } = messageComments;
   // The viewer's capabilities are baked in here, once: a reader's actions have no
@@ -135,11 +151,7 @@ export function useProjectMessageCommentUi({
         setActiveMessageId((current) => (current === messageId ? null : messageId));
         setFocusedCommentId(null);
       },
-      onSelectMessageComments: (messageId, commentId) => {
-        setActiveMessageId(messageId);
-        setFocusedCommentId(commentId ?? null);
-        if (usesDesktopRail) onRequestCommentSurface?.();
-      },
+      onSelectMessageComments: selectMessageComments,
       onStartComment: startComment,
       onCloseMessageComments: () => setActiveMessageId(null),
       onClearDraft: clearDraft,
@@ -153,10 +165,36 @@ export function useProjectMessageCommentUi({
       focusedCommentId,
       messageComments.comments,
       onRequestCommentSurface,
+      selectMessageComments,
       startComment,
       usesDesktopRail,
     ]
   );
+
+  // Commented words are painted in the conversation; clicking them opens their thread. The
+  // focused thread is painted strongly while it is showing: in the docked rail when that is
+  // open, or on smaller screens while its message's inline thread list is expanded.
+  const focusedThread = focusedCommentId
+    ? (messageComments.comments.find((thread) => thread.id === focusedCommentId) ?? null)
+    : null;
+  const focusedShowing =
+    focusedThread !== null &&
+    focusedThread.anchor.messageId === activeMessageId &&
+    (usesDesktopRail ? commentSurfaceOpen : true);
+  const openHighlightedThread = useCallback(
+    (thread: UiMessageCommentThread) => selectMessageComments(thread.anchor.messageId, thread.id),
+    [selectMessageComments]
+  );
+  useCommentQuoteHighlights({
+    containerRef: chatLogRef,
+    threads: messageComments.comments,
+    itemIdOf: messageIdOf,
+    activeThreadId: focusedShowing ? focusedCommentId : null,
+    // Keyed on the focus, not on whether it is showing: reopening the rail on the same thread
+    // must not pull the conversation back to it after the user scrolled away.
+    revealKey: focusedCommentId,
+    onOpenThread: openHighlightedThread,
+  });
 
   const selectionControls =
     selection && canComment ? (
