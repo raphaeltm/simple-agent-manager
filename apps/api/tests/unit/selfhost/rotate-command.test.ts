@@ -363,6 +363,80 @@ describe('rotate encryption-key', () => {
   });
 });
 
+describe('rotate --all', () => {
+  it('replaces every key in order, keeps every stored value readable, and finishes on resume', async () => {
+    const { symmetricEncrypt, symmetricDecrypt } = await import('better-auth/crypto');
+    const before = await head();
+    await seedCredential('c-agent', 'sk-agent', before.ENCRYPTION_KEY!);
+    sqlite
+      .prepare(`INSERT INTO accounts (id, access_token) VALUES ('a1', ?)`)
+      .run(await symmetricEncrypt({ key: before.ENCRYPTION_KEY!, data: 'gho_x' }));
+    await runRotate(input({ all: true }), deps());
+    const journal = readJournal(stateDir)!;
+    expect(journal.keys).toEqual([
+      'agent-signing-key',
+      'preview-signing-key',
+      'deploy-signing-keys',
+      'vapid-keys',
+      'gateway-secret',
+      'encryption-key',
+      'better-auth-secret',
+      'jwt-keys',
+    ]);
+    expect(journal.steps['encryption-key']?.phase).toBe('waiting');
+    expect(journal.steps['better-auth-secret']?.phase).toBe('done');
+    expect(journal.steps['jwt-keys']?.phase).toBe('waiting');
+    expect(journal.steps['gateway-secret']?.phase).toBe('done');
+
+    clock += 14 * HOUR;
+    await runRotate(input({ resume: true }), deps());
+    expect(readJournal(stateDir)).toBeNull();
+    const after = await head();
+    for (const name of [
+      'SAM_KEY_AGENT_SIGNING_KEY',
+      'PREVIEW_SIGNING_KEY',
+      'DEPLOY_SIGNING_PRIVATE_KEY',
+      'VAPID_PRIVATE_KEY',
+      'REVERSE_TUNNEL_GATEWAY_SECRET',
+      'ENCRYPTION_KEY',
+      'JWT_PRIVATE_KEY',
+    ]) {
+      expect(after[name], name).not.toBe(before[name]);
+    }
+    // BetterAuth was pinned to the old ENCRYPTION_KEY first, then rotated away from it.
+    expect(after.BETTER_AUTH_SECRET).not.toBe(before.ENCRYPTION_KEY);
+    for (const transitional of [
+      'ENCRYPTION_KEY_PREVIOUS',
+      'BETTER_AUTH_SECRET_PREVIOUS',
+      'JWT_PUBLIC_KEY_PREVIOUS',
+      'REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE',
+      'SAM_KEY_ROTATION_CONTROL_KEY',
+    ]) {
+      expect(after[transitional], transitional).toBeUndefined();
+    }
+    // The lookup-hash key stays the old value on purpose (API tokens keep matching).
+    expect(after.TOKEN_HASH_KEY).toBe(before.ENCRYPTION_KEY);
+    expect(restarts).toHaveLength(1);
+    const key = await getDecryptedAgentKey(
+      drizzle(d1, { schema }),
+      'u1',
+      'claude-code',
+      after.ENCRYPTION_KEY!
+    );
+    expect(key?.credential).toBe('sk-agent');
+    const token = (sqlite.prepare(`SELECT access_token AS t FROM accounts`).get() as { t: string })
+      .t;
+    const version = Number(after.BETTER_AUTH_SECRET_VERSION);
+    expect(
+      await symmetricDecrypt({
+        key: { keys: new Map([[version, after.BETTER_AUTH_SECRET!]]), currentVersion: version },
+        data: token,
+      })
+    ).toBe('gho_x');
+    expect(logs.join('\n')).toContain('Done. The bundle was resealed');
+  });
+});
+
 describe('the rotation lock', () => {
   it('refuses a second run while one is live, and takes over a lock left by a crash', async () => {
     const lockDir = join(stateDir, 'key-agent', 'rotation');

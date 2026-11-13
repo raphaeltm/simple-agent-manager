@@ -24,7 +24,7 @@ Inventory (code-derived, 2026-11-13; file:line in the PR body):
 | ENCRYPTION_KEY via fingerprints | nodes.placement_credential_fingerprint = sha256(iv,ciphertext) | - | strict node deletion fails closed (rule 71) | remap fingerprint old->new in the same D1 batch as the re-encryption (same plaintext proven) |
 | ENCRYPTION_KEY via mirrors | credentials<->cc_credentials identical (ciphertext, iv) pairs | - | mirror pairing breaks | rewrite every row holding the old pair with the identical new pair in one batch |
 | BETTER_AUTH_SECRET (defaults to ENCRYPTION_KEY) | session cookie signatures, cookieCache, API-token session cookies, accounts.access_token/refresh_token (XChaCha) | browsers | everyone signed out; OAuth tokens unreadable | pin to old value during encryption-key; own rotation: better-auth versioned secrets (`secrets:[{v,new}]`, legacy=old), re-encrypt accounts tokens to `$ba$v$`, verify, drop previous. Users signed out once |
-| JWT_PRIVATE/PUBLIC_KEY | callback tokens (24h, heartbeat refresh at 50%), terminal/node-mgmt/port/local-forward tokens, JWKS, OIDC identity tokens | VMs (callback token, JWKS cache by kid), external WIF/agent-sign-in verifiers | vm-agent treats 401 as terminal: every node goes dark | overlap: JWT_PUBLIC_KEY_PREVIOUS accepted until JWT_PUBLIC_KEY_PREVIOUS_UNTIL (default 25h), JWKS publishes both, new key gets its own kid (JWT_KEY_ID); finish after the window |
+| JWT_PRIVATE/PUBLIC_KEY | callback tokens (24h, refreshed by heartbeat), terminal/node-mgmt/port/local-forward tokens, JWKS, OIDC identity tokens | VMs (callback token, JWKS cache by kid), external WIF/agent-sign-in verifiers | vm-agent treats a callback 401 as terminal: every node goes dark | new key with its own kid (JWT_KEY_ID), published alone in both JWKS; Worker accepts the previous key for callback tokens only until JWT_PUBLIC_KEY_PREVIOUS_UNTIL (default 13 h; 0 = hard cut); a non-current-kid callback token is refreshed on the next heartbeat; finish after the window (security review H1) |
 | DEPLOY_SIGNING pair | deploy payload signatures (3600 s, not stored) | nodes get pubkey each heartbeat | an in-flight apply may be refused once | swap both halves, deploy |
 | VAPID pair | push subscriptions (applicationServerKey in browser) | browsers | push stops until the user re-enables notifications | swap, deploy; impact stated |
 | PREVIEW_SIGNING_KEY | preview URLs (300 s) | browsers | open previews fail <=5 min | swap, deploy |
@@ -38,20 +38,31 @@ Design: rotation state sealed in bundles (never plaintext); journal `.state/key-
 
 ## Implementation checklist
 
-- [ ] Inventory every platform key and secret (code-derived), what it protects, who holds copies
-- [ ] Per-key rotation procedure (ENCRYPTION_KEY re-encryption; signing-key overlap; gateway secret order)
-- [ ] `rotate --all | <name>`, `--dry-run` plan with user impact per key
-- [ ] Backup first; journal that survives interruption; `--resume`
-- [ ] Verification per key; automatic rollback of a key whose verification fails
-- [ ] Reseal at the end; tell the operator purge/backup deletion is now meaningful; external secrets list
-- [ ] Cloudflare behaviour unchanged; shared code behind an explicit entry point
-- [ ] Tests: real SQL engine, interruption + resume, undecryptable row skipped, failed verification rolls back,
+- [x] Inventory every platform key and secret (code-derived), what it protects, who holds copies
+- [x] Per-key rotation procedure (ENCRYPTION_KEY re-encryption; signing-key overlap; gateway secret order)
+- [x] `rotate --all | <name>`, `--dry-run` plan with user impact per key
+- [x] Backup first; journal that survives interruption; `--resume`
+- [x] Verification per key; automatic rollback of a key whose verification fails
+- [x] Reseal at the end; tell the operator purge/backup deletion is now meaningful; external secrets list
+- [x] Cloudflare behaviour unchanged; shared code behind an explicit entry point
+- [x] Tests: real SQL engine, interruption + resume, undecryptable row skipped, failed verification rolls back,
       signing-key overlap accepted then expired, end to end on real celld + pinned object store
-- [ ] "Old key not deleted before proof" guard proven discriminating
-- [ ] deploy/selfhost/README.md in the same commits
-- [ ] security-auditor once; CRITICAL/HIGH fixed
-- [ ] CI green on branch (manual `gh workflow run ci.yml --ref <branch>`)
-- [ ] Draft PR with "How to run on the box", "Decisions for Raphaël", "Before main"; post on feature.selfhost-spike
+- [x] "Old key not deleted before proof" guard proven discriminating
+- [x] deploy/selfhost/README.md in the same commits
+- [x] security-auditor once; CRITICAL/HIGH fixed
+- [x] CI green on branch (manual `gh workflow run ci.yml --ref <branch>`)
+- [x] Draft PR with "How to run on the box", "Decisions for Raphaël", "Before main"; post on feature.selfhost-spike
+
+## Notes
+
+- Security review (security-auditor): 0 CRITICAL; H1 JWT overlap narrowed, H2 tunnel credentials
+  reported + `tasks/backlog/2026-11-13-selfhost-recredential-tunnel-nodes.md`; M1, M2, L1, L3, L4,
+  L6, L7 fixed; M3 (capacity authority generation), M4 (celld `onlyIf`), L2, L5 documented.
+- Retire guard discriminating: removing `assertRetireProof` turns exactly
+  `rotate-command.test.ts > migrates a value written under the old key after verification before it
+  retires the old key` red; restored, all green.
+- Base fixes carried: teardown `composeFiles` (after #2696), cherry-pick of main's #2701 (expired
+  gitleaks exemptions).
 
 ## Acceptance criteria
 

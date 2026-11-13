@@ -20,11 +20,7 @@
 import { log } from '../lib/logger';
 import { type JsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { setPreviousEncryptionKeys } from '../services/encryption-key-fallback';
-import {
-  handleKeyRotationRequest,
-  isKeyRotationRequest,
-  type KeyRotationEnv,
-} from './key-rotation/control';
+import { KEY_ROTATION_PATH } from './key-rotation/control-auth';
 import { type AesKeyEnv, previousKeyPairs } from './key-rotation/keys';
 
 export const DEFAULT_KEY_AGENT_TIMEOUT_MS = 3000;
@@ -309,9 +305,15 @@ export function wrapWorker<E extends object>(worker: WorkerHandlers<E>): WorkerH
         return unavailableResponse(error);
       }
       const merged = withRuntimeSecrets(env, secrets);
-      // The rotation's control path never reaches the app (key-rotation/control.ts).
-      if (isKeyRotationRequest(request)) {
-        return await handleKeyRotationRequest(request, merged as unknown as KeyRotationEnv);
+      // The rotation's control path never reaches the app (key-rotation/control.ts). Loaded on
+      // demand: the handler pulls in the passes and their dependencies, which no other request
+      // (and no tool that loads this module, like the migration preflight) needs.
+      if (new URL(request.url).pathname === KEY_ROTATION_PATH) {
+        const control = await import('./key-rotation/control');
+        return await control.handleKeyRotationRequest(
+          request,
+          merged as unknown as import('./key-rotation/control').KeyRotationEnv
+        );
       }
       return await inner(request, merged, ctx);
     };

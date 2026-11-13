@@ -14,11 +14,7 @@
 import type { BetterAuthSecretsEnv } from '../../lib/better-auth-secrets';
 import { log } from '../../lib/logger';
 import { BETTER_AUTH_LOCATION, betterAuthRotating, runBetterAuthPass } from './better-auth-pass';
-import {
-  KEY_ROTATION_AUTH_HEADER,
-  KEY_ROTATION_PATH,
-  verifyKeyRotationRequest,
-} from './control-auth';
+import { KEY_ROTATION_AUTH_HEADER, verifyKeyRotationRequest } from './control-auth';
 import { D1_LOCATIONS, d1Location } from './d1-locations';
 import { type PassMode, runD1Pass } from './d1-pass';
 import { type AesKeyEnv, type AesKeyRole, roleKeys } from './keys';
@@ -36,10 +32,6 @@ export const DEFAULT_PAGE_BUDGET_MS = 10_000;
 const MAX_PAGE_BUDGET_MS = 25_000;
 const DEFAULT_LIMITS = { d1: 200, library: 25, 'better-auth': 200 } as const;
 const MAX_LIMIT = 1000;
-
-export function isKeyRotationRequest(request: Request): boolean {
-  return new URL(request.url).pathname === KEY_ROTATION_PATH;
-}
 
 function reply(status: number, body: unknown): Response {
   return Response.json(body, { status, headers: { 'cache-control': 'no-store' } });

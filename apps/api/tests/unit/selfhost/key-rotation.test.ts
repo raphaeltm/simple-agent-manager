@@ -28,7 +28,7 @@ import {
   D1_LOCATIONS,
   NOT_ROTATED_IV_COLUMNS,
 } from '../../../src/selfhost/key-rotation/d1-locations';
-import { previousKeyPairs } from '../../../src/selfhost/key-rotation/keys';
+import { previousKeyPairs, roleKeys } from '../../../src/selfhost/key-rotation/keys';
 import { getDecryptedAgentKey } from '../../../src/services/agent-key-resolution';
 import {
   decrypt,
@@ -415,6 +415,102 @@ describe('ENCRYPTION_KEY rotation over D1', () => {
     expect(await decrypt(old.ciphertext, old.iv, NEW)).toBe('still-old');
     setPreviousEncryptionKeys(new Map());
     await expect(decrypt(old.ciphertext, old.iv, NEW)).rejects.toThrow();
+  });
+});
+
+describe('purpose-specific key overrides', () => {
+  it('rotating only LIBRARY_ENCRYPTION_KEY moves library files and leaves every credential alone', async () => {
+    const libraryOld = generateEncryptionKey();
+    const libraryNew = generateEncryptionKey();
+    const credential = await seal('stays-under-encryption-key', OLD);
+    sqlite
+      .prepare(`INSERT INTO credentials (id, encrypted_token, iv) VALUES ('c1', ?, ?)`)
+      .run(credential.ciphertext, credential.iv);
+    const { ciphertext, metadata } = await encryptFile(
+      new TextEncoder().encode('library').buffer as ArrayBuffer,
+      libraryOld
+    );
+    bucket.set('library/p1/f1', ciphertext, metadataToR2CustomMetadata(metadata));
+    env = {
+      ...env,
+      ENCRYPTION_KEY: OLD,
+      ENCRYPTION_KEY_PREVIOUS: undefined,
+      LIBRARY_ENCRYPTION_KEY: libraryNew,
+      LIBRARY_ENCRYPTION_KEY_PREVIOUS: libraryOld,
+    };
+    expect((await call({ op: 'status' })).body.roles).toEqual({
+      credential: false,
+      'credential-nullish': false,
+      library: true,
+    });
+    const migrate = await call({ op: 'pass', target: 'library', mode: 'migrate', cursor: null });
+    expect(migrate.body).toMatchObject({ migrated: 1 });
+    const stored = bucket.object('library/p1/f1')!;
+    const plain = await decryptFile(
+      stored.body,
+      r2CustomMetadataToMetadata(stored.customMetadata),
+      libraryNew
+    );
+    expect(new TextDecoder().decode(plain)).toBe('library');
+    // The credential role is not rotating: every D1 value reads as current and nothing is written.
+    const verify = await passAll('verify');
+    expect(verify).toMatchObject({ previous: 0, unreadable: 0, current: 1 });
+    expect(
+      one<any>(`SELECT encrypted_token FROM credentials WHERE id = 'c1'`).encrypted_token
+    ).toBe(credential.ciphertext);
+  });
+
+  it('rotating a CREDENTIAL_ENCRYPTION_KEY override moves the credential tables, not the library', async () => {
+    const credentialOld = generateEncryptionKey();
+    const credentialNew = generateEncryptionKey();
+    const value = await seal('credential-secret', credentialOld);
+    sqlite
+      .prepare(`INSERT INTO credentials (id, encrypted_token, iv) VALUES ('c1', ?, ?)`)
+      .run(value.ciphertext, value.iv);
+    const deploySecret = await seal('deploy-secret', credentialOld);
+    sqlite
+      .prepare(`INSERT INTO deployment_secrets (id, encrypted_value, iv) VALUES ('d1', ?, ?)`)
+      .run(deploySecret.ciphertext, deploySecret.iv);
+    env = {
+      ...env,
+      ENCRYPTION_KEY: OLD,
+      ENCRYPTION_KEY_PREVIOUS: undefined,
+      CREDENTIAL_ENCRYPTION_KEY: credentialNew,
+      CREDENTIAL_ENCRYPTION_KEY_PREVIOUS: credentialOld,
+    };
+    expect((await call({ op: 'status' })).body.roles).toEqual({
+      credential: true,
+      'credential-nullish': true,
+      library: false,
+    });
+    await passAll('migrate');
+    expect(await passAll('verify')).toMatchObject({ previous: 0, unreadable: 0, current: 2 });
+    const row = one<any>(`SELECT encrypted_token AS c, iv FROM credentials WHERE id = 'c1'`);
+    expect(await decryptWithKeyOnly(row.c, row.iv, credentialNew)).toBe('credential-secret');
+    const deploy = one<any>(
+      `SELECT encrypted_value AS c, iv FROM deployment_secrets WHERE id = 'd1'`
+    );
+    expect(await decryptWithKeyOnly(deploy.c, deploy.iv, credentialNew)).toBe('deploy-secret');
+  });
+
+  it('mirrors the app resolvers exactly, including || versus ?? on an empty override', () => {
+    const empty = { ENCRYPTION_KEY: NEW, CREDENTIAL_ENCRYPTION_KEY: '' };
+    // getCredentialEncryptionKey uses ||; deployment-secrets.ts uses ?? (an empty string wins).
+    expect(roleKeys('credential', empty).current).toBe(NEW);
+    expect(roleKeys('credential-nullish', empty).current).toBe('');
+    expect(roleKeys('library', { ENCRYPTION_KEY: NEW }).current).toBe(NEW);
+    expect(roleKeys('credential', { ENCRYPTION_KEY: NEW, ENCRYPTION_KEY_PREVIOUS: OLD })).toEqual({
+      current: NEW,
+      previous: OLD,
+    });
+    // An override that is set keeps its role out of an ENCRYPTION_KEY rotation.
+    expect(
+      roleKeys('credential', {
+        ENCRYPTION_KEY: NEW,
+        ENCRYPTION_KEY_PREVIOUS: OLD,
+        CREDENTIAL_ENCRYPTION_KEY: 'override',
+      }).previous
+    ).toBeNull();
   });
 });
 
