@@ -227,16 +227,28 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
       lookupFailureEvent: 'chat.agent_session_id_lookup_failed',
     });
 
-    const stateWithRecovery = await attachWakeState(db, state, {
+    let stateWithRecovery = await attachWakeState(db, state, {
       projectId,
       sessionId,
       sessionStatus: sessionRecord.status,
+      env: c.env,
     });
+
+    // Hydration may have repaired a lost post-commit activation signal. Return the
+    // actual DO lifecycle, rather than a synthetic ready status from the snapshot.
+    let visibleSession = session;
+    if (sessionRecord.status === 'sleeping' && stateWithRecovery?.recoveryStatus === 'restored') {
+      visibleSession =
+        (await projectDataService.getSession(c.env, projectId, sessionId)) ?? session;
+      if (visibleSession.status === 'sleeping') {
+        stateWithRecovery = { ...stateWithRecovery, recoveryStatus: 'waking' };
+      }
+    }
 
     return c.json({
       session: await enrichSessionWithAccess(
         db,
-        { ...session, agentSessionId, agentType, task },
+        { ...visibleSession, agentSessionId, agentType, task },
         userId,
         { access: loaded.access, grants: loaded.grants, undelivered: loaded.undelivered }
       ),

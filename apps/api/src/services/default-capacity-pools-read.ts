@@ -1,10 +1,10 @@
-import {
-  effectiveDefaultCapacityPoolScopeChain,
-} from '@simple-agent-manager/scheduler-core';
+import { effectiveDefaultCapacityPoolScopeChain } from '@simple-agent-manager/scheduler-core';
 import type { SafeEffectiveCapacityPoolSummary } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
+import { capacityPoolRefreshSettings } from './capacity-pool-refresh-settings';
+import { queueCapacityPoolRefreshes } from './capacity-pool-refresh-work';
 import { toSafeEffectiveCapacityPoolSummary } from './default-capacity-pool-safe-summary';
 import { attachCapacitySourceLabels } from './default-capacity-pool-source-labels';
 import {
@@ -36,6 +36,14 @@ export async function ensureDefaultCapacityPoolsForExistingCredentials(
   db: Db,
   options: DefaultCapacityPoolsBackfillOptions = {}
 ): Promise<DefaultCapacityPoolsEnsureResult> {
+  const refreshSettings =
+    options.refreshSettings ?? (await capacityPoolRefreshSettings(options.env));
+  options = {
+    ...options,
+    refreshSettings,
+    reconciliationDeadlineAt:
+      options.reconciliationDeadlineAt ?? Date.now() + refreshSettings.passBudgetMs,
+  };
   const installation =
     options.includeInstallation === false ? null : await ensureInstallationDefaultPool(db, options);
   const user = options.userId ? await ensureUserDefaultPool(db, options.userId, options) : null;
@@ -55,6 +63,14 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
   credentialAnchorsScrubbed: number;
   credentialAnchorsPending: boolean;
 }> {
+  const refreshSettings =
+    options.refreshSettings ?? (await capacityPoolRefreshSettings(options.env));
+  options = {
+    ...options,
+    refreshSettings,
+    reconciliationDeadlineAt:
+      options.reconciliationDeadlineAt ?? Date.now() + refreshSettings.passBudgetMs,
+  };
   const installation =
     options.includeInstallation === false ? null : await ensureInstallationDefaultPool(db, options);
 
@@ -66,18 +82,44 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
     ? [options.projectId]
     : await listCredentialProjectIdsForBackfill(db, scopeBatchSize);
 
+  // Persist the whole bounded discovery page before draining any scope. A crash or spent
+  // aggregate budget leaves the remaining scopes independently due on the next cron tick.
+  await queueCapacityPoolRefreshes(
+    db,
+    [
+      ...userIds.map((userId) => ({
+        scope: 'user' as const,
+        ownerUserId: userId,
+        ownerProjectId: null,
+      })),
+      ...projectIds.map((projectId) => ({
+        scope: 'project' as const,
+        ownerUserId: null,
+        ownerProjectId: projectId,
+      })),
+    ],
+    refreshSettings
+  );
+  // Discovery advances once the page is durable, even if this invocation has no budget left
+  // to drain it. Otherwise repeatedly finishing the first page can starve later accounts.
+  const lastUserId = userIds.at(-1);
+  if (!options.userId && lastUserId)
+    await writeBackfillCursor(db, BACKFILL_USER_CURSOR_KEY, lastUserId);
+  const lastProjectId = projectIds.at(-1);
+  if (!options.projectId && lastProjectId)
+    await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, lastProjectId);
   let usersEnsured = 0;
   for (const userId of userIds) {
+    if (Date.now() >= (options.reconciliationDeadlineAt ?? Infinity)) break;
     await ensureUserDefaultPool(db, userId, options);
     usersEnsured += 1;
-    if (!options.userId) await writeBackfillCursor(db, BACKFILL_USER_CURSOR_KEY, userId);
   }
 
   let projectsEnsured = 0;
   for (const projectId of projectIds) {
+    if (Date.now() >= (options.reconciliationDeadlineAt ?? Infinity)) break;
     await ensureProjectDefaultPool(db, projectId, options);
     projectsEnsured += 1;
-    if (!options.projectId) await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, projectId);
   }
 
   const anchors = await scrubCapacitySourceCredentialSecrets(db, {

@@ -206,11 +206,12 @@ describe('legacy VM retirement: real SQL, snapshot verifier and strict provider 
       INSERT INTO tasks(id,project_id,user_id,chat_session_id,workspace_id,title,description,status,priority,task_mode,dispatch_depth,created_by,created_at,updated_at)
         VALUES ('conversation','project','owner','chat-ws','ws','Conversation','Work','sleeping',0,'conversation',0,'owner','2026-08-15T00:00:00.000Z','2026-08-15T00:00:00.000Z');`);
     // The owner picked machines: the wake places on the pool, and nothing joins it on its own.
+    // Prepare the validated bundled catalog; this retirement/wake fixture's synthetic
+    // credential is not encrypted for a live provider lookup.
     await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
       userId: 'owner',
       projectId: 'project',
       includeInstallation: true,
-      env,
     });
     expect(await ensureSessionRecovery(env, 'project', 'chat-ws')).toMatchObject({
       status: 'waking',

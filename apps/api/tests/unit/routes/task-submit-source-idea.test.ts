@@ -128,10 +128,11 @@ async function createEnv() {
     } as Env,
   };
   // The user picked machines in the project pool: nothing joins a pool on its own.
+  // Prepare the validated bundled catalog; this idea/submit fixture's synthetic
+  // credential is not encrypted for a live provider lookup.
   await ensurePoolsWithStarterMachines(drizzle(fixture.env.DATABASE, { schema }) as never, {
     userId: 'user-1',
     projectId: 'project-1',
-    env: fixture.env,
   });
   return fixture;
 }

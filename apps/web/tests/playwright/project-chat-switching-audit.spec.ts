@@ -363,9 +363,23 @@ test.describe('project chat — instant switching audit', () => {
     // once. Give its debounced callback ample time: nothing older may load until
     // the reader asks for it.
     await page.waitForTimeout(1_500);
-    expect(requests.filter((r) => r.sessionId === TOOLS.id)).toEqual([
+    const opened = requests.filter((r) => r.sessionId === TOOLS.id);
+    expect(opened.filter((r) => r.before !== null)).toHaveLength(0);
+    expect(opened.filter((r) => r.after === null)).toEqual([
       { sessionId: TOOLS.id, limit: '500', before: null, after: null },
     ]);
+    // Background catch-up may read forward from the newest persisted row. It must
+    // leave older history behind the reader's explicit Load earlier action.
+    const newest = TRANSCRIPTS[TOOLS.id]!.at(-1)!;
+    const newestCursor = JSON.stringify([newest.createdAt, newest.sequence, newest.id]);
+    for (const refresh of opened.filter((r) => r.after !== null)) {
+      expect(refresh).toEqual({
+        sessionId: TOOLS.id,
+        limit: null,
+        before: null,
+        after: newestCursor,
+      });
+    }
 
     await page.getByRole('button', { name: 'Load earlier messages' }).click();
     await expect(conversation(page).getByText('Tool run checkpoint 500:')).toBeVisible();

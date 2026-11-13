@@ -116,6 +116,7 @@ export { parseCountCnt, parseEnabled, parseMigrationName } from './do/row-schema
 export { type SessionAccessGrantRecord, type SessionAccessResolution } from './do/session-access';
 export { type SessionWakeProgressInput } from './do/session-wake-progress';
 export { type SessionWakeReadyInput } from './do/session-wake-ready';
+export { isSessionWakeReadyCurrent } from './do/session-wake-ready-authority';
 export { type ActivityReportOutcome } from './do/session-work-clock';
 export {
   buildSharedSessionSpeakerLine,

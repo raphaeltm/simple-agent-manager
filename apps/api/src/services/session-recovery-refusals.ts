@@ -95,6 +95,16 @@ const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassifica
     action: 'report',
     description: 'Cloud provider credentials are missing for this wake.',
   },
+  placement_sources_disabled: {
+    action: 'report',
+    description:
+      'The compute accounts selected for this wake are disabled. Enable an account in infrastructure settings before retrying.',
+  },
+  placement_pool_empty: {
+    action: 'report',
+    description:
+      'The compute pool for this wake has no selected machines. Add machines in infrastructure settings before retrying.',
+  },
 };
 
 function classifyRecoveryStartFailed(reason: string): SessionRecoveryRefusalClassification | null {

@@ -9,6 +9,10 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
+import {
+  promoteStagedCandidates,
+  stageCandidateValues,
+} from './default-capacity-pool-candidate-staging';
 import { providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import {
   ACTIVE_STATUS,
@@ -106,7 +110,22 @@ export async function ensureCandidatesForSource(
   const cursorKey = candidatePublicationCursorKey(poolId, sourceId);
   const digest = await candidateSetDigest(candidateValues, options.sourceAuthorityGeneration);
   const progress = await readPublicationProgress(options.cursorStore, cursorKey, digest);
-  const alreadyPublished = progress.published;
+  // Incomplete legacy cursors wrote live rows; only a matching staged prefix can resume now.
+  const staged = await db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(schema.capacityPoolCandidateStaging)
+    .where(
+      and(
+        eq(schema.capacityPoolCandidateStaging.poolId, poolId),
+        eq(schema.capacityPoolCandidateStaging.capacitySourceId, sourceId),
+        eq(schema.capacityPoolCandidateStaging.digest, digest)
+      )
+    );
+  const catalogValidated = options.catalogValidated ?? options.catalogComplete !== false;
+  const stageReplacement =
+    !progress.complete || options.catalogComplete === false || !catalogValidated;
+  const alreadyPublished =
+    stageReplacement && Number(staged[0]?.count ?? 0) < progress.published ? 0 : progress.published;
   const batchSize = Math.max(
     1,
     options.publishBatchSize ?? DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE
@@ -127,7 +146,9 @@ export async function ensureCandidatesForSource(
   let lastBatchFullyPublished = true;
   for (;;) {
     const pending = candidateValues.slice(publishedTotal, publishedTotal + batchSize);
-    const written = await publishCandidateValues(db, pending, options);
+    const written = stageReplacement
+      ? await stageCandidateValues(db, pending, digest, publishedTotal, options)
+      : await publishCandidateValues(db, pending, options);
     published += written;
     publishedTotal += written;
     // A row that did not land (a newer publisher's generation fence, or a native-configuration
@@ -148,8 +169,22 @@ export async function ensureCandidatesForSource(
     });
   }
 
-  const publicationComplete =
-    publishedTotal >= candidateValues.length || (progress.complete && lastBatchFullyPublished);
+  let publicationComplete =
+    catalogValidated &&
+    (publishedTotal >= candidateValues.length || (progress.complete && lastBatchFullyPublished));
+  let poolPublicationGuard: EnsureCandidatesForSourceResult['poolPublicationGuard'];
+  if (publicationComplete && stageReplacement) {
+    const promotion = await promoteStagedCandidates(
+      db,
+      poolId,
+      sourceId,
+      digest,
+      candidateValues.length,
+      options
+    );
+    publicationComplete = promotion.promoted;
+    poolPublicationGuard = promotion.poolPublicationGuard;
+  }
   // Retain completion for multi-pass catalogs: clearing the cursor would make every
   // following identical refresh mark a ready pool migration-pending again. Small catalogs
   // still complete in one pass without a progress row.
@@ -168,7 +203,7 @@ export async function ensureCandidatesForSource(
   // Marking earlier would strip last-known-good availability from offerings this tick simply
   // did not reach yet.
   const markedMissing = options.catalogComplete !== false && publicationComplete;
-  if (markedMissing) {
+  if (markedMissing && !stageReplacement) {
     await markMissingCandidatesForSource(
       db,
       poolId,
@@ -180,6 +215,7 @@ export async function ensureCandidatesForSource(
   }
 
   return {
+    ...(poolPublicationGuard ? { poolPublicationGuard } : {}),
     totalCandidates: candidateValues.length,
     publishedCandidates: published,
     publicationComplete,
