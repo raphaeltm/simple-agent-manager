@@ -64,20 +64,29 @@ export interface IntegrationSection {
   description: string;
 }
 
-export function feature(
-  title: string,
-  description: string
-): { title: string; description: string } {
-  return { title, description };
-}
+const CATEGORIES: readonly IntegrationCategory[] = [
+  'ai-agents',
+  'cloud-providers',
+  'code-hosting',
+  'model-access',
+];
 
-export function step(
-  stepTitle: string,
-  description: string
-): { step: string; description: string } {
-  return { step: stepTitle, description };
-}
-
-export function faq(question: string, answer: string): { question: string; answer: string } {
-  return { question, answer };
+/**
+ * Validate integration content loaded from JSON (content, not code, like data/features/*.json),
+ * so a typo in a category or a missing step fails the build instead of rendering a broken page.
+ */
+export function asIntegration(candidate: unknown): Integration {
+  const entry = candidate as Integration;
+  if (!CATEGORIES.includes(entry.category)) {
+    throw new Error(`Integration "${entry.slug}" has unknown category "${entry.category}"`);
+  }
+  if (entry.howItWorks.length === 0 || entry.features.length === 0) {
+    throw new Error(`Integration "${entry.slug}" needs at least one feature and one setup step`);
+  }
+  if (!entry.externalLabel || !entry.logoPath.startsWith('/images/integrations/')) {
+    throw new Error(
+      `Integration "${entry.slug}" needs an external link label and a logo under /images/integrations/`
+    );
+  }
+  return entry;
 }
