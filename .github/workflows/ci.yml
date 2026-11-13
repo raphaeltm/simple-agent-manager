@@ -658,6 +658,13 @@ jobs:
       - name: Install nftables for the egress-fence tests
         run: command -v nft >/dev/null || (sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables)
 
+      # Both self-host suites load API modules (runtime-secrets.ts and its imports), which since
+      # the worker package split (#2681) import workspace packages such as worker-core. Those
+      # resolve through their built dist/, as `pnpm selfhost:deploy` does after building them
+      # (deploy.ts buildApiDependencies), so build before either suite runs.
+      - name: Build the API Worker's workspace dependencies for the self-host tests
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+
       # celld wrangler.json generator, root-only secret files, pinned versions.
       - name: Run self-host packaging tests
         run: pnpm selfhost:test
@@ -666,12 +673,7 @@ jobs:
       # fragments against stub upstreams, and the pinned frpc/frps 0.72.0 (checksum-verified)
       # with the generated frpc.toml: gateway 404s and path tricks, X-SAM-* stripping, the 101
       # Set-Cookie rule, frpc certificate verification, the NewWorkConn plugin payload.
-      # The sealed-secrets live tests bundle API modules (runtime-secrets.ts and its imports) with
-      # celld's esbuild, which resolves workspace packages through their built dist/, as
-      # `pnpm selfhost:deploy` does after building them (deploy.ts buildApiDependencies).
-      - name: Build the API Worker's workspace dependencies for the live tests
-        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
-
+      # The sealed-secrets live tests bundle the same modules with celld's esbuild.
       - name: Run self-host live tests (Caddy in Docker, real frp, celld, fence in a namespace)
         run: pnpm selfhost:live-test
 
