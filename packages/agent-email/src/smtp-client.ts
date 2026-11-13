@@ -208,7 +208,7 @@ export async function sendSmtpMessage(
     // Socket and TLS errors (refused, unreachable, certificate) carry no secrets.
     throw new SmtpError(error instanceof Error ? error.message : String(error));
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
     connection.close();
   }
 }

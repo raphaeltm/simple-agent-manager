@@ -48,7 +48,7 @@ export async function joinSharedFlight<T>(
   try {
     return await Promise.race([flight, abandoned]);
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

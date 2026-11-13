@@ -22,6 +22,11 @@ export interface GitLabOAuthConfig {
   apiBaseUrl: string;
   clientId: string;
   clientSecret: string;
+  /**
+   * `integration.gitlab.allowPrivateNetwork`. A host on the private network is refused unless
+   * this is on (gitlab-host-policy.ts); it is never inferred from the host itself.
+   */
+  allowPrivateNetwork: boolean;
 }
 
 /** Platform settings (D1 + env), resolved and cached by the worker's platform-config service. */

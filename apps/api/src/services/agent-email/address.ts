@@ -4,5 +4,6 @@ export {
   agentEmailAddress,
   agentEmailDomain,
   generateAddressKey,
+  normalizeMailbox,
   parseAgentEmailRecipient,
 } from '@simple-agent-manager/agent-email/definitions';

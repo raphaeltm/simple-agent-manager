@@ -71,3 +71,6 @@ export {
   gitLabRequestError,
 } from './gitlab-host-policy';
 export { type RepoBrowser, resolveRepoBrowser } from './repo-browse';
+// Used by the worker's self-host hosted-git import (apps/api/src/services/hosted-git/import.ts).
+export { createFetchHttpClient } from './repo-browse/fetch-http-client';
+export { MemoryFS } from './repo-browse/memory-fs';
