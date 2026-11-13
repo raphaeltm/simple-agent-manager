@@ -721,6 +721,9 @@ jobs:
       - name: AST-based code quality checks
         run: pnpm quality:ast-checks
 
+      - name: Shared in-flight join guard (no unbounded await of another request's promise)
+        run: pnpm quality:shared-flight-joins
+
       - name: File size limit enforcement
         run: pnpm quality:file-sizes
 

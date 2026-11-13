@@ -69,15 +69,38 @@ export function getProjectDataEnsureMemoMaxEntries(env: ProjectDataEnsureMemoEnv
 }
 
 /**
+ * How many abandoned ensures one caller waits out before it runs its own without registering it.
+ * Bounds the wait when every replacement's starter also loses its client: at most
+ * 3 x (5 s + 1 s grace) = 18 s before that last ensure. Internal safety margin.
+ */
+const MAX_ENSURE_JOIN_ATTEMPTS = 3;
+
+/**
  * Run `ensure` exactly once per DO id for the lifetime of this isolate.
  *
  * Concurrent callers for the same id share a single in-flight promise. A
  * rejected ensure is not memoized, so the next caller retries it.
+ *
+ * A caller joins another request's ensure only until `DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS`
+ * plus the join grace (lib/shared-flight.ts). Past that, the first caller to notice drops the dead
+ * entry and registers its own ensure, and every other waiter joins that one: a slow Durable
+ * Object receives one extra call, not one per waiter. This also applies on Cloudflare when an
+ * ensure RPC takes longer than the wait (an overloaded Durable Object), where callers used to wait
+ * for the original call however long it took; the extra call is an idempotent `INSERT OR IGNORE`.
  */
 export async function ensureOncePerIsolate(
   env: ProjectDataEnsureMemoEnv,
   doId: string,
   ensure: () => Promise<void>
+): Promise<void> {
+  return ensureOnce(env, doId, ensure, 0);
+}
+
+async function ensureOnce(
+  env: ProjectDataEnsureMemoEnv,
+  doId: string,
+  ensure: () => Promise<void>,
+  joinAttempt: number
 ): Promise<void> {
   if (ensured.has(doId)) {
     // Refresh recency so a hot project is not evicted by cold-project churn.
@@ -88,14 +111,21 @@ export async function ensureOncePerIsolate(
   }
 
   const pending = inFlight.get(doId);
-  if (pending) {
+  if (pending && joinAttempt < MAX_ENSURE_JOIN_ATTEMPTS) {
     const joined = await settleSharedFlight(
       pending.promise,
       pending.startedAt + DEFAULT_PROJECT_DATA_ENSURE_JOIN_WAIT_MS
     );
     if (!joined.abandoned) return;
-    // The starter's request is gone and its ensure with it: run this caller's own.
+    // The starter's request is gone and its ensure with it. Drop the dead entry if no other
+    // waiter has yet; the retry then either starts the replacement or joins the one another
+    // waiter just registered.
     if (inFlight.get(doId) === pending) inFlight.delete(doId);
+    return ensureOnce(env, doId, ensure, joinAttempt + 1);
+  }
+
+  if (pending) {
+    // Past the bound: run this caller's ensure unregistered, so it cannot displace a live entry.
     await ensure();
     remember(env, doId);
     return;

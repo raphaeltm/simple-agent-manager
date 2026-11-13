@@ -54,6 +54,7 @@
     "quality:agent-install-manifest": "tsx scripts/quality/check-agent-install-manifest.ts",
     "quality:skill-references": "tsx scripts/quality/check-skill-references.ts",
     "quality:ast-checks": "tsx scripts/quality/ast-checks.ts",
+    "quality:shared-flight-joins": "tsx scripts/quality/check-shared-flight-joins.ts",
     "quality:file-sizes": "tsx scripts/quality/check-file-sizes.ts",
     "quality:stale-artifacts": "tsx scripts/quality/check-stale-artifacts.ts",
     "quality:migration-safety": "tsx scripts/quality/check-migration-safety.ts",
