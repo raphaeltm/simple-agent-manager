@@ -202,7 +202,7 @@ The small kernel every other package needs, so they do not each invent one.
 - [x] W7 merged into core (#2694)
 - [x] Root `CLAUDE.md` structure and build order updated; architecture docs synced
 - [x] `main` merged into core, CI green on the core PR (head 13f4b0afb, all checks passed; includes the port of #2700 and the fix #2701)
-- [x] One staging deploy of the core branch, full regression of core flows (three runs; reports in PR #2681 comments 6834394984 and 6843211365, the last with production's compact archive setting on)
+- [x] One staging deploy of the core branch, regression of the core flows Raphaël named as the merge bar: running sessions, pushing to the repository, and reacting to events (three runs; reports in PR #2681 comments 6834394984 and 6843211365, the last with production's compact archive setting on). The regression was partial: a prompt through the SAM-managed AI proxy, app deployment create/apply, inbound agent email, GitLab, and the production-only storage-relief preflight cron were not exercised on staging (see Outcome)
 - [x] CodeRabbit requested on the core PR (answered `Review skipped: 1204 files`; recorded in the PR body)
 - [x] Raphaël lifts the draft hold; merge; production deploy monitored (he authorized merging after a production-like staging pass; merged 2026-11-13 04:08 UTC as 57614ec6b; main CI 43363560258 and Deploy Production 43366605168 succeeded; health check 200)
 
