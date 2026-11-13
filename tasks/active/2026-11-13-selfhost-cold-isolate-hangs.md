@@ -122,5 +122,7 @@ Fix (branch `sam/r6-joiner-own-turn`):
       Red without the switch (second request hung to the 15 s cap), green with it.
 - [x] Unit tests: both runtimes for every existing case; own-timer resume (red on the old code);
       Cloudflare direct-resume control.
-- [ ] Box: deploy the branch and repeat the same load (see idea `01M77QE3GR2JRA7DSQQENMJZDE`,
-      note "BOX ROUND R6 (hang fix)").
+- [x] Box: deployed (dc0c53f08, Worker ed15e84b93a4bd41) and repeated the same 15 min load:
+      0 of 128 requests hung (worst 4.6 s; #2706 alone: 13 of 128 to the 60 s cap). 30 min soak:
+      0 poller failures in 3,599 probes. Details: idea `01M77QE3GR2JRA7DSQQENMJZDE`, note
+      "BOX ROUND R6 (hang fix)".
