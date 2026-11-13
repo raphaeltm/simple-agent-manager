@@ -9,48 +9,42 @@
  * exactly the two, leave every pointer and the current version, and celld must still serve the
  * current version after a restart. A current version that still holds plaintext stops the purge.
  */
-import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { runCommand } from '../backup-cli';
-import { type BoxContext, OBJECTSTORE_IMAGE } from '../backup-lib';
+import type { BoxContext } from '../backup-lib';
 import { listObjects, readObject } from '../bucket-objects';
-import { ensureCelldBinary, resolveEsbuild } from '../celld-binary.js';
+import { ensureCelldBinary } from '../celld-binary.js';
 import { type KnownSecrets, purgeVersions, scanDeployVersions } from '../plaintext-scan';
-import { freePort, LIVE_TMP, REPO_ROOT, type Running, start, waitFor } from './harness';
+import {
+  type CelldNode,
+  celldNode,
+  hasDocker,
+  type ObjectStore,
+  startObjectStore,
+  writeProject,
+} from './celld-lab';
+import { LIVE_TMP, type Running, waitFor } from './harness';
 
 const KEY = 'sam-live-purge';
 const SECRET = 'live-purge-store-0123456789';
-const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status === 0;
 
 let root = '';
-let container = '';
-let binary = '';
+let store: ObjectStore | undefined;
+let node: CelldNode;
 let celld: Running | undefined;
-let ports: { store: number; celld: number; internal: number };
 const canary = `live-purge-canary-${randomBytes(12).toString('hex')}`;
-const storeEnv = () => ({
-  AWS_ACCESS_KEY_ID: KEY,
-  AWS_SECRET_ACCESS_KEY: SECRET,
-  AWS_REGION: 'us-east-1',
-});
-const bucketArgs = () => [
-  '--bucket',
-  's3://fleet/celld',
-  '--endpoint',
-  `http://127.0.0.1:${ports.store}`,
-];
 const secrets = (): KnownSecrets => ({ names: new Set(['ENCRYPTION_KEY']), values: [canary] });
 
 function ctx(): BoxContext {
   return {
     box: {
       CELLD_BUCKET: 's3://fleet/celld',
-      S3_ENDPOINT: `http://127.0.0.1:${ports.store}`,
+      S3_ENDPOINT: store?.url ?? '',
       AWS_ACCESS_KEY_ID: KEY,
       AWS_SECRET_ACCESS_KEY: SECRET,
     },
@@ -66,57 +60,26 @@ function ctx(): BoxContext {
 
 /** Deploys a Worker that answers its marker; `secret` set means the pre-sealing plain-var path. */
 function deploy(marker: string, secret: boolean): void {
-  const project = join(root, `project-${marker}`);
-  mkdirSync(project, { recursive: true });
-  writeFileSync(
-    join(project, 'worker.js'),
-    `export default { fetch(_r, env) { return Response.json({ marker: ${JSON.stringify(marker)}, has: typeof env.ENCRYPTION_KEY }); } };`
-  );
-  writeFileSync(
-    join(project, 'wrangler.json'),
-    JSON.stringify({
-      name: 'workspaces-api',
-      main: 'worker.js',
-      compatibility_date: '2026-01-01',
-      vars: {
-        PLAIN_VAR: `plain-${marker}`,
-        ...(secret
-          ? { ENCRYPTION_KEY: canary }
-          : { SAM_KEY_AGENT_URL: 'http://127.0.0.1:7190/v1/secrets' }),
-      },
-    })
-  );
-  const result = spawnSync(binary, ['deploy', project, ...bucketArgs()], {
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      ...storeEnv(),
-      CELLD_ESBUILD: resolveEsbuild(join(REPO_ROOT, 'apps/api')),
+  const project = writeProject(join(root, `project-${marker}`), {
+    name: 'workspaces-api',
+    worker: `export default { fetch(_r, env) { return Response.json({ marker: ${JSON.stringify(marker)}, has: typeof env.ENCRYPTION_KEY }); } };`,
+    vars: {
+      PLAIN_VAR: `plain-${marker}`,
+      ...(secret
+        ? { ENCRYPTION_KEY: canary }
+        : { SAM_KEY_AGENT_URL: 'http://127.0.0.1:7190/v1/secrets' }),
     },
   });
+  const result = node.deploy(project);
   expect(result.status, result.stderr + result.stdout).toBe(0);
 }
 
-function startCelld(): Running {
-  return start(
-    binary,
-    [
-      ...bucketArgs(),
-      '--listen',
-      `127.0.0.1:${ports.celld}`,
-      '--internal-listen',
-      `127.0.0.1:${ports.internal}`,
-    ],
-    storeEnv()
-  );
-}
-
 async function served(): Promise<string> {
-  const reload = await fetch(`http://127.0.0.1:${ports.internal}/reload`, { method: 'POST' }).catch(
-    () => null
-  );
+  const reload = await fetch(`http://127.0.0.1:${node.internalPort}/reload`, {
+    method: 'POST',
+  }).catch(() => null);
   if (!reload?.ok) return '';
-  const response = await fetch(`http://127.0.0.1:${ports.celld}/`).catch(() => null);
+  const response = await fetch(`http://127.0.0.1:${node.port}/`).catch(() => null);
   return response?.ok ? String(((await response.json()) as { marker?: unknown }).marker) : '';
 }
 
@@ -124,62 +87,15 @@ describe.skipIf(!hasDocker && !process.env.CI)(
   'plaintext listing and purge on a real celld bucket',
   () => {
     beforeAll(async () => {
-      ports = { store: await freePort(), celld: await freePort(), internal: await freePort() };
       mkdirSync(LIVE_TMP, { recursive: true });
       root = mkdtempSync(join(LIVE_TMP, 'purge-'));
-      const run = spawnSync(
-        'docker',
-        [
-          'run',
-          '-d',
-          '--rm',
-          '--network',
-          'host',
-          '-e',
-          `MINIO_ROOT_USER=${KEY}`,
-          '-e',
-          `MINIO_ROOT_PASSWORD=${SECRET}`,
-          '--entrypoint',
-          'minio',
-          OBJECTSTORE_IMAGE,
-          'server',
-          '/data',
-          '--address',
-          `127.0.0.1:${ports.store}`,
-          '--console-address',
-          `127.0.0.1:${await freePort()}`,
-        ],
-        { encoding: 'utf8' }
+      store = await startObjectStore(KEY, SECRET);
+      node = await celldNode(
+        await ensureCelldBinary(join(LIVE_TMP, 'celld-bin')),
+        store,
+        's3://fleet/celld'
       );
-      expect(run.status, run.stderr).toBe(0);
-      container = run.stdout.trim();
-      await waitFor(
-        'object store',
-        async () =>
-          (await fetch(`http://127.0.0.1:${ports.store}/minio/health/live`).catch(() => null))?.ok
-      );
-      const mb = spawnSync(
-        'docker',
-        [
-          'run',
-          '--rm',
-          '--network',
-          'host',
-          '-e',
-          `MC_HOST_src=http://${KEY}:${SECRET}@127.0.0.1:${ports.store}`,
-          '-e',
-          'MC_CONFIG_DIR=/tmp/mc',
-          '--entrypoint',
-          'mc',
-          OBJECTSTORE_IMAGE,
-          'mb',
-          'src/fleet',
-        ],
-        { encoding: 'utf8' }
-      );
-      expect(mb.status, mb.stderr).toBe(0);
-      binary = await ensureCelldBinary(join(LIVE_TMP, 'celld-bin'));
-      celld = startCelld();
+      celld = node.start();
       deploy('old-1', true);
       deploy('old-2', true);
       deploy('sealed', false);
@@ -193,7 +109,7 @@ describe.skipIf(!hasDocker && !process.env.CI)(
 
     afterAll(async () => {
       await celld?.stop();
-      if (container) spawnSync('docker', ['rm', '-f', container]);
+      store?.stop();
       if (root) rmSync(root, { recursive: true, force: true });
     });
 
@@ -240,7 +156,7 @@ describe.skipIf(!hasDocker && !process.env.CI)(
 
     it('celld still boots and serves the current version from the purged bucket', async () => {
       await celld?.stop();
-      celld = startCelld();
+      celld = node.start();
       await waitFor(
         'celld after restart',
         async () => (await served()) === 'sealed',

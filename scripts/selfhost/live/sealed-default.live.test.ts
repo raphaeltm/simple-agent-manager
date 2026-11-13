@@ -23,43 +23,39 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { runCommand } from '../backup-cli';
-import { type BoxContext, OBJECTSTORE_IMAGE } from '../backup-lib';
-import { ensureCelldBinary, resolveEsbuild } from '../celld-binary.js';
+import type { BoxContext } from '../backup-lib';
+import { ensureCelldBinary } from '../celld-binary.js';
 import { CLOSED_HOST, runDeploy } from '../deploy-harness.js';
 import { knownSecrets, purgeVersions, scanDeployVersions } from '../plaintext-scan';
 import { ensurePlatformKeys } from '../platform-keys';
 import { parseDotenv, readPrivateJson } from '../secret-files';
 import { type MigrateDeps, runMigration } from '../secrets-migrate';
 import { preflightSealedSecrets } from '../secrets-preflight';
-import { freePort, LIVE_TMP, REPO_ROOT, type Running, start, waitFor } from './harness';
+import {
+  type CelldNode,
+  celldNode,
+  hasDocker,
+  type ObjectStore,
+  startObjectStore,
+  writeProject,
+} from './celld-lab';
+import { freePort, LIVE_TMP, REPO_ROOT, type Running, waitFor } from './harness';
 
 const KEY = 'sam-live-default';
 const SECRET = 'live-default-store-0123456789';
 const IMAGE = 'sam-selfhost-key-agent:live-test';
 const RUNTIME_SECRETS = join(REPO_ROOT, 'apps/api/src/selfhost/runtime-secrets.ts');
-const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status === 0;
 const uid = process.getuid?.() ?? 0;
 
 let root = '';
 let state = '';
 let envFile = '';
-let store = '';
+let store: ObjectStore | undefined;
+let node: CelldNode;
+let agentPort = 0;
 let agentContainer = '';
-let binary = '';
 let celld: Running | undefined;
-let ports: { store: number; celld: number; internal: number; agent: number };
 
-const storeEnv = () => ({
-  AWS_ACCESS_KEY_ID: KEY,
-  AWS_SECRET_ACCESS_KEY: SECRET,
-  AWS_REGION: 'us-east-1',
-});
-const bucketArgs = () => [
-  '--bucket',
-  's3://fleet/celld',
-  '--endpoint',
-  `http://127.0.0.1:${ports.store}`,
-];
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 const box = () => parseDotenv(readFileSync(envFile, 'utf8'), envFile);
 
@@ -77,26 +73,12 @@ function ctx(): BoxContext {
 }
 
 function celldDeploy(name: string, worker: string, vars: Record<string, string>): void {
-  const project = join(root, `project-${name}-${Date.now()}`);
-  mkdirSync(project, { recursive: true });
-  writeFileSync(join(project, 'worker.js'), worker);
-  writeFileSync(
-    join(project, 'wrangler.json'),
-    JSON.stringify({
-      name: 'workspaces-api',
-      main: 'worker.js',
-      compatibility_date: '2026-01-01',
-      vars,
-    })
-  );
-  const result = spawnSync(binary, ['deploy', project, ...bucketArgs()], {
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      ...storeEnv(),
-      CELLD_ESBUILD: resolveEsbuild(join(REPO_ROOT, 'apps/api')),
-    },
+  const project = writeProject(join(root, `project-${name}-${Date.now()}`), {
+    name: 'workspaces-api',
+    worker,
+    vars,
   });
+  const result = node.deploy(project);
   expect(result.status, result.stderr + result.stdout).toBe(0);
 }
 
@@ -178,7 +160,7 @@ async function startAgent(): Promise<void> {
   await waitFor(
     'the key agent container',
     async () => {
-      const r = await fetch(`http://127.0.0.1:${ports.agent}/healthz`).catch(() => null);
+      const r = await fetch(`http://127.0.0.1:${agentPort}/healthz`).catch(() => null);
       return r?.ok ? ((await r.json()) as { sealed?: boolean }).sealed !== false : false;
     },
     60_000,
@@ -187,11 +169,11 @@ async function startAgent(): Promise<void> {
 }
 
 async function adoptAndCheck(): Promise<{ healthy: boolean; detail: string }> {
-  const reload = await fetch(`http://127.0.0.1:${ports.internal}/reload`, { method: 'POST' }).catch(
-    () => null
-  );
+  const reload = await fetch(`http://127.0.0.1:${node.internalPort}/reload`, {
+    method: 'POST',
+  }).catch(() => null);
   if (!reload?.ok) return { healthy: false, detail: `reload ${reload?.status ?? 'failed'}` };
-  const response = await fetch(`http://127.0.0.1:${ports.celld}/`).catch(() => null);
+  const response = await fetch(`http://127.0.0.1:${node.port}/`).catch(() => null);
   if (!response) return { healthy: false, detail: 'no response' };
   const body = (await response.json()) as { sha?: string; code?: string };
   const expected = sha256(
@@ -229,12 +211,13 @@ function deps(log: string[], breakAgent = false): MigrateDeps {
 
 describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on celld', () => {
   beforeAll(async () => {
-    ports = {
-      store: await freePort(),
-      celld: await freePort(),
-      internal: await freePort(),
-      agent: await freePort(),
-    };
+    agentPort = await freePort();
+    store = await startObjectStore(KEY, SECRET);
+    node = await celldNode(
+      await ensureCelldBinary(join(LIVE_TMP, 'celld-bin')),
+      store,
+      's3://fleet/celld'
+    );
     mkdirSync(LIVE_TMP, { recursive: true });
     root = mkdtempSync(join(LIVE_TMP, 'sealed-default-'));
     state = join(root, '.state');
@@ -246,12 +229,12 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
         'SAM_TLS_MODE=internal',
         'COMPOSE_PROFILES=tunnel,local-store',
         'CELLD_BUCKET=s3://fleet/celld',
-        `S3_ENDPOINT=http://127.0.0.1:${ports.store}`,
+        `S3_ENDPOINT=${store.url}`,
         `AWS_ACCESS_KEY_ID=${KEY}`,
         `AWS_SECRET_ACCESS_KEY=${SECRET}`,
-        `SAM_KEY_AGENT_PORT=${ports.agent}`,
-        `CELLD_PORT=${ports.celld}`,
-        `CELLD_INTERNAL_PORT=${ports.internal}`,
+        `SAM_KEY_AGENT_PORT=${agentPort}`,
+        `CELLD_PORT=${node.port}`,
+        `CELLD_INTERNAL_PORT=${node.internalPort}`,
         `SAM_GCE_METADATA_HOST=${CLOSED_HOST}`,
         `SAM_AWS_IMDS_HOST=${CLOSED_HOST}`,
         `SAM_AZURE_IMDS_HOST=${CLOSED_HOST}`,
@@ -275,69 +258,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
       { encoding: 'utf8' }
     );
     expect(build.status, build.stderr).toBe(0);
-    const minio = spawnSync(
-      'docker',
-      [
-        'run',
-        '-d',
-        '--rm',
-        '--network',
-        'host',
-        '-e',
-        `MINIO_ROOT_USER=${KEY}`,
-        '-e',
-        `MINIO_ROOT_PASSWORD=${SECRET}`,
-        '--entrypoint',
-        'minio',
-        OBJECTSTORE_IMAGE,
-        'server',
-        '/data',
-        '--address',
-        `127.0.0.1:${ports.store}`,
-        '--console-address',
-        `127.0.0.1:${await freePort()}`,
-      ],
-      { encoding: 'utf8' }
-    );
-    expect(minio.status, minio.stderr).toBe(0);
-    store = minio.stdout.trim();
-    await waitFor(
-      'object store',
-      async () =>
-        (await fetch(`http://127.0.0.1:${ports.store}/minio/health/live`).catch(() => null))?.ok
-    );
-    const mb = spawnSync(
-      'docker',
-      [
-        'run',
-        '--rm',
-        '--network',
-        'host',
-        '-e',
-        `MC_HOST_src=http://${KEY}:${SECRET}@127.0.0.1:${ports.store}`,
-        '-e',
-        'MC_CONFIG_DIR=/tmp/mc',
-        '--entrypoint',
-        'mc',
-        OBJECTSTORE_IMAGE,
-        'mb',
-        'src/fleet',
-      ],
-      { encoding: 'utf8' }
-    );
-    expect(mb.status, mb.stderr).toBe(0);
-    binary = await ensureCelldBinary(join(LIVE_TMP, 'celld-bin'));
-    celld = start(
-      binary,
-      [
-        ...bucketArgs(),
-        '--listen',
-        `127.0.0.1:${ports.celld}`,
-        '--internal-listen',
-        `127.0.0.1:${ports.internal}`,
-      ],
-      storeEnv()
-    );
+    celld = node.start();
     deployLegacy();
     await waitFor(
       'the legacy install to serve',
@@ -350,7 +271,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
   afterAll(async () => {
     stopAgent();
     await celld?.stop();
-    if (store) spawnSync('docker', ['rm', '-f', store]);
+    store?.stop();
     if (root) rmSync(root, { recursive: true, force: true });
   });
 
@@ -385,15 +306,17 @@ describe.skipIf(!hasDocker && !process.env.CI)('sealed secrets by default on cel
       'migrated-files-kept'
     );
     expect(log.join('\n')).toContain('KEY FILE CREATED');
-    const response = await fetch(`http://127.0.0.1:${ports.celld}/`);
+    const response = await fetch(`http://127.0.0.1:${node.port}/`);
     expect(await response.json()).toEqual({ sha: sha256(keys.ENCRYPTION_KEY ?? '') });
 
     const copy = join(root, 'kek-copy');
     writeFileSync(copy, readFileSync(join(state, 'key-agent/kek')), { mode: 0o600 });
     const finishing = deps([]);
     finishing.adoptAndCheck = async () => {
-      const reload = await fetch(`http://127.0.0.1:${ports.internal}/reload`, { method: 'POST' });
-      const r = await fetch(`http://127.0.0.1:${ports.celld}/`);
+      const reload = await fetch(`http://127.0.0.1:${node.internalPort}/reload`, {
+        method: 'POST',
+      });
+      const r = await fetch(`http://127.0.0.1:${node.port}/`);
       const body = (await r.json()) as { sha?: string };
       return {
         healthy: reload.ok && r.ok && body.sha === sha256(keys.ENCRYPTION_KEY ?? ''),

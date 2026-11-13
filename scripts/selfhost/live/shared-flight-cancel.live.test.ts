@@ -15,32 +15,40 @@
  *
  * The control: a request that starts its own load (the fix) answers even though the aborted
  * request's fetch was dropped; before the fix every later request joined the dropped fetch.
+ *
+ * The same holds for the per-isolate reads every request's auth/config path joins: the admin
+ * settings cache and the legacy platform-config read (resolvePlatformConfig, reached for example
+ * by every MCP tool listing). Their joiners may wait out the dropped read's deadline plus the
+ * join grace, then read for themselves (apps/api/src/lib/shared-flight.ts).
  */
-import { spawnSync } from 'node:child_process';
-import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { connect, createServer, type Server } from 'node:net';
 import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { sealSecrets } from '../../../deploy/selfhost/key-agent/bundle.ts';
+import { ensureCelldBinary } from '../celld-binary.js';
 import {
-  createFileProvider,
-  generateFileKek,
-} from '../../../deploy/selfhost/key-agent/provider-file.ts';
-import { OBJECTSTORE_IMAGE } from '../backup-lib';
-import { ensureCelldBinary, resolveEsbuild } from '../celld-binary.js';
-import { freePort, LIVE_TMP, REPO_ROOT, type Running, sleep, start, waitFor } from './harness';
+  celldNode,
+  hasDocker,
+  type ObjectStore,
+  sealBundle,
+  startKeyAgent,
+  startObjectStore,
+  writeProject,
+} from './celld-lab';
+import { freePort, LIVE_TMP, REPO_ROOT, type Running, sleep, waitFor } from './harness';
 
-const KEY = 'sam-live-sharedflight';
-const SECRET = 'live-sharedflight-store-0123456789';
-const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status === 0;
 const RUNTIME_SECRETS = join(REPO_ROOT, 'apps/api/src/selfhost/runtime-secrets.ts');
 const SETTINGS_CACHE = join(REPO_ROOT, 'apps/api/src/services/admin-settings-cache.ts');
+const PLATFORM_CONFIG = join(REPO_ROOT, 'apps/api/src/services/platform-config.ts');
 /** The settings flight's own deadline in the probe: longer than one slow read. */
 const SETTINGS_READ_TIMEOUT_MS = 3000;
-const AGENT = join(REPO_ROOT, 'deploy/selfhost/key-agent/server.ts');
+/** The legacy platform-config read's deadline: performance.configReadTimeoutMs at its default. */
+const PLATFORM_CONFIG_READ_TIMEOUT_MS = 5000;
+/** lib/shared-flight.ts DEFAULT_SHARED_FLIGHT_JOIN_GRACE_MS */
+const JOIN_GRACE_MS = 1000;
 /** How long the proxy holds each agent connection: wide enough to abort the first request in. */
 const AGENT_DELAY_MS = 1500;
 /** The first client gives up while the secrets fetch is still in flight. */
@@ -54,11 +62,31 @@ const CLIENT_CAP_MS = 15_000;
 // object's own load (wrapDurableObject, under blockConcurrencyWhile) is the only one.
 // `/settings` reads through the real AdminSettingsCache (the shared per-isolate flight every
 // request's auth path joins), with a loader that waits on the slow proxy like a slow D1 read.
+// `/platform-config` runs the real resolvePlatformConfig over a stand-in D1 whose settings reads
+// answer at once and whose five legacy platform-config reads wait on the slow proxy, so an
+// aborted first request is mid legacy read when its client leaves.
 const WORKER = `
 import { wrapDurableObject, wrapWorker } from ${JSON.stringify(RUNTIME_SECRETS)};
 import { AdminSettingsCache } from ${JSON.stringify(SETTINGS_CACHE)};
+import { resolvePlatformConfig } from ${JSON.stringify(PLATFORM_CONFIG)};
 const DB = {};
 let settings;
+let slowUrl = '';
+const LEGACY_READ = /WHERE key = \\?|AS encryptedToken/;
+function statement(sql) {
+  const wait = async () => {
+    if (LEGACY_READ.test(sql)) await (await fetch(slowUrl)).arrayBuffer();
+  };
+  const api = {
+    bind: () => api,
+    first: async () => { await wait(); return null; },
+    all: async () => { await wait(); return { results: [], success: true, meta: {} }; },
+    run: async () => { await wait(); return { success: true, meta: {} }; },
+    raw: async () => { await wait(); return []; },
+  };
+  return api;
+}
+const CONFIG_DB = { prepare: statement, batch: async () => [] };
 class Probe {
   constructor(_ctx, env) { this.env = env; }
   async fetch() { return Response.json({ doSecret: typeof this.env.LIVE_SECRET }); }
@@ -78,6 +106,11 @@ export default {
       const rows = await settings.read(DB, false, 60_000, ${SETTINGS_READ_TIMEOUT_MS});
       return Response.json({ rows: rows.length });
     }
+    if (url.pathname === '/platform-config') {
+      slowUrl = env.SLOW_URL;
+      const config = await resolvePlatformConfig({ DATABASE: CONFIG_DB, GITHUB_APP_SLUG: 'live-app' });
+      return Response.json({ appSlug: config.github.appSlug.value });
+    }
     if (url.pathname === '/do') {
       const stub = env.PROBE_DO.get(env.PROBE_DO.idFromName(url.searchParams.get('name') ?? 'x'));
       return await stub.fetch('https://do/');
@@ -88,22 +121,11 @@ export default {
 `;
 
 let root = '';
-let container = '';
+let store: ObjectStore | undefined;
 let celld: Running | undefined;
 let agent: Running | undefined;
 let proxy: Server | undefined;
-let ports: { store: number; celld: number; internal: number; agent: number; proxy: number };
-const storeEnv = () => ({
-  AWS_ACCESS_KEY_ID: KEY,
-  AWS_SECRET_ACCESS_KEY: SECRET,
-  AWS_REGION: 'us-east-1',
-});
-const bucketArgs = () => [
-  '--bucket',
-  's3://fleet',
-  '--endpoint',
-  `http://127.0.0.1:${ports.store}`,
-];
+let celldPort = 0;
 
 /** A loopback TCP proxy to the agent that waits before connecting: a slow key agent. */
 function startDelayProxy(listenPort: number, targetPort: number, delayMs: number): Server {
@@ -133,7 +155,7 @@ interface Outcome {
 async function request(path: string, timeoutMs: number): Promise<Outcome> {
   const started = Date.now();
   try {
-    const response = await fetch(`http://127.0.0.1:${ports.celld}${path}`, {
+    const response = await fetch(`http://127.0.0.1:${celldPort}${path}`, {
       signal: AbortSignal.timeout(timeoutMs),
     });
     return { status: response.status, ms: Date.now() - started, body: await response.json() };
@@ -142,145 +164,59 @@ async function request(path: string, timeoutMs: number): Promise<Outcome> {
   }
 }
 
+/** Abort the first request to a fresh isolate, then require the next two to answer in `bound`. */
+async function expectJoinersAnswer(path: string, bound: number): Promise<Outcome[]> {
+  await sleep(IDLE_FOR_FRESH_ISOLATE_MS);
+  expect((await request(path, ABORT_AFTER_MS)).status).toBe(0);
+  // The next reads join the dropped flight. They may wait out its deadline plus the join grace,
+  // then read for themselves: bounded, never the client cap.
+  const next = await Promise.all([request(path, CLIENT_CAP_MS), request(path, CLIENT_CAP_MS)]);
+  const report = JSON.stringify(next) + (celld?.output().slice(-3000) ?? '');
+  expect(
+    next.map((o) => o.status),
+    report
+  ).toEqual([200, 200]);
+  for (const outcome of next) expect(outcome.ms, report).toBeLessThan(bound);
+  return next;
+}
+
 describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not poison celld', () => {
   beforeAll(async () => {
-    ports = {
-      store: await freePort(),
-      celld: await freePort(),
-      internal: await freePort(),
-      agent: await freePort(),
-      proxy: await freePort(),
-    };
+    const agentPort = await freePort();
+    const proxyPort = await freePort();
     mkdirSync(LIVE_TMP, { recursive: true });
     root = mkdtempSync(join(LIVE_TMP, 'shared-flight-'));
-    mkdirSync(join(root, 'state/bundles'), { recursive: true, mode: 0o700 });
-    const consolePort = await freePort();
-    const run = spawnSync(
-      'docker',
-      [
-        'run',
-        '-d',
-        '--rm',
-        '--network',
-        'host',
-        '-e',
-        `MINIO_ROOT_USER=${KEY}`,
-        '-e',
-        `MINIO_ROOT_PASSWORD=${SECRET}`,
-        '--entrypoint',
-        'minio',
-        OBJECTSTORE_IMAGE,
-        'server',
-        '/data',
-        '--address',
-        `127.0.0.1:${ports.store}`,
-        '--console-address',
-        `127.0.0.1:${consolePort}`,
-      ],
-      { encoding: 'utf8' }
+    store = await startObjectStore('sam-live-sharedflight', 'live-sharedflight-store-0123456789');
+    const bundle = await sealBundle(
+      join(root, 'state'),
+      { LIVE_SECRET: `live-${randomBytes(8).toString('hex')}` },
+      'd'.repeat(32)
     );
-    expect(run.status, run.stderr).toBe(0);
-    container = run.stdout.trim();
-    await waitFor(
-      'object store',
-      async () =>
-        (await fetch(`http://127.0.0.1:${ports.store}/minio/health/live`).catch(() => null))?.ok
-    );
-    const mb = spawnSync(
-      'docker',
-      [
-        'run',
-        '--rm',
-        '--network',
-        'host',
-        '-e',
-        `MC_HOST_src=http://${KEY}:${SECRET}@127.0.0.1:${ports.store}`,
-        '-e',
-        'MC_CONFIG_DIR=/tmp/mc',
-        '--entrypoint',
-        'mc',
-        OBJECTSTORE_IMAGE,
-        'mb',
-        'src/fleet',
-      ],
-      { encoding: 'utf8' }
-    );
-    expect(mb.status, mb.stderr).toBe(0);
-
-    writeFileSync(join(root, 'state/kek'), generateFileKek(), { mode: 0o600 });
-    const agentKey = generateKeyPairSync('ed25519');
-    const verifyKey = Buffer.from(
-      String(agentKey.publicKey.export({ format: 'jwk' }).x),
-      'base64url'
-    ).toString('base64');
-    const signing = agentKey.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
-    const bundle = await sealSecrets(
-      {
-        LIVE_SECRET: `live-${randomBytes(8).toString('hex')}`,
-        SAM_KEY_AGENT_SIGNING_KEY: signing,
+    const project = writeProject(join(root, 'project'), {
+      name: 'shared-flight-probe',
+      worker: WORKER,
+      probeObject: true,
+      vars: {
+        // The Worker talks to the slow proxy; the proxy talks to the real agent.
+        SAM_KEY_AGENT_URL: `http://127.0.0.1:${proxyPort}/v1/secrets`,
+        SAM_SECRET_BUNDLE_ID: bundle.bundleId,
+        SAM_KEY_AGENT_VERIFY_KEY: bundle.verifyKey,
+        SAM_INSTALLATION_ID: 'd'.repeat(32),
+        // Longer than the proxy delay: a healthy load finishes; only a dropped one hangs.
+        SAM_KEY_AGENT_TIMEOUT_MS: '5000',
+        SLOW_URL: `http://127.0.0.1:${proxyPort}/healthz`,
       },
-      createFileProvider({ SAM_KEY_FILE: join(root, 'state/kek') }),
-      { installationId: 'd'.repeat(32) }
-    );
-    writeFileSync(join(root, 'state/bundles', `${bundle.bundleId}.json`), JSON.stringify(bundle), {
-      mode: 0o600,
     });
-
-    const project = join(root, 'project');
-    mkdirSync(project);
-    writeFileSync(join(project, 'worker.js'), WORKER);
-    writeFileSync(
-      join(project, 'wrangler.json'),
-      JSON.stringify({
-        name: 'shared-flight-probe',
-        main: 'worker.js',
-        compatibility_date: '2026-01-01',
-        durable_objects: { bindings: [{ name: 'PROBE_DO', class_name: 'ProbeDO' }] },
-        migrations: [{ tag: 'v1', new_sqlite_classes: ['ProbeDO'] }],
-        vars: {
-          // The Worker talks to the slow proxy; the proxy talks to the real agent.
-          SAM_KEY_AGENT_URL: `http://127.0.0.1:${ports.proxy}/v1/secrets`,
-          SAM_SECRET_BUNDLE_ID: bundle.bundleId,
-          SAM_KEY_AGENT_VERIFY_KEY: verifyKey,
-          SAM_INSTALLATION_ID: 'd'.repeat(32),
-          // Longer than the proxy delay: a healthy load finishes; only a dropped one hangs.
-          SAM_KEY_AGENT_TIMEOUT_MS: '5000',
-          SLOW_URL: `http://127.0.0.1:${ports.proxy}/healthz`,
-        },
-      })
-    );
-    agent = start('node', [AGENT], {
-      SAM_KEY_PROVIDER: 'file',
-      SAM_KEY_FILE: join(root, 'state/kek'),
-      SAM_KEY_AGENT_PORT: String(ports.agent),
-      SAM_KEY_AGENT_BUNDLE_DIR: join(root, 'state/bundles'),
-      SAM_KEY_AGENT_ALLOWED_UIDS: String(process.getuid?.() ?? 0),
-    });
+    agent = startKeyAgent(bundle, agentPort, process.getuid?.() ?? 0);
     await waitFor(
       'the agent',
-      async () => (await fetch(`http://127.0.0.1:${ports.agent}/healthz`).catch(() => null))?.ok
+      async () => (await fetch(`http://127.0.0.1:${agentPort}/healthz`).catch(() => null))?.ok
     );
-    proxy = startDelayProxy(ports.proxy, ports.agent, AGENT_DELAY_MS);
-    const binary = await ensureCelldBinary(join(LIVE_TMP, 'celld-bin'));
-    celld = start(
-      binary,
-      [
-        ...bucketArgs(),
-        '--listen',
-        `127.0.0.1:${ports.celld}`,
-        '--internal-listen',
-        `127.0.0.1:${ports.internal}`,
-      ],
-      storeEnv()
-    );
-    const deployed = spawnSync(binary, ['deploy', project, ...bucketArgs()], {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        ...storeEnv(),
-        CELLD_ESBUILD: resolveEsbuild(join(REPO_ROOT, 'apps/api')),
-      },
-    });
+    proxy = startDelayProxy(proxyPort, agentPort, AGENT_DELAY_MS);
+    const node = await celldNode(await ensureCelldBinary(join(LIVE_TMP, 'celld-bin')), store);
+    celldPort = node.port;
+    celld = node.start();
+    const deployed = node.deploy(project);
     expect(deployed.status, deployed.stderr + deployed.stdout).toBe(0);
     await waitFor(
       'celld to serve the Worker',
@@ -294,7 +230,7 @@ describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not pois
     await celld?.stop();
     await agent?.stop();
     await new Promise<void>((done) => (proxy ? proxy.close(() => done()) : done()));
-    if (container) spawnSync('docker', ['rm', '-f', container]);
+    store?.stop();
     if (root) rmSync(root, { recursive: true, force: true });
   });
 
@@ -323,21 +259,19 @@ describe.skipIf(!hasDocker && !process.env.CI)('an aborted request does not pois
     // Each answer costs about one slow agent round trip, nowhere near the client cap.
     for (const outcome of next) expect(outcome.ms, report).toBeLessThan(CLIENT_CAP_MS / 2);
   }, 150_000);
+
   it('serves settings reads after the request that started the shared read was aborted', async () => {
-    await sleep(IDLE_FOR_FRESH_ISOLATE_MS);
-    expect((await request('/settings', ABORT_AFTER_MS)).status).toBe(0);
-    // The next reads join the dropped flight. They may wait out its deadline plus the join grace,
-    // then read for themselves: bounded, never the client cap.
-    const next = await Promise.all([
-      request('/settings', CLIENT_CAP_MS),
-      request('/settings', CLIENT_CAP_MS),
-    ]);
-    const report = JSON.stringify(next) + (celld?.output().slice(-3000) ?? '');
-    expect(
-      next.map((o) => o.status),
-      report
-    ).toEqual([200, 200]);
-    const bound = SETTINGS_READ_TIMEOUT_MS + 1000 + 2 * AGENT_DELAY_MS + 2000;
-    for (const outcome of next) expect(outcome.ms, report).toBeLessThan(bound);
+    await expectJoinersAnswer(
+      '/settings',
+      SETTINGS_READ_TIMEOUT_MS + JOIN_GRACE_MS + 2 * AGENT_DELAY_MS + 2000
+    );
+  }, 150_000);
+
+  it('serves platform-config reads after the request that started the shared read was aborted', async () => {
+    const next = await expectJoinersAnswer(
+      '/platform-config',
+      PLATFORM_CONFIG_READ_TIMEOUT_MS + JOIN_GRACE_MS + 2 * AGENT_DELAY_MS + 2000
+    );
+    for (const outcome of next) expect(outcome.body).toEqual({ appSlug: 'live-app' });
   }, 150_000);
 });
