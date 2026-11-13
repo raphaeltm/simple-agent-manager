@@ -17,6 +17,7 @@ import { Hono } from 'hono';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { getTokenHashKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId, rejectAgentSignInSession } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
@@ -283,7 +284,7 @@ async function loadProjectInviteByToken(
     throw errors.notFound('Invite link');
   }
   const db = drizzle(c.env.DATABASE, { schema });
-  const tokenHash = await hmacInviteToken(token, c.env.ENCRYPTION_KEY);
+  const tokenHash = await hmacInviteToken(token, getTokenHashKey(c.env));
   const rows = await db
     .select({ link: schema.projectInviteLinks, project: schema.projects })
     .from(schema.projectInviteLinks)
@@ -423,7 +424,7 @@ projectMembersRoutes.post(
     const rawToken = generateInviteToken(
       parsePositiveEnvInt(c.env.PROJECT_INVITE_TOKEN_BYTES, DEFAULT_INVITE_TOKEN_BYTES)
     );
-    const tokenHash = await hmacInviteToken(rawToken, c.env.ENCRYPTION_KEY);
+    const tokenHash = await hmacInviteToken(rawToken, getTokenHashKey(c.env));
     const link = {
       id: ulid(),
       projectId,

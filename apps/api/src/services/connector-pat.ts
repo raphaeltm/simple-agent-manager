@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { getTokenHashKey } from '../lib/secrets';
 import type { Actor } from '../operations/types';
 import { hmacToken } from '../routes/api-tokens';
 import { assertSessionUserApproved } from './signup-approval';
@@ -16,7 +17,7 @@ export async function authenticateConnectorPat(rawToken: string, env: Env): Prom
     .from(schema.apiTokens)
     .where(
       and(
-        eq(schema.apiTokens.tokenHash, await hmacToken(rawToken, env.ENCRYPTION_KEY)),
+        eq(schema.apiTokens.tokenHash, await hmacToken(rawToken, getTokenHashKey(env))),
         isNull(schema.apiTokens.revokedAt)
       )
     )

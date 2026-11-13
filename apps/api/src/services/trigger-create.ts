@@ -15,6 +15,7 @@ import type * as v from 'valibot';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { getTokenHashKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import type { CreateTriggerSchema } from '../schemas/triggers';
@@ -271,7 +272,7 @@ export async function createTrigger(
       : undefined;
   let webhookToken: Awaited<ReturnType<typeof createWebhookTokenMaterial>> | undefined;
   if (body.sourceType === 'webhook' && body.webhookConfig) {
-    webhookToken = await createWebhookTokenMaterial(env.ENCRYPTION_KEY);
+    webhookToken = await createWebhookTokenMaterial(getTokenHashKey(env));
     await db.batch([
       db.insert(schema.triggers).values(values),
       db

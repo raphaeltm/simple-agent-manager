@@ -1,0 +1,8 @@
+# The key-rotation control endpoint (apps/api/src/selfhost/key-rotation/control.ts) exists only
+# while `pnpm selfhost:secrets rotate` runs, and that command calls celld on loopback directly.
+# It is never served through Caddy, so a request from outside the box gets a 404 here before it
+# can reach the Worker (the endpoint's own HMAC check is the first line; this is the second).
+@sam_key_rotation path /__sam-selfhost/*
+handle @sam_key_rotation {
+	respond 404
+}
