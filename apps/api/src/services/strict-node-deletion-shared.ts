@@ -220,22 +220,3 @@ export async function requireStrictNodeProvider(
   }
   return providerResult;
 }
-
-export async function resolveStrictNodeProvider(
-  db: NodeDb,
-  node: NodeRow,
-  userId: string,
-  env: Env
-): Promise<ProviderForUserResult> {
-  if (!node.providerInstanceId) {
-    throw new Error(`Cannot strictly resolve provider for node ${node.id}: instance ID is missing`);
-  }
-  const targetProvider = node.cloudProvider as CredentialProvider | null;
-  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
-  if (!targetProvider || providerResult.providerName !== targetProvider) {
-    throw new Error(
-      `Cannot strictly delete node ${node.id}: persisted provider binding did not resolve exactly`
-    );
-  }
-  return providerResult;
-}

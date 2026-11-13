@@ -7,6 +7,12 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { captureNodeLogsBeforeTeardown } from './node-log-capture';
+import {
+  NodeTeardownBlockedError,
+  proveNodeInstanceOwnership,
+  resolveStrictNodeTeardownAuthority,
+} from './node-teardown-authority';
+import { recordNodeTeardownBlocked } from './node-teardown-blocked';
 import { releaseNodeTunnels } from './node-tunnel-cleanup';
 import {
   type ContainerWorkspaceDeletionAuthority,
@@ -20,7 +26,6 @@ import {
   type NodeRow,
   requireSameNodeIncarnation,
   requireStrictNode,
-  resolveStrictNodeProvider,
 } from './strict-node-deletion-shared';
 import { deleteStrictNodeDnsRecord } from './strict-node-dns-cleanup';
 import { reconcileStrictProviderlessVm } from './strict-node-providerless-reconcile';
@@ -61,21 +66,34 @@ async function deleteStrictProviderInstance(
   requestContext?: ProviderRequestContext,
   beforeDestroy?: () => Promise<void>
 ): Promise<StrictNodeDeletionResult['providerVm']> {
-  if (!node.providerInstanceId) {
+  const providerInstanceId = node.providerInstanceId;
+  if (!providerInstanceId) {
     throw new Error(
       `Cannot confirm managed VM termination for node ${node.id}: instance identity is missing`
     );
   }
 
-  const providerResult = await resolveStrictNodeProvider(db, node, userId, env);
+  const authority = await resolveStrictNodeTeardownAuthority(db, node, userId, env);
 
   await requireSameNodeIncarnation(db, node, 'provider delete');
   await beforeDestroy?.();
   // Black box recorder: bounded and best-effort, never blocks teardown beyond its timeout.
   await captureNodeLogsBeforeTeardown(env, node);
-  if (requestContext)
-    await providerResult.provider.deleteVM(node.providerInstanceId, requestContext);
-  else await providerResult.provider.deleteVM(node.providerInstanceId);
+  let provider = authority.kind === 'pinned' ? authority.providerResult.provider : null;
+  if (!provider) {
+    // The placement credential no longer resolves (rotated, re-saved, reconnected). Ownership
+    // comes from the instance itself, read immediately before the delete.
+    const proven = await proveNodeInstanceOwnership(
+      node,
+      env,
+      authority.kind === 'current_owner_credential' ? authority.candidates : [],
+      requestContext
+    );
+    await requireSameNodeIncarnation(db, node, 'provider delete after ownership proof');
+    provider = proven.provider;
+  }
+  if (requestContext) await provider.deleteVM(providerInstanceId, requestContext);
+  else await provider.deleteVM(providerInstanceId);
   return 'deleted';
 }
 
@@ -323,24 +341,34 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
-  const providerVm =
-    initialNode.status === 'destroying' && node.runtime === 'vm' && !node.providerInstanceId
-      ? await reconcileStrictProviderlessVm(
-          db,
-          node,
-          userId,
-          env,
-          options.providerRequestContext,
-          beforeDestroy
-        )
-      : await deleteStrictProviderInstance(
-          db,
-          node,
-          userId,
-          env,
-          options.providerRequestContext,
-          beforeDestroy
-        );
+  let providerVm: StrictNodeDeletionResult['providerVm'];
+  try {
+    providerVm =
+      initialNode.status === 'destroying' && node.runtime === 'vm' && !node.providerInstanceId
+        ? await reconcileStrictProviderlessVm(
+            db,
+            node,
+            userId,
+            env,
+            options.providerRequestContext,
+            beforeDestroy
+          )
+        : await deleteStrictProviderInstance(
+            db,
+            node,
+            userId,
+            env,
+            options.providerRequestContext,
+            beforeDestroy
+          );
+  } catch (error) {
+    // Every entry point (owner delete, NodeLifecycle stop, cleanup cron, deployment and
+    // TaskRunner cleanup) funnels through here, so a named refusal is recorded once, visibly.
+    if (error instanceof NodeTeardownBlockedError) {
+      await recordNodeTeardownBlocked(env, node, error);
+    }
+    throw error;
+  }
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   // The proof makes this incarnation non-live, which releases its Cloudflare tunnel (if it
   // had one). Never throws: the tunnel journal keeps the identity for the cron sweep.
