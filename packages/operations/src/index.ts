@@ -103,6 +103,7 @@ export {
   samTaskGet,
   samTasksList,
 } from './platform-operations';
+export { type ProfileAccountBinding } from './port-types';
 export { type OperationPorts, type ProjectEventErrorKind } from './ports';
 export {
   ensurePullRequest,
@@ -145,5 +146,6 @@ export {
   type UntrustedTextBlock,
   untrustedTextBlock,
 } from './untrusted-text';
+export { samUsageGet, usageOperations } from './usage-operations';
 export { utf8ByteLength } from './utf8';
 export { readArchivedToolPayloads, readResourceHistory } from './workspace-history';

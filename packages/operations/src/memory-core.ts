@@ -1,6 +1,7 @@
 import { KNOWLEDGE_ENTITY_TYPES, type KnowledgeEntityType } from '@simple-agent-manager/shared';
-import { normalizeSearchQuery } from '@simple-agent-manager/worker-core';
+import { log, normalizeSearchQuery } from '@simple-agent-manager/worker-core';
 
+import { bindProfiles, publicProfileAccount } from './account-usage';
 import { operationLink, operationPageLimit } from './connector-read-core';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
@@ -84,7 +85,16 @@ export async function listProfiles(
     if (status === 400 || status === 403 || status === 409) {
       throw new OperationError('invalid_input', (error as Error).message);
     }
-    throw new OperationError('unavailable', `Failed to list profiles: ${(error as Error).message}`);
+    const detail = error instanceof Error ? error.message : String(error);
+    log.warn('operations.list_profiles_failed', { projectId, error: detail });
+    // Storage error text (SQL, table names) never reaches an external app; a workspace agent in
+    // the same installation keeps the detail for diagnosis.
+    throw new OperationError(
+      'unavailable',
+      ctx.actor.via === 'workspace-agent'
+        ? `Failed to list profiles: ${detail}`
+        : 'SAM could not list agent profiles right now.'
+    );
   }
   const external = ctx.actor.via !== 'workspace-agent';
   const matching = external
@@ -101,6 +111,9 @@ export async function listProfiles(
     : profiles;
   const limit = operationPageLimit(ctx, input.limit);
   const page = external ? matching.slice(0, limit) : matching;
+  // Workspace agents read their own profile list on every dispatch; account resolution is for
+  // monitoring apps and the SAM assistant only.
+  const bindings = external ? await bindProfiles(ctx, projectId, page) : null;
   return {
     ...(external ? { nextCursor: matching.length > limit ? (page.at(-1)?.id ?? null) : null } : {}),
     profiles: page.map((profile) => ({
@@ -115,10 +128,18 @@ export async function listProfiles(
         ? {
             runtime: profile.runtime,
             taskMode: profile.taskMode,
+            account: publicProfileAccount(bindings?.get(profile.id)),
             link: operationLink(ctx, projectId),
           }
         : {}),
     })),
     count: page.length,
+    ...(external
+      ? {
+          accountNote: bindings
+            ? 'account.poolId groups profiles that share one stored credential and therefore one provider quota. Read remaining usage per pool with sam_usage_get.'
+            : 'Account resolution is unavailable right now; account is null for every profile.',
+        }
+      : {}),
   };
 }

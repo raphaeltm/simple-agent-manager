@@ -213,6 +213,27 @@ Notes for client developers:
   one-off schedules and recurring (cron) ones. `sam_channels_list`, `sam_channel_history`,
   `sam_channel_get` and `sam_channel_subscription_cancel` read and manage coordination channels;
   apps cannot post to them.
+- `sam_profiles_list` gives each profile an `account`: `state` (`account`, `sam_ai_proxy`,
+  `paused`, `none` or `unknown`), `tier` (`profile`, `project` or `user`), an opaque `poolId`, and
+  `accountName` (null for accounts stored before named accounts existed). It is the account a new
+  run would use, chosen by the same selection as the agent-key callback
+  (`services/agent-credential-selection.ts`) from row metadata only; a skill that switches the agent
+  is not applied. A platform credential is never an account: without one of yours, Claude Code and
+  Codex run on SAM's AI proxy only when you chose SAM as the provider (`sam_ai_proxy`), otherwise
+  `none`. `sam_usage_get` groups profiles by `poolId` (one stored secret, including byte-identical
+  copies; the id is a digest that can change, so re-read it) and returns provider-reported windows
+  with `usedPercent`, `remainingPercent`, `resetsAt`, `observedAt`, `ageMinutes` and `freshness`
+  (`fresh`, `stale` after `connector.usageStaleAfterMinutes`, or `reset_since_sample`), plus per-pool
+  `exhausted` and `nextResetAt`. `usage.state` is `reported`, `never_reported` (unknown, not full),
+  `unavailable` (the read failed; retry) or, for the `sam_ai_proxy` pool, `sam_ai_budget` with
+  `samAiToday`. Credentials, ciphertext, credential ids and other members' accounts are never
+  returned.
+- `sam_chat_start` accepts `model` and `effort` for that chat only; the result echoes the requested
+  values as `agentOverrides`. An effort the resolved agent cannot run is refused before anything
+  starts. `sam_chats_list` rows carry `operational` (`taskStatus`, `executionStep`,
+  `parentTaskId`, `taskTerminal`, `labelMayBeStale`), `lastMessageAt` and `agentCompletedAt` beside
+  the index `status` label, and
+  `sam_tasks_list` rows carry `parentTaskId`, `executionStep` and `sessionId`.
 - To answer an agent, send its `interactionId` with an `optionId`, `formContent`, or
   `decline: true`. A link request is accepted with `optionId: "accept"`. An attention question takes
   its `markerId` and an `answer` instead. SAM generates the receipt metadata.
