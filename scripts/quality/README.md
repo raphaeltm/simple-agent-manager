@@ -34,6 +34,13 @@ different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
   the 2026-08-11 ai-slop debt burn-down, promoted after reaching 0 diagnostics), any new diagnostic
   fails the run with a nonzero exit code — no `--fail-on-findings` flag required. Other scopes
   remain advisory (exit 0 regardless of findings) until their own evidence is promoted.
+- `pnpm quality:shared-flight-joins` (blocking in CI) fails when Worker code (`apps/api/src` and
+  the shared, providers and cloud-init packages) awaits or returns a promise read out of
+  module-scope state: another request's in-flight read. On the self-hosted celld runtime such a
+  promise never settles once its starter's client disconnects. Join with `joinSharedFlight` /
+  `settleSharedFlight` (`apps/api/src/lib/shared-flight.ts`), or mark a reviewed exception with
+  `// shared-flight-join-allowed: <reason>` on the line above. `--inventory` lists every
+  module-scope variable that holds a promise. It does not follow `this` state inside a class.
 - `pnpm lint:oxlint` is report-only. Promotion is forbidden until
   `scripts/quality/lint-adoption-evidence.json` records finding, fix-diff, scope, template,
   suppression, and cold-performance parity. Type-aware Oxlint is disabled.

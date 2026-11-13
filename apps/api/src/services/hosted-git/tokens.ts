@@ -64,25 +64,28 @@ function base64UrlDecode(value: string): Uint8Array | null {
   }
 }
 
-let cachedKey: { secret: string; key: Promise<CryptoKey> } | null = null;
+/**
+ * The derived key, cached once derived. Only a finished key is shared: a request never waits on a
+ * derivation another request started, which on the self-hosted celld runtime could be dropped
+ * with that request (lib/shared-flight.ts). Concurrent cold callers each derive once (one HKDF).
+ */
+let cachedKey: { secret: string; key: CryptoKey } | null = null;
 
 /** HKDF-SHA256 from ENCRYPTION_KEY with a purpose label; no other use shares this key. */
-function signingKey(env: Pick<Env, 'ENCRYPTION_KEY'>): Promise<CryptoKey> {
+async function signingKey(env: Pick<Env, 'ENCRYPTION_KEY'>): Promise<CryptoKey> {
   const secret = env.ENCRYPTION_KEY;
   if (!secret) throw new Error('ENCRYPTION_KEY is required for SAM-hosted repositories');
   if (cachedKey?.secret === secret) return cachedKey.key;
-  const key = (async () => {
-    const root = await crypto.subtle.importKey('raw', encoder.encode(secret), 'HKDF', false, [
-      'deriveKey',
-    ]);
-    return crypto.subtle.deriveKey(
-      { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: encoder.encode(KEY_LABEL) },
-      root,
-      { name: 'HMAC', hash: 'SHA-256', length: 256 },
-      false,
-      ['sign', 'verify']
-    );
-  })();
+  const root = await crypto.subtle.importKey('raw', encoder.encode(secret), 'HKDF', false, [
+    'deriveKey',
+  ]);
+  const key = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: encoder.encode(KEY_LABEL) },
+    root,
+    { name: 'HMAC', hash: 'SHA-256', length: 256 },
+    false,
+    ['sign', 'verify']
+  );
   cachedKey = { secret, key };
   return key;
 }
