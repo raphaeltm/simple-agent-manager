@@ -60,12 +60,12 @@ vi.mock('react-virtuoso', async () => {
 
 import { ProjectMessageView } from '../../../src/components/project-message-view';
 import { VIRTUAL_START } from '../../../src/components/project-message-view/types';
-import { stubCssHighlights } from '../../test-utils/css-highlights';
 import {
   resetVirtuosoMock,
   scrollToIndexCalls,
   virtuosoLastProps,
 } from '../../helpers/virtuoso-mock';
+import { stubCssHighlights } from '../../test-utils/css-highlights';
 
 const SESSION_ID = 'sess-history';
 
