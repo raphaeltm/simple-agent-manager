@@ -4602,8 +4602,8 @@ async function processArchiveMigrationBatch(input: {
     ensuredOwners.set(projectId, pending);
     return pending;
   };
-  // Today's reserved total, read once per batch and kept current with this batch's own
-  // reservations. It lets `reserve` refuse a candidate whose lower-bound estimate cannot fit
+  // Today's reserved total, read once per batch, kept current with this batch's own
+  // reservations and re-read after a refund. It lets `reserve` refuse a candidate whose lower-bound estimate cannot fit
   // without asking the root object to scan the session: after the day's pool is spent, every
   // tick would otherwise scan up to `sweepSessions + sweepFallthroughDepth` of the largest
   // sessions just to be refused.
@@ -4703,6 +4703,11 @@ async function processArchiveMigrationBatch(input: {
         input.now,
         input.env
       );
+      // The refund lowered D1's total, so the cached total is now too high. Drop it and let the
+      // next floor check re-read D1: otherwise a candidate refused after reserving (largest
+      // first, so the biggest estimates) would floor-refuse every smaller affordable candidate
+      // behind it in the same tick. Only on success: a failed refund left D1 unchanged.
+      reservedToday = null;
     } catch (error) {
       log.warn('project_data_archive_unused_reservation_release_failed', {
         ...serializeError(error),

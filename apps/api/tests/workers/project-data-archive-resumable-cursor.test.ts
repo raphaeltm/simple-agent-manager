@@ -685,6 +685,49 @@ describe('resumable archive cursor', () => {
     expect(await source.estimateCallCountForTest()).toBeGreaterThan(before);
     expect(await readJournal(projectId, sessionId)).not.toBeNull();
   });
+  it('admits a smaller candidate in the same tick after a larger reserved one is refused and refunded', async () => {
+    // Largest first: A reserves, the root refuses it (unresolved attention marker) and the
+    // reservation is refunded. B must then be judged against D1's refunded total, not against a
+    // per-tick cache that still counts A's estimate.
+    const large = await seedCandidate('refundlarge', LARGE_MESSAGES);
+    const { projectId, source } = large;
+    const smallId = await source.createSession(null, 'refundsmall');
+    await source.persistMessageBatch(smallId, messagesFor('refundsmall', 40));
+    await source.stopSession(smallId);
+    await source.runSummarySyncForTest();
+    await runInDurableObject(source, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO session_attention_markers (id, session_id, kind, source, created_at)
+         VALUES (?, ?, 'wake_failed', 'test', ?)`,
+        crypto.randomUUID(),
+        large.sessionId,
+        tickClock + 86_400_000
+      );
+    });
+    const factor = 2;
+    const estimateLarge = await source.archiveSourceEstimateWrites(
+      large.sessionId,
+      factor,
+      1_000_000
+    );
+    // B's floor (1,000 + 2 x 40 = 1,080) fits the empty pool but not the pool minus A's
+    // estimate, so only a stale cache can refuse it.
+    const allowance = estimateLarge + 500;
+    expect(1_000 + factor * 40).toBeGreaterThan(allowance - estimateLarge);
+
+    const stats = await tick({ PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance) });
+
+    expect(await readJournal(projectId, large.sessionId)).toMatchObject({
+      state: 'frozen',
+      error_code: 'precopy_refused',
+    });
+    expect(stats.budgetWindowExhausted ?? 0).toBe(0);
+    expect(stats).toMatchObject({ migrated: 1, failed: 0, poisoned: 0 });
+    expect((await readJournal(projectId, smallId))?.state).toBe('published');
+    // Only B's reservation remains: A's was refunded.
+    expect(await reservedWrites()).toBeGreaterThan(0);
+    expect(await reservedWrites()).toBeLessThan(estimateLarge);
+  });
   it('resumes verification after a transient R2 read failure instead of recording a verdict', async () => {
     const { projectId, sessionId, messageIds } = await seedCandidate('verifyblip', 40);
     const r2 = env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket;

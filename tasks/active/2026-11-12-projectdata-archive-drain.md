@@ -406,3 +406,17 @@ stuck past deadline) was recorded at 02:05Z.
   the port: import order, DO migration gate (trigger SQL frozen as literals; the gate test allows
   `CREATE TRIGGER IF NOT EXISTS` only when its body neither deletes nor drops), AST sql-injection
   (`DELETE FROM ${table}` split into two literal statements).
+
+### Parent review of d41148b29 (2026-11-13)
+
+- BLOCKING (fixed): `processArchiveMigrationBatch` kept a per-tick `reservedToday` cache that
+  `reserve()` incremented but `releaseUnused()` never lowered. A large candidate reserved and then
+  refused by the root (refunded in D1) left the cache overstated, so smaller affordable candidates
+  behind it in the same tick were floor-refused (`window_exhausted`). Fix: a successful refund sets
+  the cache to null so the next floor check re-reads D1 (one extra D1 read per refunded refusal; a
+  failed refund leaves D1 unchanged and keeps the cache).
+- Scenario test `admits a smaller candidate in the same tick after a larger reserved one is refused
+and refunded` (resumable-cursor suite, real DO/D1/R2). Discrimination: with the invalidation
+  commented out, `budgetWindowExhausted` is 1 and the test is red; restored, green.
+- PR summary corrected: the first prepare still traverses the whole session, in bounded yielding
+  pages outside the transcript lock, with a generation re-check under the lock.
