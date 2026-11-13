@@ -46,32 +46,44 @@ staging verification skipped by explicit instruction.
 
 ## Implementation checklist
 
-- [ ] Move `quote-highlight.ts` to `components/project-message-view/comments/` (shared); reader
+- [x] Move `quote-highlight.ts` to `components/project-message-view/comments/` (shared); reader
       imports updated; test file moved.
-- [ ] Per-surface highlight registry (union of all mounted surfaces under the two CSS names).
-- [ ] `useQuoteHighlights` options: item attribute (`readerItem` / `commentAnchor`), observe DOM
+- [x] Per-surface highlight registry (union of all mounted surfaces under the two CSS names).
+- [x] `useQuoteHighlights` options: item attribute (`readerItem` / `commentAnchor`), observe DOM
       mutations (rAF-debounced), reveal-on-focus window; returns painted ranges.
-- [ ] Hit-testing + `useQuoteHighlightClicks` (click opens, pointer cursor on hover, ignores
+- [x] Hit-testing + `useQuoteHighlightClicks` (click opens, pointer cursor on hover, ignores
       drags/selection and clicks on interactive elements).
-- [ ] Chat: paint focused thread strongly (while its surface is open) and other open quoted
+- [x] Chat: paint focused thread strongly (while its surface is open) and other open quoted
       threads faintly; click → `onSelectMessageComments(messageId, newestOpenHitThreadId)`;
       reveal the focused quote after deep link / rail selection.
-- [ ] Reader: faint highlights only for open comments (same rule).
-- [ ] Library: lift `useLibraryFileComments` into `FilePreviewModal` (enabled for markdown or
+- [x] Reader: faint highlights only for open comments (same rule).
+- [x] Library: lift `useLibraryFileComments` into `FilePreviewModal` (enabled for markdown or
       when the panel is open); paint in rendered markdown; click opens panel + focuses thread.
-- [ ] Library deep link: `?preview=<fileId>&commentThread=<id>` from the Comments page; modal
+- [x] Library deep link: `?preview=<fileId>&commentThread=<id>` from the Comments page; modal
       opens the panel focused and reveals the quote; closing the preview drops both params.
-- [ ] CSS: pointer cursor while hovering a highlight; comments in `index.css` updated.
-- [ ] Tests: registry, hit-testing, chat click/paint behavior, library click/deep link.
-- [ ] Playwright visual audit: chat + library, mobile 375 + desktop 1280.
-- [ ] Docs: public docs mention of comment highlighting updated if present.
+- [x] CSS: pointer cursor while hovering a highlight; comments in `index.css` updated.
+- [x] Tests: registry, hit-testing, chat click/paint behavior, library click/deep link.
+- [x] Playwright visual audit: chat + library, mobile 375 + desktop 1280.
+- [x] Docs: public docs mention of comment highlighting updated if present.
 
 ## Acceptance criteria
 
-- [ ] "Open in chat" from the reader shows the quoted words strongly highlighted in the chat.
-- [ ] Open quoted comments are faintly highlighted in the chat by default; resolved are not.
-- [ ] Clicking a chat highlight opens the comment rail (desktop) / inline thread (mobile)
+- [x] "Open in chat" from the reader shows the quoted words strongly highlighted in the chat.
+- [x] Open quoted comments are faintly highlighted in the chat by default; resolved are not.
+- [x] Clicking a chat highlight opens the comment rail (desktop) / inline thread (mobile)
       focused on the newest open thread under the click.
-- [ ] Library markdown files highlight open quoted comments; clicking opens the panel focused.
-- [ ] Opening a library comment from the Comments page opens the file with the thread focused.
-- [ ] A library preview opened over a chat doesn't erase the chat's highlights (registry test).
+- [x] Library markdown files highlight open quoted comments; clicking opens the panel focused.
+- [x] Opening a library comment from the Comments page opens the file with the thread focused.
+- [x] A library preview opened over a chat doesn't erase the chat's highlights (registry test).
+
+## Implementation notes
+
+- Found while auditing: "Open in chat" sometimes never scrolled to the message (3 of 6 Playwright
+  runs pre-fix). `useConversationJump`'s route-driven jump used the one-shot fast path when the
+  target was already loaded, and Virtuoso's own first scroll to the bottom could undo it. Deep
+  links now always take the confirmed (retrying) path. Regression test:
+  `project-message-view-navigation.test.tsx` "keeps scrolling a comment link to a loaded message…"
+  (fails with the fix reverted). Playwright: 12/12 deep-link runs after the fix.
+- Reveal runs only on navigation (deep link, a thread's View), not on clicking the painted words.
+- Discrimination checks (each guard removed, intended test went red): resolved filter, mutation
+  observer, selection guard, registry union, newest-open pick, reveal (Playwright long reply).
