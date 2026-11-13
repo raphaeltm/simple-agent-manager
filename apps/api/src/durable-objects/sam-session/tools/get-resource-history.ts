@@ -1,8 +1,10 @@
 /**
  * SAM get_resource_history tool — inspect workspace resource summaries and lazy chunk detail.
  */
+import { readResourceHistory } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../../env';
-import { getWorkspaceResourceHistory } from '../../../services/workspace-resource-history';
+import { operationDeps } from '../../../operation-ports';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { resolveProjectWithOwnership } from './helpers';
 
@@ -72,23 +74,11 @@ export async function getResourceHistory(
     return { error: 'Project not found or not owned by you.' };
   }
 
-  const history = await getWorkspaceResourceHistory(env, {
+  return readResourceHistory(operationDeps(env), {
     projectId: project.id,
     sessionId,
     taskId,
     workspaceId,
-    detailChunkId: trimOptional(input.chunkId),
+    chunkId: trimOptional(input.chunkId),
   });
-
-  return {
-    scope: { projectId: project.id, sessionId, taskId, workspaceId },
-    ...history,
-    notes: [
-      'Samples are workspace-level cgroup observations, not per-process attribution.',
-      'memoryWorkingSetMeanBytes and memoryWorkingSetPeakBytes estimate memory needed by excluding reclaimable inactive file cache; null means the VM agent did not report them.',
-      'memoryMeanBytes, memoryPeakBytes, and memoryKernelPeakBytes include cache and remain available for historical comparison.',
-      'Tool spans are timestamp correlation windows and may include an ACP kind and metadata-provided tool name; titles and inputs are never returned.',
-      'Chunk detail is returned only when chunkId is supplied; summary reads stay bounded.',
-    ],
-  };
 }

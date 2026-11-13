@@ -1,4 +1,8 @@
 import {
+  copyBackProjectDataArchiveMigration,
+  runScopedProjectDataArchiveCanary,
+} from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
+import {
   createExecutionContext,
   env,
   runInDurableObject,
@@ -8,10 +12,6 @@ import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import worker from '../../src/index';
-import {
-  copyBackProjectDataArchiveMigration,
-  runScopedProjectDataArchiveCanary,
-} from '../../src/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
 import {
   countTargetMessages,
@@ -470,7 +470,7 @@ describe('compact R2 archive rollout', () => {
 
   it('shares an atomic durable allowance across concurrent attempts, retries and UTC windows', async () => {
     const { reserveArchiveWrites, ARCHIVE_BUDGET_WINDOW_MS } =
-      await import('../../src/project-data-archive/write-budget');
+      await import('@simple-agent-manager/project-data/internal/archive/write-budget');
     await env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget').run();
     const now = Date.now();
     const results = await Promise.all(
@@ -516,9 +516,11 @@ describe('compact R2 archive rollout', () => {
 
 describe('compact archive SQL cost measurement', () => {
   it('reduces measured target writes for the same consolidated streaming transcript', async () => {
-    const archive = await import('../../src/durable-objects/project-data/archive-sharding');
-    const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
-    const { PROJECT_DATA_ARCHIVE_TABLES } = await import('../../src/project-data-archive/contract');
+    const archive = await import('@simple-agent-manager/project-data/internal/do/archive-sharding');
+    const { writeCompactChunk } =
+      await import('@simple-agent-manager/project-data/internal/archive/compact-r2');
+    const { PROJECT_DATA_ARCHIVE_TABLES } =
+      await import('@simple-agent-manager/project-data/internal/archive/contract');
     const measurements: number[] = [];
     for (const storageFormat of ['sqlite-v1', 'r2-gzip-v1'] as const) {
       const projectId = `compact-cost-${crypto.randomUUID()}`;
@@ -612,7 +614,8 @@ describe('compact archive SQL cost measurement', () => {
 
 describe('compact archive concurrent mutation fencing', () => {
   it('serializes duplicate chunk commits across R2 awaits before abandoning a partial target', async () => {
-    const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
+    const { writeCompactChunk } =
+      await import('@simple-agent-manager/project-data/internal/archive/compact-r2');
     const projectId = `compact-concurrency-${crypto.randomUUID()}`;
     const { source, sessionId, base, target } = await prepareCompactArchiveTarget(
       projectId,
@@ -703,8 +706,10 @@ describe('compact archive concurrent mutation fencing', () => {
   });
 
   it('rolls back source rows and routing anchors together before exact retry', async () => {
-    const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
-    const { PROJECT_DATA_ARCHIVE_TABLES } = await import('../../src/project-data-archive/contract');
+    const { writeCompactChunk } =
+      await import('@simple-agent-manager/project-data/internal/archive/compact-r2');
+    const { PROJECT_DATA_ARCHIVE_TABLES } =
+      await import('@simple-agent-manager/project-data/internal/archive/contract');
     const projectId = `compact-finalize-rollback-${crypto.randomUUID()}`;
     const { source, sessionId, base, prepared, target } = await prepareCompactArchiveTarget(
       projectId,
@@ -885,7 +890,7 @@ describe('compact coordinator restart and contention', () => {
 
   it('releases only unused same-session contender reservations, exactly once and never across days', async () => {
     const { releaseUnusedArchiveReservation, reserveArchiveWrites, ARCHIVE_BUDGET_WINDOW_MS } =
-      await import('../../src/project-data-archive/write-budget');
+      await import('@simple-agent-manager/project-data/internal/archive/write-budget');
     const projectId = `compact-contention-${crypto.randomUUID()}`;
     const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 10, true);
     await env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget').run();

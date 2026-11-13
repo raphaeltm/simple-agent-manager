@@ -40,7 +40,9 @@ const mocks = vi.hoisted(() => ({
   enrichMessageWithMentions: vi.fn(),
 }));
 
-vi.mock('../../../src/operations/link-core', () => ({ recordLink: mocks.recordLink }));
+vi.mock('@simple-agent-manager/operations/internal/link-core', () => ({
+  recordLink: mocks.recordLink,
+}));
 
 vi.mock('../../../src/services/instant-session', () => ({
   acceptInstantSession: mocks.acceptInstantSession,
@@ -214,7 +216,7 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
         sourceIdeaId: 'idea-open',
       });
       expect(response.status).toBe(202);
-      expect(mocks.recordLink).toHaveBeenCalledWith(env, 'project-1', {
+      expect(mocks.recordLink).toHaveBeenCalledWith(expect.objectContaining({ env }), 'project-1', {
         sourceKind: 'session',
         sourceId: 'session-1',
         targetKind: 'idea',

@@ -10,6 +10,17 @@
  * 3. Returns immediately with 202 Accepted
  * 4. Async: selects/creates node, creates workspace, runs agent, creates PR, cleans up
  */
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  mergeResourceRequirementLayers,
+  normalizeResourceRequirementsInput,
+  parseLegacyVmSize,
+  parseResourceRequirementsSource,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
 import type { RunTaskResponse, TaskStatus, VMSize } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -36,17 +47,6 @@ import {
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import { cleanupRequestedTaskRun } from '../../services/requested-task-run-cleanup';
-import {
-  collectStoredResourceRequirementLayers,
-  createPersistedTaskResourcePlanJson,
-  firstResourceRequirementLayer,
-  mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
-  parseLegacyVmSize,
-  parseResourceRequirementsSource,
-  readPersistedTaskResourcePlan,
-  ResourceRequirementsValidationError,
-} from '../../services/resource-requirements-input';
 import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { isTaskBlocked } from '../../services/task-graph';
 import { startTaskRunnerDO } from '../../services/task-runner-do';

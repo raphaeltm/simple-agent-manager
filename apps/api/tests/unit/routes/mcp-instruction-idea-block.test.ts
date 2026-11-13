@@ -25,7 +25,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
 vi.mock('../../../src/services/project-data', () => mocks.projectData);
-vi.mock('../../../src/operations/link-core', () => ({ listLinks: mocks.listLinks }));
+vi.mock('@simple-agent-manager/operations/internal/link-core', () => ({
+  listLinks: mocks.listLinks,
+}));
 vi.mock('../../../src/services/admin-settings', () => ({
   resolveAdminSettingDetails: mocks.resolveAdminSettingDetails,
 }));

@@ -24,7 +24,7 @@ The reference covers:
 - Project-wide comment inbox (`/api/projects/:projectId/comments`)
 - Agent Settings (`/api/agent-settings/*`)
 - Notifications (`/api/notifications/*`)
-- Automation triggers (`/api/projects/:projectId/triggers/*`, `/api/webhooks/ingest`)
+- Automation triggers (`/api/projects/:projectId/triggers/*`, `/api/webhooks/ingest`, signed `/api/webhooks/in/:triggerId`)
 - VM Communication callbacks
 - Terminal Access
 - Git Integration (VM Agent direct)

@@ -273,10 +273,34 @@ export interface SessionAgentCredential {
   isOwnSession: boolean;
 }
 
+/**
+ * What a chat's agent actually runs with: the values the control plane resolved and froze
+ * into the session's runtime contract (`agent_sessions.runtime_contract_json`), after the
+ * profile, skill, project default and user settings were applied.
+ */
+export interface SessionAgentRuntimeConfig {
+  agentType: string;
+  /** Null means the agent picks its own default model. */
+  model: string | null;
+  /** Null or 'auto' means the agent's default effort. */
+  effort: string | null;
+  permissionMode: string;
+  /** OpenCode inference provider; null for other agents or the default provider. */
+  opencodeProvider: string | null;
+  /**
+   * The current name of the skill the session runs, when the viewer may see it. Unlike the
+   * other fields this is looked up live, not frozen: a renamed skill shows its new name and
+   * a deleted one shows nothing.
+   */
+  skillName: string | null;
+}
+
 /** GET /api/projects/:projectId/sessions/:sessionId/agent-credential */
 export interface SessionAgentCredentialResponse {
   /** Null until the session's agent has received a credential. */
   credential: SessionAgentCredential | null;
+  /** Null for sessions started before runtime contracts were recorded. */
+  runtime: SessionAgentRuntimeConfig | null;
 }
 
 export interface PlatformCredential {

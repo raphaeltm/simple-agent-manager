@@ -1,0 +1,43 @@
+{
+  "name": "@simple-agent-manager/operations",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Surface-agnostic SAM platform operations shared by the workspace MCP server, the Connector, /sam and REST adapters",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./internal/*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'"
+  },
+  "dependencies": {
+    "@simple-agent-manager/shared": "workspace:*",
+    "@simple-agent-manager/worker-core": "workspace:*",
+    "@valibot/to-json-schema": "catalog:",
+    "drizzle-orm": "catalog:",
+    "valibot": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "name": "@simple-agent-manager/project-data",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ProjectData Durable Object, its client, the ProjectData archive and the ProjectData cron jobs",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./durable-object": {
+      "types": "./dist/durable-object.d.ts",
+      "import": "./dist/durable-object.js"
+    },
+    "./scheduled": {
+      "types": "./dist/scheduled.d.ts",
+      "import": "./dist/scheduled.js"
+    },
+    "./internal/*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'"
+  },
+  "dependencies": {
+    "@simple-agent-manager/scheduler-core": "workspace:*",
+    "@simple-agent-manager/shared": "workspace:*",
+    "@simple-agent-manager/worker-core": "workspace:*",
+    "valibot": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "better-sqlite3": "^13.0.3",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -18,6 +18,8 @@ export const NOTIFICATION_TYPES = [
   'session_access',
   /** An Operations-project agent asks a superadmin to approve an action. */
   'operations_approval',
+  /** An agent asks for a secret value to be supplied through the in-chat card. */
+  'secret_request',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

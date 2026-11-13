@@ -18,7 +18,7 @@
  * It never calls an Email Routing endpoint. Turning routing on, even for a subdomain, can add
  * Cloudflare's SPF record and DKIM key to the root domain the first time a zone uses it (seen on
  * staging, deploy run 39866499256). That step belongs to the admin setup
- * (`apps/api/src/services/agent-email/setup.ts`), which shows the admin those records first.
+ * (`packages/agent-email/src/setup.ts`), which shows the admin those records first.
  *
  * Runs automatically for production and staging; activation remains an admin action.
  *

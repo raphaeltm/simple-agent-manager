@@ -23,6 +23,7 @@ import {
   emailTriggerWhen,
   githubTriggerWhen,
   INCIDENT_TRIGGER_WHEN,
+  webhookScheme,
   webhookTriggerWhen,
 } from './describe';
 import { dateTimeLabel, viewerZone } from './time';
@@ -180,7 +181,12 @@ export function triggerWhen(trigger: TriggerResponse): { when: string; whenNote?
           : 'When something happens on GitHub',
       };
     case 'webhook':
-      return { when: webhookTriggerWhen(trigger.webhookConfig?.sourceLabel) };
+      return {
+        when: webhookTriggerWhen(
+          trigger.webhookConfig?.sourceLabel,
+          webhookScheme(trigger.webhookConfig)
+        ),
+      };
     case 'email':
       return { when: emailTriggerWhen(trigger.emailConfig?.address) };
     case 'incident':
@@ -345,7 +351,7 @@ export function fromSchedule(
 
 /**
  * Why the watch runner pauses a watch on its own. Must match the reasons in
- * `apps/api/src/durable-objects/project-data/project-standing-watches-runner.ts`
+ * `packages/project-data/src/do/project-standing-watches-runner.ts`
  * (`STANDING_WATCH_TARGET_NOT_OWNED` and the revoked-access pause). A person's own pause reason
  * is stored in the same field, so only these two read as problems.
  */

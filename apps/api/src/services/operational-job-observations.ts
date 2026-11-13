@@ -1,5 +1,6 @@
+import { getPlatformOperationLimits } from '@simple-agent-manager/operations';
+
 import type { Env } from '../env';
-import { getPlatformOperationLimits } from '../operations/limits';
 
 const statuses = new Set([
   'running',

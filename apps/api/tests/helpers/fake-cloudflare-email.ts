@@ -1,5 +1,5 @@
 /**
- * A fake Cloudflare zone for the agent email admin setup (`src/services/agent-email/setup.ts`):
+ * A fake Cloudflare zone for the agent email admin setup (`packages/agent-email/src/setup.ts`):
  * DNS records, Email Routing settings and rules, and Email Sending subdomains, served through a
  * `fetch` stub at the real API paths. Every response is a fresh `Response`.
  *

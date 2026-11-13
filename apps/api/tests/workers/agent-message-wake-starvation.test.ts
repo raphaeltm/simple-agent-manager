@@ -1,14 +1,14 @@
-import { runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
-
 import {
   runProjectEventWakeMaterializationBatch,
   selectProjectEventWakeMaterializationCandidates,
-} from '../../src/durable-objects/project-data/project-events-materialization';
+} from '@simple-agent-manager/project-data/internal/do/project-events-materialization';
 import {
   computeProjectEventMaterializationAlarmTime,
   recordSchedulerFailure,
-} from '../../src/durable-objects/project-data/project-events-scheduler';
+} from '@simple-agent-manager/project-data/internal/do/project-events-scheduler';
+import { runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
+
 import {
   type ChannelReceipt,
   inboxRows,

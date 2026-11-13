@@ -102,6 +102,13 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
   // Focus trap, Escape, scroll lock, an inert page behind, and focus back on whatever
   // opened the sheet (the To control or the cards link).
   useModalInteraction({ enabled: open, modalRef: dialogRef, onEscape: onClose });
+  // Opening the sheet puts the cursor in search, so typing filters straight away. This must
+  // be declared after useModalInteraction: its effect focuses the dialog, and effects run in
+  // order. Not on phones, where focusing would raise the keyboard over most of the list.
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (open && !isMobile) searchRef.current?.focus();
+  }, [open, isMobile]);
 
   // Every opening starts from the plain list.
   useEffect(() => {
@@ -187,6 +194,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
               aria-hidden="true"
             />
             <input
+              ref={searchRef}
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}

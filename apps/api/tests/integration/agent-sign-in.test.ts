@@ -383,11 +383,11 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       return (await createSessionCookieForUser(env, TARGET_ID)).sessionCookie;
     }
 
-    function post(path: string, cookie: string, body: unknown = {}) {
+    function post(path: string, cookie: string, body: unknown = {}, method = 'POST') {
       return app.request(
         `${API_ORIGIN}${path}`,
         {
-          method: 'POST',
+          method,
           headers: {
             'content-type': 'application/json',
             cookie,
@@ -472,12 +472,19 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
           404,
         ],
         ['/api/projects/proj-x/triggers/trig-x/webhook/rotate', {}, 404],
+        // A signing secret lets whoever knows it start runs after the session expires.
+        [
+          'PUT /api/projects/proj-x/triggers/trig-x/webhook/signing-secret',
+          { secret: 'a-signing-secret-of-enough-length' },
+          404,
+        ],
       ];
-      for (const [path, body, ordinaryStatus] of cases) {
-        const refused = await post(path, agent, body);
+      for (const [route, body, ordinaryStatus] of cases) {
+        const [method, path] = route.startsWith('PUT ') ? ['PUT', route.slice(4)] : ['POST', route];
+        const refused = await post(path, agent, body, method);
         expect({ path, status: refused.status }).toEqual({ path, status: 403 });
         expect(((await refused.json()) as { message: string }).message).toMatch(REFUSED);
-        const control = await post(path, ordinary, body);
+        const control = await post(path, ordinary, body, method);
         expect({ path, status: control.status }).toEqual({ path, status: ordinaryStatus });
       }
     });

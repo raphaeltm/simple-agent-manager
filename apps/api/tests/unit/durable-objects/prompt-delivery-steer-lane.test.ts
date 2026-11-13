@@ -3,22 +3,22 @@
  * The VM adapter is stubbed at its boundary; claim selection, result application, the
  * transcript label and the queue fallback all run for real against SQLite.
  */
-import type { VmPromptDeliveryCapabilities } from '@simple-agent-manager/shared';
-import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   acceptPromptDelivery,
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
-} from '../../../src/durable-objects/project-data/durability-foundation';
-import { resolveDurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
+} from '@simple-agent-manager/project-data/internal/do/durability-foundation';
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
 import {
   computePromptDeliveryAlarmTime,
   nudgePromptDeliveriesForTarget,
   type PromptDeliveryResult,
-} from '../../../src/durable-objects/project-data/prompt-delivery';
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import type { VmPromptDeliveryCapabilities } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { DefaultVmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 import { createSqlStorage } from './sql-storage-test-utils';

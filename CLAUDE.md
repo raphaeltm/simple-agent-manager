@@ -42,6 +42,14 @@ apps/
 packages/
 ├── shared/       # Shared types and utilities
 ├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr, UpCloud)
+├── worker-core/  # API worker kernel: logging, errors, validation, ids, timeouts, D1 schema
+├── scheduler-core/ # Pure placement and capacity decisions (no storage, no Cloudflare runtime)
+├── project-data/ # ProjectData Durable Object, its client, archive and cron jobs
+├── operations/   # Surface-agnostic platform operations (MCP, Connector, /sam, REST adapters)
+├── app-deployment/ # Worker side of app deployments (compose, releases, volumes, domains)
+├── ai-proxy/     # AI proxy billing auth, gateway logs and costs, token budgets
+├── agent-email/  # Agent email: inbound delivery, replies, setup and recovery
+├── repo-hosting/ # GitHub App and OAuth, GitLab, repository browsing
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
 ├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)
@@ -70,13 +78,14 @@ ratchet. Scanner and quality-policy commands are documented in `scripts/quality/
 
 ## Build Order
 
-Build packages in dependency order: `shared` -> `providers` -> `cloud-init` -> `api` / `web`
+Build packages in dependency order: `shared` -> `providers` / `worker-core` / `scheduler-core` -> the worker module packages (`project-data`, `operations`, `app-deployment`, `ai-proxy`, `agent-email`, `repo-hosting`) -> `cloud-init` -> `api` / `web`
 
 ```bash
-pnpm --filter @simple-agent-manager/shared build
-pnpm --filter @simple-agent-manager/providers build
+pnpm exec turbo run build --filter=@simple-agent-manager/api^...   # every package the API worker needs, in order
 pnpm --filter @simple-agent-manager/api build
 ```
+
+The API worker resolves these packages through their built `dist/`. After editing a package, rebuild it before typechecking or testing `apps/api`. Worker module packages never import from `apps/*`, and the worker imports them only through their public entry points; `eslint.config.mjs` (`boundaryRules`) enforces both. A package's `./internal/*` entry is for `apps/api` tests only.
 
 ## Website vs App (IMPORTANT)
 

@@ -66,7 +66,7 @@ function findTaskInserts(source: string, file: string): TaskInsert[] {
 }
 
 describe('mission task creators claim their session in the task INSERT', () => {
-  const inserts = collectSourceFiles(SRC_ROOT).flatMap((file) =>
+  const inserts = collectSourceFiles().flatMap((file) =>
     findTaskInserts(
       readFileSync(file, 'utf8'),
       path.relative(SRC_ROOT, file).split(path.sep).join('/')

@@ -152,6 +152,8 @@ async function setupApiMocks(
     workspace?: Record<string, unknown>;
     /** Body of GET /sessions/:id/agent-credential (which account ran the session). */
     credential?: Record<string, unknown> | null;
+    /** The session's effective configuration (model, effort, permissions, skill). */
+    runtime?: Record<string, unknown> | null;
   } = {}
 ) {
   const session = opts.session ?? makeSession();
@@ -267,7 +269,7 @@ async function setupApiMocks(
         return respond(200, { messages: sorted.slice(0, limit), hasMore: sorted.length > limit });
       }
       if (subPath.match(/\/sessions\/[^/]+\/agent-credential$/)) {
-        return respond(200, { credential: opts.credential ?? null });
+        return respond(200, { credential: opts.credential ?? null, runtime: opts.runtime ?? null });
       }
       if (subPath === '/tasks') return respond(200, { tasks, nextCursor: null });
       if (subPath.match(/\/tasks\//)) return respond(200, { id: 'task-1', status: 'in_progress' });
@@ -880,6 +882,71 @@ test.describe('Session details: which account ran it', () => {
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, `session-details-credential-member-${viewportName()}`);
+  });
+});
+
+test.describe('Session details: effective configuration', () => {
+  test('model, effort, permissions and skill', async ({ page }) => {
+    await setupApiMocks(page, {
+      runtime: {
+        agentType: 'claude-code',
+        model: 'claude-opus-5-5',
+        effort: 'max',
+        permissionMode: 'bypassPermissions',
+        opencodeProvider: null,
+        skillName: 'do',
+      },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    const configuration = page.getByTestId('session-run-configuration');
+    await expect(configuration).toBeVisible();
+    await expect(configuration).toContainText('claude-opus-5-5');
+    await expect(configuration).toContainText('Max');
+    await expect(configuration).toContainText('Bypass Permissions');
+    await configuration.scrollIntoViewIfNeeded();
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, `session-details-configuration-${viewportName()}`);
+  });
+
+  test('long custom model id and skill name wrap without overflow', async ({ page }) => {
+    await setupApiMocks(page, {
+      runtime: {
+        agentType: 'opencode',
+        model:
+          'custom-provider/an-extremely-long-self-hosted-model-identifier-without-any-spaces-0123456789abcdef',
+        effort: null,
+        permissionMode: 'acceptEdits',
+        opencodeProvider: 'custom',
+        skillName:
+          'Reconcile <script>alert(1)</script> branches across every repository Ω — a deliberately long skill name',
+      },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    const configuration = page.getByTestId('session-run-configuration');
+    await expect(configuration).toBeVisible();
+    await expect(configuration).toContainText('Custom (OpenAI-compatible)');
+    await expect(configuration).toContainText('<script>alert(1)</script>');
+    await expect(configuration).not.toContainText('Effort');
+    await configuration.scrollIntoViewIfNeeded();
+    const box = await configuration.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, `session-details-configuration-long-${viewportName()}`);
+  });
+
+  test('no section for sessions without a recorded configuration', async ({ page }) => {
+    await setupApiMocks(page, { runtime: null });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    await expect(page.getByTestId('session-header-details')).toBeVisible();
+    await expect(page.getByTestId('session-run-configuration')).toHaveCount(0);
   });
 });
 

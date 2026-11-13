@@ -12,6 +12,7 @@ import {
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
+import { type RuntimeSecretRequestSettingName } from './runtime-secret-request-settings-definition';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
 
 export type AdminSettingValue = boolean | number | string | readonly string[] | null;
@@ -25,6 +26,7 @@ export type AdminSettingName =
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
+  | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
   | NodeTunnelSettingName
@@ -103,6 +105,9 @@ export type AdminSettingName =
   | 'operations.samOperatorStreamMaxSubscribers'
   | 'operations.githubTriggerQueueMaxPendingLimit'
   | 'operations.githubTriggerQueueTtlSecondsLimit'
+  | 'operations.webhookQueueMaxPending'
+  | 'operations.webhookQueueTtlSeconds'
+  | 'operations.webhookSignatureToleranceSeconds'
   | 'operations.pullRequestRefreshCap'
   | 'operations.pullRequestRefreshTtlSeconds'
   | 'operations.pullRequestRefreshBudgetPerHour'
@@ -124,13 +129,7 @@ export interface AdminSettingDefinition {
   readonly type: AdminSettingType;
   readonly defaultValue: AdminSettingValue;
   readonly category:
-    | 'OAuth'
-    | 'Connector'
-    | 'Operations'
-    | 'Collaboration'
-    | 'Chat'
-    | 'AI models'
-    | 'Email';
+    'OAuth' | 'Connector' | 'Operations' | 'Collaboration' | 'Chat' | 'AI models' | 'Email';
   readonly description: string;
   readonly secret: boolean;
   readonly risky: boolean;

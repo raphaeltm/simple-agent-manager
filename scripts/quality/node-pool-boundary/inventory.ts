@@ -29,11 +29,7 @@ export interface AllocationWriterInventoryEntry {
  * routes through shared admission or is deliberately re-classified.
  */
 export type AllocationEntrypointStatus =
-  | 'canonical'
-  | 'role-adapter'
-  | 'runtime-adapter'
-  | 'runtime-dispatch'
-  | 'unreviewed-bypass';
+  'canonical' | 'role-adapter' | 'runtime-adapter' | 'runtime-dispatch' | 'unreviewed-bypass';
 
 export interface AllocationEntrypointInventoryEntry {
   filePath: string;

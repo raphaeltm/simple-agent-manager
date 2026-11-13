@@ -122,7 +122,7 @@ The tells:
 
 - Task: `tasks/archive/2026-08-23-knowledge-injection-relevance-ranking.md` (moves to
   `tasks/archive/` on completion); research `/engineering/research/token-optimization-research.md` §3.2, §8/R3
-- Implementation: `apps/api/src/durable-objects/project-data/knowledge.ts`
+- Implementation: `packages/project-data/src/do/knowledge.ts`
   (`getAllHighConfidenceKnowledge`, `getKnowledgeEntityIndex`)
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` — a signal that
   cannot answer the question being asked of it; "the symptom is an absence"

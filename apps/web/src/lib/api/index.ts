@@ -520,6 +520,7 @@ export type {
   WorkspaceResourceToolSpan,
 } from './resource-timeline';
 export { getSessionResourceTimeline, getSessionResourceTimelineChunk } from './resource-timeline';
+export { declineSecretRequest, fulfillSecretRequest, getSecretRequest } from './secret-requests';
 export {
   getSessionAccess,
   resumeChatSessionAgent,
@@ -600,6 +601,7 @@ export {
   previewWebhookTrigger,
   rotateWebhookTriggerToken,
   runTrigger,
+  setWebhookSigningSecret,
   testTrigger,
   updateTrigger,
 } from './triggers';

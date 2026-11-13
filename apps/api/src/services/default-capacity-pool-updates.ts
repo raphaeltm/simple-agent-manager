@@ -1,3 +1,6 @@
+import {
+  capacityCandidateIdForRole,
+} from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityExhaustionPolicy,
   CapacityPoolStatus,
@@ -11,7 +14,6 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
-import { capacityCandidateIdForRole } from './capacity-pool-workload-roles';
 import type { DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
 import {
   publishSourceSettingsOnly,

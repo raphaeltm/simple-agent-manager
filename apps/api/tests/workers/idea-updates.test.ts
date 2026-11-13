@@ -1,15 +1,12 @@
+import type { OperationError } from '@simple-agent-manager/operations';
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from '@simple-agent-manager/operations';
+import { samIdeaUpdate, samIdeaUpdatesList } from '@simple-agent-manager/operations';
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
-import type { OperationError } from '../../src/operations/errors';
-import {
-  addIdeaUpdate,
-  deleteIdeaUpdate,
-  listIdeaUpdates,
-} from '../../src/operations/idea-update-core';
-import { samIdeaUpdate, samIdeaUpdatesList } from '../../src/operations/platform-operations';
-import type { OperationContext } from '../../src/operations/types';
+import { createOperationPorts } from '../../src/operation-ports';
 import { handleUpdateIdea } from '../../src/routes/mcp/idea-tools';
 import { CONNECTOR_DEFAULTS } from '../../src/services/connector-settings';
 import type { McpTokenData } from '../../src/services/mcp-token';
@@ -43,11 +40,13 @@ const agentSession = `idea-agent-${suffix}`;
 const testEnv = env as unknown as Env;
 const ownerContext: OperationContext = {
   env: testEnv,
+  ports: createOperationPorts(testEnv),
   requestId: 'test',
   actor: { userId: owner, via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
 };
 const memberContext: OperationContext = {
   env: testEnv,
+  ports: createOperationPorts(testEnv),
   requestId: 'test',
   actor: { userId: member, via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
 };
@@ -275,6 +274,7 @@ describe('idea updates through real D1 and ProjectData SQLite', () => {
     await seedTask(connectorIdea, project, owner, { status: 'draft', isIdea: true });
     const connectorContext: OperationContext = {
       env: testEnv,
+      ports: createOperationPorts(testEnv),
       requestId: 'connector-test',
       actor: { userId: owner, via: 'connector', scopes: new Set(['sam.read', 'sam.write']) },
       connectorSettings: CONNECTOR_DEFAULTS,

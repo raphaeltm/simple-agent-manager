@@ -1,4 +1,10 @@
 import {
+  parseLegacyVmSize,
+  type PersistedTaskResourcePlanReadResult,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from '@simple-agent-manager/scheduler-core';
+import {
   type AgentProfileRuntime,
   type CredentialSource,
   DEFAULT_VM_SIZE,
@@ -17,12 +23,6 @@ import type {
   TaskStartPlacementInput,
   TaskStartPlacementWithCredential,
 } from './placement-resolver';
-import {
-  parseLegacyVmSize,
-  type PersistedTaskResourcePlanReadResult,
-  readPersistedTaskResourcePlan,
-  ResourceRequirementsValidationError,
-} from './resource-requirements-input';
 import type { RecoveryContext } from './session-recovery-context';
 import type { SessionRecoveryOptions } from './session-recovery-eviction';
 import { resolveRecoveryLocationIntent } from './session-recovery-location';

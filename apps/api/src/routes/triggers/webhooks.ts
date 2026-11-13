@@ -1,17 +1,32 @@
-import type { TriggerPreviewResponse, WebhookCredential } from '@simple-agent-manager/shared';
+import {
+  isWebhookSignedScheme,
+  type SetWebhookSigningSecretResponse,
+  type TriggerPreviewResponse,
+  type WebhookCredential,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
+import { maybeJsonRecord } from '../../lib/runtime-validation';
 import { buildTrustedApiUrl } from '../../lib/trusted-origins';
 import { getAuth, rejectAgentSignInSession } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { jsonValidator, TriggerPreviewSchema } from '../../schemas';
 import { renderTemplate } from '../../services/trigger-template';
+import {
+  setWebhookSigningSecret,
+  validateWebhookSigningSecret,
+} from '../../services/webhook-signed-store';
 import { getWebhookTriggerLimits } from '../../services/webhook-trigger-config';
+import {
+  toWebhookTriggerConfig,
+  WEBHOOK_BEARER_INGEST_PATH,
+} from '../../services/webhook-trigger-config-rows';
 import {
   buildWebhookContext,
   evaluateWebhookFilters,
@@ -21,14 +36,13 @@ import {
   InvalidWebhookDeliveryCursorError,
   listWebhookDeliveries,
   rotateWebhookToken,
-  toWebhookTriggerConfig,
 } from '../../services/webhook-trigger-store';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
 
 const webhookRoutes = new Hono<{ Bindings: Env }>();
 
 function endpointUrl(env: Env): string {
-  return buildTrustedApiUrl(env, '/api/webhooks/ingest');
+  return buildTrustedApiUrl(env, WEBHOOK_BEARER_INGEST_PATH);
 }
 
 function credential(env: Env, token: string): WebhookCredential {
@@ -52,7 +66,7 @@ async function loadWebhookTrigger(env: Env, projectId: string, triggerId: string
     .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)))
     .get();
   if (!row) throw errors.notFound('Webhook trigger');
-  return { ...row, config: toWebhookTriggerConfig(row.config) };
+  return { ...row, config: toWebhookTriggerConfig(row.config, env) };
 }
 
 webhookRoutes.post('/:triggerId/webhook/rotate', rejectAgentSignInSession(), async (c) => {
@@ -64,6 +78,45 @@ webhookRoutes.post('/:triggerId/webhook/rotate', rejectAgentSignInSession(), asy
   if (!token) throw errors.notFound('Webhook trigger');
   c.header('Cache-Control', 'private, no-store');
   return c.json({ webhookCredential: credential(c.env, token.token) });
+});
+
+/**
+ * Saves or replaces the signing secret of a signed automation. Write-only: the value is
+ * encrypted at rest, no endpoint returns it, and it is never echoed in an error or a log line.
+ * The body is read by hand instead of through the shared validator, whose messages quote the
+ * offending value.
+ */
+// An agent sign-in session must not install a lasting credential: whoever knows the signing
+// secret can start runs as the owner after that session has expired (same as /rotate).
+webhookRoutes.put('/:triggerId/webhook/signing-secret', rejectAgentSignInSession(), async (c) => {
+  const projectId = requireRouteParam(c, 'projectId');
+  const triggerId = requireRouteParam(c, 'triggerId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  const userId = getAuth(c).user.id;
+  await requireProjectTaskWrite(db, projectId, userId);
+  const { config } = await loadWebhookTrigger(c.env, projectId, triggerId);
+  if (!isWebhookSignedScheme(config.verification.scheme)) {
+    throw errors.badRequest('This automation uses a SAM token, not a signing secret');
+  }
+  let parsed: unknown = null;
+  try {
+    parsed = await c.req.json();
+  } catch {
+    parsed = null;
+  }
+  const checked = validateWebhookSigningSecret(maybeJsonRecord(parsed)?.secret);
+  if (!checked.ok) throw errors.badRequest(checked.message);
+  const signingSecret = await setWebhookSigningSecret(c.env, {
+    projectId,
+    triggerId,
+    userId,
+    secret: checked.secret,
+  });
+  if (!signingSecret) throw errors.notFound('Webhook trigger');
+  log.info('trigger.webhook_signing_secret_saved', { triggerId, projectId, userId });
+  c.header('Cache-Control', 'private, no-store');
+  const response: SetWebhookSigningSecretResponse = { signingSecret };
+  return c.json(response);
 });
 
 webhookRoutes.get('/:triggerId/webhook/deliveries', async (c) => {

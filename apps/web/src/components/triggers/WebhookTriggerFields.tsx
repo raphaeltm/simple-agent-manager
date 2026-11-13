@@ -1,4 +1,7 @@
-import type { WebhookTriggerFilter } from '@simple-agent-manager/shared';
+import {
+  isWebhookFilterPresenceOperator,
+  type WebhookTriggerFilter,
+} from '@simple-agent-manager/shared';
 import { Plus, Trash2 } from 'lucide-react';
 
 import { FOCUS_RING } from './trigger-form-support';
@@ -131,17 +134,20 @@ export function WebhookTriggerFields({
                   const operator = event.target.value as WebhookTriggerFilter['operator'];
                   updateFilter(
                     index,
-                    operator === 'exists' ? { operator, value: undefined } : { operator, value: '' }
+                    isWebhookFilterPresenceOperator(operator)
+                      ? { operator, value: undefined }
+                      : { operator, value: filter.value ?? '' }
                   );
                 }}
                 className={`mt-1 w-full px-2 py-1.5 rounded-md text-sm text-fg-primary ${FOCUS_RING}`}
               >
                 <option value="exists">Exists</option>
+                <option value="notExists">Does not exist</option>
                 <option value="equals">Equals</option>
                 <option value="contains">Contains</option>
               </select>
             </label>
-            {filter.operator === 'exists' ? (
+            {isWebhookFilterPresenceOperator(filter.operator) ? (
               <span className="sm:col-span-2" />
             ) : (
               <>

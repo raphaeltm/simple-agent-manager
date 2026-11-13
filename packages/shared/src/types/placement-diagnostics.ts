@@ -2,7 +2,7 @@
  * Canonical placement diagnostics — the stable "why this node / why queued /
  * why rejected" contract between the placement runtime and its displays.
  *
- * The API builds these (services/placement-diagnostics.ts); the web surfaces
+ * The API builds these (scheduler-core placement-diagnostics.ts); the web surfaces
  * render them (D3b). Keeping the shape here means a display can never
  * reconstruct placement reasoning from incidental fields it happened to find on
  * a node row.

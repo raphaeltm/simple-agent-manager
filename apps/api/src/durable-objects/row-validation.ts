@@ -8,11 +8,10 @@
  * NULL constraint) must never throw the whole read — see
  * .claude/rules/50-list-read-row-fault-isolation.md.
  *
- * The throwing single-row validator (`parseRow`) already exists in
- * `project-data/row-schemas/core.ts` and is fully generic (no project-data
- * coupling). This module reuses it — matching the existing cross-DO
- * precedent in `notification-row-schemas.ts` — and adds the two
- * fault-isolated wrappers DOs outside project-data need:
+ * The throwing single-row validator (`parseRow`) and its two fault-isolated
+ * wrappers live in `@simple-agent-manager/worker-core` (`row-parsing.ts`; fully
+ * generic, and ProjectData uses them too). This module re-exports them for the
+ * worker's other DOs:
  *
  *  - `mapRows`: validate a LIST of rows, skipping (and warn-logging) any row
  *    that fails validation instead of throwing the whole read.
@@ -26,77 +25,13 @@
  * no `type` column at all, so `type` is optional here to cover both DOs'
  * SELECTs with one schema.
  */
+import { mapRows, parseRow, parseRowOrNull } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import { log } from '../lib/logger';
-import { parseRow } from './project-data/row-schemas';
-
-export { parseRow };
+/** Generic DO row parsers live in worker-core; re-exported for the worker's Durable Objects. */
+export { mapRows, parseRow, parseRowOrNull };
 
 /** Best-effort row identifier for skip-log diagnostics; `idKey` defaults to `id`. */
-function bestEffortRowId(row: Record<string, unknown>, idKey: string): string | null {
-  return typeof row[idKey] === 'string' ? row[idKey] : null;
-}
-
-/**
- * Map a LIST of raw DO-SQLite rows through a Valibot schema. A row that
- * fails validation is skipped and warn-logged — never thrown — so one
- * malformed row cannot 500 the whole list read. See .claude/rules/50.
- *
- * `idKey` names the row's natural best-effort identifier column for the skip
- * log (defaults to `id`; pass e.g. `'mission_id'` for tables whose primary
- * key uses a different column name).
- */
-export function mapRows<TOutput>(
-  rows: readonly Record<string, unknown>[],
-  schema: v.GenericSchema<unknown, TOutput>,
-  context: string,
-  idKey: string = 'id'
-): TOutput[] {
-  const out: TOutput[] = [];
-  let skipped = 0;
-
-  for (const row of rows) {
-    try {
-      out.push(parseRow(schema, row, context));
-    } catch (e) {
-      skipped++;
-      log.warn(`${context}_row_skipped`, { rowId: bestEffortRowId(row, idKey), error: String(e) });
-    }
-  }
-
-  if (skipped > 0) {
-    log.warn(`${context}_degraded`, { fetched: rows.length, returned: out.length, skipped });
-  }
-
-  return out;
-}
-
-/**
- * Parse a single optional row (e.g. `rows[0]`), degrading to `null` + a warn
- * log on validation failure instead of throwing. For hot single-row lookups
- * where the caller already treats a missing row as null/undefined (rate
- * limit bookkeeping, FTS rowid lookups, `LIMIT 1` queries).
- *
- * `idKey` names the row's natural best-effort identifier column for the skip
- * log (defaults to `id`; pass e.g. `'mission_id'` for tables whose primary
- * key uses a different column name).
- */
-export function parseRowOrNull<TOutput>(
-  row: Record<string, unknown> | undefined,
-  schema: v.GenericSchema<unknown, TOutput>,
-  context: string,
-  idKey: string = 'id'
-): TOutput | null {
-  if (!row) return null;
-  try {
-    return parseRow(schema, row, context);
-  } catch (e) {
-    log.warn(`${context}_row_skipped`, { rowId: bestEffortRowId(row, idKey), error: String(e) });
-    return null;
-  }
-}
-
 // =============================================================================
 // Shared row schemas — ProjectAgent + SamSession
 // =============================================================================

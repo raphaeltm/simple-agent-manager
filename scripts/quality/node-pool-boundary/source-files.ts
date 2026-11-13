@@ -25,7 +25,9 @@ export interface BoundaryViolation {
  */
 export const SCANNED_SOURCE_ROOTS = [
   'apps/api/src',
+  'packages/operations/src',
   'packages/providers/src',
+  'packages/scheduler-core/src',
   'packages/shared/src',
 ] as const;
 

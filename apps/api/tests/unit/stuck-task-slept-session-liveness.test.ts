@@ -1,11 +1,10 @@
+import { runMigrations } from '@simple-agent-manager/project-data/internal/do/migrations';
+import { upsertActivityState } from '@simple-agent-manager/project-data/internal/do/session-state';
+import type { Env as ProjectDataEnv } from '@simple-agent-manager/project-data/internal/do/types';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
-import { runMigrations } from '../../src/durable-objects/migrations';
-import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
-import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-data/task-runtime-liveness';
-import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import {
@@ -13,6 +12,7 @@ import {
   needsSessionResumabilityProbe,
   needsTaskSupersessionProbe,
 } from '../../src/services/task-runtime-liveness';
+import { getLocalTaskRuntimeLiveness } from '../../src/services/task-runtime-liveness-local';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 

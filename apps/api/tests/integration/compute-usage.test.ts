@@ -26,7 +26,7 @@ import {
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 describe('compute usage metering pipeline', () => {
-  const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
+  const schemaFile = readFileSync(resolve(process.cwd(), '../../packages/worker-core/src/schema.ts'), 'utf8');
   const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/compute-usage.ts'), 'utf8');
   const nodeUsageServiceFile = ['node-usage-calculation.ts', 'node-usage-summaries.ts']
     .map((file) => readFileSync(resolve(process.cwd(), 'src/services', file), 'utf8'))

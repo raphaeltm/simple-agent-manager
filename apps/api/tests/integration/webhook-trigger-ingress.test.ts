@@ -163,6 +163,17 @@ describe('generic webhook ingress vertical slice', () => {
         'utf8'
       )
     );
+    // The queue columns: the signed-webhook migration indexes them.
+    sqlite.exec(
+      'ALTER TABLE trigger_executions ADD COLUMN queue_expires_at TEXT;' +
+        'ALTER TABLE trigger_executions ADD COLUMN subject_key TEXT;'
+    );
+    sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0235_signed_webhook_triggers.sql', import.meta.url),
+        'utf8'
+      )
+    );
     createAgentEmailTables(sqlite);
     taskRunnerStates = new Map();
     token = generateWebhookToken();
@@ -487,7 +498,11 @@ From that information, I'd like you to derive something interesting to append to
     );
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ accepted: false, message: 'Not found' });
+    expect(await response.json()).toEqual({
+      accepted: false,
+      error: 'NOT_FOUND',
+      message: 'Not found',
+    });
     expect(submitter).not.toHaveBeenCalled();
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM webhook_deliveries').get()).toEqual({
       count: 0,
@@ -563,6 +578,7 @@ From that information, I'd like you to derive something interesting to append to
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       accepted: false,
+      error: 'SERVICE_UNAVAILABLE',
       message: 'Webhook could not be processed',
     });
     expect(submitter).not.toHaveBeenCalled();
@@ -584,6 +600,7 @@ From that information, I'd like you to derive something interesting to append to
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       accepted: false,
+      error: 'SERVICE_UNAVAILABLE',
       message: 'Webhook trigger is not configured',
     });
     expect(submitter).not.toHaveBeenCalled();
@@ -632,7 +649,11 @@ From that information, I'd like you to derive something interesting to append to
 
     expect(accepted.status).toBe(202);
     expect(limited.status).toBe(429);
-    expect(await limited.json()).toEqual({ accepted: false, message: 'Too many requests' });
+    expect(await limited.json()).toEqual({
+      accepted: false,
+      error: 'TOO_MANY_REQUESTS',
+      message: 'Too many requests',
+    });
     expect(submitter).toHaveBeenCalledOnce();
     expect(
       rows<{ outcome: string; error_code: string | null }>(
@@ -810,6 +831,7 @@ From that information, I'd like you to derive something interesting to append to
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       accepted: false,
+      error: 'SERVICE_UNAVAILABLE',
       message: 'Webhook could not be processed',
     });
     expect(
@@ -1463,7 +1485,6 @@ From that information, I'd like you to derive something interesting to append to
     expect(await findWebhookTriggerByToken(env, token)).toBeNull();
     expect(await findWebhookTriggerByToken(env, rotated!.token)).toMatchObject({
       trigger: { id: TRIGGER_ID, projectId: 'project-1' },
-      config: { tokenLastFour: rotated!.tokenLastFour },
     });
     const stored = sqlite
       .prepare('SELECT token_hash, token_last_four, token_rotated_at FROM webhook_trigger_configs')

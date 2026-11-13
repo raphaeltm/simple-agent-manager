@@ -4,13 +4,14 @@
  * Health is derived with the same function the node UI uses (`deriveNodeHealth`), so a node
  * reads the same here as on its page. Lists disclose their total (`.claude/rules/65`).
  */
+import { neutralizeUntrustedText } from '@simple-agent-manager/operations';
+
 import type { Env } from '../../env';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
-import { neutralizeUntrustedText } from '../../operations/untrusted-text';
 import { deriveNodeHealth } from '../node-health';
 import { getStatus as getNodeLifecycleStatus } from '../node-lifecycle';
 import { listNodeLogCaptures } from '../node-log-capture-read';
-import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-resource-capacity';
+import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-reservation-usage';
 
 type Row = Record<string, unknown>;
 
