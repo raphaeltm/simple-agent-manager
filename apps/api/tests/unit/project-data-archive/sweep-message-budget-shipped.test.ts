@@ -1,11 +1,13 @@
 /**
  * What the shipped `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` costs and buys.
  *
- * The behavioural half lives in `tests/workers/project-data-archive-sweep-throughput.test.ts`,
- * which drives the real sweep and proves the budget is a SELECTION ceiling: below it a larger
- * session is invisible, at it the session archives with its transcript intact. These cases
- * cover the half that behaviour test cannot see — what the ceiling does to the daily write
- * allowance, which is a different binding constraint and an operating-cost question.
+ * Since 2026-11-13 the unscoped sweep no longer selects by this budget: a migration is a
+ * resumable cursor and the only per-session selection limit is the ceiling derived from the
+ * daily write allowance (`tests/workers/project-data-archive-sweep-throughput.test.ts` drives a
+ * session above it to publication). The budget remains the operator-scoped canary's packing
+ * budget. These cases pin what sessions of this size cost the daily write allowance, which is
+ * the binding constraint and an operating-cost question. The history below records why the
+ * value was raised while it was still a selection ceiling.
  *
  * Measured in production on 2026-09-20 (root ProjectData object at ~99.85% of its configured
  * 10 GB limit):

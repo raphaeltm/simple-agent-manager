@@ -130,35 +130,23 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "1080000"
 # publishes ~6 small sessions (8-14 s each, measured 2026-11-12), so 50 is a safety cap that
 # wall time reaches first; it binds only for a run of near-empty sessions. Code default is 10.
 PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "50"
-# Largest session (by message_count) the unscoped sweep will select. Since 2026-11-12 this is
-# only a per-candidate ceiling (`sweepMessageCeiling` = min(this, the ceiling derived from
-# _DAILY_WRITE_BUDGET)), not a per-tick total; the tick is bounded by _WALL_TIME_MS. When
-# _COMPACT_ENABLED is true selectCandidates binds it into `AND ss.message_count <= ?`, so a
-# session larger than this is INVISIBLE to every tick until it is raised. Treat a change here
-# as a change to WHICH sessions can ever be archived. The operator-scoped canary still uses it as
-# a cumulative budget for its up-front selection.
-#
-# 2026-09-20: 10000 (was 5000). Step 1 of a staged raise toward the code default of 20000;
-# promote only on staged evidence, never as a routine bump. MAX is 5_000_000.
-# Two constraints to keep in mind when changing it:
-#   - Bigger candidates are the better buy per write (the fixed 1000-unit per-session
-#     reservation amortises further), but the allowance then admits fewer sessions per UTC
-#     window than the cadence has ticks, so _DAILY_WRITE_BUDGET becomes the binding
-#     constraint and later ticks report `window_exhausted` — normal backpressure, not an alert.
-#   - Per-candidate risk scales with the candidate: chunk count, seal read-back, lease headroom
-#     against _LEASE_MS, and the cost of a failed attempt (copySourceChunks restarts at ordinal
-#     0 and re-reserves the full estimate; _POISON_AFTER_ATTEMPTS failures strand the session).
-# Sizing evidence, rollout stages and the production measurements behind this value live in
-# tasks/archive/2026-09-20-archive-sweep-throughput-step3.md and PR #2109. Behaviour is pinned by
-# tests/unit/project-data-archive/sweep-message-budget-shipped.test.ts and
-# tests/workers/project-data-archive-sweep-throughput.test.ts.
+# Cumulative message_count the operator-scoped canary packs into one run (largest first), and its
+# SQL ceiling for unnamed sessions. Since 2026-11-13 the UNSCOPED sweep no longer uses it: a
+# migration is a resumable cursor that copies, verifies and reclaims across ticks, so the only
+# per-session limit there is the ceiling derived from _DAILY_WRITE_BUDGET (`sweepMessageCeiling`).
+# Until then this was a per-candidate selection ceiling, and every session above it (77% of
+# eligible messages on 2026-11-11) was invisible to every tick.
+# History: 5000 until 2026-09-20, then 10000 (tasks/archive/2026-09-20-archive-sweep-throughput-step3.md,
+# PR #2109). Code default 20000, MAX 5_000_000. Pinned by
+# tests/unit/project-data-archive/sweep-message-budget-shipped.test.ts.
 PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "10000"
-# Soft budget checked between candidates, so a tick runs up to this plus one candidate. 60 s
-# (was 10 s until 2026-11-12, which fit exactly one small session). Measured cost is ~12 ms per
-# message plus ~8 s fixed per session, so a tick moves ~5k messages or ~6 small sessions; at 80
-# ticks/day that is ~400k messages/day against ~85k ingested. Worst case per tick: 60 s plus one
-# _SWEEP_MESSAGE_BUDGET-sized candidate (~2-3 min), inside the 420 s cadence lease
-# (wall + _LEASE_MS + 60 s). Code fallback stays 5 s.
+# Tick deadline. Checked between candidates and, since 2026-11-13, inside a migration too: a
+# migration that has advanced pauses at the deadline (copy chunk, R2 verification page or phase
+# boundary) and the next tick resumes it, so a tick runs up to this plus one in-flight RPC. The
+# longest single RPC is the flip's terminal-version recompute on the root (~0.09 ms/message in
+# production, so ~9 s at the 100k-message cap). 60 s (was 10 s until 2026-11-12, which fit
+# exactly one small session); ~12 ms per message plus ~8 s fixed per small session, so at 80
+# ticks/day ~400k messages/day against ~85k ingested. Code fallback stays 5 s.
 PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "60000"
 PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS = "4"
 PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY = "4"

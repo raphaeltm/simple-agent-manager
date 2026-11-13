@@ -725,16 +725,18 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     );
   });
 
-  it('abandon returns a fenced pre-copy migration to root so the session reads again', async () => {
+  it('abandon returns a fenced pre-copy migration to root so the session accepts writes again', async () => {
     const projectId = `archive-abandon-${crypto.randomUUID()}`;
     const { sessionId } = await seedTerminalSessionWithMessages(projectId, 5);
     const migrationId = crypto.randomUUID();
     await seedFailedPreCopyMigration(projectId, sessionId, migrationId);
 
     await withArchiveEnv({ PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true' }, async () => {
-      // Fenced: the exact read owner is neither root nor a published shard.
+      // A `migrating` session reads from the root (it still holds every row) while writes stay
+      // fenced until the migration publishes or is abandoned.
+      expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(5);
       await expect(
-        projectDataService.getMessageCount(testEnv, projectId, sessionId)
+        projectDataService.persistMessage(testEnv, projectId, sessionId, 'user', 'fenced', null)
       ).rejects.toMatchObject({ code: 'PROJECT_DATA_ARCHIVE_ROUTING_UNSAFE' });
 
       const abandoned = await abandonProjectDataArchiveMigration(testEnv, {
@@ -1137,7 +1139,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
       // The message must name the recovery action, not just the symptom (`.claude/rules/72`),
       // and must say that waiting will not help — that was the false signal for four days.
       expect(stalled?.last_error).toContain('Waiting will not clear this');
-      expect(stalled?.last_error).toContain('PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET');
+      expect(stalled?.last_error).toContain('PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT');
       expect(stalled?.last_error).toContain('PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET');
     });
 

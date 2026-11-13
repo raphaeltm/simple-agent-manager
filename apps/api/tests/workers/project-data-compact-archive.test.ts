@@ -818,7 +818,7 @@ describe('compact archive concurrent mutation fencing', () => {
 });
 
 describe('compact coordinator restart and contention', () => {
-  it('retains its journaled format and write admission after interruption before target creation', async () => {
+  it('retains its journaled format and its one reservation after interruption before target creation', async () => {
     await env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget').run();
     const projectId = `compact-resume-${crypto.randomUUID()}`;
     const { sessionId } = await seedTerminalSessionWithMessages(projectId, 10, true);
@@ -865,7 +865,13 @@ describe('compact coordinator restart and contention', () => {
       .bind(projectId)
       .first();
     expect(journal).toMatchObject({ storage_format: 'r2-gzip-v1', state: 'failed' });
-    const paused = await runScopedProjectDataArchiveCanary(
+    // The migration reserved its whole estimate when it was journaled, so resuming it does not
+    // charge the allowance again: a zero allowance pauses admission of NEW migrations only. It
+    // also keeps the format it was journaled with, although compact is now disabled.
+    const reservedBefore = await env.DATABASE.prepare(
+      `SELECT reserved_writes FROM project_data_archive_write_budget WHERE id = 'global'`
+    ).first<{ reserved_writes: number }>();
+    const resumed = await runScopedProjectDataArchiveCanary(
       {
         ...base,
         PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false',
@@ -873,12 +879,11 @@ describe('compact coordinator restart and contention', () => {
       },
       args
     );
-    expect(paused.stats).toMatchObject({ migrated: 0, failed: 0, budgetDeferred: 1 });
-    const resumed = await runScopedProjectDataArchiveCanary(
-      { ...base, PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false' },
-      args
-    );
-    expect(resumed.stats).toMatchObject({ migrated: 1, failed: 0 });
+    expect(resumed.stats).toMatchObject({ migrated: 1, failed: 0, budgetDeferred: 0 });
+    const reservedAfter = await env.DATABASE.prepare(
+      `SELECT reserved_writes FROM project_data_archive_write_budget WHERE id = 'global'`
+    ).first<{ reserved_writes: number }>();
+    expect(reservedAfter?.reserved_writes).toBe(reservedBefore?.reserved_writes);
     const location = await readLocation(projectId, sessionId);
     if (!location) throw new Error('Missing location');
     expect(await countTargetMessages(location.owner_name, sessionId)).toBe(0);
