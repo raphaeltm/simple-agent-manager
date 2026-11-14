@@ -13,6 +13,7 @@
  * the real writers (`reportActivity`, `failSession`, `createAttentionMarker`), never seeded into
  * `session_state` directly (`.claude/rules/62`).
  */
+import { SHIPPED_DAILY_WRITE_BUDGET } from '../helpers/archive-sweep-ceiling';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
@@ -50,7 +51,7 @@ function sweepEnv(overrides: Record<string, string> = {}) {
     PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
     PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '50',
     PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '60000',
-    PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '2400000',
+    PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(SHIPPED_DAILY_WRITE_BUDGET),
     ...overrides,
   };
 }
