@@ -49,28 +49,28 @@ Remove the dead `GCP_DISK_SIZE_GB`.
 
 ## Implementation Checklist
 
-- [ ] providers: `GcpBootDiskPolicy` + `gcpBootDiskSizeGb(vcpus, policy)` with DEFAULT constants (20/50)
-- [ ] providers: GcpProvider takes the policy instead of a flat `diskSizeGb`; catalog offerings size disk per type
-- [ ] providers: createVM disk precedence: explicit `bootDiskSizeGb` > plan `resources.diskGb` > policy(vCPUs)
-- [ ] providers: static GCP offerings and `SIZE_MAP` storage agree with the default policy (large → 80 GB)
-- [ ] providers: price includes the boot disk (pd-balanced capacity SKU per region) when its price is known
-- [ ] api: `gcpCatalog.bootDiskGbPerVcpu` and `gcpCatalog.bootDiskMinGb` admin settings, typed defaults
-- [ ] api: one helper builds GcpProvider with the resolved policy at every construction site
-- [ ] remove `GCP_DISK_SIZE_GB` (env.ts, .env.example, configuration.md, env-reference skill, runtime-tunables
+- [x] providers: `GcpBootDiskPolicy` + `gcpBootDiskSizeGb(vcpus, policy)` with DEFAULT constants (20/50)
+- [x] providers: GcpProvider takes the policy instead of a flat `diskSizeGb`; catalog offerings size disk per type
+- [x] providers: createVM disk precedence: explicit `bootDiskSizeGb` > plan `resources.diskGb` > policy(vCPUs)
+- [x] providers: static GCP offerings and `SIZE_MAP` storage agree with the default policy (large → 80 GB)
+- [x] providers: price includes the boot disk (pd-balanced capacity SKU per region) when its price is known
+- [x] api: `gcpCatalog.bootDiskGbPerVcpu` and `gcpCatalog.bootDiskMinGb` admin settings, typed defaults
+- [x] api: one helper builds GcpProvider with the resolved policy at every construction site
+- [x] remove `GCP_DISK_SIZE_GB` (env.ts, .env.example, configuration.md, env-reference skill, runtime-tunables
       baseline, shared `DEFAULT_GCP_DISK_SIZE_GB`); document the new settings
-- [ ] tests: offering → candidate → plan → createVM body agree (160 GB for t2d-standard-8)
-- [ ] tests: existing 50 GB node stays inside reuse authority after candidate disk becomes 160 (real SQL)
-- [ ] tests: admin setting overrides change offering + VM size; floor applies to small types
-- [ ] tests: price includes disk; missing disk price keeps machine-only price with a distinct price source
+- [x] tests: offering → candidate → plan → createVM body agree (160 GB for t2d-standard-8)
+- [x] tests: existing 50 GB node stays inside reuse authority after candidate disk becomes 160 (real SQL)
+- [x] tests: admin setting overrides change offering + VM size; floor applies to small types
+- [x] tests: price includes disk; missing disk price keeps machine-only price with a distinct price source
 
 ## Acceptance Criteria
 
-- [ ] A t2d-standard-8 offering advertises 160 GB; candidate row disk 160 / boot-disk NULL; createVM body
+- [x] A t2d-standard-8 offering advertises 160 GB; candidate row disk 160 / boot-disk NULL; createVM body
       `diskSizeGb: "160"`; observed node capacity 160.
-- [ ] A running node created with 50 GB stays reusable (inside authority) after the refresh, with 50 GB capacity.
-- [ ] Changing the two admin settings changes the advertised and created size without a deploy.
-- [ ] Shown price includes the boot disk cost.
-- [ ] `GCP_DISK_SIZE_GB` no longer appears in code or docs.
+- [x] A running node created with 50 GB stays reusable (inside authority) after the refresh, with 50 GB capacity.
+- [x] Changing the two admin settings changes the advertised and created size without a deploy.
+- [x] Shown price includes the boot disk cost.
+- [x] `GCP_DISK_SIZE_GB` no longer appears in code or docs.
 - [ ] Staging: a real GCP VM boots with the scaled disk (checked at GCP and in node capacity), two default
       workspaces placed on it, then cleaned up.
 
@@ -80,3 +80,19 @@ Remove the dead `GCP_DISK_SIZE_GB`.
 - apps/api/src/services/provider-credentials.ts, provider-catalogs-build.ts, admin-settings-gcp-catalog-definitions.ts
 - packages/scheduler-core/src/placement-resolver-capacity-reuse.ts, apps/api/src/services/placement-authority.ts (read only; PR #2693 owns it)
 - Rules: 07 (dynamic runtime settings), 59, 62, 74, 81
+
+## Implementation Notes
+
+- `gcp-boot-disk.ts` holds the policy; `GcpProvider` takes it as its 6th constructor argument (was the
+  flat `diskSizeGb`). `native-vm-config.ts` accepts a machine-aware default (`DefaultBootDiskSizeGb`
+  function) so `gcp.ts` needs no legacy-size lookup (native-vm-boundary test).
+- createVM precedence: explicit `bootDiskSizeGb` > pool plan `resources.diskGb` > policy(vCPUs). A plan
+  made before the catalog refresh still says 50 and gets 50, matching its node row.
+- Price: `balancedDiskGibMonthly` per region from zonal "Balanced PD Capacity[ in <place>]" SKUs
+  (unit `GiBy.mo`, verified on the live catalog 2026-11-14: $0.10 US, $0.11 europe-west4).
+  Missing disk price → machine price alone, `priceSource: cloud-billing-catalog-machine-only`.
+- `createGcpProviderForEnv()` (apps/api/src/services/gcp-provider-factory.ts) replaces the 6 direct
+  constructions. Settings reads hit the per-isolate admin settings cache.
+- provider-credentials.ts is over 500 lines already; this change is net +1 line (call-site swaps), so no split.
+- Discrimination: replacing the catalog sizing with a flat 50 reddened the API refresh test (2 cases) and
+  the provider offering test; the boot-disk-column control proves the authority trap.
