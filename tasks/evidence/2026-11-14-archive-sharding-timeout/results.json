@@ -1,7 +1,7 @@
 {
   "ideaId": "01M7C75DDYYXGHDW5WW7X1M8WY",
-  "status": "in_progress",
-  "recordedAt": "2026-11-14T06:14:22.527823+00:00",
+  "status": "complete",
+  "recordedAt": "2026-11-14T06:23:03.547589+00:00",
   "codeCommit": "90994fa7a3024b5e6e922d1e1c9a7edb0d4ae2ab",
   "inputSha256": {
     "apps/api/tests/unit/durable-objects/project-data-archive-sharding.test.ts": "ae0674f1086c7f2ee6c94d95555101d6cf7a99beb0c64aa9a0252a4ca39d5cd7",
@@ -30,12 +30,12 @@
       "maxCommandSeconds": 42.835
     },
     "loaded": {
-      "fileRuns": 15,
-      "passedCases": 705,
+      "fileRuns": 30,
+      "passedCases": 1410,
       "failedCases": 0,
-      "targetMinMs": 3780.433,
-      "targetMedianMs": 4809.205,
-      "targetP95Ms": 5722.175,
+      "targetMinMs": 3621.808,
+      "targetMedianMs": 4123.388,
+      "targetP95Ms": 5637.365,
       "targetMaxMs": 5722.175,
       "maxCommandSeconds": 105.0
     }
@@ -190,6 +190,156 @@
       "target_ms": 5330.204,
       "cpu": 2,
       "load_cpu_s": 49.17
+    },
+    {
+      "mode": "loaded",
+      "run": 16,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 81.503,
+      "target_ms": 3954.148,
+      "cpu": 0,
+      "load_cpu_s": 38.04
+    },
+    {
+      "mode": "loaded",
+      "run": 17,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.266,
+      "target_ms": 4151.983,
+      "cpu": 0,
+      "load_cpu_s": 35.52
+    },
+    {
+      "mode": "loaded",
+      "run": 18,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.454,
+      "target_ms": 4006.32,
+      "cpu": 0,
+      "load_cpu_s": 35.6
+    },
+    {
+      "mode": "loaded",
+      "run": 19,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 77.532,
+      "target_ms": 4102.604,
+      "cpu": 0,
+      "load_cpu_s": 36.14
+    },
+    {
+      "mode": "loaded",
+      "run": 20,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 78.088,
+      "target_ms": 3956.014,
+      "cpu": 0,
+      "load_cpu_s": 36.39
+    },
+    {
+      "mode": "loaded",
+      "run": 21,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 81.281,
+      "target_ms": 3771.557,
+      "cpu": 1,
+      "load_cpu_s": 38.02
+    },
+    {
+      "mode": "loaded",
+      "run": 22,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 77.921,
+      "target_ms": 4320.949,
+      "cpu": 1,
+      "load_cpu_s": 36.65
+    },
+    {
+      "mode": "loaded",
+      "run": 23,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 77.558,
+      "target_ms": 3934.898,
+      "cpu": 1,
+      "load_cpu_s": 36.04
+    },
+    {
+      "mode": "loaded",
+      "run": 24,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 78.238,
+      "target_ms": 4243.463,
+      "cpu": 1,
+      "load_cpu_s": 36.61
+    },
+    {
+      "mode": "loaded",
+      "run": 25,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 77.687,
+      "target_ms": 3919.707,
+      "cpu": 1,
+      "load_cpu_s": 36.18
+    },
+    {
+      "mode": "loaded",
+      "run": 26,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 78.975,
+      "target_ms": 3621.808,
+      "cpu": 2,
+      "load_cpu_s": 36.85
+    },
+    {
+      "mode": "loaded",
+      "run": 27,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.564,
+      "target_ms": 4021.67,
+      "cpu": 2,
+      "load_cpu_s": 35.7
+    },
+    {
+      "mode": "loaded",
+      "run": 28,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 79.474,
+      "target_ms": 3810.842,
+      "cpu": 2,
+      "load_cpu_s": 37.03
+    },
+    {
+      "mode": "loaded",
+      "run": 29,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 76.494,
+      "target_ms": 4106.967,
+      "cpu": 2,
+      "load_cpu_s": 35.63
+    },
+    {
+      "mode": "loaded",
+      "run": 30,
+      "pass": 47,
+      "fail": 0,
+      "wall_s": 78.238,
+      "target_ms": 3871.422,
+      "cpu": 2,
+      "load_cpu_s": 36.57
     },
     {
       "mode": "normal",
@@ -574,7 +724,6 @@
     "doMigrationSafety": "passed"
   },
   "pendingReleaseGates": [
-    "final stability counts if status in_progress",
     "task completion review",
     "draft PR with needs-human-review",
     "technical CI (label intentionally blocks review-evidence check)",
