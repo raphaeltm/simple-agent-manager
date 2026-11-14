@@ -51,3 +51,7 @@ Coordinator requires actual CI wall-clock measurements for serial package concur
 ## Final CI budget selection
 
 Measured four-CPU runner: serial job32:55/coverage30:41.896; bounded middle job25:27/coverage23:37.382, all technical jobs passed. Select Turbo concurrency2 plus Vitest maxWorkers75%, saving7:28 against serial and staying within4:43 of fastest historical Test job. Main advanced between the two PR merge refs (seven extra API tests in middle); evidence discloses this and runner variability. Final current-head CI/review and coordinator exact-SHA approval remain pending.
+
+## CodeRabbit follow-up
+
+The automatic review after approval found one minor evidence-harness interruption leak(comment4574159067). Added unconditional inner process-group cleanup, verified real SIGINT red/green with child/burner cleanup, and restored draft plus needs-human-review for the changed head. Previous72b653 approval does not authorize the new commit. No test-source or production change;120repeat evidence remains valid. New-head CI, incremental review wait and coordinator approval remain pending.

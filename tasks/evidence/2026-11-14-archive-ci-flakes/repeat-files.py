@@ -77,8 +77,9 @@ try:
             try:
                 code = process.wait(timeout=min(180, remaining))
             except subprocess.TimeoutExpired:
-                stop_group(process)
                 code = 124
+            finally:
+                stop_group(process)
         elapsed = time.monotonic() - started
         data = json.loads(report.read_text()) if report.exists() else {}
         cases = [case for suite in data.get('testResults', []) for case in suite['assertionResults']]
