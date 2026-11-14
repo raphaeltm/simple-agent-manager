@@ -196,7 +196,10 @@ function selectAcrossQuotaBuckets(
     else buckets.set(key, [attempt]);
   }
   const kept = new Set<ProvisioningAttempt>();
-  const queues = [...buckets.values()];
+  // Within a bucket, each distinct size comes before a repeat of a size already queued: the same
+  // type in another zone of the region draws on the same quota, so once one is refused the other
+  // is skipped, while a smaller type could still fit.
+  const queues = [...buckets.values()].map(distinctSizesFirst);
   while (kept.size < max && queues.some((queue) => queue.length > 0)) {
     for (const queue of queues) {
       const next = queue.shift();
@@ -205,6 +208,21 @@ function selectAcrossQuotaBuckets(
     }
   }
   return attempts.filter((attempt) => kept.has(attempt));
+}
+
+function distinctSizesFirst(bucket: ProvisioningAttempt[]): ProvisioningAttempt[] {
+  const seen = new Set<string>();
+  const first: ProvisioningAttempt[] = [];
+  const repeats: ProvisioningAttempt[] = [];
+  for (const attempt of bucket) {
+    const size = `${attempt.providerInstanceType ?? ''}|${attempt.candidate?.providerInstanceVcpuCount ?? ''}`;
+    if (seen.has(size)) repeats.push(attempt);
+    else {
+      seen.add(size);
+      first.push(attempt);
+    }
+  }
+  return [...first, ...repeats];
 }
 
 /** Rank as a sortable key: unranked sources share the last rank. */

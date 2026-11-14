@@ -658,7 +658,90 @@ describe('provider tiers: falling back to the next-ranked provider', () => {
         'gcp t2d-standard-8',
         'hetzner cx43',
       ]);
+      // The last GCP refusal names its quota, not "no available capacity".
+      const lastGcp = diagnostics(state).find(
+        (attempt) =>
+          attempt.providerInstanceType === 't2d-standard-8' && attempt.location === 'europe-west4-a'
+      );
+      expect(lastGcp?.reason).toMatch(
+        /^GCP quota T2D_CPUS in europe-west4 is used up, and no other offering from this source remains\. Provider error: /
+      );
       expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    });
+
+    it('descends the same way for a synchronous 403 quota response', async () => {
+      const sync = await gcpCreateError({
+        kind: 'http',
+        status: 403,
+        body: {
+          error: {
+            code: 403,
+            message: "Quota 'T2D_CPUS' exceeded.  Limit: 24.0 in region europe-west1.",
+            status: 'PERMISSION_DENIED',
+            errors: [
+              {
+                message: "Quota 'T2D_CPUS' exceeded.  Limit: 24.0 in region europe-west1.",
+                domain: 'usageLimits',
+                reason: 'quotaExceeded',
+              },
+            ],
+          },
+        },
+      });
+      expect(sync.category).toBe('quota_exceeded');
+      outcomesAt({ 't2d-standard-8@europe-west1-b': sync });
+      const { rc } = createContext();
+      const state = createState([T2D_8_B, T2D_8_C, T2D_4_B, HETZNER_A]);
+
+      await handleNodeProvisioning(state, rc);
+
+      expect(attempted()).toEqual(['gcp t2d-standard-8', 'gcp t2d-standard-4']);
+    });
+
+    it("control: one GCP source's quota does not rule out another GCP source's offerings", async () => {
+      const t2dEw1 = await gcpQuotaIn('T2D_CPUS', 'in region europe-west1');
+      // Only the first source's create is refused; the same type and zone in the second source
+      // belongs to another Google project and its own quota.
+      provisionNode.mockImplementationOnce(async () => {
+        throw t2dEw1;
+      });
+      const { rc } = createContext();
+      const otherProject: Offering = { ...T2D_8_B, source: 'source-gcp-b', rank: 2 };
+      const state = createState(
+        [T2D_8_B, otherProject, HETZNER_A].map((o, i) => (i === 2 ? { ...o, rank: 3 } : o))
+      );
+
+      await handleNodeProvisioning(state, rc);
+
+      expect(attempted()).toEqual(['gcp t2d-standard-8', 'gcp t2d-standard-8']);
+      expect(state.stepResults.capacityPlacementSnapshot?.capacitySourceId).toBe('source-gcp-b');
+    });
+
+    it('keeps a smaller type in the cap when zone duplicates of a refused size compete for slots', async () => {
+      const t2dEw1 = await gcpQuotaIn('T2D_CPUS', 'in region europe-west1');
+      outcomesAt({ 't2d-standard-8@europe-west1-b': t2dEw1 });
+      const { rc } = createContext();
+      const d = 'europe-west1-d';
+      const ew4b = 'europe-west4-b';
+      const offerings = [
+        T2D_8_B,
+        T2D_8_C,
+        ew1('t2d-standard-8', 8, d),
+        T2D_4_B,
+        T2D_8_EW4,
+        ew1('t2d-standard-8', 8, ew4b),
+        E2_8_B,
+        ew1('e2-standard-8', 8, 'europe-west1-c'),
+        ew1('e2-standard-8', 8, 'europe-west4-a'),
+        ew1('n2d-standard-8', 8),
+        HETZNER_A,
+      ];
+      const state = createState(offerings);
+
+      await handleNodeProvisioning(state, rc);
+
+      // Ten GCP offerings in five buckets; the smaller t2d keeps a slot over a third t2d-8 zone.
+      expect(attempted()).toEqual(['gcp t2d-standard-8', 'gcp t2d-standard-4']);
     });
 
     it('control: a quota that names no region still leaves GCP at once', async () => {

@@ -37,7 +37,6 @@ import {
   buildAdmissionIdentity,
   waitOrThrowForCapacityPoolNodeLimit,
 } from './node-provisioning-admission';
-import { quotaExclusionReason, type QuotaRejection } from './node-provisioning-quota-descent';
 import {
   buildProvisioningExhaustionPlan,
   firstAttemptIndexAfterTier,
@@ -47,6 +46,7 @@ import {
   terminalizeExhaustedPlan,
 } from './node-provisioning-failure';
 import { enforceUserNodeLimit } from './node-provisioning-gates';
+import { quotaExclusionReason, type QuotaRejection } from './node-provisioning-quota-descent';
 import { rankProvisioningCandidates } from './node-provisioning-ranking';
 import { adoptProvisionedNodeAfterCrash } from './node-provisioning-recovery';
 import {

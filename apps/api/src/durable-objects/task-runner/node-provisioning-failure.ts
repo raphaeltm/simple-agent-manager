@@ -42,19 +42,20 @@ import {
 } from '../../services/vm-admission-control';
 import { scheduleAdmissionWait } from './node-provisioning-admission';
 import {
-  coreLimitLabel,
-  nextEligibleAttemptIndex,
-  quotaDescentReason,
-  quotaExclusionReason,
-  type QuotaRejection,
-  quotaRejectionFor,
-} from './node-provisioning-quota-descent';
-import {
   exhaustionPolicyQueues,
   exhaustionTerminalMessage,
   firstAttemptIndexAfterTier,
   type ProvisioningExhaustionPlan,
 } from './node-provisioning-exhaustion';
+import {
+  coreLimitLabel,
+  nextEligibleAttemptIndex,
+  quotaDescentReason,
+  quotaExclusionReason,
+  quotaExhaustedReason,
+  type QuotaRejection,
+  quotaRejectionFor,
+} from './node-provisioning-quota-descent';
 import { discardProviderRejectedNode } from './node-provisioning-rejected-node';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -134,9 +135,11 @@ export async function handleProvisioningAttemptFailure(
       ? quotaDescentReason(rejection, providerError.message)
       : accountLimit && providerError
         ? `Provider account ${accountLimitLabel(accountLimit)} reached. Provider error: ${providerError.message}`
-        : diagnosticAttempt.outcome === 'capacity-exhausted'
-          ? `Provider offering has no available capacity${providerDetail}`
-          : `Provider allocation failed${providerDetail}`;
+        : rejection && providerError
+          ? quotaExhaustedReason(rejection, providerError.message)
+          : diagnosticAttempt.outcome === 'capacity-exhausted'
+            ? `Provider offering has no available capacity${providerDetail}`
+            : `Provider allocation failed${providerDetail}`;
   await persistPlacementDiagnostics(state, rc, {
     attempts: diagnosticAttempts,
     selectedNodeId: null,

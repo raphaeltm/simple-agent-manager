@@ -302,7 +302,9 @@ attempt in the placement record names the quota and region (`classifyGcpQuotaBuc
 `packages/providers/src/gcp-quota-buckets.ts`, `quotaExclusionReason()` in
 `node-provisioning-quota-descent.ts`). A quota that names no region, such as `CPUS_ALL_REGIONS`, still
 moves straight to the next provider. Each refused attempt costs one create request, so with the
-default limit at most 8 refusals happen before the next provider is tried. With `fail` or `queue` it tries one offering per source. `queue` waits only after every
+default limit at most 8 refusals happen before the next provider is tried.
+
+With `fail` or `queue` SAM tries one offering per source, so there is no descent within a source. `queue` waits only after every
 source is exhausted, and the retry starts again from the first source.
 
 SAM does **not** move to another provider after an error that could mean a machine was created

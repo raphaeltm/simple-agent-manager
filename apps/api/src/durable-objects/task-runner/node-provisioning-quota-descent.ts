@@ -131,6 +131,19 @@ export function quotaDescentReason(rejection: QuotaRejection, providerMessage: s
   );
 }
 
+/**
+ * The refused attempt's reason when the quota leaves nothing else to try in this tier. Names the
+ * quota rather than "no available capacity", so a regional quota and a zone stockout stay apart in
+ * the placement record (`.claude/rules/74`).
+ */
+export function quotaExhaustedReason(rejection: QuotaRejection, providerMessage: string): string {
+  const quota =
+    rejection.kind === 'hetzner-cores'
+      ? `Provider account ${coreLimitLabel(rejection.limit)}`
+      : describeGcpQuotaBucket(rejection.bucket);
+  return `${quota} is used up, and no other offering from this source remains. Provider error: ${providerMessage}`;
+}
+
 function hetznerCoreExclusionReason(
   attempt: ProvisioningAttempt,
   rejection: Extract<QuotaRejection, { kind: 'hetzner-cores' }>

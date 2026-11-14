@@ -56,12 +56,25 @@ chain move on. Per-tier attempt list must span buckets.
 
 ## Notes
 
+- Consumers reviewed (rule 67), sixth one: `isProviderCreateRejectedBeforeVmIdentity`
+  (`node-provisioning-predicates.ts`) also keys on `quota_exceeded` but is Hetzner-only. Intentionally
+  not extended: a GCP quota refusal leaves the node row in `error`, and `discardProviderRejectedNode`
+  deletes it (`provider_instance_id IS NULL`), the same path main already took once per task for the
+  GCP tier fallback.
 - Worst-case added latency before falling back (rule 81): one refused create per attempt, at most
-  `operations.provisioningAttemptsPerProviderTier` (default 8) per tier. A GCP quota refusal comes back
-  from the insert operation in seconds, so ≤ 8 × (insert + operation poll) ≈ tens of seconds before
-  another provider, against a new VM on another provider today.
-- Cooldown: not built. With bucket-scoped skipping each task pays at most one refused create per
-  bucket; the 2026-11-12 10:54-11:07Z burst of 7 would cost 7 refusals of a few seconds each instead of
-  7 Hetzner VMs. A shared cooldown store would add state that goes stale as nodes are deleted.
-- Discrimination: GCP rejection disabled → 6 new tests red (global-quota control stays green); cap
-  reverted to "first 8 by rank" → only the spread test red.
+  `operations.provisioningAttemptsPerProviderTier` (default 8) per tier. Each refusal costs the
+  firewall ensure, the insert and the operation poll; GCP normally reports a quota refusal on the
+  insert operation within seconds, but the poll is bounded by `operationPollTimeoutMs` (5 min), so the
+  hard bound is 8 × (insert + poll ≤ 5 min). Typical: tens of seconds.
+- Cooldown: not built. Each concurrent task may pay up to the per-tier cap of refusals (smaller types
+  in a refused bucket are deliberately retried), instead of one new VM on another provider each. A
+  region-and-metric cooldown with a TTL would trim those refusals but needs a shared store and a TTL
+  that matches how fast quota frees as nodes are deleted; not worth it at current volume (the
+  2026-11-12 10:54-11:07Z burst was 7 tasks).
+- Per-tier cap: slots dealt round-robin across region+series buckets, distinct sizes before zone
+  repeats within a bucket. With more buckets than slots, later buckets are dropped and each kept bucket
+  gets one offering.
+- Metrics outside `<SERIES>_CPUS`, `CPUS`, `SSD_TOTAL_GB` count as `other` and rule out their region;
+  a metric with no region (`CPUS_ALL_REGIONS`) leaves the source at once (the old behaviour).
+- Discrimination: GCP rejection disabled → 6 descent tests red (global-quota control stays green); cap
+  reverted to "first 8 by rank" → spread test red; distinct-size ordering removed → zone-duplicate test red.
