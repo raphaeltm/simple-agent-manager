@@ -1311,8 +1311,14 @@ describe('Worker vars omitted because they equal the code default', () => {
     ...RETIRED_WITH_BUSY_BUILD_WAIT,
   ];
 
-  it('pins every original binding to its retained value or proven runtime default', () => {
+  it('pins original bindings to retained values, deliberate retunes or proven runtime defaults', () => {
     const current = readCheckedInWrangler().vars ?? {};
+    // Approved 2026-11-14 archive throughput tuning. Preserve the dated audit snapshot;
+    // only these two retained bindings intentionally differ from that historical baseline.
+    const retuned: Record<string, string> = {
+      PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '6000000',
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '540000',
+    };
     // Vars whose only consumer was deleted later (the anonymous-trial product, the busy-build
     // wait; both 2026-11-08) are dead too: nothing reads them, so they are neither retained nor
     // recorded as defaults.
@@ -1320,7 +1326,7 @@ describe('Worker vars omitted because they equal the code default', () => {
     expect(Object.keys(bindingAudit.variables)).toHaveLength(283);
     for (const [name, value] of Object.entries(bindingAudit.variables)) {
       if (has(current, name)) {
-        expect(current[name], name).toBe(value);
+        expect(current[name], name).toBe(retuned[name] ?? value);
       } else if (dead.has(name)) {
         expect(OMITTED_WORKER_VAR_DEFAULTS, name).not.toHaveProperty(name);
       } else {
