@@ -3,7 +3,7 @@
  * the real settings writer reaches every GcpProvider the API builds, without a deploy.
  */
 import type Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { updateAdminSettings } from '../../../src/services/admin-settings';
@@ -13,6 +13,7 @@ import {
 } from '../../../src/services/gcp-provider-factory';
 import { getStaticProviderCatalogOfferings } from '../../../src/services/provider-catalogs';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
+import { stubGcpCompute } from '../../helpers/gcp-compute-stub';
 
 const ZONE = 'europe-west1-b';
 let sqlite: Database.Database;
@@ -27,44 +28,8 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-function stubCompute(inserted: string[]) {
-  globalThis.fetch = vi.fn(async (input: string | URL, init: RequestInit = {}) => {
-    const url = String(input);
-    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-    if (url.includes('/aggregated/machineTypes')) {
-      return json({
-        items: {
-          [`zones/${ZONE}`]: {
-            machineTypes: [{ name: 't2d-standard-8', zone: ZONE, guestCpus: 8, memoryMb: 32_768 }],
-          },
-        },
-      });
-    }
-    if (url.endsWith('/global/firewalls') && init.method === 'POST') {
-      return json({ error: { code: 409, message: 'exists' } }, 409);
-    }
-    if (url.endsWith('/instances') && init.method === 'POST') {
-      const body = JSON.parse(String(init.body)) as {
-        disks: Array<{ initializeParams: { diskSizeGb: string } }>;
-      };
-      inserted.push(body.disks[0]!.initializeParams.diskSizeGb);
-      return json({ name: 'op-1', status: 'PENDING' });
-    }
-    if (url.includes('/operations/')) return json({ name: 'op-1', status: 'DONE' });
-    if (url.includes('/instances/node-1')) {
-      return json({
-        id: '1',
-        name: 'node-1',
-        status: 'RUNNING',
-        creationTimestamp: '2026-11-14T00:00:00Z',
-        machineType: `zones/${ZONE}/machineTypes/t2d-standard-8`,
-        networkInterfaces: [{ accessConfigs: [{ natIP: '203.0.113.10' }] }],
-      });
-    }
-    if (url.includes('/machineTypes/t2d-standard-8'))
-      return json({ guestCpus: 8, memoryMb: 32_768 });
-    throw new Error(`Unexpected request ${url}`);
-  }) as unknown as typeof fetch;
+function stubCompute(inserted: string[] = []) {
+  stubGcpCompute(ZONE, inserted);
 }
 
 async function sizes(): Promise<{ advertised: number | undefined; created: string | undefined }> {
