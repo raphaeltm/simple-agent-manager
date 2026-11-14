@@ -35,6 +35,7 @@ export type AdminSettingName =
   | NodeTunnelSettingName
   | GcpCatalogSettingName
   | OperationsTelemetrySettingName
+  | 'operations.projectDataRowUsageIntervalMs'
   | 'chat.profileUsageWindowDays'
   | 'nodes.usageWindowMinutes'
   | 'nodes.usageChunkLookbackMinutes'

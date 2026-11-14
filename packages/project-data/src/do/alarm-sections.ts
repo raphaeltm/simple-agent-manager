@@ -283,11 +283,20 @@ export function createRowMeteredSqlStorage(sql: SqlStorage): {
   sql: SqlStorage;
   meter: SqlRowMeter;
 } {
-  let active: Array<{ rowsRead?: number; rowsWritten?: number }> | null = null;
+  let active: SqlRowCounts | null = null;
+  let pending: { rowsRead?: number; rowsWritten?: number } | null = null;
+  const fold = () => {
+    if (active && pending) {
+      active.rowsRead += pending.rowsRead ?? 0;
+      active.rowsWritten += pending.rowsWritten ?? 0;
+    }
+    pending = null;
+  };
   const metered = {
     exec(query: string, ...bindings: unknown[]) {
+      fold();
       const cursor = sql.exec(query, ...bindings);
-      active?.push(cursor);
+      if (active) pending = cursor;
       return cursor;
     },
     get databaseSize() {
@@ -304,18 +313,14 @@ export function createRowMeteredSqlStorage(sql: SqlStorage): {
     sql: metered as unknown as SqlStorage,
     meter: {
       begin() {
-        active = [];
+        fold();
+        active = { rowsRead: 0, rowsWritten: 0 };
       },
       end() {
-        const cursors = active ?? [];
+        fold();
+        const counts = active ?? { rowsRead: 0, rowsWritten: 0 };
         active = null;
-        let rowsRead = 0;
-        let rowsWritten = 0;
-        for (const cursor of cursors) {
-          rowsRead += typeof cursor.rowsRead === 'number' ? cursor.rowsRead : 0;
-          rowsWritten += typeof cursor.rowsWritten === 'number' ? cursor.rowsWritten : 0;
-        }
-        return { rowsRead, rowsWritten };
+        return counts;
       },
     },
   };
@@ -342,7 +347,11 @@ export class ProjectDataAlarmTick {
     private readonly plan: ProjectDataAlarmTickPlan,
     private readonly config: ProjectDataAlarmGatingConfig,
     private readonly meter: SqlRowMeter,
-    private readonly scheduler: ProjectDataAlarmSectionScheduler
+    private readonly scheduler: ProjectDataAlarmSectionScheduler,
+    private readonly runSection: (
+      section: ProjectDataAlarmSection,
+      work: () => unknown
+    ) => unknown = (_section, work) => work()
   ) {}
 
   /**
@@ -370,7 +379,7 @@ export class ProjectDataAlarmTick {
     let status: ProjectDataAlarmSectionStatus = 'ran';
     let error: string | undefined;
     try {
-      await work();
+      await this.runSection(section, work);
     } catch (err) {
       status = 'failed';
       error = err instanceof Error ? err.message : String(err);
