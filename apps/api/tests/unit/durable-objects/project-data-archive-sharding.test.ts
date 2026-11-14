@@ -1958,7 +1958,10 @@ describe('ProjectData archive terminal-version hashing streams bounded pages', (
       source.db.close();
       target.db.close();
     }
-  });
+    // The unchanged full lifecycle measured 5.22 s with a busy worker sharing one
+    // CPU (1.41 s setup, 1.00 s copy, 1.99 s seal) after eliminating quadratic
+    // lookups. Allow that real work while retaining the plan/page regression guards.
+  }, 10_000);
 });
 
 describe('ProjectData archive abandon primitives', () => {
