@@ -213,7 +213,7 @@ func run(ctx context.Context, launch Launch, spec Spec, sink publish.EventSink) 
 	if err = os.Remove(archive.Name()); err != nil {
 		return err
 	}
-	daemon := exec.CommandContext(ctx, "dockerd", "--host=unix:///var/run/docker.sock", "--iptables=false", "--ip6tables=false", "--ip-forward=false", "--exec-opt", "native.cgroupdriver=cgroupfs")
+	daemon := exec.CommandContext(ctx, "/usr/local/bin/dockerd", "--host=unix:///var/run/docker.sock", "--iptables=false", "--ip6tables=false", "--ip-forward=false", "--exec-opt", "native.cgroupdriver=cgroupfs")
 	// Keep daemon diagnostics off callbacks; never print a job launch payload.
 	daemon.Stdout = os.Stderr
 	daemon.Stderr = os.Stderr
@@ -224,7 +224,7 @@ func run(ctx context.Context, launch Launch, spec Spec, sink publish.EventSink) 
 	readyCtx, readyCancel := context.WithTimeout(ctx, time.Duration(spec.DaemonReadyTimeoutMs)*time.Millisecond)
 	defer readyCancel()
 	for {
-		if exec.CommandContext(readyCtx, "docker", "info").Run() == nil {
+		if exec.CommandContext(readyCtx, "/usr/local/bin/docker", "info").Run() == nil {
 			break
 		}
 		select {

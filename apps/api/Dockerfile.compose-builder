@@ -1,6 +1,8 @@
 # Phase-0 measured Docker29.9.3 / Compose5.7.0 / Buildx0.38.2.
 # Keep the reviewed digest: root DinD with overlayfs, not rootless or vfs.
-FROM docker.io/library/docker:29.9.3-dind@sha256:08a98015fce594af7c382883bea080ea206de74402a95da9dc52b6428c8cd121
+# Rootful DinD is required by the measured recipe. The isolated, one-job
+# Cloudflare microVM is the trust boundary; no broad credential is delivered.
+FROM docker.io/library/docker@sha256:08a98015fce594af7c382883bea080ea206de74402a95da9dc52b6428c8cd121
 COPY container-artifacts/sam-builder-linux-amd64 /usr/local/bin/sam-builder
 COPY container-entrypoints/compose-builder.sh /usr/local/bin/compose-builder
 RUN chmod 0755 /usr/local/bin/sam-builder /usr/local/bin/compose-builder

@@ -52,6 +52,7 @@ func TestCallbackStopsImmediatelyOnRevocationAndCancelsRetryDelay(t *testing.T) 
 		})
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503); cancel() }))
 	defer server.Close()
 	started := time.Now()

@@ -193,6 +193,7 @@ export class ComposeBuilderContainer extends Container<Env> {
           portReadyTimeoutMS: startTimeoutMs,
         },
       });
+      // Private SDK transport to this microVM's port; this is not an Internet HTTP endpoint.
       const health = await this.containerFetch('http://builder/health', { signal });
       const version: unknown = await health.json();
       if (
@@ -228,6 +229,7 @@ export class ComposeBuilderContainer extends Container<Env> {
         },
         deadline
       );
+      // Launch never traverses public HTTP; Container SDK routes inside its private port transport.
       const response = await this.containerFetch('http://builder/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
