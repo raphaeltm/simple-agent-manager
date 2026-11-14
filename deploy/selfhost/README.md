@@ -703,10 +703,10 @@ so the sealed bundles and key material go even when a cache does not. The summar
 path that is left, says whether it is only a cache, and gives the command to remove it
 (`clearStateEntries` in `teardown-state-dir.ts`).
 
-| Mode                  | Removes                                                                                                                                                | Keeps                                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `--keep-data`         | node VMs and their disks; the bootstrap's pool, provider, node service account and its roles; containers                                               | bucket, volumes, images, `.state/` (bundles, key file), `.env`, backups, the KMS key and the box's grant on it, DNS, GitHub App |
-| `--remove-everything` | the above, plus the KMS grant, every object under `CELLD_BUCKET`, compose volumes (the bundled store's bucket too) and built images, `.state/`, `.env` | the record, the key file and the KMS key (without `--destroy-key`), backups (without `--delete-backups`)                        |
+| Mode                  | Removes                                                                                                                                                                                 | Keeps                                                                                                                           |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--keep-data`         | node VMs and their disks; the bootstrap's pool, provider, node service account and its roles; containers                                                                                | bucket, volumes, images, `.state/` (bundles, key file), `.env`, backups, the KMS key and the box's grant on it, DNS, GitHub App |
+| `--remove-everything` | the above, plus the KMS grant a recorded bootstrap run created, every object under `CELLD_BUCKET`, compose volumes (the bundled store's bucket too) and built images, `.state/`, `.env` | the record, the key file and the KMS key (without `--destroy-key`), backups (without `--delete-backups`)                        |
 
 Destructive flags, each only with `--remove-everything`:
 
@@ -758,6 +758,10 @@ VM uses it. Another install's VM is listed as refused and never touched.
 - the DNS records (`*.SAM_DOMAIN` and the apex record if you made one, and with inbound mail the MX
   record and the `sam-smtp-in` rule), the bucket itself when you created it, OAuth clients and SMTP
   credentials, and an AWS or Azure key (commands under Removing what setup created);
+- the box VM account's grant on the KMS key when no recorded bootstrap run created it (the
+  bootstrap ran elsewhere, or found the key already there), with the
+  `gcloud kms keys remove-iam-policy-binding` command: a grant on a key the bootstrap did not
+  create may predate SAM, so teardown does not remove it;
 - the machine and what you made for it: its boot disk, static IP, network, subnet and the firewall
   rules you opened for it (80/443, SSH), its service account and bucket grant. Teardown runs on the
   box and cannot tell which network or address you made for it.

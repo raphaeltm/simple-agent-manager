@@ -113,23 +113,35 @@ export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
     };
   };
   const how = `pnpm selfhost:gcp-bootstrap -- --project ${project} --api-url ${issuer} --teardown, which proves each one this install's again`;
-  const items: Item[] = entries.map((entry) => ({
-    id: `gcp:${entry.kind}:${entry.name}`,
-    place: 'in your cloud, made by the bootstrap',
-    what: `${entry.kind} ${entry.name}`,
-    provenance: 'recorded',
-    how,
-    step: STEPS.identity,
-    plan:
-      entry.action === 'reused'
-        ? both({ act: 'keep', why: 'it existed before the bootstrap' })
-        : bootstrapPlan(ctx, entry.kind, entry.name),
-    forGood: entry.kind === 'kms-key' ? KEY_FOR_GOOD : undefined,
-    removedAt: entry.removedAt,
-    runKey,
-    run,
-    settle: settle(entry.kind, entry.name),
-  }));
+  const key = [...entries, ...discovered].find((e) => e.kind === 'kms-key')?.name;
+  const keyGrant = (e: { kind: string; name: string }) =>
+    key !== undefined && e.kind === 'iam-binding' && e.name.startsWith(`${key}#`);
+  const reusedGrant = entries.find((e) => keyGrant(e) && e.action === 'reused');
+  const items: Item[] = entries
+    .filter((entry) => entry !== reusedGrant)
+    .map((entry) => ({
+      id: `gcp:${entry.kind}:${entry.name}`,
+      place: 'in your cloud, made by the bootstrap',
+      what: `${entry.kind} ${entry.name}`,
+      provenance: 'recorded',
+      how,
+      step: STEPS.identity,
+      plan:
+        entry.action === 'reused'
+          ? both({ act: 'keep', why: 'it existed before the bootstrap' })
+          : bootstrapPlan(ctx, entry.kind, entry.name),
+      forGood: entry.kind === 'kms-key' ? KEY_FOR_GOOD : undefined,
+      removedAt: entry.removedAt,
+      runKey,
+      run,
+      settle: settle(entry.kind, entry.name),
+    }));
+  // The bootstrap's teardown removes the box account's grant on the key only when a recorded run
+  // created it (a grant on a key it found may predate SAM). Any other grant, on a key it found or
+  // one the box adopted by name (R13 D6), stays in the key's policy: say so, with the command.
+  if (key !== undefined && !entries.some((e) => keyGrant(e) && e.action === 'created')) {
+    items.push(kmsGrantItem(project, key, reusedGrant?.attributes?.member));
+  }
   for (const d of discovered) {
     items.push({
       id: `gcp:${d.kind}:${d.name}`,
@@ -165,6 +177,33 @@ export function bootstrapItems(ctx: TeardownContext, project: string): Item[] {
     });
   }
   return items;
+}
+
+const KMS_ROLE = 'roles/cloudkms.cryptoKeyEncrypterDecrypter';
+
+function kmsGrantItem(project: string, key: string, member: string | undefined): Item {
+  const keyId = key.split('/').pop() ?? key;
+  const location = /\/locations\/([^/]+)\//.exec(key)?.[1] ?? 'global';
+  const ring = /\/keyRings\/([^/]+)\//.exec(key)?.[1] ?? KEY_RING;
+  const who = member ?? 'serviceAccount:<the box VM service account>';
+  const find = member
+    ? ''
+    : ` (find it with: gcloud kms keys get-iam-policy ${keyId} --keyring=${ring} --location=${location} --project=${project})`;
+  return {
+    id: `gcp:kms-grant:${key}`,
+    place: 'in your cloud, made by the bootstrap',
+    what: `the box VM account's ${KMS_ROLE} grant on the KMS key ${key}${member ? ` (${member})` : ''}, not created by a recorded bootstrap run`,
+    provenance: member ? 'recorded' : 'from the setup steps',
+    how: `gcloud kms keys remove-iam-policy-binding ${keyId} --keyring=${ring} --location=${location} --project=${project} --member=${who} --role=${KMS_ROLE}${find}`,
+    step: STEPS.identity,
+    plan: {
+      'keep-data': { act: 'keep', why: "keep my data keeps the key and the box's use of it" },
+      'remove-everything': {
+        act: 'operator',
+        why: 'teardown removes only a grant a recorded bootstrap run created; this one may predate the install',
+      },
+    },
+  };
 }
 
 interface Discovered {

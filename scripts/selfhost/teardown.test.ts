@@ -556,6 +556,60 @@ exec node ${JSON.stringify(resolve(import.meta.dirname, 'testdata/fake-gcloud-ia
     expect(Object.keys(gcp().keys)).toHaveLength(1); // keep my data keeps the key
   });
 
+  // Box round R13 D6: the key was adopted by name (the bootstrap ran in another workspace), so its
+  // grant to the box account was in no record; teardown neither removed nor listed it.
+  it('lists the box account grant on a key it did not record creating, with the command', async () => {
+    await install();
+    const key = record().resources.find((r) => r.kind === 'kms-key')!.name;
+    const keyId = key.split('/').pop();
+    const kept = record().resources.filter((r) => r.cloud === 'box');
+    writeFileSync(
+      join(state, 'created-resources.json'),
+      JSON.stringify({ format: 'sam-created-resources/1', resources: kept })
+    );
+    const dry = await teardown([
+      '--remove-everything',
+      '--destroy-key',
+      '--adopt-discovered',
+      '--dry-run',
+      '--gcp-project',
+      PROJECT,
+    ]);
+    expect(dry.status, dry.out).toBe(0);
+    expect(dry.out).toMatch(
+      new RegExp(
+        `the box VM account's roles/cloudkms\\.cryptoKeyEncrypterDecrypter grant on the KMS key ${key.replace(/[/.]/g, '\\$&')}[^\n]*: left for you`
+      )
+    );
+    // The inventory (and the summary after a run) gives the command.
+    const inventory = await teardown(['--gcp-project', PROJECT]);
+    expect(inventory.out).toContain(
+      `gcloud kms keys remove-iam-policy-binding ${keyId} --keyring=sam-selfhost --location=global --project=${PROJECT} --member=serviceAccount:<the box VM service account> --role=roles/cloudkms.cryptoKeyEncrypterDecrypter`
+    );
+    expect(inventory.out).toContain(`gcloud kms keys get-iam-policy ${keyId}`);
+  });
+
+  it('a grant the record says was reused names its member; a created one is removed, not listed', async () => {
+    await install();
+    // Control: the bootstrap created the key here, so its teardown removes the grant itself.
+    const control = await teardown(['--gcp-project', PROJECT]);
+    expect(control.out).not.toContain("the box VM account's roles/cloudkms");
+    const file = join(state, 'created-resources.json');
+    const recorded = JSON.parse(readFileSync(file, 'utf8')) as {
+      resources: Array<{ kind: string; name: string; action: string }>;
+    };
+    for (const r of recorded.resources) {
+      if (r.kind === 'kms-key' || (r.kind === 'iam-binding' && r.name.includes('/cryptoKeys/'))) {
+        r.action = 'reused';
+      }
+    }
+    writeFileSync(file, JSON.stringify(recorded));
+    const inventory = await teardown(['--gcp-project', PROJECT]);
+    expect(inventory.status, inventory.out).toBe(0);
+    expect(inventory.out).toContain(`--member=serviceAccount:${BOX_SA} --role=roles/cloudkms`);
+    expect(inventory.out.match(/the box VM account's roles\/cloudkms/g)).toHaveLength(1);
+  });
+
   // Box round R5: on sam-box (bootstrap run from Cloud Shell, so no bootstrap record on the box;
   // gcloud on the box = the VM's own account) the inventory silently omitted the firewall rules and
   // the Cloud KMS key sealing the box, because "permission denied" was read as "does not exist".
