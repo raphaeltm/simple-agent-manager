@@ -3,12 +3,19 @@
  * the box is Docker Compose and files; the bucket goes through bucket-objects.ts, which already
  * speaks gs:// and s3://. Cloud resources are teardown-gcp.ts's (and any later adapter's).
  */
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 
 import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
-import { type BoxContext, check, composeArgs, MANIFEST_NAME, parseBucketUrl } from './backup-lib';
+import {
+  type BoxContext,
+  check,
+  composeArgs,
+  MANIFEST_NAME,
+  parseBucketUrl,
+  STATE_CACHE_EXCLUDES,
+} from './backup-lib';
 import { deleteObjects, listObjects } from './bucket-objects';
 import { COMPOSE_PROJECT, RECORD_FILE, usesBundledStore } from './install-record';
 import { both, type Item, type Mode, STEPS } from './teardown-model';
@@ -30,6 +37,8 @@ export interface TeardownContext extends BoxContext {
   installationId: string | null;
   /** deploy/selfhost: where backups go by default. */
   selfhostDir: string;
+  /** Removes one path under .state (tests inject a failure); default removeTree. */
+  removeTree?: (path: string) => void;
 }
 
 /** Objects per `gcloud storage rm` / `mc rm` call. */
@@ -174,6 +183,7 @@ function stateItems(ctx: TeardownContext): Item[] {
       forGood:
         'every sealed bundle and every backup of this box sealed with this key can never be opened again, unless you keep a copy',
       runKey: 'state',
+      goneDespiteGroupFailure: () => !existsSync(keyFile),
       record: { cloud: 'box', kind: 'key-file', name: keyFile, createdBy: 'deploy' },
     });
   }
@@ -188,6 +198,7 @@ function stateItems(ctx: TeardownContext): Item[] {
       plan: keyDecision,
       forGood: 'the box copy of the platform keys; backups hold their own copy',
       runKey: 'state',
+      goneDespiteGroupFailure: () => !existsSync(legacyKeys),
       record: { cloud: 'box', kind: 'platform-keys', name: legacyKeys, createdBy: 'deploy' },
     });
   }
@@ -229,18 +240,88 @@ function stateItems(ctx: TeardownContext): Item[] {
 /** Everything in .state except the record, and the keys when they are kept. */
 function clearState(ctx: TeardownContext, keepKey: boolean): void {
   assertStateDir(ctx);
-  for (const entry of readdirSync(ctx.stateDir)) {
-    if (entry === RECORD_FILE || (keepKey && entry === LEGACY_KEYS)) continue;
-    const path = join(ctx.stateDir, entry);
+  const left = clearStateEntries(ctx.stateDir, keepKey, ctx.removeTree);
+  if (left.length > 0) throw new Error(describeLeftovers(ctx.stateDir, left));
+}
+
+export interface Leftover {
+  path: string;
+  /** A rebuildable cache (STATE_CACHE_EXCLUDES): holds no secret. */
+  cache: boolean;
+  error: string;
+}
+
+/**
+ * Removes every entry of the state directory except the record (and the key, when kept), and
+ * returns what could not be removed. Caches go last and a failure does not stop the others, so
+ * an unremovable build cache can never leave the sealed bundles or key material behind
+ * (box round R12: the Go module cache's read-only directories stopped the whole removal).
+ */
+export function clearStateEntries(
+  stateDir: string,
+  keepKey: boolean,
+  remove: (path: string) => void = removeTree
+): Leftover[] {
+  const isCache = (entry: string) => STATE_CACHE_EXCLUDES.includes(entry);
+  const entries = readdirSync(stateDir)
+    .filter((entry) => entry !== RECORD_FILE && !(keepKey && entry === LEGACY_KEYS))
+    .sort((a, b) => Number(isCache(a)) - Number(isCache(b)) || a.localeCompare(b));
+  const left: Leftover[] = [];
+  const attempt = (path: string, cache: boolean) => {
+    try {
+      remove(path);
+    } catch (error) {
+      left.push({ path, cache, error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  for (const entry of entries) {
+    const path = join(stateDir, entry);
     if (entry === 'key-agent' && keepKey) {
       for (const inner of readdirSync(path)) {
-        if (inner !== basename(KEY_FILE))
-          rmSync(join(path, inner), { recursive: true, force: true });
+        if (inner !== basename(KEY_FILE)) attempt(join(path, inner), false);
       }
       continue;
     }
-    rmSync(path, { recursive: true, force: true });
+    attempt(path, isCache(entry));
   }
+  return left;
+}
+
+function describeLeftovers(stateDir: string, left: Leftover[]): string {
+  const secretsLeft = left.some((l) => !l.cache);
+  const lines = left.map(
+    (l) => `${l.path}${l.cache ? ' (a build cache, no secrets)' : ''}: ${l.error}`
+  );
+  return [
+    `could not remove ${left.length} of the entries in ${stateDir}: ${lines.join('; ')}.`,
+    secretsLeft
+      ? 'Some of what is left is not a cache and may hold sealed bundles or keys.'
+      : 'Everything else in it is gone, including the sealed bundles and key material.',
+    `Remove what is left by hand: chmod -R u+w <path> && rm -r <path>, then run teardown again.`,
+  ].join(' ');
+}
+
+/**
+ * `rm -r` that also removes trees with read-only directories. Go makes every module-cache
+ * directory 0555 (`go-cache/mod`), and deleting an entry needs write permission on its parent.
+ * Directories are made owner-writable first; symbolic links are never followed.
+ */
+export function removeTree(path: string): void {
+  makeDirsWritable(path);
+  rmSync(path, { recursive: true, force: true });
+}
+
+function makeDirsWritable(path: string): void {
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (!stat?.isDirectory()) return;
+  if ((stat.mode & 0o700) !== 0o700) {
+    try {
+      chmodSync(path, (stat.mode & 0o7777) | 0o700);
+    } catch {
+      // Not ours to change (another owner): rmSync reports what it cannot remove.
+    }
+  }
+  for (const entry of readdirSync(path)) makeDirsWritable(join(path, entry));
 }
 
 /** True for `/`, the home directory, and any directory that contains the checkout. */

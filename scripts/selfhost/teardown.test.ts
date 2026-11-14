@@ -185,6 +185,38 @@ function snapshot(): string {
   return JSON.stringify({ gcp: gcp(), docker: docker(), box: files(dir) });
 }
 
+/**
+ * The module cache `go build` leaves under .state/go-cache: Go makes every module directory
+ * read-only (0555) and its files 0444, so a plain recursive delete fails with EACCES.
+ */
+function goModuleCache(stateDir: string): string {
+  const mod = join(stateDir, 'go-cache', 'mod');
+  const pkg = join(mod, 'github.com', 'example', 'jwkset@v0.11.3');
+  mkdirSync(join(pkg, '.github', 'workflows'), { recursive: true });
+  writeFileSync(join(pkg, 'go.mod'), 'module example\n');
+  writeFileSync(join(pkg, '.github', 'workflows', 'ci.yml'), 'on: push\n');
+  mkdirSync(join(stateDir, 'go-cache', 'build', 'ab'), { recursive: true });
+  writeFileSync(join(stateDir, 'go-cache', 'build', 'ab', 'obj-d'), 'compiled');
+  for (const file of [join(pkg, 'go.mod'), join(pkg, '.github', 'workflows', 'ci.yml')]) {
+    chmodSync(file, 0o444);
+  }
+  for (const d of [join(pkg, '.github', 'workflows'), join(pkg, '.github'), pkg]) {
+    chmodSync(d, 0o555);
+  }
+  return mod;
+}
+
+/** Restores write permission so a test's temp directory can be cleaned up whatever happened. */
+function makeWritable(path: string): void {
+  if (!existsSync(path)) return;
+  for (const entry of readdirSync(path, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      chmodSync(join(path, entry.name), 0o755);
+      makeWritable(join(path, entry.name));
+    }
+  }
+}
+
 const MUTATING_GCLOUD =
   / (create|delete|destroy|remove-iam-policy-binding|add-iam-policy-binding)|^storage rm/;
 
@@ -219,6 +251,7 @@ beforeEach(() => {
     { mode: 0o600 }
   );
   return () => {
+    makeWritable(dir);
     for (const d of [dir, fake, bin]) rmSync(d, { recursive: true, force: true });
   };
 });
@@ -380,6 +413,25 @@ describe('pnpm selfhost:teardown', () => {
       ['DESTROY_SCHEDULED'],
     ]);
     expect(result.out).toContain('destroys for good: every sealed bundle');
+  });
+
+  it('removes a .state holding a read-only Go module cache, as a real build leaves it (box round R12)', async () => {
+    await install();
+    const modDir = goModuleCache(state);
+    const result = await teardown([
+      '--remove-everything',
+      '--delete-backups',
+      '--destroy-key',
+      '--confirm',
+      DOMAIN,
+    ]);
+    expect(result.status, result.out).toBe(0);
+    expect(existsSync(modDir)).toBe(false);
+    expect(readdirSync(state)).toEqual(['created-resources.json']);
+    expect(result.out).not.toMatch(/^Failed:/m);
+    // A second run finds nothing left to do.
+    const again = await teardown(['--remove-everything', '--delete-backups', '--confirm', DOMAIN]);
+    expect(again.status, again.out).toBe(0);
   });
 
   it('keep my data refuses --delete-backups and --destroy-key', async () => {
