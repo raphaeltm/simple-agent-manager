@@ -35,9 +35,8 @@ import {
   scanRemoteBackups,
 } from './plaintext-scan';
 import { boxRotateDeps } from './rotate-box-deps';
-import { formatSummary } from './rotate-report';
+import { formatRotationStatus } from './rotate-report';
 import { runRotate } from './rotate-run';
-import { readJournal } from './rotate-store';
 import { assertPrivateFile, parseDotenv } from './secret-files';
 import { boxMigrateDeps, boxSwitchDeps } from './secrets-box-deps';
 import { describeKeyFile, verifyKeyCopy } from './secrets-keyfile';
@@ -45,26 +44,61 @@ import { runMigration } from './secrets-migrate';
 import { describeKeyStatus } from './secrets-status';
 import { runSwitch } from './secrets-switch';
 
-const { values, positionals } = parseArgs({
-  allowPositionals: true,
-  options: {
-    'box-env': { type: 'string' },
-    'state-dir': { type: 'string' },
-    backups: { type: 'string', multiple: true },
-    purge: { type: 'boolean', default: false },
-    confirm: { type: 'string' },
-    'min-age-hours': { type: 'string' },
-    'key-copy': { type: 'string' },
-    to: { type: 'string' },
-    'dry-run': { type: 'boolean', default: false },
-    all: { type: 'boolean', default: false },
-    resume: { type: 'boolean', default: false },
-    status: { type: 'boolean', default: false },
-    'skip-backup': { type: 'boolean', default: false },
-    'jwt-overlap-hours': { type: 'string' },
-    'stored-lifetime-minutes': { type: 'string' },
-  },
-});
+const USAGE = `usage: pnpm selfhost:secrets <command> [--box-env <path>] [--state-dir <dir>]
+
+  status                    which key provider seals the Worker secrets, why, and the bundles
+  key-file                  where the file key is, its fingerprint and mode
+  verify-key-copy <path>    whether a copy of the file key matches the box's (exit 1 if not)
+  migrate [--key-copy <path>]
+                            move a plaintext install to sealed secrets
+  switch --to <file|gcp-kms|aws-kms|azure-kv|transit|auto> [--dry-run]
+                            seal again with another key provider and move the box over
+  reseal                    seal again with the same provider (new data key, current KEK)
+  plaintext [--backups DIR|gs://...|s3://... ...] [--purge --confirm <CELLD_BUCKET> [--min-age-hours N]]
+                            old deploy versions and backups holding plaintext secrets
+  rotate --all | <key> ... [--dry-run] [--skip-backup] [--jwt-overlap-hours N] [--stored-lifetime-minutes N]
+  rotate --resume | --status
+                            replace platform keys; --dry-run prints the plan and what users notice
+
+Never prints a key or a secret value. deploy/selfhost/README.md has the details.`;
+
+function parseCommandLine() {
+  try {
+    return parseArgs({
+      allowPositionals: true,
+      options: {
+        'box-env': { type: 'string' },
+        'state-dir': { type: 'string' },
+        backups: { type: 'string', multiple: true },
+        purge: { type: 'boolean', default: false },
+        confirm: { type: 'string' },
+        'min-age-hours': { type: 'string' },
+        'key-copy': { type: 'string' },
+        to: { type: 'string' },
+        'dry-run': { type: 'boolean', default: false },
+        all: { type: 'boolean', default: false },
+        resume: { type: 'boolean', default: false },
+        status: { type: 'boolean', default: false },
+        'skip-backup': { type: 'boolean', default: false },
+        'jwt-overlap-hours': { type: 'string' },
+        'stored-lifetime-minutes': { type: 'string' },
+        help: { type: 'boolean', short: 'h', default: false },
+      },
+    });
+  } catch (error) {
+    // node:util parseArgs rejects an unknown option with a TypeError: answer in one line.
+    console.error(
+      `[selfhost] ${error instanceof Error ? error.message : String(error)}\n\n${USAGE}`
+    );
+    process.exit(1);
+  }
+}
+
+const { values, positionals } = parseCommandLine();
+if (values.help) {
+  console.log(USAGE);
+  process.exit(0);
+}
 
 function positiveNumber(
   value: string | undefined,
@@ -170,12 +204,7 @@ try {
     }
     case 'rotate': {
       if (values.status) {
-        const journal = readJournal(stateDir);
-        if (!journal) {
-          console.log('no rotation in progress');
-          break;
-        }
-        for (const line of formatSummary(journal, {}, stateDir)) console.log(line);
+        for (const line of formatRotationStatus(stateDir)) console.log(line);
         break;
       }
       const ctx = loadBox(envFile, values['state-dir']);
@@ -199,9 +228,7 @@ try {
       break;
     }
     default:
-      throw new Error(
-        'usage: pnpm selfhost:secrets status|key-file|verify-key-copy <path>|migrate|switch|reseal|plaintext|rotate [--box-env PATH] [--state-dir DIR]'
-      );
+      throw new Error(USAGE);
   }
 } catch (error) {
   console.error(`[selfhost] ${error instanceof Error ? error.message : String(error)}`);

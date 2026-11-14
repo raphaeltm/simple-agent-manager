@@ -14,9 +14,10 @@
 import { closeSync, existsSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { listBundles } from './key-service';
 import { applyPatch, type RotateDeps, type StepContext } from './rotate-apply';
 import { ROTATABLE_KEYS, type RotatableKey, rotatableKey } from './rotate-catalog';
-import { formatPlan, formatSummary, transitionalNames } from './rotate-report';
+import { formatPlan, formatSummary, RESEAL_STEP, transitionalNames } from './rotate-report';
 import {
   advanceGateway,
   advanceOverlap,
@@ -54,7 +55,7 @@ export interface RotateInput {
   store?: RotationStore;
 }
 
-const FINAL = 'reseal';
+const FINAL = RESEAL_STEP;
 const RESEAL_KEY: RotatableKey = {
   name: FINAL,
   procedure: 'swap',
@@ -175,7 +176,8 @@ async function startJournal(
   const head = await store.head();
   const keys = selectKeys(input, head.secrets);
   assertNothingOverrides(input.stateDir, keys);
-  for (const line of formatPlan(keys, head.secrets, input)) deps.log(line);
+  const existingBundles = listBundles(store.settings.bundleDir, deps.log);
+  for (const line of formatPlan(keys, head.secrets, { ...input, existingBundles })) deps.log(line);
   if (input.dryRun) {
     deps.log('dry run: nothing was changed');
     return null;
@@ -233,6 +235,8 @@ function acquireLock(stateDir: string): () => void {
 }
 
 export async function runRotate(input: RotateInput, deps: RotateDeps): Promise<Journal | null> {
+  // A dry run only reads (the journal, the bundles), so it takes no lock and creates nothing.
+  if (input.dryRun) return await runRotateLocked(input, deps);
   const release = acquireLock(input.stateDir);
   try {
     return await runRotateLocked(input, deps);

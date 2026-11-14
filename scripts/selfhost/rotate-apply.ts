@@ -115,5 +115,9 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
   delete step.stagedFor;
   delete step.stagedFrom;
   ctx.save();
-  for (const removed of store.prune([bundleId])) deps.log(`  removed old bundle ${removed}`);
+  const removed = store.prune([bundleId]);
+  if (removed.length === 0) return;
+  for (const id of removed) deps.log(`  removed old bundle ${id} (the box keeps the newest 3)`);
+  ctx.journal.removedBundles = [...(ctx.journal.removedBundles ?? []), ...removed];
+  ctx.save();
 }

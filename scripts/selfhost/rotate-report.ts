@@ -4,9 +4,14 @@
  */
 import { join } from 'node:path';
 
+import type { SealedBundle } from '../../deploy/selfhost/key-agent/bundle.ts';
+import { DEFAULT_KEPT_BUNDLES } from './key-service';
 import { EXTERNAL_SECRETS, NOT_ROTATED, type RotatableKey } from './rotate-catalog';
 import { DEFAULT_STORED_LIFETIME_MINUTES } from './rotate-steps-data';
-import type { Journal } from './rotate-store';
+import { type Journal, readJournal } from './rotate-store';
+
+/** The journal step that seals the final bundle once every key is done (rotate-run.ts). */
+export const RESEAL_STEP = 'reseal';
 
 const PROCEDURE_TEXT: Record<RotatableKey['procedure'], string> = {
   swap: 'new value, deploy, check',
@@ -69,7 +74,13 @@ function externalLines(bundle: Readonly<Record<string, string>>): string[] {
 export function formatPlan(
   keys: readonly RotatableKey[],
   bundle: Readonly<Record<string, string>>,
-  options: { jwtOverlapHours?: number; storedLifetimeMinutes?: number; skipBackup?: boolean }
+  options: {
+    jwtOverlapHours?: number;
+    storedLifetimeMinutes?: number;
+    skipBackup?: boolean;
+    /** The bundles on the box now, newest first (listBundles). */
+    existingBundles?: readonly Pick<SealedBundle, 'bundleId' | 'createdAt' | 'provider'>[];
+  }
 ): string[] {
   const lines = ['Plan (in this order):'];
   if (!options.skipBackup)
@@ -98,11 +109,44 @@ export function formatPlan(
     }
     if (key.procedure === 'overlap') {
       lines.push(
-        `     finishes: \`rotate --resume\` after the ${options.jwtOverlapHours ?? 13} h overlap; until then the old key still verifies callback tokens`
+        options.jwtOverlapHours === 0
+          ? '     finishes: in this run (--jwt-overlap-hours 0 is a hard cut): the old key is removed in this run and stops verifying callback tokens at once, so every running node is cut off (replace them)'
+          : `     finishes: \`rotate --resume\` after the ${options.jwtOverlapHours ?? 13} h overlap; until then the old key still verifies callback tokens`
       );
     }
   });
+  lines.push(...bundlePlanLines(keys.length, options.existingBundles ?? []));
   lines.push(...externalLines(bundle));
+  return lines;
+}
+
+/**
+ * Every step seals a bundle and every seal keeps only the newest DEFAULT_KEPT_BUNDLES (the rule
+ * of every seal on the box, key-service.ts), so a rotation removes the bundles from before it.
+ * At least one seal per key plus the final reseal: the oldest ones go for certain.
+ */
+function bundlePlanLines(
+  keyCount: number,
+  existing: readonly Pick<SealedBundle, 'bundleId' | 'createdAt' | 'provider'>[]
+): string[] {
+  if (existing.length === 0) return [];
+  const minSeals = keyCount + 1;
+  const mayStay = Math.max(0, DEFAULT_KEPT_BUNDLES - minSeals);
+  const describe = (b: Pick<SealedBundle, 'bundleId' | 'createdAt' | 'provider'>) =>
+    `${b.bundleId} (${b.provider}, ${b.createdAt})`;
+  const lines = [
+    `Sealed bundles: each step seals a new one and the box keeps only the newest ${DEFAULT_KEPT_BUNDLES}, so this run removes the bundles that exist now:`,
+    ...existing.slice(mayStay).map((b) => `  ${describe(b)}`),
+  ];
+  if (mayStay > 0) {
+    lines.push(
+      '  and, if the run seals more than one bundle per key, also:',
+      ...existing.slice(0, mayStay).map((b) => `  ${describe(b)}`)
+    );
+  }
+  lines.push(
+    "  The old values stay readable in the rotation directory (*.before.json, the rollback source) and in backups. A bundle sealed by another key provider (an earlier switch) goes too; keep that provider's key only while a backup still needs it."
+  );
   return lines;
 }
 
@@ -127,6 +171,8 @@ export function formatSummary(
     let detail = '';
     if (step.phase === 'waiting')
       detail = ` until ${step.waitUntil}: then run pnpm selfhost:secrets rotate --resume`;
+    if (step.phase === 'staging' && step.stagedBundleId)
+      detail = ` (bundle ${step.stagedBundleId} is sealed and recorded but not confirmed deployed: pnpm selfhost:secrets rotate --resume deploys it again)`;
     if (step.error) detail += ` (${step.error})`;
     if (step.baseline?.unreadable) {
       const ids = step.baseline.rows.slice(0, 20).map((r) => `${r.location}/${r.id}.${r.column}`);
@@ -139,6 +185,20 @@ export function formatSummary(
       detail += `; ${step.legacyTunnelLeases} reverse-tunnel node(s) created before the switch still use a tunnel credential derived from the old key: replace them`;
     }
     lines.push(`  ${name}: ${step.phase}${detail}`);
+  }
+  const reseal = journal.steps[RESEAL_STEP];
+  if (reseal && reseal.phase !== 'done') {
+    const staged = reseal.stagedBundleId
+      ? `; bundle ${reseal.stagedBundleId} is sealed and recorded but not confirmed deployed: pnpm selfhost:secrets rotate --resume deploys it again`
+      : '';
+    lines.push(
+      `  ${RESEAL_STEP}: ${reseal.phase} (the final seal without transitional values${staged})`
+    );
+  }
+  if (journal.removedBundles?.length) {
+    lines.push(
+      `Removed sealed bundles (the box keeps the newest ${DEFAULT_KEPT_BUNDLES}): ${journal.removedBundles.join(', ')}`
+    );
   }
   if (!journal.finishedAt) {
     lines.push(
@@ -163,4 +223,11 @@ export function formatSummary(
     ...externalLines(bundle)
   );
   return lines.filter(Boolean);
+}
+
+/** `rotate --status`: the journal of the rotation in progress, or that there is none. */
+export function formatRotationStatus(stateDir: string): string[] {
+  const journal = readJournal(stateDir);
+  if (!journal) return ['no rotation in progress'];
+  return formatSummary(journal, {}, stateDir);
 }

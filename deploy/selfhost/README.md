@@ -220,6 +220,21 @@ rotates each key in this order. Every new value exists only in sealed bundles; t
 (`.state/key-agent/rotation/journal.json`) holds names, phases, bundle ids and cursors, never a
 value. Before a key's first change its old values are sealed again to
 `.state/key-agent/rotation/<id>/<key>.before.json`: the rollback source, kept until you delete it.
+A dry run only reads: it creates no file or directory and takes no lock.
+
+Each step seals a new bundle, and every seal on the box keeps only the newest 3 bundles
+(`DEFAULT_KEPT_BUNDLES`, `scripts/selfhost/key-service.ts`), the same rule as every deploy. So a
+rotation removes the bundles that existed before it, including one sealed by another key provider
+before a `switch`. That is intended: the old values stay in the `*.before.json` snapshots and in
+backups, not in bundles the key agent would still open. The plan lists the bundles that will go and
+the summary (and `rotate --status`) lists the ones that went.
+
+After every deploy the run asks celld to adopt the version and checks the API's health, retrying
+for up to 30 s (`SELFHOST_ADOPT_CHECK_WINDOW_MS`, every `SELFHOST_HEALTH_POLL_INTERVAL_MS`), so a
+short celld stall while it adopts a version does not stop the run. A version still unhealthy after
+the window is rolled back as before. If a run stops anyway, `rotate --status` shows the step and the
+bundle it sealed, including the final reseal, and `rotate --resume` deploys that recorded bundle
+again.
 
 | Key                                                                                                 | How                                                                                                                                                                                                                                                                                                                                                                                                                              | Users notice                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Downtime                                    |
 | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
