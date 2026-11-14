@@ -264,6 +264,21 @@ export async function resolveExactReadOwner(
 ): Promise<ProjectDataArchiveLocation> {
   const location = await resolveProjectDataSessionLocation(env, projectId, sessionId);
   if (location.state === 'root' || location.state === 'archive_shard') return location;
+  if (location.state === 'migrating') {
+    // Until the atomic flip the root object still holds every row of the session and its
+    // transcript writes are fenced by the source intent, so a migration that spans many ticks
+    // keeps the session readable from the root. The root refuses exact reads once the flip
+    // has committed (`isSourceExactReadFenced`); from then on the location is published to the
+    // shard. Writes stay fenced by `assertExactWriteAllowed`, which accepts only `root`.
+    return {
+      ...rootProjectDataOwner(projectId),
+      state: 'migrating',
+      sessionId,
+      migrationId: location.migrationId,
+      targetAggregateSha256: null,
+      routingSchemaVersion: location.routingSchemaVersion,
+    };
+  }
   throw new ProjectDataArchiveRoutingError(
     'exact_read_owner_not_publishable',
     `ProjectData archive exact read for session ${sessionId} is fenced by ${location.state}`

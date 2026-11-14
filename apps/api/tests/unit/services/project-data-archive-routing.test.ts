@@ -25,13 +25,57 @@ describe('ProjectData archive routing', () => {
     });
   });
 
-  it('fails closed for in-flight migration locations', async () => {
+  it('reads an in-flight migration from the root until the flip', async () => {
+    const owner = await resolveExactReadOwner(
+      envWithLocation({
+        project_id: 'project-1',
+        session_id: 'session-1',
+        location_state: 'migrating',
+        owner_kind: 'archive_shard',
+        owner_name: 'project-1:archive:g1:s0',
+        generation: 1,
+        migration_id: 'migration-1',
+        routing_schema_version: 1,
+      }),
+      'project-1',
+      'session-1'
+    );
+    expect(owner).toMatchObject({
+      state: 'migrating',
+      kind: 'root',
+      ownerName: 'project-1',
+      generation: 0,
+      migrationId: 'migration-1',
+    });
+  });
+
+  it('still fences writes while a migration is in flight', async () => {
+    await expect(
+      assertExactWriteAllowed(
+        envWithLocation({
+          project_id: 'project-1',
+          session_id: 'session-1',
+          location_state: 'migrating',
+          owner_kind: 'archive_shard',
+          owner_name: 'project-1:archive:g1:s0',
+          generation: 1,
+          migration_id: 'migration-1',
+          routing_schema_version: 1,
+        }),
+        'project-1',
+        'session-1',
+        'persistMessage'
+      )
+    ).rejects.toMatchObject({ reason: 'exact_write_owner_not_root' });
+  });
+
+  it('fails closed for frozen locations', async () => {
     await expect(
       resolveExactReadOwner(
         envWithLocation({
           project_id: 'project-1',
           session_id: 'session-1',
-          location_state: 'migrating',
+          location_state: 'frozen',
           owner_kind: 'archive_shard',
           owner_name: 'project-1:archive:g1:s0',
           generation: 1,

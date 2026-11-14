@@ -20,6 +20,7 @@ import {
   jsonValidator,
   SaveGcpServiceAccountCredentialSchema,
 } from '../schemas';
+import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { enforceCredentialMutationRateLimit } from '../services/credential-mutation-rate-limit';
 import { decrypt } from '../services/encryption';
 import { getTimeoutMs } from '../services/fetch-timeout';
@@ -94,7 +95,10 @@ async function getStoredGcpCredential(
   return { id: row.id, credential: parseGcpCredential(decrypted) };
 }
 
-/** Drop what SAM cached for a credential that was just replaced. */
+/**
+ * Drop what SAM cached for the secret that was just replaced. The credential row keeps its id
+ * across a re-save, so the API health cached under that id described the old secret.
+ */
 async function forgetReplacedCredential(
   env: Env,
   userId: string,
@@ -181,6 +185,8 @@ gcpRoutes.put(
     if (previous) {
       await forgetReplacedCredential(c.env, userId, previous);
     }
+    // Same as POST /api/credentials: the default capacity source must follow the new secret.
+    await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
     return c.json({
       success: true,
       credential: {
@@ -215,6 +221,7 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
   if (previous) {
     await forgetReplacedCredential(c.env, userId, previous);
   }
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
 
   try {
     await verifyGcpOidcSetup(userId, 'setup-verification', credential, c.env);

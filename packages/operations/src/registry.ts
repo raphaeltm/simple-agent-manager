@@ -8,6 +8,7 @@ import { platformOperations } from './platform-operations';
 import { scheduleOperations } from './schedule-operations';
 import { teamOperations } from './team-operations';
 import type { Operation } from './types';
+import { usageOperations } from './usage-operations';
 
 /** One catalog shared by adapters. Names remain stable across surfaces. */
 export const operations = [
@@ -17,6 +18,7 @@ export const operations = [
   ...teamOperations,
   ...scheduleOperations,
   ...channelOperations,
+  ...usageOperations,
 ] as const;
 
 export function operationInputJsonSchema(

@@ -128,6 +128,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
       from: vi.fn().mockReturnThis(),
       leftJoin: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
+      orderBy: vi.fn().mockReturnThis(),
       limit: vi.fn(),
     };
     vi.mocked(drizzle).mockReturnValue(mockDB as ReturnType<typeof drizzle>);
@@ -168,6 +169,10 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
       ],
       [
         {
+          // Production row shape: the legacy picker scopes by agent and project.
+          id: 'opencode-key-1',
+          agentType: 'opencode',
+          projectId: null,
           encryptedToken: 'encrypted-dedicated',
           iv: 'iv-dedicated',
           credentialKind: 'api-key',
@@ -220,6 +225,10 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
       ],
       [
         {
+          // Production row shape: the legacy picker scopes by agent and project.
+          id: 'opencode-key-2',
+          agentType: 'opencode',
+          projectId: null,
           encryptedToken: 'encrypted-dedicated',
           iv: 'iv-dedicated',
           credentialKind: 'api-key',
@@ -298,6 +307,9 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
         ],
         [
           {
+            id: 'opencode-key',
+            agentType: 'opencode',
+            projectId: null,
             encryptedToken,
             iv,
             credentialKind: 'api-key',

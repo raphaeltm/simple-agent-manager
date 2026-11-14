@@ -52,9 +52,13 @@ import {
 } from './services/connector-agent-answer';
 import { auditConnectorWrite, executeConnectorWrite } from './services/connector-execution';
 import { getConnectorReadLimits } from './services/connector-read-settings';
-import { listProjectCredentialLimits } from './services/credential-limit-events/read';
+import {
+  listOwnCredentialLimitsByReferences,
+  listProjectCredentialLimits,
+} from './services/credential-limit-events/read';
 import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
+import { resolveProfileAccountBindings } from './services/profile-account-bindings';
 import * as projectData from './services/project-data';
 import { describeRootSearchCoverage } from './services/project-data-search-coverage';
 import { startOrchestration } from './services/project-orchestrator';
@@ -218,6 +222,9 @@ export function createOperationPorts(env: Env): OperationPorts {
     },
     account: {
       listProfiles: (projectId, userId) => listProfiles(db(), projectId, userId, env),
+      profileAccountBindings: (input) => resolveProfileAccountBindings(env, input),
+      listOwnCredentialLimitsByReferences: (userId, references) =>
+        listOwnCredentialLimitsByReferences(env, { userId, references }),
       tokenUsage: (userId) => getTokenUsage(env.KV, userId, env),
       budgetSettings: (userId) => getUserBudgetSettings(env.KV, userId),
       effectiveBudgetLimits: (settings) => resolveEffectiveLimits(settings, env),

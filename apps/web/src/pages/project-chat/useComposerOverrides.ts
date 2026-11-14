@@ -17,8 +17,8 @@ import {
 } from '../../components/resource-requirements';
 
 /**
- * One-chat overrides set under Chat options: resources, model and effort. Blank values inherit
- * from the profile/project. Cleared on project switch, New chat and after a successful send.
+ * One-chat overrides: resources, model and effort (Chat options) and the account (beside To).
+ * Blank values inherit from the profile/project. Cleared on project switch, New chat and after a successful send.
  */
 export function useComposerOverrides(projectId: string) {
   const [taskResourceReqs, setTaskResourceReqs] = useState<ResourceRequirementsFormState>({
@@ -44,17 +44,21 @@ export function useComposerOverrides(projectId: string) {
     return !hasValidationErrors(errors);
   }, [taskResourceReqs]);
 
-  /** Request fields for the model/effort still valid for the agent this chat will run. */
+  /** Request fields for the model/effort/account still valid for the agent this chat will run. */
   const agentOverrideFields = useCallback(
     (
       profile: AgentProfile | null,
       skill: AgentSkill | null
-    ): { model?: string; effort?: AgentEffort } => {
-      const { model, effort } = activeChatAgentOverrides(
+    ): { model?: string; effort?: AgentEffort; agentConfigurationId?: string } => {
+      const { model, effort, accountId } = activeChatAgentOverrides(
         agentOverrides,
         chatAgentDefaults(profile, skill).agentType
       );
-      return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
+      return {
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
+        ...(accountId ? { agentConfigurationId: accountId } : {}),
+      };
     },
     [agentOverrides]
   );

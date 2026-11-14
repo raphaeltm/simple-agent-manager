@@ -17,10 +17,7 @@ export interface StoredGcpCredentialResult {
  * may both begin before either batch runs, so a pre-batch snapshot can miss the
  * credential inserted by the competing request.
  */
-function cleanupManagedCredentialStatements(
-  env: Env,
-  userId: string,
-): D1PreparedStatement[] {
+function cleanupManagedCredentialStatements(env: Env, userId: string): D1PreparedStatement[] {
   return [
     env.DATABASE.prepare(
       `DELETE FROM cc_attachments
@@ -35,7 +32,7 @@ function cleanupManagedCredentialStatements(
              AND consumer_kind = 'compute'
              AND consumer_target = 'gcp'
              AND json_extract(settings_json, '$.managedBy') = 'legacy-gcp-credential'
-         )`,
+         )`
     ).bind(userId, userId),
     env.DATABASE.prepare(
       `DELETE FROM cc_credentials
@@ -66,7 +63,7 @@ function cleanupManagedCredentialStatements(
                  WHERE other_attachment.configuration_id = other_configuration.id
                )
              )
-         )`,
+         )`
     ).bind(userId, userId, userId),
     env.DATABASE.prepare(
       `DELETE FROM cc_configurations
@@ -77,16 +74,38 @@ function cleanupManagedCredentialStatements(
          AND NOT EXISTS (
            SELECT 1 FROM cc_attachments
            WHERE configuration_id = cc_configurations.id
-         )`,
+         )`
     ).bind(userId),
   ];
 }
 
-/** Atomically replace the user-level GCP credential across legacy and CC stores. */
+/** The user's own GCP connection row in the legacy store. Binds `userId` once. */
+const USER_GCP_CREDENTIAL_ROW = `user_id = ?
+         AND project_id IS NULL
+         AND provider = 'gcp'
+         AND credential_type = 'cloud-provider'`;
+
+/**
+ * Atomically save the user-level GCP credential across legacy and CC stores.
+ *
+ * A re-save keeps the existing `credentials` row and its id, exactly like every other
+ * provider's save (`POST /api/credentials`, project cloud credentials). The id is the identity
+ * of the user's GCP connection: the default capacity source is keyed on it
+ * (`defaultCapacitySourceId`), `capacity_sources.credential_id` cascades on its deletion, and
+ * that cascade deletes the pool's candidates (the person's machine choices) and nulls
+ * `capacity_source_id` on every node, workspace and task placed from it (migration 0125).
+ * Replacing the row on every save therefore made GCP unplaceable and stranded live nodes
+ * (idea 01M76T4XXVQS1TX8VQM2BRPWFG). The secret, `updated_at` (the credential version) and the
+ * placement fingerprint still change, so a rotation stays detectable.
+ *
+ * Every step runs in one batch so two concurrent saves still leave exactly one legacy row and
+ * one managed composable copy: the UPDATE and the guarded INSERT read the table inside the
+ * transaction, never a pre-batch snapshot.
+ */
 export async function replaceUserGcpCredential(
   env: Env,
   userId: string,
-  credential: GcpCredential,
+  credential: GcpCredential
 ): Promise<StoredGcpCredentialResult> {
   if (typeof env.DATABASE.batch !== 'function') {
     throw new Error('Atomic credential replacement is unavailable');
@@ -98,52 +117,77 @@ export async function replaceUserGcpCredential(
   const ccAttachmentId = `cc-att-${ulid()}`;
   const encrypted = await encrypt(
     serializeGcpCredential(credential),
-    getCredentialEncryptionKey(env),
+    getCredentialEncryptionKey(env)
   );
 
   const statements: D1PreparedStatement[] = [
+    // A user has one GCP connection. Should duplicates exist (none in production on
+    // 2026-11-14), keep the one a capacity source is built on, else the oldest, and delete the
+    // rest, as the old replace deleted every row. A deleted duplicate's own source cascades;
+    // its nodes stay reapable through the released-source shape in `cleanupNodeProvenanceSql`.
     env.DATABASE.prepare(
       `DELETE FROM credentials
-       WHERE user_id = ?
-         AND project_id IS NULL
-         AND provider = 'gcp'
-         AND credential_type = 'cloud-provider'`,
-    ).bind(userId),
-    ...cleanupManagedCredentialStatements(env, userId),
+       WHERE ${USER_GCP_CREDENTIAL_ROW}
+         AND id != (
+           SELECT keep.id FROM credentials keep
+           WHERE keep.user_id = ?
+             AND keep.project_id IS NULL
+             AND keep.provider = 'gcp'
+             AND keep.credential_type = 'cloud-provider'
+           ORDER BY EXISTS (
+               SELECT 1 FROM capacity_sources source WHERE source.credential_id = keep.id
+             ) DESC,
+             keep.created_at, keep.id
+           LIMIT 1
+         )`
+    ).bind(userId, userId),
+    env.DATABASE.prepare(
+      `UPDATE credentials
+       SET encrypted_token = ?, iv = ?, is_active = 1, updated_at = ?
+       WHERE ${USER_GCP_CREDENTIAL_ROW}`
+    ).bind(encrypted.ciphertext, encrypted.iv, now, userId),
     env.DATABASE.prepare(
       `INSERT INTO credentials (
          id, user_id, project_id, provider, credential_type, agent_type,
          credential_kind, is_active, encrypted_token, iv, created_at, updated_at
-       ) VALUES (?, ?, NULL, 'gcp', 'cloud-provider', NULL, 'api-key', 1, ?, ?, ?, ?)`,
-    ).bind(legacyId, userId, encrypted.ciphertext, encrypted.iv, now, now),
+       )
+       SELECT ?, ?, NULL, 'gcp', 'cloud-provider', NULL, 'api-key', 1, ?, ?, ?, ?
+       WHERE NOT EXISTS (SELECT 1 FROM credentials WHERE ${USER_GCP_CREDENTIAL_ROW})`
+    ).bind(legacyId, userId, encrypted.ciphertext, encrypted.iv, now, now, userId),
+    ...cleanupManagedCredentialStatements(env, userId),
     env.DATABASE.prepare(
       `INSERT INTO cc_credentials (
          id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at
-       ) VALUES (?, ?, 'GCP cloud credential', 'cloud-provider', ?, ?, 1, ?, ?)`,
+       ) VALUES (?, ?, 'GCP cloud credential', 'cloud-provider', ?, ?, 1, ?, ?)`
     ).bind(ccCredentialId, userId, encrypted.ciphertext, encrypted.iv, now, now),
     env.DATABASE.prepare(
       `INSERT INTO cc_configurations (
          id, owner_id, name, consumer_kind, consumer_target, credential_id,
          settings_json, is_active, created_at, updated_at
-       ) VALUES (?, ?, 'GCP default', 'compute', 'gcp', ?, ?, 1, ?, ?)`,
-    ).bind(
-      ccConfigurationId,
-      userId,
-      ccCredentialId,
-      JSON.stringify({ managedBy: 'legacy-gcp-credential', legacyCredentialId: legacyId }),
-      now,
-      now,
-    ),
+       ) VALUES (?, ?, 'GCP default', 'compute', 'gcp', ?,
+         json_object(
+           'managedBy', 'legacy-gcp-credential',
+           'legacyCredentialId', (SELECT id FROM credentials WHERE ${USER_GCP_CREDENTIAL_ROW})
+         ),
+         1, ?, ?)`
+    ).bind(ccConfigurationId, userId, ccCredentialId, userId, now, now),
     env.DATABASE.prepare(
       `INSERT INTO cc_attachments (
          id, configuration_id, consumer_kind, consumer_target, user_id, project_id,
          is_active, created_at, updated_at
-       ) VALUES (?, ?, 'compute', 'gcp', ?, NULL, 1, ?, ?)`,
+       ) VALUES (?, ?, 'compute', 'gcp', ?, NULL, 1, ?, ?)`
     ).bind(ccAttachmentId, ccConfigurationId, userId, now, now),
+    env.DATABASE.prepare(
+      `SELECT id, created_at AS createdAt FROM credentials WHERE ${USER_GCP_CREDENTIAL_ROW}`
+    ).bind(userId),
   ];
 
-  await env.DATABASE.batch(statements);
-  return { id: legacyId, createdAt: now };
+  const results = await env.DATABASE.batch<StoredGcpCredentialResult>(statements);
+  const stored = results.at(-1)?.results?.[0];
+  if (!stored?.id || !stored.createdAt) {
+    throw new Error('GCP credential save did not leave a stored credential');
+  }
+  return { id: stored.id, createdAt: stored.createdAt };
 }
 
 /** Atomically remove user-level GCP credential copies from both stores. */
@@ -157,7 +201,7 @@ export async function deleteUserGcpCredential(env: Env, userId: string): Promise
        WHERE user_id = ?
          AND project_id IS NULL
          AND provider = 'gcp'
-         AND credential_type = 'cloud-provider'`,
+         AND credential_type = 'cloud-provider'`
     ).bind(userId),
     ...cleanupManagedCredentialStatements(env, userId),
   ];

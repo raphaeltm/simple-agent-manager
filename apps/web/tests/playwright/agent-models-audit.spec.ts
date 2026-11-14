@@ -62,7 +62,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   workspaceIdleTimeoutMs: null,
   createdAt: TIMESTAMP,
   updatedAt: TIMESTAMP,

@@ -134,7 +134,11 @@ function useOptimisticThreadMutation<TInput>(
   });
 }
 
-export function useLibraryFileComments(projectId: string, fileId: string) {
+/**
+ * One file's comment threads and their mutations. `enabled` defers the list request, e.g. for
+ * a preview that only paints quotes in some views and loads the rest when the panel opens.
+ */
+export function useLibraryFileComments(projectId: string, fileId: string, enabled = true) {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -148,7 +152,7 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
 
   const commentsQuery = useQuery({
     ...libraryFileCommentsQueryOptions(queryScope, projectId, fileId),
-    enabled: Boolean(queryScope && projectId && fileId),
+    enabled: Boolean(enabled && queryScope && projectId && fileId),
     select: (threads): UiCommentThread[] => threads.map(fileThreadToUi),
   });
 
@@ -237,3 +241,5 @@ export function useLibraryFileComments(projectId: string, fileId: string) {
       reopenMutation.isPending,
   };
 }
+
+export type LibraryFileComments = ReturnType<typeof useLibraryFileComments>;

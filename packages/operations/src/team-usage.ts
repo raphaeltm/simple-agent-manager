@@ -26,6 +26,30 @@ export async function settle<T>(source: string, read: () => Promise<T>): Promise
   }
 }
 
+/**
+ * The caller's SAM AI proxy usage today (UTC, all projects) against their daily limits, or
+ * `'unavailable'` when the meter cannot be read.
+ */
+export async function samAiDailyUsage(ctx: OperationContext) {
+  const daily = await settle('sam_ai_budget', async () => {
+    const [usage, settings] = await Promise.all([
+      ctx.ports.account.tokenUsage(ctx.actor.userId),
+      ctx.ports.account.budgetSettings(ctx.actor.userId),
+    ]);
+    return { usage, limits: ctx.ports.account.effectiveBudgetLimits(settings) };
+  });
+  return daily.ok
+    ? {
+        scope: 'your_sam_ai_usage_today_utc_all_projects',
+        inputTokens: daily.value.usage.inputTokens,
+        outputTokens: daily.value.usage.outputTokens,
+        dailyInputLimit: daily.value.limits.dailyInputTokenLimit,
+        dailyOutputLimit: daily.value.limits.dailyOutputTokenLimit,
+        source: 'sam_ai_proxy_meter',
+      }
+    : ('unavailable' as const);
+}
+
 export async function usageSection(
   ctx: OperationContext,
   tasks: readonly Pick<TeamTask, 'agent' | 'compute'>[],
@@ -33,26 +57,7 @@ export async function usageSection(
   quotas: Settled<CredentialLimitsResponse>
 ) {
   const samMetered = tasks.filter((task) => task.agent?.providerMode === 'sam').length;
-  let samDaily: unknown = 'not_applicable';
-  if (samMetered > 0) {
-    const daily = await settle('sam_ai_budget', async () => {
-      const [usage, settings] = await Promise.all([
-        ctx.ports.account.tokenUsage(ctx.actor.userId),
-        ctx.ports.account.budgetSettings(ctx.actor.userId),
-      ]);
-      return { usage, limits: ctx.ports.account.effectiveBudgetLimits(settings) };
-    });
-    samDaily = daily.ok
-      ? {
-          scope: 'your_sam_ai_usage_today_utc_all_projects',
-          inputTokens: daily.value.usage.inputTokens,
-          outputTokens: daily.value.usage.outputTokens,
-          dailyInputLimit: daily.value.limits.dailyInputTokenLimit,
-          dailyOutputLimit: daily.value.limits.dailyOutputTokenLimit,
-          source: 'sam_ai_proxy_meter',
-        }
-      : 'unavailable';
-  }
+  const samDaily: unknown = samMetered > 0 ? await samAiDailyUsage(ctx) : 'not_applicable';
   const computeTotals = tasks.reduce(
     (acc, task) => ({
       runtimeMinutes: acc.runtimeMinutes + (task.compute?.runtimeMinutes ?? 0),

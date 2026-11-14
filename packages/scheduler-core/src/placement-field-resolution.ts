@@ -44,29 +44,22 @@ export function resolveWorkloadRole(
   return value === 'deployment' ? 'deployment' : 'workspace';
 }
 
+/**
+ * Only an explicit per-request provider narrows placement. Projects, agent profiles and skills
+ * have no provider setting: the effective compute pool decides which providers are eligible.
+ */
 export function resolveProvider(
-  explicitProvider: CredentialProvider | string | null | undefined,
-  profile: PlacementProfileDefaults | null,
-  project: PlacementProjectDefaults
+  explicitProvider: CredentialProvider | string | null | undefined
 ): CredentialProvider | null {
-  if (explicitProvider != null) {
-    if (!isValidProvider(explicitProvider)) {
-      throw new PlacementResolutionError(
-        'invalid-provider',
-        `provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`,
-        CREDENTIAL_PROVIDERS
-      );
-    }
-    return explicitProvider;
+  if (explicitProvider == null) return null;
+  if (!isValidProvider(explicitProvider)) {
+    throw new PlacementResolutionError(
+      'invalid-provider',
+      `provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`,
+      CREDENTIAL_PROVIDERS
+    );
   }
-
-  return (
-    providerFromTrustedLayer(profile?.provider) ?? providerFromTrustedLayer(project.defaultProvider)
-  );
-}
-
-function providerFromTrustedLayer(provider: string | null | undefined): CredentialProvider | null {
-  return typeof provider === 'string' && isValidProvider(provider) ? provider : null;
+  return explicitProvider;
 }
 
 export function resolveVmSize(
@@ -111,18 +104,18 @@ export function resolvePreferredVmLocation(
   return preferredLocation as VMLocation;
 }
 
+/**
+ * An explicit location wins, then a preference (where this work last ran), then the provider's
+ * default. Projects, agent profiles and skills have no location setting; without an explicit
+ * location, pool offerings in every location stay eligible.
+ */
 export function resolveVmLocation(
   explicitLocation: string | null | undefined,
   preferredLocation: VMLocation | null,
-  profile: PlacementProfileDefaults | null,
-  project: PlacementProjectDefaults,
   provider: CredentialProvider | null
 ): VMLocation {
-  // A preference outranks the profile/project defaults: it is where this work last ran.
   return ((explicitLocation as VMLocation | null) ??
     preferredLocation ??
-    (profile?.vmLocation as VMLocation | null) ??
-    (project.defaultLocation as VMLocation | null) ??
     (provider ? (getDefaultLocationForProvider(provider) as VMLocation | null) : null) ??
     DEFAULT_VM_LOCATION) as VMLocation;
 }

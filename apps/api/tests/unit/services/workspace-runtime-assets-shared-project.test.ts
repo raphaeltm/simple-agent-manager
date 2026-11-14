@@ -25,7 +25,9 @@ describe('workspace runtime assets shared project access', () => {
         project_id TEXT NOT NULL,
         user_id TEXT NOT NULL,
         agent_profile_hint TEXT,
-        skill_id TEXT
+        skill_id TEXT,
+        agent_configuration_id TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE agent_profiles (

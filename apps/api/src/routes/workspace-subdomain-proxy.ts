@@ -1,7 +1,9 @@
 /**
  * Browser traffic for workspace subdomains (`ws-{id}.*` and `ws-{id}--{port}.*`): authenticate
  * (session, terminal token, port-access cookie/token, public-port setting), authorize against
- * D1, then proxy to the node's vm-agent. Extracted verbatim from `index.ts` (rule 18).
+ * D1, then proxy to the node's vm-agent or the Instant container. Moved verbatim out of
+ * `index.ts` (rule 18); `index.ts` mounts it with `app.use('*', workspaceSubdomainProxy)` at
+ * the same position in the middleware chain.
  *
  * On a self-hosted box the same handler also answers Caddy forward_auth for WebSocket upgrades
  * (`routes/self-host-gateway.ts`): when the request is a gateway authorization request it

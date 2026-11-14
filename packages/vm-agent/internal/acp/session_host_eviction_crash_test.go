@@ -269,10 +269,13 @@ func TestExpiredEvictionReopensAdmissionAndNextEpisodeParks(t *testing.T) {
 	if starts.Load() != 1 {
 		t.Fatalf("restarts = %d, want 1", starts.Load())
 	}
-	attempt, ok := host.beginPrompt(func() {}, nil)
-	if !ok {
-		t.Fatal("expired eviction permanently fenced the recovered host")
-	}
+	// Completion precedes replay's deferred release of prompt admission.
+	var attempt *promptAttempt
+	waitFor(t, time.Second, func() bool {
+		var accepted bool
+		attempt, accepted = host.beginPrompt(func() {}, nil)
+		return accepted
+	})
 	// Keep the newly accepted prompt active through the next episode.
 
 	host.config.EvictionParkTimeout = time.Hour

@@ -627,6 +627,11 @@ export interface SubmitTaskRequest {
   model?: string | null;
   /** Effort for this task only. Must be supported by the resolved agent; null inherits. */
   effort?: AgentEffort | null;
+  /**
+   * The caller's own agent account (`cc_configurations.id`) for this task only, over the
+   * profile's. Must be active and for the agent the task runs; null/absent uses the profile's.
+   */
+  agentConfigurationId?: string | null;
   /** An open idea in this project that this work starts from. The server validates it,
    * then records the session → idea link (`works_on` for task mode, `discusses` for
    * conversation mode) before the agent receives its first prompt. The idea is never

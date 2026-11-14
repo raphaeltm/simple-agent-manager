@@ -109,7 +109,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
       )
     ).not.toThrow();
   });
-  it('real SDK client initializes, lists all 38 annotated tools and reads only current memberships', async () => {
+  it('real SDK client initializes, lists all 39 annotated tools and reads only current memberships', async () => {
     const client = new Client({ name: 'conformance', version: '1' });
     const transport = new StreamableHTTPClientTransport(
       new URL('https://api.test.example.com/connect/mcp'),
@@ -117,7 +117,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
     );
     await client.connect(transport);
     const catalog = await client.listTools();
-    expect(catalog.tools).toHaveLength(38);
+    expect(catalog.tools).toHaveLength(39);
     expect(catalog.tools.map((t) => t.name)).toEqual(
       expect.arrayContaining([
         'sam_chat_message_get',
@@ -131,6 +131,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
         'sam_work_changes',
         'sam_chat_jobs_list',
         'sam_operation_get',
+        'sam_usage_get',
       ])
     );
     expect(
@@ -199,7 +200,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
       requestInit: { headers: { Authorization: `Bearer ${token}` } },
     });
     await client.connect(transport);
-    expect((await client.listTools()).tools).toHaveLength(38);
+    expect((await client.listTools()).tools).toHaveLength(39);
     const result = await client.callTool({ name: 'sam_projects_list', arguments: {} });
     expect(JSON.stringify(result)).toContain('My Project');
     await client.close();
@@ -254,7 +255,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
       `INSERT INTO platform_settings(key,value,updated_at) VALUES ('connector.writeEnabled','false','2026-10-16T00:00:00Z')`
     );
     const { json } = await rpc('tools/list');
-    expect(json.result.tools).toHaveLength(27);
+    expect(json.result.tools).toHaveLength(28);
     const disabled = await rpc('tools/call', {
       name: 'sam_idea_create',
       arguments: { projectId: 'mine', title: 'Not created' },

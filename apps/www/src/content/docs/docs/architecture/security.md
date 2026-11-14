@@ -21,7 +21,7 @@ For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial adminis
 
 SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP credentials, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.
 
-However, SAM's own hosted deployment also has an **enabled platform-level cloud credential** (`platform_credentials`, `provider=hetzner`, `credential_type=cloud-provider`). VM provider resolution uses **project credential → user credential → platform credential**, so on the hosted (zero-config) platform a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes when the project or platform can supply one. Self-hosted deployments without a project or platform credential rely on user-supplied BYOC tokens.
+An installation administrator can also enable a **platform-level cloud credential** (`platform_credentials`, `credential_type=cloud-provider`). VM provider resolution uses **project credential → user credential → platform credential** (`resolveCredentialSource()` in `apps/api/src/services/provider-credentials.ts`), so where the project or platform can supply one, a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes. Installations without a project or platform credential rely on user-supplied BYOC tokens.
 
 ## Credential Types
 
@@ -112,9 +112,9 @@ Code requests and code redemptions are limited per IP address. Requests and rede
 
 | Token           | Lifetime             | Purpose                          | Validated By            |
 | --------------- | -------------------- | -------------------------------- | ----------------------- |
-| Session cookie  | Hours                | Browser authentication           | API Worker (BetterAuth) |
-| Workspace JWT   | Minutes              | Terminal WebSocket auth          | VM Agent (via JWKS)     |
-| Bootstrap token | 5 minutes            | One-time VM credential injection | API Worker              |
+| Session cookie  | 7 days               | Browser authentication           | API Worker (BetterAuth) |
+| Workspace JWT   | 1 hour               | Terminal WebSocket auth          | VM Agent (via JWKS)     |
+| Bootstrap token | 15 minutes (default) | One-time VM credential injection | API Worker              |
 | Callback token  | 24 hours (renewable) | VM Agent → API callbacks         | API Worker              |
 
 ### SAM Connector tokens
@@ -183,13 +183,73 @@ tool output, repository data, and credentials are never copied into this signal.
 
 Destructive runtime requests are bound to a server-written node incarnation, the
 exact provider credential reference used for provisioning, and a SHA-256
-fingerprint of that encrypted credential generation. The fingerprint prevents a
-later in-place credential rotation from redirecting teardown to a different
-provider account whose VM identifier happens to collide. SAM rechecks the
+fingerprint of that encrypted credential generation. SAM rechecks the
 workspace, node owner, project/session ownership, provider instance, and runtime
-incarnation immediately before a VM-agent deletion request. Managed provider
-teardown fails closed when a legacy node has no exact provider-account binding;
-it never substitutes whichever credential happens to be active later.
+incarnation immediately before a VM-agent deletion request.
+
+Deleting a managed VM does not depend on the credential that created it, so
+rotating, re-saving or reconnecting a cloud credential never strands running
+VMs (`resolveStrictNodeTeardownAuthority()` in
+`apps/api/src/services/node-teardown-authority.ts`):
+
+- While the provisioning credential still resolves to its exact generation, SAM
+  deletes through it.
+- Otherwise SAM uses the node owner's current credentials for that provider: the
+  provisioning order for the node's own user and project (project, then user,
+  then platform), the owner's user credential on its own for a project node,
+  then every enabled platform credential for that provider. It never uses
+  another user's or another project's credential.
+- With a current credential, ownership is proven from the VM itself
+  (`proveNodeInstanceOwnership()`). Immediately before the provider delete, SAM
+  re-reads the instance and requires the recorded provider instance ID plus the
+  exact SAM labels: managed, node, role, environment, installation and runtime
+  incarnation. A missing, duplicated or different label preserves the VM, so a
+  VM created before SAM stamped these labels is never deleted this way. This
+  also covers a credential rotated to a different account whose VM identifier
+  happens to collide: that VM is skipped and the next credential is tried.
+- A credential that cannot see the instance is not proof the VM is gone. The
+  node stays `destroying` with a named `cleanup_blocked_reason`
+  (`teardown_credential_unavailable`, `teardown_instance_not_visible`,
+  `teardown_instance_ownership_mismatch`,
+  `teardown_ownership_scope_unavailable`, `teardown_delete_refused` or
+  `teardown_deletion_unconfirmed`) and SAM raises its operator alert
+  (`recordNodeTeardownBlocked()` in `node-teardown-blocked.ts`), instead of
+  retrying silently. A credential that could not be read at all (a transient
+  storage or decryption failure) is an ordinary failure and is retried on the
+  normal backoff, not reported as missing. A credential that can read the VM but
+  is refused permission to delete it is skipped, and the next credential has to
+  prove ownership again before its own delete
+  (`deleteWithCurrentOwnerCredential()`).
+
+The cleanup cron does not wait for a provider's long-running delete. GCP deletes
+an instance through an operation that runs from about 20 seconds to a few
+minutes, longer than one cron attempt may take. For a provider that supports it
+(GCP today), the cron starts the deletion and returns
+(`sendProviderDeletion()` in `apps/api/src/services/node-provider-deletion.ts`):
+
+- The ownership proof and incarnation fence above run first, unchanged.
+- Before the DELETE is sent, SAM writes a record of it on the node row
+  (`nodes.provider_deletion_requested_at`, `nodes.provider_deletion_json`),
+  bound to the node's provider instance ID and runtime incarnation. A delete cut
+  off mid-flight can still be confirmed, or shown never to have arrived.
+- Sending the DELETE is not proof. On a later tick the
+  `provider_deletion_confirm` phase reads the provider's own record of that
+  deletion (`confirmPendingProviderDeletion()`): for GCP, the zone's delete
+  operations whose `targetId` is the instance's numeric ID
+  (`getGcpInstanceDeletionStatus()` in `packages/providers/src/gcp-deletion.ts`).
+  Termination proof is written only when that record shows a completed,
+  error-free deletion of that exact instance. "Not found" through a current
+  credential is still never proof.
+- If the provider has no record of the delete, or the delete failed, the record
+  is cleared and the next attempt runs the guarded teardown again. A deletion
+  still unconfirmed after `operations.nodeProviderDeletionConfirmMaxMs` (30
+  minutes by default) is reported as `teardown_deletion_unconfirmed` with the
+  operator alert, and is checked again only after the one-hour failure backoff.
+
+Providers whose delete call already returns once the provider accepts it
+(Hetzner, DigitalOcean, Vultr, Infomaniak, Scaleway) keep the single-step path.
+Interactive deletes (owner **Delete Node**, NodeLifecycle stop) still wait for
+the provider.
 
 ## Credential Encryption
 
@@ -208,7 +268,7 @@ GCP WIF configuration and uploaded service-account JSON use the same versioned c
 
 The complete source credential is encrypted at rest with AES-256-GCM. SAM signs short-lived RS256 assertions and exchanges them only at the fixed Google OAuth token endpoint. Derived Google access tokens are cached in KV only until their returned expiry minus a safety buffer; they are never persisted as primary credentials. Cache identity includes the authentication mode and WIF or private-key identity, so switching modes or rotating a key cannot reuse a prior token.
 
-Save and rotation verify the selected Compute zone before a D1 transaction replaces both legacy and composable credential copies. A failed verification or transaction leaves the previous credential intact. Disconnect removes SAM's encrypted copies and cached derivatives but does not revoke a Google-managed service-account key.
+Save and rotation verify the selected Compute zone before one D1 transaction updates the user's stored credential in place and replaces its composable copy. The stored credential keeps its id, which the compute pool's account and every node placed from it are keyed on, so a re-save does not reset pool choices or orphan running machines (`replaceUserGcpCredential()`). A failed verification or transaction leaves the previous credential intact. Disconnect removes SAM's encrypted copies and cached derivatives but does not revoke a Google-managed service-account key.
 
 ## Terminal Authentication
 

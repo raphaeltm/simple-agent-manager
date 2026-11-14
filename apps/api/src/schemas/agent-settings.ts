@@ -1,5 +1,6 @@
 import type { AgentProviderMode, OpenCodeProvider } from '@simple-agent-manager/shared';
 import {
+  AGENT_MODEL_MAX_LENGTH,
   OPENCODE_PROVIDERS,
   VALID_AGENT_PROVIDER_MODES,
   VALID_PERMISSION_MODES,
@@ -17,7 +18,7 @@ export interface AgentSettingsValidationLimits {
 }
 
 export const AGENT_SETTINGS_VALIDATION_DEFAULTS: AgentSettingsValidationLimits = {
-  maxModelLength: 200,
+  maxModelLength: AGENT_MODEL_MAX_LENGTH,
   maxToolNameLength: 200,
   maxToolListLength: 100,
   maxEnvVars: 50,

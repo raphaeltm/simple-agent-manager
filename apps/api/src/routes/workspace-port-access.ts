@@ -1,8 +1,9 @@
 /**
  * Port-access authentication for workspace port hosts (`ws-{id}--{port}.*`): the
  * `sam_port_access` cookie, the `?port_token=` handshake (exchanged for that cookie with a 302),
- * and the workspace's public-ports setting. Extracted verbatim from the ws-* proxy (rule 18);
- * the 302 is returned to the caller, which sends it only after its ownership check passes.
+ * and the workspace's public-ports setting. Moved verbatim out of the ws-* proxy in `index.ts`
+ * (rule 18); the 302 is returned to the caller, which sends it only after its ownership check
+ * passes.
  */
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';

@@ -160,6 +160,11 @@ const (
 	// DefaultDeployBuildPublishTimeout bounds host build + push + release publish
 	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
 	DefaultDeployBuildPublishTimeout = 20 * time.Minute
+	// DEFAULT_BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE bounds source spool use.
+	// Override via BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE; excess probes fail fast.
+	DEFAULT_BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE = 1
+	DefaultBuildContextCallbackMaxAttempts         = 3
+	DefaultBuildContextCallbackRetryDelay          = 5 * time.Second
 	// DefaultDeployPublishHeartbeatInterval proves liveness during silent Docker operations.
 	DefaultDeployPublishHeartbeatInterval = time.Minute
 	DefaultHTTPCallbackTimeout            = 30 * time.Second
@@ -524,6 +529,9 @@ type Config struct {
 	ComposeOutputRetentionBytes         int64         // Max compose output bytes retained (tail) for apply error messages (env: COMPOSE_OUTPUT_RETENTION_BYTES)
 	DeployPublishHeartbeatInterval      time.Duration // env: DEPLOY_PUBLISH_HEARTBEAT_INTERVAL
 	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
+	BuildContextMaxActivePerWorkspace   int           // Concurrent context collections (env: BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE)
+	BuildContextCallbackMaxAttempts     int           // Bounded init/complete callback attempts
+	BuildContextCallbackRetryDelay      time.Duration // Cancellable delay between transient callback failures
 	DeployPreflightCommandTimeout       time.Duration // Max deployment preflight diagnostic command duration (env: DEPLOY_PREFLIGHT_COMMAND_TIMEOUT)
 }
 

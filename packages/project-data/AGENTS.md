@@ -5,7 +5,7 @@
 The per-project data store: the `ProjectData` Durable Object (chat sessions, messages, activity,
 attention, comments, project events, schedules, durable prompt delivery, storage safety), its
 typed RPC client, the ProjectData archive, and the two ProjectData cron jobs. Extracted from
-`apps/api` by the worker modularization (`tasks/active/2026-11-12-worker-modularization.md`, W1).
+`apps/api` by the worker modularization (`tasks/archive/2026-11-12-worker-modularization.md`, W1).
 
 The package imports nothing from `apps/*`. It depends on `@simple-agent-manager/shared` and
 `@simple-agent-manager/worker-core`. Everything it needs from other areas of the worker (task

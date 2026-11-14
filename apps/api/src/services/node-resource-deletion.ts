@@ -9,6 +9,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { deleteDNSRecord } from './dns';
+import { NodeTeardownBlockedError } from './node-teardown-authority';
 import { deleteNodeResourcesStrict } from './strict-node-deletion';
 import { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from './workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
@@ -72,7 +73,12 @@ async function deleteManagedNodeRuntime(
     }
     return true;
   } catch (err) {
-    result.errors.push(RUNTIME_TERMINATION_PENDING_ERROR);
+    // Name a known refusal so the owner sees why, e.g. the cloud credential no longer reaches it.
+    result.errors.push(
+      err instanceof NodeTeardownBlockedError
+        ? `${RUNTIME_TERMINATION_PENDING_ERROR} (${err.reason})`
+        : RUNTIME_TERMINATION_PENDING_ERROR
+    );
     log.error('node_delete.runtime_termination_unconfirmed', {
       nodeId,
       ...serializeError(err),

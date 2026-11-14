@@ -4,7 +4,12 @@
  * Collapses the two parallel resolution functions into ONE pure resolver
  * parameterized by a ConsumerRef, most specific tier first:
  *
- *   profile attachment → project attachment → user attachment → platform default
+ *   run account → profile attachment → project attachment → user attachment → platform default
+ *
+ * The run account is the configuration a person chose for one run. Like a profile or
+ * project pin, an unusable choice (paused, missing, another person's) halts: the run never
+ * silently falls back to an account nobody picked for it. A choice for another agent is
+ * skipped, as a profile pin is.
  *
  * Preserves Rule 28: an INACTIVE profile- or project-scoped attachment (or one
  * whose configuration or credential is inactive) does NOT fall through — it
@@ -79,6 +84,13 @@ export function explainResolution(
 ): ResolutionTrace {
   const forConsumer = snapshot.attachments.filter((a) => sameConsumer(a.consumer, consumer));
   const tiers: Array<{ tier: ResolutionTier; evaluate: () => TierOutcome }> = [];
+  if (ctx.runConfigurationId !== undefined && consumer.kind === 'agent') {
+    const configurationId = ctx.runConfigurationId;
+    tiers.push({
+      tier: 'run',
+      evaluate: () => runTier(snapshot, consumer, ctx, configurationId),
+    });
+  }
   if (ctx.profileId !== undefined && consumer.kind === 'agent') {
     const profileId = ctx.profileId;
     tiers.push({
@@ -167,6 +179,56 @@ function profileTier(
     };
   }
   return haltingTier('profile', snapshot, pin, consumer, 'profile-attachment');
+}
+
+/**
+ * The account chosen for this run. It must be the run owner's own: the API snapshot holds
+ * only their configurations, and the owner is checked again here so a snapshot built any
+ * other way cannot lend someone else's account. An unusable choice halts: the person chose
+ * an account for this run, and the run must not quietly start on one they did not choose.
+ *
+ * A choice for a different agent is skipped, like a profile pin: it was validated for the
+ * agent the run launches, and another agent's session in the same workspace (or the proxy
+ * probing candidate agents) must keep its own usual account rather than stop.
+ */
+function runTier(
+  snapshot: CompositionSnapshot,
+  consumer: Extract<ConsumerRef, { kind: 'agent' }>,
+  ctx: ResolutionContext,
+  configurationId: string
+): TierOutcome {
+  const configuration = findConfiguration(snapshot, configurationId);
+  const runStep = (reason: ResolutionStepReason): TierOutcome => ({
+    kind: 'halted',
+    step: { tier: 'run', state: 'halted', attachmentId: null, configurationId, reason },
+  });
+  if (!configuration || configuration.ownerId !== ctx.userId) {
+    return runStep('configuration-missing');
+  }
+  if (!sameConsumer(configuration.consumer, consumer)) {
+    return {
+      kind: 'continue',
+      step: {
+        tier: 'run',
+        state: 'skipped',
+        attachmentId: null,
+        configurationId,
+        reason: 'agent-type-mismatch',
+        pinnedAgentType:
+          configuration.consumer.kind === 'agent' ? configuration.consumer.agentType : undefined,
+      },
+    };
+  }
+  if (!configuration.isActive) return runStep('configuration-inactive');
+  const credential = findCredential(snapshot, configuration.credentialId);
+  // A run account must carry a credential of the run owner (submit refuses one without).
+  if (!credential || credential.ownerId !== ctx.userId) return runStep('credential-missing');
+  if (!credential.isActive) return runStep('credential-inactive');
+  return {
+    kind: 'used',
+    resolved: { consumer, configuration, credential, source: 'run-override' },
+    step: { tier: 'run', state: 'used', attachmentId: null, configurationId, reason: null },
+  };
 }
 
 /** The pin worth reporting as skipped: the one for the running agent first. */

@@ -45,7 +45,6 @@ export const MOCK_PROJECT = {
   githubInstallationId: 'inst-northwind',
   defaultVmSize: 'medium',
   defaultAgentType: 'claude-code',
-  defaultProvider: 'hetzner',
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: daysAgo(90),

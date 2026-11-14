@@ -88,37 +88,57 @@ describe('a row released inside a sweep is due in that same sweep', () => {
 });
 
 describe('an unobserved create settles after the settle window', () => {
-  it('keeps the row pending inside the window and cleans it within settle + one backoff', async () => {
-    const node = await strandedPendingCreate();
-    const start = Date.now();
-    vi.useFakeTimers({ toFake: ['Date'] });
-    // Drive the real sweep at each time the row becomes due, the way the cron reaches it.
-    let now = start;
-    let sweeps = 0;
-    while (journal(node.id)[0]!.status !== 'cleaned' && sweeps < 20) {
-      const next = journal(node.id)[0]!.cleanupNextAttemptAt;
-      now = Math.max(now, next ? Date.parse(next) : now) + 1;
-      vi.setSystemTime(now);
-      const listsBefore = cf.callCount('tunnel.list');
-      const result = await runNodeTunnelCleanupSweep(env, new Date(now));
-      // Liveness: every sweep really attempted the row and re-read the inventory.
-      expect(result.attempted).toBe(1);
-      expect(cf.callCount('tunnel.list')).toBeGreaterThan(listsBefore);
-      if (now - start < 15 * 60_000) {
-        expect(journal(node.id)[0]).toMatchObject({
-          status: 'cleanup_pending',
-          pendingCreateCount: 1,
-        });
+  it.each([0, 1_000])(
+    'keeps the row pending inside the window and cleans it within settle + one backoff (setup delay %i ms)',
+    async (setupDelayMs) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-11-10T00:00:00.999Z'));
+      const node = await strandedPendingCreate();
+      // Cross a second boundary after setup: wall time captured here is not the create stamp.
+      vi.setSystemTime(Date.now() + setupDelayMs);
+      const { since } = sqlite
+        .prepare(
+          `SELECT COALESCE(pending_create_last_at, created_at) AS since
+           FROM node_cloudflare_tunnels WHERE node_id = ?`
+        )
+        .get(node.id) as { since: string };
+      const start = Date.parse(since);
+      expect(start).toBe(Date.parse('2026-11-10T00:00:00.999Z'));
+      expect(Date.now() - start).toBe(setupDelayMs);
+      // Drive the real sweep at each time the row becomes due, the way the cron reaches it.
+      let now = Date.now();
+      let sweeps = 0;
+      let pendingSweeps = 0;
+      while (journal(node.id)[0]!.status !== 'cleaned' && sweeps < 20) {
+        const next = journal(node.id)[0]!.cleanupNextAttemptAt;
+        now = Math.max(now, next ? Date.parse(next) : now) + 1;
+        vi.setSystemTime(now);
+        const listsBefore = cf.callCount('tunnel.list');
+        const result = await runNodeTunnelCleanupSweep(env, new Date(now));
+        // Liveness: every sweep really attempted the row and re-read the inventory.
+        expect(result.attempted).toBe(1);
+        expect(cf.callCount('tunnel.list')).toBeGreaterThan(listsBefore);
+        if (now - start < 15 * 60_000) {
+          expect(journal(node.id)[0]).toMatchObject({
+            status: 'cleanup_pending',
+            pendingCreateCount: 1,
+          });
+          pendingSweeps++;
+        } else {
+          expect(journal(node.id)[0]).toMatchObject({ status: 'cleaned', pendingCreateCount: 0 });
+        }
+        sweeps++;
       }
-      sweeps++;
+      expect(pendingSweeps).toBeGreaterThan(0);
+      expect(now - start).toBeGreaterThanOrEqual(15 * 60_000);
+      expect(journal(node.id)).toMatchObject([{ status: 'cleaned', pendingCreateCount: 0 }]);
+      // Rule 81: worst case is the settle window plus the backoff interval that spans its end.
+      // Backoff doubles from 1 min, so that interval is at most the time already elapsed:
+      // completion <= 2 x settle (30 min at the defaults).
+      expect(now - start).toBeLessThanOrEqual(2 * 15 * 60_000 + 60_000);
+      expect(logged.join('\n')).toContain('node_tunnel.pending_create_settled_by_age');
     }
-    expect(journal(node.id)).toMatchObject([{ status: 'cleaned', pendingCreateCount: 0 }]);
-    // Rule 81: worst case is the settle window plus the backoff interval that spans its end.
-    // Backoff doubles from 1 min, so that interval is at most the time already elapsed:
-    // completion <= 2 x settle (30 min at the defaults).
-    expect(now - start).toBeLessThanOrEqual(2 * 15 * 60_000 + 60_000);
-    expect(logged.join('\n')).toContain('node_tunnel.pending_create_settled_by_age');
-  });
+  );
 
   it('settles exactly at the window boundary, not before', () => {
     const since = '2026-11-10T00:00:00.000Z';

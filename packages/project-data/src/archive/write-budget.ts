@@ -25,10 +25,18 @@ export const ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT = 10_000;
  * scales linearly with `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET`, which has no maximum. An
  * operator raising the allowance to clear a backlog would otherwise also raise the `LIMIT` on
  * three COUNT subqueries that run once per candidate, once per tick, inside a Durable Object
- * whose memory ceiling is the thing that reset it twice on 2026-09-05. A session above this
- * many units needs an explicitly sized migration plan, not a bigger scan.
+ * whose memory ceiling is the thing that reset it twice on 2026-09-05. The three counts are
+ * streaming aggregates over indexed `session_id` ranges, so memory stays constant and only the
+ * scan length grows with this cap.
+ *
+ * 1,000,000 covers the outer probable limit: sessions are capped at 100,000 messages
+ * (`DEFAULT_MAX_MESSAGES_PER_SESSION`), and the largest production sessions carry ~2-3 units
+ * per message once grouped rows and FTS bytes are counted. Since the resumable cursor reserves
+ * a migration's writes once, at journal creation, this scan runs once per new journal rather
+ * than once per tick the migration spans. The previous 100,000 cap made every session above
+ * ~40-50k messages permanently unaffordable.
  */
-export const ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS = 100_000;
+export const ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS = 1_000_000;
 const FTS_BYTES_PER_UNIT = 512;
 const DEFAULT_UNUSED_RESERVATION_RETENTION_MS = 7 * ARCHIVE_BUDGET_WINDOW_MS;
 const DEFAULT_UNUSED_RESERVATION_CLEANUP_LIMIT = 100;

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import type { OperationContext } from '@simple-agent-manager/operations';
 import { getPullRequestStates } from '@simple-agent-manager/operations';
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,7 +38,7 @@ describe('verified GitHub PR webhooks', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
-    sqlite.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, repository TEXT, github_repo_id INTEGER);
+    sqlite.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, repository TEXT, github_repo_id INTEGER, user_id TEXT NOT NULL DEFAULT 'pr-webhook-owner');
       CREATE TABLE tasks (id TEXT PRIMARY KEY);`);
     sqlite.exec(
       readFileSync(
@@ -46,13 +47,13 @@ describe('verified GitHub PR webhooks', () => {
       )
     );
     sqlite
-      .prepare('INSERT INTO projects VALUES (?, ?, ?, ?)')
+      .prepare('INSERT INTO projects (id, name, repository, github_repo_id) VALUES (?, ?, ?, ?)')
       .run('p1', 'First', 'acme/widget', 91);
     sqlite
-      .prepare('INSERT INTO projects VALUES (?, ?, ?, ?)')
+      .prepare('INSERT INTO projects (id, name, repository, github_repo_id) VALUES (?, ?, ?, ?)')
       .run('p2', 'Second', 'acme/widget', 91);
     sqlite
-      .prepare('INSERT INTO projects VALUES (?, ?, ?, ?)')
+      .prepare('INSERT INTO projects (id, name, repository, github_repo_id) VALUES (?, ?, ?, ?)')
       .run('other', 'Other', 'else/other', 92);
     env = { DATABASE: createSqliteD1(sqlite) } as Env;
     app = new Hono<{ Bindings: Env }>();
@@ -111,6 +112,23 @@ describe('verified GitHub PR webhooks', () => {
       closed_at: null,
       ...changes,
     },
+  });
+
+  // Leftovers of the retired anonymous trial are owned by the system sentinel user. Nobody can
+  // open them, so a webhook must not be paid for in row writes on their behalf.
+  it('tracks nothing for a project owned by the system sentinel user', async () => {
+    sqlite
+      .prepare(
+        'INSERT INTO projects (id, name, repository, github_repo_id, user_id) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run('trial-leftover', 'Leftover', 'acme/widget', 91, SYSTEM_USER_ID);
+
+    await deliver('pull_request', pr('opened'));
+
+    // Owner control in the same delivery: both user-owned projects on the repository are tracked.
+    expect(
+      sqlite.prepare('SELECT project_id FROM pull_requests ORDER BY project_id').all()
+    ).toEqual([{ project_id: 'p1' }, { project_id: 'p2' }]);
   });
 
   it('tracks lifecycle for both projects and refuses older or unrelated events', async () => {
@@ -413,7 +431,7 @@ describe('verified GitHub PR webhooks', () => {
   it('ingests complete GitHub example payloads through the verified route', async () => {
     // Fixtures are unmodified payload examples from octokit/webhooks, api.github.com.
     sqlite
-      .prepare('INSERT INTO projects VALUES (?, ?, ?, ?)')
+      .prepare('INSERT INTO projects (id, name, repository, github_repo_id) VALUES (?, ?, ?, ?)')
       .run('fixture', 'Fixture', 'Codertocat/Hello-World', 186853002);
     const fixture = (name: string) =>
       JSON.parse(

@@ -26,6 +26,9 @@ type TaskSearchRow = {
   outputPrUrl: string | null;
   outputSummary: string | null;
   updatedAt: string;
+  parentTaskId?: string | null;
+  executionStep?: string | null;
+  chatSessionId?: string | null;
 };
 
 function truncateSnippet(value: string | null, maxLength: number): string | null {
@@ -41,6 +44,9 @@ function toTaskSearchResult(task: TaskSearchRow, snippetLength: number, external
           projectId: task.projectId,
           triggeredBy: task.triggeredBy,
           connectorClientName: task.connectorClientName,
+          parentTaskId: task.parentTaskId ?? null,
+          executionStep: task.executionStep ?? null,
+          sessionId: task.chatSessionId ?? null,
         }
       : {}),
     title: task.title,
@@ -195,6 +201,9 @@ export async function listTasks(ctx: OperationContext, input: ListTasksInput) {
       outputBranch: schema.tasks.outputBranch,
       outputPrUrl: schema.tasks.outputPrUrl,
       outputSummary: schema.tasks.outputSummary,
+      parentTaskId: schema.tasks.parentTaskId,
+      executionStep: schema.tasks.executionStep,
+      chatSessionId: schema.tasks.chatSessionId,
       ...(search ? {} : { createdAt: schema.tasks.createdAt }),
       updatedAt: schema.tasks.updatedAt,
     })

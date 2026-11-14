@@ -208,7 +208,7 @@ export async function runInstallerEngine(
       throw new Error('Shallow source');
     if (!c.dryRun) {
       goVersion = (await execute('go', ['version'])).trim();
-      if (!goVersion.startsWith('go version go1.26.10 '))
+      if (!goVersion.startsWith('go version go1.26.11 '))
         throw new Error('Unsupported Go toolchain');
       await execute('docker', ['info']);
     }

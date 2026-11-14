@@ -39,7 +39,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-01-01T00:00:00Z',
@@ -394,8 +393,19 @@ test('Connector provenance in session sidebar remains user-initiated', async ({ 
   // Ready: the project chat's new-chat page has rendered.
   await expect(page.getByText('What do you want to build?')).toBeVisible();
   await openMobileSidebar(page);
-  await expect(page.getByTitle(`Created via ${connectorClientName}`).first()).toBeVisible();
+  // Provenance reads "Task via <app>" on the meta line, under the title.
+  const provenance = page.getByTestId('session-connector').first();
+  await expect(provenance).toBeVisible();
+  await expect(provenance).toContainText('via Claude Research');
+  await expect(page.getByTitle(`Task started from ${connectorClientName}`).first()).toBeVisible();
   await assertNoOverflow(page);
+  // The provenance sits below the title, so the long name cannot push anything on the title line.
+  const titleBox = await page
+    .getByText('Implement authentication', { exact: true })
+    .first()
+    .boundingBox();
+  const provenanceBox = await provenance.boundingBox();
+  expect(provenanceBox!.y).toBeGreaterThan(titleBox!.y + titleBox!.height - 1);
   expect(
     await page
       .getByText('Implement authentication', { exact: true })

@@ -189,6 +189,7 @@ where it says so and the app continues from there.
 | `connector.teamTextChars`          | 600     | 100–4,000    | Characters of each agent summary, evidence note and question per task in team status |
 | `connector.channelHistoryPageSize` | 20      | 1–100        | Channel messages in one page when the app does not ask for a number                  |
 | `connector.channelMessageChars`    | 2,000   | 200–4,096    | Characters of each channel message                                                   |
+| `connector.usageStaleAfterMinutes` | 60      | 1–10,080     | Minutes after which `sam_usage_get` calls a provider usage reading stale             |
 
 ## Chat
 
@@ -271,6 +272,28 @@ admins can set a whole number from 0 to 99, and 0 turns the cutoff off. SAM star
 another VM, creating one if it needs to. Restarting a stopped workspace on its own VM is still
 allowed. VMs you added yourself, and VMs no task created, have no lifetime limit and no cutoff.
 
+## Archiving ended chats
+
+Each project keeps its chats in one store with a hard size limit. A scheduled sweep moves ended
+chats out of that store into archive storage, where they stay readable and searchable. Moving a
+chat costs billed Cloudflare Durable Object row writes on both sides, and the only thing it buys is
+room in the project's store, so the sweep leaves a project alone until its store is filling up.
+
+`operations.projectDataArchiveMinStorageUsagePercent` sets how full a project's store must be, as a
+percent of its limit, before the sweep archives that project's ended chats. The default is 50;
+admins can set a whole number from 0 to 100, and 0 archives every project regardless of size. The
+sweep reads the size from the store's periodic storage measurement (hourly by default,
+`PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS`). A project that has never been
+measured, or whose last measurement is older than
+`operations.projectDataArchiveStorageTelemetryMaxAgeHours` (default 24 hours, 1 to 720), is archived
+as if it were full, because an old reading cannot show that the store has room. The sweep does not
+look at whether measurement is switched on, only at the stored reading and its age. So if storage
+measurement is turned off (`PROJECT_DATA_STORAGE_TELEMETRY_ENABLED=false`), a reading taken before
+that still holds its project back until it passes the max age; after that no project has a usable
+reading, every project is archived, and this setting has no effect. Chats already being
+moved always finish, and an archive run a superadmin starts for one named project through the
+admin archive route is not held back by this setting.
+
 ## Stale agent turns
 
 An agent's turn can stop producing anything without ending: the VM keeps reporting the turn as
@@ -301,6 +324,15 @@ Two related settings control warning and alert frequency: `operations.nodeCleanu
 Active workspaces and provider ownership checks remain protected. When SAM can't retire a blocked VM at the deadline (often, but not always, because it can't prove who owns the server), it keeps the VM and records an error in **Admin → Errors**, at most once per node per `operations.nodeCleanupOwnershipAlertIntervalMs` (one day by default): **VM may still exist at provider: _provider_ _server id_; cleanup requires ownership/operator resolution**. Before deleting anything, open the node and read its **Cleanup blocked since…** reasons. Delete the server in that provider's console only when the reason is `provenance` (or `strict_provider_ownership_or_deletion_failure`) and you have checked that it belongs to your installation and runs nothing you need. If the reasons include `active_workspace` or `warm_placement_claim`, or the node hosts app deployments, resolve that first instead. Once the server is gone, the node's owner can remove the node with **I already deleted this server** on its page, after selecting **Delete Node** first if the node shows **Stopped**; see [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node). That button refuses nodes on the installation's own cloud account, and the app has no other way to remove such a node yet.
 
 Blocked nodes show the time and reason in their error message on the node list and detail page, as **Cleanup blocked since** _time_ followed by reason codes; [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away) explains each one.
+
+## Provider deletion in the cleanup cron
+
+The cleanup cron starts a VM deletion and confirms it on a later run instead of waiting for it, for providers whose delete runs as a long operation (GCP today). Two settings bound it:
+
+- `operations.nodeProviderDeletionRequestTimeoutMs` is the time one cleanup attempt may take to start a deletion or read its result: the log capture before teardown, provider sign-in, the ownership check and the delete request. The default is 15,000 milliseconds (15 seconds); admins can set a whole number from 1,000 to 60,000. A cleanup phase starts an attempt only while at least a third of this value (and never more than half the phase budget) remains, so a long value cannot stop cleanup from starting.
+- `operations.nodeProviderDeletionConfirmMaxMs` is how long a started deletion may stay unconfirmed. After it, the node shows the cleanup reason `teardown_deletion_unconfirmed` and SAM records **VM may still exist at provider** in **Admin → Errors**, then checks again hourly. The default is 1,800,000 milliseconds (30 minutes); admins can set a whole number from 60,000 to 86,400,000.
+
+An idle GCP node is normally removed within two cron runs (about 10 minutes) of its first cleanup attempt: the first run sends the delete, the next confirms it from GCP's own record and removes the node.
 
 ## Lifecycle latency monitoring
 
@@ -664,16 +696,18 @@ The GitHub route returns `504 GITHUB_TIMEOUT` when its overall deadline expires.
 
 These control the live Google Cloud catalog described in [Google Cloud](/docs/guides/google-cloud/#machine-types-zones-and-prices).
 
-| Setting                                     | Default                                         | Allowed range     | Applies to                                                                                               |
-| ------------------------------------------- | ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------- |
-| `gcpCatalog.machineTypes`                   | e2-medium; e2, n2d, t2d standard up to 16 vCPUs | 1–100 exact names | Machine types SAM offers from Google Cloud, in every zone that has them. Arm (ARM64) types are skipped.  |
-| `gcpCatalog.priceTableTtlMinutes`           | 1440                                            | 60–10080          | How old the stored Google Cloud price list may get before the background step refreshes it.              |
-| `gcpCatalog.priceRetryMinutes`              | 60                                              | 5–1440            | Wait after a failed price refresh before trying again.                                                   |
-| `gcpCatalog.priceMaxPages`                  | 20                                              | 1–200             | Most pages of price data read in one refresh; needing more fails rather than storing a partial list.     |
-| `gcpCatalog.priceRequestTimeoutMs`          | 30000                                           | 1000–120000       | Each request for a page of Google Cloud price data.                                                      |
-| `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Credentials tried per refresh, platform first; a retry continues with the next ones.                     |
-| `gcpCatalog.priceRefreshBudgetMs`           | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                          |
-| `gcpCatalog.apiIssueTtlMinutes`             | 10080                                           | 60–43200          | How long a Google API problem Google reported stays shown on a credential; a successful check clears it. |
+| Setting                                     | Default                                         | Allowed range     | Applies to                                                                                                                                                     |
+| ------------------------------------------- | ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gcpCatalog.machineTypes`                   | e2-medium; e2, n2d, t2d standard up to 16 vCPUs | 1–100 exact names | Machine types SAM offers from Google Cloud, in every zone that has them. Arm (ARM64) types are skipped.                                                        |
+| `gcpCatalog.priceTableTtlMinutes`           | 1440                                            | 60–10080          | How old the stored Google Cloud price list may get before the background step refreshes it.                                                                    |
+| `gcpCatalog.priceRetryMinutes`              | 60                                              | 5–1440            | Wait after a failed price refresh before trying again.                                                                                                         |
+| `gcpCatalog.priceMaxPages`                  | 20                                              | 1–200             | Most pages of price data read in one refresh; needing more fails rather than storing a partial list.                                                           |
+| `gcpCatalog.priceRequestTimeoutMs`          | 30000                                           | 1000–120000       | Each request for a page of Google Cloud price data.                                                                                                            |
+| `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Credentials tried per refresh, platform first; a retry continues with the next ones.                                                                           |
+| `gcpCatalog.priceRefreshBudgetMs`           | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                                                                                |
+| `gcpCatalog.apiIssueTtlMinutes`             | 10080                                           | 60–43200          | How long a Google API problem Google reported stays shown on a credential; a successful check clears it.                                                       |
+| `gcpCatalog.bootDiskGbPerVcpu`              | 20                                              | 1–256             | GB of boot disk a new Google Cloud node gets per vCPU, used by the catalog, prices and new nodes from the next catalog refresh; running nodes keep their disk. |
+| `gcpCatalog.bootDiskMinGb`                  | 50                                              | 10–4096           | Smallest boot disk, in GB, a new Google Cloud node gets whatever its vCPU count; same refresh rule.                                                            |
 
 ### Provider fallback
 

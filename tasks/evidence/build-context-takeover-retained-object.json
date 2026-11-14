@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-09T23:04:12.151842+00:00",
+  "status": 200,
+  "key": "compose-build-contexts/01KVRJCC7Y3NSDQYCPWDRPVJVH/01M717A2PE0C7MKTZMFJS46GZA/01M717NG24BB6ZYT8VMPNBGR79/1.tar.zst",
+  "bytes": 8391150,
+  "sha256": "e0be70b6764d6b591aee646f223eba780c82f1f36be705973ee4e47fafcf7ca6",
+  "disposition": "Retained per coordinator for normal 48h retention sweep",
+  "eligibleExpiry": "2026-11-11T22:43:08Z"
+}

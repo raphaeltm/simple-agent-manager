@@ -82,7 +82,13 @@ export async function refreshGcpPriceTableIfDue(
 ): Promise<GcpPriceRefreshResult> {
   const ttlMs = Number(await resolveAdminSetting(env, 'gcpCatalog.priceTableTtlMinutes')) * 60_000;
   const stored = await readStored(env);
-  if (stored && Date.parse(stored.fetchedAt) + ttlMs > now.getTime()) {
+  // A table stored before boot disks were priced is due at once: until it is replaced, every
+  // offering would show the machine price without its disk for the rest of the TTL.
+  if (
+    stored &&
+    stored.table.balancedDiskGibMonthly !== undefined &&
+    Date.parse(stored.fetchedAt) + ttlMs > now.getTime()
+  ) {
     return { status: 'fresh', fetchedAt: stored.fetchedAt };
   }
 
@@ -158,6 +164,14 @@ async function refreshFromCandidates(
       // offering for the whole TTL. Treat it as this credential's failure instead.
       if (!hasUsableRate(table)) {
         throw new Error('Cloud Billing returned no usable core and RAM rate pair');
+      }
+      if (Object.keys(table.balancedDiskGibMonthly ?? {}).length === 0) {
+        // Prices stay usable (machine only), but the disk SKU match found nothing: a renamed
+        // "Balanced PD Capacity" SKU would otherwise drop every boot disk price silently.
+        log.warn('gcp_price_table.no_boot_disk_prices', {
+          credentialId: candidate.id,
+          regions: Object.keys(table.regions).length,
+        });
       }
       const fetchedAt = now.toISOString();
       await env.KV.put(GCP_PRICE_TABLE_KV_KEY, JSON.stringify({ fetchedAt, table }));

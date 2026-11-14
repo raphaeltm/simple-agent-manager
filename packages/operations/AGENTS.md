@@ -6,7 +6,7 @@ Surface-agnostic SAM platform operations. Each operation owns validation, member
 capability checks, limits and side effects; every surface (workspace `sam-mcp`, the Connector at
 `/connect/mcp`, the /sam agent and REST routes) is a thin adapter that translates transport,
 actor and output format (project policy 5cb362e8, idea 01M4GJ0W0DS5BTKBM1YW0X5YC8). Part of the
-worker modularization (`tasks/active/2026-11-12-worker-modularization.md`, workstream W3).
+worker modularization (`tasks/archive/2026-11-12-worker-modularization.md`, workstream W3).
 
 The package holds **no worker `Env` and no import from `apps/*`**. It reads only its narrow
 `OperationsEnv` (`src/env.ts`, which the worker `Env` extends) and reaches everything another area
