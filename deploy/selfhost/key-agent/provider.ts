@@ -20,10 +20,18 @@ export type KeyProviderErrorKind =
 
 export class KeyProviderError extends Error {
   readonly kind: KeyProviderErrorKind;
-  constructor(kind: KeyProviderErrorKind, message: string) {
+  /**
+   * True only when the key service itself said the KEY does not exist (Cloud KMS or Key Vault 404
+   * on the key, AWS NotFoundException). Never set for a missing VM identity, a 404 from a token
+   * endpoint or a wrong key usage, which share kind `config`. The automatic key choice
+   * (scripts/selfhost/key-choice.ts, candidateFloor) reads this as "no key was set up".
+   */
+  readonly keyMissing: boolean;
+  constructor(kind: KeyProviderErrorKind, message: string, options: { keyMissing?: boolean } = {}) {
     super(message);
     this.name = 'KeyProviderError';
     this.kind = kind;
+    this.keyMissing = options.keyMissing === true;
   }
 }
 
@@ -73,6 +81,8 @@ export interface JsonCallOptions {
   timeoutMs?: number;
   /** Text naming the service in errors (never a credential). */
   service: string;
+  /** The URL names the key itself, so a 404 means the key does not exist (keyMissing). */
+  keyResource?: boolean;
 }
 
 /** An error body larger than this is not read: the status token sits at its start. */
@@ -136,7 +146,8 @@ export async function jsonCall(url: string, options: JsonCallOptions): Promise<u
     const status = await errorStatus(response);
     throw new KeyProviderError(
       kindForStatus(response.status),
-      `${options.service}: HTTP ${response.status}${status ? ` ${status}` : ''}`
+      `${options.service}: HTTP ${response.status}${status ? ` ${status}` : ''}`,
+      { keyMissing: options.keyResource === true && response.status === 404 }
     );
   }
   try {

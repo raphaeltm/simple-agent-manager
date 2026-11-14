@@ -29,6 +29,8 @@ export interface FakeKeyService {
    * destruction (`teardown --destroy-key`) or disabled.
    */
   setGcpPrimaryState(name: string, state: string): void;
+  /** The GCE token endpoint answers 404 while true, as on a VM with no service account. */
+  setNoGcpIdentity(none: boolean): void;
   close(): Promise<void>;
 }
 
@@ -58,6 +60,7 @@ export async function startFakeKeyServices(
   let denied = false;
   const gcpKeys = new Map<string, Buffer>();
   const gcpPrimaryState = new Map<string, string>();
+  let noGcpIdentity = false;
   const azureKeys = new Map<string, Map<string, { publicKey: KeyObject; privateKey: KeyObject }>>();
 
   function azureVersion(name: string, version?: string) {
@@ -98,6 +101,7 @@ export async function startFakeKeyServices(
       // Token endpoints (GCE metadata, Azure IMDS).
       if (url.pathname === '/computeMetadata/v1/instance/service-accounts/default/token') {
         if (request.headers['metadata-flavor'] !== 'Google') return send(403, {});
+        if (noGcpIdentity) return send(404, {});
         return send(200, { access_token: token, expires_in: 3599, token_type: 'Bearer' });
       }
       if (url.pathname === '/metadata/identity/oauth2/token') {
@@ -192,6 +196,9 @@ export async function startFakeKeyServices(
     },
     setGcpPrimaryState: (name, state) => {
       gcpPrimaryState.set(name, state);
+    },
+    setNoGcpIdentity: (none) => {
+      noGcpIdentity = none;
     },
     close: () => new Promise<void>((done) => server.close(() => done())),
   };

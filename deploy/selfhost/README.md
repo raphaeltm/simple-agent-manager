@@ -183,9 +183,10 @@ The automatic choice:
    (Azure without `SAM_AZURE_KEY_VAULT_URL`), or when the cloud says the conventional key does
    not exist. The printed line says why, for example `key provider: file (on AWS (eu-west-1),
 but AWS KMS key alias/sam-... is not usable (config: ... NotFoundException); using a key file on this box)`.
-5. Never a weaker key by itself. A key set in `.env` that fails, or a key that exists but cannot be
-   used (denied, disabled, no enabled version, unreachable), stops `--init` with the reason and
-   what to run; nothing is recorded or sealed. Google Cloud answers "denied" also for a key the VM
+5. Never a weaker key by itself. A key set in `.env` that fails or is not tried (no cloud
+   detected, another cloud), or a key that cannot be used for any reason other than the key
+   service saying it does not exist (denied, disabled, no enabled version, no VM identity,
+   unreachable), stops `--init` with the reason and what to run; nothing is recorded or sealed. Google Cloud answers "denied" also for a key the VM
    may not see, so on Google Cloud without a key either set one up (below) or set
    `SAM_KEY_PROVIDER=file` in `.env`: that line is how you choose the key file on purpose. The
    rule is one function, `sealingFloorRefusal` in `scripts/selfhost/key-choice.ts`; `switch --to

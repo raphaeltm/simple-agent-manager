@@ -459,6 +459,34 @@ describe('--kms: a key with no enabled primary version (box round R13)', () => {
     expect(gcp().keys[KEY_PATH(key)]?.versions).toEqual({ 1: 'DESTROY_SCHEDULED' });
   });
 
+  it('destroy, re-bootstrap with --new-key-version, teardown again: the new grant and version go too', () => {
+    const kmsOnly = [...kmsArgs.slice(0, 5), '--kms-only', '--box-service-account', BOX_SA];
+    const teardown = ['--project', 'sam-vm-test', '--api-url', ISSUER, '--teardown'];
+    expect(run(kmsOnly).status).toBe(0);
+    const key = keyName();
+    expect(run([...teardown, '--destroy-key-versions', key]).status).toBe(0);
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toEqual([]);
+
+    // Rebuilt within the 30 days, with the record still here (the bootstrap ran in the same place).
+    const again = run([...kmsOnly, '--new-key-version']);
+    expect(again.status, again.stderr).toBe(0);
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toHaveLength(1);
+    const grant = record().resources.find(
+      (r) => r.kind === 'iam-binding' && String(r.name).includes('/cryptoKeys/')
+    );
+    // The record says the grant exists again; it must not read as already removed.
+    expect(grant).toMatchObject({ action: 'created' });
+    expect(grant).not.toHaveProperty('removedAt');
+
+    const second = run([...teardown, '--destroy-key-versions', key]);
+    expect(second.status, second.stderr).toBe(0);
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toEqual([]);
+    expect(gcp().keys[KEY_PATH(key)]?.versions).toEqual({
+      1: 'DESTROY_SCHEDULED',
+      2: 'DESTROY_SCHEDULED',
+    });
+  });
+
   it('a healthy key needs no flag and gets no new version', () => {
     expect(run(kmsArgs).status).toBe(0);
     const before = calls().length;

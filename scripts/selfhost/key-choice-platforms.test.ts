@@ -321,6 +321,51 @@ describe('AWS', () => {
   });
 });
 
+/** Security review of F3: other ways the automatic choice could still go down silently. */
+describe('no silent fallback through a missing identity or a missed probe', () => {
+  it('a VM with no service account (token endpoint 404) stops --init: config is not "no key" (M2)', async () => {
+    fake = await startFakeKeyServices({ gcpProject: PROJECT, existingKeys: [GCP_KEY] });
+    fake.setNoGcpIdentity(true);
+    const envFile = writeBox(dir, [
+      ...elsewhere('gce'),
+      `SAM_GCE_METADATA_HOST=${fake.host}`,
+      `SAM_GCP_KMS_ENDPOINT=http://${fake.host}`,
+      dmi('gcp'),
+    ]);
+    const init = await runDeploy(envFile, ['--init']);
+    expect(init.status).not.toBe(0);
+    expect(init.out).toContain('(config: gce metadata server: HTTP 404)');
+    expect(init.out).toContain('no service account or instance role attached');
+    expectNothingSealed();
+  });
+
+  it('a key configured in .env with no cloud detected (probe missed) stops --init (M1)', async () => {
+    const init = await runDeploy(
+      writeBox(dir, [
+        ...elsewhere('gce'),
+        `SAM_GCE_METADATA_HOST=${CLOSED_HOST}`,
+        `SAM_GCP_KMS_KEY=${GCP_KEY}`,
+      ]),
+      ['--init']
+    );
+    expect(init.status).not.toBe(0);
+    expect(init.out).toContain(
+      'SAM_GCP_KMS_KEY is set in .env, but no cloud instance identity was detected'
+    );
+    expect(init.out).toContain('SAM_KEY_PROVIDER=gcp-kms');
+    expectNothingSealed();
+  });
+
+  it('control: off a cloud with no cloud key configured, the key file as before', async () => {
+    const init = await runDeploy(
+      writeBox(dir, [...elsewhere('gce'), `SAM_GCE_METADATA_HOST=${CLOSED_HOST}`]),
+      ['--init']
+    );
+    expect(init.status, init.out).toBe(0);
+    expect(choice()).toMatchObject({ provider: 'file', source: 'auto' });
+  });
+});
+
 describe('a cloud key service that does not answer', () => {
   it('stops --init instead of recording the file key for good', async () => {
     const init = await gcpInit([GCP_KEY], [`SAM_GCP_KMS_ENDPOINT=http://${CLOSED_HOST}`]);

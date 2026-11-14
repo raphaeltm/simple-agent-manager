@@ -288,7 +288,9 @@ export function createAwsKmsProvider(
           ? 'unavailable'
           : 'invalid');
     if (kind === 'denied') cached = null;
-    throw new KeyProviderError(kind, `${service}: ${type || `HTTP ${response.status}`}`);
+    throw new KeyProviderError(kind, `${service}: ${type || `HTTP ${response.status}`}`, {
+      keyMissing: type === 'NotFoundException',
+    });
   }
 
   const encryptionContext = (context: Uint8Array) => ({

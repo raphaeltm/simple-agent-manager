@@ -194,7 +194,7 @@ function kmsGrantItem(project: string, key: string, member: string | undefined):
     place: 'in your cloud, made by the bootstrap',
     what: `the box VM account's ${KMS_ROLE} grant on the KMS key ${key}${member ? ` (${member})` : ''}, not created by a recorded bootstrap run`,
     provenance: member ? 'recorded' : 'from the setup steps',
-    how: `gcloud kms keys remove-iam-policy-binding ${keyId} --keyring=${ring} --location=${location} --project=${project} --member=${who} --role=${KMS_ROLE}${find}`,
+    how: `gcloud kms keys remove-iam-policy-binding ${keyId} --keyring=${ring} --location=${location} --project=${project} --member='${who}' --role=${KMS_ROLE}${find}`,
     step: STEPS.identity,
     plan: {
       'keep-data': { act: 'keep', why: "keep my data keeps the key and the box's use of it" },

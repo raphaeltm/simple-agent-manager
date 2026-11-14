@@ -584,7 +584,7 @@ exec node ${JSON.stringify(resolve(import.meta.dirname, 'testdata/fake-gcloud-ia
     // The inventory (and the summary after a run) gives the command.
     const inventory = await teardown(['--gcp-project', PROJECT]);
     expect(inventory.out).toContain(
-      `gcloud kms keys remove-iam-policy-binding ${keyId} --keyring=sam-selfhost --location=global --project=${PROJECT} --member=serviceAccount:<the box VM service account> --role=roles/cloudkms.cryptoKeyEncrypterDecrypter`
+      `gcloud kms keys remove-iam-policy-binding ${keyId} --keyring=sam-selfhost --location=global --project=${PROJECT} --member='serviceAccount:<the box VM service account>' --role=roles/cloudkms.cryptoKeyEncrypterDecrypter`
     );
     expect(inventory.out).toContain(`gcloud kms keys get-iam-policy ${keyId}`);
   });
@@ -606,7 +606,7 @@ exec node ${JSON.stringify(resolve(import.meta.dirname, 'testdata/fake-gcloud-ia
     writeFileSync(file, JSON.stringify(recorded));
     const inventory = await teardown(['--gcp-project', PROJECT]);
     expect(inventory.status, inventory.out).toBe(0);
-    expect(inventory.out).toContain(`--member=serviceAccount:${BOX_SA} --role=roles/cloudkms`);
+    expect(inventory.out).toContain(`--member='serviceAccount:${BOX_SA}' --role=roles/cloudkms`);
     expect(inventory.out.match(/the box VM account's roles\/cloudkms/g)).toHaveLength(1);
   });
 

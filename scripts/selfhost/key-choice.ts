@@ -147,26 +147,34 @@ function providerFor(box: Box, stateDir: string, candidate: KeyCandidate): KeyPr
 export interface CandidateFailure {
   kind: string | null;
   text: string;
+  /** The key service said the key does not exist (KeyProviderError.keyMissing). */
+  keyMissing: boolean;
+}
+
+function failureOf(error: unknown): CandidateFailure {
+  const { kind, keyMissing } = error as { kind?: unknown; keyMissing?: unknown };
+  const message = error instanceof Error ? error.message : String(error);
+  return typeof kind === 'string'
+    ? { kind, text: `${kind}: ${message}`, keyMissing: keyMissing === true }
+    : { kind: null, text: message, keyMissing: false };
 }
 
 async function roundTripFailure(provider: KeyProvider): Promise<CandidateFailure | null> {
   const key = randomBytes(32);
   const context = new Uint8Array(Buffer.from(`sam-key-choice:${randomBytes(8).toString('hex')}`));
+  let back: Buffer | null = null;
   try {
-    const back = Buffer.from(
+    back = Buffer.from(
       await provider.unwrap(await provider.wrap(new Uint8Array(key), context), context)
     );
     return back.equals(key)
       ? null
-      : { kind: null, text: 'the round trip returned a different key' };
+      : { kind: null, text: 'the round trip returned a different key', keyMissing: false };
   } catch (error) {
-    const kind = (error as { kind?: unknown }).kind;
-    const message = error instanceof Error ? error.message : String(error);
-    return typeof kind === 'string'
-      ? { kind, text: `${kind}: ${message}` }
-      : { kind: null, text: message };
+    return failureOf(error);
   } finally {
     key.fill(0);
+    back?.fill(0);
   }
 }
 
@@ -184,9 +192,12 @@ export async function tryKeyCandidate(
   try {
     return await roundTripFailure(providerFor(box, stateDir, candidate));
   } catch (error) {
-    const kind = (error as { kind?: unknown }).kind;
-    const message = error instanceof Error ? error.message : String(error);
-    return { kind: typeof kind === 'string' ? kind : null, text: message };
+    // Construction failed (a malformed setting): the key was not even asked, so never "missing".
+    return {
+      ...failureOf(error),
+      keyMissing: false,
+      text: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -214,9 +225,12 @@ export interface SealingFloor {
  * THE rule for every automatic choice of a key provider (chooseKeyProvider, reached by
  * `deploy --init`, `secrets migrate` through it, and `secrets switch --to auto`): never seal with
  * a provider weaker (sealingStrength) than any floor, where a floor is
- *  - a cloud key configured in `.env` (the operator asked for it),
- *  - a cloud key that exists but cannot be used now (denied, disabled, no enabled version,
- *    unreachable): only "the key does not exist" (kind `config`) means nothing was set up,
+ *  - a cloud key configured in `.env` (the operator asked for it), whether or not this machine's
+ *    platform produced a candidate for it (configuredKeyFloors),
+ *  - a conventional-name cloud key that could not be used for any reason other than the key
+ *    service saying the key does not exist (KeyProviderError.keyMissing): denied (which Google
+ *    Cloud and AWS also answer for a key the VM may not see), no enabled version, disabled, no VM
+ *    identity, unreachable,
  *  - the provider the box is sealed with now (`switch --to auto`).
  * Returns the error to stop with, or null when `chosen` is allowed. Choosing a weaker provider on
  * purpose stays possible, and explicit: SAM_KEY_PROVIDER in .env or `switch --to file`.
@@ -260,11 +274,53 @@ export function candidateFix(
   }
   if (failure.kind === 'denied') {
     return (
-      'denied means this VM may not use the key: check the grant to the box VM identity on that ' +
-      'key and, on Google Cloud, that the VM has the cloud-platform access scope.'
+      'denied means no key by that name was set up for this install (Google Cloud and AWS also ' +
+      'answer denied for a key the VM may not see), or the box VM identity may not use it: run ' +
+      'the one-time setup (README, Cloud key, one-time setup), or check the grant on the key and, ' +
+      'on Google Cloud, that the VM has the cloud-platform access scope.'
+    );
+  }
+  if (failure.kind === 'config' && !failure.keyMissing) {
+    return (
+      'The VM identity or the key settings are not usable here (no service account or instance ' +
+      'role attached, or a key of the wrong kind).'
     );
   }
   return undefined;
+}
+
+/** `.env` settings that name an off-box key, by the provider that uses them. */
+const CONFIGURED_KEY_SETTINGS: ReadonlyArray<readonly [setting: string, provider: string]> = [
+  ['SAM_GCP_KMS_KEY', 'gcp-kms'],
+  ['SAM_AWS_KMS_KEY_ID', 'aws-kms'],
+  ['SAM_AZURE_KEY_VAULT_URL', 'azure-kv'],
+  ['SAM_TRANSIT_ADDR', 'transit'],
+];
+
+/**
+ * A floor for every off-box key configured in `.env` that no candidate tried: the metadata probe
+ * found no platform (timed out, or not on that cloud), the platform is another cloud, or the
+ * provider is never a candidate (transit). The operator asked for that key, so the file key must
+ * not be chosen in its place (security review M1).
+ */
+export function configuredKeyFloors(
+  box: Box,
+  candidates: readonly KeyCandidate[],
+  platform: string | null
+): SealingFloor[] {
+  return CONFIGURED_KEY_SETTINGS.filter(
+    ([setting]) =>
+      (box[setting]?.trim() ?? '') !== '' && !candidates.some((c) => c.configuredBy === setting)
+  ).map(([setting, provider]) => ({
+    provider,
+    why:
+      `${setting} is set in .env, but ` +
+      (platform ? `this machine is on ${platform}` : 'no cloud instance identity was detected') +
+      `, so the ${provider} key it names was not tried`,
+    fix:
+      `To use that key, set SAM_KEY_PROVIDER=${provider} in .env; if the ${setting} line is ` +
+      'left over, remove it.',
+  }));
 }
 
 /** The floor a failed candidate sets, or null when its failure says nothing was set up. */
@@ -281,9 +337,10 @@ export function candidateFloor(
       fix,
     };
   }
-  // `config` is the key service saying the key does not exist (404, NotFoundException): no key
-  // was set up for this install, so the key file is the documented default.
-  if (failure.kind === 'config') return null;
+  // The key service said the key does not exist (404 on the key, NotFoundException): no key was
+  // set up for this install, so the key file is the documented default. Not every `config`
+  // failure: a VM with no identity attached is also `config`, and must stop (security review M2).
+  if (failure.keyMissing) return null;
   if (failure.kind === 'unavailable') {
     return {
       provider: candidate.provider,
@@ -347,7 +404,10 @@ export async function chooseKeyProvider(input: ChooseInput): Promise<KeyChoice> 
     );
   }
   const failures: string[] = [];
-  const floors: SealingFloor[] = [...(input.floors ?? [])];
+  const floors: SealingFloor[] = [
+    ...(input.floors ?? []),
+    ...configuredKeyFloors(box, found.candidates, found.platform),
+  ];
   for (const candidate of found.candidates) {
     const failure = await tryKeyCandidate(box, stateDir, candidate);
     if (failure === null) {

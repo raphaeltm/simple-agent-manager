@@ -319,7 +319,7 @@ ensure_primary_version() {
     | awk -F'\t' '{ n = $1; sub(/.*\//, "", n); printf "%s%s=%s", sep, n, $2; sep = ", " }')"
   case "$KEY_VERSION_ACTION" in
     new)
-      echo "key ${KEY_ID}: no enabled primary version (${versions:-no versions}); creating a new primary version"
+      echo "key ${KEY_ID}: no enabled primary version (${versions:-no versions}); a new primary version$([ "$DRY_RUN" -eq 1 ] && echo " would be" || echo " is being") created"
       change kms keys versions create --key="$KEY_ID" "${KEY_FLAGS[@]}" --primary
       ;;
     restore)
@@ -340,7 +340,8 @@ ensure_primary_version() {
         *) die "key ${KEY_NAME} has no version to restore (${versions:-no versions}): use --new-key-version instead" ;;
       esac
       [ "$target" = "$version" ] || change kms keys set-primary-version "$KEY_ID" "${KEY_FLAGS[@]}" --version="$target"
-      echo "key ${KEY_ID}: version ${target} restored and enabled"
+      if [ "$DRY_RUN" -eq 1 ]; then echo "key ${KEY_ID}: version ${target} would be restored and enabled"
+      else echo "key ${KEY_ID}: version ${target} restored and enabled"; fi
       ;;
     *)
       die "key ${KEY_NAME} has no enabled primary version (${versions:-no versions}), so the box cannot seal with it (Cloud KMS answers FAILED_PRECONDITION). After \`pnpm selfhost:teardown --destroy-key\` its version is scheduled for destruction. Run this again with --new-key-version (a new primary version; anything sealed with the old one stays lost), or with --restore-key-version to undo the destruction (only within 30 days of it), or pass another --key."

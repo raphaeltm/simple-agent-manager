@@ -43,7 +43,12 @@ function writeRecord(file, record) {
   renameSync(tmp, file);
 }
 
-/** Adds or refreshes one entry. A resource once recorded as created never becomes "reused". */
+/**
+ * Adds or refreshes one entry. A live resource once recorded as created never becomes "reused".
+ * An entry a teardown removed that is recorded again exists again: it takes the new action and
+ * loses its removedAt, so a later teardown neither skips it as already removed nor deletes a
+ * resource this run only found (reused).
+ */
 export function addResource(file, entry, now = new Date()) {
   for (const key of Object.keys(entry.attributes ?? {})) {
     if (SECRETISH.test(key))
@@ -54,8 +59,8 @@ export function addResource(file, entry, now = new Date()) {
     (r) => r.cloud === entry.cloud && r.kind === entry.kind && r.name === entry.name
   );
   if (existing) {
-    if (existing.removedAt && entry.action === 'created') {
-      Object.assign(existing, { action: 'created', createdAt: now.toISOString() });
+    if (existing.removedAt) {
+      Object.assign(existing, { action: entry.action, createdAt: now.toISOString() });
       delete existing.removedAt;
     } else if (existing.action !== 'created') {
       existing.action = entry.action;

@@ -109,28 +109,35 @@ export async function cloudKeyWarnings(
   if (provider !== 'file') return [];
   const found = await detect(box);
   const lines: string[] = [];
+  // `switch` refuses while SAM_KEY_PROVIDER is set (secrets-switch.ts), so say to remove it first.
+  const move = explicitKeyProvider(box)
+    ? 'remove the SAM_KEY_PROVIDER=file line from .env, then `pnpm selfhost:secrets switch --to auto`'
+    : '`pnpm selfhost:secrets switch --to auto` (try --dry-run first)';
   for (const candidate of found.candidates) {
     if (sealingStrength(candidate.provider) <= sealingStrength(provider)) continue;
     const failure = await tryKeyCandidate(box, stateDir, candidate);
     if (failure === null) {
       lines.push(
         `WARNING: ${candidate.label} works on this machine, but this box seals with a key file. ` +
-          'Move to it: `pnpm selfhost:secrets switch --to auto --dry-run`, then without --dry-run ' +
-          '(pnpm selfhost:secrets switch --to auto).'
+          `To move to it: ${move}.`
       );
       continue;
     }
-    if (failure.kind === 'config' && !candidate.configuredBy) continue;
+    // The key service said there is no such key and nobody configured one: nothing was set up.
+    if (failure.keyMissing && !candidate.configuredBy) continue;
+    // Only `invalid` proves the key exists (no enabled version, disabled). Google Cloud and AWS
+    // answer `denied` for a key the VM may not see as well (security review M3).
     const what =
-      failure.kind === 'invalid' || failure.kind === 'denied'
+      failure.kind === 'invalid'
         ? 'exists but is not usable'
-        : 'is not usable';
+        : failure.kind === 'denied'
+          ? 'could not be used (it may not exist, or this VM may not use it)'
+          : 'is not usable';
     const fix = candidateFix(box, candidate, failure);
     lines.push(
       `WARNING: ${candidate.label} ${what} (${failure.text})` +
         `${candidate.configuredBy ? `; ${candidate.configuredBy} is set in .env` : ''}, and this ` +
-        `box seals with a key file instead.${fix ? ` ${fix}` : ''} Then move to it: ` +
-        '`pnpm selfhost:secrets switch --to auto`.'
+        `box seals with a key file instead.${fix ? ` ${fix}` : ''} Then, to move to it: ${move}.`
     );
   }
   return lines;
