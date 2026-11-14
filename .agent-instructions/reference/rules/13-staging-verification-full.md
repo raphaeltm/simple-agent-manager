@@ -65,8 +65,12 @@ Staging deployment is **manual** — it does NOT run automatically on PRs. You m
 For container-backed Instant verification, `wrangler deploy` success means the
 rollout started, not that every instance serves the new image. The shared staging
 and production workflow has a separate **Wait for container rollout completion**
-step. It pins application/rollout identities and requires completed 100% steps and
-the target application version. API errors, unreadable status and timeout fail the
+step. It compares rollout identities before/after deploy, pins the single new
+rollout and requires completed 100% steps and its target application version.
+Multiple new rollouts fail as ambiguous. An unchanged or metadata-only deployment
+awaits any existing pending rollout; a first direct creation needs no rollout.
+Application GET can report the old version during rollout, so version equality
+alone cannot prove a no-op. API errors, unreadable status and timeout fail the
 step. Keep gradual rollouts: even one 100% step has a mixed-image window while
 instances are replaced. After workflow success, verify the new Instant node's
 recorded `agent_version` matches the deployed `VM_AGENT_REQUIRED_VERSION` before

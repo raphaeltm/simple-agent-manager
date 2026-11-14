@@ -11,7 +11,14 @@ import {
 } from './container-rollout';
 import { containerApplicationNames } from './wait-container-rollout';
 
-const before = [{ name: 'api-agent-staging', applicationId: 'app', version: 4, rolloutId: 'old' }];
+const before = [
+  {
+    name: 'api-agent-staging',
+    applicationId: 'app',
+    version: 4,
+    rollouts: [{ id: 'old', target_version: 4 }],
+  },
+];
 function rollout(status = 'completed', id = 'new', target_version = 5): Rollout {
   return { id, status, target_version, steps: [{ status, step_size: { percentage: 100 } }] };
 }
@@ -21,7 +28,9 @@ function harness(initial = rollout()) {
   let activeVersion = initial.status === 'completed' ? initial.target_version : 4;
   const api: RolloutApi = {
     applications: vi.fn(async () => [{ id: 'app', name: before[0].name, version: activeVersion }]),
-    rollouts: vi.fn(async () => [current, rollout('completed', 'old', 4)]),
+    rollouts: vi.fn(async () =>
+      current.id === 'old' ? [current] : [current, rollout('completed', 'old', 4)]
+    ),
   };
   const options = {
     timeoutMs: 100,
@@ -31,7 +40,6 @@ function harness(initial = rollout()) {
       time += ms;
     }),
     log: vi.fn(),
-    modifiedNames: new Set([before[0].name]),
   };
   return {
     api,
@@ -70,11 +78,29 @@ describe('container rollout deploy gate', () => {
     );
     expect(h.options.sleep).toHaveBeenCalledTimes(10);
   });
-  it('rejects old completed rollout after a Wrangler modification', async () => {
+  it('accepts metadata-only modification without requiring a new rollout', async () => {
     const h = harness(rollout('completed', 'old', 4));
+    h.set(rollout('completed', 'old', 4), 5);
+    await waitForContainerRollouts(h.api, before, h.options);
+    expect(h.options.sleep).not.toHaveBeenCalled();
+  });
+  it('rejects a superseding rollout already present on the first post-deploy read', async () => {
+    const h = harness();
+    vi.mocked(h.api.rollouts).mockResolvedValue([rollout(), rollout('progressing', 'other', 6)]);
     await expect(waitForContainerRollouts(h.api, before, h.options)).rejects.toThrow(
-      'Modified application has no new rollout'
+      /new:5,other:6.*Ambiguous\/superseding/
     );
+  });
+  it('awaits an existing pending rollout even for an unchanged deployment', async () => {
+    const h = harness(rollout('progressing'));
+    const pendingBefore = [
+      { ...before[0], rollouts: [{ id: 'new', target_version: 5 }, ...before[0].rollouts] },
+    ];
+    h.options.sleep.mockImplementationOnce(async () => {
+      h.set(rollout());
+    });
+    await waitForContainerRollouts(h.api, pendingBefore, h.options);
+    expect(h.options.sleep).toHaveBeenCalledTimes(1);
   });
   it('rejects a superseding deployment', async () => {
     const h = harness(rollout('progressing'));
@@ -106,17 +132,32 @@ describe('container rollout deploy gate', () => {
   });
   it('checks completed state when no container changes', async () => {
     const h = harness(rollout('completed', 'old', 4));
-    h.options.modifiedNames.clear();
     await waitForContainerRollouts(h.api, before, h.options);
     expect(h.options.sleep).not.toHaveBeenCalled();
+  });
+  it('rejects a new rollout whose target is already behind the active version', async () => {
+    const h = harness();
+    await expect(
+      waitForContainerRollouts(h.api, [{ ...before[0], version: 6 }], h.options)
+    ).rejects.toThrow('regressed');
+    h.set(rollout('completed', 'new', 4));
+    await expect(waitForContainerRollouts(h.api, before, h.options)).rejects.toThrow(
+      'did not advance'
+    );
+  });
+  it('fails when previously observed rollout history disappears', async () => {
+    const h = harness();
+    vi.mocked(h.api.rollouts).mockResolvedValue([]);
+    await expect(waitForContainerRollouts(h.api, before, h.options)).rejects.toThrow(
+      'history disappeared'
+    );
   });
   it('accepts first direct creation without inventing rollout', async () => {
     const h = harness();
     vi.mocked(h.api.rollouts).mockResolvedValue([]);
-    h.options.modifiedNames.clear();
     await waitForContainerRollouts(
       h.api,
-      [{ ...before[0], applicationId: null, version: null, rolloutId: null }],
+      [{ ...before[0], applicationId: null, version: null, rollouts: [] }],
       h.options
     );
   });
@@ -124,7 +165,7 @@ describe('container rollout deploy gate', () => {
     const h = harness();
     vi.mocked(h.api.applications).mockResolvedValue([]);
     expect(await snapshotApplications(h.api, [before[0].name])).toEqual([
-      { name: before[0].name, applicationId: null, version: null, rolloutId: null },
+      { name: before[0].name, applicationId: null, version: null, rollouts: [] },
     ]);
   });
   it('fails if an app disappears', async () => {
@@ -136,6 +177,41 @@ describe('container rollout deploy gate', () => {
   });
 });
 describe('Cloudflare response boundary', () => {
+  it('snapshots and waits through the HTTP boundary without Wrangler stdout on either engine path', async () => {
+    let activeVersion = 4;
+    let records = [rollout('completed', 'old', 4)];
+    const fetcher = vi.fn(
+      async (url: string | URL | Request) =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            result: String(url).endsWith('/rollouts')
+              ? records
+              : [{ id: 'app', name: before[0].name, version: activeVersion }],
+          })
+        )
+    );
+    const api = createRolloutApi(
+      'account',
+      'secret',
+      new AbortController().signal,
+      fetcher as typeof fetch
+    );
+    const saved = parseSnapshot(
+      JSON.parse(JSON.stringify(await snapshotApplications(api, [before[0].name])))
+    );
+    records = [rollout('progressing'), ...records];
+    const h = harness();
+    h.options.sleep.mockImplementationOnce(async () => {
+      records = [rollout(), rollout('completed', 'old', 4)];
+      activeVersion = 5;
+    });
+    await waitForContainerRollouts(api, saved, h.options);
+    expect(h.options.sleep).toHaveBeenCalledTimes(1);
+    expect(h.options.log.mock.calls[0][0]).toContain('version=4 target=5');
+    expect(h.options.log.mock.calls[1][0]).toContain('version=5 target=5');
+  });
+
   function api(body: unknown, status = 200) {
     return createRolloutApi(
       'account',

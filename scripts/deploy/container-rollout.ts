@@ -17,7 +17,7 @@ export interface Snapshot {
   name: string;
   applicationId: string | null;
   version: number | null;
-  rolloutId: string | null;
+  rollouts: { id: string; target_version: number }[];
 }
 export interface RolloutApi {
   applications(): Promise<Application[]>;
@@ -46,9 +46,19 @@ export function parseSnapshot(value: unknown): Snapshot[] {
       name: text(s.name),
       applicationId: s.applicationId === null ? null : text(s.applicationId),
       version: s.version === null ? null : version(s.version),
-      rolloutId: s.rolloutId === null ? null : text(s.rolloutId),
+      rollouts: parseIdentities(s.rollouts),
     };
   });
+}
+function parseIdentities(value: unknown): Snapshot['rollouts'] {
+  if (!Array.isArray(value)) throw new Error('Unreadable container rollout identities');
+  const identities = value.map((value) => {
+    const r = record(value);
+    return { id: text(r.id), target_version: version(r.target_version) };
+  });
+  if (new Set(identities.map((r) => r.id)).size !== identities.length)
+    throw new Error('Duplicate container rollout identities');
+  return identities;
 }
 export function readRolloutTiming(env: NodeJS.ProcessEnv) {
   function positive(name: string, fallback: number) {
@@ -146,7 +156,7 @@ export async function snapshotApplications(api: RolloutApi, names: string[]): Pr
         name,
         applicationId: app?.id ?? null,
         version: app?.version ?? null,
-        rolloutId: app ? (latest(await api.rollouts(app.id))?.id ?? null) : null,
+        rollouts: app ? parseIdentities(await api.rollouts(app.id)) : [],
       };
     })
   );
@@ -157,7 +167,6 @@ export async function waitForContainerRollouts(
   options: {
     timeoutMs: number;
     pollIntervalMs: number;
-    modifiedNames?: Set<string>;
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
     log?: (line: string) => void;
@@ -181,32 +190,50 @@ export async function waitForContainerRollouts(
         const app = applications.find((a) => a.name === prior.name);
         if (!app || (prior.applicationId && prior.applicationId !== app.id))
           throw new Error(`Missing/replaced application ${prior.name}`);
-        const rollout = latest(await api.rollouts(app.id));
-        status = `application=${app.id} rollout=${rollout?.id ?? 'none'} status=${rollout?.status ?? 'direct-create'} version=${app.version} target=${rollout?.target_version ?? app.version}`;
-        const target = targets.get(prior.name);
-        if (!target) {
-          if (prior.version !== null && app.version < prior.version)
-            throw new Error('Application version regressed');
-          if (
-            options.modifiedNames?.has(prior.name) &&
-            (!rollout || rollout.id === prior.rolloutId)
+        const rollouts = await api.rollouts(app.id);
+        parseIdentities(rollouts);
+        const newRollouts = rollouts.filter((r) => !prior.rollouts.some((p) => p.id === r.id));
+        status = `application=${app.id} version=${app.version} newRollouts=${newRollouts.map((r) => `${r.id}:${r.target_version}`).join(',') || 'none'}`;
+        if (newRollouts.length > 1) throw new Error('Ambiguous/superseding container rollouts');
+        const candidate = newRollouts[0] ?? latest(rollouts);
+        if (!newRollouts.length && prior.rollouts.length && !candidate)
+          throw new Error('Prior container rollout history disappeared');
+        if (
+          rollouts.some((r) =>
+            prior.rollouts.some((p) => p.id === r.id && p.target_version !== r.target_version)
           )
-            throw new Error('Modified application has no new rollout');
+        )
+          throw new Error('Container rollout target version changed');
+        const target = targets.get(prior.name);
+        if (prior.version !== null && app.version < prior.version)
+          throw new Error('Application version regressed');
+        if (!target) {
+          if (
+            newRollouts.length &&
+            ((prior.version !== null && candidate.target_version <= prior.version) ||
+              prior.rollouts.some((r) => r.target_version >= candidate.target_version))
+          )
+            throw new Error('New rollout target did not advance');
           targets.set(prior.name, {
             applicationId: app.id,
-            rolloutId: rollout?.id ?? null,
-            version: rollout?.target_version ?? app.version,
+            rolloutId: candidate?.id ?? null,
+            version: candidate?.target_version ?? app.version,
           });
         } else if (
           target.applicationId !== app.id ||
-          target.rolloutId !== (rollout?.id ?? null) ||
-          target.version !== (rollout?.target_version ?? app.version)
+          target.rolloutId !== (candidate?.id ?? null) ||
+          target.version !== (candidate?.target_version ?? app.version)
         )
           throw new Error('Target container rollout was superseded');
         const pinned = targets.get(prior.name);
         if (!pinned) throw new Error('Missing pinned rollout target');
-        if (rollout && rollout.target_version < app.version)
-          throw new Error('Rollout target is older than active application');
+        const rollout = rollouts.find((r) => r.id === pinned.rolloutId);
+        if (pinned.rolloutId && !rollout) throw new Error('Pinned container rollout disappeared');
+        // A metadata-only update can advance app.version without a new rollout.
+        // A newly created rollout must finish at its exact target version.
+        if (newRollouts.length && app.version > pinned.version)
+          throw new Error('Target container rollout was superseded');
+        status = `application=${app.id} rollout=${rollout?.id ?? 'none'} status=${rollout?.status ?? 'direct-create'} version=${app.version} target=${pinned.version}`;
         log(status);
         if (rollout) {
           if (['failed', 'cancelled', 'canceled'].includes(rollout.status))
@@ -219,9 +246,10 @@ export async function waitForContainerRollouts(
             rollout.steps.at(-1)?.step_size.percentage === 100;
           if (rollout.status === 'completed' && !done)
             throw new Error('Completed rollout has unreadable/non-100% steps');
-          complete &&= done && app.version === pinned.version;
-        } else if (prior.applicationId !== null && app.version !== prior.version)
-          throw new Error('Changed application has no readable rollout');
+          complete &&=
+            done &&
+            (newRollouts.length ? app.version === pinned.version : app.version >= pinned.version);
+        }
       }
       if (complete) return;
     } catch (error) {

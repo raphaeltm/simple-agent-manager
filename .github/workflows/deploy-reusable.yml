@@ -1960,7 +1960,6 @@ jobs:
             exit 1
           }
           echo "$OUTPUT"
-          printf '%s\n' "$OUTPUT" > "$RUNNER_TEMP/container-deploy-output.txt"
           if echo "$OUTPUT" | grep -q "not inherited by environments"; then
             NON_ARTIFACTS_BINDING_WARNINGS=$(echo "$OUTPUT" | grep -E '      - "[^"]+" exists at the top level' | grep -v '"artifacts" exists at the top level' || true)
             if [ -z "$NON_ARTIFACTS_BINDING_WARNINGS" ] && [ "${ARTIFACTS_BINDING_ENABLED:-false}" != "true" ] && echo "$OUTPUT" | grep -q '"artifacts" exists at the top level'; then
@@ -1986,7 +1985,6 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CONTAINER_DEPLOY_OUTPUT: ${{ !inputs.use_shared_engine && format('{0}/container-deploy-output.txt', runner.temp) || '' }}
           CONTAINER_ROLLOUT_TIMEOUT_MS: ${{ vars.CONTAINER_ROLLOUT_TIMEOUT_MS }}
           CONTAINER_ROLLOUT_POLL_INTERVAL_MS: ${{ vars.CONTAINER_ROLLOUT_POLL_INTERVAL_MS }}
 

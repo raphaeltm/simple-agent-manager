@@ -50,6 +50,7 @@ vi.mock('../../../src/db/schema', () => ({
     ipAddress: 'nodes.ipAddress',
     nodeClass: 'nodes.nodeClass',
     status: 'nodes.status',
+    runtime: 'nodes.runtime',
   },
   workspaces: {
     id: 'workspaces.id',
@@ -80,7 +81,20 @@ function createMockDb() {
                 : state.node
             ),
             // heartbeat: db.select().from(nodes).where().limit(1)
-            limit: vi.fn().mockResolvedValue([state.node]),
+            limit: vi
+              .fn()
+              .mockResolvedValue([
+                selection
+                  ? Object.fromEntries(
+                      Object.entries(selection).map(([key, column]) => [
+                        key,
+                        typeof column === 'string'
+                          ? (state.node as Record<string, unknown>)?.[column.split('.').at(-1)!]
+                          : undefined,
+                      ])
+                    )
+                  : state.node,
+              ]),
           };
         }),
       })),

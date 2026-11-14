@@ -508,7 +508,10 @@ Use the manual workflow when you rotate deployment secrets, change GitHub Enviro
 Staging and production deployments wait for container application rollouts to reach
 100% before reporting success. Wrangler returning successfully only means the
 rollout started; the workflow's **Wait for container rollout completion** step
-checks the exact rollout and target application version. Gradual rollout behavior
+compares rollout records before/after deployment and checks the exact new rollout
+and target application version. Multiple new rollouts fail as ambiguous; no-op or
+metadata-only updates require no new rollout, but await an existing pending one.
+Gradual rollout behavior
 is preserved. API errors, unreadable state and timeout fail the deployment.
 Optional GitHub Environment variables `CONTAINER_ROLLOUT_TIMEOUT_MS` (default
 `1200000`, 20 minutes) and `CONTAINER_ROLLOUT_POLL_INTERVAL_MS` (default `10000`)

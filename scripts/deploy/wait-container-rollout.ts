@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { stripVTControlCharacters } from 'node:util';
 
 import { parse } from '@iarna/toml';
 
@@ -51,12 +50,7 @@ async function main() {
     writeFileSync(file, JSON.stringify(await snapshotApplications(api, names)));
   } else {
     const before = parseSnapshot(JSON.parse(readFileSync(file, 'utf8')) as unknown);
-    const outputFile = process.env.CONTAINER_DEPLOY_OUTPUT;
-    const output = outputFile ? stripVTControlCharacters(readFileSync(outputFile, 'utf8')) : '';
-    const modifiedNames = new Set(
-      [...output.matchAll(/Modified application ([^\n]+?) \(Application ID:/g)].map((m) => m[1])
-    );
-    await waitForContainerRollouts(api, before, { ...timing, modifiedNames });
+    await waitForContainerRollouts(api, before, timing);
   }
 }
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
