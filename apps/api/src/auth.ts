@@ -303,7 +303,8 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
     session: {
       // The signed session-cookie cache stays configured, but every SAM call site reads sessions
       // with `query: { disableCookieCache: true }` (`middleware/auth.ts`, `index.ts`,
-      // `routes/auth.ts`, `services/session-factory.ts`) and that is DELIBERATE — do not remove
+      // `routes/auth.ts`, `services/session-factory.ts`, and `/get-session` through
+      // `services/read-auth-session.ts`) and that is DELIBERATE — do not remove
       // those flags to save the ~2 session/user D1 queries.
       //
       // `requireAuth` calls `assertUserNotSuspended(authContext.user)` and `requireApproved`

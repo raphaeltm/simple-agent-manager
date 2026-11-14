@@ -130,6 +130,19 @@ describe('email sign-in through better-auth (vertical slice)', () => {
     return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   }
 
+  /** What the web app reads for the role (AuthProvider's useSession): better-auth's get-session. */
+  async function getSession() {
+    const response = await app.request(
+      `${API_ORIGIN}/api/auth/get-session`,
+      { headers: { cookie } },
+      env
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as { user?: Record<string, unknown> } | null,
+    };
+  }
+
   function realUsers() {
     return sqlite
       .prepare(`SELECT id, email, role, status FROM users WHERE status != 'system' ORDER BY id`)
@@ -158,6 +171,41 @@ describe('email sign-in through better-auth (vertical slice)', () => {
       status: 'active',
     });
     expect(realUsers()).toHaveLength(1);
+  });
+
+  it("gives the owner's very first session administrator rights in what the web app reads (box round R12)", async () => {
+    await requestCode(OWNER);
+    expect((await signIn(OWNER, codeFrom(mail.sent[0]))).status).toBe(200);
+    // The sign-in answer carries better-auth's session cookie cache: before the fix it held the
+    // user as created (role user), promoted only afterwards, so /admin redirected to /dashboard
+    // until a second sign-in.
+    expect(cookie).toContain('session_data=');
+    const session = await getSession();
+    expect(session.status).toBe(200);
+    expect(session.body?.user).toMatchObject({
+      email: OWNER,
+      role: 'superadmin',
+      status: 'active',
+    });
+    // Liveness: the same session is valid on the D1-backed read too.
+    expect((await me()).body).toMatchObject({ role: 'superadmin' });
+  });
+
+  it('control: a non-owner signing in by email gets no administrator rights in get-session', async () => {
+    await requestCode(OWNER);
+    await signIn(OWNER, codeFrom(mail.sent[0]));
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, name, role, status, created_at, updated_at)
+         VALUES ('github-user', 'teammate@example.com', 1, 'Teammate', 'user', 'active', 1, 1)`
+      )
+      .run();
+    await requestCode('teammate@example.com');
+    cookie = '';
+    expect((await signIn('teammate@example.com', codeFrom(mail.sent[1]))).status).toBe(200);
+    const session = await getSession();
+    expect(session.status).toBe(200);
+    expect(session.body?.user).toMatchObject({ email: 'teammate@example.com', role: 'user' });
   });
 
   it('sends no code to anyone else before the owner exists, and creates no account', async () => {
