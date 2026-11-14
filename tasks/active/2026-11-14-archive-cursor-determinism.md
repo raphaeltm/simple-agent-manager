@@ -45,7 +45,7 @@ Push each unit. Keep commands under 10 minutes. Do not archive until completion 
 Initial full Workers file: 15/15 passed. Repository lint: 22/22 tasks passed (existing web warnings).
 Local test-engineer and Cloudflare review: PASS; completion audit awaits mutation/stability/CI evidence.
 
-Mutation proof on final test code9d5fc49a8 (source and dist changed temporarily, restored byte-for-byte):
+Earlier mutation proof on test code9d5fc49a8 (source and dist changed temporarily, restored byte-for-byte):
 
 - Renewal disabled with early return: lease test fails at line509, only1 distinct expiry vs required >3.
 - Poison threshold disabled: poison test fails at line590, fourth state is failed instead of poisoned.
@@ -66,9 +66,9 @@ All prior repeated-run counts are superseded for final stability proof; restart3
 - [x] Control the sibling large-session test's clock; preserve all assertions and tick bound.
 - [x] Re-run renewal/poison mutations and additionally remove the yield guard to prove the sibling test.
 
-Final-version f1a9b823b mutation proof: all3 targeted tests fail intended assertions and source/dist restored.
+Intermediate f1a9b823b mutation proof: all3 targeted tests fail intended assertions and source/dist restored.
 Deadline yield disabled => first case publishes in1 tick and fails ticks>1 (line247).
-Targeted final ESLint passed. Final stability batches use v2 prefixes; older rows are excluded.
+Targeted final ESLint passed. The v2 repetition proof below exposed the fixture lifecycle race and is superseded by v3.
 
 ## Stability-discovered fixture lifecycle race
 
@@ -83,3 +83,13 @@ No production archive behavior changes. Final stability proof restarts with v3 p
 
 Separate telemetry follow-up (outside this test-only change): idea01M7C1MHXM1B8S9XJ89Y9V5T7A
 tracks verifiedChunks omitting verification work before an eventual migration exception.
+
+## Final implementation validation
+
+Implementation edcb25580 includes all clock, observation, and fixture retirement changes.
+The full-file smoke passed15/15; final API typecheck and changed-file ESLint passed.
+All3 mutations were repeated on this exact implementation, each failing only the intended
+assertion (1failed/14skipped); production source and built module restored byte-for-byte.
+Final proof counts only v3nA/B and v3sA/B batches, excluding smoke and every exploratory run.
+At the current milestone18normal+18CPU-loaded full-file runs passed, each15tests/zeroerrors.
+Final30+30 and completion audit pending.
