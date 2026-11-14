@@ -39,3 +39,15 @@ Completed100% pinned rollout succeeds despite stale list; current version alone 
 - Pre-fix regression red at 14:24:54Z: completed new rollout target5, list4/detail5 timed out100ms.
 - Post-fix deployment suite: 9 files / 120 tests passed at 14:25Z, including pending/current-version, failed, cancelled, replaced, superseding, unchanged-image retry, malformed and timeout controls.
 - No endpoint implementation added: verified GET object shape is fixture evidence only; rollout authority avoids another stale proxy and extra API calls.
+
+## Specialist review evidence
+
+| Reviewer          | Status | Outcome                                                                                                                                                                                                                                  |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| rollout_review    | PASS   | Cloudflare + constitution: completed pinned rollout remains authoritative; all identity/history/supersession/failure/timeout checks preserved; no new API dependency, secret logging or tunables. Independently passed 36 rollout tests. |
+| completion_review | PASS   | Completion validator A–F and test engineering: local implementation/coverage complete, discriminating HTTP regression confirmed, no findings. Staging/CI/release remain explicit pending gates. Independently passed 36 rollout tests.   |
+
+- Full build passed (18/18 tasks); targeted script ESLint and TypeScript check passed.
+- First full repository tests aborted on unchanged infra DNS/KV beforeAll 10-second hook timeouts during broad concurrent checks. One bounded lower-concurrency full retry started; not claiming full-suite green.
+
+- Full lint22/22 and typecheck36/36 passed. Documentation scan found two stale descriptions requiring application version equality; synchronized self-hosting guide and staging reference to rollout authority.
