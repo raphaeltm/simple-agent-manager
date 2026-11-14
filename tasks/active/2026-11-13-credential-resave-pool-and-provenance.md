@@ -123,6 +123,17 @@ re-save today would strand.
 | reconcile call in PUT /api/gcp/service-account | service-account rotation test (source credential version stays on the old key) |
 | source-preferring ORDER BY in the duplicate collapse | unit: keeps the duplicate a capacity source is built on |
 | pool-ownership conjunct of `capacitySourceReleasedSql` | damaged-row test, foreign-pool line |
+| `released_pool.scope = node scope` | scope test, user node on an installation pool |
+| project branch weakened to any project pool | scope test, foreign-project line |
+| installation branch removed | scope test, installation control |
+| released-shape blank-candidate conjunct | none (redundant: the snapshot `present` list already requires the candidate id; blank id stays refused) |
+
+Adversarial re-check (2026-11-14 02:30Z): FINDINGS, no CRITICAL/HIGH. MEDIUM providerless reconcile cannot use a
+released node's deleted pinned credential: release flag reverted there, comment added; such nodes stay
+`destroying` and surface through `node_destroying_too_long`. LOW test gaps closed (rows above). LOW writer
+table updated in provider-credential-exact.ts. Noted, not changed: GCP API health warning from an in-flight
+old-secret probe can land on the stable id (display only); `previous` lookups without ORDER BY only matter with
+duplicate rows (0 in production).
 
 Review follow-ups (2026-11-14): security M1 (duplicate collapse could cascade the live source) fixed;
 security L1 pool-ownership defence added; validator/cloudflare route test for PUT

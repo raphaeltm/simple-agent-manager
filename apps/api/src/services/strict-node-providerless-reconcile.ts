@@ -2,7 +2,10 @@
  * Providerless strict teardown: a `destroying` VM row whose provider create response was lost.
  * Split out of `strict-node-deletion.ts` (rule 18); behavior unchanged.
  */
-import { type ProviderRequestContext, type VMInstance } from '@simple-agent-manager/providers';
+import {
+  type ProviderRequestContext,
+  type VMInstance,
+} from '@simple-agent-manager/providers';
 
 import type { Env } from '../env';
 import {
@@ -11,7 +14,6 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
-import { isNodeCapacitySourceReleased } from './node-teardown-provenance';
 import {
   hasManagedVmPlacementProof,
   type NodeDb,
@@ -50,10 +52,11 @@ export async function reconcileStrictProviderlessVm(
   requestContext?: ProviderRequestContext,
   beforeDestroy?: () => Promise<void>
 ): Promise<'deleted'> {
-  if (
-    node.status !== 'destroying' ||
-    !hasManagedVmPlacementProof(node, await isNodeCapacitySourceReleased(env.DATABASE, node))
-  ) {
+  // A node whose capacity source was released is not admitted here: the release means the
+  // pinned credential was deleted, and this inventory proof is only sound with that exact
+  // credential (a different account's empty inventory proves nothing). Such a node stays
+  // `destroying` and surfaces through `node_destroying_too_long`.
+  if (node.status !== 'destroying' || !hasManagedVmPlacementProof(node)) {
     throw new Error(
       `Cannot confirm managed VM termination for node ${node.id}: instance identity is missing`
     );

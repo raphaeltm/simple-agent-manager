@@ -760,6 +760,66 @@ describe('rows already damaged in the production shape', () => {
     ).rejects.toThrow(/lacks managed placement/);
   });
 
+  it('binds a released node to its own pool scope, project and installation', async () => {
+    const installationId = `${prefix}-scope-install`;
+    const projectA = `${prefix}-project-a`;
+    const projectB = `${prefix}-project-b`;
+    await seedInstallation(installationId, ownerId);
+    await seedProject(projectA, ownerId, installationId);
+    await seedProject(projectB, ownerId, installationId);
+    const setPool = (
+      nodeId: string,
+      scope: string,
+      ownerUser: string | null,
+      ownerProject: string | null
+    ) =>
+      env.DATABASE.prepare(
+        'UPDATE capacity_pools SET scope = ?, owner_user_id = ?, owner_project_id = ? WHERE id = ?'
+      )
+        .bind(scope, ownerUser, ownerProject, `${nodeId}-pool`)
+        .run();
+    const setNodeScope = (nodeId: string, scope: string, projectId: string | null) =>
+      env.DATABASE.prepare(
+        'UPDATE nodes SET capacity_pool_scope = ?, capacity_pool_project_id = ? WHERE id = ?'
+      )
+        .bind(scope, projectId, nodeId)
+        .run();
+
+    // A user-scoped node whose pool row is an installation pool: the scopes must agree.
+    const scopeMismatch = `${prefix}-scope-mismatch`;
+    await seedReleasedNode(scopeMismatch, ownerId, 'stopped');
+    await setPool(scopeMismatch, 'installation', null, null);
+
+    // A project-scoped node whose pool belongs to another project.
+    const foreignProject = `${prefix}-foreign-project`;
+    await seedReleasedNode(foreignProject, ownerId, 'stopped');
+    await setPool(foreignProject, 'project', null, projectB);
+    await setNodeScope(foreignProject, 'project', projectA);
+
+    // Controls: the node's own project pool, and an installation pool for an installation node.
+    const ownProject = `${prefix}-own-project`;
+    await seedReleasedNode(ownProject, ownerId, 'stopped');
+    await setPool(ownProject, 'project', null, projectA);
+    await setNodeScope(ownProject, 'project', projectA);
+    const installationNode = `${prefix}-installation-node`;
+    await seedReleasedNode(installationNode, ownerId, 'stopped');
+    await setPool(installationNode, 'installation', null, null);
+    await setNodeScope(installationNode, 'installation', null);
+
+    // A blank candidate id names nothing, so it is not the cascade's shape.
+    const blankCandidate = `${prefix}-blank-candidate`;
+    await seedReleasedNode(blankCandidate, ownerId, 'stopped');
+    await env.DATABASE.prepare("UPDATE nodes SET capacity_pool_candidate_id = '  ' WHERE id = ?")
+      .bind(blankCandidate)
+      .run();
+
+    expect(await claim(scopeMismatch, ownerId, 'stopped')).toBe(false);
+    expect(await claim(foreignProject, ownerId, 'stopped')).toBe(false);
+    expect(await claim(blankCandidate, ownerId, 'stopped')).toBe(false);
+    expect(await claim(ownProject, ownerId, 'stopped')).toBe(true);
+    expect(await claim(installationNode, ownerId, 'stopped')).toBe(true);
+  });
+
   it('a pool whose order names a deleted source still places on its active options', async () => {
     expect((await request(ownerId, 'POST', '/api/credentials', GCP_CONNECTION)).status).toBe(201);
     await reconcile({ userId: ownerId });
