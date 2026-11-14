@@ -1476,11 +1476,13 @@ function recordSelectRows(base: SqlStorage): {
   sql: SqlStorage;
   maxRowsPerSelect: number;
   selects: number;
+  selectQueries: Set<string>;
 } {
-  const recorder = { maxRowsPerSelect: 0, selects: 0 } as {
+  const recorder = { maxRowsPerSelect: 0, selects: 0, selectQueries: new Set<string>() } as {
     sql: SqlStorage;
     maxRowsPerSelect: number;
     selects: number;
+    selectQueries: Set<string>;
   };
   recorder.sql = {
     exec(query: string, ...params: unknown[]) {
@@ -1488,6 +1490,7 @@ function recordSelectRows(base: SqlStorage): {
       if (!/^\s*SELECT/i.test(query)) return cursor;
       const rows = cursor.toArray();
       recorder.selects++;
+      recorder.selectQueries.add(query);
       recorder.maxRowsPerSelect = Math.max(recorder.maxRowsPerSelect, rows.length);
       return {
         toArray: () => rows,
@@ -1606,12 +1609,75 @@ describe('ProjectData archive terminal-version hashing streams bounded pages', (
     }
   });
 
+  it.each([300, 1200, 4800])(
+    'indexes document-equivalence lookups at %i rows and preserves rows across upgrade',
+    (count) => {
+      const store = makeSql();
+      try {
+        const insert = store.db.prepare(`INSERT INTO project_data_archive_search_documents
+          (projection_id, document_id, session_id, role, content, created_at)
+          VALUES (?, ?, 'session-scaling', 'user', ?, ?)`);
+        store.db.transaction(() => {
+          for (let index = 0; index < count; index++) {
+            insert.run(`raw:${index}`, `document-${index}`, `payload ${index}`, index);
+          }
+        })();
+        const assertIndexedLookup = () => {
+          const plan = store.db
+            .prepare(
+              `EXPLAIN QUERY PLAN SELECT 1 AS present
+            FROM project_data_archive_search_documents
+            WHERE session_id = ? AND document_id = ? AND content = ? LIMIT 1`
+            )
+            .all('session-scaling', 'missing-document', 'missing-content') as Array<{
+            detail: string;
+          }>;
+          // Deterministic scaling check: the seek must include document_id. A plan
+          // using only session_id visits every document for EACH absent grouped ID.
+          expect(plan.some((row) => row.detail.includes('(session_id=? AND document_id=?)'))).toBe(
+            true
+          );
+        };
+        assertIndexedLookup(); // clean install
+        store.db.exec('DROP INDEX idx_project_data_archive_search_documents_document');
+        store.db
+          .prepare('DELETE FROM migrations WHERE name = ?')
+          .run('077-archive-search-document-lookup');
+        runMigrations(store.sql); // existing object, with populated projection
+        runMigrations(store.sql); // repeat is idempotent
+        assertIndexedLookup();
+        expect(
+          store.db
+            .prepare('SELECT COUNT(*) AS count FROM project_data_archive_search_documents')
+            .get()
+        ).toEqual({ count });
+      } finally {
+        store.db.close();
+      }
+    }
+  );
+
   it('keeps every source-side scan bounded through seal and finalize on a multi-page session', async () => {
     const source = makeSql();
     const target = makeSql();
     try {
       seedWideTerminalSession(source.sql, 'session-paged', WIDE_SESSION_ROWS);
       seedWideGroupedRows(source.sql, 'session-paged', WIDE_SESSION_ROWS);
+      // A stopped/materialized source has an FTS entry for every grouped row. Without
+      // these, reclaim throws and logs once per row instead of exercising normal deletion.
+      source.sql.exec(
+        `INSERT INTO chat_messages_grouped_fts(rowid, content)
+        SELECT rowid, content FROM chat_messages_grouped WHERE session_id = ?`,
+        'session-paged'
+      );
+      expect(
+        source.db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM chat_messages_grouped_fts
+        WHERE chat_messages_grouped_fts MATCH 'grouped'`
+          )
+          .get()
+      ).toEqual({ count: WIDE_SESSION_ROWS });
       const base = {
         projectId: 'project-archive',
         sessionId: 'session-paged',
@@ -1662,7 +1728,22 @@ describe('ProjectData archive terminal-version hashing streams bounded pages', (
         now: NOW,
         hashPageRows: 500,
       });
+      expect(sourceRecorder.maxRowsPerSelect).toBeLessThanOrEqual(500);
       expect(targetRecorder.maxRowsPerSelect).toBeLessThanOrEqual(500);
+      // Check the statement the real seal path issued, not a separately reconstructed
+      // query. A bounded result can still hide a whole-session scan for every row.
+      const equivalenceQueries = [...targetRecorder.selectQueries].filter((query) =>
+        query.includes('document_id = ?')
+      );
+      expect(equivalenceQueries.length).toBeGreaterThan(0);
+      for (const query of equivalenceQueries) {
+        const plan = target.db
+          .prepare(`EXPLAIN QUERY PLAN ${query}`)
+          .all(base.sessionId, 'missing-document', 'missing-content') as Array<{ detail: string }>;
+        expect(plan.some((row) => row.detail.includes('(session_id=? AND document_id=?)'))).toBe(
+          true
+        );
+      }
       expect(sealed.messageCount).toBe(WIDE_SESSION_ROWS);
       expect(sealed.groupedCount).toBe(WIDE_SESSION_ROWS);
 
