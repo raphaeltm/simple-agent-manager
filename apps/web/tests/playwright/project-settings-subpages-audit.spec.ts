@@ -65,8 +65,6 @@ const project = {
   installationId: 'inst-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
-  defaultLocation: null,
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   taskExecutionTimeoutMs: null,

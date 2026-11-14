@@ -83,7 +83,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-northwind',
   defaultVmSize: 'medium',
   defaultAgentType: 'claude-code',
-  defaultProvider: 'hetzner',
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-06-01T00:00:00.000Z',

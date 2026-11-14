@@ -1,8 +1,10 @@
-import type { ProviderInstanceOffering } from '@simple-agent-manager/shared';
+import type { GcpBootDiskPolicy } from '@simple-agent-manager/providers';
+import type { CredentialProvider, ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import { and, asc, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import type { Env } from '../env';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log, serializeError } from '../lib/logger';
 import {
@@ -14,6 +16,7 @@ import type {
   DefaultCapacityPoolOfferingResolution,
   DefaultCapacityPoolsBackfillOptions,
 } from './default-capacity-pools';
+import { resolveGcpBootDiskPolicy } from './gcp-provider-factory';
 import {
   buildProviderCatalogForCredential,
   getStaticProviderCatalogOfferings,
@@ -312,7 +315,10 @@ export async function resolveOfferingsForSeed(
         ...serializeError(error),
       });
       return {
-        offerings: getStaticProviderCatalogOfferings(seed.provider),
+        offerings: getStaticProviderCatalogOfferings(
+          seed.provider,
+          await staticCatalogOptions(seed.provider, options.env)
+        ),
         refreshSucceeded: false,
         catalogComplete: false,
       };
@@ -320,7 +326,10 @@ export async function resolveOfferingsForSeed(
   }
 
   return {
-    offerings: getStaticProviderCatalogOfferings(seed.provider),
+    offerings: getStaticProviderCatalogOfferings(
+      seed.provider,
+      await staticCatalogOptions(seed.provider, options.env)
+    ),
     refreshSucceeded: true,
     catalogComplete: false,
   };
@@ -333,4 +342,14 @@ function normalizeOfferingResolution(
     return { offerings: value, refreshSucceeded: true, catalogComplete: true };
   }
   return value;
+}
+
+/** GCP static offerings follow the admin boot disk policy when an environment is available. */
+async function staticCatalogOptions(
+  provider: CredentialProvider,
+  env: Env | undefined
+): Promise<{ gcpBootDiskPolicy?: GcpBootDiskPolicy }> {
+  return provider === 'gcp' && env
+    ? { gcpBootDiskPolicy: await resolveGcpBootDiskPolicy(env) }
+    : {};
 }

@@ -109,7 +109,11 @@ function sku(description: string, price: number) {
     pricingInfo: [
       {
         pricingExpression: {
-          usageUnit: description.includes('Ram') ? 'GiBy.h' : 'h',
+          usageUnit: description.includes('PD Capacity')
+            ? 'GiBy.mo'
+            : description.includes('Ram')
+              ? 'GiBy.h'
+              : 'h',
           tieredRates: [
             {
               startUsageAmount: 0,
@@ -154,6 +158,7 @@ function stubBilling(
         skus: [
           sku('E2 Instance Core running in Americas', 0.021811),
           sku('E2 Instance Ram running in Americas', 0.002923),
+          sku('Balanced PD Capacity', 0.1),
         ],
       })
     );
@@ -258,6 +263,31 @@ describe('GCP price table', () => {
     const stale = new Date(NOW.getTime() + 25 * 60 * 60 * 1000);
     expect(await refreshGcpPriceTableIfDue(env, stale)).toMatchObject({ status: 'refreshed' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes at once a fresh table stored before boot disks were priced, then stays fresh', async () => {
+    await seedOwned('cred-a', 'enabled-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+    const fetchMock = stubBilling();
+    const oneHourAgo = new Date(NOW.getTime() - 60 * 60 * 1000).toISOString();
+    await env.KV.put(
+      GCP_PRICE_TABLE_KV_KEY,
+      JSON.stringify({
+        fetchedAt: oneHourAgo,
+        table: {
+          currency: 'USD',
+          regions: { 'us-central1': { e2: { coreHourly: 0.02, ramGibHourly: 0.003 } } },
+        },
+      })
+    );
+    // Old table still reads (machine prices), with no disk map.
+    expect((await readGcpPriceTable(env))?.balancedDiskGibMonthly).toBeUndefined();
+
+    expect(await refreshGcpPriceTableIfDue(env, NOW)).toMatchObject({ status: 'refreshed' });
+    expect((await readGcpPriceTable(env))?.balancedDiskGibMonthly).toEqual({ 'us-central1': 0.1 });
+
+    // Control: the new table is fresh, so the next tick does not refresh again.
+    expect(await refreshGcpPriceTableIfDue(env, NOW)).toMatchObject({ status: 'fresh' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('backs off after every credential fails, keeps the old table, then retries', async () => {

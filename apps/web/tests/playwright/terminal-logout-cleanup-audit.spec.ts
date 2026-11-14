@@ -16,7 +16,6 @@ const MOCK_PROJECT = {
   repoName: 'test/audit',
   repoProvider: 'github',
   installationId: 'inst-1',
-  defaultProvider: 'hetzner',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
   defaultNodeSize: 'cpx21',

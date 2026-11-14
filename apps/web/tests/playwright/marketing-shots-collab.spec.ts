@@ -64,8 +64,6 @@ const PROJECT = {
   installationId: 'inst-northwind',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
-  defaultLocation: null,
   defaultWorkspaceProfile: 'full',
   defaultDevcontainerConfigName: null,
   multiplayerActive: true,

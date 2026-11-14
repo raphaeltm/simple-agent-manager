@@ -94,10 +94,11 @@ export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> & 
     medium: { vcpu: 4, ramGb: 12, storageGb: 120 },
     large: { vcpu: 8, ramGb: 32, storageGb: 600 },
   },
+  // Boot disk follows the GCP policy defaults (20 GB per vCPU, 50 GB floor; gcp-boot-disk.ts).
   gcp: {
     small: { vcpu: 1, ramGb: 4, storageGb: 50 },
     medium: { vcpu: 2, ramGb: 8, storageGb: 50 },
-    large: { vcpu: 4, ramGb: 16, storageGb: 50 },
+    large: { vcpu: 4, ramGb: 16, storageGb: 80 },
   },
   vultr: {
     small: { vcpu: 2, ramGb: 4, storageGb: 80 },

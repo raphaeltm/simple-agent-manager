@@ -1,7 +1,8 @@
 import {
+  applyGcpBootDiskPolicy,
   createProvider,
+  type GcpBootDiskPolicy,
   type GcpPriceTable,
-  GcpProvider,
   getProviderCatalogOfferings,
   type Provider as CloudProvider,
   type ProviderConfig,
@@ -25,6 +26,7 @@ import { resolveAdminSetting } from './admin-settings-resolution';
 import { decrypt } from './encryption';
 import { withDeadline } from './fetch-timeout';
 import { readGcpPriceTable } from './gcp-price-table';
+import { createGcpProviderForEnv } from './gcp-provider-factory';
 import { createGcpTokenProvider, type GcpTokenOwner } from './gcp-token-provider';
 import {
   type Db,
@@ -101,18 +103,27 @@ export async function listProviderCatalogOfferings(
   }
 }
 
+/**
+ * The static catalog, used when a live catalog cannot be read. GCP offerings are re-sized to the
+ * boot disk policy (`gcpBootDiskPolicy`, default when omitted) so this fallback advertises the
+ * disk `GcpProvider.createVM` will create.
+ */
 export function getStaticProviderCatalogOfferings(
-  provider: CredentialProvider
+  provider: CredentialProvider,
+  options: { gcpBootDiskPolicy?: GcpBootDiskPolicy } = {}
 ): ProviderInstanceOffering[] {
   const locations = getLocationsForProvider(provider);
   const locationMetadata = Object.fromEntries(
     locations.map((location) => [location.id, { name: location.name, country: location.country }])
   );
-  return getProviderCatalogOfferings(
+  const offerings = getProviderCatalogOfferings(
     provider,
     locations.map((location) => location.id),
     locationMetadata
   );
+  return provider === 'gcp'
+    ? applyGcpBootDiskPolicy(offerings, options.gcpBootDiskPolicy)
+    : offerings;
 }
 
 export async function buildProviderCatalogForCredential(input: {
@@ -209,24 +220,10 @@ async function createGcpCatalogProvider(
 ): Promise<CloudProvider> {
   const gcpCred = parseGcpCredential(decryptedToken);
   const machineTypes = await resolveAdminSetting(env, 'gcpCatalog.machineTypes');
-  return new GcpProvider(
-    gcpCred.gcpProjectId,
-    createGcpTokenProvider(gcpCred, owner, env),
-    gcpCred.defaultZone,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      machineTypes: Array.isArray(machineTypes) ? machineTypes : [],
-      priceTable,
-    }
-  );
+  return createGcpProviderForEnv(env, gcpCred, createGcpTokenProvider(gcpCred, owner, env), {
+    machineTypes: Array.isArray(machineTypes) ? machineTypes : [],
+    priceTable,
+  });
 }
 
 export function createCatalogProvider(
