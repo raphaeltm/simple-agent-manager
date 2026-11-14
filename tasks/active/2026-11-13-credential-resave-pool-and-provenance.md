@@ -120,6 +120,16 @@ re-save today would strand.
 | running-status opt-in | damaged-row test, running-without-opt-in line |
 | `user_id = ?` in `claimNodeForCleanup` | damaged-row test, other-user line |
 | release check in the strict-deletion caller | strict deletion twin test |
+| reconcile call in PUT /api/gcp/service-account | service-account rotation test (source credential version stays on the old key) |
+| source-preferring ORDER BY in the duplicate collapse | unit: keeps the duplicate a capacity source is built on |
+| pool-ownership conjunct of `capacitySourceReleasedSql` | damaged-row test, foreign-pool line |
+
+Review follow-ups (2026-11-14): security M1 (duplicate collapse could cascade the live source) fixed;
+security L1 pool-ownership defence added; validator/cloudflare route test for PUT
+/service-account added; reuse control for a released node added. POST /api/gcp/setup makes the
+same single reconcile call but needs Google OAuth infrastructure to drive; not separately tested.
+Merge only after PR #2715: after a re-save the node's pinned generation changes and only #2715's
+owner-credential fallback can delete it (security M2, cloudflare HIGH).
 
 ## Left for Raphaël
 
