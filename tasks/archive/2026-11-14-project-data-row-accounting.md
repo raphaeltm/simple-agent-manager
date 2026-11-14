@@ -1,5 +1,7 @@
 # ProjectData per-operation row accounting
 
+Implementation and local review complete. Staging, release, and first-hour observation remain in progress; this is not a release-completion record.
+
 Attribute SQL and storage writes to RPC and handler labels without adding persisted writes. Scope is only the accounting item in idea 01M7CX61WVX72T7CFQNRTX0DVM.
 
 ## Research
