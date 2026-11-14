@@ -1,8 +1,15 @@
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 
 import { markProviderCreateNotDispatched } from './create-dispatch';
-import { type GcpApiScope, pollGcpOperation } from './gcp-api';
+import { pollGcpOperation } from './gcp-api';
 import { fetchGcpMachineTypes, gcpOfferingsFromMachineTypes } from './gcp-catalog';
+import {
+  deleteGcpInstance,
+  type GcpDeletionScope,
+  gcpInstanceZone,
+  getGcpInstanceDeletionStatus,
+  requestGcpInstanceDeletion,
+} from './gcp-deletion';
 import { ensureGcpFirewallRules } from './gcp-firewall';
 import {
   findGcpInstanceByIdOrName,
@@ -55,6 +62,12 @@ import type {
 import { ProviderError } from './types';
 import { parseProviderJson } from './validation';
 import { type GcpInstancePayload, validateGcpOperation } from './validation-gcp';
+import type {
+  VmDeletionRequestOptions,
+  VmDeletionRequestResult,
+  VmDeletionStatus,
+  VmDeletionTicket,
+} from './vm-deletion';
 
 export type { GcpTokenProvider } from './gcp-metadata';
 export {
@@ -126,9 +139,12 @@ export class GcpProvider implements Provider {
     return `${COMPUTE_API_BASE}/projects/${this.projectId}`;
   }
 
-  /** Request scope for the shared helpers in `gcp-api.ts` / `gcp-firewall.ts`. */
-  private get api(): GcpApiScope {
+  /** Request scope for the shared helpers in `gcp-api.ts`, `gcp-firewall.ts` and `gcp-deletion.ts`. */
+  private get api(): GcpDeletionScope {
     return {
+      projectId: this.projectId,
+      zones: this.locations,
+      defaultZone: this.defaultLocation,
       projectUrl: this.projectUrl(),
       timeoutMs: this.timeoutMs,
       operationPollTimeoutMs: this.operationPollTimeoutMs,
@@ -276,35 +292,22 @@ export class GcpProvider implements Provider {
   }
 
   async deleteVM(id: string, context?: ProviderRequestContext): Promise<void> {
-    throwIfProviderRequestAborted(context);
-    // GCP uses name-based lookups, so we need to find the zone
-    const instance = await this.findInstanceByIdOrName(id, context);
-    if (!instance) return; // Idempotent — already deleted
+    await deleteGcpInstance(this.api, id, context);
+  }
 
-    const zone = this.extractZone(instance.machineType);
-    const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}`;
+  async requestVMDeletion(
+    id: string,
+    context?: ProviderRequestContext,
+    options?: VmDeletionRequestOptions
+  ): Promise<VmDeletionRequestResult> {
+    return await requestGcpInstanceDeletion(this.api, id, context, options);
+  }
 
-    try {
-      const res = await providerFetch(
-        'gcp',
-        url,
-        { method: 'DELETE', headers },
-        this.timeoutMs,
-        undefined,
-        context
-      );
-      throwIfProviderRequestAborted(context);
-      const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'deleteVM'), 'deleteVM', {
-        requireName: true,
-      });
-      throwIfProviderRequestAborted(context);
-      await this.pollOperation(zone, op.name, context);
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      if (err instanceof ProviderError && err.statusCode === 404) return;
-      throw err;
-    }
+  async getVMDeletionStatus(
+    ticket: VmDeletionTicket,
+    context?: ProviderRequestContext
+  ): Promise<VmDeletionStatus> {
+    return await getGcpInstanceDeletionStatus(this.api, ticket, context);
   }
 
   async getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
@@ -333,37 +336,27 @@ export class GcpProvider implements Provider {
   }
 
   async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
-    throwIfProviderRequestAborted(context);
-    const instance = await this.findInstanceByIdOrName(id, context);
-    if (!instance) throw new ProviderError('gcp', 404, `VM ${id} not found`);
-
-    const zone = this.extractZone(instance.machineType);
-    const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/stop`;
-    const res = await providerFetch(
-      'gcp',
-      url,
-      { method: 'POST', headers },
-      this.timeoutMs,
-      undefined,
-      context
-    );
-    throwIfProviderRequestAborted(context);
-    const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'powerOff'), 'powerOff', {
-      requireName: true,
-    });
-    throwIfProviderRequestAborted(context);
-    await this.pollOperation(zone, op.name, context);
+    await this.runInstanceAction(id, 'stop', 'powerOff', context);
   }
 
   async powerOn(id: string, context?: ProviderRequestContext): Promise<void> {
+    await this.runInstanceAction(id, 'start', 'powerOn', context);
+  }
+
+  /** POST `stop`/`start` on the instance and wait for the operation. */
+  private async runInstanceAction(
+    id: string,
+    action: 'stop' | 'start',
+    validationContext: 'powerOff' | 'powerOn',
+    context?: ProviderRequestContext
+  ): Promise<void> {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) throw new ProviderError('gcp', 404, `VM ${id} not found`);
 
-    const zone = this.extractZone(instance.machineType);
+    const zone = gcpInstanceZone(instance, this.defaultLocation);
     const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/start`;
+    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/${action}`;
     const res = await providerFetch(
       'gcp',
       url,
@@ -373,9 +366,11 @@ export class GcpProvider implements Provider {
       context
     );
     throwIfProviderRequestAborted(context);
-    const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'powerOn'), 'powerOn', {
-      requireName: true,
-    });
+    const op = validateGcpOperation(
+      await parseProviderJson(res, 'gcp', validationContext),
+      validationContext,
+      { requireName: true }
+    );
     throwIfProviderRequestAborted(context);
     await this.pollOperation(zone, op.name, context);
   }
@@ -501,11 +496,5 @@ export class GcpProvider implements Provider {
       `GCP provider does not support volume operation ${operation}`,
       { category: 'invalid_config' }
     );
-  }
-
-  /** Extract zone from a machineType URL like zones/us-central1-a/machineTypes/e2-standard-2 */
-  private extractZone(machineType: string): string {
-    const match = machineType.match(/zones\/([^/]+)/);
-    return match?.[1] || this.defaultLocation;
   }
 }

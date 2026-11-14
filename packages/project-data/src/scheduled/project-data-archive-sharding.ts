@@ -175,6 +175,14 @@ type ArchiveCoordinatorConfig = {
    * somewhere smaller to descend to instead of ending the tick (`.claude/rules/65`).
    */
   sweepFallthroughDepth: number;
+  /**
+   * Storage-pressure gate for the unscoped sweep (`STORAGE_PRESSURE_GATE_SQL`): the lowest
+   * `project_data_storage_telemetry.usage_ratio` a project's root object must report before its
+   * sessions are selected. 0 turns the gate off.
+   */
+  minStorageUsageRatio: number;
+  /** A telemetry row older than this proves nothing about pressure, so its project stays eligible. */
+  storageTelemetryMaxAgeMs: number;
   sessionGraceMs: number;
   /**
    * Rule-47 expiring marker: how long a `frozen`/`precopy_refused` journal keeps its session out
@@ -312,6 +320,15 @@ export type ProjectDataArchiveShardingStats = {
   messageCeiling?: number;
   /** Largest per-session write estimate the current allowance can admit, in units. */
   affordableWriteUnits?: number;
+  /** The storage-pressure threshold this tick selected with; 0 means the gate was off. */
+  storagePressureMinUsageRatio?: number;
+  /**
+   * Otherwise-eligible sessions the storage-pressure gate left in root this tick, with the
+   * projects and messages they span. `null` when the count failed, which is not zero.
+   */
+  storagePressureHeldSessions?: number | null;
+  storagePressureHeldProjects?: number | null;
+  storagePressureHeldMessages?: number | null;
   enabled: boolean;
   skipped: boolean;
   skipReason: string | null;
@@ -542,7 +559,31 @@ function resolveSweepAffordability(
   };
 }
 
-export function resolveConfig(env: Env): ArchiveCoordinatorConfig {
+/**
+ * Tunables the caller resolves outside this package (the admin settings registry lives in the
+ * worker). Omitted fields use the `DEFAULT_*` constants.
+ */
+export type ProjectDataArchiveSweepOptions = {
+  /** Percent of the storage limit, 0-100. 0 archives every project regardless of storage. */
+  minStorageUsagePercent?: number;
+  storageTelemetryMaxAgeHours?: number;
+};
+
+export const DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT = 50;
+export const DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS = 24;
+/** Shared with the admin settings registry so the two bounds cannot drift apart. */
+export const MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS = 30 * 24;
+const HOUR_MS = 60 * 60 * 1000;
+
+function boundedOption(value: number | undefined, fallback: number, min: number, max: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+export function resolveConfig(
+  env: Env,
+  options: ProjectDataArchiveSweepOptions = {}
+): ArchiveCoordinatorConfig {
   const sweepMessageBudget = envInt(
     env.PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET,
     PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
@@ -568,6 +609,20 @@ export function resolveConfig(env: Env): ArchiveCoordinatorConfig {
       0,
       PROJECT_DATA_ARCHIVE_MAX_SWEEP_FALLTHROUGH_DEPTH
     ),
+    minStorageUsageRatio:
+      boundedOption(
+        options.minStorageUsagePercent,
+        DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT,
+        0,
+        100
+      ) / 100,
+    storageTelemetryMaxAgeMs:
+      boundedOption(
+        options.storageTelemetryMaxAgeHours,
+        DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
+        1,
+        MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS
+      ) * HOUR_MS,
     budgetStallAlertSweeps: envInt(
       env.PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS,
       PROJECT_DATA_ARCHIVE_DEFAULT_BUDGET_STALL_ALERT_SWEEPS,
@@ -721,6 +776,7 @@ function emptyStats(
     budgetWindowExhausted: 0,
     messageCeiling: config.sweepMessageCeiling,
     affordableWriteUnits: config.affordableWriteUnits,
+    storagePressureMinUsageRatio: config.minStorageUsageRatio,
   } satisfies ProjectDataArchiveShardingStats;
 }
 
@@ -1342,22 +1398,51 @@ function applyMessageBudget(
 }
 
 /**
- * Eligible candidates for the unscoped sweep, ordered largest-first under the derived
- * affordability ceiling.
+ * Storage-pressure gate for the unscoped sweep. Archiving a session costs billed row writes on
+ * the root object and on its shard, and the only thing it buys is room in the root object. A
+ * project far below its limit gains nothing, so its sessions are left in place.
  *
- * `limit` is the number of sessions the tick may FENCE; the query deliberately reads
- * `sweepFallthroughDepth` rows beyond it. A candidate the write budget refuses is never
- * fenced and must not cost the tick a slot, so the caller needs spare candidates below the
- * refused one to descend to. Reading exactly `limit` rows is what turned a single
- * unaffordable session into a four-day standstill in production.
+ * Condition: the project's root object is under storage pressure. Signal: its last
+ * `project_data_storage_telemetry` row. The two diverge when the row is missing or the hourly
+ * measurement has stopped, and then nothing is known about the object. Both cases keep the
+ * project eligible, because holding the drain off an object that is filling up is the expensive
+ * mistake (`.claude/rules/74`). A dormant project therefore drains once; an active one below
+ * the threshold never does.
+ *
+ * Only new-candidate selection is gated. In-flight migrations, pending reclaim and the
+ * operator-scoped canary (`selectScopedCandidates`) are deliberately untouched.
  */
-export function projectDataArchiveCandidateSql(compact: boolean): string {
-  return `SELECT ss.project_id, ss.id AS session_id, ss.message_count
-     FROM session_summaries ss
+const STORAGE_PRESSURE_GATE_SQL = `AND (
+         ? <= 0
+         OR tel.project_id IS NULL
+         OR tel.measured_at < ?
+         OR tel.usage_ratio >= ?
+       )`;
+const STORAGE_PRESSURE_HELD_SQL = `AND ? > 0
+       AND tel.project_id IS NOT NULL
+       AND tel.measured_at >= ?
+       AND tel.usage_ratio < ?`;
+
+function storagePressureBinds(
+  config: Pick<ArchiveCoordinatorConfig, 'minStorageUsageRatio' | 'storageTelemetryMaxAgeMs'>,
+  now: Date
+): [number, number, number] {
+  return [
+    config.minStorageUsageRatio,
+    now.getTime() - config.storageTelemetryMaxAgeMs,
+    config.minStorageUsageRatio,
+  ];
+}
+
+/** Everything the unscoped sweep requires of a candidate except the storage-pressure verdict. */
+function unscopedCandidateFromWhereSql(compact: boolean): string {
+  return `FROM session_summaries ss
      LEFT JOIN project_data_session_locations loc
        ON loc.project_id = ss.project_id AND loc.session_id = ss.id
      LEFT JOIN project_data_archive_circuit_breakers breaker
        ON breaker.project_id = ss.project_id
+     LEFT JOIN project_data_storage_telemetry tel
+       ON tel.project_id = ss.project_id
      WHERE ss.status IN ('stopped', 'failed')
        ${compact ? 'AND ss.message_count <= ?' : ''}
        AND ss.ended_at IS NOT NULL
@@ -1371,9 +1456,48 @@ export function projectDataArchiveCandidateSql(compact: boolean): string {
            AND snap.status IN ('available', 'degraded')
            AND snap.expires_at > ?
        )
-       ${PRECOPY_REFUSAL_EXCLUSION_SQL}
+       ${PRECOPY_REFUSAL_EXCLUSION_SQL}`;
+}
+
+function unscopedCandidateBinds(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  now: Date
+): Array<string | number> {
+  return [
+    ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageCeiling] : []),
+    now.getTime() - config.sessionGraceMs,
+    now.toISOString(),
+    ...precopyRefusalExclusionBinds(config, now),
+    ...storagePressureBinds(config, now),
+  ];
+}
+
+/**
+ * Eligible candidates for the unscoped sweep, ordered largest-first under the derived
+ * affordability ceiling.
+ *
+ * `limit` is the number of sessions the tick may FENCE; the query deliberately reads
+ * `sweepFallthroughDepth` rows beyond it. A candidate the write budget refuses is never
+ * fenced and must not cost the tick a slot, so the caller needs spare candidates below the
+ * refused one to descend to. Reading exactly `limit` rows is what turned a single
+ * unaffordable session into a four-day standstill in production.
+ */
+export function projectDataArchiveCandidateSql(compact: boolean): string {
+  return `SELECT ss.project_id, ss.id AS session_id, ss.message_count
+     ${unscopedCandidateFromWhereSql(compact)}
+       ${STORAGE_PRESSURE_GATE_SQL}
      ORDER BY ss.message_count DESC, ss.updated_at ASC, ss.id ASC
      LIMIT ?`;
+}
+
+/** What the storage-pressure gate kept out of this tick's selection, for the tick's stats. */
+export function projectDataArchiveStoragePressureHeldSql(compact: boolean): string {
+  return `SELECT COUNT(*) AS sessions,
+       COUNT(DISTINCT ss.project_id) AS projects,
+       COALESCE(SUM(ss.message_count), 0) AS messages
+     ${unscopedCandidateFromWhereSql(compact)}
+       ${STORAGE_PRESSURE_HELD_SQL}`;
 }
 
 async function selectCandidates(
@@ -1383,20 +1507,46 @@ async function selectCandidates(
   limit: number
 ): Promise<CandidateRow[]> {
   if (limit <= 0) return [];
-  const cutoff = now.getTime() - config.sessionGraceMs;
-  const nowIso = now.toISOString();
   const rows = await env.DATABASE.prepare(
     projectDataArchiveCandidateSql(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true')
   )
     .bind(
-      ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageCeiling] : []),
-      cutoff,
-      nowIso,
-      ...precopyRefusalExclusionBinds(config, now),
+      ...unscopedCandidateBinds(env, config, now),
       Math.min(limit, config.sweepProjects * config.sweepSessions) + config.sweepFallthroughDepth
     )
     .all<CandidateRow>();
   return rows.results ?? [];
+}
+
+type StoragePressureHeld = { sessions: number; projects: number; messages: number };
+
+/**
+ * Never throws: this only feeds the tick's stats, and a failed count must not stop the drain.
+ * `null` means "not counted", which is not the same as zero held (`.claude/rules/53`).
+ */
+async function countStoragePressureHeld(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  now: Date
+): Promise<StoragePressureHeld | null> {
+  if (config.minStorageUsageRatio <= 0) return { sessions: 0, projects: 0, messages: 0 };
+  try {
+    const row = await env.DATABASE.prepare(
+      projectDataArchiveStoragePressureHeldSql(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true')
+    )
+      .bind(...unscopedCandidateBinds(env, config, now))
+      .first<{ sessions: number | null; projects: number | null; messages: number | null }>();
+    return {
+      sessions: Number(row?.sessions ?? 0),
+      projects: Number(row?.projects ?? 0),
+      messages: Number(row?.messages ?? 0),
+    };
+  } catch (error) {
+    log.warn('project_data_archive_storage_pressure_count_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 async function selectScopedCandidates(
@@ -4931,9 +5081,10 @@ async function processArchiveMigrationBatch(input: {
 
 export async function runProjectDataArchiveSharding(
   env: Env,
-  nowDate = new Date()
+  nowDate = new Date(),
+  options: ProjectDataArchiveSweepOptions = {}
 ): Promise<ProjectDataArchiveShardingStats> {
-  const config = resolveConfig(env);
+  const config = resolveConfig(env, options);
   if (!config.enabled) return emptyStats(config, true, 'disabled');
   if (!isProjectDataArchiveExactRoutingEnabled(env)) {
     return emptyStats(config, true, 'exact_routing_disabled');
@@ -4948,7 +5099,12 @@ export async function runProjectDataArchiveSharding(
     return emptyStats(config, true, cadenceClaim.skipReason, cadenceClaim.cadence);
   }
 
-  const stats = emptyStats(config, false, null, cadenceClaim.cadence);
+  const stats: ProjectDataArchiveShardingStats = emptyStats(
+    config,
+    false,
+    null,
+    cadenceClaim.cadence
+  );
   try {
     const crashGapRecovery = await recoverCrashGaps(env, config, now);
     stats.recoveredCrashGaps = crashGapRecovery.recovered;
@@ -4974,6 +5130,12 @@ export async function runProjectDataArchiveSharding(
       markFailedErrorEvent: 'project_data_archive_mark_failed_failed',
       candidateFailedEvent: 'project_data_archive_candidate_failed',
     });
+    // After the batch on purpose: the count only feeds this tick's stats and must not take
+    // wall time from the migrations themselves.
+    const held = await countStoragePressureHeld(env, config, nowDate);
+    stats.storagePressureHeldSessions = held?.sessions ?? null;
+    stats.storagePressureHeldProjects = held?.projects ?? null;
+    stats.storagePressureHeldMessages = held?.messages ?? null;
     await finishGlobalSweepCadence(
       env,
       config,

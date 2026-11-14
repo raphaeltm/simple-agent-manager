@@ -211,7 +211,8 @@ VMs (`resolveStrictNodeTeardownAuthority()` in
   node stays `destroying` with a named `cleanup_blocked_reason`
   (`teardown_credential_unavailable`, `teardown_instance_not_visible`,
   `teardown_instance_ownership_mismatch`,
-  `teardown_ownership_scope_unavailable` or `teardown_delete_refused`) and SAM raises its operator alert
+  `teardown_ownership_scope_unavailable`, `teardown_delete_refused` or
+  `teardown_deletion_unconfirmed`) and SAM raises its operator alert
   (`recordNodeTeardownBlocked()` in `node-teardown-blocked.ts`), instead of
   retrying silently. A credential that could not be read at all (a transient
   storage or decryption failure) is an ordinary failure and is retried on the
@@ -219,6 +220,36 @@ VMs (`resolveStrictNodeTeardownAuthority()` in
   is refused permission to delete it is skipped, and the next credential has to
   prove ownership again before its own delete
   (`deleteWithCurrentOwnerCredential()`).
+
+The cleanup cron does not wait for a provider's long-running delete. GCP deletes
+an instance through an operation that runs from about 20 seconds to a few
+minutes, longer than one cron attempt may take. For a provider that supports it
+(GCP today), the cron starts the deletion and returns
+(`sendProviderDeletion()` in `apps/api/src/services/node-provider-deletion.ts`):
+
+- The ownership proof and incarnation fence above run first, unchanged.
+- Before the DELETE is sent, SAM writes a record of it on the node row
+  (`nodes.provider_deletion_requested_at`, `nodes.provider_deletion_json`),
+  bound to the node's provider instance ID and runtime incarnation. A delete cut
+  off mid-flight can still be confirmed, or shown never to have arrived.
+- Sending the DELETE is not proof. On a later tick the
+  `provider_deletion_confirm` phase reads the provider's own record of that
+  deletion (`confirmPendingProviderDeletion()`): for GCP, the zone's delete
+  operations whose `targetId` is the instance's numeric ID
+  (`getGcpInstanceDeletionStatus()` in `packages/providers/src/gcp-deletion.ts`).
+  Termination proof is written only when that record shows a completed,
+  error-free deletion of that exact instance. "Not found" through a current
+  credential is still never proof.
+- If the provider has no record of the delete, or the delete failed, the record
+  is cleared and the next attempt runs the guarded teardown again. A deletion
+  still unconfirmed after `operations.nodeProviderDeletionConfirmMaxMs` (30
+  minutes by default) is reported as `teardown_deletion_unconfirmed` with the
+  operator alert, and is checked again only after the one-hour failure backoff.
+
+Providers whose delete call already returns once the provider accepts it
+(Hetzner, DigitalOcean, Vultr, Infomaniak, Scaleway) keep the single-step path.
+Interactive deletes (owner **Delete Node**, NodeLifecycle stop) still wait for
+the provider.
 
 ## Credential Encryption
 
