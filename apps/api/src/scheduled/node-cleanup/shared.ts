@@ -23,6 +23,7 @@ import {
   type NodeLifecycleDecision,
   recordNodeLifecycleDecision,
 } from '../../services/node-lifecycle-decisions';
+import { NodeTeardownBlockedError } from '../../services/node-teardown-authority';
 import { deleteNodeResourcesStrict } from '../../services/nodes';
 import { persistError } from '../../services/observability';
 import { resolveOperationsTelemetrySetting } from '../../services/operations-telemetry-settings';
@@ -268,6 +269,14 @@ async function handleCleanupFailure(
   );
   if (refusal) {
     refusal.cleanup_blocked_since = node.cleanup_blocked_since ?? nowIso;
+    // A named teardown refusal is the actual cause; the re-diagnosis only sees its aftermath
+    // (the backoff just written, or nothing, which it would label a lost race).
+    if (error instanceof NodeTeardownBlockedError) {
+      refusal.reasons = [
+        error.reason,
+        ...refusal.reasons.filter((reason) => reason !== 'lost_race'),
+      ];
+    }
     await env.DATABASE.prepare(
       `UPDATE nodes SET cleanup_blocked_since=?
       WHERE id=? AND user_id=? AND status=? AND status IN ('stopped','destroying')`
@@ -283,6 +292,19 @@ async function handleCleanupFailure(
       options.blockedRetirementMs,
       options.refusalWarnAfterMs
     );
+  }
+  if (error instanceof NodeTeardownBlockedError) {
+    // A named teardown refusal needs a person (reconnect the account, or remove the VM by hand),
+    // so it cannot clear itself. The refusal backoff above shrinks to zero once the blocked
+    // deadline passes, which would re-read the provider every tick forever (rule 47). Keep the
+    // full failure backoff instead.
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET cleanup_backoff_until=?
+      WHERE id=? AND user_id=? AND status IN ('stopped','destroying')
+        AND (cleanup_backoff_until IS NULL OR cleanup_backoff_until < ?)`
+    )
+      .bind(backoffUntil, node.id, node.user_id, backoffUntil)
+      .run();
   }
   await persistCleanupFailure(env, node, options, error, backoffUntil);
 }
