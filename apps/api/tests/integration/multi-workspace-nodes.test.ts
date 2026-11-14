@@ -13,6 +13,11 @@ describe('multi-workspace nodes integration wiring', () => {
     readFileSync(resolve(process.cwd(), 'src/routes/workspaces/agent-sessions.ts'), 'utf8'),
   ].join('\n');
   const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+  // The ws-* proxy moved out of index.ts (rule 18); index.ts mounts it with app.use.
+  const wsProxyFile = readFileSync(
+    resolve(process.cwd(), 'src/routes/workspace-subdomain-proxy.ts'),
+    'utf8'
+  );
 
   it('wires node and workspace routes into API index', () => {
     expect(indexFile).toContain("app.route('/api/nodes', nodesRoutes)");
@@ -20,7 +25,8 @@ describe('multi-workspace nodes integration wiring', () => {
   });
 
   it('includes cross-component proxy + node-agent call paths', () => {
-    expect(indexFile).toContain('ws_proxy_route');
+    expect(indexFile).toContain("app.use('*', workspaceSubdomainProxy)");
+    expect(wsProxyFile).toContain('ws_proxy_route');
     expect(workspacesRoute).toContain('createWorkspaceOnNode');
     expect(workspacesRoute).toContain('stopWorkspaceOnNode');
     expect(nodesRoute).toContain('stopWorkspaceOnNode');

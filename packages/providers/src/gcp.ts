@@ -2,6 +2,13 @@ import type { CredentialProvider } from '@simple-agent-manager/shared';
 
 import { markProviderCreateNotDispatched } from './create-dispatch';
 import { pollGcpOperation } from './gcp-api';
+import {
+  applyGcpBootDiskPolicy,
+  DEFAULT_GCP_BOOT_DISK_POLICY,
+  type GcpBootDiskPolicy,
+  gcpBootDiskSizeGb,
+  gcpMachineTypeNamedVcpus,
+} from './gcp-boot-disk';
 import { fetchGcpMachineTypes, gcpOfferingsFromMachineTypes } from './gcp-catalog';
 import {
   deleteGcpInstance,
@@ -39,13 +46,17 @@ import {
 } from './gcp-native-instance';
 import type { GcpPriceTable } from './gcp-pricing';
 import { getProviderCatalogOfferings } from './instance-offerings';
-import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
+import {
+  type NativeVMConfigSource,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
 import {
   providerFetch,
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
 } from './provider-fetch';
 import type {
+  NativeVMConfig,
   Provider,
   ProviderOfferingListOptions,
   ProviderRequestContext,
@@ -109,7 +120,7 @@ export class GcpProvider implements Provider {
     defaultZone?: string,
     private readonly imageFamily: string = 'ubuntu-2404-lts-amd64',
     private readonly imageProject: string = 'ubuntu-os-cloud',
-    private readonly diskSizeGb: number = 50,
+    private readonly bootDiskPolicy: GcpBootDiskPolicy = DEFAULT_GCP_BOOT_DISK_POLICY,
     private readonly timeoutMs: number = 30_000,
     private readonly operationPollTimeoutMs: number = 5 * 60 * 1000,
     private readonly firewallSourceRanges: readonly string[] = DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
@@ -191,7 +202,7 @@ export class GcpProvider implements Provider {
       defaultLocation: this.defaultLocation,
       legacySizes: this.sizes,
       defaultImage: this.imageFamily,
-      defaultBootDiskSizeGb: this.diskSizeGb,
+      defaultBootDiskSizeGb: (resolved, source) => this.defaultBootDiskSizeGb(resolved, source),
       minBootDiskSizeGb: 10,
       legacyBootDiskSizeAuthority: 'provider-default',
     });
@@ -231,7 +242,9 @@ export class GcpProvider implements Provider {
           zone,
           nativeConfig.instanceType,
           resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
-          nativeConfig.bootDiskSizeGb ?? this.diskSizeGb
+          // Resolution always sets bootDiskSizeGb (the default above is a function that returns
+          // a number); the fallback only narrows the optional type.
+          nativeConfig.bootDiskSizeGb ?? this.defaultBootDiskSizeGb(nativeConfig, 'native')
         ),
       ],
       networkInterfaces: [
@@ -398,7 +411,7 @@ export class GcpProvider implements Provider {
       ]);
       throwIfProviderRequestAborted(context);
       return gcpOfferingsFromMachineTypes(types, priceTable, {
-        bootDiskGb: this.diskSizeGb,
+        bootDiskPolicy: this.bootDiskPolicy,
         lastSeenAt: new Date().toISOString(),
       });
     } catch (err) {
@@ -409,11 +422,38 @@ export class GcpProvider implements Provider {
   }
 
   private staticOfferings() {
-    return getProviderCatalogOfferings(
-      this.name as CredentialProvider,
-      this.locations,
-      this.locationMetadata
+    return applyGcpBootDiskPolicy(
+      getProviderCatalogOfferings(
+        this.name as CredentialProvider,
+        this.locations,
+        this.locationMetadata
+      ),
+      this.bootDiskPolicy
     );
+  }
+
+  /**
+   * Boot disk for a VM whose request names no `bootDiskSizeGb`. A pool plan is a native request
+   * carrying the candidate's disk as `resources.diskGb`; that is what the catalog advertised and
+   * what the node row records, so the VM is created at exactly that size. Any other request gets
+   * the policy size for the machine's vCPUs (`gcp-boot-disk.ts`), the same size the catalog
+   * advertises for that machine type.
+   */
+  private defaultBootDiskSizeGb(
+    resolved: Pick<NativeVMConfig, 'instanceType' | 'resources'>,
+    source: NativeVMConfigSource
+  ): number {
+    const plannedDiskGb = resolved.resources?.diskGb;
+    if (
+      source === 'native' &&
+      typeof plannedDiskGb === 'number' &&
+      Number.isInteger(plannedDiskGb) &&
+      plannedDiskGb > 0
+    ) {
+      return plannedDiskGb;
+    }
+    const vcpus = resolved.resources?.vcpuCount ?? gcpMachineTypeNamedVcpus(resolved.instanceType);
+    return gcpBootDiskSizeGb(vcpus, this.bootDiskPolicy);
   }
 
   /** Prices are optional: an unavailable table leaves offerings unpriced, never fails them. */

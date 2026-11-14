@@ -215,7 +215,7 @@ async function placementSelection(userId: string, projectId: string | null) {
       taskId: `${prefix}-task`,
       projectId: projectId ?? '',
       userId,
-      project: { id: projectId ?? '', defaultProvider: null, defaultVmSize: 'small' },
+      project: { id: projectId ?? '', defaultVmSize: 'small' },
       credentialProjectPolicy: 'current-project',
       taskModeDefault: 'task',
       resourceRequirements: {},

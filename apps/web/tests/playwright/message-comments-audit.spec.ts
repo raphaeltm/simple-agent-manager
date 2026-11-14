@@ -32,7 +32,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-message-comments',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   defaultWorkspaceProfile: 'full',
   defaultDevcontainerConfigName: '',
   workspaceIdleTimeoutMs: null,

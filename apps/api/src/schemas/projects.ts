@@ -1,15 +1,6 @@
 import { VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-const CredentialProviderSchema = v.picklist([
-  'hetzner',
-  'scaleway',
-  'gcp',
-  'vultr',
-  'infomaniak',
-  'digitalocean',
-  'upcloud',
-]);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
 
@@ -45,8 +36,6 @@ export const UpdateProjectSchema = v.object({
   defaultAgentType: v.optional(v.nullable(v.string())),
   defaultWorkspaceProfile: v.optional(v.nullable(WorkspaceProfileSchema)),
   defaultDevcontainerConfigName: v.optional(v.nullable(v.string())),
-  defaultProvider: v.optional(v.nullable(CredentialProviderSchema)),
-  defaultLocation: v.optional(v.nullable(v.string())),
   agentDefaults: v.optional(v.nullable(AgentDefaultsSchema)),
   workspaceIdleTimeoutMs: v.optional(v.nullable(v.number())),
   nodeIdleTimeoutMs: v.optional(v.nullable(v.number())),

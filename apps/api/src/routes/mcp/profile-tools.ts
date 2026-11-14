@@ -85,8 +85,6 @@ export function extractProfileFields(
       );
     }
   }
-  if (typeof params.provider === 'string') fields.provider = params.provider;
-  if (typeof params.vmLocation === 'string') fields.vmLocation = params.vmLocation;
   if (typeof params.workspaceProfile === 'string')
     fields.workspaceProfile = params.workspaceProfile;
   if (hasSuppliedParam(params, 'runtime')) {
@@ -152,8 +150,6 @@ export async function handleGetAgentProfile(
               timeoutMinutes: profile.timeoutMinutes,
               vmSizeOverride: profile.vmSizeOverride,
               resourceRequirementsJson: profile.resourceRequirementsJson,
-              provider: profile.provider,
-              vmLocation: profile.vmLocation,
               workspaceProfile: profile.workspaceProfile,
               devcontainerConfigName: profile.devcontainerConfigName,
               taskMode: profile.taskMode,

@@ -173,8 +173,6 @@ export function toProjectResponse(project: schema.Project): Project {
     defaultWorkspaceProfile:
       (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
     defaultDevcontainerConfigName: project.defaultDevcontainerConfigName ?? null,
-    defaultProvider: (project.defaultProvider as Project['defaultProvider']) ?? null,
-    defaultLocation: project.defaultLocation ?? null,
     agentDefaults: parseAgentDefaults(project.agentDefaults),
     workspaceIdleTimeoutMs: project.workspaceIdleTimeoutMs ?? null,
     nodeIdleTimeoutMs: project.nodeIdleTimeoutMs ?? null,

@@ -7252,14 +7252,6 @@
             "description": "Persisted modern workload requirements JSON for profile compatibility.",
             "nullable": true
           },
-          "provider": {
-            "type": "string",
-            "nullable": true
-          },
-          "vmLocation": {
-            "type": "string",
-            "nullable": true
-          },
           "workspaceProfile": {
             "type": "string",
             "nullable": true

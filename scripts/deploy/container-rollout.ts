@@ -261,10 +261,12 @@ export async function waitForContainerRollouts(
       statuses.set(prior.name, status);
       log(status);
       if (!rollout) return true; // Direct creation or metadata-only update without a rollout.
-      const active = newRollouts.length
-        ? app.version === target.version
-        : app.version >= target.version;
-      return rolloutCompleted(rollout) && active;
+      const complete = rolloutCompleted(rollout);
+      // The pinned rollout is authoritative: the list can retain N-1 after 100% completion.
+      // Neither list nor detail version alone establishes completion during a rollout.
+      if (complete && app.version < target.version)
+        log(`Container rollout completed with stale application list version (${status})`);
+      return complete;
     } catch (error) {
       throw new Error(`Container rollout gate failed (${status}): ${errorMessage(error)}`);
     }

@@ -149,7 +149,7 @@ async function loadRemainingProjectCoverage(input: {
 
 async function addTriggerResources(input: {
   db: AppDb;
-  project: Pick<schema.Project, 'id' | 'defaultAgentType' | 'defaultProvider'>;
+  project: Pick<schema.Project, 'id' | 'defaultAgentType'>;
   departingUserId: string;
   defaultAgentType: string;
   remainingCoverage: Map<CoverageKey, RemainingAttachmentCoverage>;
@@ -188,7 +188,6 @@ async function addTriggerResources(input: {
         .select({
           id: schema.agentProfiles.id,
           agentType: schema.agentProfiles.agentType,
-          provider: schema.agentProfiles.provider,
         })
         .from(schema.agentProfiles)
         .where(inArray(schema.agentProfiles.id, profileIds))
@@ -199,8 +198,8 @@ async function addTriggerResources(input: {
     const profile = trigger.agentProfileId ? profileById.get(trigger.agentProfileId) : null;
     const agentTarget =
       profile?.agentType ?? input.project.defaultAgentType ?? input.defaultAgentType;
-    const computeTarget =
-      profile?.provider ?? input.project.defaultProvider ?? INHERITED_COMPUTE_TARGET;
+    // The effective compute pool picks the provider; projects and profiles never pin one.
+    const computeTarget = INHERITED_COMPUTE_TARGET;
     const agentCoverage = hasRemainingCoverage(input.remainingCoverage, 'agent', agentTarget);
     const computeCoverage = hasRemainingCoverage(input.remainingCoverage, 'compute', computeTarget);
     // Keeping a trigger active also needs a principal that can still execute it.
@@ -235,8 +234,7 @@ async function addTriggerResources(input: {
         executionUserId: trigger.executionUserId,
         effectiveExecutionUserId: executionUserIdBefore,
         executionCapability: TRIGGER_EXECUTION_CAPABILITY,
-        hasAuthorizedRemainingExecutionPrincipal:
-          input.hasAuthorizedRemainingExecutionPrincipal,
+        hasAuthorizedRemainingExecutionPrincipal: input.hasAuthorizedRemainingExecutionPrincipal,
         remainingProjectCoverage: {
           agent: agentCoverage
             ? {
@@ -521,11 +519,13 @@ export async function enumerateOffboardingResources(input: {
   // `detailsJson` against the stored plan, so an actor-dependent value would
   // make a plan previewed by one admin unapplyable by another.
   const hasAuthorizedRemainingExecutionPrincipal =
-    (await loadAuthorizedRemainingExecutionPrincipals({
-      db: input.db,
-      projectId: input.project.id,
-      departingUserId: input.memberUserId,
-    })).length > 0;
+    (
+      await loadAuthorizedRemainingExecutionPrincipals({
+        db: input.db,
+        projectId: input.project.id,
+        departingUserId: input.memberUserId,
+      })
+    ).length > 0;
   const resourcesByKey = new Map<string, ResourceDraft>();
 
   await addTriggerResources({

@@ -66,7 +66,9 @@ For container-backed Instant verification, `wrangler deploy` success means the
 rollout started, not that every instance serves the new image. The shared staging
 and production workflow has a separate **Wait for container rollout completion**
 step. It compares rollout identities before/after deploy, pins the single new
-rollout and requires completed 100% steps and its target application version.
+rollout and requires all its steps completed through 100% at the pinned target.
+The application list can retain the previous version after completion; that
+disagreement is diagnostic and does not veto the completed rollout.
 Multiple new rollouts fail as ambiguous. An unchanged or metadata-only deployment
 awaits any existing pending rollout; a first direct creation needs no rollout.
 Application GET can report the old version during rollout, so version equality

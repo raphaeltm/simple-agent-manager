@@ -55,8 +55,6 @@ const PROJECT = {
   defaultVmSize: null,
   defaultAgentType: 'claude-code',
   defaultWorkspaceProfile: null,
-  defaultProvider: null,
-  defaultLocation: null,
   agentDefaults: {
     'claude-code': { model: 'claude-opus-5', permissionMode: 'acceptEdits' },
     'openai-codex': { model: 'gpt-5.5-codex', permissionMode: null },
