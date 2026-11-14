@@ -5,12 +5,9 @@ import {
 import type { UpdateProjectRequest } from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
-  CREDENTIAL_PROVIDERS,
   DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
   DEVCONTAINER_CONFIG_NAME_REGEX,
   isValidAgentType,
-  isValidLocationForProvider,
-  isValidProvider,
   MAX_NODE_IDLE_TIMEOUT_MS,
   MAX_WORKSPACE_IDLE_TIMEOUT_MS,
   MIN_NODE_IDLE_TIMEOUT_MS,
@@ -56,8 +53,6 @@ export function registerProjectUpdateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       'defaultAgentType',
       'defaultWorkspaceProfile',
       'defaultDevcontainerConfigName',
-      'defaultProvider',
-      'defaultLocation',
       'agentDefaults',
       'workspaceIdleTimeoutMs',
       'nodeIdleTimeoutMs',
@@ -120,41 +115,6 @@ export function registerProjectUpdateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       ) {
         throw errors.badRequest(
           'defaultDevcontainerConfigName must be alphanumeric with hyphens/underscores, max 128 chars'
-        );
-      }
-    }
-
-    if (
-      body.defaultProvider !== undefined &&
-      body.defaultProvider !== null &&
-      !CREDENTIAL_PROVIDERS.includes(body.defaultProvider)
-    ) {
-      throw errors.badRequest(`defaultProvider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
-    }
-
-    // Determine the effective provider for location validation
-    const effectiveProvider =
-      body.defaultProvider === undefined
-        ? existing.defaultProvider
-        : (body.defaultProvider ?? null);
-
-    // If defaultProvider changed, clear defaultLocation unless explicitly set in this request
-    if (
-      body.defaultProvider !== undefined &&
-      body.defaultProvider !== existing.defaultProvider &&
-      body.defaultLocation === undefined
-    ) {
-      body.defaultLocation = null;
-    }
-
-    // Validate defaultLocation against the effective provider
-    if (body.defaultLocation !== undefined && body.defaultLocation !== null) {
-      if (!effectiveProvider || !isValidProvider(effectiveProvider)) {
-        throw errors.badRequest('Cannot set defaultLocation without a valid defaultProvider');
-      }
-      if (!isValidLocationForProvider(effectiveProvider, body.defaultLocation)) {
-        throw errors.badRequest(
-          `defaultLocation '${body.defaultLocation}' is not valid for provider '${effectiveProvider}'`
         );
       }
     }
@@ -307,14 +267,6 @@ export function registerProjectUpdateRoute(crudRoutes: Hono<{ Bindings: Env }>):
           body.defaultDevcontainerConfigName === undefined
             ? existing.defaultDevcontainerConfigName
             : (body.defaultDevcontainerConfigName ?? null),
-        defaultProvider:
-          body.defaultProvider === undefined
-            ? existing.defaultProvider
-            : (body.defaultProvider ?? null),
-        defaultLocation:
-          body.defaultLocation === undefined
-            ? existing.defaultLocation
-            : (body.defaultLocation ?? null),
         agentDefaults:
           agentDefaultsColumn === undefined ? existing.agentDefaults : agentDefaultsColumn,
         workspaceIdleTimeoutMs:

@@ -4,7 +4,6 @@ import type { AgentPermissionMode } from './agent-settings';
 import type { ProjectRuntimeEnvVarProvenance } from './runtime-secret-requests';
 import type { ChatSession } from './session';
 import type { TaskStatus } from './task';
-import type { CredentialProvider } from './user';
 import type { VMSize, WorkspaceProfile, WorkspaceResponse } from './workspace';
 
 // =============================================================================
@@ -49,8 +48,6 @@ export interface Project {
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = auto-discover default. */
   defaultDevcontainerConfigName?: string | null;
-  defaultProvider?: CredentialProvider | null;
-  defaultLocation?: string | null;
   /** Per-agent-type model + permission mode overrides.
    *  Resolution chain: task explicit > agent profile > project.agentDefaults[agentType] > user agent_settings > platform default. */
   agentDefaults?: ProjectAgentDefaults | null;
@@ -133,8 +130,6 @@ export interface UpdateProjectRequest {
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = reset to auto-discover. */
   defaultDevcontainerConfigName?: string | null;
-  defaultProvider?: CredentialProvider | null;
-  defaultLocation?: string | null;
   /** Per-agent-type model + permission mode overrides.
    *  null = clear all project-level agent defaults. */
   agentDefaults?: ProjectAgentDefaults | null;
