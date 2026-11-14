@@ -26,12 +26,22 @@ export interface ResolvedNativeVMConfig {
   resources?: VMHardwareResources;
 }
 
+export type NativeVMConfigSource = 'native' | 'top-level-instance-type' | 'legacy-size';
+
+/**
+ * A provider's boot disk default. A function receives the resolved machine, so a provider whose
+ * default scales with the machine (GCP) needs no legacy-size lookup of its own.
+ */
+export type DefaultBootDiskSizeGb =
+  | number
+  | ((resolved: NativeVMConfig, source: NativeVMConfigSource) => number);
+
 export interface NativeVMResolveOptions {
   providerName: string;
   defaultLocation: string;
   legacySizes: Readonly<Record<string, SizeConfig>>;
   defaultImage?: string;
-  defaultBootDiskSizeGb?: number;
+  defaultBootDiskSizeGb?: DefaultBootDiskSizeGb;
   minBootDiskSizeGb?: number;
   maxBootDiskSizeGb?: number;
   legacyBootDiskSizeAuthority?: 'legacy-size' | 'provider-default';
@@ -198,7 +208,7 @@ function normalizeNativeVMConfig(
   options: NativeVMResolveOptions
 ): NativeVMConfig {
   const explicitNative = config.native;
-  const source: 'native' | 'top-level-instance-type' | 'legacy-size' = explicitNative
+  const source: NativeVMConfigSource = explicitNative
     ? 'native'
     : config.instanceType
       ? 'top-level-instance-type'
@@ -218,12 +228,16 @@ function normalizeNativeVMConfig(
     });
   }
 
+  const defaultBootDiskSizeGb =
+    typeof options.defaultBootDiskSizeGb === 'function'
+      ? options.defaultBootDiskSizeGb(candidate, source)
+      : options.defaultBootDiskSizeGb;
   const bootDiskSizeGb =
     source !== 'native' &&
     options.legacyBootDiskSizeAuthority === 'provider-default' &&
-    options.defaultBootDiskSizeGb !== undefined
-      ? options.defaultBootDiskSizeGb
-      : (candidate.bootDiskSizeGb ?? options.defaultBootDiskSizeGb);
+    defaultBootDiskSizeGb !== undefined
+      ? defaultBootDiskSizeGb
+      : (candidate.bootDiskSizeGb ?? defaultBootDiskSizeGb);
   assertBootDiskSizeGb(options.providerName, bootDiskSizeGb, {
     min: options.minBootDiskSizeGb,
     max: options.maxBootDiskSizeGb,

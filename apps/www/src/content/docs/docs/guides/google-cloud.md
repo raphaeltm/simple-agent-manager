@@ -73,7 +73,10 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
   times the RAM price for that region. Prices are the same for every Google project, so SAM keeps
   one price list for the whole installation and refreshes it about once a day in the background,
   using any connected Google Cloud credential (platform credentials first) with a token limited to
-  read-only Cloud Billing access. The price excludes the boot disk.
+  read-only Cloud Billing access. The price includes the node's boot disk at the region's
+  `pd-balanced` list price (`gcpBootDiskHourlyPrice()` in `packages/providers/src/gcp-catalog.ts`).
+  A price list stored before boot disks were priced, or a series SAM does not boot from
+  `pd-balanced`, shows the machine price alone until the next refresh.
 - **Price unavailable.** If no connected project has the Cloud Billing API enabled, or Google has no
   list price SAM recognises for a machine in a region, the machine is still offered but shows
   "Price unavailable". SAM never guesses a price. Enable `cloudbilling.googleapis.com` in the
@@ -87,15 +90,22 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
   in `apps/api/src/services/gcp-price-table.ts`). That covers a token without the right scope, a
   server error, a timeout, a response with no usable price, and any failure of a platform
   credential, which operators own. Either way the previous price list is kept.
-- **Boot disk.** Each node boots from a balanced persistent disk (`pd-balanced`, SSD-backed),
-  50 GB by default, in the node's zone (`gcpBootDisk()` in
-  `packages/providers/src/gcp-native-instance.ts`). This applies to machine series that support
-  Persistent Disk, including every default type (e2, n2d, t2d). Hyperdisk-only series such as N4
-  and C4 get no disk type from SAM, and nodes created before SAM requested `pd-balanced` keep
-  their original `pd-standard` disk. A `pd-balanced` disk counts against the region's
-  `SSD_TOTAL_GB` quota ("Persistent disk SSD (GB)"), so each such node needs its disk size in
-  that quota. When the quota runs out, Google refuses the node with
-  `Quota 'SSD_TOTAL_GB' exceeded`.
+- **Boot disk.** Each node boots from a balanced persistent disk (`pd-balanced`, SSD-backed) in
+  the node's zone (`gcpBootDisk()` in `packages/providers/src/gcp-native-instance.ts`). Its size
+  scales with the machine so bigger nodes can hold more workspaces: 20 GB per vCPU with a 50 GB
+  minimum (t2d-standard-8 gets 160 GB, e2-standard-4 80 GB, e2-medium 50 GB), set by the admin
+  settings `gcpCatalog.bootDiskGbPerVcpu` and `gcpCatalog.bootDiskMinGb`
+  (`gcpBootDiskSizeGb()` in `packages/providers/src/gcp-boot-disk.ts`). The catalog advertises
+  that size, the pool and its price use it, and the node is created with it. A changed setting
+  reaches a pool when its catalog is next refreshed (opening the pool's settings does this);
+  nodes already running keep the disk they were created with and stay usable. `pd-balanced`
+  applies to machine series that support Persistent Disk, including every default type (e2, n2d,
+  t2d). Hyperdisk-only series such as N4 and C4 get no disk type from SAM, and nodes created
+  before SAM requested `pd-balanced` keep their original `pd-standard` disk. A `pd-balanced` disk
+  counts against the region's `SSD_TOTAL_GB` quota ("Persistent disk SSD (GB)"), so each such
+  node needs its disk size in that quota. At 20 GB per vCPU, a region's whole default CPU quota
+  needs a few thousand GB, well under a typical 20,480 GB SSD quota. When the quota runs out,
+  Google refuses the node with `Quota 'SSD_TOTAL_GB' exceeded`.
 - **Credits and discounts are not reflected.** These are list prices. Committed-use discounts,
   free-tier usage and promotional credits apply on your Google invoice, not in SAM's ranking.
 

@@ -1,4 +1,10 @@
-import { GCP_MACHINE_TYPE_NAME_PATTERN } from '@simple-agent-manager/providers';
+import {
+  DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,
+  DEFAULT_GCP_BOOT_DISK_MIN_GB,
+  GCP_BOOT_DISK_FLOOR_GB,
+  GCP_BOOT_DISK_MAX_GB,
+  GCP_MACHINE_TYPE_NAME_PATTERN,
+} from '@simple-agent-manager/providers';
 
 import { type AdminSettingDefinition, integerDefinition } from './admin-setting-definitions';
 
@@ -10,7 +16,9 @@ export type GcpCatalogSettingName =
   | 'gcpCatalog.priceRequestTimeoutMs'
   | 'gcpCatalog.priceRefreshCredentialAttempts'
   | 'gcpCatalog.priceRefreshBudgetMs'
-  | 'gcpCatalog.apiIssueTtlMinutes';
+  | 'gcpCatalog.apiIssueTtlMinutes'
+  | 'gcpCatalog.bootDiskGbPerVcpu'
+  | 'gcpCatalog.bootDiskMinGb';
 
 /**
  * General-purpose shapes SAM offers from Google Cloud by default: shared-core e2-medium, and the
@@ -100,5 +108,19 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Minutes SAM keeps showing a Google API problem (for example Cloud Billing disabled) on a Google Cloud credential after Google last reported it. A successful check clears it sooner.',
     { min: 60, max: 30 * 24 * 60 }
+  ),
+  integerDefinition(
+    'gcpCatalog.bootDiskGbPerVcpu',
+    DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,
+    'Operations',
+    'GB of boot disk SAM gives a new Google Cloud VM per vCPU (an 8-vCPU machine gets 8 times this), so bigger machines hold more workspaces. Applies to the catalog, prices and new VMs from the next catalog refresh; running VMs keep their disk.',
+    { min: 1, max: 256 }
+  ),
+  integerDefinition(
+    'gcpCatalog.bootDiskMinGb',
+    DEFAULT_GCP_BOOT_DISK_MIN_GB,
+    'Operations',
+    'Smallest boot disk, in GB, SAM gives a new Google Cloud VM, whatever its vCPU count.',
+    { min: GCP_BOOT_DISK_FLOOR_GB, max: GCP_BOOT_DISK_MAX_GB }
   ),
 ];

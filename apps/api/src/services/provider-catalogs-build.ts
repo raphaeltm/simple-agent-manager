@@ -1,7 +1,6 @@
 import {
   createProvider,
   type GcpPriceTable,
-  GcpProvider,
   getProviderCatalogOfferings,
   type Provider as CloudProvider,
   type ProviderConfig,
@@ -25,6 +24,7 @@ import { resolveAdminSetting } from './admin-settings-resolution';
 import { decrypt } from './encryption';
 import { withDeadline } from './fetch-timeout';
 import { readGcpPriceTable } from './gcp-price-table';
+import { createGcpProviderForEnv } from './gcp-provider-factory';
 import { createGcpTokenProvider, type GcpTokenOwner } from './gcp-token-provider';
 import {
   type Db,
@@ -209,24 +209,10 @@ async function createGcpCatalogProvider(
 ): Promise<CloudProvider> {
   const gcpCred = parseGcpCredential(decryptedToken);
   const machineTypes = await resolveAdminSetting(env, 'gcpCatalog.machineTypes');
-  return new GcpProvider(
-    gcpCred.gcpProjectId,
-    createGcpTokenProvider(gcpCred, owner, env),
-    gcpCred.defaultZone,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    {
-      machineTypes: Array.isArray(machineTypes) ? machineTypes : [],
-      priceTable,
-    }
-  );
+  return createGcpProviderForEnv(env, gcpCred, createGcpTokenProvider(gcpCred, owner, env), {
+    machineTypes: Array.isArray(machineTypes) ? machineTypes : [],
+    priceTable,
+  });
 }
 
 export function createCatalogProvider(

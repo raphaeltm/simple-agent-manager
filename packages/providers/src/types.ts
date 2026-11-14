@@ -497,7 +497,8 @@ export interface GcpProviderConfig {
   defaultZone?: string;
   imageFamily?: string;
   imageProject?: string;
-  diskSizeGb?: number;
+  /** Boot disk sizing (`gcp-boot-disk.ts`); defaults to 20 GB per vCPU with a 50 GB floor. */
+  bootDiskPolicy?: { gbPerVcpu: number; minGb: number };
   timeoutMs?: number;
   operationPollTimeoutMs?: number;
   /** Source CIDR ranges allowed by the GCP VPC firewall rule for VM agent ingress. */

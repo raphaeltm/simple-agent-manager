@@ -1228,7 +1228,6 @@ export interface Env
   GCP_DEFAULT_ZONE?: string;
   GCP_IMAGE_FAMILY?: string;
   GCP_IMAGE_PROJECT?: string;
-  GCP_DISK_SIZE_GB?: string;
   // GCP deployment (project-level OIDC for Defang)
   GCP_DEPLOY_WIF_POOL_ID?: string;
   GCP_DEPLOY_WIF_PROVIDER_ID?: string;

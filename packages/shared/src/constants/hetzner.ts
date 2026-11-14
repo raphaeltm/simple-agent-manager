@@ -54,9 +54,6 @@ export const DEFAULT_GCP_IMAGE_FAMILY = 'ubuntu-2404-lts-amd64';
 /** Default GCP image project. Override via GCP_IMAGE_PROJECT env var. */
 export const DEFAULT_GCP_IMAGE_PROJECT = 'ubuntu-os-cloud';
 
-/** Default GCP disk size in GB. Override via GCP_DISK_SIZE_GB env var. */
-export const DEFAULT_GCP_DISK_SIZE_GB = 50;
-
 /** Default GCP WIF pool ID. Override via GCP_WIF_POOL_ID env var. */
 export const DEFAULT_GCP_WIF_POOL_ID = 'sam-pool';
 

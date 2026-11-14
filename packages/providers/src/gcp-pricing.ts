@@ -33,6 +33,12 @@ export interface GcpSeriesUnitPrices {
 export interface GcpPriceTable {
   currency: typeof GCP_PRICE_CURRENCY;
   regions: Record<string, Record<string, GcpSeriesUnitPrices>>;
+  /**
+   * region → zonal `pd-balanced` capacity price per GiB-month, the boot disk type SAM creates
+   * (`DEFAULT_GCP_BOOT_DISK_TYPE`). Optional: a table stored before boot disks were priced has
+   * none, and its offerings show the machine price alone until the next refresh.
+   */
+  balancedDiskGibMonthly?: Record<string, number | null>;
 }
 
 /**
@@ -51,16 +57,31 @@ interface ParsedUnitSku {
 }
 
 /**
+ * Zonal Balanced Persistent Disk capacity: "Balanced PD Capacity" (one SKU for a group of
+ * regions) or "Balanced PD Capacity in Belgium". Anchored so "Regional Balanced PD Capacity"
+ * (replicated disks, twice the price) never matches. Verified against the live catalog
+ * 2026-11-14: unit `GiBy.mo`, usage type `OnDemand`.
+ */
+const BALANCED_DISK_SKU = /^Balanced PD Capacity(?: in .+)?$/;
+const BALANCED_DISK_UNIT = 'GiBy.mo';
+
+interface ParsedDiskSku {
+  kind: 'BalancedDisk';
+  regions: string[];
+  price: number;
+}
+
+export type ParsedGcpSku = ParsedUnitSku | ParsedDiskSku;
+
+/**
  * Parse one SKU into a unit price, or null when it is not an on-demand VM core/RAM SKU or its
  * pricing is not in the shape this parser understands. Anything unexpected is skipped rather than
  * guessed: a missing price shows as "unavailable", a wrong one would rank machines wrongly.
  */
-export function parseGcpUnitSku(raw: unknown): ParsedUnitSku | null {
+export function parseGcpUnitSku(raw: unknown): ParsedGcpSku | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const sku = raw as Record<string, unknown>;
   const description = typeof sku.description === 'string' ? sku.description : '';
-  const match = VM_UNIT_SKU.exec(description);
-  if (!match) return null;
   const category = sku.category as Record<string, unknown> | undefined;
   if (category?.usageType !== 'OnDemand') return null;
   const regions = Array.isArray(sku.serviceRegions)
@@ -68,11 +89,27 @@ export function parseGcpUnitSku(raw: unknown): ParsedUnitSku | null {
     : [];
   if (regions.length === 0) return null;
 
-  const kind = match[2] as 'Core' | 'Ram';
+  const match = VM_UNIT_SKU.exec(description);
+  if (match) {
+    const kind = match[2] as 'Core' | 'Ram';
+    const price = skuUnitPrice(sku, UNIT_FOR_KIND[kind]);
+    return price === null
+      ? null
+      : { series: (match[1] as string).toLowerCase(), kind, regions, price };
+  }
+  if (BALANCED_DISK_SKU.test(description)) {
+    const price = skuUnitPrice(sku, BALANCED_DISK_UNIT);
+    return price === null ? null : { kind: 'BalancedDisk', regions, price };
+  }
+  return null;
+}
+
+/** The steady-state unit price of a SKU in `GCP_PRICE_CURRENCY`, or null for any other shape. */
+function skuUnitPrice(sku: Record<string, unknown>, usageUnit: string): number | null {
   const pricingInfo = Array.isArray(sku.pricingInfo) ? sku.pricingInfo[0] : undefined;
   const expression = (pricingInfo as Record<string, unknown> | undefined)?.pricingExpression as
     Record<string, unknown> | undefined;
-  if (expression?.usageUnit !== UNIT_FOR_KIND[kind]) return null;
+  if (expression?.usageUnit !== usageUnit) return null;
   const tiers = Array.isArray(expression.tieredRates) ? expression.tieredRates : [];
   // The last tier is the steady-state rate; earlier tiers (if any) cover free usage.
   const rate = tiers[tiers.length - 1] as Record<string, unknown> | undefined;
@@ -82,19 +119,32 @@ export function parseGcpUnitSku(raw: unknown): ParsedUnitSku | null {
   const nanos = Number(unitPrice.nanos ?? 0);
   if (!Number.isFinite(units) || !Number.isFinite(nanos)) return null;
   const price = units + nanos / 1e9;
-  if (!(price > 0)) return null;
-
-  return { series: (match[1] as string).toLowerCase(), kind, regions, price };
+  return price > 0 ? price : null;
 }
 
 /**
  * Fold parsed SKUs into a price table. Two different prices for the same region, series and kind
  * are a conflict this code cannot resolve, so that unit becomes unknown rather than either value.
  */
-export function buildGcpPriceTable(skus: Iterable<ParsedUnitSku>): GcpPriceTable {
+export function buildGcpPriceTable(skus: Iterable<ParsedGcpSku>): GcpPriceTable {
   const regions: GcpPriceTable['regions'] = {};
+  const balancedDiskGibMonthly: Record<string, number | null> = {};
   const conflicts = new Set<string>();
   for (const sku of skus) {
+    if (sku.kind === 'BalancedDisk') {
+      for (const region of sku.regions) {
+        const key = `${region}|balanced-disk`;
+        if (conflicts.has(key)) continue;
+        const existing = balancedDiskGibMonthly[region];
+        if (existing !== undefined && existing !== sku.price) {
+          balancedDiskGibMonthly[region] = null;
+          conflicts.add(key);
+          continue;
+        }
+        balancedDiskGibMonthly[region] = sku.price;
+      }
+      continue;
+    }
     const field = sku.kind === 'Core' ? 'coreHourly' : 'ramGibHourly';
     for (const region of sku.regions) {
       const key = `${region}|${sku.series}|${field}`;
@@ -110,7 +160,7 @@ export function buildGcpPriceTable(skus: Iterable<ParsedUnitSku>): GcpPriceTable
       prices[field] = sku.price;
     }
   }
-  return { currency: GCP_PRICE_CURRENCY, regions };
+  return { currency: GCP_PRICE_CURRENCY, regions, balancedDiskGibMonthly };
 }
 
 export interface GcpPriceFetchOptions {
@@ -136,7 +186,7 @@ export async function fetchGcpComputePriceTable(
   options: GcpPriceFetchOptions,
   context?: ProviderRequestContext
 ): Promise<GcpPriceTable> {
-  const parsed: ParsedUnitSku[] = [];
+  const parsed: ParsedGcpSku[] = [];
   const seenTokens = new Set<string>();
   let pageToken: string | undefined;
   const base = options.apiBase ?? GCP_BILLING_API_BASE;
@@ -230,7 +280,14 @@ export function parseStoredGcpPriceTable(value: unknown): GcpPriceTable | null {
       }
       out[region] = parsedSeries;
     }
-    return { currency: GCP_PRICE_CURRENCY, regions: out };
+    const disk: Record<string, number | null> = {};
+    if (root.balancedDiskGibMonthly !== undefined) {
+      const stored = expectObject(root.balancedDiskGibMonthly, 'gcp', 'storedPriceTable.disk');
+      for (const [region, price] of Object.entries(stored)) {
+        disk[region] = finitePositiveOrNull(price);
+      }
+    }
+    return { currency: GCP_PRICE_CURRENCY, regions: out, balancedDiskGibMonthly: disk };
   } catch {
     return null;
   }

@@ -117,6 +117,16 @@ export {
   GCP_LOCATIONS,
   GcpProvider,
 } from './gcp';
+export {
+  DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,
+  DEFAULT_GCP_BOOT_DISK_MIN_GB,
+  DEFAULT_GCP_BOOT_DISK_POLICY,
+  GCP_BOOT_DISK_FLOOR_GB,
+  GCP_BOOT_DISK_MAX_GB,
+  type GcpBootDiskPolicy,
+  gcpBootDiskSizeGb,
+  normalizeGcpBootDiskPolicy,
+} from './gcp-boot-disk';
 export { GCP_MACHINE_TYPE_NAME_PATTERN } from './gcp-catalog';
 export { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
 export {
@@ -300,7 +310,7 @@ export function createProvider(config: ProviderConfig): Provider {
         config.defaultZone,
         config.imageFamily,
         config.imageProject,
-        config.diskSizeGb,
+        config.bootDiskPolicy,
         config.timeoutMs,
         config.operationPollTimeoutMs,
         config.firewallSourceRanges,

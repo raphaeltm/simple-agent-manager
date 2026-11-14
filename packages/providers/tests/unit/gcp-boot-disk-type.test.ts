@@ -110,7 +110,8 @@ describe('GCP boot disk type', () => {
     expect(inserts[0]!.zone).toBe(DEFAULT_ZONE);
     expect(bootDisk(inserts[0]!)).toEqual({
       sourceImage: 'projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64',
-      diskSizeGb: '50',
+      // e2-standard-4: 4 vCPU x 20 GB (gcp-boot-disk.ts default policy).
+      diskSizeGb: '80',
       diskType: `zones/${DEFAULT_ZONE}/diskTypes/pd-balanced`,
     });
   });
@@ -155,9 +156,14 @@ describe('GCP boot disk type', () => {
     ]);
   });
 
-  it.each(['n4-standard-4', 'c4-standard-8', 'c4a-standard-4', 'n4d-standard-4'])(
+  it.each([
+    ['n4-standard-4', '80'],
+    ['c4-standard-8', '160'],
+    ['c4a-standard-4', '80'],
+    ['n4d-standard-4', '80'],
+  ])(
     'sends no disk type for Hyperdisk-only %s, as before',
-    async (instanceType) => {
+    async (instanceType, diskSizeGb) => {
       const inserts: Insert[] = [];
       stubCompute(inserts);
       const provider = new GcpProvider('test-project', async () => 'token', DEFAULT_ZONE);
@@ -170,7 +176,7 @@ describe('GCP boot disk type', () => {
       );
       expect(bootDisk(inserts[0]!)).toEqual({
         sourceImage: 'projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64',
-        diskSizeGb: '50',
+        diskSizeGb,
       });
     }
   );

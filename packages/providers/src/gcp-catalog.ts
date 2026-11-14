@@ -11,7 +11,8 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { fetchPaginatedGcpList, GCP_UNREACHABLE_WARNING, type GcpApiScope } from './gcp-api';
-import { LOCATION_METADATA, SIZE_MAP } from './gcp-metadata';
+import { type GcpBootDiskPolicy, gcpBootDiskSizeGb } from './gcp-boot-disk';
+import { GCP_PD_BALANCED_BOOT_SERIES, LOCATION_METADATA, SIZE_MAP } from './gcp-metadata';
 import type { GcpPriceTable } from './gcp-pricing';
 import { throwIfProviderRequestAborted } from './provider-fetch';
 import type { ProviderRequestContext } from './types';
@@ -178,13 +179,37 @@ export function gcpMachineTypeHourlyPrice(
   return billedVcpus * prices.coreHourly + (type.memoryMb / 1024) * prices.ramGibHourly;
 }
 
+/**
+ * Hourly price of a `diskGb` boot disk for this machine type, or null when unknown. Only the
+ * series SAM boots from `pd-balanced` (`GCP_PD_BALANCED_BOOT_SERIES`) are priced: other series
+ * get Compute Engine's default disk type, whose price the table does not hold.
+ */
+export function gcpBootDiskHourlyPrice(
+  type: Pick<GcpMachineType, 'name' | 'zone'>,
+  diskGb: number,
+  table: GcpPriceTable | null
+): number | null {
+  const series = type.name.split('-', 1)[0] ?? '';
+  if (!table || !GCP_PD_BALANCED_BOOT_SERIES.has(series)) return null;
+  const gibMonthly = table.balancedDiskGibMonthly?.[gcpZoneRegion(type.zone)];
+  return typeof gibMonthly === 'number' ? (diskGb * gibMonthly) / GCP_HOURS_PER_MONTH : null;
+}
+
+/**
+ * Offerings for the listed machine types. Each one's disk is the boot disk SAM will create for
+ * it (`gcpBootDiskSizeGb`), and its price is machine plus that disk. When the table has no disk
+ * price for the region the machine price stands alone, marked by `priceSource`.
+ */
 export function gcpOfferingsFromMachineTypes(
   types: readonly GcpMachineType[],
   table: GcpPriceTable | null,
-  input: { bootDiskGb: number; lastSeenAt: string }
+  input: { bootDiskPolicy: GcpBootDiskPolicy; lastSeenAt: string }
 ): ProviderInstanceOffering[] {
   return types.map((type) => {
-    const hourly = gcpMachineTypeHourlyPrice(type, table);
+    const diskGb = gcpBootDiskSizeGb(type.guestCpus, input.bootDiskPolicy);
+    const machineHourly = gcpMachineTypeHourlyPrice(type, table);
+    const diskHourly = machineHourly === null ? null : gcpBootDiskHourlyPrice(type, diskGb, table);
+    const hourly = machineHourly === null ? null : machineHourly + (diskHourly ?? 0);
     const monthly = hourly === null ? null : hourly * GCP_HOURS_PER_MONTH;
     const currency = hourly === null ? null : (table?.currency ?? null);
     const location = LOCATION_METADATA[type.zone];
@@ -205,8 +230,8 @@ export function gcpOfferingsFromMachineTypes(
       ramGb: type.memoryMb / 1024,
       memoryGb: type.memoryMb / 1024,
       memoryMb: type.memoryMb,
-      storageGb: input.bootDiskGb,
-      diskGb: input.bootDiskGb,
+      storageGb: diskGb,
+      diskGb,
       price: monthly === null ? 'Price unavailable' : `$${monthly.toFixed(2)}/mo`,
       priceHourly: hourly,
       priceMonthly: monthly,
@@ -222,7 +247,13 @@ export function gcpOfferingsFromMachineTypes(
       catalogMetadata: {
         region: gcpZoneRegion(type.zone),
         sharedCpu: type.isSharedCpu,
-        priceSource: hourly === null ? 'unavailable' : 'cloud-billing-catalog',
+        priceSource:
+          hourly === null
+            ? 'unavailable'
+            : diskHourly === null
+              ? 'cloud-billing-catalog-machine-only'
+              : 'cloud-billing-catalog',
+        bootDiskGb: diskGb,
       },
     } satisfies ProviderInstanceOffering;
   });

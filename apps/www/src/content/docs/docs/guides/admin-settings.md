@@ -696,6 +696,8 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Credentials tried per refresh, platform first; a retry continues with the next ones.                     |
 | `gcpCatalog.priceRefreshBudgetMs`           | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                          |
 | `gcpCatalog.apiIssueTtlMinutes`             | 10080                                           | 60–43200          | How long a Google API problem Google reported stays shown on a credential; a successful check clears it. |
+| `gcpCatalog.bootDiskGbPerVcpu`              | 20                                              | 1–256             | GB of boot disk a new Google Cloud node gets per vCPU, used by the catalog, prices and new nodes.        |
+| `gcpCatalog.bootDiskMinGb`                  | 50                                              | 10–4096           | Smallest boot disk a new Google Cloud node gets.                                                         |
 
 ### Provider fallback
 
