@@ -13,7 +13,7 @@ import {
 import type { ProviderRequestContext } from './types';
 import { ProviderError } from './types';
 import { parseProviderJson } from './validation';
-import { expectObject, optionalArray, requireString } from './validation-core';
+import { expectObject, optionalArray, optionalString, requireString } from './validation-core';
 import { type GcpInstancePayload, validateGcpOperation } from './validation-gcp';
 import type {
   VmDeletionRequestOptions,
@@ -49,6 +49,8 @@ export function gcpInstanceZone(instance: GcpInstancePayload, defaultZone: strin
 /** A GCP zone or numeric id: only these characters may reach a URL or filter expression. */
 const GCP_ZONE_PATTERN = /^[a-z]+-[a-z]+[0-9]+-[a-z]$/;
 const GCP_NUMERIC_ID_PATTERN = /^[0-9]{1,20}$/;
+/** Pages of a filtered operations list read before giving up (each holds up to 50). */
+const GCP_DELETION_STATUS_MAX_PAGES = 5;
 const GCP_NAME_PATTERN = /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/;
 
 function parseTicket(ticket: VmDeletionTicket): GcpDeletionTicketBody {
@@ -192,40 +194,57 @@ export async function getGcpInstanceDeletionStatus(
   const body = parseTicket(ticket);
   if (body.project !== scope.projectId) return { state: 'wrong_scope' };
   const headers = await scope.authHeaders(context);
-  const params = new URLSearchParams({
-    filter: `(operationType = "delete") (targetId = "${body.instanceId}")`,
-    maxResults: '50',
-  });
-  const res = await providerFetch(
-    'gcp',
-    `${scope.projectUrl}/zones/${body.zone}/operations?${params.toString()}`,
-    { headers },
-    scope.timeoutMs,
-    undefined,
-    context
-  );
-  throwIfProviderRequestAborted(context);
-  const root = expectObject(
-    await parseProviderJson(res, 'gcp', 'getVMDeletionStatus'),
-    'gcp',
-    'getVMDeletionStatus'
-  );
-  const operations = (optionalArray(root, 'items', 'gcp', 'getVMDeletionStatus') ?? []).map(
-    (item, index) => {
-      const op = validateGcpOperation(item, `getVMDeletionStatus.items[${index}]`);
-      const fields = expectObject(item, 'gcp', `getVMDeletionStatus.items[${index}]`);
-      return {
-        ...op,
-        targetId: requireString(fields, 'targetId', 'gcp', `getVMDeletionStatus.items[${index}]`),
-        operationType: requireString(
-          fields,
-          'operationType',
-          'gcp',
-          `getVMDeletionStatus.items[${index}]`
-        ),
-      };
+  const operations: Array<{
+    status: string;
+    error?: { errors?: Array<{ code: string; message: string }> };
+    targetId: string;
+    operationType: string;
+  }> = [];
+  // A filtered list may return empty pages with a continuation; read a bounded number of them.
+  // A record left unread after the last page is never taken as "not requested".
+  let pageToken: string | undefined;
+  for (let page = 0; ; page++) {
+    if (page >= GCP_DELETION_STATUS_MAX_PAGES) {
+      throw new ProviderError(
+        'gcp',
+        undefined,
+        `GCP delete operations for instance ${body.instanceId} span more than ${GCP_DELETION_STATUS_MAX_PAGES} pages`
+      );
     }
-  );
+    const params = new URLSearchParams({
+      filter: `(operationType = "delete") (targetId = "${body.instanceId}")`,
+      maxResults: '50',
+      ...(pageToken ? { pageToken } : {}),
+    });
+    const res = await providerFetch(
+      'gcp',
+      `${scope.projectUrl}/zones/${body.zone}/operations?${params.toString()}`,
+      { headers },
+      scope.timeoutMs,
+      undefined,
+      context
+    );
+    throwIfProviderRequestAborted(context);
+    const root = expectObject(
+      await parseProviderJson(res, 'gcp', 'getVMDeletionStatus'),
+      'gcp',
+      'getVMDeletionStatus'
+    );
+    for (const [index, item] of (
+      optionalArray(root, 'items', 'gcp', 'getVMDeletionStatus') ?? []
+    ).entries()) {
+      const where = `getVMDeletionStatus.items[${index}]`;
+      const op = validateGcpOperation(item, where);
+      const fields = expectObject(item, 'gcp', where);
+      operations.push({
+        ...op,
+        targetId: requireString(fields, 'targetId', 'gcp', where),
+        operationType: requireString(fields, 'operationType', 'gcp', where),
+      });
+    }
+    pageToken = optionalString(root, 'nextPageToken', 'gcp', 'getVMDeletionStatus');
+    if (!pageToken) break;
+  }
   // Never trust the server-side filter alone: only this instance's delete operations count.
   const deletes = operations.filter(
     (op) => op.targetId === body.instanceId && op.operationType === 'delete'

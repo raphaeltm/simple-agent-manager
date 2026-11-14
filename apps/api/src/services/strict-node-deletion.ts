@@ -1,5 +1,8 @@
 import { type ProviderRequestContext } from '@simple-agent-manager/providers';
-import { DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
+  DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
+} from '@simple-agent-manager/shared';
 import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -9,6 +12,7 @@ import type { Env } from '../env';
 import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { captureNodeLogsBeforeTeardown } from './node-log-capture';
 import {
+  boundedConfirmationError,
   clearProviderDeletionRecord,
   confirmPendingProviderDeletion,
   pendingProviderDeletionFor,
@@ -75,6 +79,8 @@ function matchesExpectedRuntime(
 interface ProviderDeletionOptions {
   mode: ProviderDeletionMode;
   confirmMaxMs: number;
+  /** How long after its record a sent DELETE may still be in flight (see `confirmPending…`). */
+  sendGraceMs: number;
 }
 
 async function deleteStrictProviderInstance(
@@ -93,27 +99,32 @@ async function deleteStrictProviderInstance(
     );
   }
 
-  const authority = await resolveStrictNodeTeardownAuthority(db, node, userId, env);
-
   // A deletion this exact runtime already started (two-phase mode) is resolved from the
   // provider's own record. Its pre-delete guards ran before the record was written, and the
   // delete may already be done, so they are not re-run; a record the provider shows to be void is
-  // cleared and the next attempt runs the guarded path again.
+  // cleared and the next attempt runs the guarded path again. Every failure on this path is bounded
+  // by the record's age (`boundedConfirmationError`), including credential resolution.
   const pending = pendingProviderDeletionFor(node);
   if (pending) {
-    await requireSameNodeIncarnation(db, node, 'provider deletion confirmation');
-    const providers =
-      authority.kind === 'pinned'
-        ? [authority.providerResult.provider]
-        : authority.candidates.map((candidate) => candidate.provider);
-    const outcome = await confirmPendingProviderDeletion(
-      db,
-      node,
-      providers,
-      pending,
-      deletion.confirmMaxMs,
-      requestContext
-    );
+    let outcome: ProviderDeletionOutcome;
+    try {
+      const authority = await resolveStrictNodeTeardownAuthority(db, node, userId, env);
+      await requireSameNodeIncarnation(db, node, 'provider deletion confirmation');
+      const providers =
+        authority.kind === 'pinned'
+          ? [authority.providerResult.provider]
+          : authority.candidates.map((candidate) => candidate.provider);
+      outcome = await confirmPendingProviderDeletion(
+        db,
+        node,
+        providers,
+        pending,
+        { confirmMaxMs: deletion.confirmMaxMs, sendGraceMs: deletion.sendGraceMs },
+        requestContext
+      );
+    } catch (error) {
+      throw boundedConfirmationError(node, pending, deletion.confirmMaxMs, error);
+    }
     if (outcome === 'deletion_pending' && deletion.mode === 'wait') {
       throw new Error(
         `Provider deletion of node ${node.id} started at ${pending.requestedAt} is still in progress; retry shortly`
@@ -122,6 +133,7 @@ async function deleteStrictProviderInstance(
     return outcome;
   }
 
+  const authority = await resolveStrictNodeTeardownAuthority(db, node, userId, env);
   await requireSameNodeIncarnation(db, node, 'provider delete');
   await beforeDestroy?.();
   // Black box recorder: bounded and best-effort, never blocks teardown beyond its timeout.
@@ -307,6 +319,8 @@ export async function deleteNodeResourcesStrict(
     providerDeletion?: ProviderDeletionMode;
     /** How long a started deletion may stay unconfirmed before `teardown_deletion_unconfirmed`. */
     providerDeletionConfirmMaxMs?: number;
+    /** Per-attempt budget of the sender; a record younger than this may still be in flight. */
+    providerDeletionSendGraceMs?: number;
   } = {}
 ): Promise<StrictNodeDeletionResult> {
   const db = drizzle(env.DATABASE, { schema });
@@ -441,6 +455,9 @@ export async function deleteNodeResourcesStrict(
               confirmMaxMs:
                 options.providerDeletionConfirmMaxMs ??
                 DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
+              sendGraceMs:
+                options.providerDeletionSendGraceMs ??
+                DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
             },
             options.providerRequestContext,
             beforeDestroy

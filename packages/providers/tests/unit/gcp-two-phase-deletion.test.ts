@@ -199,6 +199,21 @@ describe('GcpProvider two-phase deletion', () => {
       await expect(provider.getVMDeletionStatus(ticket)).resolves.toEqual(expected);
     });
 
+    it('follows empty filtered pages to the delete operation', async () => {
+      const fetchMock = installFetch((url) =>
+        url.searchParams.get('pageToken') === 'p2'
+          ? json({ items: [deleteOp()] })
+          : json({ items: [], nextPageToken: 'p2' })
+      );
+      await expect(provider.getVMDeletionStatus(ticket)).resolves.toEqual({ state: 'deleted' });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('never reads an unfinished page walk as not requested', async () => {
+      installFetch(() => json({ items: [], nextPageToken: 'again' }));
+      await expect(provider.getVMDeletionStatus(ticket)).rejects.toBeInstanceOf(ProviderError);
+    });
+
     it('ignores operations for another instance even if the server filter returned them', async () => {
       installFetch(() => json({ items: [deleteOp({ targetId: '999' })] }));
       await expect(provider.getVMDeletionStatus(ticket)).resolves.toEqual({

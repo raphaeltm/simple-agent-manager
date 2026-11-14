@@ -81,6 +81,7 @@ interface DestroyNodeForCleanupOptions extends CleanupOutcomeOptions {
    */
   providerDeletion?: 'request';
   providerDeletionConfirmMaxMs?: number;
+  providerDeletionSendGraceMs?: number;
   /**
    * Confirm a deletion this node already started: claim it with the pending-deletion lease
    * instead of the ordinary cleanup claim (whose idle/artifact guards were met when it started).
@@ -279,6 +280,7 @@ async function runStrictCleanup(
           requestDeadlineMs: options.requestDeadlineMs,
           providerDeletion: options.confirmPendingDeletion ? 'confirm' : options.providerDeletion,
           providerDeletionConfirmMaxMs: options.providerDeletionConfirmMaxMs,
+          providerDeletionSendGraceMs: options.providerDeletionSendGraceMs,
         })
       : await deleteNodeResourcesStrict(
           node.id,

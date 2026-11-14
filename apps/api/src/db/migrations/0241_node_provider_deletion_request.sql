@@ -5,8 +5,9 @@
 --
 -- provider_deletion_requested_at: when this record was written, immediately before the DELETE.
 --   Confirmation never re-stamps it, so it bounds how long a deletion may stay unconfirmed. A new
---   record is written only after the old one was cleared (the provider showed it void) or no
---   longer describes the row's runtime.
+--   record replaces it only when another DELETE is about to be sent: after the provider showed the
+--   old one void (cleared), when it no longer describes the row's runtime, or when the next current
+--   credential retries after the provider refused the previous one's DELETE.
 -- provider_deletion_json: the provider's opaque ticket plus the provider instance id and runtime
 --   incarnation it was written for. A record whose identity does not match the row is ignored.
 --

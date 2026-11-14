@@ -237,6 +237,7 @@ export async function sweepStrandedNodes(
         ),
         providerDeletion: 'request',
         providerDeletionConfirmMaxMs: config.providerDeletionConfirmMaxMs,
+        providerDeletionSendGraceMs: config.providerDeletionRequestTimeoutMs,
         logEvent: 'node_cleanup.stranded_node_force_retiring',
         failureLogEvent: 'node_cleanup.stranded_node_force_retirement_failed',
         successMessage: 'Automatically retired stranded VM after cleanup refusal deadline',

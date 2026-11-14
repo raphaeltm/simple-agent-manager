@@ -114,6 +114,7 @@ async function sweepManagedHandoffNodes(
       ),
       providerDeletion: 'request',
       providerDeletionConfirmMaxMs: config.providerDeletionConfirmMaxMs,
+      providerDeletionSendGraceMs: config.providerDeletionRequestTimeoutMs,
       failureLogEvent: options.failureLogEvent,
       successMessage: options.successMessage,
       failureMessagePrefix: options.failureMessagePrefix,
@@ -192,6 +193,7 @@ export async function sweepProviderDeletionConfirmations(
       confirmPendingDeletion: true,
       providerDeletion: 'request',
       providerDeletionConfirmMaxMs: config.providerDeletionConfirmMaxMs,
+      providerDeletionSendGraceMs: config.providerDeletionRequestTimeoutMs,
       requestDeadlineMs: Math.min(
         sweepDeadlineMs,
         Date.now() + config.providerDeletionRequestTimeoutMs

@@ -192,52 +192,82 @@ function unconfirmedError(node: NodeRow, pending: PendingProviderDeletion, detai
   );
 }
 
+/** The provider showed the record void; it was cleared. Not an "unconfirmed" condition. */
+export class ProviderDeletionRecordVoidError extends Error {
+  override readonly name = 'ProviderDeletionRecordVoidError';
+}
+
+/**
+ * Bound every confirmation failure by the record's age (rule 47: every candidate needs a way out).
+ * Past `confirmMaxMs`, any failure to confirm (unreadable record, credential resolution, an
+ * incarnation fence, a deadline) becomes the named `teardown_deletion_unconfirmed`, which alerts
+ * and backs off for an hour. Named teardown refusals and a record the provider showed void keep
+ * their own meaning.
+ */
+export function boundedConfirmationError(
+  node: NodeRow,
+  pending: PendingProviderDeletion,
+  confirmMaxMs: number,
+  error: unknown
+): unknown {
+  if (
+    error instanceof NodeTeardownBlockedError ||
+    error instanceof ProviderDeletionRecordVoidError
+  ) {
+    return error;
+  }
+  if (Date.now() - Date.parse(pending.requestedAt) < confirmMaxMs) return error;
+  return unconfirmedError(
+    node,
+    pending,
+    `it could not be confirmed: ${error instanceof Error ? error.message : String(error)}`
+  );
+}
+
 /**
  * Resolve an in-flight deletion from the provider's record.
  *
  * - `deleted` → `deleted`; the caller writes termination proof.
  * - `in_progress` → `deletion_pending` while younger than `confirmMaxMs`, then the named blocked
- *   reason `teardown_deletion_unconfirmed`. An unreadable record past the bound is the same.
- * - `not_requested` / `failed` → the record is cleared and the attempt fails, so the next attempt
- *   runs the full guarded teardown again.
+ *   reason `teardown_deletion_unconfirmed`.
+ * - `not_requested` within `sendGraceMs` of the record → still `deletion_pending`: the record is
+ *   written just before the DELETE leaves, so a confirmation racing the sender (an owner delete,
+ *   an overlapping tick) must not clear it and let a second DELETE follow.
+ * - `not_requested` after that, or `failed` → the record is cleared and the attempt fails
+ *   (`ProviderDeletionRecordVoidError`), so the next attempt runs the full guarded teardown.
+ *
+ * Callers wrap failures with `boundedConfirmationError`.
  */
 export async function confirmPendingProviderDeletion(
   db: NodeDb,
   node: NodeRow,
   providers: readonly Provider[],
   pending: PendingProviderDeletion,
-  confirmMaxMs: number,
+  bounds: { confirmMaxMs: number; sendGraceMs: number },
   context?: ProviderRequestContext
 ): Promise<ProviderDeletionOutcome> {
-  const overdue = Date.now() - Date.parse(pending.requestedAt) >= confirmMaxMs;
-  let status: VmDeletionStatus;
-  try {
-    status = await readProviderDeletionStatus(node, providers, pending.ticket, context);
-  } catch (error) {
-    if (overdue && !context?.signal?.aborted) {
-      throw unconfirmedError(
-        node,
-        pending,
-        `its record could not be read: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-    throw error;
-  }
+  const ageMs = Date.now() - Date.parse(pending.requestedAt);
+  const status = await readProviderDeletionStatus(node, providers, pending.ticket, context);
   switch (status.state) {
     case 'deleted':
       return 'deleted';
     case 'in_progress':
-      if (overdue) throw unconfirmedError(node, pending, 'the provider still reports it running');
+      if (ageMs >= bounds.confirmMaxMs) {
+        throw unconfirmedError(node, pending, 'the provider still reports it running');
+      }
       return 'deletion_pending';
     case 'not_requested':
+      if (ageMs < bounds.sendGraceMs) return 'deletion_pending';
       await clearProviderDeletionRecord(db, node, 'not_requested');
-      throw new Error(
+      throw new ProviderDeletionRecordVoidError(
         `Provider has no record of the deletion requested for node ${node.id}; ` +
           'cleared it so the next attempt runs teardown again'
       );
     case 'failed':
       await clearProviderDeletionRecord(db, node, 'failed');
-      throw new Error(`Provider deletion of node ${node.id} failed: ${status.message}`);
+      throw new ProviderDeletionRecordVoidError(
+        `Provider deletion of node ${node.id} failed: ${status.message}`
+      );
     case 'wrong_scope':
       // `readProviderDeletionStatus` never returns `wrong_scope`.
       throw new Error(`No credential can read the deletion record of node ${node.id}`);

@@ -19,6 +19,7 @@ import * as observabilitySchema from '../../../src/db/observability-schema';
 import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
 import { invalidateAdminSettings } from '../../../src/services/admin-settings-resolution';
 import { encrypt } from '../../../src/services/encryption';
+import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { seedHost } from '../routes/node-pool-upgrade-test-helpers';
 import { handoffFixture } from './node-cleanup-handoff-fixture';
@@ -32,6 +33,8 @@ const cloud = vi.hoisted(() => ({
   neverConfirms: false,
   /** The DELETE reaches the provider but its response never comes back within the attempt. */
   loseDeleteResponse: false,
+  /** Runs after the write-ahead record and before the DELETE leaves (a racing caller). */
+  betweenRecordAndSend: undefined as undefined | (() => Promise<void>),
   /** API token -> server id -> labels. */
   accounts: new Map<string, Map<string, Record<string, string>>>(),
   /** Started deletes: server id -> { account, sentAt }. */
@@ -98,6 +101,7 @@ vi.mock('@simple-agent-manager/providers', async (importOriginal) => {
           if (!present(id)) return outlastAttempt(context);
           const ticket = JSON.stringify({ account, id });
           await options?.beforeSend?.(ticket);
+          await cloud.betweenRecordAndSend?.();
           if (context?.signal?.aborted) throw context.signal.reason;
           send(account, id);
           if (cloud.loseDeleteResponse) return outlastAttempt(context);
@@ -139,6 +143,7 @@ afterEach(() => {
   cloud.operationMs = 2 * 60_000;
   cloud.neverConfirms = false;
   cloud.loseDeleteResponse = false;
+  cloud.betweenRecordAndSend = undefined;
   cloud.accounts.clear();
   cloud.operations.clear();
   cloud.deletes.length = 0;
@@ -378,6 +383,54 @@ describe('two-phase provider deletion at the cleanup cron entry point', () => {
     expect(cloud.statusReads).toEqual([]);
     // Cleared, so the ordinary guarded phases own the node again; no proof was written.
     expect(f.node()).toMatchObject({ status: 'destroying', proof: null, requestedAt: null });
+  });
+
+  it('a confirmation that keeps failing before it can read the record is still bounded and named', async () => {
+    cloud.operationMs = 60 * 60_000;
+    const f = await twoPhaseFixture({ confirmMaxMs: 2 * TICK_MS });
+    await f.tick(0);
+    // Every stored copy of the credential becomes unreadable after the DELETE was sent.
+    f.sqlite.exec("UPDATE credentials SET encrypted_token = 'x', iv = 'y'");
+    f.sqlite.exec("UPDATE cc_credentials SET encrypted_token = 'x', iv = 'y'");
+
+    for (let n = 1; n <= 6; n++) await f.tick(n);
+
+    expect(cloud.deletes).toHaveLength(1);
+    const node = f.node();
+    expect(node).toMatchObject({
+      status: 'destroying',
+      proof: null,
+      reason: expect.stringMatching(/^teardown_deletion_unconfirmed/),
+      requestedAt: NOW.toISOString(),
+    });
+    // Out of the hot set for the full failure backoff, not re-tried every tick.
+    expect(Date.parse(node.backoff!)).toBeGreaterThan(NOW.getTime() + 6 * TICK_MS);
+    const failures = f
+      .errorRows()
+      .filter((row) => row.message.startsWith('Failed to confirm provider deletion'));
+    expect(failures.length).toBeLessThanOrEqual(3);
+  });
+
+  it('a delete that races the sender sees the deletion as in flight: no cleared record, no second DELETE', async () => {
+    const f = await twoPhaseFixture();
+    let raced: unknown = 'not run';
+    cloud.betweenRecordAndSend = async () => {
+      cloud.betweenRecordAndSend = undefined;
+      // The owner deletes the node while the cron's DELETE has not left yet.
+      raced = await deleteNodeResourcesStrict('host', 'user-1', f.env).catch(
+        (error: Error) => error
+      );
+    };
+
+    await f.tick(0);
+
+    expect(raced).toBeInstanceOf(Error);
+    expect((raced as Error).message).toMatch(/still in progress/);
+    expect(cloud.deletes).toEqual([`${TOKEN}:${INSTANCE}`]);
+    expect(f.node()).toMatchObject({ status: 'destroying', requestedAt: NOW.toISOString() });
+    await f.tick(1);
+    expect(cloud.deletes).toEqual([`${TOKEN}:${INSTANCE}`]);
+    expect(f.node()).toMatchObject({ status: 'deleted', proof: expect.any(String) });
   });
 
   it('keeps the node pending, without an error row, while the provider is still deleting', async () => {

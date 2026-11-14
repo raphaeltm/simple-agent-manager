@@ -163,6 +163,8 @@ Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.t
 | Request mode not passed (wait mode) | reap, pending, re-save, never-confirms, starvation |
 | Failed attempt after the record releases the node to `stopped` (review fix) | lost-response |
 | Confirm mode no longer refuses a record that does not match (review fix) | confirm-never-sends |
+| Confirm failures before the status read not bounded by record age (adversarial fix) | bounded-confirm |
+| No send grace on `not_requested` (adversarial fix) | race-with-sender |
 
 ## Review fixes (Phase 5)
 
@@ -178,3 +180,10 @@ Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.t
   (`minimumTeardownAttemptMs`).
 - Migration renumbered `0241` (open PRs #2693 and #2721 both propose `0239`); its comment on
   re-stamping corrected (security LOW).
+- Adversarial re-check: (1) the stranding above, confirmed CRITICAL on the pre-fix head and fixed;
+  (2) MEDIUM: a confirm failing before the status read (credential resolution) retried every tick
+  forever: every confirm-path failure is now bounded by the record's age
+  (`boundedConfirmationError`); (3) a caller confirming between the write-ahead record and the
+  DELETE could clear the record and cause a second DELETE: `not_requested` within the sender's
+  per-attempt budget is still pending; (4) LOW: GCP operations list now follows `nextPageToken`
+  (bounded at 5 pages, unfinished walk is an error, never "not requested").
