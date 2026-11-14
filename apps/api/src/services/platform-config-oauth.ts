@@ -32,7 +32,11 @@ function normalizeBaseUrl(value: string): string {
   }
 }
 
-/** GitLab.com, the GitLab host whose sign-ins vouch for emails GitLab itself verified. */
+/**
+ * GitLab.com, the GitLab host whose sign-ins vouch for emails GitLab itself verified. Deliberately
+ * not configurable: whoever can write configuration could otherwise declare any host trusted,
+ * which is the 2026-11-12 attack. Deployers pin a self-managed host with GITLAB_HOST instead.
+ */
 const PUBLIC_GITLAB_HOST = 'https://gitlab.com';
 
 export interface GitLabOAuthConfig {
