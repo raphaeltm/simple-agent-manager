@@ -26,6 +26,7 @@ import {
   selectGoogleLoginOAuthConfig,
 } from './services/platform-config';
 import { isSignupApprovalRequired } from './services/signup-approval';
+import { scheduleAccountLinkedAlert } from './services/security-alerts';
 
 export { refreshGitHubAccessToken };
 
@@ -351,6 +352,10 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       },
     },
     databaseHooks: {
+      // Owner alert when a social sign-in is linked to an admin or superadmin (best-effort).
+      account: {
+        create: { after: async (account) => scheduleAccountLinkedAlert(env, account, options) },
+      },
       user: {
         create: {
           before: async (incoming) => {

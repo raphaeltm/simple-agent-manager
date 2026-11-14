@@ -224,7 +224,7 @@ describe('platform config resolver', () => {
       'admin-1'
     );
 
-    await savePlatformIntegrationConfig(env, { googleInfrastructure: { remove: true } }, 'admin-2');
+    await savePlatformIntegrationConfig(env, { clear: ['googleInfrastructureOAuth'] }, 'admin-2');
 
     await expect(getGoogleInfraOAuthConfig(env)).resolves.toEqual({
       clientId: 'env-google-infra-client',
@@ -413,12 +413,15 @@ describe('platform config resolver', () => {
     });
     expect(status.integrations.githubApp).toMatchObject({
       configured: true,
-      label: 'set via environment fallback',
+      label: 'Worker environment fallback',
     });
-    expect(status.integrations.googleOAuth).toMatchObject({ configured: true, label: 'set here' });
+    expect(status.integrations.googleOAuth).toMatchObject({
+      configured: true,
+      label: 'stored in SAM',
+    });
     expect(status.integrations.gitlabOAuth).toMatchObject({
       configured: true,
-      label: 'set via environment fallback',
+      label: 'Worker environment fallback',
     });
   });
 

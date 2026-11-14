@@ -10,6 +10,12 @@ import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
 import { IoTimeoutError, withDeadline } from './fetch-timeout';
 import { buildPlatformIntegrationStatements, settingStatement } from './platform-config-statements';
 import {
+  integrationAuditChanges,
+  integrationChanges,
+  type PlatformIntegrationChange,
+  platformSourceFromSetting,
+} from './platform-config-changes';
+import {
   creatorId,
   ENV_KEYS,
   readSetting,
@@ -48,72 +54,36 @@ import type {
 const DEFAULT_PLATFORM_CONFIG_CACHE_MS = 60_000;
 
 /*
- * The writers below return nothing ON PURPOSE. A `ResolvedPlatformConfig` carries every platform
- * secret as plaintext `.value`, and a since-removed `PUT /api/setup/config` once echoed a writer's result straight
- * into its response body. Callers that need to report state use `getPlatformConfigStatus`, which
- * projects to booleans and source labels.
+ * The writers below never return resolved values ON PURPOSE. A `ResolvedPlatformConfig` carries
+ * every platform secret as plaintext `.value`, and a since-removed `PUT /api/setup/config` once
+ * echoed a writer's result straight into its response body. They return only the audit record of
+ * what changed (setting names and set/reset), which the owner security alerts describe. Callers
+ * that need to report state use `getPlatformConfigStatus`, which projects to booleans and labels.
  */
 
 export async function savePlatformIntegrationConfig(
   env: Env,
   input: PlatformIntegrationInput,
   updatedBy?: string
-): Promise<void> {
+): Promise<PlatformIntegrationChange[]> {
   const by = creatorId(updatedBy);
   const expectedRevision = await validateAdminSettingsChanges(env, integrationChanges(input));
-  const statements = await buildPlatformIntegrationStatements(
-    env,
-    input,
-    by,
-    new Date().toISOString()
-  );
-  if (statements.length === 0) return;
+  const [statements, changes] = await Promise.all([
+    buildPlatformIntegrationStatements(env, input, by, new Date().toISOString()),
+    integrationAuditChanges(env, input),
+  ]);
+  if (statements.length === 0) return [];
   try {
     await commitAdminSettingsStatements(env, {
       statements,
-      changes: integrationAuditChanges(input),
+      changes,
       actorUserId: by,
       expectedRevision,
     });
   } finally {
     invalidatePlatformConfigCache();
   }
-}
-
-function integrationAuditChanges(
-  input: PlatformIntegrationInput
-): Array<{ name: AdminSettingName; action: 'set' | 'reset' }> {
-  const changes: Array<{ name: AdminSettingName; action: 'set' | 'reset' }> = [];
-  for (const provider of ['github', 'google', 'googleInfrastructure', 'gitlab'] as const) {
-    const config = input[provider];
-    if (!config) continue;
-    for (const field of provider === 'gitlab'
-      ? ['host', 'clientId', 'clientSecret']
-      : ['clientId', 'clientSecret']) {
-      const removed = provider === 'googleInfrastructure' && input.googleInfrastructure?.remove;
-      if (removed || trimOptional((config as Record<string, string | undefined>)[field])) {
-        changes.push({
-          name: `integration.${provider}.${field}` as AdminSettingName,
-          action: removed ? 'reset' : 'set',
-        });
-      }
-    }
-  }
   return changes;
-}
-
-function integrationChanges(input: PlatformIntegrationInput) {
-  return integrationAuditChanges(input).map((change) => {
-    const [, provider, field = ''] = change.name.split('.');
-    const config = input[provider as 'github' | 'google' | 'googleInfrastructure' | 'gitlab'];
-    return {
-      name: change.name,
-      value:
-        change.action === 'reset'
-          ? null
-          : trimOptional((config as Record<string, string | undefined>)[field]),
-    };
-  });
 }
 
 function runtimePreview(value: string): ResolvedPlatformValue {
@@ -179,23 +149,27 @@ export async function completeSetupWithConfig(
   env: Env,
   input: PlatformIntegrationInput,
   updatedBy?: string
-): Promise<void> {
+): Promise<PlatformIntegrationChange[]> {
   const by = creatorId(updatedBy);
   const expectedRevision = await validateAdminSettingsChanges(env, integrationChanges(input));
   const now = new Date().toISOString();
-  const statements = await buildPlatformIntegrationStatements(env, input, by, now);
+  const [statements, changes] = await Promise.all([
+    buildPlatformIntegrationStatements(env, input, by, now),
+    integrationAuditChanges(env, input),
+  ]);
   statements.push(settingStatement(env, SETUP_COMPLETED_SETTING_KEY, 'true', by, now));
 
   try {
     await commitAdminSettingsStatements(env, {
       statements,
-      changes: integrationAuditChanges(input),
+      changes,
       actorUserId: by,
       expectedRevision,
     });
   } finally {
     invalidatePlatformConfigCache();
   }
+  return changes;
 }
 
 interface PlatformConfigCacheEntry {
@@ -311,9 +285,7 @@ export async function resolvePlatformConfig(
   fields.forEach(({ provider, field }, index) => {
     const setting = settings[index];
     if (!setting) throw new Error('Platform settings are unavailable.');
-    let source: ResolvedPlatformValue['source'] = 'environment';
-    if (setting.source === 'database') source = 'runtime';
-    else if (setting.source === 'default') source = 'unset';
+    const source = platformSourceFromSetting(setting.source);
     (config[provider] as unknown as Record<string, ResolvedPlatformValue>)[field] = {
       value: typeof setting.value === 'string' ? setting.value : null,
       source,

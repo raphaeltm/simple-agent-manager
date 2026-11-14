@@ -12,10 +12,17 @@ export function integration(
     configured: false,
     source: 'unset',
     label: 'not configured',
+    clearable: false,
     fields: Object.fromEntries(
       fields.map((field) => [
         field,
-        { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
+        {
+          configured: false,
+          source: 'unset',
+          label: 'not configured',
+          updatedAt: null,
+          updatedBy: null,
+        },
       ])
     ),
     ...overrides,
@@ -33,7 +40,13 @@ export function makeStatus(
     project: null,
     message: 'No Operations project is configured.',
     fields: {
-      projectId: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
+      projectId: {
+        configured: false,
+        source: 'unset',
+        label: 'not configured',
+        updatedAt: null,
+        updatedBy: null,
+      },
     },
   }
 ): PlatformConfigStatus {

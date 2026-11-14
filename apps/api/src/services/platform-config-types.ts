@@ -1,4 +1,22 @@
-export type PlatformConfigSource = 'runtime' | 'environment' | 'unset';
+/**
+ * Where a resolved value came from:
+ * - `runtime`: stored in this installation's D1 (`platform_settings` / `platform_credentials`)
+ * - `environment`: a Worker environment variable or secret (the deploy-time fallback)
+ * - `legacy-kv`: a value read from the legacy KV namespace
+ * - `unset`: nothing configured
+ */
+export type PlatformConfigSource = 'runtime' | 'environment' | 'legacy-kv' | 'unset';
+
+/** Integration groups an admin can clear as a unit. Keys match `PlatformConfigStatus.integrations`. */
+export const PLATFORM_INTEGRATION_GROUPS = [
+  'githubOAuth',
+  'githubApp',
+  'githubWebhook',
+  'googleOAuth',
+  'googleInfrastructureOAuth',
+  'gitlabOAuth',
+] as const;
+export type PlatformIntegrationGroup = (typeof PLATFORM_INTEGRATION_GROUPS)[number];
 
 export interface ResolvedPlatformValue {
   value: string | null;
@@ -48,7 +66,7 @@ export interface FeedbackProjectStatus {
     status: string | null;
   } | null;
   message: string;
-  fields: Record<string, Omit<ResolvedPlatformValue, 'value'> & { configured: boolean }>;
+  fields: Record<string, PlatformConfigFieldStatus>;
 }
 
 export interface PlatformConfigStatus {
@@ -65,11 +83,21 @@ export interface PlatformConfigStatus {
   feedbackProject: FeedbackProjectStatus;
 }
 
+export interface PlatformConfigFieldStatus extends Omit<ResolvedPlatformValue, 'value'> {
+  configured: boolean;
+  /** Human-readable source, e.g. "stored in SAM" or "Worker environment fallback". */
+  label: string;
+  /** Who last wrote a stored value, as a person would read it. Null when not stored. */
+  updatedByLabel: string | null;
+}
+
 export interface IntegrationStatus {
   configured: boolean;
   source: PlatformConfigSource;
   label: string;
-  fields: Record<string, Omit<ResolvedPlatformValue, 'value'> & { configured: boolean }>;
+  /** True when at least one field is stored in D1, so clearing would change something. */
+  clearable: boolean;
+  fields: Record<string, PlatformConfigFieldStatus>;
 }
 
 export interface PlatformIntegrationInput {
@@ -88,7 +116,6 @@ export interface PlatformIntegrationInput {
   googleInfrastructure?: {
     clientId?: string;
     clientSecret?: string;
-    remove?: boolean;
   };
   gitlab?: {
     host?: string;
@@ -99,4 +126,6 @@ export interface PlatformIntegrationInput {
     projectId?: string;
     remove?: boolean;
   };
+  /** Integration groups whose stored values are deleted, so resolution falls back to env or unset. */
+  clear?: PlatformIntegrationGroup[];
 }

@@ -219,3 +219,55 @@ describe('integration mutation guardrails', () => {
     });
   });
 });
+
+describe('integration owner alerts', () => {
+  const sent: Array<{ to: string; subject: string; text: string }> = [];
+  beforeEach(() => {
+    sent.length = 0;
+    sqlite.exec(`
+      CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT, name TEXT, role TEXT, status TEXT);
+      INSERT INTO users VALUES ('admin', 'owner@example.com', 'Owner', 'superadmin', 'active');
+    `);
+    Object.assign(bindings, {
+      BASE_DOMAIN: 'example.com',
+      AGENT_EMAIL: {
+        send: async (message: { to: string; subject: string; text: string }) => {
+          sent.push(message);
+          return { messageId: 'm' };
+        },
+      },
+    });
+  });
+
+  it('emails the owners when an integration setting is set or reset from the settings page', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ error: 'invalid_grant' })));
+    const response = await request(
+      {},
+      {
+        expectedRevision: 0,
+        changes: [
+          { name: 'integration.google.clientId', value: 'stored-client-id' },
+          { name: 'integration.google.clientSecret', value: 'stored-client-secret' },
+        ],
+      }
+    );
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.subject).toBe('SAM security alert: Google sign-in (OAuth) settings changed');
+    expect(sent[0]!.text).toContain('By: Owner <owner@example.com>');
+    expect(sent[0]!.text).not.toContain('stored-client-secret');
+  });
+
+  it('sends nothing for non-integration settings', async () => {
+    const response = await request(
+      {},
+      {
+        expectedRevision: 0,
+        changes: [{ name: 'operations.stalledTaskClassifierEnabled', value: false }],
+      }
+    );
+    expect(response.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(sent).toEqual([]);
+  });
+});

@@ -314,4 +314,52 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     expect(response.headers.get('location')).toBe(CALLBACK_URL);
     expect(verificationIdentifiers()).toEqual([]);
   });
+
+  it.each([
+    { role: 'superadmin', alerted: true },
+    { role: 'admin', alerted: true },
+    { role: 'user', alerted: false },
+  ])(
+    'linking a GitHub sign-in to an existing $role account alerts the owners: $alerted',
+    async ({ role, alerted }) => {
+      const sent: Array<{ to: string; subject: string }> = [];
+      env = {
+        ...env,
+        AGENT_EMAIL: {
+          send: async (message: { to: string; subject: string }) => {
+            sent.push(message);
+            return { messageId: `m-${sent.length}` };
+          },
+        },
+      } as unknown as Env;
+      // The 2026-11-12 shape: an existing account, and a provider sign-in with the same verified
+      // email that better-auth links to it automatically. An owner must hear about that.
+      const createdAt = Date.parse('2026-06-26T10:13:40Z');
+      sqlite
+        .prepare(
+          `INSERT INTO users (id, email, email_verified, name, image, role, status, created_at, updated_at) VALUES
+            ('owner', 'owner@example.com', 1, 'Owner', NULL, 'superadmin', 'active', ?, ?),
+            ('linked', 'mona@example.com', 1, 'Mona', NULL, ?, 'active', ?, ?)`
+        )
+        .run(createdAt, createdAt, role, createdAt, createdAt);
+
+      const callback = await signInWithGitHub();
+      expect(callback.status).toBe(302);
+      // Liveness: the sign-in really linked a GitHub account to the existing user.
+      expect(githubAccounts()).toMatchObject([{ user_id: 'linked' }]);
+
+      if (alerted) {
+        await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+        expect(sent.map((message) => message.to).sort()).toEqual(
+          role === 'superadmin' ? ['mona@example.com', 'owner@example.com'] : ['owner@example.com']
+        );
+        expect(sent[0]!.subject).toBe(
+          `SAM security alert: a GitHub sign-in was linked to ${role === 'admin' ? 'an' : 'a'} ${role} account`
+        );
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(sent).toEqual([]);
+      }
+    }
+  );
 });

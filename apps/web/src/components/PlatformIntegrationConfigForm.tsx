@@ -1,15 +1,22 @@
-import { AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
+import { AlertCircle, CheckCircle2, KeyRound, Trash2 } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 
 import type {
   FeedbackProjectStatus,
-  PlatformConfigFieldStatus,
   PlatformConfigStatus,
   PlatformIntegrationConfigInput,
+  PlatformIntegrationGroup,
   PlatformIntegrationStatus,
 } from '../lib/api';
 import { ConfirmDialog } from './ConfirmDialog';
+import {
+  FieldAudit,
+  FieldLabel,
+  SourceBadge,
+  TextAreaField,
+  TextField,
+} from './PlatformIntegrationFields';
 
 type FormValues = Record<string, string>;
 type FeedbackProjectOption = { id: string; name: string; status?: string | null };
@@ -42,7 +49,7 @@ export function PlatformIntegrationConfigForm({
   feedbackProjectsFooter,
 }: PlatformIntegrationConfigFormProps) {
   const [values, setValues] = useState<FormValues>({});
-  const [showRemoveInfrastructureConfirm, setShowRemoveInfrastructureConfirm] = useState(false);
+  const [clearTarget, setClearTarget] = useState<PlatformIntegrationGroup | null>(null);
   const config = useMemo(() => buildConfig(values), [values]);
 
   const updateValue = (name: string, value: string) => {
@@ -54,24 +61,33 @@ export function PlatformIntegrationConfigForm({
     await onPrimary(config);
   };
 
-  const handleRemoveInfrastructure = async () => {
-    await onPrimary({ googleInfrastructure: { remove: true } });
-    setShowRemoveInfrastructureConfirm(false);
-    setValues((current) => {
-      const next = { ...current };
-      delete next['googleInfrastructure.clientId'];
-      delete next['googleInfrastructure.clientSecret'];
-      return next;
-    });
+  const handleClear = async () => {
+    if (!clearTarget) return;
+    const group = clearTarget;
+    await onPrimary({ clear: [group] });
+    setClearTarget(null);
+    // Drop any half-typed replacement for the cleared group so it cannot be saved by accident.
+    setValues((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([key]) => !GROUP_FIELD_PREFIXES[group].includes(key))
+      )
+    );
   };
+
+  const sectionProps = (group: PlatformIntegrationGroup) => ({
+    group,
+    title: GROUP_TITLES[group],
+    status: status.integrations[group],
+    submitting,
+    onClear: setClearTarget,
+  });
 
   return (
     <form className="space-y-4" onSubmit={handleSubmit} data-testid="platform-config-form">
       <div className="grid gap-4 md:grid-cols-2">
         <IntegrationSection
-          title="GitHub OAuth"
+          {...sectionProps('githubOAuth')}
           description="Enables GitHub sign-in and user GitHub token refresh."
-          status={status.integrations.githubOAuth}
         >
           <TextField
             name="github.clientId"
@@ -91,9 +107,8 @@ export function PlatformIntegrationConfigForm({
         </IntegrationSection>
 
         <IntegrationSection
-          title="Google sign-in (OAuth)"
+          {...sectionProps('googleOAuth')}
           description="A dedicated Google OAuth client for user login — separate from any Google/GCP infrastructure credentials. Register the redirect URI /api/auth/callback/google on this client."
-          status={status.integrations.googleOAuth}
         >
           <TextField
             name="google.clientId"
@@ -113,9 +128,8 @@ export function PlatformIntegrationConfigForm({
         </IntegrationSection>
 
         <IntegrationSection
-          title="Google infrastructure OAuth"
+          {...sectionProps('googleInfrastructureOAuth')}
           description="Used only for keyless GCP/WIF setup with cloud-platform scope. Register both static callbacks: /auth/google/callback and /api/deployment/gcp/callback. This client never enables Google sign-in."
-          status={status.integrations.googleInfrastructureOAuth}
         >
           <TextField
             name="googleInfrastructure.clientId"
@@ -136,26 +150,11 @@ export function PlatformIntegrationConfigForm({
             Enter both values to configure or rotate the client. Secrets are encrypted and never
             returned.
           </p>
-          <FieldAudit
-            field={status.integrations.googleInfrastructureOAuth.fields.clientSecret}
-            testId="google-infrastructure-audit"
-          />
-          {status.integrations.googleInfrastructureOAuth.source === 'runtime' && (
-            <button
-              type="button"
-              onClick={() => setShowRemoveInfrastructureConfirm(true)}
-              disabled={submitting}
-              className="inline-flex min-h-11 items-center justify-center rounded-md border border-danger/40 px-3 text-sm font-semibold text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Remove runtime infrastructure client
-            </button>
-          )}
         </IntegrationSection>
 
         <IntegrationSection
-          title="GitLab OAuth"
+          {...sectionProps('gitlabOAuth')}
           description="Stores the GitLab OAuth application for GitLab sign-in."
-          status={status.integrations.gitlabOAuth}
         >
           <TextField
             name="gitlab.host"
@@ -191,9 +190,8 @@ export function PlatformIntegrationConfigForm({
       />
 
       <IntegrationSection
-        title="GitHub App"
+        {...sectionProps('githubApp')}
         description="Connects repository installation, webhooks, task dispatch, and project automation."
-        status={status.integrations.githubApp}
       >
         <div className="grid gap-3 md:grid-cols-2">
           <TextField
@@ -221,9 +219,8 @@ export function PlatformIntegrationConfigForm({
       </IntegrationSection>
 
       <IntegrationSection
-        title="GitHub Webhooks"
+        {...sectionProps('githubWebhook')}
         description="Verifies inbound GitHub webhook signatures before automation runs."
-        status={status.integrations.githubWebhook}
       >
         <TextField
           name="github.webhookSecret"
@@ -236,19 +233,19 @@ export function PlatformIntegrationConfigForm({
       </IntegrationSection>
 
       <ConfirmDialog
-        isOpen={showRemoveInfrastructureConfirm}
-        onClose={() => setShowRemoveInfrastructureConfirm(false)}
-        onConfirm={() => void handleRemoveInfrastructure()}
-        title="Remove runtime Google infrastructure OAuth?"
-        message="SAM will delete the encrypted runtime client ID and secret. If GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set in the environment, that fallback becomes active again."
-        confirmLabel="Remove runtime client"
+        isOpen={clearTarget !== null}
+        onClose={() => setClearTarget(null)}
+        onConfirm={() => void handleClear()}
+        title={clearTarget ? `Clear ${GROUP_TITLES[clearTarget]}?` : 'Clear integration?'}
+        message={clearTarget ? clearMessage(clearTarget) : ''}
+        confirmLabel="Clear stored values"
         variant="danger"
         loading={submitting}
       />
 
       <div className="flex flex-col gap-2 border-t border-border-default pt-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-fg-muted">
-          Runtime values override GitHub Actions or Worker environment fallbacks.
+          Values stored in SAM override Worker environment fallbacks.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
@@ -270,26 +267,34 @@ function IntegrationSection({
   description,
   status,
   children,
+  group,
+  submitting = false,
+  onClear,
 }: {
   title: string;
   description: string;
-  status: PlatformIntegrationStatus;
+  status: PlatformIntegrationStatus | FeedbackProjectStatus;
   children: ReactNode;
+  /** When set, the section offers "Clear stored values" for this integration group. */
+  group?: PlatformIntegrationGroup;
+  submitting?: boolean;
+  onClear?: (group: PlatformIntegrationGroup) => void;
 }) {
+  const clearable = Boolean(group && onClear && 'clearable' in status && status.clearable);
   return (
     <section
-      className="rounded-lg border border-border-default bg-surface p-4"
+      className="min-w-0 rounded-lg border border-border-default bg-surface p-4"
       data-testid={`integration-${title.toLowerCase().replaceAll(' ', '-')}`}
     >
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-fg-primary">{title}</h2>
             <SourceBadge label={status.label} configured={status.configured} />
           </div>
-          <p className="mt-1 text-sm text-fg-muted">{description}</p>
+          <p className="mt-1 break-words text-sm text-fg-muted">{description}</p>
         </div>
-        <div className="flex items-center gap-1 text-xs text-fg-muted">
+        <div className="flex shrink-0 items-center gap-1 text-xs text-fg-muted">
           {status.configured ? (
             <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" />
           ) : (
@@ -299,6 +304,23 @@ function IntegrationSection({
         </div>
       </div>
       <div className="space-y-3">{children}</div>
+      {clearable && group && onClear && (
+        <div className="mt-4 flex flex-col gap-2 border-t border-border-default pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-fg-muted">
+            Remove the values stored in SAM. Environment values, if any, take over.
+          </p>
+          <button
+            type="button"
+            onClick={() => onClear(group)}
+            disabled={submitting}
+            aria-label={`Clear stored ${title} values`}
+            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-danger/40 px-3 text-sm font-semibold text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Clear
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -378,115 +400,36 @@ function FeedbackProjectSection({
   );
 }
 
-function TextField({
-  name,
-  label,
-  value,
-  field,
-  onChange,
-  type = 'text',
-}: {
-  name: string;
-  label: string;
-  value: string;
-  field?: PlatformConfigFieldStatus;
-  onChange: (name: string, value: string) => void;
-  type?: 'text' | 'password';
-}) {
-  return (
-    <label className="block space-y-1.5">
-      <FieldLabel label={label} field={field} />
-      <input
-        type={type}
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(name, event.target.value)}
-        placeholder={
-          field?.configured ? 'Leave blank to keep current value' : `Enter ${label.toLowerCase()}`
-        }
-        className="w-full min-h-11 rounded-sm border border-border-default bg-inset px-3 py-2 text-sm text-fg-primary placeholder:text-fg-muted"
-        autoComplete="off"
-        spellCheck={false}
-      />
-    </label>
-  );
-}
+const GROUP_TITLES: Record<PlatformIntegrationGroup, string> = {
+  githubOAuth: 'GitHub OAuth',
+  githubApp: 'GitHub App',
+  githubWebhook: 'GitHub Webhooks',
+  googleOAuth: 'Google sign-in (OAuth)',
+  googleInfrastructureOAuth: 'Google infrastructure OAuth',
+  gitlabOAuth: 'GitLab OAuth',
+};
 
-function TextAreaField({
-  name,
-  label,
-  value,
-  field,
-  onChange,
-}: {
-  name: string;
-  label: string;
-  value: string;
-  field?: PlatformConfigFieldStatus;
-  onChange: (name: string, value: string) => void;
-}) {
-  return (
-    <label className="block space-y-1.5">
-      <FieldLabel label={label} field={field} />
-      <textarea
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(name, event.target.value)}
-        placeholder={
-          field?.configured ? 'Leave blank to keep current key' : 'Paste PEM private key'
-        }
-        className="min-h-36 w-full resize-y rounded-sm border border-border-default bg-inset px-3 py-2 font-mono text-xs text-fg-primary placeholder:text-fg-muted"
-        autoComplete="off"
-        spellCheck={false}
-      />
-    </label>
-  );
-}
+/** Form value keys each group owns, so a clear also drops half-typed replacements. */
+const GROUP_FIELD_PREFIXES: Record<PlatformIntegrationGroup, string[]> = {
+  githubOAuth: ['github.clientId', 'github.clientSecret'],
+  githubApp: ['github.appId', 'github.appSlug', 'github.appPrivateKey'],
+  githubWebhook: ['github.webhookSecret'],
+  googleOAuth: ['google.clientId', 'google.clientSecret'],
+  googleInfrastructureOAuth: ['googleInfrastructure.clientId', 'googleInfrastructure.clientSecret'],
+  gitlabOAuth: ['gitlab.host', 'gitlab.clientId', 'gitlab.clientSecret'],
+};
 
-function FieldAudit({ field, testId }: { field?: PlatformConfigFieldStatus; testId?: string }) {
-  if (!field?.updatedAt) return null;
-  return (
-    <p className="text-xs text-fg-muted" data-testid={testId}>
-      Last rotated {new Date(field.updatedAt).toLocaleString()}
-      {field.updatedBy ? ` by ${field.updatedBy}` : ''}
-    </p>
-  );
-}
+const SIGN_IN_GROUPS = new Set<PlatformIntegrationGroup>([
+  'githubOAuth',
+  'googleOAuth',
+  'gitlabOAuth',
+]);
 
-function FieldLabel({ label, field }: { label: string; field?: PlatformConfigFieldStatus }) {
-  return (
-    <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg-primary">
-      {label}
-      <SourceBadge label={sourceLabel(field)} configured={Boolean(field?.configured)} compact />
-    </span>
-  );
-}
-
-function SourceBadge({
-  label,
-  configured,
-  compact = false,
-}: {
-  label: string;
-  configured: boolean;
-  compact?: boolean;
-}) {
-  const className = configured
-    ? 'border-success/30 bg-success-tint text-success-fg'
-    : 'border-border-default bg-surface-secondary text-fg-muted';
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 ${compact ? 'py-0 text-[11px]' : 'py-0.5 text-xs'} ${className}`}
-    >
-      {label}
-    </span>
-  );
-}
-
-function sourceLabel(field?: PlatformConfigFieldStatus): string {
-  if (field?.source === 'runtime') return 'set here';
-  if (field?.source === 'environment') return 'set via environment fallback';
-  return 'not configured';
+function clearMessage(group: PlatformIntegrationGroup): string {
+  const consequence = SIGN_IN_GROUPS.has(group)
+    ? ' If no environment value takes over, its sign-in button disappears and nobody can sign in with it.'
+    : '';
+  return `SAM will delete the ${GROUP_TITLES[group]} values stored in its database, including encrypted secrets. Worker environment values, if set, become active again.${consequence} This is recorded in the settings audit and the owners are emailed.`;
 }
 
 function buildConfig(values: FormValues): PlatformIntegrationConfigInput {
