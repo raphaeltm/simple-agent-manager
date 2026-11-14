@@ -165,6 +165,7 @@ Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.t
 | Confirm mode no longer refuses a record that does not match (review fix) | confirm-never-sends |
 | Confirm failures before the status read not bounded by record age (adversarial fix) | bounded-confirm |
 | No send grace on `not_requested` (adversarial fix) | race-with-sender |
+| Recorded sender grace ignored (adversarial delta LOW) | sender-budget |
 
 ## Review fixes (Phase 5)
 
@@ -187,3 +188,4 @@ Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.t
   DELETE could clear the record and cause a second DELETE: `not_requested` within the sender's
   per-attempt budget is still pending; (4) LOW: GCP operations list now follows `nextPageToken`
   (bounded at 5 pages, unfinished walk is an error, never "not requested").
+- Adversarial delta re-check: fixes hold; two LOWs fixed: the sender's grace is stored in the record and honoured by any confirming caller; the GCP operations walk stops at the first conclusive page.

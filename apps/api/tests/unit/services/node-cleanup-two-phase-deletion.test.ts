@@ -433,6 +433,25 @@ describe('two-phase provider deletion at the cleanup cron entry point', () => {
     expect(f.node()).toMatchObject({ status: 'deleted', proof: expect.any(String) });
   });
 
+  it("honours the sender's recorded budget, not the racing caller's default", async () => {
+    // The cron's per-attempt budget is raised to 30 s; the owner path defaults to 15 s.
+    const f = await twoPhaseFixture({ requestTimeoutMs: 30_000 });
+    let raced: unknown = 'not run';
+    cloud.betweenRecordAndSend = async () => {
+      cloud.betweenRecordAndSend = undefined;
+      vi.setSystemTime(new Date(NOW.getTime() + 20_000));
+      raced = await deleteNodeResourcesStrict('host', 'user-1', f.env).catch(
+        (error: Error) => error
+      );
+    };
+
+    await f.tick(0);
+
+    expect((raced as Error).message).toMatch(/still in progress/);
+    expect(cloud.deletes).toEqual([`${TOKEN}:${INSTANCE}`]);
+    expect(f.node()).toMatchObject({ requestedAt: NOW.toISOString() });
+  });
+
   it('keeps the node pending, without an error row, while the provider is still deleting', async () => {
     cloud.operationMs = 7 * 60_000;
     const f = await twoPhaseFixture();

@@ -193,6 +193,8 @@ export async function getGcpInstanceDeletionStatus(
   throwIfProviderRequestAborted(context);
   const body = parseTicket(ticket);
   if (body.project !== scope.projectId) return { state: 'wrong_scope' };
+  const isThisDelete = (op: { targetId: string; operationType: string }) =>
+    op.targetId === body.instanceId && op.operationType === 'delete';
   const headers = await scope.authHeaders(context);
   const operations: Array<{
     status: string;
@@ -242,13 +244,13 @@ export async function getGcpInstanceDeletionStatus(
         operationType: requireString(fields, 'operationType', 'gcp', where),
       });
     }
+    // A conclusive record on an early page decides; only "nothing yet" needs the whole walk.
+    if (operations.some((op) => isThisDelete(op) && (op.status !== 'DONE' || !op.error))) break;
     pageToken = optionalString(root, 'nextPageToken', 'gcp', 'getVMDeletionStatus');
     if (!pageToken) break;
   }
   // Never trust the server-side filter alone: only this instance's delete operations count.
-  const deletes = operations.filter(
-    (op) => op.targetId === body.instanceId && op.operationType === 'delete'
-  );
+  const deletes = operations.filter(isThisDelete);
   if (deletes.some((op) => op.status === 'DONE' && !op.error)) return { state: 'deleted' };
   if (deletes.some((op) => op.status !== 'DONE')) return { state: 'in_progress' };
   const failed = deletes.find((op) => op.error);

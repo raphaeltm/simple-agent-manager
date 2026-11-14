@@ -144,6 +144,7 @@ async function deleteStrictProviderInstance(
       node,
       authority.providerResult.provider,
       deletion.mode,
+      deletion.sendGraceMs,
       requestContext
     );
   }
@@ -157,7 +158,8 @@ async function deleteStrictProviderInstance(
       await requireSameNodeIncarnation(db, node, 'provider delete after ownership proof');
     },
     requestContext,
-    (provider) => sendProviderDeletion(db, node, provider, deletion.mode, requestContext)
+    (provider) =>
+      sendProviderDeletion(db, node, provider, deletion.mode, deletion.sendGraceMs, requestContext)
   );
 }
 

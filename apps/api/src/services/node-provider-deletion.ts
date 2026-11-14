@@ -45,12 +45,15 @@ export type ProviderDeletionOutcome = 'deleted' | 'deletion_pending';
 export interface PendingProviderDeletion {
   ticket: VmDeletionTicket;
   requestedAt: string;
+  /** The sender's attempt budget: how long after `requestedAt` its DELETE may still be leaving. */
+  sendGraceMs?: number;
 }
 
 interface ProviderDeletionRecord {
   ticket: string;
   providerInstanceId: string;
   runtimeIncarnationId: string;
+  sendGraceMs?: number;
 }
 
 /**
@@ -88,7 +91,10 @@ export function pendingProviderDeletionFor(node: NodeRow): PendingProviderDeleti
     });
     return null;
   }
-  return { ticket, requestedAt: requestedAt as string };
+  const recordedGrace = record?.sendGraceMs;
+  const sendGraceMs =
+    typeof recordedGrace === 'number' && Number.isFinite(recordedGrace) ? recordedGrace : undefined;
+  return { ticket, requestedAt: requestedAt as string, ...(sendGraceMs ? { sendGraceMs } : {}) };
 }
 
 /**
@@ -98,13 +104,16 @@ export function pendingProviderDeletionFor(node: NodeRow): PendingProviderDeleti
 export async function recordProviderDeletionRequested(
   db: NodeDb,
   node: NodeRow,
-  ticket: VmDeletionTicket
+  ticket: VmDeletionTicket,
+  sendGraceMs: number
 ): Promise<void> {
   const requestedAt = new Date().toISOString();
   const record: ProviderDeletionRecord = {
     ticket,
     providerInstanceId: node.providerInstanceId ?? '',
     runtimeIncarnationId: node.runtimeIncarnationId ?? '',
+    // Whoever confirms later (an owner delete included) honours the SENDER's budget, not its own.
+    sendGraceMs,
   };
   const result = await db
     .update(schema.nodes)
@@ -257,7 +266,7 @@ export async function confirmPendingProviderDeletion(
       }
       return 'deletion_pending';
     case 'not_requested':
-      if (ageMs < bounds.sendGraceMs) return 'deletion_pending';
+      if (ageMs < Math.max(bounds.sendGraceMs, pending.sendGraceMs ?? 0)) return 'deletion_pending';
       await clearProviderDeletionRecord(db, node, 'not_requested');
       throw new ProviderDeletionRecordVoidError(
         `Provider has no record of the deletion requested for node ${node.id}; ` +
@@ -284,6 +293,7 @@ export async function sendProviderDeletion(
   node: NodeRow,
   provider: Provider,
   mode: ProviderDeletionMode,
+  sendGraceMs: number,
   context?: ProviderRequestContext
 ): Promise<ProviderDeletionOutcome> {
   const instanceId = node.providerInstanceId;
@@ -295,7 +305,7 @@ export async function sendProviderDeletion(
   }
   if (mode === 'request' && provider.requestVMDeletion && provider.getVMDeletionStatus) {
     const result = await provider.requestVMDeletion(instanceId, context, {
-      beforeSend: (ticket) => recordProviderDeletionRequested(db, node, ticket),
+      beforeSend: (ticket) => recordProviderDeletionRequested(db, node, ticket, sendGraceMs),
     });
     // `absent` is the same quiet return `deleteVM` gives for an instance its lookup cannot find.
     return result.state === 'absent' ? 'deleted' : 'deletion_pending';

@@ -209,6 +209,12 @@ describe('GcpProvider two-phase deletion', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
+    it('stops at the page that shows the delete, even if more pages follow', async () => {
+      const fetchMock = installFetch(() => json({ items: [deleteOp()], nextPageToken: 'more' }));
+      await expect(provider.getVMDeletionStatus(ticket)).resolves.toEqual({ state: 'deleted' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it('never reads an unfinished page walk as not requested', async () => {
       installFetch(() => json({ items: [], nextPageToken: 'again' }));
       await expect(provider.getVMDeletionStatus(ticket)).rejects.toBeInstanceOf(ProviderError);
