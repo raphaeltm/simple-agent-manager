@@ -105,9 +105,21 @@ The automatic choice:
 3. On a cloud, it tries the key for this install through the VM's own identity: the key set in
    `.env`, else the one the one-time setup below creates (named `sam-<8 hex>` from your domain,
    like the bootstrap's pool id). It is chosen only if a real wrap and unwrap round trip succeeds.
-4. Otherwise, and on any other host, the file key. The printed line says why in plain words, for
-   example `key provider: file (on Google Cloud (project p), but Cloud KMS key projects/p/... is
-not usable (denied: ...); using a key file on this box)`.
+4. The file key only when nothing better was set up: off a cloud, on a cloud that offers no key
+   (Azure without `SAM_AZURE_KEY_VAULT_URL`), or when the cloud says the conventional key does
+   not exist. The printed line says why, for example `key provider: file (on AWS (eu-west-1),
+but AWS KMS key alias/sam-... is not usable (config: ... NotFoundException); using a key file on this box)`.
+5. Never a weaker key by itself. A key set in `.env` that fails, or a key that exists but cannot be
+   used (denied, disabled, no enabled version, unreachable), stops `--init` with the reason and
+   what to run; nothing is recorded or sealed. Google Cloud answers "denied" also for a key the VM
+   may not see, so on Google Cloud without a key either set one up (below) or set
+   `SAM_KEY_PROVIDER=file` in `.env`: that line is how you choose the key file on purpose. The
+   rule is one function, `sealingFloorRefusal` in `scripts/selfhost/key-choice.ts`; `switch --to
+auto` follows it too and never moves a box below the provider it seals with now.
+
+`pnpm selfhost:secrets status` names what seals the box (`sealed by: a key file on this box`) and,
+on a box sealed with the key file, warns when this machine's cloud key works (move with
+`switch --to auto`) or exists but cannot be used (with what to run).
 
 Moving to another provider later (for example after setting up a cloud key) is never a silent
 change at a deploy:
@@ -335,6 +347,17 @@ It creates or reuses the key ring `sam-selfhost` (location `global`; `--kms-loca
 key `$NAME` labelled `sam-install`, grants `roles/cloudkms.cryptoKeyEncrypterDecrypter` to the box
 VM's service account on that key only, and prints `SAM_GCP_KMS_KEY=...`. Use `--kms` instead of
 `--kms-only` to also run the node setup above.
+
+A reused key must have an enabled primary version. After `pnpm selfhost:teardown --destroy-key`
+the key's name stays (Cloud KMS never deletes it) with its version scheduled for destruction, so
+the bootstrap stops and lists the versions. Run it again with one of:
+
+- `--new-key-version`: a new primary version. Anything sealed with the old version stays lost.
+- `--restore-key-version`: undo the destruction, only within 30 days of it
+  (`destroyScheduledDuration`): the version is restored, enabled and kept primary.
+- `--key <another id>`: a new key (then put the printed `SAM_GCP_KMS_KEY=...` line in `.env`).
+
+The box's `deploy --init` refuses such a key the same way rather than falling back to the file key.
 
 **AWS** (the box is an EC2 instance with an instance profile; IMDSv2 is enough):
 

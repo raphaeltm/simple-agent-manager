@@ -2,11 +2,12 @@
  * Cloud key candidates for the automatic key-provider choice (key-choice.ts): which key each
  * platform would use, through the VM's own identity, so nothing is stored on the box.
  *
- * A key is either configured in `.env`, or the one the documented one-time setup creates under a
- * name derived from this install (`installKeyName`): `pnpm selfhost:gcp-bootstrap -- --kms` on
- * Google Cloud, the README's commands on AWS and Azure. Either way it is only a candidate: the
- * choice selects it after a real wrap and unwrap round trip, so a key that does not exist or that
- * this VM may not use falls back to the file key with the reason printed.
+ * A key is either configured in `.env` (`configuredBy` names the setting), or the one the
+ * documented one-time setup creates under a name derived from this install (`installKeyName`):
+ * `pnpm selfhost:gcp-bootstrap -- --kms` on Google Cloud, the README's commands on AWS and Azure.
+ * Either way it is only a candidate: the choice selects it after a real wrap and unwrap round trip.
+ * Only a conventional-name key that does not exist falls back to the file key; any other failure
+ * stops `--init` (sealingFloorRefusal in key-choice.ts).
  */
 import { createHash } from 'node:crypto';
 
@@ -37,13 +38,15 @@ export function candidatesFor(facts: PlatformFacts, box: Box): PlatformCandidate
   const platform = platformName(facts);
   const keyName = installKeyName(box.SAM_DOMAIN ?? '');
   if (facts.platform === 'gcp') {
+    const configured = value(box, 'SAM_GCP_KMS_KEY');
     const key =
-      value(box, 'SAM_GCP_KMS_KEY') ??
+      configured ??
       `projects/${facts.projectId}/locations/${value(box, 'SAM_GCP_KMS_LOCATION') ?? DEFAULT_GCP_KMS_LOCATION}/keyRings/${GCP_KEY_RING}/cryptoKeys/${keyName}`;
     const candidate: KeyCandidate = {
       provider: 'gcp-kms',
       settings: { SAM_GCP_KMS_KEY: key },
       label: `Cloud KMS key ${key}`,
+      ...(configured ? { configuredBy: 'SAM_GCP_KMS_KEY' } : {}),
     };
     return { platform, candidates: [candidate] };
   }
@@ -64,11 +67,14 @@ export function candidatesFor(facts: PlatformFacts, box: Box): PlatformCandidate
           provider: 'azure-kv',
           settings: { SAM_AZURE_KEY_VAULT_URL: vault, SAM_AZURE_KEY_NAME: name },
           label: `Key Vault key ${vault.replace(/\/+$/, '')}/keys/${name}`,
+          // A vault URL cannot be derived: an Azure candidate is always the operator's setting.
+          configuredBy: 'SAM_AZURE_KEY_VAULT_URL',
         },
       ],
     };
   }
-  const keyId = value(box, 'SAM_AWS_KMS_KEY_ID') ?? `alias/${keyName}`;
+  const configured = value(box, 'SAM_AWS_KMS_KEY_ID');
+  const keyId = configured ?? `alias/${keyName}`;
   const region = value(box, 'SAM_AWS_KMS_REGION') ?? facts.region;
   return {
     platform,
@@ -77,6 +83,7 @@ export function candidatesFor(facts: PlatformFacts, box: Box): PlatformCandidate
         provider: 'aws-kms',
         settings: { SAM_AWS_KMS_KEY_ID: keyId, SAM_AWS_KMS_REGION: region },
         label: `AWS KMS key ${keyId} in ${region}`,
+        ...(configured ? { configuredBy: 'SAM_AWS_KMS_KEY_ID' } : {}),
       },
     ],
   };

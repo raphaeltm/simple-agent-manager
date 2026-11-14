@@ -23,6 +23,12 @@ export interface FakeKeyService {
   token: string;
   /** Requests are answered 403 while true (an IAM grant removed). */
   setDenied(denied: boolean): void;
+  /**
+   * The state of a Cloud KMS key's primary version (default ENABLED). Any other state answers
+   * 400 FAILED_PRECONDITION, as Cloud KMS does for a key whose only version was scheduled for
+   * destruction (`teardown --destroy-key`) or disabled.
+   */
+  setGcpPrimaryState(name: string, state: string): void;
   close(): Promise<void>;
 }
 
@@ -51,6 +57,7 @@ export async function startFakeKeyServices(
   const token = randomBytes(16).toString('hex');
   let denied = false;
   const gcpKeys = new Map<string, Buffer>();
+  const gcpPrimaryState = new Map<string, string>();
   const azureKeys = new Map<string, Map<string, { publicKey: KeyObject; privateKey: KeyObject }>>();
 
   function azureVersion(name: string, version?: string) {
@@ -106,6 +113,16 @@ export async function startFakeKeyServices(
       if (gcp) {
         const [, name = '', op] = gcp;
         if (!exists(name)) return send(404, { error: { status: 'NOT_FOUND' } });
+        const state = gcpPrimaryState.get(name) ?? 'ENABLED';
+        if (state !== 'ENABLED') {
+          return send(400, {
+            error: {
+              code: 400,
+              status: 'FAILED_PRECONDITION',
+              message: `The request cannot be fulfilled. Resolve the following issues: CryptoKeyVersion ${name}/cryptoKeyVersions/1 is not enabled, current state is: ${state}.`,
+            },
+          });
+        }
         let key = gcpKeys.get(name);
         if (!key) {
           key = randomBytes(32);
@@ -172,6 +189,9 @@ export async function startFakeKeyServices(
     token,
     setDenied: (value) => {
       denied = value;
+    },
+    setGcpPrimaryState: (name, state) => {
+      gcpPrimaryState.set(name, state);
     },
     close: () => new Promise<void>((done) => server.close(() => done())),
   };

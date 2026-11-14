@@ -84,11 +84,15 @@ async function targetChoice(
   if (input.to === null)
     return { ...current, reason: `resealed at ${now}; ${current.reason}`, chosenAt: now };
   if (input.to === 'auto') {
-    // The automatic choice as on a new box, ignoring the bundles that pin the current provider.
+    // The automatic choice as on a new box, ignoring the bundles that pin the current provider,
+    // but never weaker than that provider (sealingFloorRefusal): `auto` is not a way down.
     const choice = await chooseKeyProvider({
       box: input.box,
       stateDir: join(input.stateDir, '.switch-probe'),
       detect: deps.detect,
+      floors: [
+        { provider: current.provider, why: `this box is sealed with ${current.provider} now` },
+      ],
     });
     return {
       ...choice,

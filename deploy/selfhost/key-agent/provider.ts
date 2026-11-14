@@ -75,9 +75,45 @@ export interface JsonCallOptions {
   service: string;
 }
 
+/** An error body larger than this is not read: the status token sits at its start. */
+const MAX_ERROR_BODY_BYTES = 16 * 1024;
+/** Only an enum-like token (`FAILED_PRECONDITION`, `KeyNotFound`) is kept, never free text. */
+const ERROR_STATUS = /^[A-Za-z][A-Za-z_]{0,63}$/;
+
 /**
- * One JSON request to a key service. Errors never include the response body: some services echo
- * the request, which here carries key material.
+ * The machine-readable status of a key service's error answer (`error.status` on Cloud KMS,
+ * `error.code` on Key Vault), so "HTTP 400" can say FAILED_PRECONDITION (a key with no enabled
+ * version) instead of leaving the operator to guess. Only a token matching ERROR_STATUS is
+ * returned: the message and the rest of the body are discarded, since some services echo the
+ * request, which here carries key material.
+ */
+async function errorStatus(response: Response): Promise<string | null> {
+  try {
+    const reader = response.body?.getReader();
+    if (!reader) return null;
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_ERROR_BODY_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+    const status = field(parsed, 'error', 'status') ?? field(parsed, 'error', 'code');
+    return typeof status === 'string' && ERROR_STATUS.test(status) ? status : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One JSON request to a key service. Errors never include the response body (some services echo
+ * the request, which here carries key material), only its status token (errorStatus).
  */
 export async function jsonCall(url: string, options: JsonCallOptions): Promise<unknown> {
   let response: Response;
@@ -97,10 +133,10 @@ export async function jsonCall(url: string, options: JsonCallOptions): Promise<u
     throw new KeyProviderError('unavailable', `${options.service}: request failed (${reason})`);
   }
   if (!response.ok) {
-    await response.body?.cancel();
+    const status = await errorStatus(response);
     throw new KeyProviderError(
       kindForStatus(response.status),
-      `${options.service}: HTTP ${response.status}`
+      `${options.service}: HTTP ${response.status}${status ? ` ${status}` : ''}`
     );
   }
   try {

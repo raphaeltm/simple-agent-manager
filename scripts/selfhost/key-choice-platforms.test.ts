@@ -3,11 +3,21 @@
  * point: fake instance metadata services (platform-probe.ts) and fake key services
  * (key-provider-fakes.ts) answer the child process the way Google Cloud, Azure and AWS document.
  *
- * For every platform: a working key is selected; no key configured, a key the VM may not use, and
- * slow or absent metadata all fall back to the file key with the reason in one line; the choice
- * is recorded and no key material is printed.
+ * For every platform: a working key is selected; no key set up (the key service says it does not
+ * exist) and slow or absent metadata fall back to the file key with the reason in one line; a key
+ * that is configured in .env, or exists but cannot be used (denied, no enabled version), stops
+ * `--init` instead (sealingFloorRefusal in key-choice.ts). The choice is recorded and no key
+ * material is printed.
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -16,7 +26,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FAKE_AWS_REGION, type FakeAws, startFakeAws } from './aws-kms-fake.js';
-import { CHILD_TEST_TIMEOUT_MS, CLOSED_HOST, runDeploy, writeBox } from './deploy-harness.js';
+import {
+  CHILD_TEST_TIMEOUT_MS,
+  CLOSED_HOST,
+  runDeploy,
+  runTsx,
+  writeBox,
+} from './deploy-harness.js';
 
 vi.setConfig({ testTimeout: CHILD_TEST_TIMEOUT_MS });
 import { installKeyName } from './key-platforms.js';
@@ -24,6 +40,7 @@ import { type FakeKeyService, startFakeKeyServices } from './key-provider-fakes.
 
 const PROJECT = 'sam-fake-project';
 const KEY_NAME = installKeyName('sam.example.com');
+const SECRETS = join(import.meta.dirname, 'secrets.ts');
 const GCP_KEY = `projects/${PROJECT}/locations/global/keyRings/sam-selfhost/cryptoKeys/${KEY_NAME}`;
 
 let dir: string;
@@ -75,6 +92,13 @@ function bundleProviders(): string[] {
     (name) =>
       (JSON.parse(readFileSync(join(bundles, name), 'utf8')) as { provider: string }).provider
   );
+}
+
+/** A refused automatic choice records nothing and seals nothing. */
+function expectNothingSealed(): void {
+  expect(existsSync(join(dir, '.state/key-agent/choice.json'))).toBe(false);
+  const bundles = join(dir, '.state/key-agent/bundles');
+  expect(existsSync(bundles) ? readdirSync(bundles) : []).toEqual([]);
 }
 
 /** A metadata host that accepts the connection and never answers. */
@@ -142,7 +166,7 @@ describe('Google Cloud', () => {
     expect(bundleProviders()).toEqual(['file']);
   });
 
-  it('key exists but this VM may not use it: falls back to the file key (denied)', async () => {
+  it('key exists but this VM may not use it: stops --init instead of choosing the file key (denied)', async () => {
     fake = await startFakeKeyServices({ gcpProject: PROJECT, existingKeys: [GCP_KEY] });
     fake.setDenied(true);
     const envFile = writeBox(dir, [
@@ -152,8 +176,101 @@ describe('Google Cloud', () => {
       dmi('gcp'),
     ]);
     const init = await runDeploy(envFile, ['--init']);
+    expect(init.status).not.toBe(0);
+    expect(init.out).toContain(`Cloud KMS key ${GCP_KEY} is not usable (denied:`);
+    expect(init.out).toContain('SAM_KEY_PROVIDER=file');
+    expectNothingSealed();
+  });
+});
+
+/**
+ * Box round R13: `teardown --destroy-key` leaves the key's name with its only version
+ * DESTROY_SCHEDULED; the rebuilt box's `--init` used to record the file key without a word.
+ */
+describe('Google Cloud key with no enabled primary version (box round R13)', () => {
+  async function r13Init(extra: string[] = []) {
+    fake = await startFakeKeyServices({ gcpProject: PROJECT, existingKeys: [GCP_KEY] });
+    fake.setGcpPrimaryState(GCP_KEY, 'DESTROY_SCHEDULED');
+    const envFile = writeBox(dir, [
+      ...elsewhere('gce'),
+      `SAM_GCE_METADATA_HOST=${fake.host}`,
+      `SAM_GCP_KMS_ENDPOINT=http://${fake.host}`,
+      dmi('gcp'),
+      ...extra,
+    ]);
+    return { envFile, init: await runDeploy(envFile, ['--init']) };
+  }
+
+  it('the default name: --init stops, names the key, the cause and the fix; nothing is recorded or sealed', async () => {
+    const { init } = await r13Init();
+    expect(init.status).not.toBe(0);
+    expect(init.out).not.toContain('key provider: file');
+    expect(init.out).toContain(`Cloud KMS key ${GCP_KEY} is not usable (invalid:`);
+    expect(init.out).toContain('FAILED_PRECONDITION');
+    expect(init.out).toContain('no enabled primary version');
+    expect(init.out).toContain('--new-key-version');
+    expect(init.out).toContain('SAM_KEY_PROVIDER=file');
+    expectNothingSealed();
+  });
+
+  it('the key named in .env: same refusal', async () => {
+    const { init } = await r13Init([`SAM_GCP_KMS_KEY=${GCP_KEY}`]);
+    expect(init.status).not.toBe(0);
+    expect(init.out).toContain('SAM_GCP_KMS_KEY is set in .env');
+    expectNothingSealed();
+  });
+
+  it('once the key has an enabled version again, --init selects it', async () => {
+    const { envFile, init } = await r13Init();
+    expect(init.status).not.toBe(0);
+    fake?.setGcpPrimaryState(GCP_KEY, 'ENABLED');
+    const again = await runDeploy(envFile, ['--init']);
+    expect(again.status, again.out).toBe(0);
+    expect(choice()).toMatchObject({ provider: 'gcp-kms', settings: { SAM_GCP_KMS_KEY: GCP_KEY } });
+    expect(bundleProviders()).toEqual(['gcp-kms']);
+  });
+
+  it('SAM_KEY_PROVIDER=file is the operator choosing the key file on purpose: it works', async () => {
+    const { init } = await r13Init(['SAM_KEY_PROVIDER=file']);
     expect(init.status, init.out).toBe(0);
-    expect(init.out).toMatch(/key provider: file \(on Google Cloud .* is not usable \(denied:/);
+    expect(init.out).toContain('key provider: file (SAM_KEY_PROVIDER=file in .env)');
+    expect(bundleProviders()).toEqual(['file']);
+  });
+
+  it('secrets status on a box that seals with the file key warns that a cloud key exists', async () => {
+    // A box that recorded the file key before this fix (R13's box), on Google Cloud.
+    const { envFile } = await r13Init(['SAM_KEY_PROVIDER=file']);
+    writeBox(dir, [
+      ...elsewhere('gce'),
+      `SAM_GCE_METADATA_HOST=${fake?.host}`,
+      `SAM_GCP_KMS_ENDPOINT=http://${fake?.host}`,
+      dmi('gcp'),
+    ]);
+    writeFileSync(
+      join(dir, '.state/key-agent/choice.json'),
+      JSON.stringify({
+        format: 'sam-key-choice/1',
+        provider: 'file',
+        settings: {},
+        reason: 'on Google Cloud, but ... is not usable; using a key file on this box',
+        source: 'auto',
+        chosenAt: '2026-11-14T21:15:07.000Z',
+      })
+    );
+    const broken = await runTsx(SECRETS, ['status', '--box-env', envFile]);
+    expect(broken.status, broken.out).toBe(0);
+    expect(broken.out).toContain('sealed by:  a key file on this box');
+    expect(broken.out).toContain(`WARNING: Cloud KMS key ${GCP_KEY} exists but is not usable`);
+    expect(broken.out).toContain('--new-key-version');
+
+    fake?.setGcpPrimaryState(GCP_KEY, 'ENABLED');
+    const usable = await runTsx(SECRETS, ['status', '--box-env', envFile]);
+    expect(usable.out).toContain(`WARNING: Cloud KMS key ${GCP_KEY} works on this machine`);
+    expect(usable.out).toContain('pnpm selfhost:secrets switch --to auto');
+    // A later deploy keeps the recorded choice: a box sealed with the file key stays on it.
+    const deploy = await runDeploy(envFile, ['--init']);
+    expect(deploy.status, deploy.out).toBe(0);
+    expect(deploy.out).toContain('key provider: file (on Google Cloud, but');
     expect(bundleProviders()).toEqual(['file']);
   });
 });
@@ -195,11 +312,12 @@ describe('AWS', () => {
     expect(bundleProviders()).toEqual(['file']);
   });
 
-  it('key exists but the role may not use it: file key (denied)', async () => {
+  it('key exists but the role may not use it (or it is disabled or pending deletion): stops --init', async () => {
     const init = await awsInit([`alias/${KEY_NAME}`], true);
-    expect(init.status, init.out).toBe(0);
+    expect(init.status).not.toBe(0);
     expect(init.out).toContain('(denied: aws-kms');
-    expect(bundleProviders()).toEqual(['file']);
+    expect(init.out).toContain('SAM_KEY_PROVIDER=file');
+    expectNothingSealed();
   });
 });
 
@@ -236,7 +354,7 @@ describe('Azure', () => {
     );
   });
 
-  it('vault configured but the managed identity is refused: file key (denied)', async () => {
+  it('vault configured but the managed identity is refused: stops --init (denied)', async () => {
     fake = await startFakeKeyServices({ existingKeys: [KEY_NAME] });
     fake.setDenied(true);
     const envFile = writeBox(dir, [
@@ -247,11 +365,10 @@ describe('Azure', () => {
       dmi('azure'),
     ]);
     const init = await runDeploy(envFile, ['--init']);
-    expect(init.status, init.out).toBe(0);
-    expect(init.out).toMatch(
-      /key provider: file \(on Azure \(westeurope\), but Key Vault key .* is not usable \(denied:/
-    );
-    expect(bundleProviders()).toEqual(['file']);
+    expect(init.status).not.toBe(0);
+    expect(init.out).toMatch(/Key Vault key .* is not usable \(denied:/);
+    expect(init.out).toContain('SAM_AZURE_KEY_VAULT_URL is set in .env');
+    expectNothingSealed();
   });
 
   it('on Azure with no vault configured: file key, and the line names the missing setting', async () => {
