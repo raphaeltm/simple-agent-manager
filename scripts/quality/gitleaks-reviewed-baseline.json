@@ -193,6 +193,14 @@
         "e29d9f39d5d508901ff20c3a7d881fb4a7e1e47fb2d68a4b7afcb424b48c105c",
         "ec04d32901800dd03b4c2dfae3064a8c5889b9cfd76f0b75e1d717d14034bf32"
       ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "PR #2718 history: commit 538817fbb's worker test fixture held a placement_credential_reference of the form credentials:<ULID> (a credentials row id, not secret material). Replaced by a fake id in 6c39434d; only the exact historical rule/path/line/bytes are accepted.",
+      "owner": "security",
+      "reviewedAt": "2026-11-14T01:20:00.000Z",
+      "expiresAt": "2026-12-14T01:20:00.000Z",
+      "digests": ["3baab23fcd18d079d16ea924fd23f9846a7353b819614beeaf9fa2698251b2ee"]
     }
   ]
 }
