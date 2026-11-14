@@ -1,0 +1,39 @@
+# Archive compatibility and lifecycle ordering CI flakes
+
+Coordinator follow-up to PR #2724. Ideas: `01M7CTAXZ79SAZCR2DSDMVCF7D`, `01M7CTZ4WGSP6VS4CKGDSAVSFZ`.
+
+## Problem and evidence
+
+CI 43585844985 / Test job 132420078266 timed out after 30 seconds in the compact archive compatibility case with 100 rows and 200 KiB metadata per row. The fixture exercises about 20 MiB of metadata and repeated real compression, hashing, paging, recovery and seal validation. An initial isolated normal run took 2612 ms for this case. Profile phases under contention before choosing a fix; preserve the large object and default-size recovery triggers.
+
+Main CI 43585850934 / DO shard job 132420098695 failed the warm handoff decision test at line 169: both expected decisions existed, in the opposite order. The listing already orders by created_at and id; IDs have a random ULID suffix within a millisecond, so that order need not equal causal insertion order. Verify consumer expectations and control the tied-clock condition in the test.
+
+The Test job runs Turbo test:coverage, which launches package test processes whose Vitest workers introduce another layer of parallelism. Measure runner resources and overlap before proposing a bounded concurrency change.
+
+## Checklist
+
+- [ ] Profile compact compatibility phases normally, with coverage, and under CPU contention.
+- [ ] Assess Test-job process/worker overcommit using actual CI logs/configuration and measured local evidence.
+- [ ] Fix production inefficiency if found, otherwise fix the demonstrated testing/runner issue with measured justification.
+- [ ] Preserve 100-row, 200 KiB metadata, multi-object, real seal/read/recovery assertions.
+- [ ] Determine decision ordering contract; exercise equal timestamps through the real warm handoff.
+- [ ] Remove a relevant guard once and prove the intended tests fail, then restore it.
+- [ ] At least 30 normal and 30 CPU-loaded full-file runs for each affected test file; report counts and timings, without hidden retries.
+- [ ] Run relevant lint, typecheck, build and broader tests.
+- [ ] Local specialist and task-completion reviews; address findings.
+- [ ] Test/config only: skip staging and state that in PR; production archive changes: request coordinator staging slot.
+- [ ] Push each unit; create separate DRAFT PR with needs-human-review; CI plus trusted CodeRabbit request and wait.
+- [ ] Send PR URL, full SHA and gate summary to coordinator; STOP until approval of that exact SHA.
+
+## Release constraints
+
+No direct implementation changes on main. Local commands foreground and under about ten minutes. Do not touch the separately fixed resumable-cursor test. Preserve the independent PR #2724 production watch: start 2026-11-14 11:59:39 UTC, end 2026-11-15 11:59:39 UTC. Its hourly chain and final guard are tracked in the idea and local .do-state.md. Alert coordinator immediately on observed new identity mismatch or rising failed/poisoned archive journals. Do not complete the original task before that watch ends.
+
+## References
+
+- `.claude/rules/62-tests-must-observe-the-real-trigger.md`
+- `.claude/rules/25-review-merge-gate.md`
+- `.github/workflows/ci.yml` Test job
+- `packages/project-data/tests/unit/project-data-compact-archive.test.ts`
+- `apps/api/tests/workers/node-lifecycle-decisions.test.ts`
+- `packages/worker-core/src/ulid.ts`
