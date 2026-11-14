@@ -226,6 +226,9 @@ export function renderSummary(outcomes: Outcome[]): string {
     ['Not attempted (an earlier step failed; run again)', ['not attempted']],
   ];
   const lines: string[] = ['', 'Summary'];
+  const notRemoved = outcomes.filter(
+    (o) => o.status !== 'removed' && o.status !== 'already removed'
+  );
   for (const [title, statuses] of groups) {
     const hits = outcomes.filter((o) => statuses.includes(o.status));
     if (hits.length === 0) continue;
@@ -237,6 +240,13 @@ export function renderSummary(outcomes: Outcome[]): string {
       );
     }
   }
+  lines.push(
+    '',
+    notRemoved.length === 0
+      ? 'Teardown removed everything it lists.'
+      : `Not removed: the ${notRemoved.length} item${notRemoved.length === 1 ? '' : 's'} above under Left by choice, Left for you, Refused, Failed and Not attempted; each says how to remove it.`,
+    'Teardown knows only what .state/created-resources.json records and what SAM labels or names. Anything else you made by hand for this install (another bucket, for example one for backups) is not listed: remove it yourself.'
+  );
   return lines.join('\n');
 }
 

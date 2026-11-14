@@ -390,6 +390,23 @@ describe('pnpm selfhost:teardown', () => {
     expect(result.out).toMatch(
       /Left for you:[\s\S]*firewall rule sam-allow-agent[\s\S]*gcloud compute firewall-rules delete/
     );
+    // Everything box round R12 had to delete by hand is named under Left for you, with a command.
+    const leftForYou = result.out.slice(result.out.indexOf('Left for you:'));
+    for (const expected of [
+      'firewall rule sam-allow-agent (sam-test-proj)',
+      'firewall rule sam-allow-app-routes (sam-test-proj)',
+      `the wildcard *.${DOMAIN}, and ${DOMAIN} itself`,
+      'the machine itself',
+      'boot disk',
+      'static IP',
+      'network, subnet and firewall rules',
+      'gcloud compute addresses delete',
+      'gcloud compute networks delete',
+    ]) {
+      expect(leftForYou).toContain(expected);
+    }
+    expect(result.out).toMatch(/Not removed: the \d+ items above/);
+    expect(result.out).toContain('Anything else you made by hand for this install');
 
     // A second run finds nothing left to do and still names the install from the record.
     const second = await teardown(['--remove-everything', '--confirm', DOMAIN]);

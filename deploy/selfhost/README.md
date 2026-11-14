@@ -592,7 +592,9 @@ Node takes) to point these commands at another `.env`.
 
 `pnpm selfhost:teardown` removes what this install created or helped create
 (`scripts/selfhost/teardown.ts`). Run it on the box, with `gcloud` logged in as a project owner if
-nodes ran in Google Cloud (the box VM's own account cannot delete VMs).
+nodes ran in Google Cloud (the box VM's own account cannot delete VMs). It looks for node VMs in
+`GCP_PROJECT` from `.env` and in every project the bootstrap recorded; `--gcp-project <id>`
+(repeatable) replaces `GCP_PROJECT`.
 
 ```bash
 pnpm selfhost:teardown                                          # inventory: read only (the default)
@@ -635,6 +637,12 @@ contents; 5. the box. If an item fails, later steps are not attempted (the ident
 delete a VM is kept), and running the same command again continues. Each removed item is marked
 `removedAt` in the record, which teardown itself keeps as its receipt.
 
+Emptying `.state/` makes read-only directories writable first (Go leaves its module cache under
+`.state/go-cache` read-only), removes caches last, and carries on past an entry it cannot remove,
+so the sealed bundles and key material go even when a cache does not. The summary then names every
+path that is left, says whether it is only a cache, and gives the command to remove it
+(`clearStateEntries` in `teardown-box.ts`).
+
 | Mode                  | Removes                                                                                                                                                | Keeps                                                                                                                           |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `--keep-data`         | node VMs and their disks; the bootstrap's pool, provider, node service account and its roles; containers                                               | bucket, volumes, images, `.state/` (bundles, key file), `.env`, backups, the KMS key and the box's grant on it, DNS, GitHub App |
@@ -675,10 +683,16 @@ VM uses it. Another install's VM is listed as refused and never touched.
   provider's console;
 - the GitHub App made through Admin → Integrations: GitHub → Settings → Developer settings → GitHub
   Apps → the App → Advanced → Delete GitHub App;
-- the DNS records (`*.SAM_DOMAIN`, and with inbound mail the MX record and the `sam-smtp-in` rule),
-  the bucket itself when you created it, the machine, its service account and bucket grant, OAuth
-  clients and SMTP credentials, and an AWS or Azure key (commands under Removing what setup
-  created).
+- the DNS records (`*.SAM_DOMAIN` and the apex record if you made one, and with inbound mail the MX
+  record and the `sam-smtp-in` rule), the bucket itself when you created it, OAuth clients and SMTP
+  credentials, and an AWS or Azure key (commands under Removing what setup created);
+- the machine and what you made for it: its boot disk, static IP, network, subnet and the firewall
+  rules you opened for it (80/443, SSH), its service account and bucket grant. Teardown runs on the
+  box and cannot tell which network or address you made for it.
+
+The summary ends with how many items were not removed. Teardown knows only what the record holds
+and what SAM labels or names; anything else made by hand for the install (a second bucket for
+backups, for example) is not listed.
 
 **Other clouds today:** the core (`teardown-model.ts`, `teardown-box.ts`) is cloud-neutral: an
 AWS, Azure, Hetzner or bare-metal box gets the box, bucket (gs:// or s3://) and backup removal and
