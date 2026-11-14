@@ -13,8 +13,8 @@ them as **Your compute pool**, **Project compute pool**, or **Shared compute poo
 where you are.
 
 :::note
-Most people never open this page in the product. If you have connected a cloud provider (or you
-are on the hosted platform, where compute is provided for you), SAM sets up a sensible pool the
+Most people never open this page in the product. If you have connected a cloud provider (or your
+installation's administrator provides compute for you), SAM sets up a sensible pool the
 first time it needs one and keeps it in sync. Read on when you want to control _which_ machines
 get rented, _how big_ they are, or _what happens when your provider is out of capacity_.
 :::
@@ -152,8 +152,8 @@ project  →  user  →  installation
 - A project with its own pool uses that pool. Its nodes are dedicated to that project.
 - No project pool? Your personal pool applies, and your nodes can host your work across the
   projects you have access to.
-- Neither? The installation pool applies. On the hosted platform this is the "installation-funded"
-  compute that lets you work without connecting a cloud account of your own.
+- Neither? The installation pool applies. When the administrator connected a shared cloud account, this is the
+  "installation-funded" compute that lets you work without connecting a cloud account of your own.
 
 :::caution
 **There is no fallback _between_ pools.** Precedence is decided by whether a pool _exists_, not by
@@ -210,9 +210,17 @@ connection (for example **Google Cloud · SAM GCP Prod**), or where you manage i
 (**Hetzner · Infrastructure settings**), so you can tell two accounts apart without seeing credential
 ids (`attachCapacitySourceLabels()`).
 
-An account that is disconnected, deleted or disabled disappears from the pool on its own, with its
-machines, and SAM never places on it. Its records are kept rather than deleted, because running
-machines may still reference them.
+Saving an account's credential again, or rotating its key, keeps the account in the pool together
+with the machines you picked from it and its place in the provider order: the connection keeps its
+identity across a save (`replaceUserGcpCredential()` for Google Cloud, an in-place update for every
+other provider).
+
+An account that is disabled disappears from the pool on its own, with its machines, and SAM never
+places on it; its records are kept. Disconnecting or deleting an account removes it from the pool
+together with the machines you picked from it. Connecting it again adds it as a new account with
+nothing picked, so pick its machines again. Machines SAM already created from a removed account
+are still cleaned up normally (`capacitySourceReleasedSql()` in
+`apps/api/src/services/node-teardown-provenance.ts`).
 
 #### Switching an account off
 

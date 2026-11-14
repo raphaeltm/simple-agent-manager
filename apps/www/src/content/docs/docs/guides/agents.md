@@ -82,15 +82,15 @@ Mistral Vibe is installed via `uv` (Python package manager) and requires Python 
 
 SAM installs OpenCode `2.2.5-sam-s1` (v2.2.5 with SAM's live-steering patch, built from source and published as SAM GitHub release binaries) with SHA-256 verification, including Linux x64 and arm64 on glibc and musl. VM devcontainers and Instant sessions use the same installer. ACP runs a private server for each agent process; session data stays in OpenCode’s XDG data directory and is included in sleep/wake snapshots. Custom OpenAI-compatible providers use OpenCode’s bundled implementation and do not need a separate npm dependency install.
 
-| Property                         | Value                                                                                                 |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| **Provider**                     | OpenCode (SST)                                                                                        |
-| **Default Inference Provider**   | OpenCode Zen                                                                                          |
-| **Advanced Inference Providers** | OpenCode Go, SAM Platform (Workers AI), Scaleway, Google Vertex, OpenAI-compatible, Anthropic, custom |
-| **API Key**                      | `OPENCODE_API_KEY` for OpenCode Zen and OpenCode Go                                                   |
-| **Get a Key**                    | [OpenCode auth](https://opencode.ai/auth)                                                             |
+| Property                       | Value                                                |
+| ------------------------------ | ---------------------------------------------------- |
+| **Provider**                   | OpenCode (SST)                                       |
+| **Default Inference Provider** | OpenCode Zen                                         |
+| **Other Inference Providers**  | OpenCode Go, Custom (any OpenAI-compatible endpoint) |
+| **API Key**                    | `OPENCODE_API_KEY` for OpenCode Zen and OpenCode Go  |
+| **Get a Key**                  | [OpenCode auth](https://opencode.ai/auth)            |
 
-OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from Models.dev through its authenticated model-catalog API, with a static fallback if that upstream catalog is unavailable. Select OpenCode Go in agent settings to use Go-only models such as `opencode-go/kimi-k3.1-pro`. Advanced configurations can use SAM Platform inference without a user API key, or another user-selected inference provider. If you explicitly select Scaleway and already have a Scaleway cloud provider credential configured, OpenCode can reuse that credential — no separate API key required.
+OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from Models.dev through its authenticated model-catalog API, with a static fallback if that upstream catalog is unavailable. Select OpenCode Go in agent settings to use Go-only models such as `opencode-go/kimi-k3.1-pro`. Select **Custom** to point OpenCode at any OpenAI-compatible endpoint with its own base URL and API key, such as a model server you host yourself (`OPENCODE_PROVIDERS` in `packages/shared/src/types/agent-settings.ts`).
 
 ### Amp
 
@@ -144,6 +144,7 @@ project's **Accounts** tab, the same list connects the agent for that project on
 SAM picks the account for a run in this order, most specific first (`explainResolution` in
 `packages/shared/src/composable-credentials/resolver.ts`):
 
+1. The account you chose for this chat ([Using another account for one chat](#using-another-account-for-one-chat)).
 1. Your account for this profile.
 2. Your account for this project.
 3. Your default account for the agent.
@@ -181,8 +182,8 @@ A few things worth knowing:
 - **Your chosen scope.** The dialog says where the account goes. From personal settings it reads
   **This account will be saved as your personal default.** From a project it reads **This account will
   be saved for this project. Your personal default stays unchanged.**
-- **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments
-  running on Cloudflare Containers (SAM's default runtime). If the button isn't shown, use the manual
+- **Availability.** Guided sign-in is available on deployments running Cloudflare Containers (SAM's default
+  runtime). If the button isn't shown, use the manual
   API key or token fields in the same panel.
 
 If Claude sign-in fails, the dialog says why and offers **Try again**, which starts a fresh attempt.
@@ -347,6 +348,25 @@ every override (profile, skill, project default, your agent settings): its **Mod
 asks, whatever permission mode is set, and the section says so. A skill that is not shared with the
 project shows its name only to you. When a member leaves a project, their choices on its profiles are removed.
 
+### Using another account for one chat
+
+You don't need a profile per account. When you start a chat, the **To** row shows which account it
+will run on, for example **on Sam Support**, once you have more than one account for the chat's
+agent. Select it to pick another of your accounts for this chat only. The list shows only accounts
+for that agent, each with how much is left of every limit, and marks the profile's own account.
+The profile keeps its account; the choice is cleared after you send.
+
+The chosen account is stored with the run (`tasks.agent_configuration_id`) and checked before it
+starts (`validateRunAgentConfiguration` in `apps/api/src/services/run-agent-configuration.ts`): it
+must be one of your own active accounts for the agent the chat runs. Every place that picks the
+run's account uses it first, so the agent, usage-limit holds, the AI proxy and token refreshes all
+use the same account, and a chat that sleeps and wakes keeps it. If the account is paused or removed
+after the chat starts, the run stops rather than switching to another account. Session details show
+**chosen for this chat** as the step that picked it.
+
+The same choice is offered when the account you're about to use is nearly out (see
+[Usage Limits](#usage-limits)).
+
 ### Agent defaults
 
 Under **Settings → Agents → Agent settings**, each agent you can run has one card: **Model**,
@@ -377,20 +397,26 @@ coming before an agent stops on it.
 - **In Settings → Agents**, each account card shows the same chip once an agent has used that
   account. The raw credential list in **Settings → Advanced** shows it too.
 - **On a project's Profiles page**, each profile shows a short line of how much of each limit its
-  account has **used** (its own pin, the project's account, or your default), for example
-  `● 5h 72%  Wk 31%  Opus 88%`: a higher number means less room left.
+  account has **left** (its own pin, the project's account, or your default), for example
+  `● 5h 28%  Wk 69%  Opus 12%`. A number turns amber at half or less and red below a quarter.
   Select it for the same details dialog. **Most room** sorts the profiles by how much is left on the
   limit that will stop each one first, which helps pick the agent to use next.
 - **When you start a new chat**, each profile's icon in the cards, the profile list and **To** has a
-  ring that shows how much is left on the limit that will stop it first. Words appear only when it
-  matters: `6% left · resets 52m` when a limit is close, `Out · back in 2h 10m` when one is used up,
-  **No account connected** when the profile's agent has no account to run on, and for example
-  **Work Claude paused** when its account is [paused](#pausing-an-account).
-  Used-up profiles move to a folded **Out for now** section at the end of the profile list. If the
-  profile you picked is close or out, a line above the message box says so and, when another profile
-  runs the same model on a different account with room, offers to switch to it (for example
-  **Use Claudiii · 83% left**). A skill or chat option that changes the agent hides this, because the
-  chat would then run on another account.
+  ring (`ProfileUsageAvatar.tsx`). Its arc is how much is left of the account's 5-hour limit, and its
+  colour is the week: green while more than half the week is left, amber down to a quarter, red
+  below. An empty arc still shows a dot. A used-up week empties the arc, and an account with only a
+  weekly limit (some ChatGPT plans) draws the week instead. Words appear only once a limit is at half
+  or less, the 5-hour one first, for example `5h 12% left · resets 52m · Week 31% left · resets 3d`,
+  or `5h used up · back in 2h 10m`. **No account connected** shows when the profile's agent has no
+  account to run on, and for example **Work Claude paused** when its account is
+  [paused](#pausing-an-account). The profile list also shows each limit as a small labelled bar,
+  in percent left. Used-up profiles move to a folded **Out for now** section at the end of the list.
+  If the account the chat will run on is under a quarter on a limit, or out, a line above the message
+  box names the limit (for example **Weekly limit · 6% left on Personal Pro · resets in 2d 4h**) and
+  offers your account with the most room for the same agent (**Run on Work Max**, with its limits).
+  Choosing it changes only this chat's account, and a line then says **This chat runs on Work Max
+  instead of Personal Pro**, with an undo. A skill or chat option that changes the agent clears the
+  choice, because the chat would then run a different agent.
 - **Agents** can read the same numbers with the `workspace_read` tool (`method: "credential_limits"`), so an agent
   coordinating others can pause before a limit and schedule itself to wake after the reset.
 
@@ -513,7 +539,8 @@ Type `@` in a chat message to choose a profile from the mention list. Mentions a
 
 - **The profile you used last is pre-selected.** A new chat starts with the profile you last picked yourself for a new chat in this project in the last 30 days, unless you've hidden it. Chats the SAM assistant started for you count; chats that automations, the Connector or other agents started don't. Otherwise it's the first profile you haven't hidden, in alphabetical order. Change it any time before you send. **Start work** on an [idea](/docs/guides/ideas/#start-work-on-an-idea) pre-selects the same way.
 - **Your recent profiles appear as cards.** With two or more profiles you haven't hidden, the empty chat asks **Who should take this?** and shows your most recent profiles as cards under **Recent** (with no recent picks, your first profiles, under **Your profiles**). When the chat area is wide enough, it also shows profiles that build and open pull requests. Each card shows the profile's description (change it with **Edit** in the profile list or on the **Profiles** page) and what runs it, such as **Claude · Opus 5.5 · max effort**. Tap a card to pick it, or select **All _N_ profiles** under the cards for the full list. Otherwise the starter prompts show instead.
-- **To** above the message box names the chosen profile. Select it to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. Profiles whose account has no [usage](#usage-limits) left wait in a folded **Out for now** section near the end. **New**, **Edit** and **Manage** are at the bottom.
+- **To** above the message box names the chosen profile, and **on _account_** beside it the account
+  the chat runs on (see [Using another account for one chat](#using-another-account-for-one-chat)). Select **To** to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. Profiles whose account has no [usage](#usage-limits) left wait in a folded **Out for now** section near the end. **New**, **Edit** and **Manage** are at the bottom.
 
 ![The profile list opened from To, titled 'Start with…', with Edit list and a close button. Recent lists Brainstormer (checked), Careful Builder and Code Reviewer. Chat & explore lists Quick Questions and Release Notes. Build & open PRs lists Frontend Builder. Each row shows what runs it, such as 'Codex · GPT-6 Luna · medium effort', and a ring around its icon for the usage left; Brainstormer and Frontend Builder, on the same nearly used-up Claude account, also read '6% left, resets 53m'. New, Edit and Manage are at the bottom.](/images/docs/new-chat-profile-list.png)
 

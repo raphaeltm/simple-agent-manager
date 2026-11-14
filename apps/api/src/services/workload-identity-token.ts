@@ -96,13 +96,14 @@ export async function signWorkloadIdentityToken(
   const { keys } = await getWorkloadJWKS(env);
   const key = keys[0];
   if (!key) throw new Error('Workload signing key is unavailable');
+  const issuedAt = Math.floor(Date.now() / 1000);
   return new SignJWT({ ...claims, type: 'workload-identity' })
     .setProtectedHeader({ alg: 'RS256', kid: key.kid, typ: 'JWT' })
     .setIssuer(workloadIdentityIssuer(env))
     .setSubject(workloadIdentitySubject(claims))
     .setAudience(audience)
-    .setIssuedAt()
-    .setExpirationTime(`${ttl}s`)
+    .setIssuedAt(issuedAt)
+    .setExpirationTime(issuedAt + ttl)
     .setJti(crypto.randomUUID())
     .sign(await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256'));
 }

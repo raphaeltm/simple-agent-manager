@@ -352,4 +352,15 @@ describe('publish job atomic guards on SQLite', () => {
     );
     expect(row().status).toBe('failed');
   });
+  it('shadow marker blocks the final atomic release fence and event release linking', async () => {
+    seed();
+    sqlite.exec('UPDATE deployment_publish_jobs SET context_shadow=1');
+    expect(await release('shadow-release')).toBe(false);
+    expect(sqlite.prepare('SELECT count(*) n FROM deployment_releases').get()).toEqual({ n: 0 });
+    expect(
+      await appendDeploymentPublishJobEvent(db(), { ...event, releaseId: 'shadow-release' })
+    ).toBe(false);
+    sqlite.exec('UPDATE deployment_publish_jobs SET context_shadow=0');
+    expect(await release('owner-release')).toBe(true);
+  });
 });

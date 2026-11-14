@@ -8,6 +8,12 @@
  * worker (apps/api) wires the ports in `src/app-deployment-ports/` and keeps
  * re-export files at the old `services/` and `scheduled/` paths.
  */
+export { collectBuildContextOnSource } from './build-context-collection';
+export * from './build-context-defaults';
+export { scheduleBuildContextShadow } from './build-context-shadow';
+export type { BuildContextDescriptor,BuildContextOwner } from './build-context-state';
+export { buildContextKey, completeBuildContext,reserveBuildContext } from './build-context-state';
+export { createBuildContextUpload, verifyBuildContextObject } from './build-context-upload';
 export type {
   ComposeImageArtifactDescriptor,
   ComposeImageArtifactDownload,
@@ -121,6 +127,7 @@ export {
   getDeploymentPublishJobForMcp,
   PUBLISH_JOB_TERMINAL_STATUSES,
   sanitizePublishEventText,
+  visiblePublishJobPredicate,
 } from './deployment-publish-jobs';
 export type {
   AppendDeploymentReleaseEventInput,
@@ -181,7 +188,7 @@ export type {
   ImageResolverOptions,
   RegistryAuth,
 } from './image-resolver';
-export { createImageResolver,ImageResolveError } from './image-resolver';
+export { createImageResolver, ImageResolveError } from './image-resolver';
 export type { ResolverRuntimeOptions } from './image-resolver-outbound';
 export { getImageResolverConfig } from './image-resolver-outbound';
 export type {
@@ -194,3 +201,4 @@ export type {
   DeploymentSecretCipher,
   DeploymentSettingsPort,
 } from './ports';
+export type { BuildContextCollectionPorts, BuildContextInterpolation } from './ports';

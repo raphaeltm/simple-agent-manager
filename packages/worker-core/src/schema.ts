@@ -1103,6 +1103,12 @@ export const tasks = sqliteTable(
     skillId: text('skill_id'),
     /** Original skill hint/id requested by the caller. */
     skillHint: text('skill_hint'),
+    /**
+     * Account (`cc_configurations.id`) the person chose for this run, over the profile's.
+     * NULL = resolve as usual. Read by `resolveSessionProfileCredentialContext` and
+     * provider-limit admission; validated at submit (`validateRunAgentConfiguration`).
+     */
+    agentConfigurationId: text('agent_configuration_id'),
     startedAt: text('started_at'),
     completedAt: text('completed_at'),
     terminalTransitionId: text('terminal_transition_id'),
@@ -1838,6 +1844,14 @@ export const nodes = sqliteTable(
     cleanupBlockedReason: text('cleanup_blocked_reason'),
     cleanupBlockedAlertedAt: text('cleanup_blocked_alerted_at'),
     cleanupRetirementSourcesJson: text('cleanup_retirement_sources_json'),
+    /**
+     * Write-ahead record of a provider deletion started without waiting for it (two-phase
+     * deletion). Set before the DELETE is sent; never re-stamped while set; cleared with the
+     * termination proof or when the provider shows the delete never arrived or failed.
+     */
+    providerDeletionRequestedAt: text('provider_deletion_requested_at'),
+    /** `{ ticket, providerInstanceId, runtimeIncarnationId }`; see `node-provider-deletion.ts`. */
+    providerDeletionJson: text('provider_deletion_json'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2207,7 +2221,7 @@ export const agentSessions = sqliteTable(
     }).default('user'),
     /** Resolution tier that chose the credential. Null on rows written before 0215. */
     agentCredentialScope: text('agent_credential_scope', {
-      enum: ['profile', 'project', 'user', 'platform'],
+      enum: ['run', 'profile', 'project', 'user', 'platform'],
     }),
     agentCredentialReference: text('agent_credential_reference'),
     agentCredentialProvider: text('agent_credential_provider'),
@@ -5170,6 +5184,12 @@ export const deploymentPublishJobs = sqliteTable(
     errorMessage: text('error_message'),
     errorCode: text('error_code'),
     retryable: integer('retryable', { mode: 'boolean' }).notNull().default(false),
+    executor: text('executor').notNull().default('node'),
+    contextShadow: integer('context_shadow', { mode: 'boolean' }).notNull().default(false),
+    contextR2Key: text('context_r2_key'),
+    contextBytes: integer('context_bytes'),
+    contextSha256: text('context_sha256'),
+    queuedAt: text('queued_at'),
     attempt: integer('attempt').notNull().default(1),
     lastEventAt: text('last_event_at'),
     // Null means a legacy executor: only the overall deadline may expire it.

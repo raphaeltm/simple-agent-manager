@@ -49,6 +49,11 @@ function setupDatabase(): Database.Database {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    -- Only the column the duplicate-collapse reads; the real table cascades from credentials.
+    CREATE TABLE capacity_sources (
+      id TEXT PRIMARY KEY,
+      credential_id TEXT REFERENCES credentials(id) ON DELETE CASCADE
+    );
     CREATE TABLE cc_credentials (
       id TEXT PRIMARY KEY,
       owner_id TEXT NOT NULL,
@@ -109,6 +114,16 @@ function snapshot(sqlite: Database.Database) {
 }
 
 describe('GCP credential atomic store', () => {
+  function seedLegacyRow(id: string, createdAt: string) {
+    sqlite
+      .prepare(
+        `INSERT INTO credentials (id, user_id, project_id, provider, credential_type, agent_type,
+           credential_kind, is_active, encrypted_token, iv, created_at, updated_at)
+         VALUES (?, ?, NULL, 'gcp', 'cloud-provider', NULL, 'api-key', 1, 'x', 'y', ?, ?)`
+      )
+      .run(id, USER_ID, createdAt, createdAt);
+  }
+
   let sqlite: Database.Database;
   let env: Env;
 
@@ -171,6 +186,64 @@ describe('GCP credential atomic store', () => {
     });
   });
 
+  it('keeps the connection id across a re-save, so capacity sources keyed on it survive', async () => {
+    const first = await replaceUserGcpCredential(env, USER_ID, credential('first-key'));
+    const second = await replaceUserGcpCredential(env, USER_ID, credential('second-key'));
+
+    expect(second).toEqual(first);
+    const rows = sqlite
+      .prepare(
+        'SELECT id, encrypted_token AS encryptedToken, updated_at AS updatedAt FROM credentials'
+      )
+      .all() as Array<{ id: string; encryptedToken: string; updatedAt: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe(first.id);
+    const stored = sqlite
+      .prepare('SELECT encrypted_token AS encryptedToken, iv FROM credentials')
+      .get() as { encryptedToken: string; iv: string };
+    const decrypted = await decrypt(stored.encryptedToken, stored.iv, ENCRYPTION_KEY);
+    expect(parseGcpCredential(decrypted).privateKeyId).toBe('second-key');
+    expect(
+      JSON.parse(
+        (
+          sqlite.prepare('SELECT settings_json AS settings FROM cc_configurations').get() as {
+            settings: string;
+          }
+        ).settings
+      )
+    ).toEqual({ managedBy: 'legacy-gcp-credential', legacyCredentialId: first.id });
+  });
+
+  it('collapses duplicate legacy rows onto the oldest one', async () => {
+    seedLegacyRow('newer-duplicate', '2026-11-12T00:00:00.000Z');
+    seedLegacyRow('older-original', '2026-11-10T00:00:00.000Z');
+
+    const stored = await replaceUserGcpCredential(env, USER_ID, credential('dedupe-key'));
+
+    expect(stored).toEqual({ id: 'older-original', createdAt: '2026-11-10T00:00:00.000Z' });
+    expect(sqlite.prepare('SELECT id FROM credentials').all()).toEqual([{ id: 'older-original' }]);
+  });
+
+  it('keeps the duplicate a capacity source is built on, even when it is newer', async () => {
+    sqlite.pragma('foreign_keys = ON');
+    seedLegacyRow('older-unused', '2026-11-10T00:00:00.000Z');
+    seedLegacyRow('newer-with-source', '2026-11-12T00:00:00.000Z');
+    sqlite
+      .prepare(
+        `INSERT INTO capacity_sources (id, credential_id) VALUES ('source', 'newer-with-source')`
+      )
+      .run();
+
+    const stored = await replaceUserGcpCredential(env, USER_ID, credential('dedupe-key'));
+
+    expect(stored.id).toBe('newer-with-source');
+    expect(sqlite.prepare('SELECT id FROM credentials').all()).toEqual([
+      { id: 'newer-with-source' },
+    ]);
+    // The source survives: deleting its credential would have cascaded it.
+    expect(sqlite.prepare('SELECT id FROM capacity_sources').all()).toEqual([{ id: 'source' }]);
+  });
+
   it('keeps only the final managed copy when replacements begin concurrently', async () => {
     await Promise.all([
       replaceUserGcpCredential(env, USER_ID, credential('concurrent-key-a')),
@@ -183,8 +256,9 @@ describe('GCP credential atomic store', () => {
     expect(stored.configurations).toHaveLength(1);
     expect(stored.attachments).toHaveLength(1);
 
-    const graph = sqlite.prepare(
-      `SELECT
+    const graph = sqlite
+      .prepare(
+        `SELECT
          legacy.encrypted_token AS legacyCiphertext,
          legacy.iv AS legacyIv,
          composable.id AS credentialId,
@@ -198,7 +272,8 @@ describe('GCP credential atomic store', () => {
        JOIN cc_credentials composable ON composable.id = configuration.credential_id
        JOIN cc_attachments attachment ON attachment.configuration_id = configuration.id
        WHERE legacy.user_id = ?`
-    ).get(USER_ID) as {
+      )
+      .get(USER_ID) as {
       legacyCiphertext: string;
       legacyIv: string;
       credentialId: string;
@@ -256,13 +331,14 @@ describe('GCP credential atomic store', () => {
     expect(snapshot(sqlite).attachments).toHaveLength(2);
   });
 
-  it('rolls back every deletion when a replacement batch fails', async () => {
+  it('rolls back the in-place update and every deletion when a replacement batch fails', async () => {
     await replaceUserGcpCredential(env, USER_ID, credential('working-key-id'));
     const before = snapshot(sqlite);
 
+    // Fail after the legacy row was already rewritten in place, so the rollback must undo it.
     sqlite.exec(`
       CREATE TRIGGER reject_gcp_rotation
-      BEFORE INSERT ON credentials
+      BEFORE INSERT ON cc_credentials
       BEGIN
         SELECT RAISE(ABORT, 'forced replacement failure');
       END;

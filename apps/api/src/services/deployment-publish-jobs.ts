@@ -13,4 +13,5 @@ export {
   getDeploymentPublishJobForMcp,
   PUBLISH_JOB_TERMINAL_STATUSES,
   sanitizePublishEventText,
+  visiblePublishJobPredicate,
 } from '@simple-agent-manager/app-deployment';

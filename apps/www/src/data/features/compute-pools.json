@@ -50,7 +50,7 @@
     },
     {
       "headline": "Token and compute usage, per user",
-      "body": "Settings → Usage shows your AI usage by model and by day, against a monthly budget, for traffic routed through the SAM AI proxy. It also tracks your compute usage in node-hours against your quota. Admins get the installation-wide view — LLM spend by model, day, and user with a projection, plus per-user node usage — in Admin → Costs and Admin → Usage.",
+      "body": "Settings → Usage shows your AI usage by model and by day, against a monthly budget, for traffic routed through the SAM AI proxy. It also tracks compute in vCPU-hours against your quota, for machines on installation-provided cloud accounts. Admins get the installation-wide view — LLM spend by model, day, and user with a projection, plus per-user node usage — in Admin → Costs and Admin → Usage.",
       "screenshot": {
         "src": "/images/features/sam-usage-tokens.png",
         "alt": "Settings → Usage page showing total cost, requests, and input and output tokens, a per-model breakdown, a daily cost trend, and budget controls with daily token limits and a monthly cost cap",

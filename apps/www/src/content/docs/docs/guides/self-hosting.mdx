@@ -161,7 +161,7 @@ Claude Code in a devcontainer that
 every time it asks to make a change. Release-specific steps are in the self-hoster notes of
 [Recent Product Changes](/docs/guides/recent-product-changes/).
 
-We recommend turning it on; the hosted service has it on. Agents set to ask then wait for an
+We recommend turning it on. Agents set to ask then wait for an
 answer — a permission request for up to 30 minutes in a task and 2 hours in a chat — and only the
 person who started the chat, or someone they shared it with, can answer, with no notification sent. To turn it on, add these GitHub
 Environment **variables** (not secrets) to your `production` environment, each set to `true`:
@@ -259,7 +259,7 @@ gcloud iam service-accounts keys create sam-service-account.json \
 
 Cloud Billing (`cloudbilling.googleapis.com`) lets SAM read Google's public list prices for the machine catalog; it grants no access to your billing account. Without it, machines are still offered but show "Price unavailable", and Settings → Infrastructure shows a warning with the exact command and an enable link. Use **Check again** on the Google Cloud connection after enabling it. Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
 
-SAM encrypts the complete JSON in both credential stores with the configured credential-encryption key. Only safe metadata is returned to the browser. Derived Google access tokens are short-lived and cached only up to their returned expiry. Rotation verifies the new key before atomically replacing all SAM copies. Disconnect removes SAM's encrypted copies and cached tokens, but it cannot revoke the key in Google Cloud—disable or delete the old key there after a successful rotation or disconnect.
+SAM encrypts the complete JSON in both credential stores with the configured credential-encryption key. Only safe metadata is returned to the browser. Derived Google access tokens are short-lived and cached only up to their returned expiry. Rotation verifies the new key before atomically replacing all SAM copies. Running VMs stay deletable after a rotation or reconnect: SAM tears them down with your current credential once each VM proves, by its SAM labels, that it belongs to the node being deleted. If the new credential points at a different Google Cloud project, those VMs are flagged as needing manual cleanup instead. Disconnect removes SAM's encrypted copies and cached tokens, but it cannot revoke the key in Google Cloud—disable or delete the old key there after a successful rotation or disconnect.
 
 ## Step 5: Generate Pulumi Passphrase
 
@@ -504,6 +504,25 @@ There's no rollback. If a release misbehaves, update to a newer one that fixes i
 4. Wait for the workflow to finish, then re-run the health check above.
 
 Use the manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
+
+Staging and production deployments wait for container application rollouts to reach
+100% before reporting success. Wrangler returning successfully only means the
+rollout started; the workflow's **Wait for container rollout completion** step
+compares rollout records before/after deployment and checks the exact new rollout
+and target application version. Multiple new rollouts fail as ambiguous; no-op or
+metadata-only updates require no new rollout, but await an existing pending one.
+Gradual rollout behavior
+is preserved. API errors, unreadable state and timeout fail the deployment.
+The wait closes the window where deployment reports success mid-rollout; it does
+not prove every running instance's binary version. The authenticated `/ready`
+callback logs `instant_session.agent_version_mismatch` with expected and reported
+versions without rejecting readiness, providing evidence for remaining version
+discrepancies.
+Optional GitHub Environment variables `CONTAINER_ROLLOUT_TIMEOUT_MS` (default
+`1200000`, 20 minutes) and `CONTAINER_ROLLOUT_POLL_INTERVAL_MS` (default `10000`)
+accept positive integer milliseconds. These are deployment runner settings, not
+Worker runtime settings. Timeout errors include the rollout ID and last status.
+
 
 ## First Login & Admin Access
 

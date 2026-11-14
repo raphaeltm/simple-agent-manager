@@ -40,7 +40,10 @@ export async function explainForConsumer(
   const ctx: CCResolutionContext = {
     userId,
     projectId: projectId ?? undefined,
-    ...(profile ? { profileId: profile.profileId, profileAgentType: profile.agentType } : {}),
+    ...(profile?.profileId
+      ? { profileId: profile.profileId, profileAgentType: profile.agentType ?? undefined }
+      : {}),
+    ...(profile?.runConfigurationId ? { runConfigurationId: profile.runConfigurationId } : {}),
   };
   return explainResolution(snapshot, consumer, ctx);
 }

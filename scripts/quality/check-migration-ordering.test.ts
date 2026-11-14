@@ -73,6 +73,18 @@ describe('D1 migration ordering check', () => {
     ]);
   });
 
+  it('preserves only the exact staging-applied context migration filename sets', () => {
+    expectOnlyTheseDuplicateFiles('0230', [
+      '0230_capacity_pool_excluded_sources.sql',
+      '0230_node_cloudflare_tunnels.sql',
+      '0230_publish_job_build_context.sql',
+    ]);
+    expectOnlyTheseDuplicateFiles('0231', [
+      '0231_node_tunnel_pending_creates.sql',
+      '0231_publish_job_context_shadow.sql',
+    ]);
+  });
+
   it('fails on migration filenames without a sortable numeric prefix', () => {
     const dir = makeDir();
     writeFileSync(join(dir, '0001_initial.sql'), 'CREATE TABLE first (id TEXT PRIMARY KEY);');

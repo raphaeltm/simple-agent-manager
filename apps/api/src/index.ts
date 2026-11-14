@@ -143,6 +143,7 @@ import { projectsRoutes } from './routes/projects';
 import { acpInteractionCallbackRoute } from './routes/projects/acp-interaction-callback';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
 import { agentUsageCallbackRoute } from './routes/projects/agent-usage-callback';
+import { buildContextCallbackRoute } from './routes/projects/build-context-callback';
 import { buildStartedCallbackRoute } from './routes/projects/build-started-callback';
 import { composeImageArtifactsCallbackRoute } from './routes/projects/compose-image-artifacts-callback';
 import { composePublishReleaseCallbackRoute } from './routes/projects/compose-publish-release-callback';
@@ -409,6 +410,7 @@ app.route('/api/projects', registryPushCredentialsCallbackRoute); // Must be bef
 app.route('/api/projects', composeImageArtifactsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', composePublishReleaseCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', deploymentPublishJobCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', buildContextCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);

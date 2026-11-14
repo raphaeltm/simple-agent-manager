@@ -8,7 +8,9 @@ import { formatMessageCursor } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { type HighlightStubs, stubCssHighlights } from '../../test-utils/css-highlights';
 
 const mocks = vi.hoisted(() => ({
   getMessageCommentContext: vi.fn(),
@@ -482,5 +484,61 @@ describe('comment reader', () => {
     } finally {
       window.matchMedia = original;
     }
+  });
+});
+
+describe('comment quotes in the reader and on the Comments page', () => {
+  let highlights: HighlightStubs | null = null;
+  afterEach(() => {
+    highlights?.restore();
+    highlights = null;
+  });
+
+  it('paints the open comment strongly, other open comments faintly, and resolved ones not at all', async () => {
+    highlights = stubCssHighlights();
+    const openSibling = makeThread('thread-open', {
+      anchor: { kind: 'message', messageId: 'a1', quote: 'It retries because' },
+    });
+    const resolvedSibling = makeThread('thread-resolved', {
+      anchor: { kind: 'message', messageId: 'a3', quote: 'before the idempotency check.' },
+      status: 'resolved',
+    });
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [THREAD, openSibling, resolvedSibling],
+    });
+
+    renderAt(READER_PATH);
+
+    await waitFor(() => expect(highlights?.activeQuotes()).toEqual(['the handler returns 500']));
+    await waitFor(() => expect(highlights?.otherQuotes()).toEqual(['It retries because']));
+  });
+
+  it('opens a library comment from the Comments page on its file, with the thread', async () => {
+    const fileThread = {
+      id: 'file-thread-1',
+      clientId: null,
+      projectId: PROJECT,
+      fileId: 'file-7',
+      anchor: { kind: 'library_file', fileId: 'file-7', quote: 'within a week' },
+      author: { id: 'grace', name: 'Grace Hopper', kind: 'human' },
+      body: 'Is a week realistic?',
+      createdAt: 2_000,
+      updatedAt: 2_000,
+      status: 'open',
+      replies: [],
+    };
+    mocks.listProjectComments.mockResolvedValue({
+      ...inboxOf([]),
+      fileThreads: [fileThread],
+      fileNames: new Map([['file-7', 'rollout.md']]),
+      totalCount: 1,
+    });
+
+    renderAt(`/projects/${PROJECT}/comments`);
+    fireEvent.click(await screen.findByRole('button', { name: /Is a week realistic\?/ }));
+
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      `/projects/${PROJECT}/library?preview=file-7&commentThread=file-thread-1`
+    );
   });
 });

@@ -1,0 +1,67 @@
+{
+  "head": "d97e8b167445da51567e1ac6ec3a0456bac30eda",
+  "environment": "01M717A2PE0C7MKTZMFJS46GZA",
+  "verifiedAt": "2026-11-09T22:44:39.220375+00:00",
+  "rows": [
+    {
+      "id": "01M717NG24BB6ZYT8VMPNBGR79",
+      "node_id": "01M717D5K1E7TTFZ30WPYP5YE7",
+      "workspace_id": "01M717D5RQYXBPAYXVBQXA9NBN",
+      "status": "succeeded",
+      "current_step": "context_ready",
+      "context_r2_key": "compose-build-contexts/01KVRJCC7Y3NSDQYCPWDRPVJVH/01M717A2PE0C7MKTZMFJS46GZA/01M717NG24BB6ZYT8VMPNBGR79/1.tar.zst",
+      "context_bytes": 8391150,
+      "context_sha256": "e0be70b6764d6b591aee646f223eba780c82f1f36be705973ee4e47fafcf7ca6",
+      "created_at": "2026-11-09T22:43:06.948Z",
+      "updated_at": "2026-11-09T22:43:09.095Z",
+      "context_shadow": 1,
+      "error_message": null
+    }
+  ],
+  "objects": [
+    {
+      "jobId": "01M717NG24BB6ZYT8VMPNBGR79",
+      "key": "compose-build-contexts/01KVRJCC7Y3NSDQYCPWDRPVJVH/01M717A2PE0C7MKTZMFJS46GZA/01M717NG24BB6ZYT8VMPNBGR79/1.tar.zst",
+      "bytes": 8391150,
+      "sha256": "e0be70b6764d6b591aee646f223eba780c82f1f36be705973ee4e47fafcf7ca6",
+      "headers": {
+        "content-type": "application/zstd",
+        "content-length": "8391150",
+        "etag": "\"cfd6e423741812fc98d0c13aec28ed6a\"",
+        "last-modified": "Mon, 09 Nov 2026 22:43:08 GMT"
+      },
+      "members": [
+        {
+          "name": "app",
+          "size": 0,
+          "sha256": null
+        },
+        {
+          "name": "app/Dockerfile",
+          "size": 43,
+          "sha256": "31f0ea74146d2ce295798eac31ccee2eb22f0ed83c899a37e5b0d0a3376d680e"
+        },
+        {
+          "name": "app/payload.bin",
+          "size": 8388608,
+          "sha256": "997d794a9093ab4742470425fa27e13ceff637dff67f4ec8b19abf718e0086ad"
+        },
+        {
+          "name": "compose.yaml",
+          "size": 150,
+          "sha256": "8253321b1482601b860a37efd6e57aca7fbcc790634d9cc2d6b062b1b1bb67d3"
+        },
+        {
+          "name": "runtime.env",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": ".env",
+          "size": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    }
+  ]
+}

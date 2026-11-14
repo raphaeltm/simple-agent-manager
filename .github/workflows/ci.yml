@@ -864,6 +864,10 @@ jobs:
       - name: Assert Go version
         run: go version | grep -E '^go version go1\.26\.11 '
 
+      # The real Instant collect route resolves its canonical /workspaces mount.
+      - name: Prepare Instant workspace mountpoint
+        run: sudo install -d -o "$(id -u)" -g "$(id -g)" /workspaces
+
       - name: Run VM Agent tests
         working-directory: packages/vm-agent
         run: go test -race ./...

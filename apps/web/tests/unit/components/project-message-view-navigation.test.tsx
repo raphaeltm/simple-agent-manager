@@ -14,7 +14,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getChatSession: vi.fn(),
@@ -65,6 +65,7 @@ import {
   scrollToIndexCalls,
   virtuosoLastProps,
 } from '../../helpers/virtuoso-mock';
+import { stubCssHighlights } from '../../test-utils/css-highlights';
 
 const SESSION_ID = 'sess-history';
 
@@ -270,6 +271,92 @@ describe('ProjectMessageView — history arrives newest first', () => {
     await waitFor(() =>
       expect(scrollToIndexCalls.at(-1)).toMatchObject({ index: 1, align: 'center' })
     );
+  });
+
+  it('keeps scrolling a comment link to a loaded message until its row stays on screen', async () => {
+    // The whole transcript is loaded, so the target needs no paging. In a browser the list's own
+    // first scroll to the newest message can still land after the jump and carry the target back
+    // off screen. Here the target row reads as off screen for its first two checks.
+    serveTranscript([row(1), row(2), row(3), row(4), row(5), row(6)], 10);
+    let offScreenReads = 2;
+    const realRect = Element.prototype.getBoundingClientRect;
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      if (this.getAttribute('data-index') === '1' && offScreenReads > 0) {
+        offScreenReads -= 1;
+        return {
+          top: 5_000,
+          bottom: 5_100,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 100,
+          x: 0,
+          y: 5_000,
+          toJSON: () => ({}),
+        };
+      }
+      return realRect.call(this);
+    });
+
+    // The chat is already showing its transcript when the link arrives (a cached chat, or a
+    // link followed from within the app), so the target resolves at once.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (target: string | null) => (
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ProjectMessageView projectId="proj-1" sessionId={SESSION_ID} targetMessageId={target} />
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    onTestFinished(() => rect.mockRestore());
+    const { rerender } = render(view(null));
+    expect(await screen.findByText('Message number 2')).toBeInTheDocument();
+    scrollToIndexCalls.length = 0;
+
+    rerender(view('m2'));
+
+    await waitFor(() => expect(offScreenReads).toBe(0));
+    await waitFor(() =>
+      expect(
+        scrollToIndexCalls.filter((call) => typeof call === 'object' && call.index === 1).length
+      ).toBeGreaterThanOrEqual(3)
+    );
+  });
+
+  it('paints a comment quoting a later streamed chunk inside the reply that absorbed it', async () => {
+    const highlights = stubCssHighlights();
+    onTestFinished(() => highlights.restore());
+    const chunk = (n: number, text: string): Row => ({
+      ...row(n),
+      id: `a${n}`,
+      role: 'assistant',
+      content: text,
+    });
+    serveTranscript(
+      [
+        row(1),
+        chunk(2, 'It retries because '),
+        chunk(3, 'the handler '),
+        chunk(4, 'returns 500.'),
+        row(5),
+      ],
+      10
+    );
+    // Anchored to the THIRD chunk, which renders inside the reply's row (id a2), not on its own.
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [
+        { ...commentOn('a4'), anchor: { kind: 'message', messageId: 'a4', quote: 'returns 500.' } },
+      ],
+    });
+
+    renderView(<ProjectMessageView projectId="proj-1" sessionId={SESSION_ID} />);
+
+    expect(
+      await screen.findByText('It retries because the handler returns 500.')
+    ).toBeInTheDocument();
+    await waitFor(() => expect(highlights.otherQuotes()).toEqual(['returns 500.']));
   });
 
   it('scrolls again until a row that arrived with older history stays on screen', async () => {

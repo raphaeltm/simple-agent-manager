@@ -129,7 +129,12 @@ export function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
   const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
   return { targetProvider, attributionUserId, attributionProjectId, exactCredential };
 }
-export function hasManagedVmPlacementProof(node: NodeRow): boolean {
+/**
+ * Code twin of `cleanupNodeProvenanceSql`'s snapshot branch. A released `capacity_source_id`
+ * (its source was deleted with the credential) counts only when the caller has checked the
+ * release in D1 with `isNodeCapacitySourceReleased`; a NULL column alone proves nothing.
+ */
+export function hasManagedVmPlacementProof(node: NodeRow, capacitySourceReleased = false): boolean {
   const hasText = (value: string | null): boolean => !!value?.trim();
   return (
     ['workspace', 'deployment'].includes(node.nodeRole) &&
@@ -146,7 +151,8 @@ export function hasManagedVmPlacementProof(node: NodeRow): boolean {
     (node.providerInstanceVcpuCount ?? 0) > 0 &&
     (node.providerInstanceMemoryMb ?? 0) > 0 &&
     hasText(node.capacityPoolId) &&
-    hasText(node.capacitySourceId) &&
+    (hasText(node.capacitySourceId) ||
+      (capacitySourceReleased && node.capacitySourceId === null)) &&
     hasText(node.capacityPoolCandidateId) &&
     hasText(node.placementCredentialReference) &&
     hasText(node.placementCredentialFingerprint) &&
@@ -216,25 +222,6 @@ export async function requireStrictNodeProvider(
   if (!providerResult) {
     throw new Error(
       `Cloud provider credentials missing for strict node deletion: node=${node.id} provider=${node.cloudProvider ?? 'unknown'} instance=${node.providerInstanceId}`
-    );
-  }
-  return providerResult;
-}
-
-export async function resolveStrictNodeProvider(
-  db: NodeDb,
-  node: NodeRow,
-  userId: string,
-  env: Env
-): Promise<ProviderForUserResult> {
-  if (!node.providerInstanceId) {
-    throw new Error(`Cannot strictly resolve provider for node ${node.id}: instance ID is missing`);
-  }
-  const targetProvider = node.cloudProvider as CredentialProvider | null;
-  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
-  if (!targetProvider || providerResult.providerName !== targetProvider) {
-    throw new Error(
-      `Cannot strictly delete node ${node.id}: persisted provider binding did not resolve exactly`
     );
   }
   return providerResult;
