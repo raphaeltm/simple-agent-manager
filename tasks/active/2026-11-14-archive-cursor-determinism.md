@@ -7,7 +7,8 @@ Idea: 01M7BXK7EST9F0H8CZGWYF1DB3. Task: 01M7BY5N87SGN5QNGXZNDJH8A7.
 Required Durable Object Workers CI intermittently fails unrelated PRs (#2605, #2715, #2717, #2718).
 The lease test assumes 40 ms per put guarantees >1.2 s of copying before a 2 s deadline;
 setup and RPC costs also consume that deadline and a 400 ms lease. Scheduler speed can stop
-copying early. Renewal is checked between operations and deliberately cannot resurrect an expired lease.
+copying early. Job 132293831140 failed the puts.size * 40 assertion at line 498
+(28 puts = 1120 ms), while the actual elapsed-time assertion on line 497 passed. Renewal is checked between operations and deliberately cannot resurrect an expired lease.
 
 Job 132287931176 actually failed the global verifiedChunks assertion, not the poison state sequence.
 The four expected states passed. At 01:56:20.090Z, a previous lateedit fixture migrated 600 messages,

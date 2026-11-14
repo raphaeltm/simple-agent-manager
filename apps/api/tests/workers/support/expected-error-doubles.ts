@@ -134,7 +134,26 @@ export class ProjectDataTestDouble extends ProjectData {
     this.verifyReadFailuresForTest = count;
   }
 
+  /** Real verifier results, scoped by session so global sweep work cannot pollute assertions. */
+  private archiveVerificationsForTest = new Map<string, { calls: number; chunks: number }>();
+
+  archiveVerificationCountsForTest(sessionId: string): { calls: number; chunks: number } {
+    return this.archiveVerificationsForTest.get(sessionId) ?? { calls: 0, chunks: 0 };
+  }
+
   override async archiveTargetVerifyPage(
+    input: archiveSharding.ArchiveTargetVerifyPageInput
+  ): Promise<archiveSharding.ArchiveTargetVerifyPageResult> {
+    const result = await this.verifyArchivePageForTest(input);
+    const previous = this.archiveVerificationCountsForTest(input.sessionId);
+    this.archiveVerificationsForTest.set(input.sessionId, {
+      calls: previous.calls + 1,
+      chunks: previous.chunks + result.chunksVerified,
+    });
+    return result;
+  }
+
+  private async verifyArchivePageForTest(
     input: archiveSharding.ArchiveTargetVerifyPageInput
   ): Promise<archiveSharding.ArchiveTargetVerifyPageResult> {
     if (this.verifyReadFailuresForTest <= 0) return super.archiveTargetVerifyPage(input);

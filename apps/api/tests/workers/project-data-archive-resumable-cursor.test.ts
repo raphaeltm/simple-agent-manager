@@ -16,7 +16,7 @@
  */
 import type { MessagePosition } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
@@ -465,17 +465,29 @@ describe('resumable archive cursor', () => {
 
   it('renews the lease during a tick longer than the lease', async () => {
     const { projectId, sessionId } = await seedCandidate('renew', LARGE_MESSAGES);
-    // A lease far shorter than the tick: without renewal the fence is lost mid-copy and the
-    // claim fails with lease_fence_lost. Long enough to survive the tick's setup before the claim.
-    // At wall-clock time, because the lease is claimed from the tick's `now`.
-    // Every chunk put is slowed so the copy is certain to outlast the lease several times over:
-    // a claim that happened to finish inside 400 ms would pass with renewal deleted.
+    const leaseMs = 400;
+    const stepMs = 150;
+    const wallTimeMs = 2000;
+    const startedAt = tickClock + 10_000;
+    const expiries: number[] = [];
     const { bucket, puts } = countingR2(env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket);
-    const slow = new Proxy(bucket, {
+    // Only Date is fake: D1, DO RPCs, R2 and their timeout timers still run normally.
+    // Each real chunk write consumes less than half a lease. Between writes the coordinator
+    // must renew, eventually carrying this claim past its original expiry several times.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(startedAt);
+    const advancing = new Proxy(bucket, {
       get(target, property, receiver) {
         if (property === 'put') {
           return async (...args: unknown[]) => {
-            await new Promise((resolve) => setTimeout(resolve, 40));
+            const lease = await env.DATABASE.prepare(
+              `SELECT lease_expires_at FROM project_data_archive_migrations
+               WHERE project_id = ? AND session_id = ?`
+            )
+              .bind(projectId, sessionId)
+              .first<{ lease_expires_at: number }>();
+            expiries.push(lease!.lease_expires_at);
+            vi.setSystemTime(Date.now() + stepMs);
             return (target.put as (...rest: unknown[]) => Promise<unknown>)(...args);
           };
         }
@@ -483,25 +495,30 @@ describe('resumable archive cursor', () => {
         return typeof value === 'function' ? value.bind(target) : value;
       },
     });
-    const startedAt = Date.now();
-    const stats = await withR2(slow as R2Bucket, () =>
-      withArchiveEnv(
-        sweepEnv({
-          PROJECT_DATA_ARCHIVE_LEASE_MS: '400',
-          PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '2000',
-        }),
-        () => runProjectDataArchiveSharding(testEnv, new Date())
-      )
-    );
-    // The claim held its fence well past the original expiry and kept copying.
-    expect(Date.now() - startedAt).toBeGreaterThan(3 * 400);
-    expect(puts.size * 40).toBeGreaterThan(3 * 400);
-    const journal = await readJournal(projectId, sessionId);
-    expect(journal?.error_message ?? null).toBeNull();
-    expect(stats.failed).toBe(0);
-    expect(['copying', 'target_sealed', 'recovery_manifest_persisted', 'published']).toContain(
-      journal?.state
-    );
+    try {
+      const stats = await withR2(advancing as R2Bucket, () =>
+        withArchiveEnv(
+          sweepEnv({
+            PROJECT_DATA_ARCHIVE_LEASE_MS: String(leaseMs),
+            PROJECT_DATA_ARCHIVE_WALL_TIME_MS: String(wallTimeMs),
+          }),
+          () => runProjectDataArchiveSharding(testEnv, new Date(startedAt))
+        )
+      );
+      expect(expiries[0]).toBe(startedAt + leaseMs);
+      expect(new Set(expiries).size).toBeGreaterThan(3);
+      expect(expiries.at(-1)).toBeGreaterThan(startedAt + 3 * leaseMs);
+      expect(Date.now()).toBeGreaterThanOrEqual(startedAt + wallTimeMs);
+      expect(puts.size).toBe(expiries.length);
+      expect(stats).toMatchObject({ failed: 0, yielded: 1 });
+      expect(await readJournal(projectId, sessionId)).toMatchObject({
+        state: 'copying',
+        lease_owner: null,
+        error_message: null,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('stops reclaim at the tick deadline, flags a stuck reclaim, then frees the bytes', async () => {
@@ -545,25 +562,46 @@ describe('resumable archive cursor', () => {
   it('poisons a migration whose flip keeps failing after verification, without re-verifying', async () => {
     const { projectId, sessionId, source } = await seedCandidate('flipfault', 40);
     await source.failNextArchiveFlipsForTest(10);
-    const observed: Array<{ state: string; verified: number }> = [];
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const stats = await tick();
-      observed.push({
-        state: (await readJournal(projectId, sessionId))?.state ?? 'none',
-        verified: stats.verifiedChunks ?? 0,
-      });
+    // The tick deadline is unrelated to this case: control Date so runner speed cannot
+    // split the first claim before its verification and injected flip failure.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(tickClock);
+    try {
+      const states: string[] = [];
+      const verifications: Array<{ calls: number; chunks: number }> = [];
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (attempt === 1) {
+          // Reproduce contamination without waiting for an earlier fixture's summary alarm:
+          // the second sweep verifies another session while this one makes no progress.
+          const other = await source.createSession(null, 'unrelated verification');
+          await source.persistMessageBatch(other, messagesFor('flipother', 7));
+          await source.stopSession(other);
+          await source.runSummarySyncForTest();
+        }
+        const stats = await tick();
+        if (attempt === 1) expect(stats.verifiedChunks).toBeGreaterThan(0);
+        states.push((await readJournal(projectId, sessionId))?.state ?? 'none');
+        const owner = (await readLocation(projectId, sessionId))?.owner_name ?? '';
+        verifications.push(
+          await projectDataStub(owner).archiveVerificationCountsForTest(sessionId)
+        );
+      }
+      expect(states).toEqual(['recovery_manifest_persisted', 'failed', 'failed', 'poisoned']);
+      // Global sweep stats also count other projects resurrected by delayed summary syncs.
+      // Observe this session's real verifier instead, including work before a thrown flip
+      // (which never reaches the sweep's successful-return stats aggregation).
+      expect(verifications[0].calls).toBeGreaterThan(0);
+      expect(verifications[0].chunks).toBe(Math.ceil(40 / 7));
+      expect(verifications.slice(1).map((entry) => entry.chunks)).toEqual([
+        verifications[0].chunks,
+        verifications[0].chunks,
+        verifications[0].chunks,
+      ]);
+      expect(verifications.map((entry) => entry.calls)).toEqual([1, 2, 3, 4]);
+    } finally {
+      vi.useRealTimers();
+      await source.failNextArchiveFlipsForTest(0);
     }
-    // Tick 1 copies and verifies (progress), so its flip failure keeps the phase. Every later
-    // claim finds the verification already complete, moves nothing, and spends an attempt.
-    expect(observed.map((entry) => entry.state)).toEqual([
-      'recovery_manifest_persisted',
-      'failed',
-      'failed',
-      'poisoned',
-    ]);
-    // Claims after the first verified nothing (a re-verification would have counted as
-    // progress and kept the phase instead of failing).
-    expect(observed.slice(1).every((entry) => entry.verified === 0)).toBe(true);
     // Nothing flipped: the root still owns the whole transcript.
     const rows = await runInDurableObject(source, async (_instance, state) =>
       Number(
@@ -573,7 +611,6 @@ describe('resumable archive cursor', () => {
       )
     );
     expect(rows).toBe(40);
-    await source.failNextArchiveFlipsForTest(0);
   });
 
   it('refuses to flip when the shard copy of the session anchor differs from the root', async () => {
