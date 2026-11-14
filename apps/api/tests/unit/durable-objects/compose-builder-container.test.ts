@@ -221,3 +221,17 @@ it('re-arms deadline destruction after a transient container failure', async () 
     sqlite.prepare('SELECT status,executor_instance_id FROM deployment_publish_jobs').get()
   ).toEqual({ status: 'failed', executor_instance_id: null });
 });
+
+it('never contacts the bootstrap port after acceptance, even if RUN binds it', async () => {
+  await launch();
+  expect(calls.fetch).toHaveBeenCalledTimes(2); // version probe, then the single launch
+  calls.fetch.mockImplementation(() => {
+    throw new Error('untrusted RUN now owns the former bootstrap port');
+  });
+  await builder.startJob('job', 1);
+  await builder.launchBuilder({ jobId: 'job', attempt: 1 });
+  await builder.enforceDeadline();
+  await builder.onStop();
+  expect(calls.fetch).toHaveBeenCalledTimes(2);
+  expect(calls.destroy).toHaveBeenCalled();
+});

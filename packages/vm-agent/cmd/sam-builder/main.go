@@ -44,7 +44,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	launches := make(chan builder.Launch, 1)
+	return serveController(ctx, listener, bootstrapBudget, controlBudget, builder.Run)
+}
+
+func controller(launches chan<- builder.Launch) http.Handler {
 	var once sync.Once
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +68,15 @@ func run() error {
 		}
 		w.WriteHeader(http.StatusAccepted)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: controlBudget, ReadTimeout: controlBudget, WriteTimeout: controlBudget}
+	return mux
+}
+
+// The listener is always closed before untrusted build execution is invoked.
+func serveController(ctx context.Context, listener net.Listener, bootstrapBudget, controlBudget time.Duration, execute func(context.Context, builder.Launch) error) error {
+	// Close even if cancellation wins before http.Server registers the listener.
+	defer listener.Close()
+	launches := make(chan builder.Launch, 1)
+	server := &http.Server{Handler: controller(launches), ReadHeaderTimeout: controlBudget, ReadTimeout: controlBudget, WriteTimeout: controlBudget}
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.Serve(listener) }()
 	timer := time.NewTimer(bootstrapBudget)
@@ -80,7 +91,7 @@ func run() error {
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			return errors.New("controller shutdown failed")
 		}
-		return builder.Run(ctx, launch)
+		return execute(ctx, launch)
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-serverErr:

@@ -146,6 +146,8 @@ export class ComposeBuilderContainer extends Container<Env> {
       const previous = await this.ctx.storage.get<BuildState>(STATE_KEY);
       if (previous && (previous.jobId !== jobId || previous.attempt !== attempt))
         throw errors.conflict('Builder identity cannot be reused');
+      // RUN can bind the former bootstrap port after the controller closes it.
+      // Never contact that port again after acceptance; status is callback-only.
       if (previous?.accepted) return { version: previous.version };
       const deadline = Date.parse(job.executorDeadlineAt);
       if (!Number.isFinite(deadline) || deadline <= Date.now())
