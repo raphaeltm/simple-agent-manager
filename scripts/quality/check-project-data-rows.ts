@@ -73,9 +73,15 @@ export function rowUsageQuery(
 }
 export function parseRowUsage(payload: unknown, rank: number): LabelRows[] {
   const parsed = v.parse(resultSchema, payload);
+  const calculations = parsed.result.calculations;
+  if (
+    calculations.length !== metricNames.length ||
+    new Set(calculations.map(({ alias }) => alias)).size !== metricNames.length
+  )
+    throw new Error('Incomplete or duplicate calculations');
   const rows = new Map<string, LabelRows>();
   const seen = new Map<string, Set<string>>();
-  for (const calculation of parsed.result.calculations) {
+  for (const calculation of calculations) {
     if (!(metricNames as readonly string[]).includes(calculation.alias))
       throw new Error('Unexpected calculation');
     if (calculation.aggregates.length >= 1000)

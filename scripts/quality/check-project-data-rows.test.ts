@@ -21,6 +21,15 @@ const response = (rank: number, label: string, writes: number) => ({
     })),
   },
 });
+const emptyRankResponse = () => ({
+  success: true,
+  result: {
+    calculations: ['calls', 'rowsRead', 'rowsWritten', 'alarmWrites'].map((alias) => ({
+      alias,
+      aggregates: [],
+    })),
+  },
+});
 describe('ProjectData optional row writer report', () => {
   it('uses the last complete UTC day even at month boundaries and groups logged sums by label', () => {
     const timeframe = completeUtcDay(new Date('2026-11-01T12:34:56Z'));
@@ -77,6 +86,38 @@ describe('ProjectData optional row writer report', () => {
       .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(response(0, 'batch', 19))))
       .mockResolvedValueOnce(new Response('', { status: 500 })) as unknown as typeof fetch;
+    const report = await reportProjectDataRows({
+      token: 'test',
+      accountId: 'account',
+      service: 'worker',
+      fetcher,
+    });
+    expect(report).toContain('not available');
+    expect(report).not.toContain('batch |');
+  });
+  it('requires every calculation once even when a rank has no aggregates', () => {
+    const emptyRank = emptyRankResponse();
+    expect(parseRowUsage(emptyRank, 1)).toEqual([]);
+    const missing = structuredClone(emptyRank);
+    missing.result.calculations = [];
+    const duplicate = structuredClone(emptyRank);
+    duplicate.result.calculations[1]!.alias = 'calls';
+    const extra = structuredClone(emptyRank);
+    extra.result.calculations.push(extra.result.calculations[0]!);
+    expect(() => parseRowUsage(missing, 1)).toThrow();
+    expect(() => parseRowUsage(duplicate, 1)).toThrow();
+    expect(() => parseRowUsage(extra, 1)).toThrow();
+  });
+  it('reports unavailable when a missing calculation rank accompanies a valid rank', async () => {
+    const emptyRank = emptyRankResponse();
+    const missing = { success: true, result: { calculations: [] } };
+    const fetcher = vi.fn(async (_url, options) => {
+      const rank = Number(JSON.parse(String(options?.body)).queryId.split('-').at(-1));
+      let payload: unknown = emptyRank;
+      if (rank === 0) payload = response(0, 'batch', 19);
+      else if (rank === 1) payload = missing;
+      return new Response(JSON.stringify(payload));
+    }) as unknown as typeof fetch;
     const report = await reportProjectDataRows({
       token: 'test',
       accountId: 'account',

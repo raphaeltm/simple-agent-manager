@@ -62,3 +62,7 @@ Merged main a7d05239d976e186e0c8436f3c9f6de4bc17ec89 (#2727) without conflicts. 
 Initial CI worker shard found alarm exact-total fixture race14vs15: existing scheduler skips duplicate persisted due times if recalculations share a millisecond. Test clock now advances one millisecond perread to make both writes deterministic; no production behavior change. FreshheadCI required.
 
 Staging deployment attempt1 timed out on activation/version consistency: VM-agent listversion1622, directGET1623, rollout1623completed100%; sandbox1908 in both. Prior gate PR2722 documents active-version lag, so this is not treated as proof the gate is incorrect. Parent coordinated one bounded attempt2; no new VM/functional test, no gate weakening. Release still waits final deployment/smoke completion.
+
+## CodeRabbit follow-up (2026-11-14 14:10Z)
+
+CodeRabbit approved head7f8cae08e but review5904746944 additionally identified missing calculation fields on empty ranks blending into partial totals. Reporter now requires each of four calculation aliases exactly once, while allowing four empty aggregate arrays. New mixed-rank regression fails without the guard. Reporter16tests and live telemetry report pass; count, uniqueness and missing-rank mutations each fail their intended test, restored source passes. Specialist re-review PASS. Only reporter/test files changed; no DO behavior or staging fixture rerun. Fresh exact-head CI and incremental review wait required before merge.
