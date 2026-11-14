@@ -102,7 +102,7 @@ must not leave nodes running.
 - No visible credential: named blocked reason, alert fired, no spin across two sweeps, reason
   survives retries.
 - Pinned path behaviour (including already-absent 404) is unchanged.
-- Staging: reproduce provision -> credential re-save -> delete; VM gone at the provider.
+- Staging: reproduce provision -> credential re-save -> delete; VM gone at the provider. (Verified 2026-11-14.)
 
 ## References
 
@@ -120,7 +120,13 @@ must not leave nodes running.
 - Per-provider label encodings (Scaleway/Vultr/DigitalOcean tags, UpCloud labels, Infomaniak
   metadata) are not re-tested here; they are decoded by the same adapters provider-orphan
   reconciliation already relies on, and `nodeProviderLabelsMatch` is the same comparison.
-- Staging verification: pending.
+- Staging verification (2026-11-14, exact head e7343e2, deploy 43535816263): GCP node
+  01M7BS03XRFS78QVEYE52EM5YR pinned to credentials:01M7BB346E...; an identical WIF re-save replaced
+  the row (01M7BS2M65D5PK3XBMMKPV463P); owner DELETE returned 200; GCP audit shows instances.delete by
+  sam-vm-manager (op done 01:02:27Z); D1 deletion_finalized/explicit_terminal_proof; late audit at
+  01:08:41Z clean. Pool restored semantically (the re-save moved GCP candidates to the new source, all
+  disabled). Owner DELETE path only; cron/NodeLifecycle covered by automated tests. Earlier Hetzner
+  pinned-path regression on 44b28cd5 passed.
 - CodeRabbit review (2026-11-13 23:23Z, six findings) addressed:
   - User-tier candidate for project-attributed nodes.
   - GcpApiError and limit-aware refusal classification.
