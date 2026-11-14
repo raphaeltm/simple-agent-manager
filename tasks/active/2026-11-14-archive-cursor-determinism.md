@@ -23,9 +23,9 @@ Production's persisted complete verdict and no-progress poison logic behave as d
 - [x] Observe real verification results per session; positively prove first verification and zero later re-verification.
 - [x] Freeze poison-test wall clock so a slow runner cannot split its first claim.
 - [x] Remove renewal and poison guards separately; intended tests fail, then restore and pass.
-- [ ] At least 30 full-file runs normally and 30 under bounded CPU load; record exact counts.
-- [ ] Relevant lint/typecheck/build and archive regression checks.
-- [ ] Local test-engineer, Cloudflare and completion reviews; resolve findings.
+- [x] At least 30 full-file runs normally and 30 under bounded CPU load; record exact counts.
+- [x] Relevant lint/typecheck/build and archive regression checks (full repository unit timeout noted below).
+- [x] Local test-engineer, Cloudflare and completion reviews; resolve findings.
 - [ ] Draft PR with needs-human-review; test-only staging skip explicitly recorded.
 - [ ] CI/review evidence sent to coordinator with full SHA; stop without merge.
 
@@ -40,19 +40,6 @@ Push each unit. Keep commands under 10 minutes. Do not archive until completion 
 `packages/project-data/src/scheduled/project-data-archive-sharding.ts`;
 `packages/project-data/src/do/archive-sharding.ts`.
 
-## Validation in progress
-
-Initial full Workers file: 15/15 passed. Repository lint: 22/22 tasks passed (existing web warnings).
-Local test-engineer and Cloudflare review: PASS; completion audit awaits mutation/stability/CI evidence.
-
-Earlier mutation proof on test code9d5fc49a8 (source and dist changed temporarily, restored byte-for-byte):
-
-- Renewal disabled with early return: lease test fails at line509, only1 distinct expiry vs required >3.
-- Poison threshold disabled: poison test fails at line590, fourth state is failed instead of poisoned.
-  Six fresh full-file reruns on final test code passed15/15 each before mutations. Remaining normal/stress
-  runs execute after restoration. Root unit command bounded at540s:38 tasks passed, API suite incomplete
-  after305 files, no observed failures; do not report full pnpm test success.
-
 ## Stability-discovered sibling timing assumption
 
 Initial bounded runs on CPUs0-7 found the existing first large-session test exhausted60 real150ms ticks
@@ -61,14 +48,10 @@ repaired tests passed. This is the same scheduler-budget assumption, not a produ
 The first test now advances Date25ms per real R2 write: six writes consume each150ms tick,
 retaining every existing readability/fencing/reservation/no-duplicate assertion and the60-tick bound.
 Date cleanup uses Vitest onTestFinished. Full file smoke passed15/15 after this change.
-All prior repeated-run counts are superseded for final stability proof; restart30normal+30stress.
+Earlier exploratory repetitions are excluded from the final stability count.
 
 - [x] Control the sibling large-session test's clock; preserve all assertions and tick bound.
 - [x] Re-run renewal/poison mutations and additionally remove the yield guard to prove the sibling test.
-
-Intermediate f1a9b823b mutation proof: all3 targeted tests fail intended assertions and source/dist restored.
-Deadline yield disabled => first case publishes in1 tick and fails ticks>1 (line247).
-Targeted final ESLint passed. The v2 repetition proof below exposed the fixture lifecycle race and is superseded by v3.
 
 ## Stability-discovered fixture lifecycle race
 
@@ -79,17 +62,29 @@ callbacks can restore candidate summaries after isolation, leaving source intent
 The test double now supports retiring summary syncs: disable future writes and await the existing
 serialized write-back chain. Every seeded source registers retirement in onTestFinished, so real
 summary behavior remains active throughout each test, including the poison case's explicit decoy.
-No production archive behavior changes. Final stability proof restarts with v3 prefixes.
+No production archive behavior changes. The final stability proof uses v3 prefixes.
 
 Separate telemetry follow-up (outside this test-only change): idea01M7C1MHXM1B8S9XJ89Y9V5T7A
 tracks verifiedChunks omitting verification work before an eventual migration exception.
 
 ## Final implementation validation
 
-Implementation edcb25580 includes all clock, observation, and fixture retirement changes.
-The full-file smoke passed15/15; final API typecheck and changed-file ESLint passed.
-All3 mutations were repeated on this exact implementation, each failing only the intended
-assertion (1failed/14skipped); production source and built module restored byte-for-byte.
+Implementation `edcb25580` includes all clock, observation, and fixture retirement changes.
+The full-file smoke passed 15/15; final API typecheck and changed-file ESLint passed.
+Repository lint passed 22 tasks; typecheck/build passed 40 tasks. The full repository unit command
+was bounded at 540 seconds: 38 tasks passed; API suite unfinished after 305 files with no observed
+failures. ProjectData passed 528 tests/50 files; web passed 5,211 tests/408 files. Full unit success
+is not claimed; required CI runs independently.
+All 3 mutations were repeated on this exact implementation, each failing only the intended
+assertion (1 failed/14 skipped); production source and built module restored byte-for-byte.
 Final proof counts only v3nA/B and v3sA/B batches, excluding smoke and every exploratory run.
-At the current milestone18normal+18CPU-loaded full-file runs passed, each15tests/zeroerrors.
-Final30+30 and completion audit pending.
+Final proof: 30/30 normal + 30/30 CPU-loaded full-file runs passed (900/900 tests), each 15 tests
+and zero unhandled errors, with no retries. Ten batches per mode each executed 3 runs, all foreground
+commands bounded 540 seconds and exit0. Normal processes pinned to CPUs 0–1/2–3; CPU-loaded processes pinned to CPUs 4–5/6–7
+with one busy Worker thread each, terminated on command exit. Earlier v1/v2 counts and v3smoke excluded.
+Local test-engineer, Cloudflare and implementation completion reviews PASS. External PR/CI/review
+gates are tracked in the PR body; the mandatory coordinator hold keeps this task active and unarchived.
+
+The mandatory needs-human-review label intentionally fails Specialist Review Evidence CI.
+Preserve the label and report this coordinator hold separately from executable test/build checks.
+No merge, readiness transition, deployment or label removal is authorized before exact-SHA approval.
