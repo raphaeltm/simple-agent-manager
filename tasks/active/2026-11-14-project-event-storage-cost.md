@@ -26,7 +26,7 @@ Decision: retain unmatched rows. Removing them would change the actual admin rec
 
 ## Query plans and scan diagnosis
 
-Baseline real-workerd evidence pending in research test; no production implementation changed yet.
+Pre-change real-workerd evidence is recorded below; production implementation and regression coverage are now present.
 Indexes: two automatic primary/unique indexes, project_received, source_type, subject, severity, audience, partial channel sequence and partial credential window. Channel sequence costs no insert for ordinary GitHub records. Measure actual rowsWritten rather than index count alone.
 Retention alarm `index.ts:3159-3168` passes `refreshAccounting:false`; manual retention defaults to full accounting. Do not attribute manual aggregation to alarm scans.
 Potential deletion issue: `project_event_matches.event_id` FK (`migrations.ts:169`) has only project-leading indexes. Inspect DELETE plan for full child-index scans as well as cutoff selection plan.
@@ -38,15 +38,15 @@ Usage-derived, not invoice: window November 1–13; 18.41M DO SQL writes and 7.5
 
 ## Implementation and acceptance checklist
 
-- [ ] Capture real workerd EXPLAIN plans and admission counters before implementation; document index decisions and retention scan cause.
-- [ ] Append-only migration drops only unused indexes; retain every queried/constraint index, add missing retention/FK access if demonstrated.
-- [ ] No scheduler checkpoint write when retention due time is already established.
-- [ ] No admission alarm re-arm when neither retention nor wake due time changes; pin cold and changed-due controls.
-- [ ] Retention uses cutoff seek and indexed delete checks; bounded batch and orphan cursor behavior unchanged.
-- [ ] Real-runtime counters before/after, including >1 retention batch and large fresh/matched prefixes; state throughput at outer probable limit.
-- [ ] Preserve unmatched status/idempotency/conflict; preserve matched event delivery via actual webhook producer and real subscription, including check_run/check_suite/workflow_run.
-- [ ] Pin subscription creation after event as no replay; preserve channel catch-up, credential supersession, schedule/lifecycle tests.
-- [ ] Delete each new guard, observe intended failing test, restore and record.
+- [x] Capture real workerd EXPLAIN plans and admission counters before implementation; document index decisions and retention scan cause.
+- [x] Append-only migration drops only unused indexes; retain every queried/constraint index, add missing retention/FK access if demonstrated.
+- [x] No scheduler checkpoint write when retention due time is already established.
+- [x] No admission alarm re-arm when neither retention nor wake due time changes; pin cold and changed-due controls.
+- [x] Retention uses cutoff seek and indexed delete checks; bounded batch and orphan cursor behavior unchanged.
+- [x] Real-runtime counters before/after, including >1 retention batch and large fresh/matched prefixes; state throughput at outer probable limit.
+- [x] Preserve unmatched status/idempotency/conflict; preserve matched event delivery via actual webhook producer and real subscription, including check_run/check_suite/workflow_run.
+- [x] Pin subscription creation after event as no replay; preserve channel catch-up, credential supersession, schedule/lifecycle tests.
+- [x] Delete each new guard, observe intended failing test, restore and record.
 - [ ] Rebase on main after #2727; push early/often; preserve unrelated .codex/config.toml.
 - [ ] Lint/typecheck/test/build, migration safety, local specialist reviews and task-completion validator.
 - [ ] Coordinate staging ownership; deploy and verify real producer/subscription wake on staging.
@@ -67,3 +67,21 @@ Usage-derived, not invoice: window November 1–13; 18.41M DO SQL writes and 7.5
 - Retention DELETE: PK/received lookup plus **`SCAN project_event_matches USING COVERING INDEX idx_project_event_matches_event_retention`**. The foreign-key check binds event_id without project_id, so project-leading match indexes cannot seek. Fixture with **2,000 fresh matched events + 601 expired unmatched events**, deleting 500 in first pass, read **2,020,358** rows with accounting disabled (production alarm mode). This proves the multiplicative scan, rather than guessing from SELECT alone.
 
 Index decision: drop unused source_type, subject, severity and audience indexes. Keep both constraint autoindexes, received index, channel sequence and credential expression indexes. Add match(event_id) for FK delete seeks. Reverse the received index with `ORDER BY received_at ASC,id DESC` to avoid sorting without a one-time rewrite of the populated event index. Equal-timestamp unmatched cleanup order changes, but oldest-first, batch limits and the separate orphan cursor do not. The seek bounds reads by expired candidates; protected old matched records may still need inspection, so no universal O(deletions) claim.
+
+### Throughput and write budget
+
+The existing event-only backlog drains at up to 500 logical events per pass, retrying after the existing 60-second minimum when `hasMore` is true. A 601-event equal-time fixture completes in two passes (one retry interval); a 1M-event event-only backlog needs 2,000 passes, approximately 33h20m. Normal cadence remains 24h. Other retention phases share the physical mutation budget and can reduce event throughput; this change preserves that policy and orphan cursor. New FK index adds one write per stored match, in exchange for removing full child-index scans on each event delete. No index rebuild of existing events is needed.
+
+Steady-state unmatched GitHub admission after the change is **5 SQL writes** (row + primary identity + delivery uniqueness + received-time + credential-window index), **0 scheduler checkpoint writes**, **0 setAlarm calls**. This retains full admin visibility and duplicate/conflict semantics. If a later product decision removes unmatched status visibility, the theoretical no-record path could avoid the event writes, but durable deduplication/fingerprint retention still needs an explicitly designed receipt contract; do not claim zero total writes without that design.
+
+### Review and reproducible measurements
+
+Cloudflare + constitution review PASS on 018650a93. Test review confirms producer/subscriber slice coverage; added direct EXPLAIN assertion on the actual multi-ID production DELETE so losing the PK hint fails independently of a generous read bound. Completion/doc review requested this wording and checklist update and an expired-protected-prefix control.
+
+Current workerd snapshot compares legacy indexes versus the new migration while BOTH sides use optimized selector/deletion code: **2,006,527 → 6,527 reads**, 500 logical deletions, **504 cursor rowsWritten** on both sides. This comparison isolates the FK index; the separate historical 2,020,358-read baseline predates selector reversal and identity hint. Do not confuse the two baselines or infer delete-index billing from admission INSERT counters.
+
+Rule62 runtime red proofs: removing checkpoint WHERE changed steady admission **5 → 7 writes**; removing admission IF made the warm RPC setAlarm assertion fail. Both guards restored; new runtime suites7/7 pass after restoration. The first alarm mutant caused unused-variable compile errors and was discarded as invalid proof; the valid mutant referenced all compared values while forcing the branch.
+
+Expired-protected control now passes: with 2,000 expired protected events ordered before 601 deletable events, first pass deletes 500 with **10,527 reads / 504 writes**, second deletes 101 with **8,533 reads / 104 writes**. All 2,000 protected events and matches survive. Remaining candidate work is linear in the expired protected prefix (plus existing active-match expiry checks), not a table-size-independent universal deletion bound. A follow-up would need bounded candidate windows and a persisted event-retention cursor, fair wrap/recheck semantics, and matching continuation scheduling; it must not weaken live-match protection or cleanup cadence. Under the original permission to split, this PR ships the lower-risk write/FK fixes first; the coordinator confirmed that scope in durable message `1ed24a33-f6cb-40c6-b6d5-aadc75fbdb72`. Record these limits in the PR and the post-deploy idea note.
+
+Identity-hint mutation proof also passed: removing the PK hint makes the actual multi-ID DELETE plan assertion fail, showing `SEARCH project_events ... idx_project_events_project_received (project_id=?)` instead of the required `sqlite_autoindex_project_events_1 (id=?)`. Restored source and rebuilt before rebase/final tests.

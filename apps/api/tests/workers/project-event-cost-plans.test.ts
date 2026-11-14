@@ -31,11 +31,11 @@ const inputFor = (projectId: string, deliveryKey: string) => ({
 });
 
 function observe(sql: SqlStorage) {
-  const statements: Array<{ query: string; cursor: SqlStorageCursor }> = [];
+  const statements: Array<{ query: string; bindings: unknown[]; cursor: SqlStorageCursor }> = [];
   const original = sql.exec.bind(sql);
   const spy = vi.spyOn(sql, 'exec').mockImplementation((query: string, ...bindings: unknown[]) => {
     const cursor = original(query, ...bindings);
-    statements.push({ query, cursor });
+    statements.push({ query, bindings, cursor });
     return cursor;
   });
   return {
@@ -204,6 +204,12 @@ describe('project event physical storage cost', () => {
               refreshAccounting: false,
             });
             const firstUsage = observed.usage();
+            const actualDelete = observed.statements.find((row) =>
+              row.query.startsWith('DELETE FROM project_events')
+            )!;
+            const actualDeletePlan = plan(sql, actualDelete.query, ...actualDelete.bindings);
+            expect(actualDeletePlan).toContain('sqlite_autoindex_project_events_1 (id=?)');
+            expect(actualDeletePlan).not.toContain('idx_project_events_project_received');
             const selection = observed.statements.find((row) =>
               row.query.startsWith('SELECT e.id AS id FROM project_events')
             )!;
@@ -242,6 +248,18 @@ describe('project event physical storage cost', () => {
         })
       );
     }
+    expect(measurements.map(({ read, written }) => ({ read, written }))).toMatchInlineSnapshot(`
+      [
+        {
+          "read": 2006527,
+          "written": 504,
+        },
+        {
+          "read": 6527,
+          "written": 504,
+        },
+      ]
+    `);
     expect(measurements[0]!.deletePlan).toContain('SCAN project_event_matches');
     expect(measurements[0]!.read).toBeGreaterThan(2_000_000);
     expect(measurements[1]!.deletePlan).toContain(
@@ -249,5 +267,48 @@ describe('project event physical storage cost', () => {
     );
     expect(measurements[1]!.deletePlan).not.toContain('SCAN project_event_matches');
     expect(measurements[1]!.read).toBeLessThan(20_000);
+  });
+  it('preserves expired protected events and measures the remaining linear cutoff candidate work', async () => {
+    const projectId = 'cost-retention-expired-protected';
+    const measurements = await runInDurableObject(stubFor(projectId), (_instance, state) => {
+      const sql = state.storage.sql;
+      seedRetention(sql, projectId);
+      // Force all protected events ahead of the deletable events in cutoff order.
+      // Their active matches must protect them even though received_at is old.
+      sql.exec("UPDATE project_events SET received_at=0 WHERE id LIKE 'fresh-%'");
+      const observed = observe(sql);
+      try {
+        const first = runProjectEventRetention(sql, testEnv, projectId, {
+          projectId,
+          refreshAccounting: false,
+        });
+        const firstUsage = observed.usage();
+        expect(first).toMatchObject({ deletedEvents: 500, hasMore: true });
+        observed.statements.length = 0;
+        const second = runProjectEventRetention(sql, testEnv, projectId, {
+          projectId,
+          refreshAccounting: false,
+        });
+        const secondUsage = observed.usage();
+        expect(second).toMatchObject({ deletedEvents: 101, hasMore: false });
+        expect(sql.exec('SELECT COUNT(*) AS n FROM project_events').one().n).toBe(2000);
+        expect(sql.exec('SELECT COUNT(*) AS n FROM project_event_matches').one().n).toBe(2000);
+        return { first: firstUsage, second: secondUsage };
+      } finally {
+        observed.restore();
+      }
+    });
+    expect(measurements).toMatchInlineSnapshot(`
+      {
+        "first": {
+          "read": 10527,
+          "written": 504,
+        },
+        "second": {
+          "read": 8533,
+          "written": 104,
+        },
+      }
+    `);
   });
 });
