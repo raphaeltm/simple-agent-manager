@@ -414,9 +414,8 @@ export async function readDefaultPoolSummary(
     pool,
     {
       sourceCount: authoritySources.length,
-      activeSourceCount: authoritySources.filter(
-        (source) => source.status === ACTIVE_STATUS && !excludedSources.has(source.id)
-      ).length,
+      activeSourceCount: authoritySources.filter((source) => source.status === ACTIVE_STATUS)
+        .length,
       candidateCount: candidates.filter((candidate) =>
         isEditorVisibleCapacityCandidateRole(candidate.workloadRole)
       ).length,

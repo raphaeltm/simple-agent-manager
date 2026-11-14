@@ -19,10 +19,7 @@ import {
 import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
 import { sessionSleepClaimLeaseMs } from './session-snapshot-sleep-claim';
 import { signalSessionWakeReadyBestEffort } from './session-wake-ready';
-import {
-  isSessionHistoricalWakeReceiptCurrent,
-  isSessionWakeReadyCurrent,
-} from './session-wake-ready-authority';
+import { isSessionWakeReadyCurrent } from './session-wake-ready-authority';
 
 /** ProjectData owns the delivery contract these describe; re-exported for worker callers. */
 export type { VmPromptDeliverySourceTaskGuard, VmPromptDeliveryTarget };
@@ -472,14 +469,12 @@ export async function resolveVmPromptDeliveryTarget(
     };
     // Preflight before any activation: a replaced runtime cannot nudge an old captured target.
     if (!(await isSessionWakeReadyCurrent(env, readiness))) {
-      if (!(await isSessionHistoricalWakeReceiptCurrent(env, readiness, expectedRuntime)))
-        return {
-          kind: 'retry',
-          reason: allowWake
-            ? 'Committed wake activation is pending'
-            : 'Committed wake authority is no longer current',
-        };
-      return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
+      return {
+        kind: 'retry',
+        reason: allowWake
+          ? 'Committed wake activation is pending'
+          : 'Committed wake authority is no longer current',
+      };
     }
     // Steering and receipt probes never activate a chat, nudge its inbox or re-arm its alarm.
     if (!allowWake)

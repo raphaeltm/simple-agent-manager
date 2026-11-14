@@ -5,8 +5,11 @@ import {
   env,
   waitOnExecutionContext,
 } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
+import type { NotificationService } from '../../src/durable-objects/notification';
 import type { Env } from '../../src/env';
 import { scheduled } from '../../src/scheduled/handler';
 import {
@@ -15,6 +18,7 @@ import {
 } from '../../src/services/admin-settings';
 import { CAPACITY_POOL_CONTINUATION_CRON } from '../../src/services/capacity-pool-refresh-defaults';
 import { defaultPoolId } from '../../src/services/default-capacity-pool-helpers';
+import { ensureUserDefaultPool } from '../../src/services/default-capacity-pools-ensure';
 import { seedUser } from './helpers/seed-d1';
 
 const refreshPoolIds: string[] = [];
@@ -22,8 +26,14 @@ beforeEach(() => __resetAdminSettingsCacheForTest());
 afterEach(async () => {
   vi.restoreAllMocks();
   __resetAdminSettingsCacheForTest();
+  await env.DATABASE.prepare(
+    "DELETE FROM platform_settings WHERE key='operations.capacityPoolRefreshDeadlineMs'"
+  ).run();
   for (const poolId of refreshPoolIds.splice(0)) {
     await env.DATABASE.batch([
+      env.DATABASE.prepare(
+        "UPDATE users SET role = 'user' WHERE id IN (SELECT owner_user_id FROM capacity_pools WHERE id = ?)"
+      ).bind(poolId),
       env.DATABASE.prepare('DELETE FROM capacity_pool_refreshes WHERE pool_id = ?').bind(poolId),
       env.DATABASE.prepare('DELETE FROM capacity_pools WHERE id = ?').bind(poolId),
     ]);
@@ -85,6 +95,48 @@ function events(spy: ReturnType<typeof vi.spyOn>) {
       return [];
     }
   });
+}
+
+/** Fail the real scope-generation read before ensure reaches its refresh begin writer. */
+function preRefreshReadFailure(userId: string, fail: () => Promise<never>) {
+  return new Proxy(env.DATABASE, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return (query: string) => {
+          const statement = target.prepare(query);
+          return new Proxy(statement, {
+            get(prepared, method) {
+              if (method === 'bind') {
+                return (...parameters: unknown[]) => {
+                  const bound = prepared.bind(...parameters);
+                  if (!parameters.includes(`capacityPools.sourceGeneration.v1:user:${userId}`))
+                    return bound;
+                  return new Proxy(bound, {
+                    get(selected, operation) {
+                      if (['raw', 'all', 'first'].includes(String(operation))) return fail;
+                      const value: unknown = Reflect.get(selected, operation, selected);
+                      return typeof value === 'function' ? value.bind(selected) : value;
+                    },
+                  });
+                };
+              }
+              const value: unknown = Reflect.get(prepared, method, prepared);
+              return typeof value === 'function' ? value.bind(prepared) : value;
+            },
+          });
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+async function refreshErrors(poolId: string) {
+  const rows = await env.OBSERVABILITY_DATABASE.prepare(
+    "SELECT level, context FROM platform_errors WHERE message LIKE 'Compute catalog refresh stopped%'"
+  ).all<{ level: string; context: string }>();
+  return rows.results.filter((row) => JSON.parse(row.context).poolId === poolId);
 }
 
 describe('one-minute catalog continuation on migrated D1', () => {
@@ -240,5 +292,112 @@ describe('one-minute catalog continuation on migrated D1', () => {
         ).all()
       ).results
     ).toEqual([{ level: 'error' }]);
+  });
+
+  it('bounds repeated pre-refresh read failures across cron restarts and alerts once', async () => {
+    const f = await pendingRefresh();
+    await env.DATABASE.prepare("UPDATE users SET role='superadmin', status='active' WHERE id=?")
+      .bind(f.userId)
+      .run();
+    await updateAdminSettings(env as unknown as Env, {
+      actorUserId: f.userId,
+      changes: [
+        { name: 'operations.cronSweepsEnabled', value: true },
+        { name: 'operations.capacityPoolRefreshDeadlineMs', value: 120_000 },
+      ],
+    });
+    await env.DATABASE.prepare(
+      'UPDATE capacity_pool_refreshes SET attempts=0, started_at=0, deadline_at=0 WHERE pool_id=?'
+    )
+      .bind(f.poolId)
+      .run();
+    const startedAt = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(startedAt);
+    const fail = vi.fn(async () => {
+      throw new Error('Pre-refresh scope read unavailable');
+    });
+    const external = vi.spyOn(globalThis, 'fetch');
+    await tick(preRefreshReadFailure(f.userId, fail));
+    expect(await readRefresh(f.poolId)).toMatchObject({
+      state: 'pending',
+      generation: 11,
+      attempts: 1,
+      started_at: startedAt,
+      deadline_at: startedAt + 120_000,
+      next_attempt_at: startedAt + 15_000,
+    });
+    expect(await refreshErrors(f.poolId)).toEqual([]);
+    // New bindings model replacement invocations without carrying continuation state.
+    clock.mockReturnValue(startedAt + 60_000);
+    await tick(preRefreshReadFailure(f.userId, fail));
+    expect(await readRefresh(f.poolId)).toMatchObject({
+      state: 'pending',
+      generation: 12,
+      attempts: 2,
+      started_at: startedAt,
+      deadline_at: startedAt + 120_000,
+      next_attempt_at: startedAt + 90_000,
+    });
+    clock.mockReturnValue(startedAt + 120_000);
+    await Promise.all([
+      tick(preRefreshReadFailure(f.userId, fail)),
+      tick(preRefreshReadFailure(f.userId, fail)),
+    ]);
+    const failed = await readRefresh(f.poolId);
+    expect(failed).toMatchObject({
+      state: 'failed',
+      attempts: 2,
+      started_at: startedAt,
+      deadline_at: startedAt + 120_000,
+    });
+    await tick(preRefreshReadFailure(f.userId, fail));
+    expect(await readRefresh(f.poolId)).toEqual(failed);
+    expect(fail).toHaveBeenCalledTimes(2);
+    expect(external).not.toHaveBeenCalled();
+    expect(await refreshErrors(f.poolId)).toHaveLength(1);
+    const notifications = env.NOTIFICATION.get(
+      env.NOTIFICATION.idFromName(f.userId)
+    ) as DurableObjectStub<NotificationService>;
+    expect(
+      (
+        await notifications.listNotifications(f.userId, { type: 'cron_failure' })
+      ).notifications.filter(
+        (notification) => notification.title === 'Compute catalog refresh stopped'
+      )
+    ).toHaveLength(1);
+  });
+
+  it('makes a stale pre-refresh failure harmless after a manual publisher takes ownership', async () => {
+    const f = await pendingRefresh();
+    await setCronEnabled(f.userId, true);
+    let rejectRead!: (reason: Error) => void;
+    let markRead!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      markRead = resolve;
+    });
+    const blocked = new Promise<never>((_resolve, reject) => {
+      rejectRead = reject;
+    });
+    const fail = vi.fn(() => {
+      markRead();
+      return blocked;
+    });
+    const older = tick(preRefreshReadFailure(f.userId, fail));
+    let newer: Awaited<ReturnType<typeof readRefresh>> = null;
+    try {
+      await reached;
+      await tick(preRefreshReadFailure(f.userId, fail));
+      expect(fail).toHaveBeenCalledTimes(1);
+      await ensureUserDefaultPool(drizzle(env.DATABASE, { schema }), f.userId, {
+        env: env as unknown as Env,
+      });
+      newer = await readRefresh(f.poolId);
+      expect(newer).toMatchObject({ state: 'complete', attempts: 2, generation: 11 });
+    } finally {
+      rejectRead(new Error('Old pre-refresh read failed after another publisher completed'));
+      await older;
+    }
+    expect(await readRefresh(f.poolId)).toEqual(newer);
+    expect(await refreshErrors(f.poolId)).toEqual([]);
   });
 });

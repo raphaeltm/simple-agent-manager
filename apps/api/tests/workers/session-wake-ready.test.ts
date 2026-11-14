@@ -245,6 +245,100 @@ describe('wake completion → D1 authority → DO scheduling → HTTP prompt adm
     }
   );
 
+  it.each(['different workspace', 'sleeping after committed wake'] as const)(
+    'holds a follow-up when the public chat is %s despite a historical restore',
+    async (publicState) => {
+      const { stub, input, nodeId, userId } = await fixture('vm');
+      expect(await stub.sleepSession(input.chatSessionId)).toBe(true);
+      expect(
+        await notifyWakeSettled({
+          env: bindings,
+          projectId: input.projectId,
+          chatSessionId: input.chatSessionId,
+          status: 'restored',
+          readiness: input,
+        })
+      ).toBe(true);
+      // A later runtime owns this chat. The old receipt is provenance, not activation authority.
+      const oldWorkspace = input.workspaceId + '-historical';
+      const oldTask = input.workspaceId + '-historical-task';
+      await seedWorkspace(oldWorkspace, nodeId, userId, {
+        projectId: input.projectId,
+        status: 'deleted',
+      });
+      await seedTask(oldTask, input.projectId, userId, {
+        status: 'completed',
+        workspaceId: oldWorkspace,
+      });
+      await env.DATABASE.prepare(
+        'UPDATE session_snapshots SET recovery_task_id=?, recovery_workspace_id=? WHERE chat_session_id=?'
+      )
+        .bind(oldTask, oldWorkspace, input.chatSessionId)
+        .run();
+      if (publicState === 'different workspace')
+        await stub.linkSessionToWorkspace(input.chatSessionId, oldWorkspace);
+      else expect(await stub.sleepSession(input.chatSessionId)).toBe(true);
+      const originalFetch = globalThis.fetch;
+      let runtimeCalls = 0;
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const target = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
+        if (!target.startsWith(getNodeBackendBaseUrl(nodeId, bindings))) return originalFetch(url);
+        runtimeCalls++;
+        if (target.endsWith(buildVmPromptDeliveryCapabilitiesPath(input.workspaceId)))
+          return Response.json(versionedPromptCapabilities('test-runtime'));
+        return Response.json(
+          acceptedPromptResponse(input.agentSessionId, 'first', 'test-runtime', Date.now())
+        );
+      });
+      await runInDurableObject(stub, async (instance, state) => {
+        const signal = vi.spyOn(instance, 'signalSessionWakeReady');
+        const before = state.storage.sql
+          .exec('SELECT id,prompt_message_id,target_session_id FROM session_inbox ORDER BY id')
+          .toArray();
+        const [claim] = claimDuePromptDeliveries(state.storage.sql, config);
+        expect(claim).toBeDefined();
+        const result = await runPromptDeliveryClaim(
+          state.storage.sql,
+          bindings,
+          config,
+          claim!,
+          new DefaultVmPromptDeliveryAdapter(bindings),
+          {
+            projectId: input.projectId,
+            recalculateAlarm: async () => {},
+            broadcastEvent: () => {},
+            armIdleCleanup: () => {},
+            nudgeDeliveries: () => 0,
+            scheduleSummarySync: () => {},
+          }
+        );
+        expect(result).toMatchObject({ kind: 'retry', reason: 'not_ready' });
+        expect(signal).not.toHaveBeenCalled();
+        expect(runtimeCalls).toBe(0);
+        expect(
+          state.storage.sql
+            .exec('SELECT id,prompt_message_id,target_session_id FROM session_inbox ORDER BY id')
+            .toArray()
+        ).toEqual(before);
+        expect(
+          state.storage.sql
+            .exec('SELECT delivery_state FROM session_inbox WHERE id=?', 'first')
+            .toArray()
+        ).toEqual([{ delivery_state: 'retry_wait' }]);
+        expect(
+          state.storage.sql
+            .exec('SELECT status,workspace_id FROM chat_sessions WHERE id=?', input.chatSessionId)
+            .toArray()
+        ).toEqual([
+          {
+            status: publicState === 'different workspace' ? 'active' : 'sleeping',
+            workspace_id: publicState === 'different workspace' ? oldWorkspace : input.workspaceId,
+          },
+        ]);
+      });
+    }
+  );
+
   it.each(['migrating', 'frozen'] as const)(
     'preserves the archive fence for a late wake-ready RPC while location is %s',
     async (locationState) => {

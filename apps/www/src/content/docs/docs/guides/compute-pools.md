@@ -402,8 +402,8 @@ you do not need to send **Continue** again. Cancellation, archive, lost permissi
 request and snapshot expirations still stop recovery. Missing credentials, an empty pool or
 requirements no allowed machine can meet remain actionable failures. Disabled sources and revoked
 accounts also require action; SAM reports an actionable failure instead of waiting for the request
-to expire. An unpublished
-pool waits automatically only while its refresh is pending within its recovery budget.
+to expire. Unavailable catalog offerings, including those in a previously published pool,
+wait automatically only while a refresh is pending within its recovery budget.
 
 An eviction blocked before its first recovery claim, without an accepted inbox message or event,
 is a separate recovery path and is not covered by this automatic continuation.

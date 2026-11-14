@@ -98,7 +98,7 @@ const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassifica
   placement_catalog_refresh_unavailable: {
     action: 'report',
     description:
-      'The compute catalog has not been published and has no active refresh within its budget. Check the selected account and use Infrastructure Refresh before retrying.',
+      'The selected compute catalog offerings are unavailable and no refresh is pending within its budget. Check the selected account and use Infrastructure Refresh before retrying.',
   },
   placement_sources_disabled: {
     action: 'report',

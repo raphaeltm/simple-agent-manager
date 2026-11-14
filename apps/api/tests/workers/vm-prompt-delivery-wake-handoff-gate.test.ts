@@ -7,8 +7,13 @@
  * claim naming another project's task reads as no claiming task (rule 11). The real-ordering
  * wake test is `vm-wake-event-delivery-handoff.test.ts`.
  */
+import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 import type { ProjectData } from '@simple-agent-manager/project-data/internal/do/index';
-import { acceptPromptDelivery } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import {
+  acceptPromptDelivery,
+  claimDuePromptDeliveries,
+} from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
+import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import type { SessionWakeReadyInput } from '@simple-agent-manager/project-data/internal/do/session-wake-ready';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
@@ -39,9 +44,6 @@ interface GateCase {
   foreignClaimTaskStatus?: string;
   /** The restore belongs to a distinct earlier task, not a rebound current wake. */
   historicalClaimTask?: boolean;
-  publicTaskIsHistorical?: boolean;
-  publicTaskInitiallyUnlinked?: boolean;
-  authorityRejected?: boolean;
   held: boolean;
 }
 
@@ -93,7 +95,6 @@ const CASES: GateCase[] = [
     recoveryStatus: 'restored',
     recoveryWorkspace: 'older',
     taskStatus: 'in_progress',
-    authorityRejected: true,
     held: false,
   },
   {
@@ -102,28 +103,6 @@ const CASES: GateCase[] = [
     recoveryStatus: 'restored',
     recoveryWorkspace: 'older',
     taskStatus: 'delegated',
-    authorityRejected: true,
-    held: false,
-  },
-  {
-    name: 'historical restore cannot authorize a cancelled current task',
-    runtime: 'vm',
-    recoveryStatus: 'restored',
-    recoveryWorkspace: 'older',
-    taskStatus: 'cancelled',
-    historicalClaimTask: true,
-    authorityRejected: true,
-    held: false,
-  },
-  {
-    name: 'historical restore cannot replace the public current-task binding',
-    runtime: 'vm',
-    recoveryStatus: 'restored',
-    recoveryWorkspace: 'older',
-    taskStatus: 'in_progress',
-    historicalClaimTask: true,
-    publicTaskIsHistorical: true,
-    authorityRejected: true,
     held: false,
   },
   {
@@ -186,11 +165,7 @@ async function seedDeliveryTarget(testCase: GateCase) {
     env.PROJECT_DATA.idFromName(projectId)
   ) as DurableObjectStub<ProjectData>;
   await stub.ensureProjectId(projectId);
-  const publicTaskId = testCase.publicTaskInitiallyUnlinked
-    ? null
-    : testCase.publicTaskIsHistorical
-      ? `${prefix}-historical-task`
-      : taskId;
+  const publicTaskId = taskId;
   expect(
     await stub.createSession(workspaceId, 'Wake handoff', publicTaskId, userId, chatSessionId)
   ).toBe(chatSessionId);
@@ -279,52 +254,92 @@ async function seedDeliveryTarget(testCase: GateCase) {
   };
 }
 
-describe('delivery target during a VM wake handoff', () => {
+describe('real delivery runner during a VM wake handoff', () => {
   it.each(CASES)('$name: held=$held', async (testCase) => {
     const target = await seedDeliveryTarget(testCase);
-    const resolution = await resolveVmPromptDeliveryTarget(
-      env as unknown as Env,
-      target.projectId,
-      target.chatSessionId,
-      undefined,
-      async () => null
-    );
-    if (testCase.authorityRejected) {
-      expect(resolution).toMatchObject({
-        kind: 'retry',
-        reason: 'Committed wake activation is pending',
-      });
-    } else if (testCase.held) {
-      expect(resolution).toEqual({
-        kind: 'retry',
-        reason: `Session is waking (${target.taskId}); agent handoff not committed`,
-      });
-    } else {
-      // Liveness: a released target resolves to this exact runtime, not merely "not held".
-      expect(resolution).toMatchObject({
-        kind: 'ready',
-        target: { workspaceId: target.workspaceId, runtime: testCase.runtime },
-      });
-    }
-    expect(await target.stub.getSession(target.chatSessionId)).toMatchObject({
-      status: testCase.held ? 'sleeping' : 'active',
-      workspaceId: target.workspaceId,
-      taskId: target.publicTaskId,
-    });
-    await runInDurableObject(target.stub, (_instance, state) => {
-      if (testCase.historicalClaimTask) {
-        // A historical receipt neither certifies nor activates the current runtime.
+    await runInDurableObject(target.stub, async (_instance, state) => {
+      await state.storage.deleteAlarm();
+      acceptPromptDelivery(
+        state.storage.sql,
+        {},
+        {
+          deliveryId: 'handoff',
+          targetSessionId: target.chatSessionId,
+          displayContent: 'Preserve accepted handoff intent',
+          senderType: 'human',
+          senderId: target.userId,
+          sourceKind: 'user_followup',
+        }
+      );
+      const config = resolveDurableExecutionConfig({});
+      const [claim] = claimDuePromptDeliveries(state.storage.sql, config);
+      expect(claim).toBeDefined();
+      // Drive the production runner's local-active predicate into the real target resolver.
+      // Transport is outside this SQL gate test; the accepted HTTP path is covered in session-wake-ready.
+      let resolution: Awaited<ReturnType<typeof resolveVmPromptDeliveryTarget>> | undefined;
+      const submit = async (
+        input: import('@simple-agent-manager/project-data').VmPromptDeliveryAdapterInput
+      ) => {
+        resolution = await resolveVmPromptDeliveryTarget(
+          env as unknown as Env,
+          input.projectId,
+          input.claim.message.targetSessionId,
+          input.sourceTaskGuard,
+          input.beforeSideEffect,
+          { isSessionActive: input.isSessionActive }
+        );
+        return {
+          kind: 'retry' as const,
+          reason: 'not_ready' as const,
+          error: 'Transport deliberately outside gate fixture',
+          runtimeIdentity: null,
+          capabilities: null,
+        };
+      };
+      await runPromptDeliveryClaim(
+        state.storage.sql,
+        env as unknown as Env,
+        config,
+        claim!,
+        { submit, reconcile: submit },
+        {
+          projectId: target.projectId,
+          recalculateAlarm: async () => {},
+          broadcastEvent: () => {},
+          armIdleCleanup: () => {},
+          nudgeDeliveries: () => 0,
+          scheduleSummarySync: () => {},
+        }
+      );
+      expect(resolution).toMatchObject(
+        testCase.held
+          ? {
+              kind: 'retry',
+              reason: `Session is waking (${target.taskId}); agent handoff not committed`,
+            }
+          : {
+              kind: 'ready',
+              target: { workspaceId: target.workspaceId, runtime: testCase.runtime },
+            }
+      );
+      expect(
+        state.storage.sql
+          .exec('SELECT status,workspace_id FROM chat_sessions WHERE id=?', target.chatSessionId)
+          .toArray()
+      ).toEqual([
+        { status: testCase.held ? 'sleeping' : 'active', workspace_id: target.workspaceId },
+      ]);
+      if (testCase.historicalClaimTask)
         expect(state.storage.sql.exec('SELECT * FROM session_wake_readiness').toArray()).toEqual(
           []
         );
-      }
-      return state.storage.deleteAlarm();
+      await state.storage.deleteAlarm();
     });
   });
 });
 
-const HISTORICAL_CASE: GateCase = {
-  name: 'independently committed current runtime with a historical restore receipt',
+const COMMITTED_CASE: GateCase = {
+  name: 'committed restore awaiting activation',
   runtime: 'vm',
   recoveryStatus: 'restored',
   recoveryWorkspace: 'older',
@@ -378,9 +393,9 @@ async function resolveAfterTargetLookup(
       { allowWake }
     );
     expect(captured).toBe(true);
-    // Historical proof is read-only; stale primary captures fail before activation as well.
+    // A stale primary capture fails before activation.
     expect(sideEffectGuards).toBe(0);
-    // The historical exemption is read-only; it never certifies an old wake as current.
+    // Rejected captures never certify a wake as current.
     await runInDurableObject(target.stub, (_instance, state) => {
       expect(state.storage.sql.exec('SELECT * FROM session_wake_readiness').toArray()).toEqual([]);
     });
@@ -389,103 +404,6 @@ async function resolveAfterTargetLookup(
     await runInDurableObject(target.stub, (_instance, state) => state.storage.deleteAlarm());
   }
 }
-
-describe('historical restore receipt authority after optimistic target lookup', () => {
-  it.each([true, false])('rejects a replaced snapshot attempt, allowWake=%s', async (allowWake) => {
-    const target = await seedDeliveryTarget(HISTORICAL_CASE);
-    const resolution = await resolveAfterTargetLookup(target, allowWake, async () => {
-      await env.DATABASE.prepare(
-        'UPDATE session_snapshots SET recovery_attempt_id = ? WHERE chat_session_id = ?'
-      )
-        .bind('wake-2', target.chatSessionId)
-        .run();
-    });
-    expect(resolution).toMatchObject({ kind: 'retry' });
-    expect(await target.stub.getSession(target.chatSessionId)).toMatchObject({
-      status: 'active',
-      workspaceId: target.workspaceId,
-      taskId: target.taskId,
-    });
-  });
-
-  it.each([
-    { name: 'node assignment', allowWake: true, changeNode: true },
-    { name: 'node assignment', allowWake: false, changeNode: true },
-    { name: 'workspace generation', allowWake: true, changeNode: false },
-    { name: 'workspace generation', allowWake: false, changeNode: false },
-  ])('rejects a changed $name, allowWake=$allowWake', async ({ allowWake, changeNode }) => {
-    const target = await seedDeliveryTarget(HISTORICAL_CASE);
-    const replacementNodeId = `${target.nodeId}-replacement`;
-    await seedNode(replacementNodeId, target.userId);
-    await env.DATABASE.prepare('UPDATE workspaces SET callback_generation = ? WHERE id = ?')
-      .bind('generation-1', target.workspaceId)
-      .run();
-    const resolution = await resolveAfterTargetLookup(target, allowWake, async () => {
-      await env.DATABASE.prepare(
-        changeNode
-          ? 'UPDATE workspaces SET node_id = ? WHERE id = ?'
-          : 'UPDATE workspaces SET callback_generation = ? WHERE id = ?'
-      )
-        .bind(changeNode ? replacementNodeId : 'generation-2', target.workspaceId)
-        .run();
-    });
-    expect(resolution).toMatchObject({ kind: 'retry' });
-    // Both nodes remain healthy: stale identity, rather than unavailable compute, rejects it.
-    expect(
-      (
-        await env.DATABASE.prepare('SELECT status FROM nodes WHERE id IN (?, ?)')
-          .bind(target.nodeId, replacementNodeId)
-          .all()
-      ).results
-    ).toEqual([{ status: 'running' }, { status: 'running' }]);
-  });
-
-  it.each([true, false])(
-    'rejects a relinked ProjectData workspace, allowWake=%s',
-    async (allowWake) => {
-      const target = await seedDeliveryTarget(HISTORICAL_CASE);
-      const resolution = await resolveAfterTargetLookup(target, allowWake, async () => {
-        await target.stub.linkSessionToWorkspace(target.chatSessionId, target.olderWorkspaceId);
-      });
-      expect(resolution).toMatchObject({ kind: 'retry' });
-      expect(await target.stub.getSession(target.chatSessionId)).toMatchObject({
-        status: 'active',
-        workspaceId: target.olderWorkspaceId,
-        taskId: target.taskId,
-      });
-    }
-  );
-
-  it.each([
-    { allowWake: true, linkCurrentTask: true },
-    { allowWake: false, linkCurrentTask: true },
-    { allowWake: true, linkCurrentTask: false },
-    { allowWake: false, linkCurrentTask: false },
-  ])(
-    'requires the exact ProjectData task link, allowWake=$allowWake current=$linkCurrentTask',
-    async ({ allowWake, linkCurrentTask }) => {
-      const target = await seedDeliveryTarget({
-        ...HISTORICAL_CASE,
-        publicTaskInitiallyUnlinked: true,
-      });
-      const linkedTaskId = linkCurrentTask ? target.taskId : target.claimTaskId;
-      const resolution = await resolveAfterTargetLookup(target, allowWake, async () => {
-        // Use the real NULL -> task binding: the RPC forbids replacing an existing task.
-        expect(await target.stub.linkSessionToTask(target.chatSessionId, linkedTaskId)).toBe(true);
-      });
-      expect(resolution).toMatchObject(
-        linkCurrentTask
-          ? { kind: 'ready', target: { workspaceId: target.workspaceId, nodeId: target.nodeId } }
-          : { kind: 'retry' }
-      );
-      expect(await target.stub.getSession(target.chatSessionId)).toMatchObject({
-        status: 'active',
-        workspaceId: target.workspaceId,
-        taskId: linkedTaskId,
-      });
-    }
-  );
-});
 
 describe('committed current restore authority after optimistic target lookup', () => {
   it.each([
@@ -497,7 +415,7 @@ describe('committed current restore authority after optimistic target lookup', (
     'rejects a changed $name before activating the chat, allowWake=$allowWake',
     async ({ allowWake, changeNode }) => {
       const target = await seedDeliveryTarget({
-        ...HISTORICAL_CASE,
+        ...COMMITTED_CASE,
         historicalClaimTask: false,
         recoveryWorkspace: 'target',
         held: true,
@@ -535,7 +453,7 @@ describe('captured runtime authority inside the real readiness DO', () => {
     'rejects changed $name during its authority read without activation or inbox nudge',
     async ({ mutation }) => {
       const target = await seedDeliveryTarget({
-        ...HISTORICAL_CASE,
+        ...COMMITTED_CASE,
         historicalClaimTask: false,
         recoveryWorkspace: 'target',
         held: true,
@@ -642,166 +560,4 @@ describe('captured runtime authority inside the real readiness DO', () => {
       });
     }
   );
-});
-
-const AWAITED_HISTORICAL_MUTATIONS = [
-  'matched current authority',
-  'node assignment',
-  'workspace generation',
-  'snapshot attempt',
-  'current task cancellation',
-  'replacement current task',
-] as const;
-
-describe('historical authority while the real ProjectData session RPC is awaited', () => {
-  it.each(
-    AWAITED_HISTORICAL_MUTATIONS.flatMap((mutation) =>
-      [true, false].map((allowWake) => ({ mutation, allowWake }))
-    )
-  )('$mutation, allowWake=$allowWake', async ({ mutation, allowWake }) => {
-    const target = await seedDeliveryTarget(HISTORICAL_CASE);
-    const replacementNodeId = `${target.nodeId}-replacement`;
-    const replacementTaskId = `${target.taskId}-replacement`;
-    await seedNode(replacementNodeId, target.userId);
-    await seedTask(replacementTaskId, target.projectId, target.userId, {
-      status: 'in_progress',
-      workspaceId: target.workspaceId,
-    });
-    await env.DATABASE.prepare('UPDATE workspaces SET callback_generation = ? WHERE id = ?')
-      .bind('generation-1', target.workspaceId)
-      .run();
-    const readAcceptedIntent = () =>
-      runInDurableObject(target.stub, (_instance, state) => ({
-        inbox: state.storage.sql
-          .exec(
-            `SELECT id, target_session_id, source_kind, prompt_message_id, delivery_state,
-              delivery_attempts, next_attempt_at FROM session_inbox WHERE id = ?`,
-            'awaited-historical-authority'
-          )
-          .toArray(),
-        transcript: state.storage.sql
-          .exec(
-            'SELECT id, role, content FROM chat_messages WHERE session_id = ?',
-            target.chatSessionId
-          )
-          .toArray(),
-      }));
-    await runInDurableObject(target.stub, (_instance, state) => {
-      acceptPromptDelivery(
-        state.storage.sql,
-        {},
-        {
-          deliveryId: 'awaited-historical-authority',
-          targetSessionId: target.chatSessionId,
-          displayContent: 'Keep this original accepted follow-up',
-          senderType: 'human',
-          senderId: target.userId,
-          sourceKind: 'user_followup',
-        }
-      );
-      state.storage.sql.exec(
-        "UPDATE session_inbox SET delivery_state = 'retry_wait', next_attempt_at = ? WHERE id = ?",
-        Date.now() + 60_000,
-        'awaited-historical-authority'
-      );
-    });
-    const accepted = await readAcceptedIntent();
-    expect(accepted.inbox).toHaveLength(1);
-    expect(accepted.transcript).toHaveLength(1);
-    let sessionReads = 0;
-    let activationCalls = 0;
-    let sideEffectGuards = 0;
-    const bindings = {
-      ...env,
-      PROJECT_DATA: {
-        idFromName: (projectId: string) => env.PROJECT_DATA.idFromName(projectId),
-        get: () => ({
-          async getSession(chatSessionId: string) {
-            const session = await target.stub.getSession(chatSessionId);
-            expect(sessionReads++).toBe(0);
-            expect(session).toMatchObject({
-              id: target.chatSessionId,
-              status: 'active',
-              workspaceId: target.workspaceId,
-              taskId: target.taskId,
-            });
-            // The first D1 proof and actual DO read succeeded; change real authority before
-            // the awaiting caller receives that session snapshot.
-            if (mutation === 'node assignment') {
-              await env.DATABASE.prepare('UPDATE workspaces SET node_id = ? WHERE id = ?')
-                .bind(replacementNodeId, target.workspaceId)
-                .run();
-            } else if (mutation === 'workspace generation') {
-              await env.DATABASE.prepare(
-                'UPDATE workspaces SET callback_generation = ? WHERE id = ?'
-              )
-                .bind('generation-2', target.workspaceId)
-                .run();
-            } else if (mutation === 'snapshot attempt') {
-              await env.DATABASE.prepare(
-                'UPDATE session_snapshots SET recovery_attempt_id = ? WHERE chat_session_id = ?'
-              )
-                .bind('wake-2', target.chatSessionId)
-                .run();
-            } else if (mutation === 'current task cancellation') {
-              await env.DATABASE.prepare("UPDATE tasks SET status = 'cancelled' WHERE id = ?")
-                .bind(target.taskId)
-                .run();
-            } else if (mutation === 'replacement current task') {
-              // Preserve the unique chat binding. A final query that accepts any current
-              // task would incorrectly certify this replacement against the old DO proof.
-              await env.DATABASE.batch([
-                env.DATABASE.prepare('UPDATE tasks SET chat_session_id = NULL WHERE id = ?').bind(
-                  target.taskId
-                ),
-                env.DATABASE.prepare('UPDATE tasks SET chat_session_id = ? WHERE id = ?').bind(
-                  target.chatSessionId,
-                  replacementTaskId
-                ),
-              ]);
-            }
-            return session;
-          },
-          async signalSessionWakeReady() {
-            activationCalls++;
-            throw new Error('Historical proof cannot activate a runtime');
-          },
-        }),
-      },
-    } as unknown as Env;
-    try {
-      const resolution = await resolveVmPromptDeliveryTarget(
-        bindings,
-        target.projectId,
-        target.chatSessionId,
-        undefined,
-        async () => {
-          sideEffectGuards++;
-          return null;
-        },
-        { allowWake }
-      );
-      expect(resolution).toMatchObject(
-        mutation === 'matched current authority'
-          ? { kind: 'ready', target: { workspaceId: target.workspaceId, nodeId: target.nodeId } }
-          : {
-              kind: 'retry',
-              reason: allowWake
-                ? 'Committed wake activation is pending'
-                : 'Committed wake authority is no longer current',
-            }
-      );
-      expect(sessionReads).toBe(1);
-      expect(activationCalls).toBe(0);
-      expect(sideEffectGuards).toBe(0);
-      expect(await readAcceptedIntent()).toEqual(accepted);
-      await runInDurableObject(target.stub, (_instance, state) => {
-        expect(state.storage.sql.exec('SELECT * FROM session_wake_readiness').toArray()).toEqual(
-          []
-        );
-      });
-    } finally {
-      await runInDurableObject(target.stub, (_instance, state) => state.storage.deleteAlarm());
-    }
-  });
 });

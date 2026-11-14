@@ -83,6 +83,19 @@ describe('catalog refresh ownership and finite retry', () => {
     expect(second.deadlineAt).toBe(first.deadlineAt);
   });
 
+  it('does not spend another attempt when the claimed execution already saved its failure', async () => {
+    const { db, sqlite } = fixture();
+    const settings = await capacityPoolRefreshSettings();
+    await queueCapacityPoolRefresh(db, scope, settings);
+    const [claim] = await db.select().from(schema.capacityPoolRefreshes);
+    const work = (await beginCapacityPoolRefresh(db, scope, settings, true, claim))!;
+    await finishCapacityPoolRefresh(db, work, settings, false);
+    const saved = sqlite.prepare('SELECT * FROM capacity_pool_refreshes').get();
+    expect(await beginCapacityPoolRefresh(db, scope, settings, true, claim)).toBeNull();
+    expect(sqlite.prepare('SELECT * FROM capacity_pool_refreshes').get()).toEqual(saved);
+    expect(saved).toMatchObject({ attempts: 1, generation: 1, state: 'pending' });
+  });
+
   it('starts the recovery budget on the first attempt after a long discovery queue wait', async () => {
     const { db } = fixture();
     const settings = await capacityPoolRefreshSettings();

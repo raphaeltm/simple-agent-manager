@@ -14,9 +14,7 @@
  * adapter: the guard IS a SQL predicate, so a mock whose `.where()` ignores its
  * arguments would pass with the predicate deleted (rule 28).
  */
-import {
-  resolveWorkspaceAdmissionPolicy,
-} from '@simple-agent-manager/scheduler-core';
+import { resolveWorkspaceAdmissionPolicy } from '@simple-agent-manager/scheduler-core';
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
@@ -595,7 +593,7 @@ describe('reuse selection agrees with final authority admission', () => {
     // accounts' running nodes stay reusable.
     expect(off.summary?.pool.revision).toBe(4);
     expect(off.summary?.activeCandidateCount).toBe(0);
-    expect(off.summary?.effectiveState).toBe('source-disabled');
+    expect(off.summary?.effectiveState).toBe('configured-empty');
     // Its picks are kept, not removed.
     expect(
       db().prepare('SELECT status FROM capacity_pool_candidates WHERE id = ?').get(pool.candidateId)

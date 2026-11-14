@@ -216,9 +216,8 @@ async function resolveRecoveryPlacement(
     }
   );
   if ('error' in resolved) {
-    // Pending publication or temporary committed-catalog capacity can recover.
-    // An unpublished catalog without live refresh work requires operator action.
-    // Refuse before claiming a snapshot or allocating a replacement runtime.
+    // Retry catalog unavailability only while publication work is durably pending.
+    // Otherwise surface the catalog refusal without spending a snapshot claim.
     let reason = 'placement_unsatisfiable';
     if (resolved.errorKind === 'credentials') {
       reason = 'placement_credentials_missing';
@@ -226,10 +225,9 @@ async function resolveRecoveryPlacement(
       switch (resolved.capacityPoolEffectiveState) {
         case 'migration-pending':
         case 'catalog-unavailable':
-          reason =
-            resolved.capacityPoolRefreshPending || resolved.capacityPoolCatalogPublished
-              ? 'session_recovery_placement_transient'
-              : 'placement_catalog_refresh_unavailable';
+          reason = resolved.capacityPoolRefreshPending
+            ? 'session_recovery_placement_transient'
+            : 'placement_catalog_refresh_unavailable';
           break;
         case 'source-disabled':
           reason = 'placement_sources_disabled';

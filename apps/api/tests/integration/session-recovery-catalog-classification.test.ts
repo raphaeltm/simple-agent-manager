@@ -1,3 +1,4 @@
+import { buildCapacityPoolSelection } from '@simple-agent-manager/scheduler-core';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -5,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { readDefaultPoolSummary } from '../../src/services/default-capacity-pool-summaries';
+import { resolveTaskStartPlacement } from '../../src/services/placement-resolver';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { classifySessionRecoveryRefusal } from '../../src/services/session-recovery-refusals';
 import { createAllSchemaTables } from '../helpers/sqlite-d1';
@@ -84,7 +86,61 @@ async function expectRefusal(reason: string, action: 'retry' | 'report') {
   expect(runner.start).not.toHaveBeenCalled();
 }
 
-describe('unpublished catalog wake failure classification through real placement', () => {
+describe('catalog wake failure classification through real placement', () => {
+  it('keeps an excluded account plus an active account ready, but reports all sources disabled', async () => {
+    const db = drizzle(env.DATABASE, { schema });
+    const [source] = await db.select().from(schema.capacitySources).limit(1);
+    const candidates = await db.select().from(schema.capacityPoolCandidates);
+    const candidate = candidates.find(
+      (row) => row.workloadRole === 'workspace' && row.status === 'active'
+    );
+    if (!source || !candidate) throw new Error('Expected selected owner source and offering');
+    sqlite.exec(`INSERT INTO credentials (id,user_id,provider,credential_type,credential_kind,
+      is_active,encrypted_token,iv,created_at,updated_at)
+      SELECT 'credential-two',user_id,provider,credential_type,credential_kind,
+        is_active,encrypted_token,iv,created_at,updated_at FROM credentials WHERE id='credential-1'`);
+    await db.insert(schema.capacitySources).values({
+      ...source,
+      id: 'source-two',
+      credentialId: 'credential-two',
+      credentialReference: 'credentials:credential-two',
+    });
+    await db.insert(schema.capacityPoolCandidates).values({
+      ...candidate,
+      id: 'candidate-two',
+      capacitySourceId: 'source-two',
+    });
+    sqlite
+      .prepare(
+        `UPDATE capacity_pools SET migration_state='complete',
+      catalog_published_at='2026-11-14T09:00:00.000Z',excluded_source_ids_json=? WHERE scope='user'`
+      )
+      .run(JSON.stringify([source.id]));
+
+    const mixed = await readDefaultPoolSummary(db, scope, { includeDisabled: true });
+    expect(mixed).toMatchObject({ effectiveState: 'configured-ready', activeCandidateCount: 1 });
+    if (!mixed) throw new Error('Expected the owner pool summary');
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: { id: 'project-1', defaultVmSize: 'small' },
+      credentialProjectPolicy: 'current-project',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+    expect(
+      buildCapacityPoolSelection(mixed, placement, 'workspace')?.candidates.map((row) => row.id)
+    ).toEqual(['candidate-two']);
+
+    sqlite.exec("UPDATE capacity_sources SET status='disabled'");
+    expect(await readDefaultPoolSummary(db, scope, { includeDisabled: true })).toMatchObject({
+      effectiveState: 'source-disabled',
+      activeCandidateCount: 0,
+    });
+    await expectRefusal('placement_sources_disabled', 'report');
+  });
   it('waits only while a started publication remains pending before its deadline', async () => {
     await expectRefusal('session_recovery_placement_transient', 'retry');
   });
@@ -193,16 +249,51 @@ describe('unpublished catalog wake failure classification through real placement
       });
     }
   );
-  it('retains temporary committed-catalog capacity waits after a completed refresh', async () => {
-    sqlite.exec(`UPDATE capacity_pools SET migration_state='complete',catalog_published_at='2026-11-14T09:00:00.000Z' WHERE scope='user';
-      UPDATE capacity_pool_refreshes SET state='complete' WHERE scope='user';
-      UPDATE capacity_pool_candidates SET catalog_availability='last-known-unavailable'`);
-    await expectRefusal('session_recovery_placement_transient', 'retry');
-  });
-  it('retains committed-catalog capacity waits during an exhausted replacement refresh', async () => {
-    sqlite.exec(`UPDATE capacity_pools SET catalog_published_at='2026-11-14T09:00:00.000Z' WHERE scope='user';
-      UPDATE capacity_pool_refreshes SET state='failed' WHERE scope='user';
-      UPDATE capacity_pool_candidates SET catalog_availability='last-known-unavailable'`);
-    await expectRefusal('session_recovery_placement_transient', 'retry');
-  });
+  it.each([
+    ['pending', "UPDATE capacity_pool_refreshes SET state='pending' WHERE scope='user'", true],
+    [
+      'queued',
+      "UPDATE capacity_pool_refreshes SET state='pending',attempts=0,started_at=0,deadline_at=0 WHERE scope='user'",
+      true,
+    ],
+    ['complete', "UPDATE capacity_pool_refreshes SET state='complete' WHERE scope='user'", false],
+    [
+      'failed replacement',
+      "UPDATE capacity_pool_refreshes SET state='failed',last_error='Catalog refresh deadline exceeded' WHERE scope='user'",
+      false,
+    ],
+    [
+      'expired pending',
+      `UPDATE capacity_pool_refreshes SET deadline_at=${clock} WHERE scope='user'`,
+      false,
+    ],
+    ['no durable operation', "DELETE FROM capacity_pool_refreshes WHERE scope='user'", false],
+  ] as const)(
+    'classifies unavailable published picks with %s refresh work without spending a claim',
+    async (_state, mutation, refreshPending) => {
+      sqlite.exec(`UPDATE capacity_pools SET catalog_published_at='2026-11-14T09:00:00.000Z' WHERE scope='user';
+        UPDATE capacity_pool_candidates SET catalog_availability='last-known-unavailable'`);
+      sqlite.exec(mutation);
+      const summary = await readDefaultPoolSummary(drizzle(env.DATABASE, { schema }), scope, {
+        includeDisabled: true,
+      });
+      expect(summary).toMatchObject({
+        catalogPublished: true,
+        catalogRefreshPending: refreshPending,
+        effectiveState: 'catalog-unavailable',
+      });
+      await expectRefusal(
+        refreshPending
+          ? 'session_recovery_placement_transient'
+          : 'placement_catalog_refresh_unavailable',
+        refreshPending ? 'retry' : 'report'
+      );
+      expect(sqlite.prepare('SELECT recovery_error FROM session_snapshots').get()).toMatchObject({
+        recovery_error: refreshPending ? null : expect.stringContaining('Infrastructure'),
+      });
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id='task-1'").get()).toEqual({
+        status: 'sleeping',
+      });
+    }
+  );
 });

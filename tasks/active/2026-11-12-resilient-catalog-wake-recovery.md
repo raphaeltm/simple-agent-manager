@@ -8,16 +8,18 @@ Current coordinator: `01M7CVSBR1SDZFDZNY3TD863RQ`; original coordinator `01M77NV
 ## Current state — November 14 review revision
 
 Main `4bdaaf61f6cecb83b6a3bab30e011257ea019710` is incorporated with a history-preserving merge, including2739 test stabilization and2740 bounded archive writes. The handler changes merge without conflict; archive metering and wake exact-write fencing are retained.
-Pushed head `fe6019eff0fcedc29eabe0958b88d413496a6163` passed all functional CI; coordinator reviews
-[part 1](https://github.com/raphaeltm/simple-agent-manager/pull/2693#issuecomment-6884423659) and
-[part 2](https://github.com/raphaeltm/simple-agent-manager/pull/2693#issuecomment-6884457589) requested changes.
-The source/test fixes below are committed locally, with final current-main local verification complete before one new candidate push. Fresh CI and live staging remain open.
-Those earlier CI results do not certify the new candidate. Keep the PR DRAFT with `needs-human-review`
-until the coordinator approves the final full SHA and normal release gates pass.
+Pushed head `281da79d7407ee04f0fc1a630993ee6a04ca8b52` is being revised after the
+[second coordinator review](https://github.com/raphaeltm/simple-agent-manager/pull/2693#issuecomment-6885357194).
+Prior high findings are cleared. Required A–F changes are limited to pending-only catalog waits,
+removing an unreachable historical-receipt path, real-runner negative controls, finite pre-begin
+refresh failures, public mutation evidence and the deferred eviction comment. The minimal
+account-exclusion summary correction caught by five native CI failures is explicitly in scope.
+Current CI and staging evidence must follow the new full SHA. Keep DRAFT and `needs-human-review`
+until final coordinator approval and the normal release gates pass.
 
 The coordinator's engineering amendment makes catalog2693 the first standalone source/staging/release;
-force2691 follows its merge. The historical combined4c73 input is retired. Staging acceptance for fe6019
-was withdrawn after review; the corrected bounded operational recipe carries to the next SHA, with
+force2691 follows its merge. The historical combined4c73 input is retired. Staging acceptance for281da79
+was withheld pending the small A–F candidate and coordinator diff confirmation; the corrected bounded operational recipe carries to the next SHA, with
 an added requirement to measure the actual 3,418-row GCP promotion batch. No staging deployment,
 setting override, VM or Instant resource has been created by this port. A fresh Shepherd lane handoff
 and source disposition remain necessary. The Nov15 release target does not reduce any gate.
@@ -63,16 +65,34 @@ References: `tasks/backlog/2026-11-09-capacity-pool-readiness-gate-during-republ
 - Promotion uses columnar staging with scoped conflict identity, indexed exact-issued SQL and no JSON extraction. Completed promotion releases staging rows; missing cleanup skips already-unavailable rows. Unchanged validated non-exhaustive catalogs write no staging/candidate rows; enumeration completeness participates in the digest. The 7,200-row bootstrap/replacement test uses declared indexes and a 100-bind-limited SQLite adapter. Three independent scan/pool/source mutants each produce one intended red test and restore byte-exact source. Existing 46 interleaving/fencing tests remain green. Local samples are 135/149ms versus original 242/435ms; these are not D1 measurements.
 - Unstarted work has attempts/start/deadline zero. Its first claim anchors the two-hour episode. Fifteen-second base backoff caps at five minutes; the old one-minute maximum caused119 real provider calls in two hours, while the regression requires at most30. Failed-state CAS persists Admin Errors and an operator notification once; six-hour cooldown allows a later daily discovery to revive. Real daily-provider failure → cooldown → fresh-handle revival → minute publication completes without Refresh. Minute kill-switch reads are isolated and ticks log resumed/failed/skipped outcomes.
 - Wake activation checks D1 archive routing and local transcript freeze before capture, then rechecks the local fence in the atomic metered transaction after awaited authority. Two actual Workers archive cases fail before the fix. Real terminal-task producer → committed wake → follow-up delivery tests fail as retry before the fix and pass after it. Active delivery uses the existing durable chat/workspace status, a synchronous local SQLite callback, one target D1 read, and no readiness self-RPC. Removing reconcile's allowWake:false makes two receipt-probe controls red.
-- Never-published state checks selected source/credential authority before publication progress. Only actual pending, unexpired work (or unstarted queued work) gives a publication wait. Twenty-one real-SQL integration cases include failed/expired/missing work and a competing unselected credential. Committed catalog temporary capacity remains retryable. Source-disabled stays terminal.
+- Never-published state checks selected source/credential authority before publication progress. Only actual pending, unexpired work (or unstarted queued work) gives a publication wait. Twenty-five real-SQL integration cases include failed/expired/missing work and a competing unselected credential. Published catalogs with unavailable picks wait only while refresh work remains pending within budget; complete/failed/expired/missing refresh work yields an actionable refusal. Actual source disablement remains terminal; user-excluded account choices retain configured-empty semantics.
 - Existing-node relay/admission tests cover legacy user/project, platform and cc user/project credentials, cross-user nodes, exclusions, removed default status, higher precedence, viewer access and timestamp/config/attachment revocation. Each negative starts from a valid owner control. Thirteen mutants cause111 intended failures; all sources are restored byte-exact. Allocation/JWT boundaries are mocked in this focused suite; SQL authority and workspace writes are real.
 
-Focused current-source evidence under `.codex/tmp/refresh-20261114/review-fixes/`: catalog59, refresh183,
-authority123, classification/recovery221, wake native161, wake/cron actual Workers64 pass. Counts overlap
-and must not be summed. The consolidated38 native suites passed1,445 cases and failed the old configured-empty expectation for a switched-off sole account. Its corrected complete43-case suite passes while retaining the off/on reuse/admission/picks/revision assertions:1,446 unique cases covered. The original failure is retained. Current manifests are `native-manifest.txt` (38 suites) and the parent `workers-manifest.txt` (8 suites). On integrated current main, all8 actual Workers suites pass115 cases (263.89s); full lint/typecheck/build passes62/62 tasks (3m55s,14cached), and merged-handler/config10/10 pass. Migration safety/order and runtime-boundary semantic checks pass. Tests execute against real D1/DO/TaskRunner entry points, with provider/VM HTTP boundaries mocked; these are not live provider or isolate-crash proof.
-Historical port evidence includes1,280 native/110 Workers and62 local quality tasks, plus functional
-CI43640124451 at fe6019. Original failed runs and corrected fixture assertions are retained; no test,
-timeout, retry or production guard was suppressed. UI is unchanged in this review revision;19 rendered
-UI tests and12 reviewed desktop/mobile dark/light screenshots are linked in PR comment6825123103.
+Second-review evidence: A has26 classification controls plus the unchanged44-case CI/editor/message
+matrix and43 effective-authority tests passing (113 unique cases).
+D has184 native and6 actual cron Workers passing, including fixed pre-begin deadlines and one
+persisted error/Notification DO alert across fresh handles and concurrent/stale claims. B/C has36
+actual delivery Workers passing; deleting the runner's workspace equality and matching bind makes
+exactly the new different-workspace negative red, followed by byte-exact restore and package rebuild.
+The obsolete historical-helper tests were removed in native and Workers suites; primary readiness,
+interruption and generation-fencing tests remain. Current remaining wake-native4 suites pass109.
+Consolidated8 Workers pass93 cases in258.09s; final scoped lint and full API typecheck pass before push. Earlier62-task full
+quality and7200-row results belong to281da79 and remain historical. Counts overlap and are not summed.
+
+Current281 CI failed five native assertions because account exclusions were treated as source
+disablement; the minimal count correction retains the original tests. Its unrelated touch-only visual
+scenario failed at clear.click after CDP touch (known flake), tracked01M7E4GCYJ2NHSBQV3KCDX110H.
+Temporary clear.tap proof passes4/4 viewports with unchanged timeouts/assertions; original bytes are
+restored. Coordinator excludes this change unless the new candidate fails at the same place.
+CodeRabbit trusted request43649014451 at22:36:48UTC produced101-file-limit skip6885290634;
+15-minute observation completed with no formal review. No repeat trigger or waiver is needed.
+
+Nonblocking second-review followups: unchanged small catalog/staging retention/cleanup cursor
+01M7E45G42MTTY2QF6DHMA1PWV; correlated plan coverage01M7E45GT7X31TVJ6927QS5524;
+credential re-save bootstrap01M7E45HGVM7ASNJC58FPXP68K; lost activation then terminal task
+01M7E45J6B12T1384H1506HD4Q; daily fairness/cooldown01M7E0QEZ3NJQ199S1RTFK20JY;
+local archive source-intent regression01M7E0QGC85R1X67X7EQMMGXCX. Bare eviction/no UI wait record
+remains01M7E0QC19VCAHN64XQCFCTMW1 and is cited at the callback. All are linked to the canonical idea.
 
 ## Latency and throughput budget (rule81)
 

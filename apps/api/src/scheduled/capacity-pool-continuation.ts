@@ -8,7 +8,10 @@ import {
   type CapacityPoolRefreshSettings,
   capacityPoolRefreshSettings,
 } from '../services/capacity-pool-refresh-settings';
-import { finishCapacityPoolRefresh } from '../services/capacity-pool-refresh-work';
+import {
+  beginCapacityPoolRefresh,
+  finishCapacityPoolRefresh,
+} from '../services/capacity-pool-refresh-work';
 import { defaultPoolId } from '../services/default-capacity-pool-helpers';
 import { resolveBackfillScopeBatchSize } from '../services/default-capacity-pool-storage';
 import {
@@ -129,6 +132,30 @@ export async function continueCapacityPoolPublications(
           env
         );
     } catch (error) {
+      // Preparation can throw before ensure begins its attempt. Spend that exact claimed
+      // attempt through the normal deadline/backoff path. If ensure already began or a
+      // newer publisher took ownership, this CAS is a no-op rather than a second attempt.
+      const failedAttempt = await beginCapacityPoolRefresh(
+        db,
+        {
+          scope: work.scope as 'installation' | 'user' | 'project',
+          ownerUserId: work.ownerUserId,
+          ownerProjectId: work.ownerProjectId,
+        },
+        settings,
+        true,
+        options.refreshClaim
+      );
+      if (failedAttempt)
+        await finishCapacityPoolRefresh(
+          db,
+          failedAttempt,
+          settings,
+          false,
+          'Compute catalog refresh preparation failed. SAM will retry automatically within its recovery budget.',
+          false,
+          env
+        );
       result.failed += 1;
       log.warn('capacity_pools.continuation_failed', {
         poolId: work.poolId,
