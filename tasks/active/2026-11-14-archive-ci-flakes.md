@@ -37,3 +37,7 @@ No direct implementation changes on main. Local commands foreground and under ab
 - `packages/project-data/tests/unit/project-data-compact-archive.test.ts`
 - `apps/api/tests/workers/node-lifecycle-decisions.test.ts`
 - `packages/worker-core/src/ulid.ts`
+
+## Initial measured diagnosis
+
+Normal phase total 2605 ms; coverage plus two busy workers on the same two cores 5737 ms. Controlled oversubscription with eighteen busy workers on two cores reproduced the original 30-second timeout. Copy cost rose from 933 ms to 10629 ms. This models contention rather than asserting an exact historical CI process count. All fixture/timeout values remain unchanged. Proposed fix serializes Turbo package coverage tasks, leaving Vitest file parallelism intact. Initial measurements are committed in tasks/evidence/2026-11-14-archive-ci-flakes. Final stability and CI duration validation remain pending.

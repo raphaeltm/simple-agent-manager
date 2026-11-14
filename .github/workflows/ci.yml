@@ -428,7 +428,9 @@ jobs:
         run: pnpm build
 
       - name: Run tests with coverage
-        run: pnpm test:coverage
+        # Vitest already parallelizes files within each package. Serial package
+        # tasks keep their independent worker pools from multiplying CPU load.
+        run: pnpm test:coverage --concurrency=1
 
   build:
     name: Build

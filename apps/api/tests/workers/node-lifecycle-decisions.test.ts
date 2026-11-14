@@ -166,11 +166,15 @@ describe('warm handoff decisions', () => {
     });
     expect(result).toEqual({ outcome: 'handed_to_warm' });
     const rows = await decisions(nodeId);
-    expect(rows.map((row) => `${row.source}:${row.decision}`)).toEqual([
+    // Both events may share a millisecond. Their random ULID suffixes give the
+    // list a stable tie order, but do not encode which event happened first.
+    expect(rows.map((row) => `${row.source}:${row.decision}`).sort()).toEqual([
       'node_lifecycle:marked_warm',
       'warm_handoff:handed_to_warm',
     ]);
-    expect(rows[1]!.detail?.removalPath).toBe('task_run_cleanup');
+    expect(rows.find((row) => row.source === 'warm_handoff')?.detail?.removalPath).toBe(
+      'task_run_cleanup'
+    );
   });
 });
 
