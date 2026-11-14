@@ -47,7 +47,13 @@ import type { CleanupConfig } from './config';
 
 export { cleanupNodeProvenanceSql } from '../../services/node-teardown-provenance';
 export { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
-export { type CleanupConfig, parseMs, parsePositiveInt, resolveCleanupConfig } from './config';
+export {
+  type CleanupConfig,
+  minimumTeardownAttemptMs,
+  parseMs,
+  parsePositiveInt,
+  resolveCleanupConfig,
+} from './config';
 export { emptyResult, type NodeCleanupResult } from './result';
 
 export type CleanupDb = ReturnType<typeof drizzle<typeof schema>>;
@@ -271,7 +277,7 @@ async function runStrictCleanup(
           boundedStrandedRetirement: options.boundedStrandedRetirement,
           providerRequestContext: { signal: controller.signal },
           requestDeadlineMs: options.requestDeadlineMs,
-          providerDeletion: options.providerDeletion,
+          providerDeletion: options.confirmPendingDeletion ? 'confirm' : options.providerDeletion,
           providerDeletionConfirmMaxMs: options.providerDeletionConfirmMaxMs,
         })
       : await deleteNodeResourcesStrict(

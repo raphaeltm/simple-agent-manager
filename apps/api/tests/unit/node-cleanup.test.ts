@@ -234,7 +234,7 @@ describe('runNodeCleanupSweep', () => {
           .mocked(env.DATABASE.prepare)
           .mock.calls.some(
             ([sql]) =>
-              sql.includes('cleanup_backoff_until = ?') && sql.includes("status = 'destroying'")
+              sql.includes('cleanup_backoff_until = CASE') && sql.includes("status = 'destroying'")
           )
       ).toBe(true);
     });

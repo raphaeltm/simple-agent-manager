@@ -33,8 +33,11 @@ import {
   type NodeRow,
 } from './strict-node-deletion-shared';
 
-/** `wait`: delete and wait (interactive callers). `request`: start it and confirm later. */
-export type ProviderDeletionMode = 'wait' | 'request';
+/**
+ * `wait`: delete and wait (interactive callers). `request`: start it and confirm later.
+ * `confirm`: only read the provider's record of a deletion already started; never send one.
+ */
+export type ProviderDeletionMode = 'wait' | 'request' | 'confirm';
 
 /** What one provider deletion attempt achieved. */
 export type ProviderDeletionOutcome = 'deleted' | 'deletion_pending';
@@ -123,11 +126,14 @@ export async function recordProviderDeletionRequested(
   log.info('node_teardown.provider_deletion_requested', { nodeId: node.id, requestedAt });
 }
 
-/** Drop a record the provider showed to be void (never arrived, or failed). */
-async function clearProviderDeletionRecord(
+/**
+ * Drop a record the provider showed to be void (never arrived, or failed), or one that no longer
+ * describes the row's runtime. Fenced on the exact record value that was read.
+ */
+export async function clearProviderDeletionRecord(
   db: NodeDb,
   node: NodeRow,
-  reason: 'not_requested' | 'failed'
+  reason: 'not_requested' | 'failed' | 'not_this_runtime'
 ): Promise<void> {
   await db
     .update(schema.nodes)
@@ -135,7 +141,8 @@ async function clearProviderDeletionRecord(
     .where(
       and(
         eq(schema.nodes.id, node.id),
-        sql`${schema.nodes.providerDeletionJson} IS ${node.providerDeletionJson}`
+        sql`${schema.nodes.providerDeletionJson} IS ${node.providerDeletionJson}`,
+        sql`${schema.nodes.providerDeletionRequestedAt} IS ${node.providerDeletionRequestedAt}`
       )
     )
     .run();
@@ -252,6 +259,9 @@ export async function sendProviderDeletion(
   const instanceId = node.providerInstanceId;
   if (!instanceId) {
     throw new Error(`Cannot delete node ${node.id}: provider instance ID is missing`);
+  }
+  if (mode === 'confirm') {
+    throw new Error(`Refusing to send a provider deletion while confirming node ${node.id}`);
   }
   if (mode === 'request' && provider.requestVMDeletion && provider.getVMDeletionStatus) {
     const result = await provider.requestVMDeletion(instanceId, context, {

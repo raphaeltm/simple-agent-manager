@@ -107,15 +107,26 @@ export async function claimNodeForCleanup(
   return (result.meta.changes ?? 0) > 0;
 }
 
+/** A provider deletion was sent for this row and has not been proven. */
+const PENDING_DELETION_SQL =
+  'provider_deletion_requested_at IS NOT NULL AND runtime_termination_confirmed_at IS NULL';
+
 export async function releaseNodeCleanupClaim(
   env: Env,
   node: CleanupNode,
   nowIso: string,
   backoffUntil: string
 ): Promise<void> {
+  // A node whose provider deletion was already sent (two-phase write-ahead record) stays
+  // `destroying` and due: the confirm phase owns it and must read the provider's record next
+  // tick. Returning it to `stopped` would leave it in no phase's selection, since every other
+  // phase excludes nodes with a record.
   await env.DATABASE.prepare(
     `UPDATE nodes
-     SET status = ?, cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_backoff_until = ?, updated_at = ?
+     SET status = CASE WHEN ${PENDING_DELETION_SQL} THEN 'destroying' ELSE ? END,
+       cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL,
+       cleanup_backoff_until = CASE WHEN ${PENDING_DELETION_SQL} THEN NULL ELSE ? END,
+       updated_at = ?
      WHERE id = ?
        AND user_id = ?
        AND status = 'destroying'`

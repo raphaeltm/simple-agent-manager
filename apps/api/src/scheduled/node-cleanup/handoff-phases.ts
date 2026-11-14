@@ -13,6 +13,7 @@ import {
   cleanupNodeProvenanceSql,
   destroyNodeForCleanup,
   getNodeWorkspaceIdleThresholdIso,
+  minimumTeardownAttemptMs,
   type NodeCleanupDestroyResult,
   type NodeCleanupResult,
 } from './shared';
@@ -86,7 +87,11 @@ async function sweepManagedHandoffNodes(
     }>();
 
   for (const node of candidates.results) {
-    if (Date.now() >= sweepDeadlineMs || preservedVmBudget.remainingSources <= 0) break;
+    if (
+      sweepDeadlineMs - Date.now() < minimumTeardownAttemptMs(config) ||
+      preservedVmBudget.remainingSources <= 0
+    )
+      break;
     if (node.active_ws_count > 0) {
       log.warn(options.skippedActiveLogEvent, {
         nodeId: node.id,
@@ -182,7 +187,7 @@ export async function sweepProviderDeletionConfirmations(
     }>();
 
   for (const node of candidates.results) {
-    if (Date.now() >= sweepDeadlineMs) break;
+    if (sweepDeadlineMs - Date.now() < minimumTeardownAttemptMs(config)) break;
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
       confirmPendingDeletion: true,
       providerDeletion: 'request',

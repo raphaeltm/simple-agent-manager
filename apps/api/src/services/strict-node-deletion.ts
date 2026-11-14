@@ -9,6 +9,7 @@ import type { Env } from '../env';
 import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { captureNodeLogsBeforeTeardown } from './node-log-capture';
 import {
+  clearProviderDeletionRecord,
   confirmPendingProviderDeletion,
   pendingProviderDeletionFor,
   type ProviderDeletionMode,
@@ -318,6 +319,15 @@ export async function deleteNodeResourcesStrict(
   }
   if (!matchesExpectedRuntime(initialNode, options.expectedRuntime)) {
     throw new Error(`Strict node deletion target was reincarnated before claim: node=${nodeId}`);
+  }
+  // The confirm phase skipped the ordinary claim guards because a deletion was already sent for
+  // this runtime. If the record no longer describes it, nothing was sent for this runtime: clear
+  // the record and fail, so the ordinary guarded phases decide (never a new DELETE from here).
+  if (options.providerDeletion === 'confirm' && !pendingProviderDeletionFor(initialNode)) {
+    await clearProviderDeletionRecord(db, initialNode, 'not_this_runtime');
+    throw new Error(
+      `Provider deletion record of node ${nodeId} does not describe its current runtime; cleared it`
+    );
   }
 
   // User-owned (BYO) machines have no SAM-provisioned cloud VM: strict deletion of the cloud

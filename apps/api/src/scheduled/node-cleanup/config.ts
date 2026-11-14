@@ -203,3 +203,13 @@ function buildCleanupConfig(env: Env): CleanupConfig {
     providerDeletionConfirmMaxMs: DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
   };
 }
+
+/**
+ * The least sweep budget worth starting a teardown attempt with: a third of the per-attempt
+ * budget (5 s at the 15 s default; a GCP request measured ~3-8 s, a confirmation ~0.4 s). An
+ * attempt started with less would almost surely hit its deadline and be recorded as a failure the
+ * node did not earn, so the candidate waits for the next tick instead.
+ */
+export function minimumTeardownAttemptMs(config: CleanupConfig): number {
+  return Math.ceil(config.providerDeletionRequestTimeoutMs / 3);
+}

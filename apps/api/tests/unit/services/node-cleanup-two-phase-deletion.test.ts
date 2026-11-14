@@ -30,6 +30,8 @@ const cloud = vi.hoisted(() => ({
   /** How long a sent delete runs before the provider records it finished. */
   operationMs: 2 * 60_000,
   neverConfirms: false,
+  /** The DELETE reaches the provider but its response never comes back within the attempt. */
+  loseDeleteResponse: false,
   /** API token -> server id -> labels. */
   accounts: new Map<string, Map<string, Record<string, string>>>(),
   /** Started deletes: server id -> { account, sentAt }. */
@@ -98,6 +100,7 @@ vi.mock('@simple-agent-manager/providers', async (importOriginal) => {
           await options?.beforeSend?.(ticket);
           if (context?.signal?.aborted) throw context.signal.reason;
           send(account, id);
+          if (cloud.loseDeleteResponse) return outlastAttempt(context);
           return { state: 'requested', ticket };
         },
         async getVMDeletionStatus(ticket: string) {
@@ -135,6 +138,7 @@ afterEach(() => {
   cloud.mode = 'operation';
   cloud.operationMs = 2 * 60_000;
   cloud.neverConfirms = false;
+  cloud.loseDeleteResponse = false;
   cloud.accounts.clear();
   cloud.operations.clear();
   cloud.deletes.length = 0;
@@ -333,6 +337,47 @@ describe('two-phase provider deletion at the cleanup cron entry point', () => {
       { decision: 'destroyed', reason: 'provider_deleted' },
     ]);
     expect(f.errorRows()).toEqual([]);
+  });
+
+  it('confirms a delete whose response was lost: the write-ahead record outlives the failed attempt', async () => {
+    cloud.loseDeleteResponse = true;
+    const f = await twoPhaseFixture();
+
+    const first = await f.tick(0);
+    // The attempt hit its deadline after the DELETE left: a visible failure, but the record of
+    // the sent delete is kept, so no later attempt sends a second one.
+    expect(first.result.errors).toBe(1);
+    expect(cloud.deletes).toEqual([`${TOKEN}:${INSTANCE}`]);
+    expect(f.node()).toMatchObject({ proof: null, requestedAt: NOW.toISOString() });
+
+    await f.tick(1);
+    expect(cloud.deletes).toEqual([`${TOKEN}:${INSTANCE}`]);
+    expect(cloud.statusReads).toEqual([`${TOKEN}:${INSTANCE}`]);
+    expect(f.node()).toMatchObject({
+      status: 'deleted',
+      proof: expect.any(String),
+      requestedAt: null,
+    });
+  });
+
+  it('never sends a DELETE from the confirm phase: a record that no longer matches is cleared instead', async () => {
+    cloud.operationMs = 60 * 60_000;
+    const f = await twoPhaseFixture();
+    await f.tick(0);
+    expect(cloud.deletes).toHaveLength(1);
+    // The record no longer describes this runtime (corrupted, or written for another one).
+    f.sqlite
+      .prepare('UPDATE nodes SET provider_deletion_json = \'{"ticket":"x"}\' WHERE id = \'host\'')
+      .run();
+
+    const confirm = await f.tick(1);
+
+    expect(confirm.result.errors).toBe(1);
+    expect(cloud.deletes).toHaveLength(1);
+    expect(cloud.lookups).toHaveLength(1);
+    expect(cloud.statusReads).toEqual([]);
+    // Cleared, so the ordinary guarded phases own the node again; no proof was written.
+    expect(f.node()).toMatchObject({ status: 'destroying', proof: null, requestedAt: null });
   });
 
   it('keeps the node pending, without an error row, while the provider is still deleting', async () => {

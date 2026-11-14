@@ -14,7 +14,7 @@ import {
   diagnoseCleanupRefusal,
   recordCleanupRefusal,
 } from './cleanup-refusal';
-import type { CleanupConfig } from './config';
+import { type CleanupConfig, minimumTeardownAttemptMs } from './config';
 import {
   type CleanupDb,
   destroyNodeForCleanup,
@@ -153,7 +153,7 @@ export async function sweepStrandedNodes(
     )
     .all<CleanupRefusalNode>();
   for (const node of candidates.results) {
-    if (Date.now() >= sweepDeadline) break;
+    if (sweepDeadline - Date.now() < minimumTeardownAttemptMs(config)) break;
     try {
       const refusal = await diagnoseCleanupRefusal(env, node, nowIso, idleThreshold);
       if (!refusal) continue;

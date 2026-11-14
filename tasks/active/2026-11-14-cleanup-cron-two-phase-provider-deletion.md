@@ -91,7 +91,7 @@ Two-phase provider deletion for the deadline-bounded cleanup callers, GCP first:
       `Provider`; GCP `requestVMDeletion` + `getVMDeletionStatus`; provider unit tests (ticket
       before DELETE, absent, 404, op list states incl. failed / wrong project / malformed ticket,
       abort)
-- [x] Migration `0239`: `nodes.provider_deletion_requested_at`, `nodes.provider_deletion_json`
+- [x] Migration `0241`: `nodes.provider_deletion_requested_at`, `nodes.provider_deletion_json`
       (ADD COLUMN only); drizzle schema
 - [x] Admin settings: request timeout + confirm max (definitions, key union, defaults in shared)
 - [x] `strict-node-deletion.ts`: request mode, pending-record match/parse (malformed → ignored +
@@ -145,7 +145,7 @@ Two-phase provider deletion for the deadline-bounded cleanup callers, GCP first:
   phase, rotation, exclusion), `cleanup-claim.ts` (`claimPendingProviderDeletion` lease),
   `shared.ts` (`pending` result). Splits for the 500-line limit: `cleanup-outcome.ts`,
   `handoff-phases.ts`, `node-teardown-credential-rejection.ts`.
-- Migration `0239_node_provider_deletion_request.sql` (ADD COLUMN only).
+- Migration `0241_node_provider_deletion_request.sql` (ADD COLUMN only).
 - Unhealthy release, deployment cleanup and orphan reconciliation stay on the synchronous path and
   the 5 s knob: `tasks/backlog/2026-11-14-slow-provider-deletes-outside-cleanup-handoff.md`.
 
@@ -161,3 +161,20 @@ Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.t
 | Pending nodes not excluded from handoff selection | reap, re-save |
 | Unconfirmed bound removed | never-confirms |
 | Request mode not passed (wait mode) | reap, pending, re-save, never-confirms, starvation |
+| Failed attempt after the record releases the node to `stopped` (review fix) | lost-response |
+| Confirm mode no longer refuses a record that does not match (review fix) | confirm-never-sends |
+
+## Review fixes (Phase 5)
+
+- security-auditor MEDIUM + cloudflare-specialist HIGH + task-completion-validator LOW-1 (same
+  defect): a failed attempt after the write-ahead record put the node back to `stopped`, where no
+  phase selects a node with a record. `releaseNodeCleanupClaim` now keeps such a node `destroying`
+  with no backoff, so the confirm phase reads the provider's record next tick.
+- security LOW + cloudflare LOW: the confirm phase could fall through to a fresh DELETE when its
+  record no longer matched. New `providerDeletion: 'confirm'` mode clears the record and fails; it
+  can never send.
+- cloudflare MEDIUM: an attempt started with a sliver of phase budget was a guaranteed,
+  unearned failure. Phases stop starting attempts below a third of the per-attempt budget
+  (`minimumTeardownAttemptMs`).
+- Migration renumbered `0241` (open PRs #2693 and #2721 both propose `0239`); its comment on
+  re-stamping corrected (security LOW).

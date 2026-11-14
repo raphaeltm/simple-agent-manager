@@ -628,7 +628,8 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
 
   it('aborts dead provider requests within the phase budget and reaches deferred work next tick', async () => {
     const f = await handoffFixture();
-    f.env.NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = '1200';
+    // 1.5 s budget, 1 s attempts: the second attempt starts with 0.5 s, above the 1/3 minimum.
+    f.env.NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = '1500';
     f.configOverrides.providerDeletionRequestTimeoutMs = 1000;
     for (const id of ['dead-a', 'dead-b']) {
       await seedHost(f, f.starts[0]!, id);
@@ -647,12 +648,12 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     await vi.waitFor(() => expect(f.providerDeletes.length).toBeGreaterThan(0), { interval: 1 });
     await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(() => expect(f.providerDeletes.length % 2).toBe(0), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(500);
     await pending;
     expect(f.result).toMatchObject({ errors: 2, lifetimeDestroyed: 0 });
     expect(f.providerDeletes).toHaveLength(2);
     expect(f.providerSignals.every((signal) => signal.aborted)).toBe(true);
-    expect(Date.now() - NOW.getTime()).toBeLessThan(1500);
+    expect(Date.now() - NOW.getTime()).toBeLessThan(2000);
     expect(
       f.sqlite.prepare("SELECT status, cleanup_backoff_until FROM nodes WHERE id = 'host'").get()
     ).toEqual({ status: 'stopped', cleanup_backoff_until: null });
@@ -665,7 +666,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     await vi.waitFor(() => expect(f.providerDeletes).toHaveLength(4), { interval: 1 });
     await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(() => expect(f.providerDeletes).toHaveLength(5), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(500);
     await retry;
     expect(f.providerDeletes).toHaveLength(5);
     expect(f.result.errors).toBe(4);
