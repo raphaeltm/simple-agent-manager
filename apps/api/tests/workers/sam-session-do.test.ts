@@ -27,6 +27,7 @@ const testStubs: SamRuntimeStub[] = [];
 let modelText: string | undefined;
 let requestedTool: { name: string; arguments: Record<string, unknown> } | null = null;
 let env: Awaited<ReturnType<typeof startSamRuntime>>;
+let runtimePoisoned = false;
 beforeAll(async () => {
   env = await startSamRuntime((request) => http(request));
 });
@@ -73,18 +74,33 @@ async function completed(request: Awaited<ReturnType<typeof setup>>['request'], 
 
 describe('SamSession durable operator in workerd', () => {
   afterEach(async () => {
+    if (runtimePoisoned) return;
     // Failed assertions must not leave model work using the next test's mock.
     releaseModel?.();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.all(testStubs.map((stub) => stub.testDrain()));
-    } finally {
+      await Promise.race([
+        Promise.all(testStubs.map((stub) => stub.testDrain())),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('Native SAM work did not drain')), 5000);
+        }),
+      ]);
       await testStubs[0]?.testSetTime(null);
+    } catch (error) {
+      // A timed-out hook keeps executing. Refuse later mock resets even if
+      // disposal itself stalls; no subsequent case may reuse this isolate.
+      runtimePoisoned = true;
+      await env.close();
+      throw error;
+    } finally {
+      clearTimeout(timeout);
       testStubs.length = 0;
       releaseModel = undefined;
     }
   });
 
   beforeEach(() => {
+    if (runtimePoisoned) throw new Error('Native SAM runtime failed teardown; refusing reuse');
     modelRequests.length = 0;
     modelDelay = null;
     modelText = undefined;
