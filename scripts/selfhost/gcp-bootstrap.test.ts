@@ -9,6 +9,8 @@ import { join, resolve } from 'node:path';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { parseGcpCredential } from '../../apps/api/src/services/provider-credential-codecs';
+
 // Every case runs bash and a node-based fake gcloud many times.
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -118,6 +120,28 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     );
   });
 
+  it('prints where the credential goes in SAM and JSON the credential parser accepts (box round R12)', () => {
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('Admin -> Credentials -> Add Credential');
+    expect(result.stdout).not.toContain('Integrations');
+    const json = /^\{"version":1,"provider":"gcp".*\}$/m.exec(result.stdout)?.[0];
+    expect(json).toBeDefined();
+    // The operator replaces ZONE; the result is what the app stores and parses for every node.
+    const parsed = parseGcpCredential(json!.replace('"ZONE"', '"europe-west1-b"'));
+    expect(parsed).toMatchObject({
+      authType: 'workload-identity',
+      gcpProjectId: 'sam-vm-test',
+      gcpProjectNumber: '123456789012',
+      serviceAccountEmail: 'sam-nodes@sam-vm-test.iam.gserviceaccount.com',
+      wifProviderId: 'sam-api',
+      defaultZone: 'europe-west1-b',
+    });
+    expect(parsed.authType === 'workload-identity' && parsed.wifPoolId).toMatch(
+      /^sam-[0-9a-f]{8}$/
+    );
+  });
+
   it('is idempotent: a second run creates nothing new and prints the same values', () => {
     const first = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
     expect(first.status, first.stderr).toBe(0);
@@ -126,7 +150,9 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     expect(second.status, second.stderr).toBe(0);
     const secondCalls = second.calls.slice(before);
     expect(secondCalls.filter((c) => / create/.test(c))).toEqual([]);
-    expect(second.stdout.split('Enter these')[1]).toBe(first.stdout.split('Enter these')[1]);
+    expect(second.stdout.split('Add the installation')[1]).toBe(
+      first.stdout.split('Add the installation')[1]
+    );
   });
 
   it('dry run changes nothing and shows what it would run', () => {

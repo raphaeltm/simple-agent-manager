@@ -535,9 +535,9 @@ first. Choose targets that are not administrators and not linked to real GitHub 
 
 ## Machines for workspaces
 
-Nodes come from a compute pool. A box with a platform cloud credential (for example the GCP
-service account in Admin → Integrations) gives every account the installation pool; nobody needs
-a cloud account of their own. Connecting the credential adds no machines: open
+Nodes come from a compute pool. A box with a platform cloud credential (**Admin → Credentials →
+Add Credential**, type Cloud Provider) gives every account the installation pool; nobody needs a
+cloud account of their own. Connecting the credential adds no machines: open
 **Admin → Infrastructure** and add machine types and regions to the installation pool.
 
 To create that credential's Google Cloud side in one step, run as a project owner with `gcloud`
@@ -551,9 +551,28 @@ pnpm selfhost:gcp-bootstrap -- --project <gcp-project-id> --api-url https://api.
 It creates or reuses a workload identity pool for this install alone, an OIDC provider that admits
 only tokens whose issuer is this install's API origin, and a `sam-nodes` service account with
 `roles/compute.instanceAdmin.v1` and `roles/compute.securityAdmin` that the pool may impersonate.
-It prints the five values for **Admin → Integrations → Google Cloud**. Re-running it changes
-nothing; it refuses to retarget a provider that trusts another install
-(`deploy/selfhost/gcp-bootstrap.sh`).
+It prints the credential to add in **Admin → Credentials → Add Credential**: Type "Cloud
+Provider", Provider "GCP", any label, and in the API Token field one JSON object (the shape
+`parseGcpCredential` in `apps/api/src/services/provider-credential-codecs.ts` reads). Replace
+`ZONE` with the Compute Engine zone nodes use by default. With made-up values:
+
+```json
+{
+  "version": 1,
+  "provider": "gcp",
+  "authType": "workload-identity",
+  "gcpProjectId": "my-sam-project",
+  "gcpProjectNumber": "123456789012",
+  "serviceAccountEmail": "sam-nodes@my-sam-project.iam.gserviceaccount.com",
+  "wifPoolId": "sam-1a2b3c4d",
+  "wifProviderId": "sam-api",
+  "defaultZone": "europe-west1-b"
+}
+```
+
+None of these is a secret: nodes get short-lived tokens through workload identity federation.
+Re-running the bootstrap changes nothing and prints the same values; it refuses to retarget a
+provider that trusts another install (`deploy/selfhost/gcp-bootstrap.sh`).
 
 It records what it created (not what it found) in `.state/created-resources.json` (names,
 project, time; no secrets; `--state-dir` to put it elsewhere). `--teardown` removes exactly those
@@ -677,7 +696,7 @@ Destructive flags, each only with `--remove-everything`:
 -d`, then `pnpm selfhost:gcp-bootstrap` again. Google keeps a deleted workload identity pool for 30
 days and its id cannot be reused until then, so within that window either undelete it
 (`gcloud iam workload-identity-pools undelete sam-<hash> --location=global --project <id>`) or pass
-a new `--pool-id` and enter the new values in Admin → Integrations. The app still lists the deleted
+a new `--pool-id` and put the new values in the platform credential (Admin → Credentials). The app still lists the deleted
 nodes: delete them in Admin → Nodes once it is up (the provider treats a VM that is already gone
 as deleted: `deleteVM` in `packages/providers/src/gcp.ts`).
 
