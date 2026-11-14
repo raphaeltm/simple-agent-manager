@@ -26,6 +26,7 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
+import { type JsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { isCredentialRejection, NodeTeardownBlockedError } from './node-teardown-authority';
 import {
   exactNodeIncarnationPredicate,
@@ -63,27 +64,27 @@ interface ProviderDeletionRecord {
  */
 export function pendingProviderDeletionFor(node: NodeRow): PendingProviderDeletion | null {
   if (!node.providerDeletionJson && !node.providerDeletionRequestedAt) return null;
-  let record: Partial<ProviderDeletionRecord> | null = null;
+  let record: JsonRecord | null = null;
   try {
-    const parsed: unknown = node.providerDeletionJson
-      ? JSON.parse(node.providerDeletionJson)
+    record = node.providerDeletionJson
+      ? maybeJsonRecord(JSON.parse(node.providerDeletionJson) as unknown)
       : null;
-    record =
-      parsed && typeof parsed === 'object' ? (parsed as Partial<ProviderDeletionRecord>) : null;
   } catch {
     record = null;
   }
   const requestedAt = node.providerDeletionRequestedAt;
-  const ticket = typeof record?.ticket === 'string' ? record.ticket : '';
+  const field = (key: keyof ProviderDeletionRecord): unknown => record?.[key];
+  const rawTicket = field('ticket');
+  const ticket = typeof rawTicket === 'string' ? rawTicket : '';
   const matches =
     record !== null &&
     ticket.length > 0 &&
     requestedAt !== null &&
     Number.isFinite(Date.parse(requestedAt)) &&
     !!node.providerInstanceId &&
-    record.providerInstanceId === node.providerInstanceId &&
+    field('providerInstanceId') === node.providerInstanceId &&
     !!node.runtimeIncarnationId &&
-    record.runtimeIncarnationId === node.runtimeIncarnationId;
+    field('runtimeIncarnationId') === node.runtimeIncarnationId;
   if (!matches) {
     log.warn('node_teardown.provider_deletion_record_ignored', {
       nodeId: node.id,
@@ -91,7 +92,7 @@ export function pendingProviderDeletionFor(node: NodeRow): PendingProviderDeleti
     });
     return null;
   }
-  const recordedGrace = record?.sendGraceMs;
+  const recordedGrace = field('sendGraceMs');
   const sendGraceMs =
     typeof recordedGrace === 'number' && Number.isFinite(recordedGrace) ? recordedGrace : undefined;
   return { ticket, requestedAt: requestedAt as string, ...(sendGraceMs ? { sendGraceMs } : {}) };
