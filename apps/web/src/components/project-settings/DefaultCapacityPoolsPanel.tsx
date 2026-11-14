@@ -29,6 +29,7 @@ import { POOL_EDIT_CONFLICT_MESSAGE, POOL_SCOPE_COPY } from '../../lib/compute-p
 import { buildMachineGroups } from '../../lib/compute-pool-machines';
 import { initialSourceOrder, orderableSources } from '../../lib/compute-pool-source-order';
 import { capacityPoolQueryKeys } from '../../lib/query-options/capacity-pools';
+import { instantRuntimeEnabledQueryOptions } from '../../lib/query-options/projects';
 import { ComputePoolEditor } from '../compute-pool/ComputePoolEditor';
 import { ComputePoolEmptyState } from '../compute-pool/ComputePoolEmptyState';
 import { ComputePoolOverview } from '../compute-pool/ComputePoolOverview';
@@ -142,6 +143,11 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
           : fetchInstallationDefaultCapacityPools(),
     enabled: Boolean(queryScope),
   });
+  // What an empty pool means: only Instant sessions, or nothing at all (a self-hosted box).
+  const instantQuery = useQuery({
+    ...instantRuntimeEnabledQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
   // Bumped after a save, a discard or a conflict, so the editor reopens from the server state.
   const [editorKey, setEditorKey] = useState(0);
   const resetEditor = () => setEditorKey((key) => key + 1);
@@ -253,6 +259,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                 sources={sources}
                 initialOrder={initialSourceOrder(sources, shown.pool.sourceOrder)}
                 saving={updateMutation.isPending}
+                instantEnabled={instantQuery.data}
                 onDiscard={resetEditor}
                 onSave={(request) => updateMutation.mutate(request)}
               />

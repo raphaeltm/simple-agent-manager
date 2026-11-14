@@ -39,6 +39,7 @@ import {
 } from '../../../../../scripts/selfhost/key-service';
 import { completePlatformKeys } from '../../../../../scripts/selfhost/platform-keys';
 import type { RotateDeps } from '../../../../../scripts/selfhost/rotate-apply';
+import { formatRotationStatus } from '../../../../../scripts/selfhost/rotate-report';
 import { runRotate } from '../../../../../scripts/selfhost/rotate-run';
 import { openRotationStore, readJournal } from '../../../../../scripts/selfhost/rotate-store';
 import * as schema from '../../../src/db/schema';
@@ -229,6 +230,79 @@ describe('rotate --dry-run', () => {
       before
     );
   });
+
+  it('creates nothing on disk, not even the rotation directory (box round R9/R11)', async () => {
+    const tree = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory()
+          ? [`${e.name}/`, ...tree(join(dir, e.name)).map((f) => `${e.name}/${f}`)]
+          : [e.name]
+      );
+    const before = tree(stateDir);
+    expect(await runRotate(input({ all: true, dryRun: true }), deps())).toBeNull();
+    expect(existsSync(join(stateDir, 'key-agent', 'rotation'))).toBe(false);
+    expect(tree(stateDir)).toEqual(before);
+  });
+
+  it('refuses --dry-run with --resume instead of running the recorded steps without the lock (security review M1)', async () => {
+    healthy = () => !logs.some((l) => l.startsWith('reseal:'));
+    await expect(runRotate(input({ names: ['vapid-keys'] }), deps())).rejects.toThrow();
+    const before = JSON.stringify(readJournal(stateDir));
+    const bundles = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    healthy = () => true;
+    await expect(runRotate(input({ resume: true, dryRun: true }), deps())).rejects.toThrow(
+      /--dry-run previews a new rotation/
+    );
+    expect(JSON.stringify(readJournal(stateDir))).toBe(before);
+    expect(listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId)).toEqual(
+      bundles
+    );
+    // Control: the real resume still finishes it.
+    await runRotate(input({ resume: true }), deps());
+    expect(readJournal(stateDir)).toBeNull();
+  });
+
+  it('with a JWT overlap of 0 says the old key is removed in this run (hard cut)', async () => {
+    await runRotate(input({ names: ['jwt-keys'], jwtOverlapHours: 0, dryRun: true }), deps());
+    const text = logs.join('\n');
+    expect(text).toContain('hard cut');
+    expect(text).toContain('removed in this run');
+    expect(text).not.toContain('after the 0 h overlap');
+    logs = [];
+    await runRotate(input({ names: ['jwt-keys'], dryRun: true }), deps());
+    expect(logs.join('\n')).toContain('after the 13 h overlap');
+  });
+
+  it('names the bundles the run will remove (the box keeps the newest 3)', async () => {
+    const existing = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    await runRotate(input({ all: true, dryRun: true }), deps());
+    const text = logs.join('\n');
+    expect(text).toMatch(/keeps only the newest 3/);
+    for (const id of existing) expect(text).toContain(id);
+  });
+});
+
+describe('rotate --status', () => {
+  it('shows a reseal that was sealed but not confirmed deployed (box round R11)', async () => {
+    let checks = 0;
+    // Every check healthy except the one after the final reseal's deploy.
+    healthy = () => {
+      checks += 1;
+      return !logs.some((l) => l.startsWith('reseal:')) || checks < 0;
+    };
+    await expect(runRotate(input({ names: ['vapid-keys'] }), deps())).rejects.toThrow(
+      /not healthy/
+    );
+    const staged = readJournal(stateDir)?.steps.reseal;
+    expect(staged?.phase).toBe('staging');
+    const status = formatRotationStatus(stateDir).join('\n');
+    expect(status).toContain(`reseal: staging`);
+    expect(status).toContain(staged?.stagedBundleId ?? 'missing');
+    expect(status).toContain('rotate --resume');
+    healthy = () => true;
+    await runRotate(input({ resume: true }), deps());
+    expect(formatRotationStatus(stateDir)).toEqual(['no rotation in progress']);
+  });
 });
 
 describe('rotate encryption-key', () => {
@@ -374,6 +448,18 @@ describe('rotate encryption-key', () => {
       /secrets.env sets ENCRYPTION_KEY/
     );
     expect(readJournal(stateDir)).toBeNull();
+  });
+});
+
+describe('rotate: which sealed bundles it removed', () => {
+  it('lists the pre-rotation bundles the newest-3 rule removed in the summary and the journal', async () => {
+    const existing = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    const journal = await runRotate(input({ names: ['vapid-keys', 'agent-signing-key'] }), deps());
+    const remaining = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    for (const id of existing) expect(remaining).not.toContain(id);
+    expect(journal?.removedBundles).toEqual(expect.arrayContaining(existing));
+    const text = logs.join('\n');
+    expect(text).toMatch(new RegExp(`Removed sealed bundles[^\\n]*${existing[0]}`));
   });
 });
 

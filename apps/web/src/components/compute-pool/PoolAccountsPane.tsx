@@ -4,8 +4,9 @@ import { ArrowDown, ArrowUp, X } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
 
 import {
-  EMPTY_POOL_COPY,
+  emptyPoolBody,
   emptyPoolTitle,
+  type InstantAvailability,
   POOL_EDITOR_COPY,
   poolAccountsTitle,
   PROVIDER_ORDER_COPY,
@@ -20,6 +21,8 @@ const VISIBLE_ITEMS_PER_ACCOUNT = 5;
 
 interface PoolAccountsPaneProps {
   scope: CapacityPoolScope;
+  /** Whether Instant sessions can run here (undefined until known). */
+  instantEnabled: InstantAvailability;
   accounts: OrderableSource[];
   rows: MachineRegionRow[];
   draft: RegionDraft;
@@ -65,6 +68,7 @@ function moveAmong(order: string[], visible: string[], id: string, delta: -1 | 1
 
 export function PoolAccountsPane({
   scope,
+  instantEnabled,
   accounts,
   rows,
   draft,
@@ -146,8 +150,8 @@ export function PoolAccountsPane({
 
       {usableCount === 0 && (
         <Alert variant="warning">
-          <strong className="block">{emptyPoolTitle(scope)}</strong>
-          {EMPTY_POOL_COPY.body}
+          <strong className="block">{emptyPoolTitle(scope, instantEnabled)}</strong>
+          {emptyPoolBody(instantEnabled)}
         </Alert>
       )}
 

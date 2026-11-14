@@ -76,6 +76,12 @@ export interface Item {
   /** Items sharing a runKey share one action, run once. */
   runKey?: string;
   run?: () => void;
+  /**
+   * For an item of a shared action (runKey): true when it is gone although the action failed on
+   * another item of the group, so the summary reports what is really left (a key file removed
+   * before an unrelated cache refused to go).
+   */
+  goneDespiteGroupFailure?: () => boolean;
   /** After the action: did it go? (default: yes when run() returned). */
   settle?: () => { removed: boolean; why?: string };
   /** Marked removed in the record once gone (added first when not recorded yet). */
@@ -133,7 +139,7 @@ export function execute(items: Item[], mode: Mode, recordFile: string): Outcome[
         }
       }
       const error = ran.get(key);
-      if (error) {
+      if (error && !item.goneDespiteGroupFailure?.()) {
         outcomes.push({ item, status: 'failed', why: error.message });
         continue;
       }
@@ -220,6 +226,9 @@ export function renderSummary(outcomes: Outcome[]): string {
     ['Not attempted (an earlier step failed; run again)', ['not attempted']],
   ];
   const lines: string[] = ['', 'Summary'];
+  const notRemoved = outcomes.filter(
+    (o) => o.status !== 'removed' && o.status !== 'already removed'
+  );
   for (const [title, statuses] of groups) {
     const hits = outcomes.filter((o) => statuses.includes(o.status));
     if (hits.length === 0) continue;
@@ -231,6 +240,13 @@ export function renderSummary(outcomes: Outcome[]): string {
       );
     }
   }
+  lines.push(
+    '',
+    notRemoved.length === 0
+      ? 'Teardown removed everything it lists.'
+      : `Not removed: the ${notRemoved.length} item${notRemoved.length === 1 ? '' : 's'} above under Left by choice, Left for you, Refused, Failed and Not attempted; each says how to remove it.`,
+    'Teardown knows only what .state/created-resources.json records and what SAM labels or names. Anything else you made by hand for this install (another bucket, for example one for backups) is not listed: remove it yourself.'
+  );
   return lines.join('\n');
 }
 

@@ -85,9 +85,21 @@ export async function withAuthReadDeadline<T>(
   );
 }
 
+/**
+ * `GET /api/auth/get-session`, which the web app reads the role and status from. Read from D1,
+ * not from better-auth's signed session-cookie cache, like every other SAM session read (see
+ * `session.cookieCache` in auth.ts): the cache can hold the user as it was before a sign-in's own
+ * hooks changed it. The bootstrap owner is created as `user` and promoted when its first session
+ * is created (bootstrap-owner.ts), so the cache written by that sign-in said `user` and the first
+ * administrator had no admin pages until a second sign-in (self-host box round R12). The same
+ * window existed for the first account promoted by the login self-heal.
+ */
 export async function readAuthSession(env: Env, request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  url.searchParams.set('disableCookieCache', 'true');
+  const uncached = new Request(url, request);
   try {
-    return await withAuthReadDeadline(env, request, (auth) => auth.handler(request));
+    return await withAuthReadDeadline(env, uncached, (auth) => auth.handler(uncached));
   } catch (error) {
     if (request.signal.aborted) throw error;
     return Response.json(

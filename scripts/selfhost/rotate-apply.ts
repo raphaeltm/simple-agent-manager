@@ -8,6 +8,7 @@
  * be in use is never thrown away.
  */
 import type { Secrets } from '../../deploy/selfhost/key-agent/bundle.ts';
+import { DEFAULT_KEPT_BUNDLES } from './key-service';
 import type { RotatableKey } from './rotate-catalog';
 import type { Journal, Phase, RotationStore, StepState } from './rotate-store';
 
@@ -115,5 +116,11 @@ export async function applyPatch(ctx: StepContext, patch: Patch, then: Phase): P
   delete step.stagedFor;
   delete step.stagedFrom;
   ctx.save();
-  for (const removed of store.prune([bundleId])) deps.log(`  removed old bundle ${removed}`);
+  const removed = store.prune([bundleId]);
+  if (removed.length === 0) return;
+  for (const id of removed) {
+    deps.log(`  removed old bundle ${id} (the box keeps the newest ${DEFAULT_KEPT_BUNDLES})`);
+  }
+  ctx.journal.removedBundles = [...(ctx.journal.removedBundles ?? []), ...removed];
+  ctx.save();
 }

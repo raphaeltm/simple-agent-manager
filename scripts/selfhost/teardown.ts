@@ -9,7 +9,8 @@
  *       also the bucket contents, compose volumes and images, .state and .env
  *     --delete-backups   also delete local backups (never without this flag)
  *     --destroy-key      also delete the key file / schedule the cloud KMS key's destruction
- *   --gcp-project <id>   a Google Cloud project nodes ran in (default: the bootstrap's, recorded)
+ *   --gcp-project <id>   a Google Cloud project nodes ran in (default: GCP_PROJECT in .env, plus
+ *                        every project the bootstrap recorded); repeatable, replaces GCP_PROJECT
  *   --adopt-discovered   remove bootstrap resources found by name on an install from before the record
  *   --box-env <file>, --state-dir <dir>   as for the other selfhost commands
  *
@@ -122,6 +123,21 @@ function resolveInstallation(
   return { entry, recordedId: id, id };
 }
 
+/**
+ * The Google Cloud projects to look in besides the bootstrap's recorded ones: --gcp-project when
+ * given, else GCP_PROJECT from .env (the box's project, set at install for DNS and the node pool).
+ */
+function resolveGcpProjects(
+  flags: string[] | undefined,
+  fromEnv: string | undefined,
+  envFile: string
+): { projects: string[]; source: string } {
+  if (flags && flags.length > 0) return { projects: flags, source: 'from --gcp-project' };
+  const project = fromEnv?.trim();
+  if (project) return { projects: [project], source: `from GCP_PROJECT in ${envFile}` };
+  return { projects: [], source: 'none' };
+}
+
 async function confirm(expected: string, given: string | undefined): Promise<boolean> {
   if (given !== undefined) return given === expected;
   if (!process.stdin.isTTY) return false;
@@ -162,6 +178,10 @@ async function main(): Promise<number> {
   const installationId = resolved.id;
   const domain = box.SAM_DOMAIN ?? install?.attributes?.domain ?? '';
   if (resolved.problem) log(`node VMs will not be touched: ${resolved.problem}`);
+  const gcpProjects = resolveGcpProjects(values['gcp-project'], box.GCP_PROJECT, envFile);
+  if (gcpProjects.projects.length > 0) {
+    log(`Google Cloud project ${gcpProjects.projects.join(', ')} (${gcpProjects.source})`);
+  }
   const uid = process.getuid?.();
   const gid = process.getgid?.();
   const ctx: TeardownContext = {
@@ -178,7 +198,7 @@ async function main(): Promise<number> {
       deleteBackups: values['delete-backups'] ?? false,
       destroyKey: values['destroy-key'] ?? false,
       adoptDiscovered: values['adopt-discovered'] ?? false,
-      gcpProjects: values['gcp-project'] ?? [],
+      gcpProjects: gcpProjects.projects,
     },
     record,
     recordFile,

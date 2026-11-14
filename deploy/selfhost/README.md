@@ -220,6 +220,21 @@ rotates each key in this order. Every new value exists only in sealed bundles; t
 (`.state/key-agent/rotation/journal.json`) holds names, phases, bundle ids and cursors, never a
 value. Before a key's first change its old values are sealed again to
 `.state/key-agent/rotation/<id>/<key>.before.json`: the rollback source, kept until you delete it.
+A dry run only reads: it creates no file or directory and takes no lock.
+
+Each step seals a new bundle, and every seal on the box keeps only the newest 3 bundles
+(`DEFAULT_KEPT_BUNDLES`, `scripts/selfhost/key-service.ts`), the same rule as every deploy. So a
+rotation removes the bundles that existed before it, including one sealed by another key provider
+before a `switch`. That is intended: the old values stay in the `*.before.json` snapshots and in
+backups, not in bundles the key agent would still open. The plan lists the bundles that will go and
+the summary (and `rotate --status`) lists the ones that went.
+
+After every deploy the run asks celld to adopt the version and checks the API's health, retrying
+for up to 30 s (`SELFHOST_ADOPT_CHECK_WINDOW_MS`, every `SELFHOST_HEALTH_POLL_INTERVAL_MS`), so a
+short celld stall while it adopts a version does not stop the run. A version still unhealthy after
+the window is rolled back as before. If a run stops anyway, `rotate --status` shows the step and the
+bundle it sealed, including the final reseal, and `rotate --resume` deploys that recorded bundle
+again.
 
 | Key                                                                                                 | How                                                                                                                                                                                                                                                                                                                                                                                                                              | Users notice                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Downtime                                    |
 | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
@@ -520,9 +535,9 @@ first. Choose targets that are not administrators and not linked to real GitHub 
 
 ## Machines for workspaces
 
-Nodes come from a compute pool. A box with a platform cloud credential (for example the GCP
-service account in Admin → Integrations) gives every account the installation pool; nobody needs
-a cloud account of their own. Connecting the credential adds no machines: open
+Nodes come from a compute pool. A box with a platform cloud credential (**Admin → Credentials →
+Add Credential**, type Cloud Provider) gives every account the installation pool; nobody needs a
+cloud account of their own. Connecting the credential adds no machines: open
 **Admin → Infrastructure** and add machine types and regions to the installation pool.
 
 To create that credential's Google Cloud side in one step, run as a project owner with `gcloud`
@@ -536,9 +551,28 @@ pnpm selfhost:gcp-bootstrap -- --project <gcp-project-id> --api-url https://api.
 It creates or reuses a workload identity pool for this install alone, an OIDC provider that admits
 only tokens whose issuer is this install's API origin, and a `sam-nodes` service account with
 `roles/compute.instanceAdmin.v1` and `roles/compute.securityAdmin` that the pool may impersonate.
-It prints the five values for **Admin → Integrations → Google Cloud**. Re-running it changes
-nothing; it refuses to retarget a provider that trusts another install
-(`deploy/selfhost/gcp-bootstrap.sh`).
+It prints the credential to add in **Admin → Credentials → Add Credential**: Type "Cloud
+Provider", Provider "GCP", any label, and in the API Token field one JSON object (the shape
+`parseGcpCredential` in `apps/api/src/services/provider-credential-codecs.ts` reads). Replace
+`ZONE` with the Compute Engine zone nodes use by default. With made-up values:
+
+```json
+{
+  "version": 1,
+  "provider": "gcp",
+  "authType": "workload-identity",
+  "gcpProjectId": "my-sam-project",
+  "gcpProjectNumber": "123456789012",
+  "serviceAccountEmail": "sam-nodes@my-sam-project.iam.gserviceaccount.com",
+  "wifPoolId": "sam-1a2b3c4d",
+  "wifProviderId": "sam-api",
+  "defaultZone": "europe-west1-b"
+}
+```
+
+None of these is a secret: nodes get short-lived tokens through workload identity federation.
+Re-running the bootstrap changes nothing and prints the same values; it refuses to retarget a
+provider that trusts another install (`deploy/selfhost/gcp-bootstrap.sh`).
 
 It records what it created (not what it found) in `.state/created-resources.json` (names,
 project, time; no secrets; `--state-dir` to put it elsewhere). `--teardown` removes exactly those
@@ -592,7 +626,9 @@ Node takes) to point these commands at another `.env`.
 
 `pnpm selfhost:teardown` removes what this install created or helped create
 (`scripts/selfhost/teardown.ts`). Run it on the box, with `gcloud` logged in as a project owner if
-nodes ran in Google Cloud (the box VM's own account cannot delete VMs).
+nodes ran in Google Cloud (the box VM's own account cannot delete VMs). It looks for node VMs in
+`GCP_PROJECT` from `.env` and in every project the bootstrap recorded; `--gcp-project <id>`
+(repeatable) replaces `GCP_PROJECT`.
 
 ```bash
 pnpm selfhost:teardown                                          # inventory: read only (the default)
@@ -635,6 +671,12 @@ contents; 5. the box. If an item fails, later steps are not attempted (the ident
 delete a VM is kept), and running the same command again continues. Each removed item is marked
 `removedAt` in the record, which teardown itself keeps as its receipt.
 
+Emptying `.state/` makes read-only directories writable first (Go leaves its module cache under
+`.state/go-cache` read-only), removes caches last, and carries on past an entry it cannot remove,
+so the sealed bundles and key material go even when a cache does not. The summary then names every
+path that is left, says whether it is only a cache, and gives the command to remove it
+(`clearStateEntries` in `teardown-state-dir.ts`).
+
 | Mode                  | Removes                                                                                                                                                | Keeps                                                                                                                           |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `--keep-data`         | node VMs and their disks; the bootstrap's pool, provider, node service account and its roles; containers                                               | bucket, volumes, images, `.state/` (bundles, key file), `.env`, backups, the KMS key and the box's grant on it, DNS, GitHub App |
@@ -654,7 +696,7 @@ Destructive flags, each only with `--remove-everything`:
 -d`, then `pnpm selfhost:gcp-bootstrap` again. Google keeps a deleted workload identity pool for 30
 days and its id cannot be reused until then, so within that window either undelete it
 (`gcloud iam workload-identity-pools undelete sam-<hash> --location=global --project <id>`) or pass
-a new `--pool-id` and enter the new values in Admin → Integrations. The app still lists the deleted
+a new `--pool-id` and put the new values in the platform credential (Admin → Credentials). The app still lists the deleted
 nodes: delete them in Admin → Nodes once it is up (the provider treats a VM that is already gone
 as deleted: `deleteVM` in `packages/providers/src/gcp.ts`).
 
@@ -675,10 +717,16 @@ VM uses it. Another install's VM is listed as refused and never touched.
   provider's console;
 - the GitHub App made through Admin → Integrations: GitHub → Settings → Developer settings → GitHub
   Apps → the App → Advanced → Delete GitHub App;
-- the DNS records (`*.SAM_DOMAIN`, and with inbound mail the MX record and the `sam-smtp-in` rule),
-  the bucket itself when you created it, the machine, its service account and bucket grant, OAuth
-  clients and SMTP credentials, and an AWS or Azure key (commands under Removing what setup
-  created).
+- the DNS records (`*.SAM_DOMAIN` and the apex record if you made one, and with inbound mail the MX
+  record and the `sam-smtp-in` rule), the bucket itself when you created it, OAuth clients and SMTP
+  credentials, and an AWS or Azure key (commands under Removing what setup created);
+- the machine and what you made for it: its boot disk, static IP, network, subnet and the firewall
+  rules you opened for it (80/443, SSH), its service account and bucket grant. Teardown runs on the
+  box and cannot tell which network or address you made for it.
+
+The summary ends with how many items were not removed. Teardown knows only what the record holds
+and what SAM labels or names; anything else made by hand for the install (a second bucket for
+backups, for example) is not listed.
 
 **Other clouds today:** the core (`teardown-model.ts`, `teardown-box.ts`) is cloud-neutral: an
 AWS, Azure, Hetzner or bare-metal box gets the box, bucket (gs:// or s3://) and backup removal and

@@ -7,7 +7,7 @@
 #     (https://api.<domain>, the `iss` SAM signs with: getIssuer() in apps/api/src/services/jwt.ts),
 #   - a node service account with roles/compute.instanceAdmin.v1 and roles/compute.securityAdmin,
 #   - the binding that lets identities from that pool impersonate the service account,
-# then prints the five values Admin -> Integrations -> Google Cloud asks for.
+# then prints the platform cloud credential to add in Admin -> Credentials (Cloud Provider, GCP).
 # With --kms, also the key that seals the box's Worker secrets (README, Sealed secrets):
 #   - a Cloud KMS key ring (default sam-selfhost) and a key for this install (default
 #     sam-<8 hex of sha256(issuer)>, the name `pnpm selfhost:deploy --init` looks for),
@@ -311,14 +311,22 @@ fi
 
 [ "$DRY_RUN" -eq 1 ] && echo "Dry run: nothing was changed."
 if [ "$NODES" -eq 1 ]; then
+  # The shape parseGcpCredential (apps/api/src/services/provider-credential-codecs.ts) reads.
   cat <<EOF
 
-Enter these in Admin -> Integrations -> Google Cloud:
+Add the installation's cloud account in SAM: Admin -> Credentials -> Add Credential,
+Type "Cloud Provider", Provider "GCP", any label. Paste this as the API Token, with ZONE
+replaced by the Compute Engine zone nodes use by default (for example europe-west1-b):
+
+{"version":1,"provider":"gcp","authType":"workload-identity","gcpProjectId":"${PROJECT}","gcpProjectNumber":"${PROJECT_NUMBER}","serviceAccountEmail":"${SA_EMAIL}","wifPoolId":"${POOL_ID}","wifProviderId":"${PROVIDER_ID}","defaultZone":"ZONE"}
+
+The values in it:
   Project ID:             ${PROJECT}
   Project number:         ${PROJECT_NUMBER}
   Pool ID:                ${POOL_ID}
   Provider ID:            ${PROVIDER_ID}
   Service account email:  ${SA_EMAIL}
+Then add machines to the installation pool in Admin -> Infrastructure.
 EOF
 fi
 if [ "$KMS" -eq 1 ]; then

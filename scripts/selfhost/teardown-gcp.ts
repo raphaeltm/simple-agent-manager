@@ -69,7 +69,7 @@ export function gcpItems(ctx: TeardownContext): Item[] {
         place: 'in your cloud, made by SAM at runtime',
         what: 'Google Cloud: no project recorded',
         provenance: 'discovered, not recorded',
-        how: 'if nodes ran in Google Cloud, run again with --gcp-project <project id>',
+        how: 'if nodes ran in Google Cloud, set GCP_PROJECT in .env or run again with --gcp-project <project id>',
         step: STEPS.compute,
         plan: both({ act: 'operator', why: 'teardown does not know the project' }),
       },

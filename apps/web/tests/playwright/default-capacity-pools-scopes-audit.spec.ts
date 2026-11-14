@@ -357,6 +357,9 @@ function defaultsResponse(scope: PoolScope) {
   };
 }
 
+/** GET /api/config/instant-runtime: on, as on a Cloudflare install; a self-hosted box has none. */
+let instantRuntimeEnabled = true;
+
 async function setupCommonMocks(page: Page, authUser: unknown, catalogScope: PoolScope) {
   await page.addInitScript(() =>
     ['pool-user', 'pool-admin'].forEach((userId) =>
@@ -380,6 +383,9 @@ async function setupCommonMocks(page: Page, authUser: unknown, catalogScope: Poo
     if (path === '/api/credentials') return respond(200, []);
     if (path.startsWith('/api/github')) return respond(200, []);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
+    if (path === '/api/config/instant-runtime') {
+      return respond(200, { enabled: instantRuntimeEnabled });
+    }
     if (path === '/api/providers/catalog') {
       return respond(200, { catalogs: providerCatalogs(catalogScope) });
     }
@@ -630,6 +636,35 @@ test.describe('Default capacity pool scope surfaces', () => {
   // Each scope exercises filters, membership edits, persistence, and multiple
   // screenshots; the shared single-screen timeout is too short for this flow.
   test.setTimeout(120_000);
+  test.beforeEach(() => {
+    instantRuntimeEnabled = true;
+  });
+
+  test('admin surface on an installation without Instant sessions says an empty pool runs nothing (box round R12)', async ({
+    page,
+  }, testInfo) => {
+    instantRuntimeEnabled = false;
+    await setupInstallationPoolMocks(page);
+    await page.goto('/admin/infrastructure');
+    const suffix = getProjectSuffix(testInfo.project.name);
+    await expectStressedDefaultPool(page, 'installation');
+    await page
+      .getByRole('switch', { name: /^Use Hetzner/ })
+      .first()
+      .click();
+    await expect(page.getByText('Empty · nothing can run')).toBeVisible();
+    await expect(
+      page.getByText('The shared pool is empty, so no work can run, for everyone who uses it.')
+    ).toBeVisible();
+    await expect(page.getByText(/Instant sessions only|only Instant sessions/)).toHaveCount(0);
+    await expect(page.getByText(/Instant runs in a container on Cloudflare/)).toHaveCount(0);
+    await assertNoOverflow(page);
+    await screenshotNearHeading(
+      page,
+      ACCOUNTS_HEADINGS.installation,
+      `default-capacity-pools-installation-no-instant-${suffix}`
+    );
+  });
 
   test('project settings surface renders stressed project default pool without overflow', async ({
     page,

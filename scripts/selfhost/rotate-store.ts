@@ -107,6 +107,11 @@ export interface Journal {
   keys: string[];
   steps: Record<string, StepState>;
   finishedAt?: string;
+  /**
+   * Sealed bundles this run deleted: every seal keeps only the newest DEFAULT_KEPT_BUNDLES
+   * (key-service.ts), and each step seals one, so a rotation removes the bundles from before it.
+   */
+  removedBundles?: string[];
 }
 
 export function rotationDir(stateDir: string): string {

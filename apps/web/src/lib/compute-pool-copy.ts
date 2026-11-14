@@ -149,15 +149,38 @@ export function poolAccountsTitle(scope: CapacityPoolScope): string {
   return `In ${POOL_NOUN[scope]}`;
 }
 
+/**
+ * Whether Instant sessions can run on this installation (`/api/config/instant-runtime`):
+ * undefined until that answer arrives. A self-hosted box has none, so an empty pool there means
+ * nothing can run (box round R12).
+ */
+export type InstantAvailability = boolean | undefined;
+
 /** Shown when nothing in the pool can run work. Matches guides/instant-sessions.md. */
-export function emptyPoolTitle(scope: CapacityPoolScope): string {
+export function emptyPoolTitle(scope: CapacityPoolScope, instant: InstantAvailability): string {
   const who = scope === 'installation' ? ', for everyone who uses it' : '';
-  return `${capitalize(POOL_NOUN[scope])} is empty, so only Instant sessions can run${who}.`;
+  const pool = capitalize(POOL_NOUN[scope]);
+  if (instant === true) return `${pool} is empty, so only Instant sessions can run${who}.`;
+  if (instant === false) return `${pool} is empty, so no work can run${who}.`;
+  return `${pool} is empty.`;
 }
 
-export const EMPTY_POOL_COPY = {
-  body: 'Instant runs in a container on Cloudflare: no Docker, no devcontainer, and a slim toolchain (git, gh, curl, jq, uv, Node and the agent CLIs). Builds and test suites that need more will fail. Add machines from the list to run work on VMs.',
-} as const;
+export function emptyPoolBody(instant: InstantAvailability): string {
+  if (instant === true) {
+    return 'Instant runs in a container on Cloudflare: no Docker, no devcontainer, and a slim toolchain (git, gh, curl, jq, uv, Node and the agent CLIs). Builds and test suites that need more will fail. Add machines from the list to run work on VMs.';
+  }
+  if (instant === false) {
+    return 'This installation has no Instant sessions, so every task and chat needs a machine from this pool. Add machines from the list.';
+  }
+  return 'Add machines from the list to run work on VMs.';
+}
+
+/** The pool editor's status chip when nothing in the pool can run work. */
+export function emptyPoolChip(instant: InstantAvailability): string {
+  if (instant === true) return 'Empty · Instant sessions only';
+  if (instant === false) return 'Empty · nothing can run';
+  return 'Empty';
+}
 
 export const POOL_EDITOR_COPY = {
   accountsHelp:

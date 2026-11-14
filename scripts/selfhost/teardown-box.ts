@@ -4,14 +4,14 @@
  * speaks gs:// and s3://. Cloud resources are teardown-gcp.ts's (and any later adapter's).
  */
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import type { CreatedResource } from '../../deploy/selfhost/created-resources.mjs';
 import { type BoxContext, check, composeArgs, MANIFEST_NAME, parseBucketUrl } from './backup-lib';
 import { deleteObjects, listObjects } from './bucket-objects';
-import { COMPOSE_PROJECT, RECORD_FILE, usesBundledStore } from './install-record';
+import { COMPOSE_PROJECT, usesBundledStore } from './install-record';
 import { both, type Item, type Mode, STEPS } from './teardown-model';
+import { isProtectedDir, stateItems } from './teardown-state-dir';
 
 export interface TeardownOptions {
   deleteBackups: boolean;
@@ -30,12 +30,12 @@ export interface TeardownContext extends BoxContext {
   installationId: string | null;
   /** deploy/selfhost: where backups go by default. */
   selfhostDir: string;
+  /** Removes one path under .state (tests inject a failure); default removeTree. */
+  removeTree?: (path: string) => void;
 }
 
 /** Objects per `gcloud storage rm` / `mc rm` call. */
 const BUCKET_DELETE_BATCH = 500;
-const KEY_FILE = join('key-agent', 'kek');
-const LEGACY_KEYS = 'platform-keys.json';
 
 export function recorded(ctx: TeardownContext, kind: string, name?: string) {
   return ctx.record.find(
@@ -148,130 +148,6 @@ function composeVolumes(ctx: TeardownContext): string[] {
     .split('\n')
     .map((v) => v.trim())
     .filter(Boolean);
-}
-
-function stateItems(ctx: TeardownContext): Item[] {
-  if (!existsSync(ctx.stateDir)) return [];
-  const items: Item[] = [];
-  const keyFile = join(ctx.stateDir, KEY_FILE);
-  const legacyKeys = join(ctx.stateDir, LEGACY_KEYS);
-  const keepKey = !ctx.options.destroyKey;
-  const keyDecision = {
-    'keep-data': { act: 'keep' as const, why: 'keep my data keeps the key' },
-    'remove-everything': ctx.options.destroyKey
-      ? { act: 'remove' as const }
-      : { act: 'keep' as const, why: 'pass --destroy-key to delete it' },
-  };
-  if (existsSync(keyFile)) {
-    items.push({
-      id: 'box:key-file',
-      place: 'on the box',
-      what: `key file ${keyFile} (opens the sealed bundles)`,
-      provenance: 'discovered, not recorded',
-      how: `rm ${keyFile}`,
-      step: STEPS.box,
-      plan: keyDecision,
-      forGood:
-        'every sealed bundle and every backup of this box sealed with this key can never be opened again, unless you keep a copy',
-      runKey: 'state',
-      record: { cloud: 'box', kind: 'key-file', name: keyFile, createdBy: 'deploy' },
-    });
-  }
-  if (existsSync(legacyKeys)) {
-    items.push({
-      id: 'box:platform-keys',
-      place: 'on the box',
-      what: `${legacyKeys} (plaintext platform keys of a legacy-plaintext box)`,
-      provenance: 'discovered, not recorded',
-      how: `rm ${legacyKeys}`,
-      step: STEPS.box,
-      plan: keyDecision,
-      forGood: 'the box copy of the platform keys; backups hold their own copy',
-      runKey: 'state',
-      record: { cloud: 'box', kind: 'platform-keys', name: legacyKeys, createdBy: 'deploy' },
-    });
-  }
-  const state = recorded(ctx, 'state-dir');
-  items.push({
-    id: 'box:state',
-    place: 'on the box',
-    what: `${ctx.stateDir} (sealed bundles, generated config, deploy project, celld binary, caches, secrets.env)`,
-    provenance: state ? 'recorded' : 'discovered, not recorded',
-    how: `rm -r everything in ${ctx.stateDir} except ${RECORD_FILE} and a key that is kept`,
-    step: STEPS.box,
-    plan: {
-      'keep-data': { act: 'keep', why: 'keep my data keeps the bundles and state' },
-      'remove-everything': { act: 'remove' },
-    },
-    removedAt: state?.removedAt,
-    runKey: 'state',
-    run: () => clearState(ctx, keepKey),
-    record: [
-      { cloud: 'box', kind: 'state-dir', name: ctx.stateDir, createdBy: 'deploy' },
-      // The install itself is gone with its state; the id stays readable for a resumed run.
-      ...ctx.record
-        .filter((r) => r.cloud === 'box' && r.kind === 'installation')
-        .map((r) => ({ cloud: 'box', kind: 'installation', name: r.name })),
-    ],
-  });
-  items.push({
-    id: 'box:record',
-    place: 'on the box',
-    what: `${ctx.recordFile} (this record: teardown's receipt)`,
-    provenance: 'recorded',
-    how: `rm ${ctx.recordFile} by hand once you no longer need it`,
-    step: STEPS.box,
-    plan: both({ act: 'keep', why: 'the receipt a second run resumes from' }),
-  });
-  return items;
-}
-
-/** Everything in .state except the record, and the keys when they are kept. */
-function clearState(ctx: TeardownContext, keepKey: boolean): void {
-  assertStateDir(ctx);
-  for (const entry of readdirSync(ctx.stateDir)) {
-    if (entry === RECORD_FILE || (keepKey && entry === LEGACY_KEYS)) continue;
-    const path = join(ctx.stateDir, entry);
-    if (entry === 'key-agent' && keepKey) {
-      for (const inner of readdirSync(path)) {
-        if (inner !== basename(KEY_FILE))
-          rmSync(join(path, inner), { recursive: true, force: true });
-      }
-      continue;
-    }
-    rmSync(path, { recursive: true, force: true });
-  }
-}
-
-/** True for `/`, the home directory, and any directory that contains the checkout. */
-function isProtectedDir(path: string, selfhostDir: string): boolean {
-  const target = resolve(path);
-  if (target === '/' || target === resolve(homedir())) return true;
-  const rel = relative(target, resolve(selfhostDir));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-}
-
-/**
- * The state directory comes from .env or --state-dir, so prove it is SAM's before emptying it
- * (security review M1): not a protected directory, and either recorded as this state dir or
- * holding the key agent's files.
- */
-function assertStateDir(ctx: TeardownContext): void {
-  if (isProtectedDir(ctx.stateDir, ctx.selfhostDir)) {
-    throw new Error(`refused: ${ctx.stateDir} is /, your home or contains the checkout`);
-  }
-  const recordedHere = ctx.record.some(
-    (r) => r.cloud === 'box' && r.kind === 'state-dir' && resolve(r.name) === resolve(ctx.stateDir)
-  );
-  if (
-    !recordedHere &&
-    !existsSync(join(ctx.stateDir, 'key-agent')) &&
-    !existsSync(join(ctx.stateDir, LEGACY_KEYS))
-  ) {
-    throw new Error(
-      `refused: ${ctx.stateDir} is neither recorded as this install's state nor holds its keys`
-    );
-  }
 }
 
 /** A backup runBackup wrote: an absolute, unprotected directory with a version-1 manifest. */
