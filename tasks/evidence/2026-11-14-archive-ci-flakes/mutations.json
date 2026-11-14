@@ -10,7 +10,23 @@
         "failure": "Error: Compact archive exceeds object byte limit"
       }
     ],
-    "restored": true
+    "restored": true,
+    "productionFile": "packages/project-data/src/do/archive-sharding.ts",
+    "function": "exportArchiveChunk",
+    "before": "if (byteCount + candidateBytes > maxBytes || transportByteCount + candidateTransportBytes > transportByteBudget) {",
+    "after": "if (false) {",
+    "command": [
+      "pnpm",
+      "--filter",
+      "@simple-agent-manager/project-data",
+      "exec",
+      "vitest",
+      "run",
+      "tests/unit/project-data-compact-archive.test.ts",
+      "-t",
+      "100 rows"
+    ],
+    "expectedFailure": "Compact archive exceeds object byte limit"
   },
   {
     "mutation": "handoff_emission",
@@ -23,7 +39,24 @@
         "failure": "AssertionError: expected [ 'node_lifecycle:marked_warm' ] to deeply equal [ 'node_lifecycle:marked_warm', \u2026(1) ]"
       }
     ],
-    "restored": true
+    "restored": true,
+    "productionFile": "apps/api/src/services/node-warm-handoff.ts",
+    "before": "await recordHandoffDecision(env, input, 'handed_to_warm', null, { warmTimeoutMs });",
+    "after": "// omit actual handoff decision emission",
+    "command": [
+      "pnpm",
+      "--filter",
+      "@simple-agent-manager/api",
+      "exec",
+      "vitest",
+      "run",
+      "--config",
+      "vitest.workers.config.ts",
+      "tests/workers/node-lifecycle-decisions.test.ts",
+      "-t",
+      "records handed_to_warm"
+    ],
+    "expectedFailure": "one persisted decision instead of two"
   },
   {
     "mutation": "handoff_emission_with_Date_only_clock",
@@ -36,6 +69,23 @@
         "status": "failed",
         "failure": "AssertionError: expected [ '2026-11-14T12:41:24.165Z' ] to deeply equal [ '2026-11-14T12:41:24.165Z', \u2026(1) ]"
       }
-    ]
+    ],
+    "productionFile": "apps/api/src/services/node-warm-handoff.ts",
+    "before": "await recordHandoffDecision(env, input, 'handed_to_warm', null, { warmTimeoutMs });",
+    "after": "// omit actual handoff decision emission",
+    "command": [
+      "pnpm",
+      "--filter",
+      "@simple-agent-manager/api",
+      "exec",
+      "vitest",
+      "run",
+      "--config",
+      "vitest.workers.config.ts",
+      "tests/workers/node-lifecycle-decisions.test.ts",
+      "-t",
+      "records handed_to_warm"
+    ],
+    "expectedFailure": "one persisted decision instead of two"
   }
 ]
