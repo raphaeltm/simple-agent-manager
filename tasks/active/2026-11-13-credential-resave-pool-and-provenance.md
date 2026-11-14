@@ -71,34 +71,34 @@ re-save today would strand.
 
 ## Implementation checklist
 
-- [ ] `replaceUserGcpCredential`: keep the user's GCP `credentials` row id stable (UPDATE in
+- [x] `replaceUserGcpCredential`: keep the user's GCP `credentials` row id stable (UPDATE in
       place, INSERT only when absent, one atomic batch, duplicates collapsed onto the oldest row);
       managed cc mirror rows keep their current replace behaviour and point at the stable id.
-- [ ] `routes/gcp.ts`: PUT /service-account and POST /setup reconcile capacity pools after the
+- [x] `routes/gcp.ts`: PUT /service-account and POST /setup reconcile capacity pools after the
       save (they never did), so the source's credential version follows the new secret.
-- [ ] `node-teardown-provenance.ts`: accept a released `capacity_source_id` when the node's
+- [x] `node-teardown-provenance.ts`: accept a released `capacity_source_id` when the node's
       `capacity_pool_candidate_id` names a candidate that no longer exists; every other snapshot
       field still required. Export the released-source SQL and an async check.
-- [ ] `hasManagedVmPlacementProof(node, capacitySourceReleased)`; strict-deletion callers compute
+- [x] `hasManagedVmPlacementProof(node, capacitySourceReleased)`; strict-deletion callers compute
       the release from D1.
-- [ ] Docs: architecture/security or capacity docs that describe provenance and credential
+- [x] Docs: architecture/security or capacity docs that describe provenance and credential
       re-save.
 - [ ] Rebase on PR #2715 once merged.
 
 ## Tests
 
-- [ ] Real SQL engine, full migration chain, FKs on: place a node from the user's default GCP
+- [x] Real SQL engine, full migration chain, FKs on: place a node from the user's default GCP
       source, re-save through the real route, assert the node keeps `capacity_source_id`, the
       cron claim admits it, the pool's candidate selections and order survive, and placement
       still resolves the connection. Must fail on main.
-- [ ] Project-scoped source (in-place writer) and platform-scoped source (delete, the only
+- [x] Project-scoped source (in-place writer) and platform-scoped source (delete, the only
       rotation path) through the real cleanup claim; one non-GCP replace path.
-- [ ] Damaged rows: node seeded in production's released shape is claimed; pool whose order names
+- [x] Damaged rows: node seeded in production's released shape is claimed; pool whose order names
       a missing source still places on its active options.
-- [ ] Attack controls, each proven discriminating: node with capacity_source_id NULL whose
+- [x] Attack controls, each proven discriminating: node with capacity_source_id NULL whose
       candidate still exists is refused; node missing another snapshot field is refused; another
       user's node is not claimed; running node not admitted without opt-in.
-- [ ] Drive the real cron, warm handoff and placement entry points.
+- [x] Drive the real cron, warm handoff and placement entry points.
 
 ## Acceptance criteria
 
@@ -108,6 +108,18 @@ re-save today would strand.
 - [ ] No weaker ownership proof: every server-written snapshot field is still required.
 - [ ] Staging: re-save the smoke user's GCP connection through the product, place a GCP node with
       no pool edit, stop it, the cron reaps it; GCP side checked with the read-only identity.
+
+## Discrimination evidence (tests/workers/credential-resave-capacity-provenance.test.ts)
+
+| Reverted | Went red |
+| --- | --- |
+| `replaceUserGcpCredential` back to main (delete + insert) | both GCP re-save tests (id changed; `capacity_source_id` NULL through the real FK) |
+| release branch in `cleanupNodeProvenanceSql` | project disconnect (cron records `provenance`), platform rotation (handoff `no_teardown_provenance`), damaged-row claim |
+| candidate-absent conjunct of `capacitySourceReleasedSql` | damaged-row test, line asserting the still-listed candidate is refused |
+| `placement_credential_fingerprint` in the required list | damaged-row test, missing-fingerprint line |
+| running-status opt-in | damaged-row test, running-without-opt-in line |
+| `user_id = ?` in `claimNodeForCleanup` | damaged-row test, other-user line |
+| release check in the strict-deletion caller | strict deletion twin test |
 
 ## Left for Raphaël
 

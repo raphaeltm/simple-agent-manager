@@ -208,7 +208,7 @@ GCP WIF configuration and uploaded service-account JSON use the same versioned c
 
 The complete source credential is encrypted at rest with AES-256-GCM. SAM signs short-lived RS256 assertions and exchanges them only at the fixed Google OAuth token endpoint. Derived Google access tokens are cached in KV only until their returned expiry minus a safety buffer; they are never persisted as primary credentials. Cache identity includes the authentication mode and WIF or private-key identity, so switching modes or rotating a key cannot reuse a prior token.
 
-Save and rotation verify the selected Compute zone before a D1 transaction replaces both legacy and composable credential copies. A failed verification or transaction leaves the previous credential intact. Disconnect removes SAM's encrypted copies and cached derivatives but does not revoke a Google-managed service-account key.
+Save and rotation verify the selected Compute zone before one D1 transaction updates the user's stored credential in place and replaces its composable copy. The stored credential keeps its id, which the compute pool's account and every node placed from it are keyed on, so a re-save does not reset pool choices or orphan running machines (`replaceUserGcpCredential()`). A failed verification or transaction leaves the previous credential intact. Disconnect removes SAM's encrypted copies and cached derivatives but does not revoke a Google-managed service-account key.
 
 ## Terminal Authentication
 
