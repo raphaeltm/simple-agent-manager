@@ -64,8 +64,7 @@ function getIssuer(env: Env): string {
  * routes pass an agent sign-in session's hard expiry (`credentialNotAfter`), so a token minted by
  * that session cannot outlive it.
  */
-function cappedExpiry(expiryMs: number, notAfter?: Date): Date {
-  const now = Date.now();
+function cappedExpiry(expiryMs: number, notAfter?: Date, now = Date.now()): Date {
   // requireAuth already refuses a session past its cap; never mint an already-dead token.
   if (notAfter && notAfter.getTime() <= now) throw new Error('Session credential cap has passed');
   const expiresAt = now + expiryMs;
@@ -460,7 +459,8 @@ export async function signPortAccessToken(
   options: { notAfter?: Date } = {}
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiresAt = cappedExpiry(getPortAccessTokenExpiry(env), options.notAfter);
+  const now = Date.now();
+  const expiresAt = cappedExpiry(getPortAccessTokenExpiry(env), options.notAfter, now);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
@@ -472,7 +472,7 @@ export async function signPortAccessToken(
     .setSubject(userId)
     .setAudience(PORT_ACCESS_AUDIENCE)
     .setExpirationTime(expiresAt)
-    .setIssuedAt()
+    .setIssuedAt(Math.floor(now / 1000))
     .sign(privateKey);
 
   return token;
@@ -518,7 +518,8 @@ export async function signLocalForwardToken(
   options: { notAfter?: Date } = {}
 ): Promise<{ token: string; expiresAt: string }> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
-  const expiresAt = cappedExpiry(getLocalForwardTokenExpiry(env), options.notAfter);
+  const now = Date.now();
+  const expiresAt = cappedExpiry(getLocalForwardTokenExpiry(env), options.notAfter, now);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
@@ -535,7 +536,7 @@ export async function signLocalForwardToken(
     .setSubject(claims.userId)
     .setAudience(LOCAL_FORWARD_AUDIENCE)
     .setExpirationTime(expiresAt)
-    .setIssuedAt()
+    .setIssuedAt(Math.floor(now / 1000))
     .sign(privateKey);
 
   return {
