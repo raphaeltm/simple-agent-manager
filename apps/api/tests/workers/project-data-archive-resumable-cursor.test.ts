@@ -560,6 +560,7 @@ describe('resumable archive cursor', () => {
     expect(third.reclaimedBytes ?? 0).toBeGreaterThan(0);
   });
   it('poisons a migration whose flip keeps failing after verification, without re-verifying', async () => {
+    const unrelated = await seedCandidate('flipother', 7);
     const { projectId, sessionId, source } = await seedCandidate('flipfault', 40);
     await source.failNextArchiveFlipsForTest(10);
     // The tick deadline is unrelated to this case: control Date so runner speed cannot
@@ -573,10 +574,10 @@ describe('resumable archive cursor', () => {
         if (attempt === 1) {
           // Reproduce contamination without waiting for an earlier fixture's summary alarm:
           // the second sweep verifies another session while this one makes no progress.
-          const other = await source.createSession(null, 'unrelated verification');
-          await source.persistMessageBatch(other, messagesFor('flipother', 7));
-          await source.stopSession(other);
-          await source.runSummarySyncForTest();
+          const other = await unrelated.source.createSession(null, 'unrelated verification');
+          await unrelated.source.persistMessageBatch(other, messagesFor('flipother', 7));
+          await unrelated.source.stopSession(other);
+          await unrelated.source.runSummarySyncForTest();
         }
         const stats = await tick();
         if (attempt === 1) expect(stats.verifiedChunks).toBeGreaterThan(0);
