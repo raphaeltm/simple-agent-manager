@@ -2,13 +2,13 @@ import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { encrypt } from './encryption';
+import { INTEGRATION_GROUP_STORAGE } from './platform-config-groups';
 import {
   INTEGRATION_CREDENTIAL_TYPE,
   SECRET_KINDS,
   SETTING_KEYS,
   trimOptional,
 } from './platform-config-store';
-import { INTEGRATION_GROUP_STORAGE } from './platform-config-groups';
 import type { PlatformIntegrationGroup, PlatformIntegrationInput } from './platform-config-types';
 
 export function settingStatement(

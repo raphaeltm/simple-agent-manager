@@ -25,8 +25,8 @@ import {
   selectGitLabOAuthConfig,
   selectGoogleLoginOAuthConfig,
 } from './services/platform-config';
-import { isSignupApprovalRequired } from './services/signup-approval';
 import { scheduleAccountLinkedAlert } from './services/security-alerts';
+import { isSignupApprovalRequired } from './services/signup-approval';
 
 export { refreshGitHubAccessToken };
 

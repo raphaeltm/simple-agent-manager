@@ -28,16 +28,16 @@ Follow-up to the 2026-11-12 setup-takeover incident (contained). Three gaps made
 
 ## Implementation checklist
 
-- [ ] API: `config.clear: IntegrationGroup[]` on `PUT /api/admin/platform-config`; deletes stored settings rows and `platform_credentials` rows for each group; audits `reset` per stored field through `commitAdminSettingsStatements`; invalidates the platform config cache; rejects clear + set of the same group
-- [ ] Replace `googleInfrastructure.remove` with the generic clear (no duplicate path)
-- [ ] Source labels: `legacy-kv` source, exhaustive mapping, truthful labels; mixed-source integration label; `clearable` flag
-- [ ] Field audit: "changed <time> by <actor>" for every stored field, `system_anonymous_trials` → "first-run setup (unauthenticated)"
-- [ ] UI: Clear button per integration section with danger ConfirmDialog; no reload; labels from server
-- [ ] `services/security-alerts.ts`: recipients (active superadmins), best-effort send in `waitUntil`, plain wording, admin links from `BASE_DOMAIN`
-- [ ] Alerts wired: admin platform-config PUT (set/clear), admin settings PATCH (integration names), setup complete (one call), account link hook (one hook block)
-- [ ] Tests: clear route (rows + audit gone/created, env fallback reappears), D1 value never labelled environment, alert module (recipients, failure isolation, wording), hook filter, route wiring
-- [ ] Docs: admin/self-hosting docs mention clearing + alerts
-- [ ] Playwright visual audit 375/1280
+- [x] API: `config.clear: IntegrationGroup[]` on `PUT /api/admin/platform-config`; deletes stored settings rows and `platform_credentials` rows for each group; audits `reset` per stored field through `commitAdminSettingsStatements`; invalidates the platform config cache; rejects clear + set of the same group
+- [x] Replace `googleInfrastructure.remove` with the generic clear (no duplicate path)
+- [x] Source labels: `legacy-kv` source, exhaustive mapping, truthful labels; mixed-source integration label; `clearable` flag
+- [x] Field audit: "changed <time> by <actor>" for every stored field, `system_anonymous_trials` → "first-run setup (unauthenticated)"
+- [x] UI: Clear button per integration section with danger ConfirmDialog; no reload; labels from server
+- [x] `services/security-alerts.ts`: recipients (active superadmins), best-effort send in `waitUntil`, plain wording, admin links from `BASE_DOMAIN`
+- [x] Alerts wired: admin platform-config PUT (set/clear), admin settings PATCH (integration names), setup complete (one call), account link hook (one hook block)
+- [x] Tests: clear route (rows + audit gone/created, env fallback reappears), D1 value never labelled environment, alert module (recipients, failure isolation, wording), hook filter, route wiring
+- [x] Docs: admin/self-hosting docs mention clearing + alerts
+- [x] Playwright visual audit 375/1280
 - [ ] Staging: set + clear test integration (not GitLab), label check, alert delivery evidence
 
 ## Acceptance criteria
@@ -45,3 +45,10 @@ Follow-up to the 2026-11-12 setup-takeover incident (contained). Three gaps made
 - Clearing any integration group from Admin → Integrations removes its D1 rows and secret rows, writes `reset` audit rows, and the page updates without reload.
 - A D1-stored value is never labelled as an environment fallback (test).
 - Superadmins receive an email for integration changes, setup completion, and new social account links to admin/superadmin users; send failures never fail the mutation.
+
+## Notes
+
+- Setup alert recipients fall back to `BOOTSTRAP_OWNER_EMAIL` when no superadmin exists (after the parallel fix, setup closes once a superadmin exists, so the alert would otherwise reach nobody).
+- Actor labels (emails) are only returned to the superadmin admin route, never to the setup-token-gated `/api/setup/*` responses.
+- Clears skip the OAuth id/secret pair validation on purpose: an admin must always be able to delete stored values.
+- Discrimination checks run: label mapping revert -> 2 label tests red; clear statements removed -> 4 clear tests red; account hook removed -> 2 link-alert tests red.

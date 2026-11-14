@@ -94,7 +94,7 @@ nobody can sign in:
 For each setting SAM uses the first of these that exists:
 
 1. A value saved in the app, here or on the older **Admin → Integrations** page, which changes the
-   same settings (**Source: database**).
+   same settings (**Source: database**; Integrations labels it **stored in SAM** and can **Clear** it).
 2. The matching Worker variable, set through your GitHub Environment (**Source: environment**).
 3. An older KV value: the cron and alarm switches (**Source: kv**).
 4. The code default (**Source: default**).

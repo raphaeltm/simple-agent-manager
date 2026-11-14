@@ -8,13 +8,13 @@ import {
 import type { AdminSettingName } from './admin-settings-registry';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
 import { IoTimeoutError, withDeadline } from './fetch-timeout';
-import { buildPlatformIntegrationStatements, settingStatement } from './platform-config-statements';
 import {
   integrationAuditChanges,
   integrationChanges,
   type PlatformIntegrationChange,
   platformSourceFromSetting,
 } from './platform-config-changes';
+import { buildPlatformIntegrationStatements, settingStatement } from './platform-config-statements';
 import {
   creatorId,
   ENV_KEYS,

@@ -314,7 +314,7 @@ function IntegrationSection({
             onClick={() => onClear(group)}
             disabled={submitting}
             aria-label={`Clear stored ${title} values`}
-            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-danger/40 px-3 text-sm font-semibold text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 self-start rounded-md border border-danger/40 px-4 sm:self-auto text-sm font-semibold text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
             Clear

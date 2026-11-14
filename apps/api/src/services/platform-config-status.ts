@@ -1,6 +1,6 @@
 import type { Env } from '../env';
-import { isSetupCompleted, resolvePlatformConfig } from './platform-config-core';
 import { resolveActorLabels } from './actor-labels';
+import { isSetupCompleted, resolvePlatformConfig } from './platform-config-core';
 import type {
   FeedbackProjectStatus,
   IntegrationStatus,

@@ -5,8 +5,8 @@ import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import { parseWithSchema } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
-import { INTEGRATION_GROUP_TITLES, integrationGroupHasValues } from './platform-config-groups';
 import type { PlatformIntegrationInput, ResolvedPlatformConfig } from './platform-config';
+import { INTEGRATION_GROUP_TITLES, integrationGroupHasValues } from './platform-config-groups';
 
 const log = createModuleLogger('platform-config-validation');
 
