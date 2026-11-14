@@ -12,8 +12,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { addResource } from '../../deploy/selfhost/created-resources.mjs';
-import { boxItems, clearStateEntries, removeTree, type TeardownContext } from './teardown-box';
+import { boxItems, type TeardownContext } from './teardown-box';
 import { execute, renderSummary } from './teardown-model';
+import { clearStateEntries, removeTree } from './teardown-state-dir';
 
 let root: string;
 let state: string;

@@ -675,7 +675,7 @@ Emptying `.state/` makes read-only directories writable first (Go leaves its mod
 `.state/go-cache` read-only), removes caches last, and carries on past an entry it cannot remove,
 so the sealed bundles and key material go even when a cache does not. The summary then names every
 path that is left, says whether it is only a cache, and gives the command to remove it
-(`clearStateEntries` in `teardown-box.ts`).
+(`clearStateEntries` in `teardown-state-dir.ts`).
 
 | Mode                  | Removes                                                                                                                                                | Keeps                                                                                                                           |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
