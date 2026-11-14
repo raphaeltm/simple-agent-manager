@@ -96,3 +96,14 @@ Remove the dead `GCP_DISK_SIZE_GB`.
 - provider-credentials.ts is over 500 lines already; this change is net +1 line (call-site swaps), so no split.
 - Discrimination: replacing the catalog sizing with a flat 50 reddened the API refresh test (2 cases) and
   the provider offering test; the boot-disk-column control proves the authority trap.
+
+## Staging Evidence (2026-11-14, staging at commit 03c22721d)
+
+- Pool refresh (`GET /api/capacity-pools/defaults?ensure=true`, smoke user) republished all 1,700+ GCP
+  workspace candidates at 14:01:45Z with policy sizes: e2-medium/e2-standard-2/n2d-2/t2d-1/t2d-2 → 50,
+  *-standard-4 → 80, *-standard-8 → 160, *-standard-16 → 320; `provider_instance_boot_disk_size_gb` NULL.
+- Price includes disk: e2-standard-4 europe-west1 = 158,390 µ$/h (Belgium E2 machine ≈ $0.1474/h +
+  80 GB × $0.10/GB-month ÷ 730 = $0.0110/h). The pre-change stored price table was refreshed by the cron.
+- Task 01M7D5X04C54BZ6VJCB5D6WTMX (provider gcp, vmSize large) provisioned node 01M7D5X7ZP4PDEAVP0X8NN9QFQ:
+  e2-standard-4 europe-west1-b, node row disk 80, observed disk 80. GCP (read-only reader): instance
+  node-01m7d5x7zp4pdeavp0x8nn9qfq RUNNING, boot disk pd-balanced 80 GB.
