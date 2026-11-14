@@ -82,7 +82,7 @@ nobody can sign in:
 2. Every deploy creates a new `SETUP_TOKEN`. In the deploy's log, the **Sync Wrangler Config (API +
    Tail Worker)** step (on a first install, **Re-sync Wrangler Config (add tail_consumers)**) prints
    a Cloudflare dashboard link ("Setup token is available in Cloudflare dashboard
-   variables: …"). Copy the token there, and open `/setup` with it (as in
+   variables: …"). The log itself masks the token. Copy it from that page, and open `/setup` with it (as in
    [Verification](/docs/guides/self-hosting/#verification)).
 3. Enter working sign-in credentials.
 4. Once you can sign in again, delete `SETUP_FORCE` and deploy again. While it's set, `/setup`

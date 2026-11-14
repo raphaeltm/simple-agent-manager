@@ -132,7 +132,10 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
     sqlite.exec(
-      readFileSync(new URL('../../src/db/migrations/0196_admin_settings.sql', import.meta.url), 'utf8')
+      readFileSync(
+        new URL('../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
+        'utf8'
+      )
     );
     // The owner as production stores them: a verified email and a linked GitHub account.
     const createdAt = Date.parse('2026-02-15T12:12:03Z');
@@ -197,13 +200,21 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     const callback = new URL(GITLAB_REDIRECT_URI);
     callback.searchParams.set('code', 'approved-code');
     callback.searchParams.set('state', authorizeUrl.searchParams.get('state') ?? '');
-    const response = await app.request(callback.toString(), { headers: { cookie: jar.header() } }, env);
+    const response = await app.request(
+      callback.toString(),
+      { headers: { cookie: jar.header() } },
+      env
+    );
     jar.store(response);
     return response;
   }
 
   async function currentUserId(env: Env): Promise<string | null> {
-    const me = await app.request(`${API_ORIGIN}/api/auth/me`, { headers: { cookie: jar.header() } }, env);
+    const me = await app.request(
+      `${API_ORIGIN}/api/auth/me`,
+      { headers: { cookie: jar.header() } },
+      env
+    );
     return me.status === 200 ? ((await me.json()) as { id: string }).id : null;
   }
 
@@ -212,9 +223,11 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
       .prepare(`SELECT account_id, user_id FROM accounts WHERE provider_id = 'gitlab'`)
       .all() as Array<{ account_id: string; user_id: string }>;
   const ownerSessions = () =>
-    (sqlite.prepare(`SELECT count(*) AS n FROM sessions WHERE user_id = ?`).get(OWNER.id) as {
-      n: number;
-    }).n;
+    (
+      sqlite.prepare(`SELECT count(*) AS n FROM sessions WHERE user_id = ?`).get(OWNER.id) as {
+        n: number;
+      }
+    ).n;
   const ownerProfile = () =>
     sqlite.prepare(`SELECT name, image FROM users WHERE id = ?`).get(OWNER.id) as {
       name: string;
@@ -243,7 +256,10 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
 
   it('gives a new user from a runtime self-managed host an unverified email', async () => {
     const env = await runtimeGitLabEnv(SELF_MANAGED_HOST);
-    vi.stubGlobal('fetch', createFakeGitLab(SELF_MANAGED_HOST, profileClaiming('new@example.com')).fetch);
+    vi.stubGlobal(
+      'fetch',
+      createFakeGitLab(SELF_MANAGED_HOST, profileClaiming('new@example.com')).fetch
+    );
 
     await signInWithGitLab(env, SELF_MANAGED_HOST);
 

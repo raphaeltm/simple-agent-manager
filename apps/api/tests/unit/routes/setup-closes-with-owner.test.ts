@@ -18,8 +18,8 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { setupRoutes } from '../../../src/routes/setup';
-import { __resetPlatformConfigCacheForTest } from '../../../src/services/platform-config';
 import { generateEncryptionKey } from '../../../src/services/encryption';
+import { __resetPlatformConfigCacheForTest } from '../../../src/services/platform-config';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const TOKEN = 'setup-token';
@@ -70,7 +70,9 @@ function insertUser(id: string, role: string, status: string): void {
 
 function setupCompletedRow() {
   return sqlite
-    .prepare(`SELECT value, updated_by AS updatedBy FROM platform_settings WHERE key = 'setup.completed'`)
+    .prepare(
+      `SELECT value, updated_by AS updatedBy FROM platform_settings WHERE key = 'setup.completed'`
+    )
     .get() as { value: string; updatedBy: string } | undefined;
 }
 
@@ -157,9 +159,9 @@ describe('first-run setup on an install that already has an owner', () => {
   });
 
   it('does not count the system sentinel as an owner even with a superadmin role', async () => {
-    sqlite.prepare(`UPDATE users SET role = 'superadmin', status = 'active' WHERE id = ?`).run(
-      SYSTEM_USER_ID
-    );
+    sqlite
+      .prepare(`UPDATE users SET role = 'superadmin', status = 'active' WHERE id = ?`)
+      .run(SYSTEM_USER_ID);
 
     expect((await request(createEnv(), 'status')).status).toBe(200);
   });
