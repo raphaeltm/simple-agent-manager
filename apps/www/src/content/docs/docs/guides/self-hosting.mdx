@@ -139,7 +139,10 @@ To let people sign in with GitLab and create projects from GitLab repositories:
    person who already uses SAM through another sign-in method keeps using that method: SAM cannot
    check that a self-managed GitLab really verified the email it reports. To let GitLab sign-ins
    join existing accounts on a self-managed host, set `GITLAB_HOST` (plus `GITLAB_CLIENT_ID` and
-   `GITLAB_CLIENT_SECRET`) in the GitHub Environment instead.
+   `GITLAB_CLIENT_SECRET`) in the GitHub Environment instead. That also applies if people already
+   signed in with GitLab through a self-managed host saved before November 2026: SAM now stores
+   such logins under a host-specific id, so those earlier GitLab links only match again once the
+   host is set in `GITLAB_HOST`.
 
 3. Check it: [create a test project from a GitLab repository](#verification) and start a chat.
 

@@ -267,6 +267,44 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
       .prepare(`SELECT email_verified FROM users WHERE email = 'new@example.com'`)
       .get() as { email_verified: number } | undefined;
     expect(created).toEqual({ email_verified: 0 });
+    // Stored under a host-scoped key, so the raw id stays free for the gitlab.com user who owns it.
+    expect(gitlabAccounts()).toEqual([
+      { account_id: `${SELF_MANAGED_HOST}/users/424242`, user_id: expect.any(String) },
+    ]);
+  });
+
+  it('refuses an untrusted host that claims the GitLab user id the owner linked from gitlab.com', async () => {
+    // The owner linked gitlab.com account 424242. GitLab ids are public and better-auth signs an
+    // existing account in by provider + id before any email check.
+    const createdAt = Date.parse('2026-10-01T00:00:00Z');
+    sqlite
+      .prepare(
+        `INSERT INTO accounts (id, account_id, provider_id, user_id, scope, created_at, updated_at)
+         VALUES ('owner-gitlab', '424242', 'gitlab', ?, 'read_user', ?, ?)`
+      )
+      .run(OWNER.id, createdAt, createdAt);
+    const env = await runtimeGitLabEnv(SELF_MANAGED_HOST);
+    vi.stubGlobal(
+      'fetch',
+      createFakeGitLab(SELF_MANAGED_HOST, profileClaiming('attacker@example.com')).fetch
+    );
+
+    await signInWithGitLab(env, SELF_MANAGED_HOST);
+
+    expect(await currentUserId(env)).not.toBe(OWNER.id);
+    expect(ownerSessions()).toBe(0);
+    // The owner's real link is untouched and the host's user lives under its own key.
+    expect(gitlabAccounts()).toEqual(
+      expect.arrayContaining([
+        { account_id: '424242', user_id: OWNER.id },
+        { account_id: `${SELF_MANAGED_HOST}/users/424242`, user_id: expect.any(String) },
+      ])
+    );
+    const attacker = sqlite
+      .prepare(`SELECT id FROM users WHERE email = 'attacker@example.com'`)
+      .get() as { id: string } | undefined;
+    expect(attacker?.id).toBeDefined();
+    expect(attacker?.id).not.toBe(OWNER.id);
   });
 
   it('links gitlab.com to the owner even when it was configured at runtime', async () => {
@@ -295,15 +333,15 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
   });
 
-  it('still signs an already-linked user back in through a runtime self-managed host', async () => {
+  it('still signs a user linked through that same untrusted host back in', async () => {
     const env = await runtimeGitLabEnv(SELF_MANAGED_HOST);
     const createdAt = Date.parse('2026-10-01T00:00:00Z');
     sqlite
       .prepare(
         `INSERT INTO accounts (id, account_id, provider_id, user_id, scope, created_at, updated_at)
-         VALUES ('owner-gitlab', '424242', 'gitlab', ?, 'read_user', ?, ?)`
+         VALUES ('owner-gitlab', ?, 'gitlab', ?, 'read_user', ?, ?)`
       )
-      .run(OWNER.id, createdAt, createdAt);
+      .run(`${SELF_MANAGED_HOST}/users/424242`, OWNER.id, createdAt, createdAt);
     vi.stubGlobal('fetch', createFakeGitLab(SELF_MANAGED_HOST, profileClaiming(OWNER.email)).fetch);
 
     const callback = await signInWithGitLab(env, SELF_MANAGED_HOST);

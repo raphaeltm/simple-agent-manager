@@ -19,6 +19,7 @@ import {
 } from './services/bootstrap-owner';
 import { emailSignInPlugins } from './services/email-sign-in';
 import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
+import { untrustedGitLabUserInfo } from './services/gitlab-sign-in-identity';
 import {
   resolveLoginOAuthConfig,
   selectGitHubOAuthConfig,
@@ -279,8 +280,8 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       issuer: gitlabOAuth.host,
       scope: ['read_user', 'api', 'read_repository', 'write_repository'],
       overrideUserInfoOnSignIn: trusted,
-      // Spread over the profile by better-auth's GitLab provider, replacing the host's claim.
-      ...(trusted ? {} : { mapProfileToUser: () => ({ emailVerified: false }) }),
+      // An untrusted host's emails count as unverified and its account ids are host-scoped.
+      ...(trusted ? {} : { getUserInfo: untrustedGitLabUserInfo(gitlabOAuth.host) }),
     };
   }
 
