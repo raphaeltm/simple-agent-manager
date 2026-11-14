@@ -13,8 +13,8 @@ The Test job runs Turbo test:coverage, which launches package test processes who
 ## Checklist
 
 - [x] Profile compact compatibility phases normally, with coverage, and under CPU contention.
-- [ ] Assess Test-job process/worker overcommit using actual CI logs/configuration and measured local evidence.
-- [ ] Fix production inefficiency if found, otherwise fix the demonstrated testing/runner issue with measured justification.
+- [x] Assess Test-job process/worker overcommit using actual CI logs/configuration and measured local evidence.
+- [x] Fix production inefficiency if found, otherwise fix the demonstrated testing/runner issue with measured justification.
 - [x] Preserve 100-row, 200 KiB metadata, multi-object, real seal/read/recovery assertions.
 - [x] Determine decision ordering contract; exercise equal timestamps through the real warm handoff.
 - [x] Remove a relevant guard once and prove the intended tests fail, then restore it.
@@ -47,3 +47,7 @@ Normal phase total 2605 ms; coverage plus two busy workers on the same two cores
 Compact file: all 30 normal + 30 loaded runs passed, 780 cases. Full ProjectData package: 528 passed. API build and dependency builds passed (12 tasks), both affected package typechecks passed after rebuild, targeted ESLint/formatting passed. Lifecycle real workerd file passed 9/9 with Date-only freezing and both persisted timestamps asserted equal. Emission mutation repeated under that final timing model failed as intended and was restored; Lifecycle 30 normal+30 loaded repetitions passed 540 cases. Local preliminary test and Cloudflare reviews found no remaining semantic finding; final completion review still pending.
 
 Coordinator requires actual CI wall-clock measurements for serial package concurrency versus a middle budget before accepting the final setting. Historical Test jobs took 32:00, 24:00, and 20:44. Prefer the fastest stable option, and a bounded middle option if serialization adds more than about five minutes unless that option flakes. Evidence is in ci-budget-comparison.json; no new CI budget measurement is claimed yet.
+
+## Final CI budget selection
+
+Measured four-CPU runner: serial job32:55/coverage30:41.896; bounded middle job25:27/coverage23:37.382, all technical jobs passed. Select Turbo concurrency2 plus Vitest maxWorkers75%, saving7:28 against serial and staying within4:43 of fastest historical Test job. Main advanced between the two PR merge refs (seven extra API tests in middle); evidence discloses this and runner variability. Final current-head CI/review and coordinator exact-SHA approval remain pending.

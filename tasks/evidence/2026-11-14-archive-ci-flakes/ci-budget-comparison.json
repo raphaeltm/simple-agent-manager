@@ -1,5 +1,5 @@
 {
-  "status": "serial_measured_middle_pending",
+  "status": "complete_middle_selected",
   "historicalTestJobs": [
     {
       "runId": 43585850934,
@@ -47,13 +47,36 @@
       "projectDataTestsPassed": 528,
       "comparisonToHistoricalSeconds": [55, 535, 731],
       "wholeWorkflowConclusion": "failure",
-      "wholeWorkflowFailureReason": "Mandatory needs-human-review label; initial preflight classification checkbox corrected in PR body, not a technical test failure."
+      "wholeWorkflowFailureReason": "Mandatory needs-human-review label; initial preflight classification checkbox corrected in PR body, not a technical test failure.",
+      "testedBaseSha": "669293f03efca2789d27830cc1dfa84a9bd5134f"
     },
     {
       "budget": "Turbo concurrency2 with Vitest maxWorkers75%",
-      "runnerAvailableCpusExpected": 4,
+      "runId": 43600923592,
+      "jobId": 132465383000,
+      "headSha": "497d7bc2d00adb19391ae0779dd83c3b1da5f2c9",
+      "testedBaseSha": "a7d05239d976e186e0c8436f3c9f6de4bc17ec89",
+      "runnerAvailableCpus": 4,
       "workerPoolCapAtFourCpus": 3,
-      "status": "pending"
+      "start": "2026-11-14T13:40:39Z",
+      "end": "2026-11-14T14:06:06Z",
+      "seconds": 1527,
+      "coverageTurboSeconds": 1417.382,
+      "conclusion": "success",
+      "coverageTasksSuccessful": 39,
+      "apiTestsPassed": 15173,
+      "apiTestsSkipped": 4,
+      "projectDataTestsPassed": 528,
+      "comparisonToHistoricalSeconds": [-393, 87, 283],
+      "wholeWorkflowConclusion": "failure",
+      "wholeWorkflowFailureReason": "Only mandatory needs-human-review label blocks Specialist Review Evidence; every technical job passed."
     }
-  ]
+  ],
+  "selection": {
+    "budget": "Turbo concurrency2 with Vitest maxWorkers75%",
+    "savesVersusSerialJobSeconds": 448,
+    "savesVersusSerialCoverageSeconds": 424.514,
+    "reason": "Fastest passing measured option; avoids serial penalty over five minutes versus median historical24:00 job. Middle25:27 is1:27 above median and4:43 above fastest historical job. Both files separately passed30normal+30CPUloaded full-file runs.",
+    "limitations": "One real CI run per budget, with normal runner variability. PR merge refs followed main: middle includes PR2727 and seven extra API tests versus serial. This is an operational wall-time comparison, not an isolated CPU microbenchmark."
+  }
 }
