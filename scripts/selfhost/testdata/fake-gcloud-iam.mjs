@@ -72,6 +72,7 @@ else if (cmd.startsWith('iam workload-identity-pools providers')) {
   if (op === 'describe') {
     if (!db.providers[id]) fail('not found');
     if (format.includes('issuerUri')) out(db.providers[id].issuer);
+    if (format.includes('state')) out(db.providers[id].state ?? 'ACTIVE');
   } else if (op === 'create-oidc') {
     db.providers[id] = { issuer: flag('issuer-uri') };
     save();
@@ -82,8 +83,10 @@ else if (cmd.startsWith('iam workload-identity-pools providers')) {
 } else if (cmd.startsWith('iam workload-identity-pools')) {
   const [, , op, id] = words;
   if (op === 'describe') {
+    // A deleted pool still describes, with state DELETED, for 30 days (as Google keeps it).
     if (!db.pools[id]) fail('not found');
     if (format.includes('description')) out(db.pools[id].description);
+    if (format.includes('state')) out(db.pools[id].state ?? 'ACTIVE');
   } else if (op === 'create') {
     db.pools[id] = { description: flag('description') };
     save();

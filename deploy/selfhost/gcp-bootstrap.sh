@@ -26,6 +26,7 @@
 #   --provider-id <id>      default: sam-api
 #   --service-account <id>  default: sam-nodes (account id, before @)
 #   --skip-issuer-check     do not fetch <api-url>/.well-known/openid-configuration first
+#                           (--kms-only never fetches it: it creates no OIDC provider)
 #   --kms                   also create the key for sealed secrets (needs a box identity below)
 #   --kms-only              only the key: no pool, provider or node service account
 #   --box-service-account <email>  the box VM's service account, granted use of the key
@@ -186,9 +187,11 @@ if [ "$TEARDOWN" -eq 1 ]; then
   exit 0
 fi
 
-if [ "$CHECK_ISSUER" -eq 1 ]; then
+# The check guards the OIDC provider the node setup creates; --kms-only creates none, and runs
+# before the install exists (README: the key comes before `deploy --init`), so it skips it.
+if [ "$CHECK_ISSUER" -eq 1 ] && [ "$NODES" -eq 1 ]; then
   discovery="$(curl -fsS --max-time 10 "${ISSUER}/.well-known/openid-configuration" 2>/dev/null)" \
-    || die "could not read ${ISSUER}/.well-known/openid-configuration (is the install up? --skip-issuer-check to skip)"
+    || die "could not read ${ISSUER}/.well-known/openid-configuration: the node setup trusts this install's token issuer, so it runs once the install answers (after \`pnpm selfhost:deploy\`; README order). For the sealed-secrets key alone, before the install exists, use --kms-only (no issuer check). --skip-issuer-check skips the check if you are sure ${ISSUER} is right."
   issuer_re="$(printf '%s' "$ISSUER" | sed 's/[.]/\\./g')"
   printf '%s' "$discovery" | grep -Eq "\"issuer\"[[:space:]]*:[[:space:]]*\"${issuer_re}\"" \
     || die "the install at ${ISSUER} does not advertise issuer ${ISSUER}; check --api-url"
@@ -228,7 +231,12 @@ if [ "$NODES" -eq 1 ]; then
   change services enable compute.googleapis.com iam.googleapis.com iamcredentials.googleapis.com \
     sts.googleapis.com --project="$PROJECT"
 
-  if exists iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" --location=global; then
+  # A deleted pool still describes (state DELETED) and keeps its id for 30 days: reusing it as
+  # "exists" would then try to create a provider in a deleted pool (R13 D5).
+  if pool_state="$(gcloud iam workload-identity-pools describe "$POOL_ID" --project="$PROJECT" \
+    --location=global --format='value(state)' 2>/dev/null)"; then
+    [ "$pool_state" != "DELETED" ] \
+      || die "workload identity pool ${POOL_ID} was deleted (Google keeps a deleted pool for 30 days, and its id cannot be reused until it is purged). Either undelete it: gcloud iam workload-identity-pools undelete ${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --pool-id <a new id> and put the new values in the platform credential (Admin -> Credentials)."
     echo "pool ${POOL_ID}: exists"
     record workload-identity-pool "$POOL_NAME" reused
   else
@@ -238,8 +246,11 @@ if [ "$NODES" -eq 1 ]; then
     record workload-identity-pool "$POOL_NAME" created
   fi
 
-  if exists iam workload-identity-pools providers describe "$PROVIDER_ID" --project="$PROJECT" \
-    --location=global --workload-identity-pool="$POOL_ID"; then
+  if provider_state="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+    --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
+    --format='value(state)' 2>/dev/null)"; then
+    [ "$provider_state" != "DELETED" ] \
+      || die "provider ${POOL_ID}/${PROVIDER_ID} was deleted (Google keeps it for 30 days). Undelete it: gcloud iam workload-identity-pools providers undelete ${PROVIDER_ID} --workload-identity-pool=${POOL_ID} --project=${PROJECT} --location=global, then run this again; or pass --provider-id <a new id>."
     current="$(gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
       --project="$PROJECT" --location=global --workload-identity-pool="$POOL_ID" \
       --format='value(oidc.issuerUri)')"

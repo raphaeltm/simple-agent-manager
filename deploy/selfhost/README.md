@@ -343,6 +343,9 @@ pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.<SAM_DOMAIN>
   --box-instance <box VM> --box-zone <zone> --dry-run    # then again without --dry-run
 ```
 
+`--kms-only` runs before the install exists, so it does not check the install's token issuer (only
+the node setup, which trusts that issuer, needs the install up).
+
 It creates or reuses the key ring `sam-selfhost` (location `global`; `--kms-location`) and the
 key `$NAME` labelled `sam-install`, grants `roles/cloudkms.cryptoKeyEncrypterDecrypter` to the box
 VM's service account on that key only, and prints `SAM_GCP_KMS_KEY=...`. Use `--kms` instead of
@@ -715,10 +718,22 @@ Destructive flags, each only with `--remove-everything`:
   after 30 days by default (`gcloud kms keys versions restore` undoes it until then); run the
   teardown again after that to delete the key and its ring.
 
+**What Google Cloud keeps after a teardown, for 30 days or for good.** A deleted workload identity
+pool (and provider) stays for 30 days in state DELETED, and its id cannot be reused until Google
+purges it. A KMS key ring and key name are never deleted; `--destroy-key` only schedules the key's
+versions for destruction (30 days, restorable until then). Enabled APIs stay enabled. So rebuilding
+the same domain soon after a teardown meets old names, and the bootstrap says so instead of reusing
+them as if they were ready:
+
+- a deleted pool or provider stops it with the undelete command
+  (`gcloud iam workload-identity-pools undelete sam-<hash> --location=global --project <id>`, the
+  provider likewise with `providers undelete`), or pass a new `--pool-id`;
+- a key with no enabled version stops it until you pass `--new-key-version` or
+  `--restore-key-version` (Cloud key, one-time setup), and `deploy --init` refuses such a key rather
+  than sealing with the file key.
+
 **Bringing a `--keep-data` install back:** `docker compose -f deploy/selfhost/docker-compose.yml up
--d`, then `pnpm selfhost:gcp-bootstrap` again. Google keeps a deleted workload identity pool for 30
-days and its id cannot be reused until then, so within that window either undelete it
-(`gcloud iam workload-identity-pools undelete sam-<hash> --location=global --project <id>`) or pass
+-d`, then `pnpm selfhost:gcp-bootstrap` again. Its pool was deleted (above): undelete it, or pass
 a new `--pool-id` and put the new values in the platform credential (Admin → Credentials). The app still lists the deleted
 nodes: delete them in Admin → Nodes once it is up (the provider treats a VM that is already gone
 as deleted: `deleteVM` in `packages/providers/src/gcp.ts`).

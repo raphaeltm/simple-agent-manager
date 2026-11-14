@@ -52,8 +52,8 @@ function run(args: string[], advertisedIssuer = ISSUER, env: NodeJS.ProcessEnv =
 }
 
 interface FakeGcp {
-  pools: Record<string, { description: string }>;
-  providers: Record<string, { issuer: string }>;
+  pools: Record<string, { description: string; state?: string }>;
+  providers: Record<string, { issuer: string; state?: string }>;
   accounts: Record<string, { description: string }>;
   bindings: string[];
   rings: Record<string, object>;
@@ -186,6 +186,67 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('does not advertise issuer');
     expect(result.calls.filter((c) => MUTATING.test(c))).toEqual([]);
+  });
+
+  it('a soft-deleted pool of the same id: stops with the undelete command, creates nothing (R13 D5)', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    const pool = Object.keys(gcp().pools)[0] ?? '';
+    // Teardown deleted it; Google keeps the id, and describe still answers, for 30 days.
+    setGcp((db) => {
+      const entry = db.pools[pool];
+      if (entry) entry.state = 'DELETED';
+      delete db.providers['sam-api'];
+    });
+    const before = calls().length;
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`workload identity pool ${pool} was deleted`);
+    expect(result.stderr).toContain(
+      `gcloud iam workload-identity-pools undelete ${pool} --project=sam-vm-test --location=global`
+    );
+    expect(result.stderr).toContain('--pool-id');
+    expect(
+      result.calls.slice(before).filter((c) => MUTATING.test(c) && !c.startsWith('services'))
+    ).toEqual([]);
+    expect(gcp().providers).toEqual({});
+  });
+
+  it('a soft-deleted provider: stops with its undelete command', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    setGcp((db) => {
+      const entry = db.providers['sam-api'];
+      if (entry) entry.state = 'DELETED';
+    });
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'gcloud iam workload-identity-pools providers undelete sam-api'
+    );
+  });
+
+  it('--kms-only does not need the install to answer: no issuer check (R13 D2)', () => {
+    writeFileSync(join(bin, 'curl'), '#!/usr/bin/env bash\nexit 7\n');
+    const result = run([
+      '--project',
+      'sam-vm-test',
+      '--api-url',
+      ISSUER,
+      '--kms-only',
+      '--box-service-account',
+      'sam-box@sam-vm-test.iam.gserviceaccount.com',
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('SAM_GCP_KMS_KEY=');
+  });
+
+  it('the node setup with the install not up yet: says to run it after the deploy, or --kms-only', () => {
+    writeFileSync(join(bin, 'curl'), '#!/usr/bin/env bash\nexit 7\n');
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('after `pnpm selfhost:deploy`');
+    expect(result.stderr).toContain('use --kms-only');
+    expect(result.stderr).toContain('--skip-issuer-check');
+    expect(result.calls).toEqual([]);
   });
 
   it('refuses an API URL that is not https://api.<domain>', () => {
