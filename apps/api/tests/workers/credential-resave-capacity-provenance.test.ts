@@ -641,8 +641,8 @@ describe('rows already damaged in the production shape', () => {
         `${nodeId}-instance`,
         `${nodeId}-incarnation`,
         `${nodeId}-pool`,
-        `cap-candidate-default:${nodeId}-pool:cap-source-default:user:01M73FZFXY0GE7DGPWWR89EHVW:gcp:europe-west1-b:e2-medium`,
-        'credentials:01M73FZFXY0GE7DGPWWR89EHVW',
+        `cap-candidate-default:${nodeId}-pool:cap-source-default:user:deleted-gcp-connection:gcp:europe-west1-b:e2-medium`,
+        'credentials:deleted-gcp-connection',
         nodeId
       )
       .run();
@@ -773,7 +773,7 @@ describe('rows already damaged in the production shape', () => {
     // The staging shape: the order still leads with the source the 2026-11-12 save deleted.
     await env.DATABASE.prepare('UPDATE capacity_pools SET source_order_json = ? WHERE id = ?')
       .bind(
-        JSON.stringify(['cap-source-default:user:01M73FZFXY0GE7DGPWWR89EHVW', picked.sourceId]),
+        JSON.stringify(['cap-source-default:user:deleted-gcp-connection', picked.sourceId]),
         pool!.id
       )
       .run();
