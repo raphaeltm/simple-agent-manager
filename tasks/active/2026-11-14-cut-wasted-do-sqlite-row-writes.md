@@ -53,25 +53,25 @@ B. `admitGitHubWebhookProjectEvents()` (`apps/api/src/services/github-project-ev
 
 ## Implementation checklist
 
-- [ ] A1. `packages/project-data`: unscoped candidate SQL joins `project_data_storage_telemetry` and
+- [x] A1. `packages/project-data`: unscoped candidate SQL joins `project_data_storage_telemetry` and
       keeps a session only when the gate is off, the project has no telemetry row, the row is older
       than the max age, or `usage_ratio` is at or above the minimum. Defaults as `DEFAULT_*`
       constants.
-- [ ] A2. `runProjectDataArchiveSharding(env, now, options)` takes the two values; the scoped canary
+- [x] A2. `runProjectDataArchiveSharding(env, now, options)` takes the two values; the scoped canary
       and reclaim paths are untouched.
-- [ ] A3. The tick reports what the gate held back (sessions, projects, threshold) in its stats so
+- [x] A3. The tick reports what the gate held back (sessions, projects, threshold) in its stats so
       the refusal is recorded and aggregatable.
-- [ ] A4. Two admin settings (`operations.*`), resolved in the cron handler; a settings read failure
+- [x] A4. Two admin settings (`operations.*`), resolved in the cron handler; a settings read failure
       falls back to the defaults and never skips the sweep.
-- [ ] A5. Tests on real SQL: low-pressure project skipped with a pressured control; missing row
+- [x] A5. Tests on real SQL: low-pressure project skipped with a pressured control; missing row
       eligible; stale row eligible; gate 0 restores old behaviour; scoped run still selects a
       low-pressure project; threshold boundary; stats disclose the skipped count.
-- [ ] B1. `GitHubProjectCandidate` carries `userId`; the producer drops projects owned by
+- [x] B1. `GitHubProjectCandidate` carries `userId`; the producer drops projects owned by
       `SYSTEM_USER_ID` before admitting.
-- [ ] B2. Tests: a system-owned project on the repository gets no admission while a user-owned
+- [x] B2. Tests: a system-owned project on the repository gets no admission while a user-owned
       project on the same repository still does; a repository with only a system-owned project
       reports `no_project`.
-- [ ] Docs: public docs that describe the archive sweep or admin settings mention the gate.
+- [x] Docs: public docs that describe the archive sweep or admin settings mention the gate.
 - [ ] Update idea `01M7CX61WVX72T7CFQNRTX0DVM` with the shipped state.
 
 ## Acceptance criteria
@@ -87,6 +87,25 @@ B. `admitGitHubWebhookProjectEvents()` (`apps/api/src/services/github-project-ev
 - [ ] After production deploy: daily rows written for project TTV's root and for
       `01KQFZA5N37Y32SREBGRYHNXFB` fall to their non-archive, non-event baseline (billed metric,
       next full UTC day).
+
+## Implementation notes
+
+- A lives in `STORAGE_PRESSURE_GATE_SQL` / `unscopedCandidateFromWhereSql()`; the held count is
+  `countStoragePressureHeld()`. Settings: `operations.projectDataArchiveMinStorageUsagePercent`
+  (default 50) and `operations.projectDataArchiveStorageTelemetryMaxAgeHours` (default 24),
+  resolved by `resolveProjectDataArchiveSweepOptions()` in
+  `apps/api/src/scheduled/project-data-archive-sharding.ts`.
+- The registry already answers a failed settings read with its outage value (the default), so the
+  wrapper's own catch is a second line, not the main path.
+- Proven discriminating: with the gate predicate made always-true, both cases in
+  `tests/workers/project-data-archive-storage-pressure-gate.test.ts` fail ("expected true to be
+  false" on the quiet project staying in root). With the producer filter made always-true, both new
+  cases in `tests/workers/github-project-events.test.ts` fail.
+- `findProjectsForGitHubRepository()` now returns `userId`. Its other caller,
+  `ingestPullRequestWebhook()`, is unchanged; three hand-written test schemas needed the
+  `project_data_storage_telemetry` table or the `user_id` column.
+- The task file went onto the feature branch rather than straight to `main`, and no git worktree
+  was used: this is a SAM workspace, where snapshots capture only the primary checkout.
 
 ## Not in this task
 
