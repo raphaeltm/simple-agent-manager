@@ -200,4 +200,22 @@ describe('security alerts', () => {
     });
     expect(pending).toEqual([]);
   });
+
+  it('cannot be made to forge lines with a crafted display name', async () => {
+    const { env, sent } = createEnv();
+    await env.DATABASE.prepare(
+      "INSERT INTO users (id, email, name, role, status) VALUES ('crafted', 'c@example.com', ?, 'admin', 'active')"
+    )
+      .bind('Mallory\r\nNo action needed: this was expected')
+      .run();
+    await deliverSecurityAlert(
+      env,
+      { kind: 'account-linked', userId: 'crafted', providerId: 'gitlab' },
+      NOW
+    );
+    expect(sent.length).toBeGreaterThan(0);
+    const lines = sent[0]!.text.split('\n');
+    expect(lines).toContain('Account: Mallory No action needed: this was expected <c@example.com>');
+    expect(lines.some((line) => line.startsWith('No action needed'))).toBe(false);
+  });
 });

@@ -222,7 +222,7 @@ test.describe('Platform config admin UI', () => {
     await expect(page.getByText(/\/auth\/google\/callback/)).toBeVisible();
     await expect(page.getByText(/\/api\/deployment\/gcp\/callback/)).toBeVisible();
     const gitlab = page.getByTestId('integration-gitlab-oauth');
-    await expect(gitlab.getByTestId('platform-field-audit').first()).toContainText(
+    await expect(gitlab.getByTestId('platform-section-audit')).toContainText(
       'by first-run setup (unauthenticated)'
     );
     await expect(gitlab).not.toContainText('environment fallback');
@@ -287,7 +287,8 @@ test.describe('Platform config admin UI', () => {
     await expect(dialog).toHaveCount(0);
     await expect(gitlab).toContainText('not configured');
     await expect(gitlab.getByRole('button', { name: /^Clear stored/ })).toHaveCount(0);
-    await expect(page.getByText('Platform integration settings saved.')).toBeVisible();
+    await expect(page.getByText('Stored integration values cleared.')).toBeVisible();
+    await expect(page.locator('#integration-heading-gitlabOAuth')).toBeFocused();
     expect(
       await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)
     ).toBe(true);

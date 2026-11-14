@@ -101,3 +101,23 @@ export function platformSourceFromSetting(
       return 'unset';
   }
 }
+
+/**
+ * Keeps only the clear groups that had a stored row when the audit was read. Every delete the
+ * commit runs is therefore matched by a `reset` audit row, which also puts the commit behind the
+ * admin-settings revision CAS (`commitAdminSettingsStatements` fences only audited batches). A row
+ * written after `validateAdminSettingsChanges` read the revision bumps it, so the CAS refuses the
+ * clear instead of deleting that row silently; a group with nothing stored is a no-op.
+ */
+export function withStoredClearsOnly(
+  input: PlatformIntegrationInput,
+  changes: PlatformIntegrationChange[]
+): PlatformIntegrationInput {
+  if (!input.clear?.length) return input;
+  const reset = new Set(changes.filter((c) => c.action === 'reset').map((c) => c.name));
+  const clear = input.clear.filter((group) => {
+    const storage = INTEGRATION_GROUP_STORAGE[group];
+    return [...storage.settings, ...storage.credentials].some((item) => reset.has(item.auditName));
+  });
+  return { ...input, clear };
+}

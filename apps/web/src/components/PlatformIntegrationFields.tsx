@@ -9,6 +9,7 @@ export function TextField({
   field,
   onChange,
   type = 'text',
+  showAudit = true,
 }: {
   name: string;
   label: string;
@@ -16,13 +17,17 @@ export function TextField({
   field?: PlatformConfigFieldStatus;
   onChange: (name: string, value: string) => void;
   type?: 'text' | 'password';
+  showAudit?: boolean;
 }) {
+  const auditId =
+    showAudit && field?.source === 'runtime' && field.updatedAt ? `${name}-audit` : undefined;
   return (
     <label className="block space-y-1.5">
       <FieldLabel label={label} field={field} />
       <input
         type={type}
         aria-label={label}
+        aria-describedby={auditId}
         value={value}
         onChange={(event) => onChange(name, event.target.value)}
         placeholder={
@@ -32,7 +37,7 @@ export function TextField({
         autoComplete="off"
         spellCheck={false}
       />
-      <FieldAudit field={field} />
+      {showAudit && <FieldAudit field={field} id={auditId} />}
     </label>
   );
 }
@@ -43,18 +48,23 @@ export function TextAreaField({
   value,
   field,
   onChange,
+  showAudit = true,
 }: {
   name: string;
   label: string;
   value: string;
   field?: PlatformConfigFieldStatus;
   onChange: (name: string, value: string) => void;
+  showAudit?: boolean;
 }) {
+  const auditId =
+    showAudit && field?.source === 'runtime' && field.updatedAt ? `${name}-audit` : undefined;
   return (
     <label className="block space-y-1.5">
       <FieldLabel label={label} field={field} />
       <textarea
         aria-label={label}
+        aria-describedby={auditId}
         value={value}
         onChange={(event) => onChange(name, event.target.value)}
         placeholder={
@@ -64,7 +74,7 @@ export function TextAreaField({
         autoComplete="off"
         spellCheck={false}
       />
-      <FieldAudit field={field} />
+      {showAudit && <FieldAudit field={field} id={auditId} />}
     </label>
   );
 }
@@ -73,14 +83,16 @@ export function TextAreaField({
 export function FieldAudit({
   field,
   testId = 'platform-field-audit',
+  id,
 }: {
   field?: PlatformConfigFieldStatus;
   testId?: string;
+  id?: string;
 }) {
   if (field?.source !== 'runtime' || !field.updatedAt) return null;
   const who = field.updatedByLabel ?? field.updatedBy;
   return (
-    <p className="break-words text-xs text-fg-muted" data-testid={testId}>
+    <p id={id} className="break-words text-xs text-fg-muted" data-testid={testId}>
       Changed {formatChangedAt(field.updatedAt)}
       {who ? ` by ${who}` : ''}
     </p>
@@ -91,7 +103,16 @@ function formatChangedAt(value: string): string {
   // D1 CURRENT_TIMESTAMP rows have no zone marker; they are UTC.
   const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${value.replace(' ', 'T')}Z`;
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZoneName: 'short',
+      });
 }
 
 export function FieldLabel({ label, field }: { label: string; field?: PlatformConfigFieldStatus }) {
@@ -126,4 +147,28 @@ export function SourceBadge({
       {label}
     </span>
   );
+}
+
+/** Stored writes within this window count as one change (setup and a single save write together). */
+const SAME_CHANGE_WINDOW_MS = 60_000;
+
+/**
+ * When every stored field in a card was written by the same actor at (about) the same time, the
+ * card shows that once instead of repeating it under each field. Returns that field, else null.
+ */
+export function sharedAuditField(
+  fields: Record<string, PlatformConfigFieldStatus>
+): PlatformConfigFieldStatus | null {
+  const stored = Object.values(fields).filter(
+    (field): field is PlatformConfigFieldStatus & { updatedAt: string } =>
+      field.source === 'runtime' && Boolean(field.updatedAt)
+  );
+  const [first] = stored;
+  if (!first || stored.length < 2) return null;
+  const times = stored.map((field) => Date.parse(field.updatedAt.replace(' ', 'T')));
+  const sameActor = stored.every((field) => field.updatedBy === first.updatedBy);
+  const sameTime =
+    times.every((time) => !Number.isNaN(time)) &&
+    Math.max(...times) - Math.min(...times) <= SAME_CHANGE_WINDOW_MS;
+  return sameActor && sameTime ? first : null;
 }

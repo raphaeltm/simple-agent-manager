@@ -13,6 +13,7 @@ import {
   integrationChanges,
   type PlatformIntegrationChange,
   platformSourceFromSetting,
+  withStoredClearsOnly,
 } from './platform-config-changes';
 import { buildPlatformIntegrationStatements, settingStatement } from './platform-config-statements';
 import {
@@ -68,10 +69,13 @@ export async function savePlatformIntegrationConfig(
 ): Promise<PlatformIntegrationChange[]> {
   const by = creatorId(updatedBy);
   const expectedRevision = await validateAdminSettingsChanges(env, integrationChanges(input));
-  const [statements, changes] = await Promise.all([
-    buildPlatformIntegrationStatements(env, input, by, new Date().toISOString()),
-    integrationAuditChanges(env, input),
-  ]);
+  const changes = await integrationAuditChanges(env, input);
+  const statements = await buildPlatformIntegrationStatements(
+    env,
+    withStoredClearsOnly(input, changes),
+    by,
+    new Date().toISOString()
+  );
   if (statements.length === 0) return [];
   try {
     await commitAdminSettingsStatements(env, {
@@ -153,10 +157,13 @@ export async function completeSetupWithConfig(
   const by = creatorId(updatedBy);
   const expectedRevision = await validateAdminSettingsChanges(env, integrationChanges(input));
   const now = new Date().toISOString();
-  const [statements, changes] = await Promise.all([
-    buildPlatformIntegrationStatements(env, input, by, now),
-    integrationAuditChanges(env, input),
-  ]);
+  const changes = await integrationAuditChanges(env, input);
+  const statements = await buildPlatformIntegrationStatements(
+    env,
+    withStoredClearsOnly(input, changes),
+    by,
+    now
+  );
   statements.push(settingStatement(env, SETUP_COMPLETED_SETTING_KEY, 'true', by, now));
 
   try {

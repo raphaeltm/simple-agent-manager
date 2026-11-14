@@ -70,9 +70,11 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
 
     expect(within(section).getByLabelText('Client ID')).toHaveValue('');
     expect(within(section).getByLabelText('Client secret')).toHaveValue('');
-    const audits = within(section).getAllByTestId('platform-field-audit');
-    expect(audits).toHaveLength(2);
-    expect(audits[0]).toHaveTextContent('by first-run setup (unauthenticated)');
+    // Both fields were written together, so the card says it once instead of per field.
+    expect(within(section).getByTestId('platform-section-audit')).toHaveTextContent(
+      'by first-run setup (unauthenticated)'
+    );
+    expect(within(section).queryAllByTestId('platform-field-audit')).toHaveLength(0);
     expect(within(section).getAllByText('stored in SAM').length).toBeGreaterThan(0);
     expect(section).not.toHaveTextContent('environment');
     expect(section).not.toHaveTextContent('infra-client-secret');
@@ -126,6 +128,68 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
     await waitFor(() => {
       expect(within(section).getByLabelText('Client ID')).toHaveValue('');
     });
+  });
+
+  it('shows a per-field line when stored fields were changed by different people', () => {
+    const at = '2026-07-16T12:00:00.000Z';
+    const runtime = integration(['clientId', 'clientSecret'], {
+      configured: true,
+      source: 'runtime',
+      label: 'stored in SAM',
+      clearable: true,
+      fields: {
+        clientId: {
+          configured: true,
+          source: 'runtime',
+          label: 'stored in SAM',
+          updatedAt: at,
+          updatedBy: 'a',
+          updatedByLabel: 'Ada <ada@example.com>',
+        },
+        clientSecret: {
+          configured: true,
+          source: 'runtime',
+          label: 'stored in SAM',
+          updatedAt: at,
+          updatedBy: 'b',
+          updatedByLabel: 'Bob <bob@example.com>',
+        },
+      },
+    });
+    renderForm(makeStatus(runtime));
+    const section = screen.getByTestId('integration-google-infrastructure-oauth');
+    expect(within(section).queryByTestId('platform-section-audit')).not.toBeInTheDocument();
+    const audits = within(section).getAllByTestId('platform-field-audit');
+    expect(audits).toHaveLength(2);
+    expect(within(section).getByLabelText('Client ID')).toHaveAccessibleDescription(/Ada/);
+  });
+
+  it('keeps the dialog and typed values when the clear fails', async () => {
+    const runtime = integration(['clientId', 'clientSecret'], {
+      configured: true,
+      source: 'runtime',
+      label: 'stored in SAM',
+      clearable: true,
+    });
+    const { onPrimary } = renderForm(makeStatus(runtime), vi.fn().mockResolvedValue(false));
+    const section = screen.getByTestId('integration-google-infrastructure-oauth');
+    fireEvent.change(within(section).getByLabelText('Client ID'), {
+      target: { value: 'typed-client-id' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Clear stored Google infrastructure OAuth values' })
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Clear Google infrastructure OAuth?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Clear stored values' }));
+
+    await waitFor(() =>
+      expect(onPrimary).toHaveBeenCalledWith({ clear: ['googleInfrastructureOAuth'] })
+    );
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Clearing failed');
+    expect(
+      screen.getByRole('dialog', { name: 'Clear Google infrastructure OAuth?' })
+    ).toBeVisible();
+    expect(within(section).getByLabelText('Client ID')).toHaveValue('typed-client-id');
   });
 
   it('cancelling the confirmation clears nothing', () => {

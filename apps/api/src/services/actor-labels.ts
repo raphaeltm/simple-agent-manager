@@ -36,9 +36,7 @@ export async function resolveActorLabels(
       .bind(...lookup)
       .all<{ id: string; name: string | null; email: string | null }>();
     for (const row of rows.results ?? []) {
-      const name = row.name?.trim();
-      const email = row.email?.trim();
-      labels.set(row.id, name && email ? `${name} <${email}>` : (email ?? name ?? row.id));
+      labels.set(row.id, formatPersonLabel(row.name, row.email, row.id));
     }
   } catch (error) {
     log.warn('actor_labels.lookup_failed', {
@@ -46,6 +44,32 @@ export async function resolveActorLabels(
       error: error instanceof Error ? error.message : String(error),
     });
   }
-  for (const id of lookup) if (!labels.has(id)) labels.set(id, id);
+  for (const id of lookup) if (!labels.has(id)) labels.set(id, sanitizeLabel(id));
   return labels;
+}
+
+/** Longest user-supplied text placed in a label (names and emails come from identity providers). */
+const MAX_LABEL_LENGTH = 200;
+
+/**
+ * Makes user-controlled text safe to place on one line of a plain-text email or an admin label:
+ * control characters (including CR/LF) become spaces, so a crafted display name cannot forge extra
+ * lines in a security alert, and the result is length-capped.
+ */
+export function sanitizeLabel(value: string): string {
+  // eslint-disable-next-line no-control-regex -- stripping control characters is the point
+  const single = value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').trim();
+  return single.length > MAX_LABEL_LENGTH ? `${single.slice(0, MAX_LABEL_LENGTH)}…` : single;
+}
+
+/** "Name <email>", or whichever part exists, else the id. Every part is sanitized. */
+export function formatPersonLabel(
+  name: string | null | undefined,
+  email: string | null | undefined,
+  fallbackId: string
+): string {
+  const cleanName = name ? sanitizeLabel(name) : '';
+  const cleanEmail = email ? sanitizeLabel(email) : '';
+  if (cleanName && cleanEmail) return `${cleanName} <${cleanEmail}>`;
+  return cleanEmail || cleanName || sanitizeLabel(fallbackId);
 }

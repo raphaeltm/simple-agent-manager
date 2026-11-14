@@ -16,7 +16,12 @@ import type { Context } from 'hono';
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
-import { FIRST_RUN_SETUP_ACTOR_LABEL, resolveActorLabels } from './actor-labels';
+import {
+  FIRST_RUN_SETUP_ACTOR_LABEL,
+  formatPersonLabel,
+  resolveActorLabels,
+  sanitizeLabel,
+} from './actor-labels';
 import { agentEmailDomain } from './agent-email/address';
 import { agentEmailSenderFor } from './agent-email/provider';
 import { bootstrapOwnerEmail } from './bootstrap-owner';
@@ -113,14 +118,15 @@ export async function deliverSecurityAlert(
   try {
     const sender = agentEmailSenderFor(env);
     if (!sender) {
-      log.warn('security_alert.no_sender', { kind: alert.kind });
+      // Error, not warn: a dropped security alert is something an operator must see.
+      log.error('security_alert.no_sender', { kind: alert.kind });
       return;
     }
     const email = await buildSecurityAlertEmail(env, alert, now);
     if (!email) return;
     const recipients = await ownerRecipients(env);
     if (recipients.length === 0) {
-      log.warn('security_alert.no_recipients', { kind: alert.kind });
+      log.error('security_alert.no_recipients', { kind: alert.kind });
       return;
     }
     const from = {
@@ -229,10 +235,7 @@ async function accountLinkedEmail(
     .bind(alert.userId)
     .first<{ role: string; email: string | null; name: string | null }>();
   if (!user || !ALERTED_ROLES.has(user.role)) return null;
-  const who =
-    user.name?.trim() && user.email
-      ? `${user.name.trim()} <${user.email}>`
-      : (user.email ?? alert.userId);
+  const who = formatPersonLabel(user.name, user.email, alert.userId);
   const provider = providerTitle(alert.providerId);
   const roleLabel = `${/^[aeiou]/.test(user.role) ? 'an' : 'a'} ${user.role}`;
   return {
@@ -273,7 +276,7 @@ function humanField(field: string): string {
 
 function providerTitle(providerId: string): string {
   const titles: Record<string, string> = { github: 'GitHub', gitlab: 'GitLab', google: 'Google' };
-  return titles[providerId] ?? providerId;
+  return titles[providerId] ?? sanitizeLabel(providerId);
 }
 
 async function actorLabel(env: Env, userId: string): Promise<string> {

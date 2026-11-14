@@ -345,4 +345,32 @@ describe('Admin → Integrations clear, source labels and owner alerts', () => {
     expect(pending).toHaveLength(0);
     expect(sent).toEqual([]);
   });
+
+  it('a clear of a group with nothing stored deletes nothing and leaves the revision alone', async () => {
+    const { env } = createEnv();
+    const before = await rows(env, 'SELECT revision FROM admin_settings_revision');
+    const res = await put(env, { clear: ['gitlabOAuth'] });
+    expect(res.status).toBe(200);
+    expect(await rows(env, 'SELECT revision FROM admin_settings_revision')).toEqual(before);
+    expect(await rows(env, 'SELECT id FROM admin_settings_audit')).toEqual([]);
+  });
+
+  it('a clear that deletes rows is fenced by the settings revision', async () => {
+    const { env } = createEnv();
+    await seedSetupWrittenGitLab(env);
+    const [{ revision: before }] = (await rows(
+      env,
+      'SELECT revision FROM admin_settings_revision'
+    )) as Array<{ revision: number }>;
+    expect((await put(env, { clear: ['gitlabOAuth'] })).status).toBe(200);
+    const [{ revision: after }] = (await rows(
+      env,
+      'SELECT revision FROM admin_settings_revision'
+    )) as Array<{ revision: number }>;
+    expect(after).toBe(before + 1);
+    // Every audited reset carries the revision of the batch that deleted its row.
+    expect(
+      await rows(env, "SELECT DISTINCT revision FROM admin_settings_audit WHERE action = 'reset'")
+    ).toEqual([{ revision: after }]);
+  });
 });
