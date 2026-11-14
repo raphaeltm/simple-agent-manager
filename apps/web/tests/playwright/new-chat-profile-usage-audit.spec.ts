@@ -410,6 +410,36 @@ test.describe('New-chat picker: usage left on profiles', () => {
     await assertNoOverflow(page);
   });
 
+  test('a long profile name in the account list wraps inside its row', async ({
+    page,
+  }, testInfo) => {
+    await openNewChat(page);
+    const suffix = getProjectSuffix(testInfo.project.name);
+
+    for (const name of [/^Overnight-Migration-Reviewer/, /^https:\/\/example\.com/]) {
+      await toControl(page).click();
+      const row = sheet(page).getByRole('button', { name });
+      await row.scrollIntoViewIfNeeded();
+      await row.click();
+      await expect(sheet(page)).toHaveCount(0);
+      await accountButton(page).click();
+      const list = page.getByRole('group', { name: 'Account for this chat' });
+      await expect(list).toBeVisible();
+      // The list scrolls vertically, so the clipped-overflow walk skips it: measure it directly.
+      const widths = await list.evaluate((panel) =>
+        [panel, ...Array.from(panel.querySelectorAll('button'))].map((el) => ({
+          client: el.clientWidth,
+          scroll: el.scrollWidth,
+        }))
+      );
+      for (const width of widths) expect(width.scroll).toBeLessThanOrEqual(width.client + 1);
+      await screenshot(page, `new-chat-run-account-long-profile-${suffix}`);
+      await assertNoOverflow(page);
+      await page.keyboard.press('Escape');
+      await expect(list).toHaveCount(0);
+    }
+  });
+
   test('the sheet shows labelled meters and folds exhausted profiles into "Out for now"', async ({
     page,
   }, testInfo) => {

@@ -188,7 +188,13 @@ function AccountRow({
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
           <span className="min-w-0 truncate text-sm font-medium text-fg-primary">{label}</span>
-          {tag && <span className="shrink-0 text-[11px] text-fg-muted">{tag}</span>}
+          {/* The tag carries the profile's name, which can be one long unbroken token: let it
+              shrink and wrap anywhere instead of pushing the row wider than the list. */}
+          {tag && (
+            <span className="min-w-0 max-w-full text-[11px] [overflow-wrap:anywhere] text-fg-muted">
+              {tag}
+            </span>
+          )}
         </span>
         {children}
       </span>
