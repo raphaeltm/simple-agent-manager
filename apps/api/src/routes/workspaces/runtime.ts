@@ -54,6 +54,7 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { assertProviderLimitCredentialPin } from '../../services/provider-limit-credential-pin';
+import { refuseHaltedRunAccount } from '../../services/run-agent-configuration';
 import {
   isAiProxyEnabled,
   PROXY_ELIGIBLE_AGENTS,
@@ -748,6 +749,20 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     profile
   );
   let credentialProviderMode = 'direct';
+
+  // An account chosen for this run that can no longer be used (paused, removed) must stop
+  // the run here. Without this, "no credential" would continue to the platform proxy or a
+  // fallback below and run the chat on an account nobody chose for it.
+  if (!credentialData && profile?.runConfigurationId) {
+    await refuseHaltedRunAccount(db, {
+      workspaceId,
+      userId: workspace.userId,
+      projectId: workspace.projectId,
+      agentType: body.agentType,
+      encryptionKey,
+      profile,
+    });
+  }
 
   // SECURITY: Never return raw platform-managed credentials to tenant workspaces.
   // Platform credentials are control-plane secrets and must only be used via

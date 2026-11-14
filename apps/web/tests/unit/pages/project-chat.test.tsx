@@ -213,6 +213,7 @@ import { ProjectChat } from '../../../src/pages/project-chat';
 import { ProvisioningIndicator } from '../../../src/pages/project-chat/ProvisioningIndicator';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 import { QueryTestWrapper } from '../../test-utils/query-test-utils';
+import { accountRows, mergeRows } from '../components/accounts/fixtures';
 
 const PROJECT_ID = 'proj-1';
 
@@ -2395,6 +2396,60 @@ describe('ProjectChat agent profile selection', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Chat options' }));
     expect(await screen.findByRole('combobox', { name: 'Model' })).toHaveValue('');
     expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('');
+  });
+
+  it('sends the account chosen beside To with the chat, and New chat starts on the profile’s', async () => {
+    const rows = mergeRows(
+      accountRows({
+        id: 'personal',
+        name: 'Personal Pro',
+        kind: 'agent',
+        target: 'claude-code',
+        isDefault: true,
+      }),
+      accountRows({ id: 'work', name: 'Work Max', kind: 'agent', target: 'claude-code' })
+    );
+    mocks.getMyCredentialLimits.mockResolvedValue({ credentials: [], generatedAt: 0 });
+    mocks.getResolutionStatus.mockResolvedValue({ consumers: [] });
+    mocks.listCCCredentials.mockResolvedValue(rows.credentials);
+    mocks.listCCConfigurations.mockResolvedValue(rows.configurations);
+    mocks.listCCAttachments.mockResolvedValue(rows.attachments);
+    mocks.listProfilePins.mockResolvedValue([]);
+    mocks.listChatSessions.mockResolvedValueOnce({ sessions: [], total: 0 }).mockResolvedValue({
+      sessions: [{ ...SESSION_1, id: 'session-prof', topic: 'Run it on work' }],
+      total: 1,
+    });
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Runs on Personal Pro, change account' })
+    );
+    const list = screen.getByRole('group', { name: 'Account for this chat' });
+    fireEvent.click(within(list).getByRole('button', { name: /^Work Max/ }));
+    expect(
+      screen.getByRole('button', { name: 'Runs on Work Max, change account' })
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Run it on work' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({ agentProfileId: 'prof-1', agentConfigurationId: 'cfg-work' })
+      );
+    });
+
+    // The choice is for one chat: the next new chat runs on the profile's account again.
+    await waitFor(() =>
+      expect(screen.getByTestId('message-view')).toHaveTextContent('session-prof')
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
+    expect(
+      await screen.findByRole('button', { name: 'Runs on Personal Pro, change account' })
+    ).toBeInTheDocument();
   });
 
   it('drops a model and effort chosen for another agent when the profile changes', async () => {

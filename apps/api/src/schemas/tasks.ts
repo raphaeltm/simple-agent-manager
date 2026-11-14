@@ -7,6 +7,9 @@ import {
 import * as v from 'valibot';
 
 import { MAX_RESOURCE_ID_LENGTH } from './_validator';
+
+/** Bound on an echoed account id; see `agentConfigurationId` below. */
+const RUN_AGENT_CONFIGURATION_ID_MAX_LENGTH = 1024;
 import { AGENT_SETTINGS_VALIDATION_DEFAULTS } from './agent-settings';
 import { ResourceRequirementsSchema } from './resource-requirements';
 
@@ -77,6 +80,15 @@ export const TaskAgentOverrideFields = {
     )
   ),
   effort: v.optional(v.nullable(v.picklist(AGENT_EFFORT_LEVELS))),
+  /**
+   * The caller's own agent account (`cc_configurations.id`) for this run, over the profile's.
+   * Checked against the stored row by `validateRunAgentConfiguration`, which is the real
+   * validation; the cap only bounds the string. It is not the 128-char resource-id cap:
+   * ids from the 2026-06 composable-credentials backfill run past 200 characters.
+   */
+  agentConfigurationId: v.optional(
+    v.nullable(v.pipe(v.string(), v.trim(), v.maxLength(RUN_AGENT_CONFIGURATION_ID_MAX_LENGTH)))
+  ),
 };
 
 export const SubmitTaskSchema = v.object({

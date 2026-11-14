@@ -1103,6 +1103,12 @@ export const tasks = sqliteTable(
     skillId: text('skill_id'),
     /** Original skill hint/id requested by the caller. */
     skillHint: text('skill_hint'),
+    /**
+     * Account (`cc_configurations.id`) the person chose for this run, over the profile's.
+     * NULL = resolve as usual. Read by `resolveSessionProfileCredentialContext` and
+     * provider-limit admission; validated at submit (`validateRunAgentConfiguration`).
+     */
+    agentConfigurationId: text('agent_configuration_id'),
     startedAt: text('started_at'),
     completedAt: text('completed_at'),
     terminalTransitionId: text('terminal_transition_id'),
@@ -2207,7 +2213,7 @@ export const agentSessions = sqliteTable(
     }).default('user'),
     /** Resolution tier that chose the credential. Null on rows written before 0215. */
     agentCredentialScope: text('agent_credential_scope', {
-      enum: ['profile', 'project', 'user', 'platform'],
+      enum: ['run', 'profile', 'project', 'user', 'platform'],
     }),
     agentCredentialReference: text('agent_credential_reference'),
     agentCredentialProvider: text('agent_credential_provider'),

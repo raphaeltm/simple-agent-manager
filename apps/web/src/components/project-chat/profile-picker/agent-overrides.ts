@@ -2,9 +2,10 @@ import type { AgentEffort, AgentProfile, AgentSkill } from '@simple-agent-manage
 import { isAgentEffortSupported } from '@simple-agent-manager/shared';
 
 /**
- * Model and effort chosen for one new chat. They are recorded with the agent they were picked
- * for: a Codex model means nothing to Claude, so switching to a profile or skill that runs a
- * different agent clears them (`ChatInput`) instead of sending a value that agent cannot use.
+ * Model, effort and account chosen for one new chat. They are recorded with the agent they
+ * were picked for: a Codex model or a ChatGPT account means nothing to Claude, so switching to
+ * a profile or skill that runs a different agent clears them (`ChatInput`) instead of sending
+ * a value that agent cannot use.
  */
 export interface ChatAgentOverrides {
   agentType: string | null;
@@ -12,12 +13,15 @@ export interface ChatAgentOverrides {
   model: string;
   /** Null means "use the default". */
   effort: AgentEffort | null;
+  /** The account (`cc_configurations.id`) this chat runs on; blank means the profile's. */
+  accountId: string;
 }
 
 export const EMPTY_CHAT_AGENT_OVERRIDES: ChatAgentOverrides = {
   agentType: null,
   model: '',
   effort: null,
+  accountId: '',
 };
 
 /** What this chat would run with if nothing were overridden. */
@@ -51,14 +55,32 @@ export function chatAgentDefaults(
 export function activeChatAgentOverrides(
   overrides: ChatAgentOverrides,
   agentType: string | null
-): { model: string | null; effort: AgentEffort | null } {
-  if (!agentType || overrides.agentType !== agentType) return { model: null, effort: null };
+): { model: string | null; effort: AgentEffort | null; accountId: string | null } {
+  if (!agentType || overrides.agentType !== agentType) {
+    return { model: null, effort: null, accountId: null };
+  }
   return {
     model: overrides.model.trim() || null,
     effort:
       overrides.effort && isAgentEffortSupported(agentType, overrides.effort)
         ? overrides.effort
         : null,
+    accountId: overrides.accountId || null,
+  };
+}
+
+/** The same overrides with the account for `agentType` set (or cleared with null). */
+export function withChatAccount(
+  overrides: ChatAgentOverrides,
+  agentType: string,
+  accountId: string | null
+): ChatAgentOverrides {
+  const sameAgent = overrides.agentType === agentType;
+  return {
+    agentType,
+    model: sameAgent ? overrides.model : '',
+    effort: sameAgent ? overrides.effort : null,
+    accountId: accountId ?? '',
   };
 }
 

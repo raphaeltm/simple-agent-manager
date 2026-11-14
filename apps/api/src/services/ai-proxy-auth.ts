@@ -4,7 +4,7 @@
  * Re-exported from `ai-proxy-shared.ts`, so callers keep importing from there.
  */
 import type { AgentCredentialScope } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -157,6 +157,11 @@ export async function verifyAIProxyAuth(
       agentCredentialProvider: schema.agentSessions.agentCredentialProvider,
       agentProviderMode: schema.agentSessions.agentProviderMode,
       agentCredentialGeneration: schema.agentSessions.agentCredentialGeneration,
+      // The run account of the task this workspace serves, with the same predicate as
+      // `resolveTaskRuntimeIds`, in this query: the proxy runs on every model call.
+      runConfigurationId: sql<
+        string | null
+      >`(SELECT ${schema.tasks.agentConfigurationId} FROM ${schema.tasks} WHERE ${schema.tasks.workspaceId} = ${workspaceId} AND ${schema.tasks.projectId} = ${workspace.projectId} AND ${schema.tasks.userId} = ${workspace.userId} ORDER BY ${schema.tasks.createdAt} DESC, ${schema.tasks.id} DESC LIMIT 1)`,
     })
     .from(schema.agentSessions)
     .where(and(...agentSessionConditions))
@@ -185,6 +190,7 @@ export async function verifyAIProxyAuth(
             id: agentSession.id,
             profileId: agentSession.agentProfileId,
             skillId: agentSession.skillId,
+            runConfigurationId: workspace.projectId ? agentSession.runConfigurationId : null,
           }
         : null,
     },

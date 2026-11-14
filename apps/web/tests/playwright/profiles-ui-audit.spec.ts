@@ -50,10 +50,13 @@ function audits(viewport: 'mobile' | 'desktop') {
     await expect(page.getByTestId('profile-usage-strip')).toHaveCount(5);
     const row = (name: string) =>
       page.getByTestId('profile-row').filter({ has: page.getByRole('button', { name }) });
-    // Astra is pinned to the team seat, whose 5h window reset after the sample.
-    await expect(row('Astra High').getByTestId('profile-usage-strip')).toHaveText(/5h\s*0%\s*↻/);
+    // Astra is pinned to the team seat, whose 5h window reset after the sample: all of it left.
+    await expect(row('Astra High').getByTestId('profile-usage-strip')).toHaveText(
+      /5h\s*100%\s*left\s*↻/
+    );
+    // Percent LEFT, like the new-chat picker: 94% used reads 6% left.
     await expect(row('Backend Implementation').getByTestId('profile-usage-strip')).toHaveText(
-      /5h\s*94%/
+      /5h\s*6%\s*left/
     );
     await expect(row('Claudiii')).toContainText('4 vCPU · 7.5 GB');
     await expect(row('Backend Implementation')).toContainText('Medium VM');
