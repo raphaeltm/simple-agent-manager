@@ -3,7 +3,7 @@
   "before": {
     "label": "cleanup guard removed",
     "exitCode": -2,
-    "testProcessesStillActive": [130844, 130845],
+    "testProcessesStillActive": [131996, 131998],
     "burnersStillActive": []
   },
   "after": {
@@ -13,5 +13,12 @@
     "burnersStillActive": []
   },
   "finallyCleanupOfAllProbeProcesses": true,
-  "sourceFixtureSizeOrTestSemanticsChanged": false
+  "sourceFixtureSizeOrTestSemanticsChanged": false,
+  "readinessFailureControl": {
+    "pidfileSuppressed": true,
+    "deadlineSeconds": 1,
+    "discoveredChildCount": 4,
+    "remainingActiveChildren": [],
+    "result": "PASS"
+  }
 }

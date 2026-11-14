@@ -4,6 +4,10 @@ source=Path('tasks/evidence/2026-11-14-archive-ci-flakes/repeat-files.py').read_
 def active(pid):
     try:return Path(f'/proc/{pid}/stat').read_text().split()[2]!='Z'
     except FileNotFoundError:return False
+def descendants(pid):
+    try: children=[int(x) for x in Path(f'/proc/{pid}/task/{pid}/children').read_text().split()]
+    except FileNotFoundError:return []
+    return children+[child for parent in children for child in descendants(parent)]
 def check(text,label):
     with tempfile.TemporaryDirectory(prefix='archive-interrupt-') as tmp:
         root=Path(tmp); script=root/'tasks/evidence/check/repeat-files.py'
@@ -27,11 +31,20 @@ def check(text,label):
             result={'label':label,'exitCode':p.returncode,'testProcessesStillActive':[pid for pid in ids if active(pid)],'burnersStillActive':[pid for pid in burners if active(pid)]}
             return result
         finally:
-            if ids:
-                try:os.killpg(ids[0],signal.SIGKILL)
+            # Freeze the harness before discovering children: a startup failure
+            # may occur before the stub can publish its process IDs.
+            if p.poll() is None:
+                try:os.kill(p.pid,signal.SIGSTOP)
                 except ProcessLookupError:pass
-            for pid in burners+[p.pid]:
-                try:os.killpg(pid,signal.SIGKILL)
+            owned={p.pid,*ids,*burners,*descendants(p.pid)}
+            groups=set()
+            for pid in owned:
+                try:
+                    group=os.getpgid(pid)
+                    if group!=os.getpgrp():groups.add(group)
+                except ProcessLookupError:pass
+            for group in groups:
+                try:os.killpg(group,signal.SIGKILL)
                 except ProcessLookupError:pass
             p.communicate(timeout=5)
 fixed=source
