@@ -123,3 +123,12 @@ Production rollout-fix run43610800149 on main3c5921849 also passed, including He
 Cleanup confirmed at 16:03Z: cancelled the owned subscription, deleted the retry task and workspace, then deleted its auto-provisioned node only after checking zero remaining workspaces and that the node was created after the test task. Independent GET checks returned 404 for all three resources (managed job `sx-45531e59c07200f8902c6777f986d7b4223a883a43952bb0edf732ebf5e82a94`). Stage slot released to the coordinator. Final browser pass waited for real page content; dashboard, project, settings and chat all returned 200 with zero errors and the chat showed the acknowledged WOKE reply.
 
 After syncing main `567d8c084`, root build passed 18 tasks, targeted real-workerd producer/cost/recovery passed 19/19, and API typecheck passed. The remaining protected-prefix candidate bound is tracked separately in idea `01M7DCY03S5CTP15F71R40VSJV`; the first PR makes no universal O(deletions) claim.
+
+
+### Late alarm-failure audit (16:28 UTC)
+
+Fault injection exposed a retry gap introduced by skipping unchanged due times: if setAlarm rejects after section memory persists, the next unchanged admission previously did not retry. An in-memory failure flag now retries on the next admission; clearing before each attempt prevents an older success erasing a newer failure. The constructor reads the real stored alarm once under blockConcurrencyWhile and marks missing/later-than-required alarms for repair, covering eviction after failure. Healthy starts perform a read and no alarm write.
+
+Real-workerd same-instance failure test was RED (expected two setAlarm calls, got one) before the correction. Real evictDurableObject tests for missing and late alarms were RED (expected repair call, got zero) before constructor validation. The healthy control initially raced real immediately-due storage maintenance; seeding its legitimate last-measurement timestamp isolates future maintenance. All eight cost-plan tests now pass, including healthy eviction with zero extra alarm writes. Corrected-candidate staging and final review remain pending.
+
+Follow-up cloudflare-specialist PASS and test-engineer ADDRESSED/PASS. Corrected three-file real-workerd suite passed 23/23; project-data lint and API typecheck passed. Corrected staging remains pending.

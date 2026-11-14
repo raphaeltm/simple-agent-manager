@@ -2,7 +2,7 @@
 import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migrations';
 import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
 import { runProjectEventRetention } from '@simple-agent-manager/project-data/internal/do/project-events-status-retention';
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env, evictDurableObject, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
@@ -181,6 +181,77 @@ describe('project event physical storage cost', () => {
       }
     });
   });
+
+  it('retries a failed alarm write on the next admission even when due times are unchanged', async () => {
+    const projectId = 'cost-alarm-retry';
+    const stub = stubFor(projectId);
+    await stub.ensureProjectId(projectId);
+    await runInDurableObject(stub, async (instance, state) => {
+      await state.storage.deleteAlarm();
+      const alarms = vi.spyOn(state.storage, 'setAlarm');
+      alarms.mockRejectedValueOnce(new Error('simulated alarm write failure'));
+      try {
+        instance.admitProjectEvent(inputFor(projectId, 'failed-alarm'));
+        await vi.waitFor(() => expect(alarms).toHaveBeenCalledTimes(1));
+        await Promise.resolve();
+        expect(await state.storage.getAlarm()).toBeNull();
+        instance.admitProjectEvent(inputFor(projectId, 'repair-alarm'));
+        await vi.waitFor(() => expect(alarms).toHaveBeenCalledTimes(2));
+        expect(await state.storage.getAlarm()).not.toBeNull();
+        alarms.mockClear();
+        instance.admitProjectEvent(inputFor(projectId, 'healthy-alarm'));
+        await state.storage.getAlarm();
+        expect(alarms).not.toHaveBeenCalled();
+      } finally {
+        alarms.mockRestore();
+        await state.storage.deleteAlarm();
+      }
+    });
+  });
+
+  it.each(['missing', 'late', 'healthy'] as const)(
+    'validates a %s alarm after eviction without rewriting a healthy alarm',
+    async (mode) => {
+      const projectId = `cost-alarm-restart-${mode}`;
+      const stub = stubFor(projectId);
+      await stub.ensureProjectId(projectId);
+      await runInDurableObject(stub, async (instance, state) => {
+        // Keep unrelated storage maintenance in the future while evicting.
+        state.storage.sql.exec(
+          "INSERT INTO do_meta (key,value) VALUES ('storageSafetyLastMeasuredAt',?)",
+          String(Date.now())
+        );
+        await state.storage.deleteAlarm();
+        if (mode === 'late') await state.storage.setAlarm(Date.now() + 10 * 86400000);
+        const alarms = vi.spyOn(state.storage, 'setAlarm');
+        if (mode !== 'healthy')
+          alarms.mockRejectedValueOnce(new Error('simulated alarm write failure'));
+        try {
+          instance.admitProjectEvent(inputFor(projectId, 'before-eviction'));
+          await vi.waitFor(() => expect(alarms).toHaveBeenCalledTimes(1));
+          await Promise.resolve();
+          if (mode === 'healthy') expect(await state.storage.getAlarm()).not.toBeNull();
+        } finally {
+          alarms.mockRestore();
+        }
+      });
+      await evictDurableObject(stub);
+      await runInDurableObject(stub, async (instance, state) => {
+        const alarms = vi.spyOn(state.storage, 'setAlarm');
+        try {
+          instance.admitProjectEvent(inputFor(projectId, 'after-eviction'));
+          if (mode !== 'healthy') await vi.waitFor(() => expect(alarms).toHaveBeenCalledTimes(1));
+          const alarm = await state.storage.getAlarm();
+          expect(alarm).not.toBeNull();
+          expect(alarm!).toBeLessThan(Date.now() + 86400000);
+          expect(alarms).toHaveBeenCalledTimes(mode === 'healthy' ? 0 : 1);
+        } finally {
+          alarms.mockRestore();
+          await state.storage.deleteAlarm();
+        }
+      });
+    }
+  );
 
   it('replaces multiplicative FK scans with indexed deletes and drains equal-time events across batches', async () => {
     const measurements = [];

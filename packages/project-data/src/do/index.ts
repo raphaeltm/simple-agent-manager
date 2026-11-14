@@ -165,6 +165,7 @@ export class ProjectData extends DurableObject<Env> {
   private alarmSections = new ProjectDataAlarmSectionScheduler();
   /** The scheduler memory as last written, so an unchanged recalculation writes nothing. */
   private persistedAlarmSchedule: string | null = null;
+  private alarmSchedulingFailed = false;
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
   private wakeReadyLock: Promise<unknown> = Promise.resolve();
@@ -185,6 +186,13 @@ export class ProjectData extends DurableObject<Env> {
         runMigrations(this.sql);
       });
       this.restoreAlarmSections();
+      // Section memory is persisted before the alarm write. An interrupted write
+      // can leave complete memory but no alarm (or an alarm later than required).
+      // Validate once per instance without rewriting a healthy stored alarm.
+      const expectedAlarm = earliestAlarmTime([this.alarmSections.nextDueAt()]);
+      const actualAlarm = await this.ctx.storage.getAlarm();
+      this.alarmSchedulingFailed =
+        expectedAlarm !== null && (actualAlarm === null || actualAlarm > expectedAlarm);
     });
   }
 
@@ -1853,7 +1861,8 @@ export class ProjectData extends DurableObject<Env> {
     if (
       previousRetentionAt !== nextRetentionAt ||
       previousWakeAt !== nextWakeAt ||
-      missingSchedule
+      missingSchedule ||
+      this.alarmSchedulingFailed
     ) {
       this.rescheduleProjectEventAlarm(input.projectId);
     }
@@ -3890,15 +3899,21 @@ export class ProjectData extends DurableObject<Env> {
   private async recalculateAlarm(
     consumed?: ReadonlyMap<ProjectDataAlarmSection, number>
   ): Promise<void> {
-    const times = computeProjectDataAlarmSectionTimes(this.sql, this.env);
-    this.alarmSections.observe(times, consumed);
-    this.persistAlarmSections();
-    // The scheduler's memory already holds every fresh time (min-folded) plus the retry floor of
-    // any section that just threw; reading fresh times directly would bypass that floor and
-    // re-arm a failing overdue section at `now` on every tick.
-    const alarmTime = earliestAlarmTime([this.alarmSections.nextDueAt()]);
-    if (alarmTime !== null) await this.ctx.storage.setAlarm(alarmTime);
-    else await this.ctx.storage.deleteAlarm();
+    // Clear before attempting the write: an older successful call must not erase
+    // a newer failure while scheduling calls overlap.
+    this.alarmSchedulingFailed = false;
+    try {
+      const times = computeProjectDataAlarmSectionTimes(this.sql, this.env);
+      this.alarmSections.observe(times, consumed);
+      this.persistAlarmSections();
+      // Preserve remembered times and the retry floor of a section that just threw.
+      const alarmTime = earliestAlarmTime([this.alarmSections.nextDueAt()]);
+      if (alarmTime !== null) await this.ctx.storage.setAlarm(alarmTime);
+      else await this.ctx.storage.deleteAlarm();
+    } catch (error) {
+      this.alarmSchedulingFailed = true;
+      throw error;
+    }
   }
 
   private async scheduleHeartbeatAlarm(): Promise<void> {
