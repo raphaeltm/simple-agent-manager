@@ -63,9 +63,9 @@ parts 1-3, D1-D8).
 - [x] 6 teardown lists the box account's KMS grant with the command.
 - [x] 7 node API default location on self-host (shared code; Cloudflare unchanged).
 - [x] 8 hosted git ls-refs honours ref-prefix (DO), "HEAD" not listed as a branch.
-- [ ] Gates: build order, typecheck, check:fast, unit tests, selfhost:test, live suite (if
+- [x] Gates: build order, typecheck, check:fast, unit tests, selfhost:test, live suite (if
       possible), manual CI run.
-- [ ] security-auditor on 1/5 changes; task-completion-validator.
+- [x] security-auditor on 1/5 changes; task-completion-validator.
 
 ## Acceptance criteria
 
@@ -92,4 +92,12 @@ parts 1-3, D1-D8).
 - Live suite (`pnpm selfhost:live-test`) cannot run in this workspace: no Docker (spawnSync docker
   ENOENT in every Docker-backed file).
 
-- Item 7 is shared code: state exactly what changes on Cloudflare (target: nothing).
+- Gates (head 14b935e2b): API deps built in order; api typecheck and selfhost tsc clean;
+  `pnpm check:fast` exit 0; `pnpm selfhost:test` 36 files, 529 passed, 5 skipped; affected API
+  unit tests 147 passed; manual CI run 43650853730.
+- Hosted git import test: with `hosted-git-repo.ts` reverted to ea7ffb415 (ref-prefix filter
+  removed) and only the entry wiring fixed, it fails the same way (`.tmp` run: "lists branches"
+  and "imports the source" both red); so the failure predates F3. The import path asks for
+  `prefix: 'HEAD'`, which the filter keeps (unit test "keeps attributes and every matching prefix").
+- task-completion-validator: PASS, 0 CRITICAL/HIGH; M1 (stale checkboxes) and M2 (import test
+  provenance) closed here; L1 proposal for a "create the box" command is in the PR body.
