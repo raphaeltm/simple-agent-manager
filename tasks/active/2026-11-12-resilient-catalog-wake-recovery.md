@@ -11,7 +11,7 @@ Main `4bdaaf61f6cecb83b6a3bab30e011257ea019710` is incorporated with a history-p
 Pushed head `fe6019eff0fcedc29eabe0958b88d413496a6163` passed all functional CI; coordinator reviews
 [part 1](https://github.com/raphaeltm/simple-agent-manager/pull/2693#issuecomment-6884423659) and
 [part 2](https://github.com/raphaeltm/simple-agent-manager/pull/2693#issuecomment-6884457589) requested changes.
-The source/test fixes below are committed locally, with final current-main verification in progress before one new candidate push.
+The source/test fixes below are committed locally, with final current-main local verification complete before one new candidate push. Fresh CI and live staging remain open.
 Those earlier CI results do not certify the new candidate. Keep the PR DRAFT with `needs-human-review`
 until the coordinator approves the final full SHA and normal release gates pass.
 
@@ -54,7 +54,7 @@ References: `tasks/backlog/2026-11-09-capacity-pool-readiness-gate-during-republ
 - [x] Archive exact-write fencing covers direct wake activation. Once this exact chat/workspace is durably active, completed/failed historical recovery tasks no longer withhold new prompts; cancellation and current target ownership still apply. Receipt probes never activate.
 - [x] Real entry-point regressions cover initial versus established pools, interrupted multi-batch/restart, unchanged catalogs, daily-independent retry/lost notification, stale/concurrent publishers, revocation, cancellation/TTL and automatic original inbox delivery without repeated Continue.
 - [x] Production-size 7,200-row indexed promotion, current migration chain and guard-deletion discrimination tests; scoped source/test specialist review.
-- [ ] Final documentation/constitution/completion review and consolidated native/Workers/full quality pass.
+- [x] Final documentation/constitution review and consolidated native/Workers/full quality pass. Completion remains WARN for open runtime/release gates.
 - [ ] Real coordinated staging retained-publication VM chain, short sequential Instant compatibility, promotion timing and independent provider/control-plane cleanup.
 - [ ] Fresh candidate CI, best-effort CodeRabbit request/wait, final exact-SHA coordinator approval and authorized release/production smoke.
 
@@ -68,7 +68,7 @@ References: `tasks/backlog/2026-11-09-capacity-pool-readiness-gate-during-republ
 
 Focused current-source evidence under `.codex/tmp/refresh-20261114/review-fixes/`: catalog59, refresh183,
 authority123, classification/recovery221, wake native161, wake/cron actual Workers64 pass. Counts overlap
-and must not be summed. The consolidated38 native suites passed1,445 cases and failed the old configured-empty expectation for a switched-off sole account. Its corrected complete43-case suite passes while retaining the off/on reuse/admission/picks/revision assertions:1,446 unique cases covered. The original failure is retained. Current manifests are `native-manifest.txt` (38 suites) and the parent `workers-manifest.txt` (8 suites). Fresh current-main Workers/full quality remain in progress.
+and must not be summed. The consolidated38 native suites passed1,445 cases and failed the old configured-empty expectation for a switched-off sole account. Its corrected complete43-case suite passes while retaining the off/on reuse/admission/picks/revision assertions:1,446 unique cases covered. The original failure is retained. Current manifests are `native-manifest.txt` (38 suites) and the parent `workers-manifest.txt` (8 suites). On integrated current main, all8 actual Workers suites pass115 cases (263.89s); full lint/typecheck/build passes62/62 tasks (3m55s,14cached), and merged-handler/config10/10 pass. Migration safety/order and runtime-boundary semantic checks pass. Tests execute against real D1/DO/TaskRunner entry points, with provider/VM HTTP boundaries mocked; these are not live provider or isolate-crash proof.
 Historical port evidence includes1,280 native/110 Workers and62 local quality tasks, plus functional
 CI43640124451 at fe6019. Original failed runs and corrected fixture assertions are retained; no test,
 timeout, retry or production guard was suppressed. UI is unchanged in this review revision;19 rendered
