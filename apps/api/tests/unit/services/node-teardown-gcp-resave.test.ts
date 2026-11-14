@@ -462,6 +462,33 @@ describe('proveNodeInstanceOwnership: provider refusals', () => {
     expect(result.message).toMatch(/^teardown_instance_not_visible/);
   });
 
+  it('a refusal whose message names a "quota" resource is still a refusal (structured codes decide)', async () => {
+    const { GcpApiError } = await import('../../../src/services/gcp-errors');
+    const { ProviderError } = await import('@simple-agent-manager/providers');
+    const cases = [
+      new GcpApiError({
+        step: 'sa_impersonation',
+        message: 'Permission denied on projects/quota-prod',
+        statusCode: 403,
+        rawBody:
+          '{"error":{"code":403,"status":"PERMISSION_DENIED","message":"Permission iam.serviceAccounts.getAccessToken denied on projects/quota-prod",' +
+          '"details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"IAM_PERMISSION_DENIED"}]}}',
+      }),
+      new GcpApiError({
+        step: 'sts_exchange',
+        message: 'The caller does not have access to rate-limit-tests',
+        statusCode: 401,
+        rawBody: '{"error":"invalid_grant","error_description":"token for project quota-prod is revoked"}',
+      }),
+      new ProviderError('hetzner', 403, 'hetzner API error (403): forbidden on project quota-prod', {
+        providerCode: 'forbidden',
+      }),
+    ];
+    for (const error of cases) {
+      expect((await prove(error)).message).toMatch(/^teardown_instance_not_visible/);
+    }
+  });
+
   it('a GCP or Hetzner limit stays an ordinary, retryable read failure', async () => {
     const { GcpApiError } = await import('../../../src/services/gcp-errors');
     const { ProviderError } = await import('@simple-agent-manager/providers');
@@ -473,8 +500,25 @@ describe('proveNodeInstanceOwnership: provider refusals', () => {
         statusCode: 403,
         rawBody: '{"error":{"status":"PERMISSION_DENIED","details":[{"reason":"RATE_LIMIT_EXCEEDED"}]}}',
       }),
+      new GcpApiError({
+        step: 'sa_impersonation',
+        message: 'Forbidden',
+        statusCode: 403,
+        rawBody: '{"error":{"status":"RESOURCE_EXHAUSTED","message":"denied"}}',
+      }),
+      new GcpApiError({
+        step: 'sa_impersonation',
+        message: 'Forbidden',
+        statusCode: 403,
+        rawBody: '{"error":{"status":"PERMISSION_DENIED","errors":[{"reason":"quotaExceeded"}]}}',
+      }),
       // providerFetch leaves category unknown; the provider code still says it is a limit.
       new ProviderError('hetzner', 403, 'limit reached', { providerCode: 'rate_limit_exceeded' }),
+      // Google ErrorInfo recorded by providerFetch on a GCP compute 403.
+      new ProviderError('gcp', 403, 'gcp API error (403): denied', {
+        providerCode: 'PERMISSION_DENIED',
+        context: { googleErrorInfo: { reason: 'RATE_LIMIT_EXCEEDED', domain: 'googleapis.com' } },
+      }),
     ];
     for (const error of cases) {
       expect(await prove(error)).toBe(error);

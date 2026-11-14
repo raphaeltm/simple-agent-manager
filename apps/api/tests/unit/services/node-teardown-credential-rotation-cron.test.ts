@@ -84,7 +84,14 @@ async function rotationFixture(scope: 'user' | 'installation' = 'user') {
         deletes.push(`${token}:${id}`);
         if (token.startsWith('read-only')) {
           return Response.json(
-            { error: { code: 'forbidden', message: 'insufficient permissions for this token' } },
+            // The message names a resource containing "quota": only the structured code may decide
+            // that this is a permission refusal rather than a temporary limit (CodeRabbit, #2715).
+            {
+              error: {
+                code: 'forbidden',
+                message: 'insufficient permissions for this token on project quota-prod',
+              },
+            },
             { status: 403 }
           );
         }
