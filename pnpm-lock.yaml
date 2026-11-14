@@ -319,8 +319,8 @@ importers:
         specifier: 4.13.4
         version: 4.13.4
       isomorphic-git:
-        specifier: ^1.38.7
-        version: 1.38.7
+        specifier: 1.44.12
+        version: 1.44.12
       jose:
         specifier: 'catalog:'
         version: 6.2.3
