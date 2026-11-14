@@ -33,6 +33,12 @@
 #   --kms-location <loc>    default: global
 #   --key-ring <id>         default: sam-selfhost
 #   --key <id>              default: sam-<8 hex of sha256(issuer)>
+#   --new-key-version       the key exists with no enabled primary version (for example after
+#                           teardown --destroy-key): create a new primary version. Bundles and
+#                           backups sealed with the old version stay unrecoverable.
+#   --restore-key-version   same case: restore the primary version from DESTROY_SCHEDULED (within
+#                           30 days of the teardown) or DISABLED, enable it and keep it primary.
+#                           Undoes a destruction the operator asked for: only when you mean it.
 #   --state-dir <dir>       where created-resources.json lives; default: deploy/selfhost/.state
 #   --teardown              remove what this script created for this install (see README)
 #   --destroy-key-versions <key id>  with --teardown: schedule destruction of the key's versions.
@@ -60,6 +66,7 @@ KEY_RING="sam-selfhost"
 KEY_ID=""
 DESTROY_KEY=""
 KEEP_KMS=0
+KEY_VERSION_ACTION=""
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${HERE}/.state"
 RECORD_TOOL="${HERE}/created-resources.mjs"
@@ -88,8 +95,10 @@ while [ $# -gt 0 ]; do
     --teardown) TEARDOWN=1; shift ;;
     --destroy-key-versions) DESTROY_KEY="${2:-}"; shift 2 ;;
     --keep-kms) KEEP_KMS=1; shift ;;
+    --new-key-version) KEY_VERSION_ACTION="${KEY_VERSION_ACTION:+both}new"; shift ;;
+    --restore-key-version) KEY_VERSION_ACTION="${KEY_VERSION_ACTION:+both}restore"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
-    -h|--help) sed -n '2,42p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,48p' "$0"; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -124,6 +133,9 @@ printf '%s' "$KEY_ID" | grep -Eq '^[A-Za-z0-9_-]{1,63}$' || die "invalid --key: 
 [ -z "$DESTROY_KEY" ] || [ "$TEARDOWN" -eq 1 ] || die "--destroy-key-versions needs --teardown"
 [ "$KEEP_KMS" -eq 0 ] || [ "$TEARDOWN" -eq 1 ] || die "--keep-kms needs --teardown"
 [ "$KEEP_KMS" -eq 0 ] || [ -z "$DESTROY_KEY" ] || die "--keep-kms and --destroy-key-versions contradict each other"
+case "$KEY_VERSION_ACTION" in both*) die "--new-key-version and --restore-key-version contradict each other" ;; esac
+[ -z "$KEY_VERSION_ACTION" ] || [ "$KMS" -eq 1 ] || die "--new-key-version and --restore-key-version need --kms or --kms-only"
+[ -z "$KEY_VERSION_ACTION" ] || [ "$TEARDOWN" -eq 0 ] || die "--new-key-version and --restore-key-version do not apply to --teardown"
 
 SA_EMAIL="${SA_ID}@${PROJECT}.iam.gserviceaccount.com"
 CONDITION="assertion.iss == '${ISSUER}'"
@@ -278,6 +290,53 @@ if [ "$NODES" -eq 1 ]; then
     --condition=None --quiet --format=none
 fi
 
+# A key the box can seal with has an ENABLED primary version. After `teardown --destroy-key` the
+# key's name stays (Cloud KMS never deletes it) with its only version DESTROY_SCHEDULED, and
+# encrypt answers FAILED_PRECONDITION. Reusing it silently left `deploy --init` to give up on the
+# key (box round R13). So: stop and say what to run, unless --new-key-version or
+# --restore-key-version says which way to go. Stopping is the default because each way changes
+# something the operator decided: restoring undoes a destruction they asked for, and a new version
+# is new key material (and a monthly cost) on a key they meant to retire.
+ensure_primary_version() {
+  local state version versions target
+  state="$(gcloud kms keys describe "$KEY_ID" "${KEY_FLAGS[@]}" --format='value(primary.state)')" \
+    || die "cannot read key ${KEY_NAME}"
+  [ "$state" = "ENABLED" ] && return 0
+  version="$(gcloud kms keys describe "$KEY_ID" "${KEY_FLAGS[@]}" --format='value(primary.name)')"
+  version="${version##*/}"
+  versions="$(gcloud kms keys versions list --key="$KEY_ID" "${KEY_FLAGS[@]}" --format='value(name,state)' \
+    | awk -F'\t' '{ n = $1; sub(/.*\//, "", n); printf "%s%s=%s", sep, n, $2; sep = ", " }')"
+  case "$KEY_VERSION_ACTION" in
+    new)
+      echo "key ${KEY_ID}: no enabled primary version (${versions:-no versions}); creating a new primary version"
+      change kms keys versions create --key="$KEY_ID" "${KEY_FLAGS[@]}" --primary
+      ;;
+    restore)
+      # The primary version, else the newest version that can still come back.
+      target="$version"
+      if [ -z "$target" ]; then
+        target="$(gcloud kms keys versions list --key="$KEY_ID" "${KEY_FLAGS[@]}" --format='value(name,state)' \
+          | awk -F'\t' '$2 == "DESTROY_SCHEDULED" || $2 == "DISABLED" { n = $1; sub(/.*\//, "", n); if (n + 0 > best + 0) best = n } END { print best }')"
+        state="$(gcloud kms keys versions list --key="$KEY_ID" "${KEY_FLAGS[@]}" --format='value(name,state)' \
+          | awk -F'\t' -v t="$target" '{ n = $1; sub(/.*\//, "", n); if (n == t) print $2 }')"
+      fi
+      case "$state" in
+        DESTROY_SCHEDULED)
+          change kms keys versions restore "$target" --key="$KEY_ID" "${KEY_FLAGS[@]}"
+          change kms keys versions enable "$target" --key="$KEY_ID" "${KEY_FLAGS[@]}" ;;
+        DISABLED)
+          change kms keys versions enable "$target" --key="$KEY_ID" "${KEY_FLAGS[@]}" ;;
+        *) die "key ${KEY_NAME} has no version to restore (${versions:-no versions}): use --new-key-version instead" ;;
+      esac
+      [ "$target" = "$version" ] || change kms keys set-primary-version "$KEY_ID" "${KEY_FLAGS[@]}" --version="$target"
+      echo "key ${KEY_ID}: version ${target} restored and enabled"
+      ;;
+    *)
+      die "key ${KEY_NAME} has no enabled primary version (${versions:-no versions}), so the box cannot seal with it (Cloud KMS answers FAILED_PRECONDITION). After \`pnpm selfhost:teardown --destroy-key\` its version is scheduled for destruction. Run this again with --new-key-version (a new primary version; anything sealed with the old one stays lost), or with --restore-key-version to undo the destruction (only within 30 days of it), or pass another --key."
+      ;;
+  esac
+}
+
 if [ "$KMS" -eq 1 ]; then
   change services enable cloudkms.googleapis.com --project="$PROJECT"
   if exists kms keyrings describe "$KEY_RING" --location="$KMS_LOCATION" --project="$PROJECT"; then
@@ -294,6 +353,7 @@ if [ "$KMS" -eq 1 ]; then
       || die "key ${KEY_NAME} exists but is not labelled sam-install=${INSTALL_HASH}; refusing to use another install's key. Pick --key."
     echo "key ${KEY_ID}: exists"
     if created kms-key "$KEY_NAME"; then key_action=created; else record kms-key "$KEY_NAME" reused; fi
+    ensure_primary_version
   else
     # Labelled with this install, so --teardown can prove the key is this install's.
     change kms keys create "$KEY_ID" "${KEY_FLAGS[@]}" --purpose=encryption \

@@ -3,7 +3,8 @@
 // commands deploy/selfhost/gcp-bootstrap.sh and gcp-teardown.sh run. State is one JSON file
 // ($STATE/gcp.json), so a later run sees what an earlier one did; every call is appended to
 // $STATE/calls. Cloud KMS follows the documented rules: a version is deleted only once DESTROYED,
-// a key only with no versions left, a ring only with no keys left.
+// a key only with no versions left, a ring only with no keys left; a restored version comes back
+// DISABLED and must be enabled; `primary` names the key's primary version (empty: none).
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -172,6 +173,21 @@ else if (cmd.startsWith('compute instances list')) {
   } else if (op === 'destroy') {
     key.versions[version] = 'DESTROY_SCHEDULED';
     save();
+  } else if (op === 'restore') {
+    if (key.versions[version] !== 'DESTROY_SCHEDULED')
+      fail(`version ${version} is ${key.versions[version]}, not DESTROY_SCHEDULED`);
+    key.versions[version] = 'DISABLED';
+    save();
+  } else if (op === 'enable') {
+    if (key.versions[version] !== 'DISABLED')
+      fail(`version ${version} is ${key.versions[version]}`);
+    key.versions[version] = 'ENABLED';
+    save();
+  } else if (op === 'create') {
+    const next = String(Math.max(0, ...Object.keys(key.versions).map(Number)) + 1);
+    key.versions[next] = 'ENABLED';
+    if (args.includes('--primary')) key.primary = next;
+    save();
   } else if (op === 'delete') {
     if (key.versions[version] !== 'DESTROYED')
       fail(`version ${version} is ${key.versions[version]}`);
@@ -187,7 +203,22 @@ else if (cmd.startsWith('kms keys list')) {
   const path = keyPath(id);
   if (op === 'describe') {
     if (!db.keys[path]) fail('not found');
-    if (format.includes('labels.sam-install')) out(db.keys[path].labels['sam-install'] ?? '');
+    const key = db.keys[path];
+    // Keys from before primary versions were modelled have version 1 as primary.
+    const primary = 'primary' in key ? key.primary : '1';
+    if (format.includes('labels.sam-install')) out(key.labels['sam-install'] ?? '');
+    if (format.includes('primary.state')) out(primary ? (key.versions[primary] ?? '') : '');
+    if (format.includes('primary.name')) {
+      out(
+        primary ? `projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/${primary}` : ''
+      );
+    }
+  } else if (op === 'set-primary-version') {
+    const key = db.keys[path];
+    if (!key) fail('not found');
+    if (key.versions[flag('version')] !== 'ENABLED') fail('version is not enabled');
+    key.primary = flag('version');
+    save();
   } else if (op === 'create') {
     const labels = Object.fromEntries(
       (flag('labels') ?? '')
@@ -195,7 +226,7 @@ else if (cmd.startsWith('kms keys list')) {
         .filter(Boolean)
         .map((p) => p.split('='))
     );
-    db.keys[path] = { labels, versions: { 1: 'ENABLED' } };
+    db.keys[path] = { labels, versions: { 1: 'ENABLED' }, primary: '1' };
     save();
   } else if (op === 'delete') {
     if (Object.keys(db.keys[path]?.versions ?? {}).length > 0) fail('key has versions');
