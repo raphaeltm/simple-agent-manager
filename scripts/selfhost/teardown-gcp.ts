@@ -5,7 +5,7 @@
  * - Node VMs: listed by the labels SAM's provider puts on every VM it creates
  *   (`buildNodeProviderLabels`, apps/api/src/services/node-provider-labels.ts). One is this
  *   install's only when `managed`, `installation` and `env` all equal this install's values, the
- *   exact predicate the app's own orphan sweep applies (`providerInventoryMatchesLabels`). The VM
+ *   exact predicate the app's own label matcher applies (`nodeProviderLabelsMatch`). The VM
  *   is described again right before the delete and must still carry the same id and labels. Boot
  *   disks go with the VM (autoDelete); a disk of that VM without autoDelete is deleted after it
  *   only when no other VM uses it.
