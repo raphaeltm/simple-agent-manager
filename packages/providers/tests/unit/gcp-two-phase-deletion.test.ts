@@ -135,6 +135,24 @@ describe('GcpProvider two-phase deletion', () => {
       ).toBeGreaterThanOrEqual(2);
     });
 
+    it('never reports absent while the instance still resolves by name (id lookup not honoured)', async () => {
+      let idUnsupported = false;
+      const fetchMock = installFetch((url, init) => {
+        if (init?.method === 'DELETE') return json({ name: 'operation-1', status: 'RUNNING' });
+        if (idUnsupported && url.pathname.endsWith(`/instances/${INSTANCE.id}`)) return notFound();
+        return lookupResponse(url) ?? notFound();
+      });
+
+      await expect(
+        provider.requestVMDeletion(INSTANCE.id, undefined, {
+          beforeSend: async () => {
+            idUnsupported = true;
+          },
+        })
+      ).rejects.toThrow(/resolves by name but not by id/);
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+    });
+
     it('reports absent, sending nothing, when the instance is gone by the re-read', async () => {
       let gone = false;
       const fetchMock = installFetch((url, init) => {

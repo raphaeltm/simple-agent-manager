@@ -172,8 +172,22 @@ export async function requestGcpInstanceDeletion(
   // DELETE addresses the instance by name. Re-read it by its numeric id right before sending: a
   // 404 then means this exact instance is gone, and a different name (renamed, or the name now
   // belongs to a replacement) is refused rather than deleted by name.
+  // `instances.get` accepts the numeric id as the resource name (verified read-only against
+  // sam-prod-infra on 2026-11-14: GET by id -> 200 with the matching name; unknown id -> 404).
   const current = await getGcpInstanceInZone(scope, zone, instance.id, context);
-  if (!current) return { state: 'absent' };
+  if (!current) {
+    // Fail closed should GET-by-id ever stop resolving: absence is only claimed when the name
+    // does not resolve to this same instance either.
+    const byName = await getGcpInstanceInZone(scope, zone, instance.name, context);
+    if (byName?.id === instance.id) {
+      throw new ProviderError(
+        'gcp',
+        undefined,
+        `GCP instance ${instance.name} in ${zone} resolves by name but not by id ${instance.id}; refusing to treat it as absent`
+      );
+    }
+    return { state: 'absent' };
+  }
   if (current.id !== instance.id || current.name !== instance.name) {
     throw new ProviderError(
       'gcp',
