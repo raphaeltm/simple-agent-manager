@@ -94,3 +94,16 @@ Rebased onto main after #2727 merged (`a7d05239d`) and rebuilt workspace depende
 Admissions also repair missing alarm section memory when an existing due wake becomes enabled after earlier admission. The cold/changed-due/warm controls remain, and a real-runtime recovery test enables wake delivery after a matched event, then admits an unrelated event: exactly one alarm is armed for the existing wake. Removing only the missing-schedule guard makes this test fail; source restored and rebuilt. Four valid runtime mutation proofs now cover checkpoint writes, redundant alarm calls, the identity seek, and missing-schedule repair. Specialist Cloudflare/constitution and test reviews explicitly passed this recovery patch.
 
 Final rebased three-file workerd run passed **19/19** (154s), covering cost plans, real producer CI wakes, alarm recovery and the #2727 system-owner exclusion controls. All four valid mutation red proofs were restored before the run.
+
+Hosted CI [43601939585](https://github.com/raphaeltm/simple-agent-manager/actions/runs/43601939585) passed on exact head `0b6df632c2d8203655a805af0ac596349d77b2f5`, including every Durable Object worker shard, migration safety, full tests, lint, typecheck and build. Staging is coordinated behind the GCP task and then the urgent rollout-gate fix; no owned staging fixtures have been created yet.
+
+
+### Cost regression post-mortem
+
+What broke: routine project-event admission incurred index, scheduler checkpoint and alarm writes even when no subscriber was due. Retention deletion could read the full match index for every deleted event.
+
+Root cause: the original event schema maintained four secondary indexes that current queries never select; the project-leading match indexes did not support SQLite's event_id-only foreign-key check. Admission refreshed scheduler state and alarm memory without checking whether due times changed. These pre-existing paths are visible in migrations 038/061 and the admission/scheduler wrappers; no claim is made that a recent single commit introduced all three costs.
+
+Why it was missed: semantic unit coverage checked stored records and deliveries without measuring workerd cursor rows or the real multi-ID DELETE plan. Process fix: the new real-runtime test files assert physical counters, actual statement plans, >one-batch throughput and protected-prefix controls, plus producer-to-subscriber delivery. No additional standing instruction files are needed.
+
+Release gates remain pending below; archiving the implementation record after validation does not assert that staging or production deployment has completed.
