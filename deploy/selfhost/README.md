@@ -25,9 +25,83 @@ install, the bundled mail collector (see Email sign-in below).
 Profile `mail-collector` (off by default, test installs only) adds `mail-collector`: Mailpit on
 `127.0.0.1:1025` (SMTP) and `127.0.0.1:8025` (UI, published at `mail.SAM_DOMAIN`). See Email sign-in.
 
+## Create the box (Google Cloud)
+
+The box shape box round R13 created in an empty project (November 14, 2026; about 90 s of
+`gcloud`, then 3 minutes of preparation on the VM: Docker, Node 22, build tools, clone,
+`pnpm install`). Run it as a project owner, or as an identity
+with Compute, IAM, Cloud DNS and Storage admin rights, in Cloud Shell or anywhere `gcloud` is
+logged in. The names below are examples; keep them consistent. `BOX` is what
+`pnpm selfhost:gcp-bootstrap -- --box-instance` takes, and teardown lists all of these under
+"Left for you", since it runs on the box and cannot remove the box. Values are made up.
+
+```bash
+PROJECT=my-sam-project; REGION=europe-west1; ZONE=europe-west1-b
+DOMAIN=sam.example.com                 # SAM_DOMAIN
+DNS_ZONE=sam-example-com               # an existing Cloud DNS managed zone for $DOMAIN
+BUCKET=my-sam-fleet                    # CELLD_BUCKET=gs://$BUCKET/celld
+BOX=sam-box; BOX_SA=sam-box@$PROJECT.iam.gserviceaccount.com
+MY_IP=203.0.113.7                      # where you SSH from
+
+gcloud config set project "$PROJECT"
+gcloud services enable compute.googleapis.com dns.googleapis.com storage.googleapis.com iam.googleapis.com
+
+# The box's own service account: the bucket (objects only) and DNS-01 for the wildcard certificate.
+gcloud iam service-accounts create sam-box --display-name="SAM box"
+gcloud storage buckets create "gs://$BUCKET" --location="$REGION" --uniform-bucket-level-access
+gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
+  --member="serviceAccount:$BOX_SA" --role=roles/storage.objectAdmin
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:$BOX_SA" --role=roles/dns.admin --condition=None
+
+# Network, firewall (80/443 for everyone: app, API and the nodes' tunnel; SSH for you), static IP.
+gcloud compute networks create sam-selfhost --subnet-mode=custom
+gcloud compute networks subnets create sam-selfhost-ew1 --network=sam-selfhost \
+  --region="$REGION" --range=10.10.0.0/24
+gcloud compute firewall-rules create sam-selfhost-allow-web --network=sam-selfhost \
+  --allow=tcp:80,tcp:443 --source-ranges=0.0.0.0/0 --target-tags=sam-box
+gcloud compute firewall-rules create sam-selfhost-allow-ssh --network=sam-selfhost \
+  --allow=tcp:22 --source-ranges="$MY_IP/32" --target-tags=sam-box
+gcloud compute addresses create sam-box-ip --region="$REGION"
+IP=$(gcloud compute addresses describe sam-box-ip --region="$REGION" --format='value(address)')
+
+# DNS: the wildcard is required, the apex record optional.
+gcloud dns record-sets create "*.$DOMAIN." --zone="$DNS_ZONE" --type=A --ttl=300 --rrdatas="$IP"
+gcloud dns record-sets create "$DOMAIN." --zone="$DNS_ZONE" --type=A --ttl=300 --rrdatas="$IP"
+
+# The VM: Ubuntu 24.04, 4 vCPU / 16 GB, its own service account with the cloud-platform scope
+# (Cloud KMS and the gs:// bucket refuse its token without it).
+gcloud compute instances create "$BOX" --zone="$ZONE" --machine-type=e2-standard-4 \
+  --subnet=sam-selfhost-ew1 --address=sam-box-ip --tags=sam-box \
+  --image-family=ubuntu-2404-lts-amd64 --image-project=ubuntu-os-cloud \
+  --boot-disk-size=60GB --boot-disk-type=pd-balanced \
+  --service-account="$BOX_SA" --scopes=cloud-platform
+```
+
+Then the sealed-secrets key (Sealed secrets, Cloud key, one-time setup:
+`pnpm selfhost:gcp-bootstrap -- ... --kms-only --box-instance "$BOX" --box-zone "$ZONE"`), and on
+the VM (`gcloud compute ssh "$BOX" --zone "$ZONE"`):
+
+```bash
+sudo apt-get update && sudo apt-get install -y build-essential git ca-certificates curl
+curl -fsSL https://get.docker.com | sudo sh            # Docker Engine with the Compose plugin
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs
+sudo corepack enable pnpm
+git clone https://github.com/raphaeltm/simple-agent-manager.git sam && cd sam   # full clone
+```
+
+Add yourself to the `docker` group (`sudo usermod -aG docker "$USER"`, then log in again) only if
+you are trusted with every secret on the box (Install or upgrade says why). In `.env`: `SAM_DOMAIN=$DOMAIN`,
+`SAM_TLS_MODE=dns-googleclouddns`, `GCP_PROJECT=$PROJECT`, `COMPOSE_PROFILES=tunnel,gce` and
+`CELLD_BUCKET=gs://$BUCKET/celld`; then Install or upgrade, below. The node setup
+(`pnpm selfhost:gcp-bootstrap` without `--kms-only`) runs once the install answers.
+
 ## Install or upgrade
 
-Needs Docker with Compose v2.20+, Node 22+ and pnpm, and a checkout of this repository.
+Needs Docker with Compose v2.20+, Node 22+ and pnpm, a C/C++ toolchain with `make` (`pnpm install`
+builds `better-sqlite3` from source where no prebuilt binary matches, as on stock Ubuntu 24.04:
+`sudo apt-get install -y build-essential`), and a full clone of this repository. On a new
+Google Cloud machine, Create the box (above) prepares all of it.
 
 ```bash
 cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env
