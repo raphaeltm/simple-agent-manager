@@ -62,6 +62,24 @@ Staging deployment is **manual** — it does NOT run automatically on PRs. You m
    gh run watch <run-id>
    ```
 
+For container-backed Instant verification, `wrangler deploy` success means the
+rollout started, not that every instance serves the new image. The shared staging
+and production workflow has a separate **Wait for container rollout completion**
+step. It pins application/rollout identities and requires completed 100% steps and
+the target application version. API errors, unreadable status and timeout fail the
+step. Keep gradual rollouts: even one 100% step has a mixed-image window while
+instances are replaced. After workflow success, verify the new Instant node's
+recorded `agent_version` matches the deployed `VM_AGENT_REQUIRED_VERSION` before
+counting a VM-agent trial as evidence. The authenticated `/ready` callback logs
+`instant_session.agent_version_mismatch` with nodeId, expectedVersion and
+reportedVersion without rejecting readiness; `/health` only reports liveness.
+
+Deploy-only GitHub Environment overrides (not Worker runtime settings):
+`CONTAINER_ROLLOUT_TIMEOUT_MS` defaults to 1200000 (20 minutes), and
+`CONTAINER_ROLLOUT_POLL_INTERVAL_MS` defaults to 10000. Both require positive
+integer milliseconds. Timeout diagnostics include application, rollout and last
+status. These settings do not change the rollout strategy.
+
 If the deployment fails:
 
 - Inspect the deployment logs: `gh run view <RUN_ID> --log-failed`

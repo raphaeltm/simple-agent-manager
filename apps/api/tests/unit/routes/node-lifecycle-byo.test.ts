@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { log } from '../../../src/lib/logger';
 import { AppError } from '../../../src/middleware/error';
 
 /**
@@ -15,6 +16,7 @@ type NodeRow = {
   status: string;
   healthStatus: string;
   nodeRole: string;
+  runtime: string;
   nodeClass: string;
   transport: string | null;
   tunnelId: string | null;
@@ -145,6 +147,7 @@ function makeNode(overrides: Partial<NodeRow> = {}): NodeRow {
     status: 'running',
     healthStatus: 'healthy',
     nodeRole: 'workspace',
+    runtime: 'vm',
     nodeClass: 'managed',
     transport: null,
     tunnelId: null,
@@ -178,7 +181,12 @@ function getNodeLifecycleApp(): Hono {
   return nodeLifecycleApp;
 }
 
-async function appRequest(path: string, body: unknown, isText = false): Promise<Response> {
+async function appRequest(
+  path: string,
+  body: unknown,
+  isText = false,
+  requiredVersion?: string
+): Promise<Response> {
   return getNodeLifecycleApp().request(
     path,
     {
@@ -189,7 +197,12 @@ async function appRequest(path: string, body: unknown, isText = false): Promise<
       },
       body: isText ? (body as string) : JSON.stringify(body),
     },
-    { DATABASE: {}, CF_API_TOKEN: 'cf', BASE_DOMAIN: 'example.com' },
+    {
+      DATABASE: {},
+      CF_API_TOKEN: 'cf',
+      BASE_DOMAIN: 'example.com',
+      VM_AGENT_REQUIRED_VERSION: requiredVersion,
+    },
     { waitUntil: vi.fn(), passThroughOnException: vi.fn() }
   );
 }
@@ -199,6 +212,7 @@ const VALID_CSR =
 
 describe('node-lifecycle BYO gates', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     state.node = makeNode();
     state.updates = [];
     state.refreshNeeded = true;
@@ -244,6 +258,41 @@ describe('node-lifecycle BYO gates', () => {
   });
 
   describe('VM agent build identity persistence', () => {
+    it('logs Instant mismatch but still accepts and records ready', async () => {
+      state.node = makeNode({ runtime: 'cf-container', status: 'creating' });
+      const res = await appRequest(
+        '/api/nodes/node-1/ready',
+        { agentVersion: 'old-release' },
+        false,
+        'new-release'
+      );
+      expect(res.status).toBe(200);
+      expect(log.warn).toHaveBeenCalledWith('instant_session.agent_version_mismatch', {
+        nodeId: 'node-1',
+        expectedVersion: 'new-release',
+        reportedVersion: 'old-release',
+      });
+      expect(state.updates).toContainEqual(
+        expect.objectContaining({ status: 'running', agentVersion: 'old-release' })
+      );
+    });
+    it.each([
+      ['cf-container', 'current', 'current'],
+      ['cf-container', 'current', undefined],
+      ['vm', 'old', 'current'],
+    ])(
+      'does not warn for runtime=%s reported=%s expected=%s',
+      async (runtime, agentVersion, expected) => {
+        state.node = makeNode({ runtime });
+        const res = await appRequest('/api/nodes/node-1/ready', { agentVersion }, false, expected);
+        expect(res.status).toBe(200);
+        expect(log.warn).not.toHaveBeenCalledWith(
+          'instant_session.agent_version_mismatch',
+          expect.anything()
+        );
+      }
+    );
+
     it('stores agentVersion reported by /ready', async () => {
       const res = await appRequest('/api/nodes/node-1/ready', { agentVersion: 'build-sha-1' });
       expect(res.status).toBe(200);

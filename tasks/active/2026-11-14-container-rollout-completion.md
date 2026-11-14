@@ -10,7 +10,7 @@ Cloudflare activates the Worker and starts a gradual container rollout before wr
 - Shared deploy path: .github/workflows/deploy-reusable.yml, used by staging and production.
 - Container definitions: generated wrangler config; app names derive from worker name, class and environment.
 - API: /containers/applications and per-application /rollouts; target_version is pending until final step completes. Application GET can still show the old image/version during rollout.
-- Readiness: apps/api/src/services/node-agent-readiness.ts accepts response.ok. Expected version is env.VM_AGENT_REQUIRED_VERSION; health reports compiled agentVersion.
+- Readiness: apps/api/src/services/node-agent-readiness.ts accepts response.ok. Expected version is env.VM_AGENT_REQUIRED_VERSION; authenticated /ready callback reports compiled agentVersion; /health only reports liveness.
 - Official reference: https://developers.cloudflare.com/containers/configuration/rollouts/
 - Prior evidence: library01M7BQXDBP92M5HAS9JJ6B28XW; final guarded proof01M7BVQ3A3TPDNBTX8FQ87ARXX.
 
