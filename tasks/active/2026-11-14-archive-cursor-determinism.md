@@ -63,4 +63,8 @@ Date cleanup uses Vitest onTestFinished. Full file smoke passed15/15 after this 
 All prior repeated-run counts are superseded for final stability proof; restart30normal+30stress.
 
 - [x] Control the sibling large-session test's clock; preserve all assertions and tick bound.
-- [ ] Re-run renewal/poison mutations and additionally remove the yield guard to prove the sibling test.
+- [x] Re-run renewal/poison mutations and additionally remove the yield guard to prove the sibling test.
+
+Final-version f1a9b823b mutation proof: all3 targeted tests fail intended assertions and source/dist restored.
+Deadline yield disabled => first case publishes in1 tick and fails ticks>1 (line247).
+Targeted final ESLint passed. Final stability batches use v2 prefixes; older rows are excluded.
