@@ -8,9 +8,9 @@ import {
 } from '@simple-agent-manager/project-data/internal/archive/contract';
 import { createCanonicalRowsChainHasher } from '@simple-agent-manager/project-data/internal/archive/hashing';
 import {
-  ARCHIVE_SEARCH_EQUIVALENT_DOCUMENT_SQL,
   abandonArchiveSourceIntent,
   abandonArchiveTargetSession,
+  ARCHIVE_SEARCH_EQUIVALENT_DOCUMENT_SQL,
   type ArchiveSourceExportChunkInput,
   archiveSourceReadMessages,
   archiveTargetSearchProjectMessages,
