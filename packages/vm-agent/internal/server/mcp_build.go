@@ -67,6 +67,7 @@ type McpBuildAndPublishJobStartResponse struct {
 }
 
 type publishJobState struct {
+	ContextOnly bool
 	ID          string
 	WorkspaceID string
 	ProjectID   string
@@ -157,7 +158,7 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 		return
 	}
 	for _, existing := range s.publishJobs {
-		if existing.WorkspaceID == prepared.WorkspaceID && existing.CompletedAt.IsZero() {
+		if existing.WorkspaceID == prepared.WorkspaceID && existing.CompletedAt.IsZero() && !existing.ContextOnly {
 			s.publishJobsMu.Unlock()
 			writeError(w, http.StatusConflict, "workspace already has an active publish job")
 			return

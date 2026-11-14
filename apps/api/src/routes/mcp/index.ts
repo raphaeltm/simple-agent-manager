@@ -36,6 +36,7 @@ import {
   handleReplyToMessageCommentThread,
   handleResolveMessageCommentThread,
 } from './comment-tools';
+import { handleBuildAndPublish } from './compose-publish-tools';
 import { handleGetDeploymentGuide } from './deployment-guide-tools';
 import {
   handleCreateDeploymentEnvironment,
@@ -320,6 +321,17 @@ mcpRoutes.post('/', async (c) => {
             return c.json(
               await handleSetDeploymentEnvironmentConfig(requestId, toolArgs, tokenData, c.env)
             );
+          case 'build_and_publish': {
+            let execCtx: { waitUntil(promise: Promise<unknown>): void } | undefined;
+            try {
+              execCtx = c.executionCtx;
+            } catch {
+              execCtx = undefined;
+            }
+            return c.json(
+              await handleBuildAndPublish(requestId, toolArgs, tokenData, c.env, execCtx)
+            );
+          }
           case 'get_deployment_guide':
             // Synchronous — no async I/O needed for static content
             return c.json(handleGetDeploymentGuide(requestId));
