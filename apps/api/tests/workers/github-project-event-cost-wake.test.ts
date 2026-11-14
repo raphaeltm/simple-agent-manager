@@ -72,6 +72,55 @@ describe('CI webhook storage optimization preserves subscriber wakes', () => {
     });
   });
 
+  it('arms an existing due wake when wake delivery is enabled after admission', async () => {
+    await withAgentMessageChannels(async () => {
+      const f = await twoAgentProject();
+      await withQuietAlarms(f, async () => {
+        await f.a.tool('create_project_event_subscription', {
+          idempotencyKey: 'wake-activation-control',
+          filter: { version: 1, source: 'github', subjectType: 'commit', subjectId: SHA },
+        });
+        const matched = await svc.admitProjectEvent(testEnv, f.projectId, {
+          source: 'github',
+          eventType: 'check_run.completed',
+          subject: { type: 'commit', id: SHA },
+          deliveryKey: 'matched-while-disabled',
+          payloadFingerprint: 'fp',
+          metadata: {},
+          display: { title: 'CI' },
+        });
+        expect(matched.matches).toHaveLength(1);
+        await runInDurableObject(f.stub, async (instance, state) => {
+          const doEnv = (instance as unknown as { env: { PROJECT_EVENT_WAKE_ENABLED?: string } })
+            .env;
+          const previous = doEnv.PROJECT_EVENT_WAKE_ENABLED;
+          doEnv.PROJECT_EVENT_WAKE_ENABLED = 'true';
+          const alarm = vi.spyOn(state.storage, 'setAlarm');
+          try {
+            const oldAlarm = await state.storage.getAlarm();
+            const result = instance.admitProjectEvent({
+              projectId: f.projectId,
+              source: 'github',
+              eventType: 'push',
+              subject: { type: 'commit', id: 'unrelated' },
+              deliveryKey: 'activation-unmatched',
+              payloadFingerprint: 'fp',
+              metadata: {},
+              display: { title: 'push' },
+            });
+            expect(result.matches).toEqual([]);
+            await vi.waitFor(() => expect(alarm).toHaveBeenCalledTimes(1));
+            expect(await state.storage.getAlarm()).toBeLessThan(Number(oldAlarm));
+          } finally {
+            doEnv.PROJECT_EVENT_WAKE_ENABLED = previous;
+            alarm.mockRestore();
+            await state.storage.deleteAlarm();
+          }
+        });
+      });
+    });
+  });
+
   it.each(['check_run', 'check_suite', 'workflow_run'])(
     'delivers %s through the real producer and preserves no historical replay',
     async (eventType) => {

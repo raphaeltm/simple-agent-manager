@@ -203,7 +203,8 @@ export class ProjectDataAlarmSectionScheduler {
   }
 
   /** Earliest remembered due time, so a recalculation can never push a section past it. */
-  nextDueAt(): number | null {
+  nextDueAt(section?: ProjectDataAlarmSection): number | null {
+    if (section !== undefined) return this.pending.get(section) ?? null;
     let min: number | null = null;
     for (const time of this.pending.values()) {
       if (min === null || time < min) min = time;

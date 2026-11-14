@@ -1843,8 +1843,18 @@ export class ProjectData extends DurableObject<Env> {
     );
     // Duplicate/unmatched admissions generally leave both schedules unchanged.
     // Retain the cold-start and new-wake paths without rewriting alarm memory
-    // or paying for setAlarm again on every webhook.
-    if (previousRetentionAt !== nextRetentionAt || previousWakeAt !== nextWakeAt) {
+    // or paying for setAlarm again on every webhook. Also repair missing section
+    // memory (for example when wakes are enabled with already matched events).
+    const missingSchedule =
+      (nextRetentionAt !== null &&
+        this.alarmSections.nextDueAt('project_event_retention') === null) ||
+      (nextWakeAt !== null &&
+        this.alarmSections.nextDueAt('project_event_wake_materialization') === null);
+    if (
+      previousRetentionAt !== nextRetentionAt ||
+      previousWakeAt !== nextWakeAt ||
+      missingSchedule
+    ) {
       this.rescheduleProjectEventAlarm(input.projectId);
     }
     return result;

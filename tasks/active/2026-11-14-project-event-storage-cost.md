@@ -47,8 +47,8 @@ Usage-derived, not invoice: window November 1–13; 18.41M DO SQL writes and 7.5
 - [x] Preserve unmatched status/idempotency/conflict; preserve matched event delivery via actual webhook producer and real subscription, including check_run/check_suite/workflow_run.
 - [x] Pin subscription creation after event as no replay; preserve channel catch-up, credential supersession, schedule/lifecycle tests.
 - [x] Delete each new guard, observe intended failing test, restore and record.
-- [ ] Rebase on main after #2727; push early/often; preserve unrelated .codex/config.toml.
-- [ ] Lint/typecheck/test/build, migration safety, local specialist reviews and task-completion validator.
+- [x] Rebase on main after #2727; push early/often; preserve unrelated .codex/config.toml.
+- [x] Lint/typecheck/test/build, migration safety, local specialist reviews and task-completion validator.
 - [ ] Coordinate staging ownership; deploy and verify real producer/subscription wake on staging.
 - [ ] PR, CI, CodeRabbit best-effort wait, authorized merge, production deploy/health smoke.
 - [ ] Add idea note with before/after counts and product-reader decision; check item C only after deployment.
@@ -85,3 +85,12 @@ Rule62 runtime red proofs: removing checkpoint WHERE changed steady admission **
 Expired-protected control now passes: with 2,000 expired protected events ordered before 601 deletable events, first pass deletes 500 with **10,527 reads / 504 writes**, second deletes 101 with **8,533 reads / 104 writes**. All 2,000 protected events and matches survive. Remaining candidate work is linear in the expired protected prefix (plus existing active-match expiry checks), not a table-size-independent universal deletion bound. A follow-up would need bounded candidate windows and a persisted event-retention cursor, fair wrap/recheck semantics, and matching continuation scheduling; it must not weaken live-match protection or cleanup cadence. Under the original permission to split, this PR ships the lower-risk write/FK fixes first; the coordinator confirmed that scope in durable message `1ed24a33-f6cb-40c6-b6d5-aadc75fbdb72`. Record these limits in the PR and the post-deploy idea note.
 
 Identity-hint mutation proof also passed: removing the PK hint makes the actual multi-ID DELETE plan assertion fail, showing `SEARCH project_events ... idx_project_events_project_received (project_id=?)` instead of the required `sqlite_autoindex_project_events_1 (id=?)`. Restored source and rebuilt before rebase/final tests.
+
+
+### Final rebased validation and alarm recovery
+
+Rebased onto main after #2727 merged (`a7d05239d`) and rebuilt workspace dependencies so the producer tests include the new system-owner exclusion. Root lint, typecheck, build and full test suite passed (39 test tasks; API 15,166, web 5,228, project-data 528 tests). Subsequent scoped project-data tests (528), API/project-data lint and API typecheck pass after the alarm recovery change. Migration safety passes. The existing unrelated `.codex/config.toml` edit is preserved outside commits.
+
+Admissions also repair missing alarm section memory when an existing due wake becomes enabled after earlier admission. The cold/changed-due/warm controls remain, and a real-runtime recovery test enables wake delivery after a matched event, then admits an unrelated event: exactly one alarm is armed for the existing wake. Removing only the missing-schedule guard makes this test fail; source restored and rebuilt. Four valid runtime mutation proofs now cover checkpoint writes, redundant alarm calls, the identity seek, and missing-schedule repair. Specialist Cloudflare/constitution and test reviews explicitly passed this recovery patch.
+
+Final rebased three-file workerd run passed **19/19** (154s), covering cost plans, real producer CI wakes, alarm recovery and the #2727 system-owner exclusion controls. All four valid mutation red proofs were restored before the run.
