@@ -606,7 +606,11 @@ describe('MCP Skill Tools', () => {
         defaultProfileId: 'prof-9',
       };
       const fields = extractSkillFields(params);
-      expect(fields).toEqual(params);
+      // Provider and location come from the compute pool; the retired fields are dropped.
+      const { provider: _provider, vmLocation: _vmLocation, ...supported } = params;
+      expect(fields).toEqual(supported);
+      expect(fields).not.toHaveProperty('provider');
+      expect(fields).not.toHaveProperty('vmLocation');
     });
 
     it('ignores fields with wrong types', () => {

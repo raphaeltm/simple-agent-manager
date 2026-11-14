@@ -11,8 +11,6 @@ const project = {
   defaultBranch: 'main',
   installationId: 'installation-1',
   defaultVmSize: 'large',
-  defaultProvider: 'hetzner',
-  defaultLocation: 'nbg1',
   resourceRequirementsJson: '{"minMemoryGb":4}',
 };
 function nativeOffering(provider: CredentialProvider, location: string, instanceType: string): ProviderInstanceOffering {

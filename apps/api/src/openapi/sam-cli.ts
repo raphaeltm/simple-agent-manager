@@ -870,8 +870,6 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           resourceRequirementsJson: nullable(
             stringSchema('Persisted modern workload requirements JSON for profile compatibility.')
           ),
-          provider: nullable(stringSchema()),
-          vmLocation: nullable(stringSchema()),
           workspaceProfile: nullable(stringSchema()),
           devcontainerConfigName: nullable(stringSchema()),
           taskMode: nullable(stringSchema()),

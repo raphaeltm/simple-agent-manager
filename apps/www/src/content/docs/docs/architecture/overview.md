@@ -553,7 +553,8 @@ there waits for every workspace still `creating` on that node. Node selection ra
 by that startup backlog before the pool strategy (`compareReusableHosts()` in
 `durable-objects/task-runner/task-placement-strategy.ts`), reading the D1 `creating` count from the
 rows `loadActiveWorkspaceReservationUsage()` already loads. An explicit location ranks before
-backlog; a default location ranks after it. When another admitted node was available, the TaskRunner
+backlog; otherwise the resolved location (a woken session's previous region, else the provider
+or platform default) is only a tie-break after it. When another admitted node was available, the TaskRunner
 carries the chosen node's observed backlog into the final reservation, which refuses the claim if
 that node's backlog has grown since (`maxStartupBacklog` in `reserveWorkspacePlacement()`). Such a
 refusal replans without counting toward `operations.workspacePlacementMaxRejections`; after

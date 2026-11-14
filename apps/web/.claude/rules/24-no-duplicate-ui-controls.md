@@ -19,10 +19,10 @@ queries per authenticated request.
 
 ### Required Steps When Adding UI Controls
 
-1. **Identify the API field(s)** your new control will read/write (e.g., `defaultProvider`, `nodeIdleTimeoutMs`)
+1. **Identify the API field(s)** your new control will read/write (e.g., `defaultVmSize`, `nodeIdleTimeoutMs`)
 2. **Search for existing controls** that manage the same field:
    ```bash
-   grep -r "defaultProvider\|setDefaultProvider" apps/web/src/ --include='*.tsx'
+   grep -r "defaultVmSize\|setDefaultVmSize" apps/web/src/ --include='*.tsx'
    ```
 3. **If a duplicate exists**, decide which location is canonical and remove the other
 4. **If moving a control**, ensure all related state, handlers, and effects are also moved or cleaned up — no orphaned state variables
