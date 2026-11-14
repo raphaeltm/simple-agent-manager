@@ -1,6 +1,4 @@
-import {
-  PlacementResolutionError,
-} from '@simple-agent-manager/scheduler-core';
+import { PlacementResolutionError } from '@simple-agent-manager/scheduler-core';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -50,7 +48,8 @@ export {
 } from './session-recovery-refusal-report';
 export { SESSION_RECOVERY_INITIAL_PROMPT } from './session-recovery-task';
 
-async function reactivateSleepingTask(
+/** Exported for tests that drive the real wake reactivation (run-account-capability). */
+export async function reactivateSleepingTask(
   database: D1Database,
   db: Db,
   context: RecoveryContext,

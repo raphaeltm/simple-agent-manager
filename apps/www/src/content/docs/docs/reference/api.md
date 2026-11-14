@@ -930,6 +930,8 @@ Optional `sourceIdeaId` starts the work from an open idea in the same project. I
 
 Optional `model` (string, up to 200 characters) and `effort` (`auto`, `low`, `medium`, `high`, `xhigh` or `max`) set the agent's model and effort for this task only, over the skill, profile and project defaults. A blank `model` or a `null` either one inherits. The effort must be one the resolved agent supports, or the request returns `400` before anything is created: Claude Code supports every level, Codex every level except `max`, and other agents only `auto`.
 
+Optional `agentConfigurationId` runs this task on one of the caller's own agent accounts (a `cc_configurations` id) instead of the account its profile would use. The account must be active and for the agent the task runs, or the request returns `400` before anything is created (`validateRunAgentConfiguration`). It is stored on the task, checked before the profile's account whenever the run's credential is resolved, and a paused or deleted account stops the run rather than falling back to another.
+
 ### `GET /api/projects/:id/agent-profiles/picker`
 
 Returns the caller's own new-chat picker state for the project: `{ usage, hiddenProfileIds, usageWindowDays }`. `usage` lists `{ profileId, lastUsedAt, chatCount }` for profiles the caller started new chats with in the last `usageWindowDays` days (admin setting `chat.profileUsageWindowDays`, default 30), most recent first. Only chats the caller started by hand count; dispatched, triggered, recovered and idea drafts do not. Any active project member can read their own state.
@@ -1020,7 +1022,7 @@ Start an [Instant](/docs/guides/instant-sessions/) chat session. Returns **`202`
 
 Because the launch is asynchronous, the response does **not** carry `agentSessionId`, `acpSessionId`, or launch `timings` — poll the session or connect to its stream for live state.
 
-Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`. Optional `model` and `effort` behave as they do there too.
+Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`. Optional `model`, `effort` and `agentConfigurationId` behave as they do there too.
 
 This endpoint is Instant-only. It returns `409` (`Selected profile resolves to VM runtime; use task submission instead.`) whenever the runtime resolves to VM — because the profile pins `vm`, because the caller has their own or a project cloud credential, or because `CF_CONTAINER_ENABLED` is not `true` for the deployment. Use `POST /api/projects/:id/tasks/submit` for VM work.
 

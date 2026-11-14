@@ -4,6 +4,7 @@ import {
   activeChatAgentOverrides,
   chatAgentDefaults,
   effectiveChatAgent,
+  withChatAccount,
 } from '../../../../src/components/project-chat/profile-picker/agent-overrides';
 
 const claudeProfile = {
@@ -56,35 +57,71 @@ describe('activeChatAgentOverrides', () => {
   it('returns trimmed overrides chosen for the same agent', () => {
     expect(
       activeChatAgentOverrides(
-        { agentType: 'claude-code', model: '  claude-opus-5-5 ', effort: 'max' },
+        {
+          agentType: 'claude-code',
+          model: '  claude-opus-5-5 ',
+          effort: 'max',
+          accountId: 'cfg-work',
+        },
         'claude-code'
       )
-    ).toEqual({ model: 'claude-opus-5-5', effort: 'max' });
+    ).toEqual({ model: 'claude-opus-5-5', effort: 'max', accountId: 'cfg-work' });
   });
 
   it('drops overrides chosen for another agent', () => {
     expect(
       activeChatAgentOverrides(
-        { agentType: 'claude-code', model: 'claude-opus-5-5', effort: 'max' },
+        {
+          agentType: 'claude-code',
+          model: 'claude-opus-5-5',
+          effort: 'max',
+          accountId: 'cfg-work',
+        },
         'openai-codex'
       )
-    ).toEqual({ model: null, effort: null });
+    ).toEqual({ model: null, effort: null, accountId: null });
   });
 
   it('treats a blank model as inherit', () => {
     expect(
       activeChatAgentOverrides(
-        { agentType: 'claude-code', model: '   ', effort: null },
+        { agentType: 'claude-code', model: '   ', effort: null, accountId: '' },
         'claude-code'
       )
-    ).toEqual({ model: null, effort: null });
+    ).toEqual({ model: null, effort: null, accountId: null });
   });
 
   it('sends nothing when no agent is known yet', () => {
-    expect(activeChatAgentOverrides({ agentType: null, model: 'x', effort: 'low' }, null)).toEqual({
-      model: null,
-      effort: null,
+    expect(
+      activeChatAgentOverrides({ agentType: null, model: 'x', effort: 'low', accountId: 'a' }, null)
+    ).toEqual({ model: null, effort: null, accountId: null });
+  });
+});
+
+describe('withChatAccount', () => {
+  it('sets the account for the agent and keeps that agent’s model and effort', () => {
+    expect(
+      withChatAccount(
+        { agentType: 'claude-code', model: 'claude-opus-5-5', effort: 'max', accountId: '' },
+        'claude-code',
+        'cfg-work'
+      )
+    ).toEqual({
+      agentType: 'claude-code',
+      model: 'claude-opus-5-5',
+      effort: 'max',
+      accountId: 'cfg-work',
     });
+  });
+
+  it('drops another agent’s model and effort, and clears with null', () => {
+    expect(
+      withChatAccount(
+        { agentType: 'openai-codex', model: 'gpt-5.5', effort: 'high', accountId: 'cfg-x' },
+        'claude-code',
+        null
+      )
+    ).toEqual({ agentType: 'claude-code', model: '', effort: null, accountId: '' });
   });
 });
 
@@ -95,13 +132,20 @@ describe('effectiveChatAgent', () => {
       model: 'claude-opus-5-5',
       effort: null,
     });
-    expect(effectiveChatAgent(defaults, { agentType: null, model: '', effort: null })).toEqual({
+    expect(
+      effectiveChatAgent(defaults, { agentType: null, model: '', effort: null, accountId: '' })
+    ).toEqual({
       agentType: 'claude-code',
       model: 'claude-opus-5-5',
       effort: 'high',
     });
     expect(
-      effectiveChatAgent(defaults, { agentType: 'claude-code', model: '', effort: 'max' })
+      effectiveChatAgent(defaults, {
+        agentType: 'claude-code',
+        model: '',
+        effort: 'max',
+        accountId: '',
+      })
     ).toEqual({ agentType: 'claude-code', model: 'claude-opus-5-5', effort: 'max' });
   });
 });

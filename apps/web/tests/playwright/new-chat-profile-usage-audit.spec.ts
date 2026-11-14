@@ -1,11 +1,14 @@
 /**
- * Usage left on profiles in the new-chat picker, through the real ProjectChat page.
+ * Usage left on profiles in the new-chat picker, and choosing the account for one chat,
+ * through the real ProjectChat page.
  *
  * Accounts, profile pins and usage limits are served as the API returns them, so which
  * account each profile runs on is resolved by the real account model, as in production:
  * Opus 5.5 Chat runs on the default Claude account (Sam Support, 5h at 94%), Claudiii is
  * pinned to Sam Sam (17%), SamSamC to Sam Social (5h refused) and Codex profiles to the
- * default Codex account.
+ * default Codex account (weekly only). A fourth Claude account has a long name.
+ *
+ * The ring's arc is the 5h window and its colour the week (approved 2026-11-13).
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 import type {
@@ -151,6 +154,13 @@ const ROWS = mergeRows(
     credentialKind: 'oauth-token',
   }),
   accountRows({
+    id: 'teamseat',
+    name: 'Team seat shared with the whole Acme engineering organisation (do not rename)',
+    kind: 'agent',
+    target: 'claude-code',
+    credentialKind: 'oauth-token',
+  }),
+  accountRows({
     id: 'codex',
     name: 'Work ChatGPT',
     kind: 'agent',
@@ -228,7 +238,7 @@ function limits(now: number) {
   return [
     usage('cred-support', 'claude-code', [
       limitWindow('claude.five_hour', 94, 'critical', 52 * MIN + 30_000, now),
-      limitWindow('claude.seven_day', 69, 'ok', 7 * HOUR, now),
+      limitWindow('claude.seven_day', 69, 'ok', 7 * HOUR + 30_000, now),
     ]),
     usage('cred-samsam', 'claude-code', [
       limitWindow('claude.five_hour', 17, 'ok', HOUR, now),
@@ -237,6 +247,11 @@ function limits(now: number) {
     usage('cred-social', 'claude-code', [
       limitWindow('claude.five_hour', 100, 'rejected', 2 * HOUR + 10 * MIN + 30_000, now),
       limitWindow('claude.seven_day', 56, 'ok', 4 * HOUR, now),
+    ]),
+    usage('cred-teamseat', 'claude-code', [
+      limitWindow('claude.five_hour', 50, 'ok', 3 * HOUR, now),
+      limitWindow('claude.seven_day', 60, 'ok', 90 * HOUR, now),
+      limitWindow('claude.seven_day_opus', 80, 'warning', 90 * HOUR, now),
     ]),
     usage('cred-codex', 'openai-codex', [limitWindow('codex.primary', 40, 'ok', 50 * HOUR, now)]),
   ];
@@ -305,51 +320,136 @@ const cards = (page: Page) => page.getByRole('region', { name: 'Choose a profile
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'Choose a profile' });
 const nudge = (page: Page) => page.getByTestId('profile-usage-nudge');
 
+const accountButton = (page: Page) => page.getByRole('button', { name: /change account$/ });
+
 test.describe('New-chat picker: usage left on profiles', () => {
-  test('cards, To chip and nudge show what is left, and the nudge switches profile', async ({
+  test('cards, To chip and nudge name each window; the nudge swaps the account', async ({
     page,
   }, testInfo) => {
     await openNewChat(page);
     const suffix = getProjectSuffix(testInfo.project.name);
 
-    // Opus runs on the default Claude account, 94% into its 5h window.
+    // Opus runs on the default Claude account: 5h nearly gone, week at 31% left.
     const opusCard = cards(page).getByRole('button', { name: /^Opus 5\.5 Chat/ });
-    await expect(opusCard.getByText('6% left · resets 53m')).toBeVisible();
+    await expect(opusCard.getByTestId('profile-usage-notice')).toHaveText(
+      '5h 6% left · resets 53m · Week 31% left · resets 7h'
+    );
     await expect(opusCard.getByTestId('profile-usage-ring')).toHaveAttribute(
       'data-usage-left',
       '6'
     );
-    // SamSamC's pin points at the refused account.
+    // SamSamC's pin points at the refused account: an empty arc still shows its dot.
     const outCard = cards(page).getByRole('button', { name: /^SamSamC/ });
-    await expect(outCard.getByText('Out · back in 2h 10m')).toBeVisible();
-    // A Codex profile with room: ring only, no words.
+    await expect(outCard.getByTestId('profile-usage-notice')).toContainText(
+      '5h used up · back in 2h 10m'
+    );
+    await expect(outCard.getByTestId('profile-usage-ring-empty')).toBeVisible();
+    // A weekly-only Codex account with room: the arc is the week, no words.
     const astraCard = cards(page).getByRole('button', { name: /^Astra High/ });
     await expect(astraCard).toHaveAccessibleName(/60% left$/);
     await expect(astraCard.getByTestId('profile-usage-notice')).toHaveCount(0);
+    await expect(astraCard.getByTestId('profile-usage-ring')).toHaveAttribute(
+      'data-usage-left',
+      '60'
+    );
 
-    await expect(toControl(page)).toHaveAccessibleName(/^To Opus 5\.5 Chat, 6% left/);
-    await expect(nudge(page)).toContainText('6% left on Sam Support · resets in 53m');
-    const switchButton = nudge(page).getByRole('button', { name: 'Use Claudiii · 83% left' });
-    await expect(switchButton).toBeVisible();
+    await expect(toControl(page)).toHaveAccessibleName(/^To Opus 5\.5 Chat, 5h 6% left/);
+    await expect(accountButton(page)).toHaveAccessibleName('Runs on Sam Support, change account');
+    await expect(nudge(page)).toContainText('5h limit · 6% left on Sam Support · resets in 53m');
+    const runOn = nudge(page).getByRole('button', { name: 'Run on Sam Sam' });
+    await expect(runOn).toBeVisible();
+    await expect(runOn.getByTestId('usage-meters')).toContainText('5h83% left');
     await screenshot(page, `new-chat-usage-cards-${suffix}`);
     await assertNoOverflow(page);
 
-    await switchButton.click();
-    await expect(toControl(page)).toHaveAccessibleName(/^To Claudiii, 83% left/);
+    // Same profile, another account: the ring follows the account and the request carries it.
+    await runOn.click();
+    await expect(toControl(page)).toHaveAccessibleName(/^To Opus 5\.5 Chat, 5h 83% left/);
     await expect(toControl(page).getByTestId('profile-usage-ring')).toHaveAttribute(
       'data-usage-left',
       '83'
     );
-    await expect(nudge(page)).toHaveCount(0);
+    await expect(accountButton(page)).toHaveAccessibleName('Runs on Sam Sam, change account');
+    await expect(page.getByTestId('run-account-swapped')).toContainText(
+      'This chat runs on Sam Sam instead of Sam Support'
+    );
+    await screenshot(page, `new-chat-run-account-swapped-${suffix}`);
+    await assertNoOverflow(page);
   });
 
-  test('the sheet folds exhausted profiles into "Out for now"', async ({ page }, testInfo) => {
+  test('the account list beside To shows every Claude account with its windows', async ({
+    page,
+  }, testInfo) => {
+    await openNewChat(page);
+    const suffix = getProjectSuffix(testInfo.project.name);
+
+    await accountButton(page).click();
+    const list = page.getByRole('group', { name: 'Account for this chat' });
+    await expect(list).toBeVisible();
+    await expect(list.getByRole('button')).toHaveCount(4);
+    await expect(list.getByRole('button', { name: /Sam Support/ })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    await expect(
+      list.getByRole('button', { name: /Team seat/ }).getByTestId('usage-meters')
+    ).toHaveText('5h50% leftOpus20% leftWk40% left');
+    // Codex accounts are not offered to a Claude chat.
+    await expect(list.getByRole('button', { name: /Work ChatGPT/ })).toHaveCount(0);
+    await screenshot(page, `new-chat-run-account-list-${suffix}`);
+    await assertNoOverflow(page);
+
+    await list.getByRole('button', { name: /Team seat/ }).click();
+    await expect(list).toHaveCount(0);
+    await expect(accountButton(page)).toHaveAccessibleName(/^Runs on Team seat/);
+    await expect(toControl(page).getByTestId('profile-usage-ring')).toHaveAttribute(
+      'data-usage-left',
+      '50'
+    );
+    await screenshot(page, `new-chat-run-account-chosen-long-${suffix}`);
+    await assertNoOverflow(page);
+  });
+
+  test('a long profile name in the account list wraps inside its row', async ({
+    page,
+  }, testInfo) => {
+    await openNewChat(page);
+    const suffix = getProjectSuffix(testInfo.project.name);
+
+    for (const name of [/^Overnight-Migration-Reviewer/, /^https:\/\/example\.com/]) {
+      await toControl(page).click();
+      const row = sheet(page).getByRole('button', { name });
+      await row.scrollIntoViewIfNeeded();
+      await row.click();
+      await expect(sheet(page)).toHaveCount(0);
+      await accountButton(page).click();
+      const list = page.getByRole('group', { name: 'Account for this chat' });
+      await expect(list).toBeVisible();
+      // The list scrolls vertically, so the clipped-overflow walk skips it: measure it directly.
+      const widths = await list.evaluate((panel) =>
+        [panel, ...Array.from(panel.querySelectorAll('button'))].map((el) => ({
+          client: el.clientWidth,
+          scroll: el.scrollWidth,
+        }))
+      );
+      for (const width of widths) expect(width.scroll).toBeLessThanOrEqual(width.client + 1);
+      await screenshot(page, `new-chat-run-account-long-profile-${suffix}`);
+      await assertNoOverflow(page);
+      await page.keyboard.press('Escape');
+      await expect(list).toHaveCount(0);
+    }
+  });
+
+  test('the sheet shows labelled meters and folds exhausted profiles into "Out for now"', async ({
+    page,
+  }, testInfo) => {
     await openNewChat(page);
     const suffix = getProjectSuffix(testInfo.project.name);
 
     await toControl(page).click();
     await expect(sheet(page)).toBeVisible();
-    await expect(sheet(page).getByRole('button', { name: /^Claudiii/ })).toBeVisible();
+    const claudiii = sheet(page).getByRole('button', { name: /^Claudiii/ });
+    await expect(claudiii.getByTestId('usage-meters')).toHaveText('5h83% leftWk91% left');
     await expect(sheet(page).getByRole('button', { name: /^SamSamC/ })).toHaveCount(0);
     await screenshot(page, `new-chat-usage-sheet-${suffix}`);
     await assertNoOverflow(page);
@@ -365,11 +465,9 @@ test.describe('New-chat picker: usage left on profiles', () => {
     await assertNoOverflow(page);
 
     await outRow.click();
-    await expect(toControl(page)).toHaveAccessibleName(/^To SamSamC, Out · back in 2h 10m/);
-    await expect(nudge(page)).toContainText('Out on Sam Social · back in 2h 10m');
-    await expect(
-      nudge(page).getByRole('button', { name: 'Use Claudiii · 83% left' })
-    ).toBeVisible();
+    await expect(toControl(page)).toHaveAccessibleName(/^To SamSamC, 5h used up · back in 2h 10m/);
+    await expect(nudge(page)).toContainText('5h limit used up on Sam Social · back in 2h 10m');
+    await expect(nudge(page).getByRole('button', { name: 'Run on Sam Sam' })).toBeVisible();
     await screenshot(page, `new-chat-usage-out-selected-${suffix}`);
     await assertNoOverflow(page);
   });
@@ -383,16 +481,15 @@ test.describe('New-chat picker: usage left on profiles', () => {
     await expect(
       cards(page)
         .getByRole('button', { name: /^Opus 5\.5 Chat/ })
-        .getByText('6% left · resets 53m')
+        .getByTestId('profile-usage-notice')
     ).toBeVisible();
     await expect(nudge(page)).toBeVisible();
     await screenshot(page, `new-chat-usage-cards-light-${suffix}`);
     await assertNoOverflow(page);
 
-    await toControl(page).click();
-    await sheet(page).getByRole('button', { name: 'Out for now (1)' }).click();
-    await expect(sheet(page).getByRole('button', { name: /^SamSamC/ })).toBeVisible();
-    await screenshot(page, `new-chat-usage-sheet-light-${suffix}`);
+    await accountButton(page).click();
+    await expect(page.getByRole('group', { name: 'Account for this chat' })).toBeVisible();
+    await screenshot(page, `new-chat-run-account-list-light-${suffix}`);
     await assertNoOverflow(page);
   });
 });

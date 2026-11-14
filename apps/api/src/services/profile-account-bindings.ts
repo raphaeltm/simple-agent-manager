@@ -171,7 +171,8 @@ export async function resolveProfileAccountBindings(
             return {
               ...base,
               state: 'account',
-              tier: selection.tier,
+              // A profile's binding is resolved without a run, so no run account applies.
+              tier: selection.tier === 'run' ? null : selection.tier,
               poolId: await poolDigest(references),
               account: {
                 name: credentialName,
@@ -184,7 +185,8 @@ export async function resolveProfileAccountBindings(
             return {
               ...base,
               state: 'paused',
-              tier: selection.tier === 'platform' ? null : selection.tier,
+              tier:
+                selection.tier === 'platform' || selection.tier === 'run' ? null : selection.tier,
               reason: selection.reason,
               account: credentialName ? { name: credentialName, storage: 'account' } : null,
             };

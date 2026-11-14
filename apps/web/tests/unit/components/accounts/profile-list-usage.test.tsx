@@ -44,7 +44,9 @@ import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
 const NOW = Date.now();
 const HOUR = 3_600_000;
 
-function profile(overrides: Partial<AgentProfile> & Pick<AgentProfile, 'id' | 'name'>): AgentProfile {
+function profile(
+  overrides: Partial<AgentProfile> & Pick<AgentProfile, 'id' | 'name'>
+): AgentProfile {
   return {
     projectId: 'p-web',
     userId: 'user-1',
@@ -87,7 +89,8 @@ const PROFILES: AgentProfile[] = [
 ];
 
 function limitWindow(
-  overrides: Partial<CredentialLimitWindowSummary> & Pick<CredentialLimitWindowSummary, 'windowType'>
+  overrides: Partial<CredentialLimitWindowSummary> &
+    Pick<CredentialLimitWindowSummary, 'windowType'>
 ): CredentialLimitWindowSummary {
   return {
     provider: 'anthropic',
@@ -105,7 +108,10 @@ function limitWindow(
   };
 }
 
-function usage(credentialId: string, windows: CredentialLimitWindowSummary[]): CredentialLimitCredentialSummary {
+function usage(
+  credentialId: string,
+  windows: CredentialLimitWindowSummary[]
+): CredentialLimitCredentialSummary {
   return {
     credentialReference: `cc_credentials:${credentialId}`,
     credentialId,
@@ -135,7 +141,11 @@ const LIMITS = [
       resetsAt: NOW - 2 * HOUR,
       observedAt: NOW - 3 * HOUR,
     }),
-    limitWindow({ windowType: 'claude.seven_day', utilizationPercent: 40, observedAt: NOW - 3 * HOUR }),
+    limitWindow({
+      windowType: 'claude.seven_day',
+      utilizationPercent: 40,
+      observedAt: NOW - 3 * HOUR,
+    }),
   ]),
 ];
 
@@ -156,8 +166,20 @@ const PIN: CCProfileAttachmentItem = {
 beforeEach(() => {
   vi.clearAllMocks();
   const rows = mergeRows(
-    accountRows({ id: 'work', name: 'Work Max', kind: 'agent', target: 'claude-code', isDefault: true }),
-    accountRows({ id: 'client', name: 'Client key', kind: 'agent', target: 'claude-code', pins: ['p-api'] }),
+    accountRows({
+      id: 'work',
+      name: 'Work Max',
+      kind: 'agent',
+      target: 'claude-code',
+      isDefault: true,
+    }),
+    accountRows({
+      id: 'client',
+      name: 'Client key',
+      kind: 'agent',
+      target: 'claude-code',
+      pins: ['p-api'],
+    }),
     accountRows({ id: 'max', name: 'Claude Max (personal)', kind: 'agent', target: 'claude-code' })
   );
   mocks.getResolutionStatus.mockResolvedValue({ consumers: [] });
@@ -199,16 +221,18 @@ describe('Profile list usage and requests', () => {
     renderList();
     await waitFor(() => expect(screen.getAllByTestId('profile-usage-strip')).toHaveLength(2));
 
-    // Liveness: the default-account profile shows Work Max's live sample.
+    // Liveness: the default-account profile shows Work Max's live sample, in percent left
+    // (72% used), the same meters as the new-chat picker.
     const everyday = within(rowFor('Everyday')).getByTestId('profile-usage-strip');
-    expect(everyday).toHaveTextContent('5h72%');
+    expect(everyday).toHaveTextContent('5h28% left');
     expect(everyday).toHaveAccessibleName(/Everyday on Work Max/);
 
     // The project pin wins for Reviewer, and its 5h window reset after the sample.
     const reviewer = within(rowFor('Reviewer')).getByTestId('profile-usage-strip');
     expect(reviewer).toHaveAccessibleName(/Reviewer on Client key: OK/);
-    expect(reviewer).toHaveTextContent('5h0%↻');
-    expect(reviewer).not.toHaveTextContent('81%');
+    expect(reviewer).toHaveTextContent('5h100% left↻');
+    // The stale sample (81% used) is not shown as 19% left.
+    expect(reviewer).not.toHaveTextContent('19%');
 
     // My profile pin wins over my default: Claude Max has no samples yet.
     const deep = rowFor('Opus deep work');

@@ -3,8 +3,8 @@
  *
  * Everything is driven through the route, not through `submitTaskImplementation`
  * directly, so the schema, the auth middleware and the submit flow all participate
- * (rule 62). The idea gate runs against a real SQLite engine with a foreign-project
- * attack case and a same-project owner control (rules 11, 28).
+ * (rule 62). The idea gate and the per-run account check run against a real SQLite
+ * engine with foreign-owner attack cases and owner controls (rules 11, 28).
  */
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
@@ -96,7 +96,17 @@ vi.mock('../../../src/services/mention-enrichment', () => ({
   enrichMessageWithMentions: mocks.enrichMessageWithMentions,
 }));
 
+// The agent-key callback authenticates the VM agent; the slice test below calls it as w-slice.
+vi.mock('../../../src/services/jwt', () => ({
+  verifyCallbackToken: vi.fn(async () => ({ workspace: 'w-slice', scope: 'workspace' })),
+  signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
+}));
+
 const { submitRoutes } = await import('../../../src/routes/tasks/submit');
+const { runtimeRoutes } = await import('../../../src/routes/workspaces/runtime');
+const { encrypt } = await import('../../../src/services/encryption');
+const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -117,6 +127,7 @@ async function createEnv() {
   seedProjectWithMember(sqlite, { projectId: 'project-2', userId: 'user-1', role: 'owner' });
   seedCloudCredential(sqlite, { id: 'cloud-1', userId: 'user-1', projectId: 'project-1' });
   seedIdeas(sqlite);
+  seedAccounts(sqlite);
   const fixture = {
     sqlite,
     env: {
@@ -158,6 +169,29 @@ function seedIdeas(sqlite: Database.Database): void {
   // refusal below cannot pass merely because the status differs (program decision 16).
   insert.run('task-ordinary-draft', 'project-1', 'An ordinary draft task', null, 'draft', 0);
   insert.run('idea-foreign', 'project-2', 'Another project idea', null, 'draft', 1);
+}
+
+const NOW = '2026-11-13T00:00:00.000Z';
+
+function seedAccounts(sqlite: Database.Database): void {
+  seedUser(sqlite, 'user-2');
+  const credential = sqlite.prepare(
+    `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, 'api-key', 'cipher', 'iv', ?, ?, ?)`
+  );
+  const configuration = sqlite.prepare(
+    `INSERT INTO cc_configurations (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, 'agent', ?, ?, NULL, ?, ?, ?)`
+  );
+  const seed = (id: string, owner: string, agentType: string, active = 1, configActive = 1) => {
+    credential.run(`cred-${id}`, owner, id, active, NOW, NOW);
+    configuration.run(`cfg-${id}`, owner, id, agentType, `cred-${id}`, configActive, NOW, NOW);
+  };
+  seed('work-max', 'user-1', 'claude-code');
+  seed('paused', 'user-1', 'claude-code', 0);
+  seed('paused-config', 'user-1', 'claude-code', 1, 0);
+  seed('codex', 'user-1', 'openai-codex');
+  seed('theirs', 'user-2', 'claude-code');
 }
 
 const executionCtx = {
@@ -423,6 +457,221 @@ describe('POST /tasks/submit with sourceIdeaId', () => {
       });
       // The route must not also write the link itself — that would double-write.
       expect(mocks.recordLink).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+/** Tasks the submit created: everything except the ideas and tasks `seedIdeas` wrote. */
+const SUBMITTED = `SELECT id, agent_configuration_id AS account FROM tasks
+  WHERE id NOT IN ('idea-open', 'idea-done', 'idea-parked', 'task-ordinary',
+                   'task-ordinary-draft', 'idea-foreign')`;
+
+function taskRows(sqlite: Database.Database) {
+  return (sqlite.prepare(SUBMITTED).all() as Array<{ account: string | null }>).map(
+    ({ account }) => ({ account })
+  );
+}
+
+describe('POST /tasks/submit with agentConfigurationId', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authState.userId = 'user-1';
+    mocks.requireRepositoryUserAccess.mockResolvedValue(undefined);
+    mocks.createSession.mockResolvedValue('session-1');
+    mocks.persistMessage.mockResolvedValue(undefined);
+    mocks.recordActivityEvent.mockResolvedValue(undefined);
+    mocks.stopSession.mockResolvedValue(undefined);
+    mocks.updateSessionTopic.mockResolvedValue(true);
+    mocks.startTaskRunnerDO.mockResolvedValue(undefined);
+    mocks.getTaskRunnerStatus.mockResolvedValue(null);
+    mocks.getTaskTitleConfig.mockReturnValue({});
+    mocks.truncateTitle.mockReturnValue('Run on Work Max');
+    mocks.generateTaskTitle.mockResolvedValue('Run on Work Max');
+    mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'Do the work.' });
+  });
+
+  it('stores the caller’s own account on a VM task', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const response = await submit(createApp(), env, {
+        message: 'Do the work.',
+        agentType: 'claude-code',
+        taskMode: 'task',
+        agentConfigurationId: 'cfg-work-max',
+      });
+      expect(response.status).toBe(202);
+      expect(taskRows(sqlite)).toEqual([{ account: 'cfg-work-max' }]);
+      expect(mocks.startTaskRunnerDO).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('stores the caller’s own account on an Instant task', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      sqlite
+        .prepare(
+          `INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime,
+             task_mode, is_builtin, created_at, updated_at)
+           VALUES ('profile-instant', 'project-1', 'user-1', 'Opus Chat', 'claude-code',
+             'cf-container', 'conversation', 0, ?, ?)`
+        )
+        .run(NOW, NOW);
+      mocks.acceptInstantSession.mockResolvedValue({
+        taskId: 'task-instant',
+        chatSessionId: 'session-instant',
+      });
+      mocks.continueInstantSessionLaunch.mockResolvedValue(undefined);
+
+      const response = await submit(createApp(), env, {
+        message: 'Talk it through.',
+        agentProfileId: 'profile-instant',
+        taskMode: 'conversation',
+        agentConfigurationId: 'cfg-work-max',
+      });
+      expect(response.status).toBe(202);
+      expect(mocks.acceptInstantSession).toHaveBeenCalledTimes(1);
+      expect(taskRows(sqlite)).toEqual([{ account: 'cfg-work-max' }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('control: no choice stores NULL and still starts', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const response = await submit(createApp(), env, {
+        message: 'Do the work.',
+        agentType: 'claude-code',
+        taskMode: 'task',
+      });
+      expect(response.status).toBe(202);
+      expect(taskRows(sqlite)).toEqual([{ account: null }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each([
+    ['another person’s account', 'cfg-theirs', /not found/],
+    ['a paused account', 'cfg-paused', /paused/],
+    ['a paused configuration', 'cfg-paused-config', /paused/],
+    ['an account for another agent', 'cfg-codex', /is for openai-codex/],
+    ['an unknown id', 'cfg-nope', /not found/],
+  ])('refuses %s before writing a task', async (_name, configurationId, message) => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const response = await submit(createApp(), env, {
+        message: 'Do the work.',
+        agentType: 'claude-code',
+        taskMode: 'task',
+        agentConfigurationId: configurationId,
+      });
+      expect(response.status).toBe(400);
+      expect(JSON.stringify(await response.json())).toMatch(message);
+      expect(taskRows(sqlite)).toEqual([]);
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('accepts a backfill-length account id (longer than the 128-char resource id cap)', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      const longId = `cfg-${'b'.repeat(219)}`;
+      sqlite
+        .prepare(
+          `INSERT INTO cc_configurations (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+           VALUES (?, 'user-1', 'Long', 'agent', 'claude-code', 'cred-work-max', NULL, 1, ?, ?)`
+        )
+        .run(longId, NOW, NOW);
+      const response = await submit(createApp(), env, {
+        message: 'Do the work.',
+        agentType: 'claude-code',
+        taskMode: 'task',
+        agentConfigurationId: longId,
+      });
+      expect(response.status).toBe(202);
+      expect(taskRows(sqlite)).toEqual([{ account: longId }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('vertical slice: the account chosen at submit is the one agent-key hands the run', async () => {
+    const { sqlite, env } = await createEnv();
+    try {
+      (env as { ENCRYPTION_KEY?: string }).ENCRYPTION_KEY = ENCRYPTION_KEY;
+      for (const id of ['work-max', 'personal']) {
+        const { ciphertext, iv } = await encrypt(`sk-${id}`, ENCRYPTION_KEY);
+        if (id === 'personal') {
+          sqlite
+            .prepare(
+              `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+               VALUES ('cred-personal', 'user-1', 'personal', 'api-key', ?, ?, 1, ?, ?)`
+            )
+            .run(ciphertext, iv, NOW, NOW);
+          sqlite
+            .prepare(
+              `INSERT INTO cc_configurations (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+               VALUES ('cfg-personal', 'user-1', 'personal', 'agent', 'claude-code', 'cred-personal', NULL, 1, ?, ?)`
+            )
+            .run(NOW, NOW);
+        } else {
+          sqlite
+            .prepare(
+              `UPDATE cc_credentials SET encrypted_token = ?, iv = ? WHERE id = 'cred-work-max'`
+            )
+            .run(ciphertext, iv);
+        }
+      }
+      // Personal is the default; the chat chooses Work Max.
+      sqlite.exec(`
+        INSERT INTO cc_attachments (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active)
+          VALUES ('att-default', 'cfg-personal', 'agent', 'claude-code', 'user-1', NULL, 1);
+      `);
+
+      const response = await submit(createApp(), env, {
+        message: 'Do the work.',
+        agentType: 'claude-code',
+        taskMode: 'task',
+        agentConfigurationId: 'cfg-work-max',
+      });
+      expect(response.status).toBe(202);
+      const task = sqlite.prepare(SUBMITTED).get() as { id: string };
+
+      // The TaskRunner provisions the run's workspace and binds it (mocked out above).
+      sqlite.exec(`
+        INSERT INTO nodes (id, user_id, status) VALUES ('n-slice', 'user-1', 'running');
+        INSERT INTO workspaces (id, user_id, node_id, project_id, status)
+          VALUES ('w-slice', 'user-1', 'n-slice', 'project-1', 'running');
+      `);
+      sqlite.prepare(`UPDATE tasks SET workspace_id = 'w-slice' WHERE id = ?`).run(task.id);
+
+      const app = new Hono<{ Bindings: Env }>();
+      app.onError((err, c) =>
+        err instanceof AppError
+          ? c.json(err.toJSON(), err.statusCode as never)
+          : c.json({ error: String(err) }, 500)
+      );
+      app.route('/api/workspaces', runtimeRoutes);
+      const keyResponse = await app.request(
+        '/api/workspaces/w-slice/agent-key',
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer cb', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agentType: 'claude-code' }),
+        },
+        env
+      );
+      expect(keyResponse.status).toBe(200);
+      const body = (await keyResponse.json()) as Record<string, unknown>;
+      expect(body).toMatchObject({ credentialReference: 'cc_credentials:cred-work-max' });
+      expect(JSON.stringify(body)).not.toContain('sk-personal');
     } finally {
       sqlite.close();
     }

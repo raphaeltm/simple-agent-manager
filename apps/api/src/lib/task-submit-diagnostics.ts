@@ -13,6 +13,7 @@ export type TaskSubmitOperation =
   | 'instant_submission'
   | 'placement_credentials'
   | 'compute_quota'
+  | 'run_account'
   | 'mention_enrichment'
   | 'task_insert'
   | 'task_status_event_insert'
