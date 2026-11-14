@@ -13,6 +13,7 @@ import {
   resolveStrictNodeTeardownAuthority,
 } from './node-teardown-authority';
 import { recordNodeTeardownBlocked } from './node-teardown-blocked';
+import { isNodeCapacitySourceReleased } from './node-teardown-provenance';
 import { releaseNodeTunnels } from './node-tunnel-cleanup';
 import {
   type ContainerWorkspaceDeletionAuthority,
@@ -297,7 +298,10 @@ export async function deleteNodeResourcesStrict(
       initialNode.status === 'destroying' &&
       node.runtime === 'vm' &&
       !node.providerInstanceId &&
-      !hasManagedVmPlacementProof(initialNode)
+      !hasManagedVmPlacementProof(
+        initialNode,
+        await isNodeCapacitySourceReleased(env.DATABASE, initialNode)
+      )
     ) {
       throw new Error(`Providerless VM termination proof lacks managed placement: node=${nodeId}`);
     }

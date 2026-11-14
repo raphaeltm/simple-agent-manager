@@ -210,9 +210,17 @@ connection (for example **Google Cloud · SAM GCP Prod**), or where you manage i
 (**Hetzner · Infrastructure settings**), so you can tell two accounts apart without seeing credential
 ids (`attachCapacitySourceLabels()`).
 
-An account that is disconnected, deleted or disabled disappears from the pool on its own, with its
-machines, and SAM never places on it. Its records are kept rather than deleted, because running
-machines may still reference them.
+Saving an account's credential again, or rotating its key, keeps the account in the pool together
+with the machines you picked from it and its place in the provider order: the connection keeps its
+identity across a save (`replaceUserGcpCredential()` for Google Cloud, an in-place update for every
+other provider).
+
+An account that is disabled disappears from the pool on its own, with its machines, and SAM never
+places on it; its records are kept. Disconnecting or deleting an account removes it from the pool
+together with the machines you picked from it. Connecting it again adds it as a new account with
+nothing picked, so pick its machines again. Machines SAM already created from a removed account
+are still cleaned up normally (`capacitySourceReleasedSql()` in
+`apps/api/src/services/node-teardown-provenance.ts`).
 
 #### Switching an account off
 
