@@ -402,6 +402,8 @@ describe('pnpm selfhost:teardown', () => {
       'network, subnet and firewall rules',
       'gcloud compute addresses delete',
       'gcloud compute networks delete',
+      'the bucket fleet itself (you created it)',
+      'gcloud storage buckets delete gs://fleet',
     ]) {
       expect(leftForYou).toContain(expected);
     }
