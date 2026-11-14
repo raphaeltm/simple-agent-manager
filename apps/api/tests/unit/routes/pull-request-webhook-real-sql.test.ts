@@ -37,7 +37,7 @@ describe('verified GitHub PR webhooks', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
-    sqlite.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, repository TEXT, github_repo_id INTEGER);
+    sqlite.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, repository TEXT, github_repo_id INTEGER, user_id TEXT NOT NULL DEFAULT 'pr-webhook-owner');
       CREATE TABLE tasks (id TEXT PRIMARY KEY);`);
     sqlite.exec(
       readFileSync(
@@ -46,13 +46,13 @@ describe('verified GitHub PR webhooks', () => {
       )
     );
     sqlite
-      .prepare('INSERT INTO projects VALUES (?, ?, ?, ?)')
+      .prepare('INSERT INTO projects (id, name, repository, github_repo_id) VALUES (?, ?, ?, ?)')
       .run('p1', 'First', 'acme/widget', 91);
     sqlite
-      .prepare('INSERT INTO projects VALUES (?, ?, ?, ?)')
+      .prepare('INSERT INTO projects (id, name, repository, github_repo_id) VALUES (?, ?, ?, ?)')
       .run('p2', 'Second', 'acme/widget', 91);
     sqlite
-      .prepare('INSERT INTO projects VALUES (?, ?, ?, ?)')
+      .prepare('INSERT INTO projects (id, name, repository, github_repo_id) VALUES (?, ?, ?, ?)')
       .run('other', 'Other', 'else/other', 92);
     env = { DATABASE: createSqliteD1(sqlite) } as Env;
     app = new Hono<{ Bindings: Env }>();
@@ -413,7 +413,7 @@ describe('verified GitHub PR webhooks', () => {
   it('ingests complete GitHub example payloads through the verified route', async () => {
     // Fixtures are unmodified payload examples from octokit/webhooks, api.github.com.
     sqlite
-      .prepare('INSERT INTO projects VALUES (?, ?, ?, ?)')
+      .prepare('INSERT INTO projects (id, name, repository, github_repo_id) VALUES (?, ?, ?, ?)')
       .run('fixture', 'Fixture', 'Codertocat/Hello-World', 186853002);
     const fixture = (name: string) =>
       JSON.parse(

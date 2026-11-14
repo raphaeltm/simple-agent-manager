@@ -1401,6 +1401,18 @@ enabled, each `cron.completed` log carries `projectDataArchiveShardingSkipReason
 tick with a `frozen`/`precopy_refused` journal and is skipped by the sweep for
 `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS`.
 
+The unscoped sweep selects sessions only from projects under storage pressure
+(`STORAGE_PRESSURE_GATE_SQL`, `projectDataArchiveCandidateSql()`): the project's last
+`project_data_storage_telemetry` row must report a `usage_ratio` at or above the admin setting
+`operations.projectDataArchiveMinStorageUsagePercent` (default 50, 0 turns the gate off). A project
+with no telemetry row, or one older than `operations.projectDataArchiveStorageTelemetryMaxAgeHours`
+(default 24), stays eligible. In-flight migrations, pending reclaim and the operator-scoped canary
+are not gated. Each `cron.completed` log carries
+`projectDataArchiveShardingStoragePressureMinUsageRatio` and the
+`...StoragePressureHeldSessions`/`HeldProjects`/`HeldMessages` counts of what the gate left in root
+(`null` when the count query failed). See
+[Archiving ended chats](/docs/guides/admin-settings/#archiving-ended-chats).
+
 The shipped cadence (`1080000`, 18 minutes) and wall budget (`10000`) were sized against the SAM root object
 (~3,350 backlog sessions plus 4-233 newly terminal sessions per day): one tick moves one
 non-trivial session because the wall-time break fires between candidates, so a daily tick can
