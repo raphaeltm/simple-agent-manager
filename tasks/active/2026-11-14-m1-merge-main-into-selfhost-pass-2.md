@@ -43,6 +43,7 @@ main's structure, hunt silent breakages, prove green and bootable.
 - [x] CI run by hand green (43618481233 on e08088cca; final-head run recorded in the PR)
 - [x] task-completion-validator (PASS), scoped security-auditor (PASS)
 - [x] Draft PR #2736
+- [x] Main chased once: merge 20cdb9941 (main 84d77aa0f), 1 conflict (admin-setting-definitions.ts union); CI run 43625330882 green on 20cdb9941
 - [ ] Report to coordinator, channel post
 
 ## Acceptance criteria
