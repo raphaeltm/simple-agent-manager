@@ -1,5 +1,5 @@
 {
-  "status": "historical_baseline_only_comparison_pending",
+  "status": "serial_measured_middle_pending",
   "historicalTestJobs": [
     {
       "runId": 43585850934,
@@ -28,5 +28,32 @@
     "serial Turbo package concurrency1",
     "middle budget concurrency2 or worker cap"
   ],
-  "decisionRule": "Choose fastest stable measured option. Prefer middle if serialization adds more than about five minutes unless middle still flakes."
+  "decisionRule": "Choose fastest stable measured option. Prefer middle if serialization adds more than about five minutes unless middle still flakes.",
+  "comparisons": [
+    {
+      "budget": "Turbo concurrency1, default Vitest workers",
+      "runId": 43597991790,
+      "jobId": 132456561421,
+      "headSha": "5f1927e9c146083635030b60494ab22e6abfeb7a",
+      "runnerAvailableCpus": 4,
+      "start": "2026-11-14T13:05:43Z",
+      "end": "2026-11-14T13:38:38Z",
+      "seconds": 1975,
+      "coverageTurboSeconds": 1841.896,
+      "conclusion": "success",
+      "coverageTasksSuccessful": 39,
+      "apiTestsPassed": 15166,
+      "apiTestsSkipped": 4,
+      "projectDataTestsPassed": 528,
+      "comparisonToHistoricalSeconds": [55, 535, 731],
+      "wholeWorkflowConclusion": "failure",
+      "wholeWorkflowFailureReason": "Mandatory needs-human-review label; initial preflight classification checkbox corrected in PR body, not a technical test failure."
+    },
+    {
+      "budget": "Turbo concurrency2 with Vitest maxWorkers75%",
+      "runnerAvailableCpusExpected": 4,
+      "workerPoolCapAtFourCpus": 3,
+      "status": "pending"
+    }
+  ]
 }

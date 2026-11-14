@@ -1,0 +1,32 @@
+{
+  "suite": "lifecycle",
+  "status": "complete",
+  "normalRuns": 30,
+  "loadedRuns": 30,
+  "totalTestsPassed": 540,
+  "failures": 0,
+  "skips": 0,
+  "retries": 0,
+  "modes": {
+    "normal": {
+      "runs": 30,
+      "passed": 270,
+      "targetMedianMs": 18.0,
+      "targetMaxMs": 20,
+      "fileWallMedianSeconds": 26.87784243200076,
+      "fileWallMaxSeconds": 27.686170535998826,
+      "allLoadedBurnersConsumedCpu": null,
+      "testSourceSha256": "c2e160f207f17c0ff881c26ee4f2ec1c2dde76bd76a1c8a319540c499f11d199"
+    },
+    "loaded": {
+      "runs": 30,
+      "passed": 270,
+      "targetMedianMs": 39.0,
+      "targetMaxMs": 48,
+      "fileWallMedianSeconds": 54.72713655700136,
+      "fileWallMaxSeconds": 61.51610647599591,
+      "allLoadedBurnersConsumedCpu": true,
+      "testSourceSha256": "c2e160f207f17c0ff881c26ee4f2ec1c2dde76bd76a1c8a319540c499f11d199"
+    }
+  }
+}

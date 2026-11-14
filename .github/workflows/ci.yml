@@ -428,11 +428,11 @@ jobs:
         run: pnpm build
 
       - name: Run tests with coverage
-        # Vitest already parallelizes files within each package. Serial package
-        # tasks keep their independent worker pools from multiplying CPU load.
+        # Bound both package scheduling and each Vitest pool. On the measured
+        # four-CPU runner this allows two pools of at most three workers.
         run: |
           node -e "console.log('Available test CPUs:', require('node:os').availableParallelism())"
-          pnpm test:coverage --concurrency=1
+          pnpm test:coverage --concurrency=2 -- --maxWorkers=75%
 
   build:
     name: Build

@@ -18,8 +18,8 @@ The Test job runs Turbo test:coverage, which launches package test processes who
 - [x] Preserve 100-row, 200 KiB metadata, multi-object, real seal/read/recovery assertions.
 - [x] Determine decision ordering contract; exercise equal timestamps through the real warm handoff.
 - [x] Remove a relevant guard once and prove the intended tests fail, then restore it.
-- [ ] At least 30 normal and 30 CPU-loaded full-file runs for each affected test file; report counts and timings, without hidden retries.
-- [ ] Run relevant lint, typecheck, build and broader tests.
+- [x] At least 30 normal and 30 CPU-loaded full-file runs for each affected test file; report counts and timings, without hidden retries.
+- [x] Run relevant lint, typecheck, build and broader tests.
 - [ ] Local specialist and task-completion reviews; address findings.
 - [ ] Test/config only: skip staging and state that in PR; production archive changes: request coordinator staging slot.
 - [ ] Push each unit; create separate DRAFT PR with needs-human-review; CI plus trusted CodeRabbit request and wait.
@@ -44,6 +44,6 @@ Normal phase total 2605 ms; coverage plus two busy workers on the same two cores
 
 ## Current validation
 
-Compact file: all 30 normal + 30 loaded runs passed, 780 cases. Full ProjectData package: 528 passed. API build and dependency builds passed (12 tasks), both affected package typechecks passed after rebuild, targeted ESLint/formatting passed. Lifecycle real workerd file passed 9/9 with Date-only freezing and both persisted timestamps asserted equal. Emission mutation repeated under that final timing model failed as intended and was restored; lifecycle repeat counts remain pending. Local preliminary test and Cloudflare reviews found no remaining semantic finding; final completion review still pending.
+Compact file: all 30 normal + 30 loaded runs passed, 780 cases. Full ProjectData package: 528 passed. API build and dependency builds passed (12 tasks), both affected package typechecks passed after rebuild, targeted ESLint/formatting passed. Lifecycle real workerd file passed 9/9 with Date-only freezing and both persisted timestamps asserted equal. Emission mutation repeated under that final timing model failed as intended and was restored; Lifecycle 30 normal+30 loaded repetitions passed 540 cases. Local preliminary test and Cloudflare reviews found no remaining semantic finding; final completion review still pending.
 
 Coordinator requires actual CI wall-clock measurements for serial package concurrency versus a middle budget before accepting the final setting. Historical Test jobs took 32:00, 24:00, and 20:44. Prefer the fastest stable option, and a bounded middle option if serialization adds more than about five minutes unless that option flakes. Evidence is in ci-budget-comparison.json; no new CI budget measurement is claimed yet.
