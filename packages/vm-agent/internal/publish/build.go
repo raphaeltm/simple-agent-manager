@@ -24,6 +24,10 @@ const unsupportedComposeVolumesGuidance = "build_and_publish supports safe named
 
 // BuildOptions configures a host-side compose build.
 type BuildOptions struct {
+	// BuildNetwork overrides networking only for build commands on remote DinD.
+	// The captured release retains the original service/runtime networks.
+	BuildNetwork string
+
 	// WorkspaceDir is the host path of the cloned repo (the compose project
 	// root). It is the same directory passed to `devcontainer up`.
 	WorkspaceDir string
@@ -240,7 +244,7 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 	if opts.Events != nil {
 		opts.Events.Event(ctx, Event{Status: "building", CurrentStep: "compose_build", EventType: "publish.build.started", Message: "docker compose build started", Detail: map[string]any{"targetCount": len(targets)}})
 	}
-	if _, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, composeEnv, "build"); err != nil {
+	if _, err := runComposeBuild(ctx, composeCmd, opts, cfg, composeEnv); err != nil {
 		log.Error("compose build command failed", "composeCmd", composeCmd, "error", err)
 		return nil, fmt.Errorf("build: docker compose build: %w", err)
 	}
