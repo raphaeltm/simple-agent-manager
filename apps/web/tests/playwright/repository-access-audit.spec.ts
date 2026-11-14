@@ -25,8 +25,6 @@ function makeProject(overrides: Record<string, unknown> = {}) {
     githubInstallationId: 'inst-1',
     defaultVmSize: null,
     defaultAgentType: null,
-    defaultProvider: null,
-    defaultLocation: null,
     workspaceIdleTimeoutMs: null,
     nodeIdleTimeoutMs: null,
     taskExecutionTimeoutMs: null,

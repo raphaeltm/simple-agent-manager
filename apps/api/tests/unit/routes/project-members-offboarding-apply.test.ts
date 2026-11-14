@@ -52,8 +52,6 @@ function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
     defaultAgentType: 'claude-code',
     defaultWorkspaceProfile: null,
     defaultDevcontainerConfigName: null,
-    defaultProvider: 'hetzner',
-    defaultLocation: null,
     agentDefaults: null,
     workspaceIdleTimeoutMs: null,
     nodeIdleTimeoutMs: null,
@@ -284,7 +282,8 @@ function triggerDetails(hasCoverage = false) {
     status: 'active',
     sourceType: 'cron',
     agentTarget: 'claude-code',
-    computeTarget: 'hetzner',
+    // Projects and profiles never pin a provider; the compute pool decides.
+    computeTarget: 'inherited-provider',
     // Creator and effective executor are recorded separately so a reviewer can
     // see which one is departing after a keep-active transfer.
     creatorUserId: 'departing-user',

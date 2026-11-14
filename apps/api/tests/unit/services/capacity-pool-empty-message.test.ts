@@ -150,8 +150,6 @@ describe('every account switched off, through the real allocation entry point', 
           scope === 'project'
             ? {
                 id: 'project-1',
-                defaultProvider: null,
-                defaultLocation: null,
                 defaultVmSize: 'small',
               }
             : null,
@@ -171,7 +169,6 @@ describe('every account switched off, through the real allocation entry point', 
           userId: 'user-1',
           project: {
             id: scope === 'project' ? 'project-1' : '',
-            defaultProvider: null,
             defaultVmSize: 'small',
           },
           credentialProjectPolicy: 'current-project',

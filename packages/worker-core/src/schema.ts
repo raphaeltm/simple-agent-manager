@@ -480,7 +480,12 @@ export const projects = sqliteTable(
     defaultWorkspaceProfile: text('default_workspace_profile'),
     /** Default devcontainer config name for new workspaces. null = auto-discover default. */
     defaultDevcontainerConfigName: text('default_devcontainer_config_name'),
+    /**
+     * Retired 2026-11-14. The effective compute pool decides VM provider and location; this
+     * column is kept for history only and is neither read nor written.
+     */
     defaultProvider: text('default_provider'),
+    /** Retired 2026-11-14 with `defaultProvider`. Neither read nor written. */
     defaultLocation: text('default_location'),
     /** Per-agent-type model + permission mode overrides.
      *  JSON: Record<AgentType, { model?: string | null, permissionMode?: string | null }>
@@ -2540,7 +2545,9 @@ export const agentProfiles = sqliteTable(
     timeoutMinutes: integer('timeout_minutes'),
     vmSizeOverride: text('vm_size_override'),
     resourceRequirementsJson: text('resource_requirements_json'),
+    /** Retired 2026-11-14: the compute pool decides provider and location. Neither read nor written. */
     provider: text('provider'),
+    /** Retired 2026-11-14 with `provider`. Neither read nor written. */
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
     /** Runtime preference: null = automatic, 'vm' = cloud VM, 'cf-container' = Cloudflare Container. */
@@ -2624,7 +2631,9 @@ export const skills = sqliteTable(
     maxTurns: integer('max_turns'),
     timeoutMinutes: integer('timeout_minutes'),
     vmSizeOverride: text('vm_size_override'),
+    /** Retired 2026-11-14: the compute pool decides provider and location. Neither read nor written. */
     provider: text('provider'),
+    /** Retired 2026-11-14 with `provider`. Neither read nor written. */
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
     runtime: text('runtime'),

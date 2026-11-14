@@ -688,7 +688,13 @@ describe('MCP Profile Tools', () => {
         resourceRequirementsJson: null,
       };
       const fields = extractProfileFields(params);
-      expect(fields).toEqual(params);
+      // Provider and location come from the compute pool; the retired fields are dropped.
+      const supported: Record<string, unknown> = { ...params };
+      delete supported.provider;
+      delete supported.vmLocation;
+      expect(fields).toEqual(supported);
+      expect(fields).not.toHaveProperty('provider');
+      expect(fields).not.toHaveProperty('vmLocation');
     });
 
     it('ignores fields with wrong types', () => {

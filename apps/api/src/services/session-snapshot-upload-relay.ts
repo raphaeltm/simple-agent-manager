@@ -66,8 +66,6 @@ async function resolveRelayAllocation(
     ? await env.DATABASE.prepare(
         `SELECT id,
                 default_vm_size AS defaultVmSize,
-                default_provider AS defaultProvider,
-                default_location AS defaultLocation,
                 default_workspace_profile AS defaultWorkspaceProfile,
                 default_devcontainer_config_name AS defaultDevcontainerConfigName,
                 default_agent_type AS defaultAgentType,
