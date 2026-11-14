@@ -17,10 +17,12 @@ Open separate DRAFT PR with needs-human-review. After CI, local reviews and trus
 ## Checklist / acceptance
 
 - [x] Measure and diagnose both causes; deterministic final fixes, production behavior unchanged. GitHub user-event waits60→27 (real paste); native Date.now boundary control, bounded drain and poisoned-runtime isolation.
-- [ ] At least30 normal +30 CPU-loaded fresh full-file runs EACH, report counts and durations.
-- [ ] Restore meaningful guard-removal RED proofs and final GREEN checks.
-- [ ] Relevant lint/typecheck/build and local test/Cloudflare/completion reviews.
+- [x] At least30 normal +30 CPU-loaded fresh full-file runs EACH:120 processes,3840 passing assertions, zero failures/skips; identical final source hashes.
+- [x] Restore meaningful guard-removal RED proofs and final GREEN checks: GitHub label omission1 RED/38 PASS; rate guard removal4 RED/21 PASS; never-settling drain watchdog/poison proof.
+- [x] Relevant lint/typecheck/build and local test/Cloudflare/completion reviews: all pass; initial Cloudflare unbounded-drain finding addressed, final re-review passed. Completion reviewer independently verified all120 runs/hashes/counts.
 - [ ] Draft PR, CI, trusted CodeRabbit request + wait; exactSHA coordinator hold.
 - [ ] Approved matched merge; mainCI + deployment + basic health receipts.
 
 Archive PR2724 production watch remains separately active through2026-11-15 11:59:39.619UTC. PR2728 formal main Test samples:1/3=22:54(run43625240684); two subsequent actual main runs pending.
+
+Local review tracker: test-engineer PASS; cloudflare-specialist ADDRESSED; task-completion-validator PASS (implementation/local validation only). Task stays active for PR, CI, trusted CodeRabbit request/wait, exact-SHA coordinator approval and release receipts; original watch and main timing samples remain open.

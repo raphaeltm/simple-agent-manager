@@ -1,6 +1,6 @@
 # Automation form and native SamSession flake evidence
 
-Test-only follow-up to PR2728. Tested code head: `ff8c3471980124eb8ab1abd01d2651956b1a58ab`. No production source or existing test timeout changes. Staging is skipped under the coordinator's explicit test-only authorization. No UI surface changes, so a visual audit has no changed surface to exercise.
+Test-only follow-up to PR #2728. Tested code head: `ff8c3471980124eb8ab1abd01d2651956b1a58ab`. No production source or existing test timeout changes. Staging is skipped under the coordinator's explicit test-only authorization. No UI surface changes, so a visual audit has no changed surface to exercise.
 
 ## Diagnosis
 
@@ -30,15 +30,22 @@ All mutations were temporary and restored with SHA256 equality checks; productio
 
 ## Stability proof
 
-Web COMPLETE:30 normal +30 loaded fresh full-file processes,2340 assertions PASS/0FAIL. SamSession normal30 complete (750 PASS), loaded30 still running. Ordinary first checks/profiling and intentional mutation failures are excluded.
+All 120 fresh full-file processes passed: **3,840 assertions, zero failures or skips**.
+
+| File | Normal runs / assertions | Loaded runs / assertions | Target normal median / max | Target loaded median / max |
+| --- | --- | --- | --- | --- |
+| automation-flows.test.tsx | 30 / 1,170 | 30 / 1,170 | 192.599 / 248.598 ms | 350.554 / 525.337 ms |
+| sam-session-do.test.ts | 30 / 750 | 30 / 750 | 128.527 / 182.631 ms | 251.643 / 378.942 ms |
+
+Native target measurements pool the four boundary cases per run. Each run executed all 39 web or 25 native assertions. Per-run summaries include actual total/pending counts and verify every assertion passed against the recorded case-name lists. All six source hashes match across every run and the final files. The observed burner totals were 721.73 CPU-seconds for web and 1,218.19 for native runs. Normal process duration maxima were 8.495 s (web) and 14.106 s (native); loaded maxima were 19.718 s and 31.410 s. Loaded batches of 15 stayed below 10 minutes. Ordinary first checks/profiling and intentional mutation failures are excluded.
 
 Each run uses `pnpm exec vitest run <file> --reporter=json --outputFile=<unique-report>` from its app directory; native SamSession adds `--config=vitest.sam-runtime.config.ts`. No test-name filter or retry. Loaded runs pin the entire pnpm/Vitest/workerd process tree to two CPUs with `taskset -c <pair>`, while two Python `while True: pass` processes each pin to one of the same CPUs. Web pair0,1; API pair2,3. Each foreground measurement process terminates and waits for both children in `finally`. Per-run summaries record observed burner CPU seconds, counts, elapsed time, head SHA and SHA256 hashes of all4 changed test files and both production paths used for mutation. Hashes are checked after EVERY run. Loaded batches use15 runs per command to remain below10minutes.
 
 ## Other validation and reviews
 
--11 API dependency builds PASS (fresh main required rebuilding previously stale local dist artifacts).
--API and web typechecks PASS.
--Full API/web lint2 tasks PASS (2 preexisting web warnings); API/web build16 tasks PASS. All3 shared native-runtime files PASS66 assertions (35 grounding,6 live-stream,25 SamSession). Completion review pending final loaded proof.
--Local test review: PASS; Cloudflare review: initial P2 unbounded drain addressed and re-review PASS; final completion review pending.
+- 11 API dependency builds PASS (fresh main required rebuilding previously stale local dist artifacts).
+- API and web typechecks PASS.
+- Full API/web lint: 2 tasks PASS (2 preexisting web warnings); API/web build: 16 tasks PASS. All 3 shared native-runtime files PASS: 66 assertions (35 grounding, 6 live-stream, 25 SamSession).
+- Local test review: PASS; Cloudflare review: initial P2 unbounded drain addressed and re-review PASS; completion review PASS for implementation/local validation. The reviewer independently recomputed all cohort counts, unique run indices, case lists, CPU evidence and current source hashes.
 
 Draft+needs-human-review and coordinator exact-SHA merge approval remain mandatory. Original PR2724 production watch through2026-11-15 11:59:39.619UTC and PR2728 main Test timing tracker remain separate obligations.
