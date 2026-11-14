@@ -122,6 +122,8 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
     schema.vmTaskAdmissions,
     schema.vmProvisioningLeases,
     schema.nodes,
+    schema.capacityPools,
+    schema.capacityPoolCandidates,
     schema.workspaces,
     schema.tasks,
     schema.sessionSummaries,

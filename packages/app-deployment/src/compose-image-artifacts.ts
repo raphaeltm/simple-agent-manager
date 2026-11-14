@@ -77,16 +77,20 @@ function getDownloadExpiry(env: AppDeploymentEnv): number {
   );
 }
 
-function getS3Client(env: AppDeploymentEnv): S3Client {
+export function getS3Client(
+  env: AppDeploymentEnv,
+  requestChecksumCalculation: 'WHEN_REQUIRED' | 'WHEN_SUPPORTED' = 'WHEN_SUPPORTED'
+): S3Client {
   if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
     throw new Error(
       'R2 S3 credentials not configured (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CF_ACCOUNT_ID required)'
     );
   }
-  const key = `${env.CF_ACCOUNT_ID}:${env.R2_ACCESS_KEY_ID}`;
+  const key = `${env.CF_ACCOUNT_ID}:${env.R2_ACCESS_KEY_ID}:${requestChecksumCalculation}`;
   if (!s3Client || s3ClientKey !== key) {
     s3Client = new S3Client({
       region: 'auto',
+      requestChecksumCalculation,
       endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       credentials: {
         accessKeyId: env.R2_ACCESS_KEY_ID,

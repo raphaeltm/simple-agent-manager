@@ -43,8 +43,6 @@ const MOCK_PROJECT = {
   repository: 'acme/provider-native-compute-pool-project',
   defaultBranch: 'main',
   defaultVmSize: null,
-  defaultProvider: 'hetzner',
-  defaultLocation: 'fsn1',
   workspaceIdleTimeoutMs: null,
   status: 'active',
   createdAt: TIMESTAMP,

@@ -32,8 +32,6 @@ const MOCK_PROJECT = {
   userId: 'user-test-1',
   githubInstallationId: 'inst-1',
   defaultVmSize: 'medium',
-  defaultProvider: null,
-  defaultLocation: null,
   workspaceIdleTimeoutMs: 1800000,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',

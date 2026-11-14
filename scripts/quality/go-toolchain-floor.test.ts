@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-const patchedGoToolchain = 'go1.26.10';
+const patchedGoToolchain = 'go1.26.11';
 const goVersion = patchedGoToolchain.replace(/^go/, '');
 
 function readRepoFile(path: string): string {

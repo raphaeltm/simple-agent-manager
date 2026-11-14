@@ -137,6 +137,9 @@ export interface SaveAgentSettingsRequest {
 // Agent Effort
 // =============================================================================
 
+/** Longest model id accepted anywhere an agent model is set (settings, profiles, one-chat overrides). */
+export const AGENT_MODEL_MAX_LENGTH = 200;
+
 export const AGENT_EFFORT_LEVELS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type AgentEffort = (typeof AGENT_EFFORT_LEVELS)[number];
 
@@ -188,8 +191,6 @@ export interface AgentProfile {
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
   resourceRequirementsJson?: string | null;
-  provider: string | null;
-  vmLocation: string | null;
   workspaceProfile: string | null;
   /** Workspace runtime preference. null = auto-resolve from environment/profile/user tier. */
   runtime: AgentProfileRuntime | null;
@@ -222,8 +223,6 @@ export interface CreateAgentProfileRequest {
   vmSizeOverride?: string | null;
   resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
-  provider?: string | null;
-  vmLocation?: string | null;
   workspaceProfile?: string | null;
   /** Workspace runtime preference. null/omitted = automatic. */
   runtime?: AgentProfileRuntime | null;
@@ -250,8 +249,6 @@ export interface UpdateAgentProfileRequest {
   vmSizeOverride?: string | null;
   resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
-  provider?: string | null;
-  vmLocation?: string | null;
   workspaceProfile?: string | null;
   /** Workspace runtime preference. null = automatic. */
   runtime?: AgentProfileRuntime | null;
@@ -277,8 +274,6 @@ export interface ResolvedAgentProfile {
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
   resourceRequirementsJson?: string | null;
-  provider: string | null;
-  vmLocation: string | null;
   workspaceProfile: string | null;
   /** Workspace runtime preference. null = automatic. */
   runtime: AgentProfileRuntime | null;

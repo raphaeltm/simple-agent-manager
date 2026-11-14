@@ -4,11 +4,13 @@ import { X } from 'lucide-react';
 import type { MessageCommentAction } from '../../lib/api/comments';
 import { CommentComposer } from '../project-message-view/comments/CommentComposer';
 import { CommentThreadList } from '../project-message-view/comments/CommentThread';
-import { useLibraryFileComments } from './useLibraryFileComments';
+import type { LibraryFileComments } from './useLibraryFileComments';
 
 interface FileCommentPanelProps {
-  projectId: string;
-  fileId: string;
+  /** The file's threads, owned by the preview so it can paint their quotes too. */
+  fileComments: LibraryFileComments;
+  /** Thread to show focused: one whose quote was clicked, or a deep link's. */
+  focusedThreadId?: string | null;
   /** Text the user selected in the preview, attached to the thread they are about to create. */
   pendingQuote?: string | null;
   onClearPendingQuote?: () => void;
@@ -16,14 +18,14 @@ interface FileCommentPanelProps {
 }
 
 export function FileCommentPanel({
-  projectId,
-  fileId,
+  fileComments,
+  focusedThreadId,
   pendingQuote,
   onClearPendingQuote,
   onClose,
 }: FileCommentPanelProps) {
   const { comments, loading, error, mutationError, createThread, reply, resolve, reopen } =
-    useLibraryFileComments(projectId, fileId);
+    fileComments;
 
   // These reject on failure by design: CommentComposer catches, keeps the draft
   // text, and leaves the reason to be rendered from `mutationError` below.
@@ -75,6 +77,8 @@ export function FileCommentPanel({
         {!loading && !error && (
           <CommentThreadList
             comments={comments}
+            focusedCommentId={focusedThreadId}
+            scrollFocusedIntoView
             emptyMessage="No comments on this file yet."
             hideSendToAgent
             onReply={handleReply}

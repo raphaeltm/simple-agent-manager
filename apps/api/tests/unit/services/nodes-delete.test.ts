@@ -15,14 +15,25 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     batch: (queries: PromiseLike<unknown>[]) => Promise.all(queries),
     select: () => {
+      let table: unknown;
       const selectRows = async () => {
+        // No platform credentials exist in this harness; every other read is the node row.
+        if (
+          (table as Record<symbol, unknown>)?.[Symbol.for('drizzle:Name')] ===
+          'platform_credentials'
+        )
+          return [];
         selectCallCount += 1;
         beforeSelectReturn?.(selectCallCount);
         return nodeRows;
       };
       const builder = {
-        from: () => builder,
+        from: (from: unknown) => {
+          table = from;
+          return builder;
+        },
         where: () => builder,
+        orderBy: () => builder,
         limit: selectRows,
         then: <TResult1 = unknown[], TResult2 = never>(
           onfulfilled?: ((value: unknown[]) => TResult1 | PromiseLike<TResult1>) | null,
@@ -147,6 +158,8 @@ const { drizzle } = await import('drizzle-orm/d1');
 
 const ENV = {
   DATABASE: {},
+  ENVIRONMENT: 'staging',
+  SAM_INSTALLATION_ID: '0123456789abcdef0123456789abcdef',
 } as unknown as Parameters<typeof deleteNodeResources>[2];
 
 describe('node resource deletion services', () => {
@@ -304,6 +317,8 @@ describe('node resource deletion services', () => {
       runtimeTerminationConfirmedAt: expect.any(String),
       // Strict proof is never owner-attested (`isOwnerAttestedTermination`).
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
   });
 
@@ -331,6 +346,8 @@ describe('node resource deletion services', () => {
       runtimeTerminationConfirmedAt: expect.any(String),
       // Strict proof is never owner-attested (`isOwnerAttestedTermination`).
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
     expect(updateCalls).toContainEqual(
       expect.objectContaining({ status: 'deleted', healthStatus: 'stale' })
@@ -388,6 +405,8 @@ describe('node resource deletion services', () => {
       runtimeTerminationConfirmedAt: expect.any(String),
       // Strict proof is never owner-attested (`isOwnerAttestedTermination`).
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
   });
 
@@ -527,6 +546,8 @@ describe('node resource deletion services', () => {
     expect(updateCalls).toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
 
     nodeRows[0] = {
@@ -595,6 +616,8 @@ describe('node resource deletion services', () => {
     await expect(
       deleteNodeResourcesStrict('pool-node-1', 'user-1', {
         ...ENV,
+        // Without an installation identity no provider inventory can prove ownership.
+        SAM_INSTALLATION_ID: undefined,
         PROVISIONING_TIMEOUT_MS: '30000',
       })
     ).rejects.toThrow(/exact ownership scope is unavailable/);
@@ -760,7 +783,6 @@ describe('node resource deletion services', () => {
         placementCredentialVersion: null,
         placementCredentialFingerprint: null,
       },
-      'placementCredentialSource, placementCredentialReference',
     ],
     [
       // A null binding can mean EITHER an invalid source OR an absent reference. The
@@ -768,38 +790,53 @@ describe('node resource deletion services', () => {
       // to the wrong column (caught by CodeRabbit on this PR).
       'a valid source but no reference',
       { placementCredentialReference: null },
-      'placementCredentialReference',
     ],
-    [
-      'a reference but an unrecognised source',
-      { placementCredentialSource: 'nonsense' },
-      'placementCredentialSource',
-    ],
+    ['a reference but an unrecognised source', { placementCredentialSource: 'nonsense' }],
     [
       'a reference but no generation proof of either kind',
       { placementCredentialVersion: null, placementCredentialFingerprint: null },
-      'placementCredentialFingerprint and placementCredentialVersion',
     ],
-    ['full proof but no cloud provider', { cloudProvider: null }, 'cloudProvider'],
-  ])('fails closed for a node with %s', async (_label, overrides, expectedMissing) => {
-    nodeRows.push(managedPoolNode({ id: 'gated-node', status: 'destroying', ...overrides }));
+  ])(
+    'falls back to the owner credential for a node with %s, and preserves an instance without ownership proof',
+    async (_label, overrides) => {
+      nodeRows.push(managedPoolNode({ id: 'gated-node', status: 'destroying', ...overrides }));
+      // The current account answers for the recorded instance ID, but the instance carries none
+      // of this node's SAM ownership labels: it must never reach provider delete.
+      providerGetVM.mockResolvedValueOnce({ id: 'vm-pool-1', labels: {} });
 
-    const error = await deleteNodeResourcesStrict('gated-node', 'user-1', ENV).catch(
-      (err: unknown) => err as Error
+      const error = await deleteNodeResourcesStrict('gated-node', 'user-1', ENV).catch(
+        (err: unknown) => err as Error
+      );
+
+      expect(error.message).toContain('teardown_instance_ownership_mismatch');
+      // The reference is an ID rather than a secret, but strict teardown keeps it out of errors.
+      expect(error.message).not.toContain('credentials:project-cloud-1');
+      // The owner's current credential is resolved the way provisioning resolves it: same
+      // attribution user and project, no pinned binding.
+      expect(createProviderForUser).toHaveBeenCalledWith(
+        expect.anything(),
+        'pool-owner-1',
+        'test-key',
+        ENV,
+        'hetzner',
+        'project-1'
+      );
+      expect(providerGetVM).toHaveBeenCalledWith('vm-pool-1');
+      expect(providerDeleteVM).not.toHaveBeenCalled();
+      expect(deleteDNSRecord).not.toHaveBeenCalled();
+    }
+  );
+
+  it('refuses a node with full proof but no cloud provider before any credential lookup', async () => {
+    nodeRows.push(managedPoolNode({ id: 'gated-node', status: 'destroying', cloudProvider: null }));
+
+    await expect(deleteNodeResourcesStrict('gated-node', 'user-1', ENV)).rejects.toThrow(
+      /cloudProvider is missing/
     );
 
-    expect(error.message).toContain('exact provider credential binding is missing');
-    // The diagnostic names exactly which prerequisites are absent, and ONLY those (rule 49).
-    // Matching the parenthesised list in full is what makes this discriminating: a substring
-    // check would let the old conflated "source+reference" text satisfy a reference-only case.
-    expect(error.message).toContain(`(${expectedMissing})`);
-    // ...without echoing the reference. It is an ID rather than a secret, but strict teardown
-    // deliberately keeps it out of logs and error strings.
-    expect(error.message).not.toContain('credentials:project-cloud-1');
     expect(createProviderForUser).not.toHaveBeenCalled();
     expect(providerGetVM).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
-    expect(deleteDNSRecord).not.toHaveBeenCalled();
     expect(updateCalls).toEqual([]);
   });
 
@@ -840,7 +877,7 @@ describe('node resource deletion services', () => {
     );
   });
 
-  it('still refuses a version-only binding whose credential row has since rotated', async () => {
+  it('blocks a rotated version-only binding visibly when the owner has no current credential', async () => {
     nodeRows.push(
       managedPoolNode({
         id: 'pre-0142-rotated',
@@ -849,13 +886,14 @@ describe('node resource deletion services', () => {
       })
     );
     // The exact resolver rejects the stale version snapshot: every ciphertext write to
-    // `credentials` bumps `updated_at`, so a rotated row can no longer match.
+    // `credentials` bumps `updated_at`, so a rotated row can no longer match. With no current
+    // credential either, teardown is blocked with a named reason instead of guessing.
     // Deliberately not `...Once`: an unconsumed one-shot survives `vi.clearAllMocks()` and
     // would leak into the next test whenever this one short-circuits earlier than expected.
     createProviderForUser.mockImplementation(async () => null);
 
     await expect(deleteNodeResourcesStrict('pre-0142-rotated', 'user-1', ENV)).rejects.toThrow(
-      /credentials missing/
+      /teardown_credential_unavailable/
     );
 
     expect(providerDeleteVM).not.toHaveBeenCalled();
@@ -864,7 +902,7 @@ describe('node resource deletion services', () => {
     );
   });
 
-  it('does not use a rotated current account even when its instance ID collides', async () => {
+  it('does not delete a colliding instance in the current account that lacks the node labels', async () => {
     nodeRows.push(
       managedPoolNode({
         id: 'legacy-collision',
@@ -876,46 +914,99 @@ describe('node resource deletion services', () => {
         placementCredentialFingerprint: null,
       })
     );
-    providerGetVM.mockResolvedValueOnce({ id: 'vm-pool-1' });
+    providerGetVM.mockResolvedValueOnce({ id: 'vm-pool-1', labels: { node: 'someone-else' } });
 
     await expect(deleteNodeResourcesStrict('legacy-collision', 'user-1', ENV)).rejects.toThrow(
-      /exact provider credential binding is missing/
+      /teardown_instance_ownership_mismatch/
     );
 
-    expect(createProviderForUser).not.toHaveBeenCalled();
-    expect(providerGetVM).not.toHaveBeenCalled();
+    expect(providerGetVM).toHaveBeenCalledWith('vm-pool-1');
     expect(providerDeleteVM).not.toHaveBeenCalled();
   });
 
   it('does not delete or write proof after the bound credential row rotates to a colliding account', async () => {
     nodeRows.push(managedPoolNode({ id: 'rotated-row-collision', status: 'destroying' }));
-    createProviderForUser.mockImplementationOnce(async (...args: unknown[]) => {
-      expect(args[6]).toMatchObject({
-        credentialReference: 'credentials:project-cloud-1',
-        credentialFingerprint: 'sha256:account-a',
-      });
+    createProviderForUser.mockImplementation(async (...args: unknown[]) => {
       // The exact resolver returns null because the mutable row now contains account B.
-      return null;
+      if (args[6]) return null;
+      return {
+        provider: { deleteVM: providerDeleteVM, getVM: providerGetVM },
+        providerName: 'hetzner',
+        credentialSource: 'project',
+      };
     });
-    providerGetVM.mockResolvedValueOnce({ id: 'vm-pool-1' });
+    // Account B happens to hold an instance with the same ID; it is not this node's VM.
+    providerGetVM.mockResolvedValueOnce({ id: 'vm-pool-1', labels: {} });
 
     await expect(deleteNodeResourcesStrict('rotated-row-collision', 'user-1', ENV)).rejects.toThrow(
-      /credentials missing/
+      /teardown_instance_ownership_mismatch/
     );
 
-    expect(providerGetVM).not.toHaveBeenCalled();
+    expect(createProviderForUser.mock.calls[0]?.[6]).toMatchObject({
+      credentialReference: 'credentials:project-cloud-1',
+      credentialFingerprint: 'sha256:account-a',
+    });
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(updateCalls).not.toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
     });
   });
 
-  it('fails closed when strict deletion credentials are missing', async () => {
+  it("tries the owner user credential when a project-attributed node's project credential cannot see the VM", async () => {
+    nodeRows.push(managedPoolNode({ id: 'project-node', status: 'destroying' }));
+    const projectGetVM = vi.fn(async () => null);
+    const userDeleteVM = vi.fn(async () => {});
+    createProviderForUser.mockImplementation(async (...args: unknown[]) => {
+      if (args[6]) return null; // the pinned project credential no longer resolves
+      if (args[5] === 'project-1') {
+        // The project credential now points at another account.
+        return {
+          provider: { getVM: projectGetVM, deleteVM: providerDeleteVM },
+          providerName: 'hetzner',
+          credentialSource: 'project',
+        };
+      }
+      return {
+        provider: {
+          deleteVM: userDeleteVM,
+          getVM: async () => ({
+            id: 'vm-pool-1',
+            labels: {
+              managed: 'simple-agent-manager',
+              node: 'pool-node-1'.replace('pool-node-1', 'project-node'),
+              role: 'workspace',
+              env: 'staging',
+              installation: '0123456789abcdef0123456789abcdef',
+              incarnation: 'runtime-incarnation-pool-1',
+            },
+          }),
+        },
+        providerName: 'hetzner',
+        credentialSource: 'user',
+      };
+    });
+
+    await deleteNodeResourcesStrict('project-node', 'user-1', ENV);
+
+    expect(projectGetVM).toHaveBeenCalledWith('vm-pool-1');
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(userDeleteVM).toHaveBeenCalledWith('vm-pool-1');
+    expect(createProviderForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      'pool-owner-1',
+      'test-key',
+      ENV,
+      'hetzner',
+      null
+    );
+  });
+
+  it('blocks visibly when neither the pinned nor any current owner credential resolves', async () => {
     nodeRows.push(managedPoolNode({ id: 'node-1', status: 'destroying' }));
-    createProviderForUser.mockResolvedValueOnce(null);
+    createProviderForUser.mockImplementation(async () => null);
 
     await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).rejects.toThrow(
-      /credentials missing/
+      /teardown_credential_unavailable/
     );
 
     expect(providerGetVM).not.toHaveBeenCalled();
@@ -949,6 +1040,8 @@ describe('node resource deletion services', () => {
     expect(updateCalls).toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
     expect(persistError).toHaveBeenCalledWith(
       undefined,

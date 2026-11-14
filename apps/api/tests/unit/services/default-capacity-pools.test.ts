@@ -524,8 +524,6 @@ function defaultTaskPlacement(taskId: string, resourceRequirements = {}) {
     userId: 'user-1',
     project: {
       id: 'project-1',
-      defaultProvider: 'hetzner',
-      defaultLocation: 'fsn1',
       defaultVmSize: 'small',
     },
     credentialProjectPolicy: 'current-project-unless-inherited',
@@ -677,8 +675,6 @@ function vultrTaskStartPlacement(
     userId: 'user-1',
     project: {
       id: 'project-1',
-      defaultProvider: 'vultr',
-      defaultLocation: getDefaultLocationForProvider('vultr'),
       defaultVmSize: 'small',
     },
     credentialProjectPolicy: 'current-project-unless-inherited',
@@ -2383,8 +2379,6 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       project: {
         id: 'project-1',
-        defaultProvider: 'hetzner',
-        defaultLocation: 'fsn1',
         defaultVmSize: 'small',
       },
       explicit: { provider: 'hetzner', vmLocation: 'fsn1' },
@@ -2817,8 +2811,6 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       project: {
         id: 'project-1',
-        defaultProvider: 'hetzner',
-        defaultLocation: 'fsn1',
         defaultVmSize: 'small',
       },
       credentialProjectPolicy: 'current-project-unless-inherited',
@@ -2858,8 +2850,6 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       project: {
         id: 'project-1',
-        defaultProvider: 'hetzner',
-        defaultLocation: 'fsn1',
         defaultVmSize: 'small',
       },
       explicit: { provider: 'hetzner' },
@@ -2898,8 +2888,6 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       project: {
         id: 'project-1',
-        defaultProvider: 'hetzner',
-        defaultLocation: 'fsn1',
         defaultVmSize: 'small',
       },
       credentialProjectPolicy: 'current-project-unless-inherited',
@@ -2922,8 +2910,6 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       project: {
         id: 'project-1',
-        defaultProvider: 'hetzner',
-        defaultLocation: 'fsn1',
         defaultVmSize: 'small',
       },
       explicit: { vmLocation: explicitLocation },
@@ -3053,8 +3039,6 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       project: {
         id: 'project-1',
-        defaultProvider: 'hetzner',
-        defaultLocation: 'fsn1',
         defaultVmSize: 'small',
       },
       credentialProjectPolicy: 'current-project-unless-inherited',
@@ -3081,8 +3065,6 @@ describe('default capacity pool creation', () => {
       explicit: { vmLocation: 'ash' },
       project: {
         id: 'project-1',
-        defaultProvider: 'hetzner',
-        defaultLocation: 'fsn1',
         defaultVmSize: 'small',
       },
       credentialProjectPolicy: 'current-project-unless-inherited',
@@ -3147,8 +3129,6 @@ describe('default capacity pool creation', () => {
         userId: 'user-1',
         project: {
           id: 'project-1',
-          defaultProvider: 'hetzner',
-          defaultLocation: 'fsn1',
           defaultVmSize: 'small',
         },
         credentialProjectPolicy: 'current-project-unless-inherited',
@@ -3943,8 +3923,6 @@ describe('default capacity pool creation', () => {
         userId: 'user-1',
         project: {
           id: 'project-1',
-          defaultProvider: 'hetzner',
-          defaultLocation: 'fsn1',
           defaultVmSize: 'small',
         },
         credentialProjectPolicy: 'current-project-unless-inherited',
@@ -5942,8 +5920,6 @@ describe('workload-role eligibility contract', () => {
       userId: 'user-1',
       project: {
         id: 'project-1',
-        defaultProvider: 'hetzner',
-        defaultLocation: getDefaultLocationForProvider('hetzner'),
         defaultVmSize: 'small',
       },
       credentialProjectPolicy: 'current-project-unless-inherited',
@@ -6502,8 +6478,6 @@ describe('GCP managed compatibility copies', () => {
       userId: 'user-1',
       project: {
         id: 'project-1',
-        defaultProvider: 'gcp',
-        defaultLocation: 'us-central1-a',
         defaultVmSize: 'medium',
       },
       credentialProjectPolicy: 'current-project-unless-inherited',
@@ -7105,7 +7079,7 @@ describe('pool provider order (idea 01M6NXTF2RQ5QXHM7YZ4ZF0XBK)', () => {
       taskId: 'order-task',
       projectId: 'project-1',
       userId: 'user-1',
-      project: { id: 'project-1', defaultProvider: null, defaultVmSize: 'medium' },
+      project: { id: 'project-1', defaultVmSize: 'medium' },
       credentialProjectPolicy: 'current-project-unless-inherited',
       taskModeDefault: 'task',
       resourceRequirements: {},

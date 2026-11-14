@@ -38,7 +38,7 @@ Everything below — providers, VM sizes, the terminal, stop/restart/delete — 
 
 ## Where your workspaces run: Bring Your Own Cloud
 
-VM workspaces run on a real cloud VM. On the **hosted platform**, compute is usually provided for you, so you can start working without connecting anything. On a **self-hosted instance**, or when you want VMs billed directly to your own account, SAM follows a **Bring Your Own Cloud (BYOC)** model: you connect a cloud provider once, and every VM runs on your account.
+VM workspaces run on a real cloud VM. If your installation's administrator connected a shared cloud account, compute is provided for you, so you can start working without connecting anything. Otherwise, or when you want VMs billed directly to your own account, SAM follows a **Bring Your Own Cloud (BYOC)** model: you connect a cloud provider once, and every VM runs on your account.
 
 SAM supports seven providers:
 
@@ -61,7 +61,7 @@ SAM supports seven providers:
 
 To change your default cloud account later, connect the new one the same way (or select **Replace your … default** under the provider's accounts). **Make default** and **Use in projects…** are for agent accounts only; to give one project its own cloud account, open the project's **Settings → Accounts** and select **Use a cloud account only this project bills to**.
 
-Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
+Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one; which provider and region a workspace lands on is decided by the [compute pool](/docs/guides/compute-pools/) and the work's resource requirements. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
 
 :::note
 Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential from the project's **Accounts** tab (**Use a cloud account only this project bills to**) so shared work doesn't run on someone's personal account.
@@ -197,5 +197,5 @@ resource requirements.
 :::
 
 :::note
-Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud). On the hosted platform, compute is typically provided for you.
+Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported and a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud), unless your installation's administrator provides compute for you.
 :::

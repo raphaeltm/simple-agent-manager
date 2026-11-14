@@ -39,6 +39,7 @@ function setupDatabase(): Database.Database {
       '  is_active INTEGER NOT NULL, encrypted_token TEXT NOT NULL, iv TEXT NOT NULL,',
       '  created_at TEXT NOT NULL, updated_at TEXT NOT NULL',
       ');',
+      'CREATE TABLE capacity_sources (id TEXT PRIMARY KEY, credential_id TEXT);',
       'CREATE TABLE cc_credentials (',
       '  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,',
       '  encrypted_token TEXT NOT NULL, iv TEXT NOT NULL, is_active INTEGER NOT NULL,',

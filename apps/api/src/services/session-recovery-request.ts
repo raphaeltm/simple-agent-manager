@@ -149,8 +149,6 @@ export async function buildRecoveryPlacementInput(
           profileId: profile.id,
           agentType: profile.agentType,
           vmSizeOverride: profile.vmSizeOverride,
-          provider: profile.provider,
-          vmLocation: profile.vmLocation,
           workspaceProfile: profile.workspaceProfile,
           runtime: asAgentProfileRuntime(profile.runtime),
           devcontainerConfigName: profile.devcontainerConfigName,

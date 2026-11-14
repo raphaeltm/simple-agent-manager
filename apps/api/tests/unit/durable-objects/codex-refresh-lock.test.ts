@@ -1137,6 +1137,17 @@ describe('CodexRefreshLock', () => {
   });
 
   describe('MEDIUM #5 — rate limit', () => {
+    beforeEach(() => {
+      // Credential setup awaits real SQLite/crypto work. Keep its expected window
+      // and the request's window on one clock without faking async timeout timers.
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-11-14T08:00:00.000Z'));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     it('counts successful refresh requests in ctx.storage', async () => {
       const {
         do: doInstance,
@@ -1208,46 +1219,50 @@ describe('CodexRefreshLock', () => {
       expect(stored.count).toBe(3);
     });
 
-    it('resets counter when the window rolls over', async () => {
-      const windowSeconds = 60;
-      const now = Math.floor(Date.now() / 1000);
-      const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
-      const stalePastWindowStart = currentWindowStart - windowSeconds;
+    it.each([-1, 0, 1])(
+      'resets counter when the window rolls over at minute boundary offset %i ms',
+      async (offsetMs) => {
+        vi.setSystemTime(new Date(Date.parse('2026-11-14T08:00:00.000Z') + offsetMs));
+        const windowSeconds = 60;
+        const now = Math.floor(Date.now() / 1000);
+        const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
+        const stalePastWindowStart = currentWindowStart - windowSeconds;
 
-      const {
-        do: doInstance,
-        env,
-        ctx,
-      } = createDO(
-        {
-          RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
-          RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
-        },
-        {
-          'rate-limit:cc_credentials:cred-1': { windowStart: stalePastWindowStart, count: 3 },
-        }
-      );
-      await setupCredentialFound(env);
-      vi.mocked(fetch).mockResolvedValue(
-        new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      );
+        const {
+          do: doInstance,
+          env,
+          ctx,
+        } = createDO(
+          {
+            RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
+            RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
+          },
+          {
+            'rate-limit:cc_credentials:cred-1': { windowStart: stalePastWindowStart, count: 3 },
+          }
+        );
+        await setupCredentialFound(env);
+        vi.mocked(fetch).mockResolvedValue(
+          new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
 
-      const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
-      );
+        const res = await doInstance.fetch(
+          makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
+        );
 
-      expect(res.status).toBe(200);
-      const stored = ctx.storage._store.get('rate-limit:cc_credentials:cred-1') as {
-        count: number;
-        windowStart: number;
-      };
-      // New window — counter reset to 1, windowStart advanced.
-      expect(stored.windowStart).toBe(currentWindowStart);
-      expect(stored.count).toBe(1);
-    });
+        expect(res.status).toBe(200);
+        const stored = ctx.storage._store.get('rate-limit:cc_credentials:cred-1') as {
+          count: number;
+          windowStart: number;
+        };
+        // New window — counter reset to 1, windowStart advanced.
+        expect(stored.windowStart).toBe(currentWindowStart);
+        expect(stored.count).toBe(1);
+      }
+    );
 
     it('rate limits per credential — one credential at its limit does not block another', async () => {
       const windowSeconds = 60;

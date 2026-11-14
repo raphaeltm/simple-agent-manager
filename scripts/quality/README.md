@@ -117,3 +117,23 @@ Each layer is independently reversible:
 
 Never remove the current authoritative path until its replacement has passed the documented
 parity and rollout gates.
+
+### ProjectData row writers (optional cost attribution)
+
+Run `pnpm exec tsx scripts/quality/check-project-data-rows.ts` with
+`CF_PRODUCTION_DEBUGGING_TOKEN`, `CF_PRODUCTION_ACCOUNT_ID`, and `CF_ROW_USAGE_SERVICE`
+(the deployed API Worker name). Optional `CF_ROW_USAGE_PROJECT_ID` scopes one project.
+It queries Workers Observability calculations for the last complete UTC day, sums each
+ranked log slot grouped by its operation label, and merges labels across slots. Up to
+33 bounded read-only queries are made; failed, malformed, or missing telemetry prints
+`not available`, never zeros. This supplements `pnpm quality:cloudflare-cost`; it does
+not replace billed analytics or invoice reconciliation.
+
+The source is one `project_data.row_usage` log per active ProjectData object per reporting
+window, with `labels.rank0` through `labels.rank32` (32 named labels plus `other`), ranked
+by rows written. `droppedLabelCount` discloses labels merged into `other`. The admin
+setting `operations.projectDataRowUsageIntervalMs` defaults to 15 minutes and refreshes
+at object initialization and after flush. Accounting is memory-only: eviction loses an
+unfinished window, and platform log sampling/retention can reduce coverage. Cursor reads
+continued after another statement may be undercounted. Treat these as attribution of
+observed work, not a complete billed-usage ledger.

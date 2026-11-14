@@ -746,7 +746,7 @@ Picking a profile from the list doesn't help when its name has no spaces but has
 than a letter a–z or A–Z, a digit, or `_` (such as `-`, `.`, `é`, or `д`): the list inserts
 `@code-reviewer`, which these releases read as `@code`, so type `@"code-reviewer"` instead.
 Update to v2026.10.15 or later. Until then, write the `@` so a word doesn't directly follow it, for
-example `bob at example.com` or `@ dataclass`. The hosted service was fixed on 14 October.
+example `bob at example.com` or `@ dataclass`.
 :::
 
 ## The chat runs a different agent than its profile

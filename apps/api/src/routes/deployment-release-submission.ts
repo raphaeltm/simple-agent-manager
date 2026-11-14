@@ -119,6 +119,7 @@ export async function insertDeploymentReleaseWhilePlacementUnlocked(params: {
     SELECT 1 FROM deployment_publish_jobs j
     WHERE j.id = ? AND j.attempt = ? AND j.project_id = ? AND j.workspace_id = ?
       AND j.requested_by = ? AND j.environment_id = ?
+      AND coalesce(j.context_shadow, 0) = 0
       AND j.status NOT IN ('succeeded', 'failed', 'canceled', 'unknown') AND j.release_id IS NULL
   )`
     : '';
@@ -166,6 +167,7 @@ export async function insertDeploymentReleaseWhilePlacementUnlocked(params: {
     SET release_id = ?, release_version = ?, release_status = ?, updated_at = ?
     WHERE id = ? AND attempt = ? AND project_id = ? AND workspace_id = ?
       AND requested_by = ? AND environment_id = ?
+      AND coalesce(context_shadow, 0) = 0
       AND status NOT IN ('succeeded', 'failed', 'canceled', 'unknown') AND release_id IS NULL
       AND EXISTS (SELECT 1 FROM deployment_releases WHERE id = ?)`
   ).bind(

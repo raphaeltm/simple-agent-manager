@@ -1,24 +1,52 @@
 ---
-const getStartedUrl = 'https://www.simple-agent-manager.org/self-host/';
 import Footer from "../../../../packages/ui/src/brand/Footer.astro";
+import { SUPPORT_EMAIL } from '../data/enterprise';
+
+interface Props {
+  /** "support" swaps the closing card for the self-host + get-support message used on enterprise pages. */
+  variant?: 'default' | 'support';
+}
+
+const { variant = 'default' } = Astro.props;
+const supportEmail = SUPPORT_EMAIL;
 ---
 
 <section class="cta-section">
   <div class="container">
     <div class="cta-content sam-glass sam-glass-rim animate-on-scroll">
-      <h2 class="cta-title">Get your coding agents off your laptop</h2>
-      <p class="cta-subtitle">
-        SAM is open source. Deploy it to your Cloudflare account and connect your agent. Add a cloud provider when you want full environments on your own servers.
-      </p>
-      <div class="cta-actions">
-        <a href={getStartedUrl} class="sam-btn sam-btn--primary">
-          Deploy SAM
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-        </a>
-        <a href="https://github.com/raphaeltm/simple-agent-manager" class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">
-          Star on GitHub
-        </a>
-      </div>
+      {variant === 'support' ? (
+        <>
+          <h2 class="cta-title">Run it yourself, with help when you need it</h2>
+          <p class="cta-subtitle">
+            SAM is open-source software you deploy to your own Cloudflare account. There is no hosted
+            service to sign up for. If you are evaluating it for a team or stuck on setup, email support.
+          </p>
+          <div class="cta-actions">
+            <a href="/self-host/" class="sam-btn sam-btn--primary">
+              Self-host SAM
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </a>
+            <a href={`mailto:${supportEmail}`} class="sam-btn sam-btn--glass">Get support</a>
+          </div>
+          <p class="cta-note">{supportEmail}</p>
+        </>
+      ) : (
+        <>
+          <h2 class="cta-title">Get your coding agents off your laptop</h2>
+          <p class="cta-subtitle">
+            SAM is open source. Deploy it to your Cloudflare account and connect your agent. Add a cloud provider when you want full environments on your own servers.
+          </p>
+          <div class="cta-actions">
+            <a href="/self-host/" class="sam-btn sam-btn--primary">
+              Deploy SAM
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </a>
+            <a href="https://github.com/raphaeltm/simple-agent-manager" class="sam-btn sam-btn--glass" target="_blank" rel="noopener noreferrer">
+              Star on GitHub
+            </a>
+          </div>
+        </>
+      )}
     </div>
   </div>
 </section>
@@ -67,6 +95,7 @@ import Footer from "../../../../packages/ui/src/brand/Footer.astro";
   }
 
   .cta-title {
+    text-wrap: balance;
     font-family: var(--font-display);
     font-size: clamp(1.5rem, 4vw, 2.25rem);
     font-weight: 600;
@@ -80,6 +109,13 @@ import Footer from "../../../../packages/ui/src/brand/Footer.astro";
     color: var(--color-fg-muted);
     line-height: 1.7;
     margin-bottom: 32px;
+  }
+
+  .cta-note {
+    margin-top: 16px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-muted);
   }
 
   .cta-actions {

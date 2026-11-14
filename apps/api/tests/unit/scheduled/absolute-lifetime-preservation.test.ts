@@ -81,6 +81,8 @@ describe('absolute lifetime active-workspace preservation', () => {
       schema.tasks,
       schema.workspaces,
       schema.sessionSnapshots,
+      schema.capacityPools,
+      schema.capacityPoolCandidates,
       schema.agentSessions,
       schema.nodeHealthEvents,
     ]);

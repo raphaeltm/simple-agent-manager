@@ -234,7 +234,7 @@ describe('runNodeCleanupSweep', () => {
           .mocked(env.DATABASE.prepare)
           .mock.calls.some(
             ([sql]) =>
-              sql.includes('cleanup_backoff_until = ?') && sql.includes("status = 'destroying'")
+              sql.includes('cleanup_backoff_until = CASE') && sql.includes("status = 'destroying'")
           )
       ).toBe(true);
     });
@@ -277,8 +277,9 @@ describe('runNodeCleanupSweep', () => {
       .mocked(env.DATABASE.prepare)
       .mock.calls.map(([sql]) => sql)
       .filter((sql) => sql.includes('FROM nodes n'));
-    // The max-lifetime sweep runs two bounded pages (`max-lifetime-candidates.ts`).
-    expect(nodeCandidateQueries).toHaveLength(9);
+    // The max-lifetime sweep runs two bounded pages (`max-lifetime-candidates.ts`); the
+    // provider-deletion confirm phase adds one.
+    expect(nodeCandidateQueries).toHaveLength(10);
     expect(nodeCandidateQueries.every((sql) => sql.includes('cleanup_backoff_until'))).toBe(true);
   });
 
@@ -370,8 +371,14 @@ describe('runNodeCleanupSweep', () => {
         'user-1',
         env,
         {
+          preservedVm: undefined,
+          boundedStrandedRetirement: undefined,
           providerRequestContext: { signal: expect.any(AbortSignal) },
           requestDeadlineMs: expect.any(Number),
+          // Two-phase: start the provider deletion; a later tick confirms it.
+          providerDeletion: 'request',
+          providerDeletionConfirmMaxMs: 30 * 60 * 1000,
+          providerDeletionSendGraceMs: 15_000,
         }
       );
     });
@@ -466,6 +473,8 @@ describe('runNodeCleanupSweep', () => {
         stoppedWorkspacesQueued: 0,
         stoppedWorkspacesDeleted: 0,
         unhealthyHeld: 0,
+        providerDeletionsRequested: 0,
+        providerDeletionsPending: 0,
         unhealthyReleased: 0,
         cfContainersDestroyed: 0,
         incompatibleDestroyed: 0,

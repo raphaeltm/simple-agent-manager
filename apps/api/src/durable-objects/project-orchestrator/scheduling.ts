@@ -376,8 +376,8 @@ async function autoDispatchSchedulableTasks(
 
   // Fetch project info (needed for startTaskRunnerDO)
   const projectRow = await env.DATABASE.prepare(
-    `SELECT repository, installation_id, default_branch, default_vm_size, default_provider,
-            default_location, default_agent_type, default_workspace_profile, default_devcontainer_config_name,
+    `SELECT repository, installation_id, default_branch, default_vm_size,
+            default_agent_type, default_workspace_profile, default_devcontainer_config_name,
             task_execution_timeout_ms, node_cpu_threshold_percent,
             node_memory_threshold_percent, warm_node_timeout_ms
      FROM projects WHERE id = ?`
@@ -388,8 +388,6 @@ async function autoDispatchSchedulableTasks(
       installation_id: string;
       default_branch: string;
       default_vm_size: string | null;
-      default_provider: string | null;
-      default_location: string | null;
       default_agent_type: string | null;
       default_workspace_profile: string | null;
       default_devcontainer_config_name: string | null;
@@ -427,8 +425,6 @@ async function autoDispatchSchedulableTasks(
           project: {
             id: projectId,
             defaultVmSize: projectRow.default_vm_size,
-            defaultProvider: projectRow.default_provider,
-            defaultLocation: projectRow.default_location,
             defaultWorkspaceProfile: projectRow.default_workspace_profile,
             defaultDevcontainerConfigName: projectRow.default_devcontainer_config_name,
             defaultAgentType: projectRow.default_agent_type,

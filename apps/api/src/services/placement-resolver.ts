@@ -188,18 +188,12 @@ function resolvePlacementReservation(
 export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskStartPlacement {
   const profile = input.profile ?? null;
   const explicit = input.explicit ?? {};
-  const provider = resolveProvider(explicit.provider, profile, input.project);
+  const provider = resolveProvider(explicit.provider);
   const preferredVmLocation =
     explicit.vmLocation == null
       ? resolvePreferredVmLocation(input.preferredVmLocation, provider)
       : null;
-  const vmLocation = resolveVmLocation(
-    explicit.vmLocation,
-    preferredVmLocation,
-    profile,
-    input.project,
-    provider
-  );
+  const vmLocation = resolveVmLocation(explicit.vmLocation, preferredVmLocation, provider);
   const workspaceProfile = resolveWorkspaceProfile(
     explicit.workspaceProfile,
     profile,

@@ -18,14 +18,16 @@ import {
   credentialScopeFromSource,
   DIALECT_VALUES,
 } from '@simple-agent-manager/shared';
-import { and, eq, isNull } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
-import * as schema from '../db/schema';
-import { hasUserCCData, lazyBackfillIfNeeded } from './composable-credentials/lazy-backfill';
+import { lazyBackfillIfNeeded } from './composable-credentials/lazy-backfill';
 import type { ProfileCredentialContext } from './composable-credentials/profile-context';
 import { explainForConsumer, resolveForConsumer } from './composable-credentials/resolve';
 import { decrypt } from './encryption';
+import {
+  loadLegacyAgentCredentialRows,
+  pickLegacyAgentCredential,
+} from './legacy-agent-credentials';
 import { getPlatformAgentCredential } from './platform-credentials';
 
 /** The resolved agent credential, in the shape the agent-key callback returns. */
@@ -74,37 +76,6 @@ export async function getDecryptedAgentKey(
 
   // --- Fallback: legacy single-table lookup ----------------------------------
   return resolveAgentKeyLegacy(db, userId, agentType, encryptionKey, projectId);
-}
-
-/** Admission reads current selection without lazy backfill or credential writes. */
-export async function getSelectedAgentCredentialReference(
-  db: ReturnType<typeof drizzle>,
-  userId: string,
-  agentType: string,
-  encryptionKey: string,
-  projectId: string | null,
-  profile?: ProfileCredentialContext | null
-): Promise<string | null> {
-  const trace = await explainForConsumer(
-    db,
-    userId,
-    encryptionKey,
-    { kind: 'agent', agentType },
-    projectId,
-    profile
-  );
-  if (trace.halted) return null;
-  const resolved = trace.resolved;
-  if (resolved && resolved.source !== 'platform' && resolved.source !== 'platform-proxy') {
-    return mapResolvedToLegacy(resolved)?.credentialReference ?? null;
-  }
-  // Match lazy-backfill precedence without performing credential writes. Once
-  // CC data exists, a platform-only result is authoritative, just as injection.
-  if (!resolved || !(await hasUserCCData(db, userId))) {
-    const legacy = await resolveAgentKeyLegacy(db, userId, agentType, encryptionKey, projectId);
-    if (legacy && legacy.credentialSource !== 'platform') return legacy.credentialReference;
-  }
-  return null;
 }
 
 /**
@@ -179,7 +150,7 @@ async function resolveAgentKeyViaCC(
 /**
  * Map a CC ResolvedEnvironment to the legacy getDecryptedAgentKey return shape.
  */
-function mapResolvedToLegacy(
+export function mapResolvedToLegacy(
   resolved: NonNullable<Awaited<ReturnType<typeof resolveForConsumer>>>
 ): ResolvedAgentKey | null {
   // Platform proxy — no raw credential to return
@@ -264,62 +235,21 @@ async function resolveAgentKeyLegacy(
   encryptionKey: string,
   projectId?: string | null
 ): Promise<ResolvedAgentKey | null> {
-  // 1. Project-scoped credential (Rule 28: inactive blocks fallthrough)
-  if (projectId) {
-    const projectCreds = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          eq(schema.credentials.projectId, projectId),
-          eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, agentType)
-        )
-      )
-      .limit(1);
-
-    const projectCred = projectCreds[0];
-    if (projectCred) {
-      if (projectCred.isActive) {
-        const credential = await decrypt(projectCred.encryptedToken, projectCred.iv, encryptionKey);
-        return {
-          credential,
-          credentialKind: projectCred.credentialKind as CredentialKind,
-          credentialSource: 'project',
-          credentialScope: 'project',
-          credentialReference: `credentials:${projectCred.id}`,
-          credentialProvider: agentType,
-        };
-      }
-      return null;
-    }
-  }
-
-  // 2. User-scoped credential
-  const userCreds = await db
-    .select()
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        isNull(schema.credentials.projectId),
-        eq(schema.credentials.credentialType, 'agent-api-key'),
-        eq(schema.credentials.agentType, agentType),
-        eq(schema.credentials.isActive, true)
-      )
-    )
-    .limit(1);
-
-  const foundCred = userCreds[0];
-  if (foundCred) {
-    const credential = await decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
+  // 1. Project-scoped credential (Rule 28: inactive blocks fallthrough), 2. user-scoped.
+  const pick = pickLegacyAgentCredential(
+    await loadLegacyAgentCredentialRows(db, userId, projectId, agentType),
+    agentType,
+    projectId
+  );
+  if (pick?.kind === 'halted') return null;
+  if (pick) {
+    const credential = await decrypt(pick.row.encryptedToken, pick.row.iv, encryptionKey);
     return {
       credential,
-      credentialKind: foundCred.credentialKind as CredentialKind,
-      credentialSource: 'user',
-      credentialScope: 'user',
-      credentialReference: `credentials:${foundCred.id}`,
+      credentialKind: pick.row.credentialKind as CredentialKind,
+      credentialSource: pick.tier,
+      credentialScope: pick.tier,
+      credentialReference: `credentials:${pick.row.id}`,
       credentialProvider: agentType,
     };
   }

@@ -45,7 +45,6 @@ const project = {
   githubInstallationId: 'installation-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-09-26T00:00:00Z',

@@ -36,7 +36,13 @@ const { mocks, authState } = vi.hoisted(() => ({
   getLibraryFile: vi.fn(),
   updateFileTags: vi.fn(),
   moveLibraryFile: vi.fn(),
+  listLibraryFileComments: vi.fn(),
   },
+}));
+
+vi.mock('../../../src/lib/api/comments', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/comments')>()),
+  listLibraryFileComments: mocks.listLibraryFileComments,
 }));
 
 vi.mock('../../../src/lib/api/library', async (importOriginal) => ({
@@ -362,6 +368,40 @@ describe('ProjectLibrary (client-side index)', () => {
     // Liveness: the sweep really is in flight, and the listing has not rendered.
     expect(mocks.listLibraryFiles).toHaveBeenCalled();
     expect(screen.queryByPlaceholderText(/search/i)).not.toBeInTheDocument();
+  });
+
+  it('opens a comment link on the file with its comments panel on that thread', async () => {
+    mocks.listLibraryFiles.mockReturnValue(new Promise(() => {}));
+    const { tags, ...file } = makeFile({ id: 'f1', filename: 'notes.txt' });
+    mocks.getLibraryFile.mockResolvedValue({ file, tags });
+    const thread = (id: string, body: string) => ({
+      id,
+      clientId: null,
+      projectId: 'proj-test',
+      fileId: 'f1',
+      anchor: { kind: 'library_file', fileId: 'f1', quote: null },
+      author: { id: 'user-2', name: 'Grace Hopper', kind: 'human' },
+      body,
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      status: 'open',
+      replies: [],
+    });
+    mocks.listLibraryFileComments.mockResolvedValue({
+      threads: [thread('t0', 'An older note.'), thread('t1', 'Is this current?')],
+      hasMore: false,
+    });
+
+    renderLibrary('/projects/proj-test/library?preview=f1&commentThread=t1');
+
+    expect(await screen.findByRole('dialog', { name: 'notes.txt' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'File comments' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(document.querySelector('[data-comment-focused="true"]')?.textContent).toContain(
+        'Is this current?',
+      ),
+    );
+    expect(screen.getByText('An older note.')).toBeInTheDocument();
   });
 
   it('opens a row without reading its metadata again, and closes back to the list', async () => {

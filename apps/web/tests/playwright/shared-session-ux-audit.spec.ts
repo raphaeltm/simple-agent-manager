@@ -31,8 +31,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-1',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
-  defaultLocation: null,
   defaultWorkspaceProfile: 'full',
   defaultDevcontainerConfigName: null,
   multiplayerActive: true,

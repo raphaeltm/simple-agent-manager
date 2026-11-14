@@ -2837,6 +2837,34 @@ type PendingArchiveSearchDocument = {
   createdAt: number;
 };
 
+// Every projection writer (including resumable repair) uses one of these two
+// deterministic identities. Seek the existing UNIQUE(projection_id) index instead
+// of scanning all documents of the session once for every grouped row.
+export const ARCHIVE_SEARCH_EQUIVALENT_DOCUMENT_SQL = `SELECT 1 AS present
+  FROM project_data_archive_search_documents
+  WHERE projection_id IN (?, ?) AND session_id = ? AND document_id = ? AND content = ?
+  LIMIT 1`;
+
+function hasEquivalentArchiveSearchDocument(
+  sql: SqlStorage,
+  sessionId: string,
+  documentId: string,
+  content: string
+): boolean {
+  return (
+    sql
+      .exec(
+        ARCHIVE_SEARCH_EQUIVALENT_DOCUMENT_SQL,
+        `raw:${sessionId}:${documentId}`,
+        `grouped:${sessionId}:${documentId}`,
+        sessionId,
+        documentId,
+        content
+      )
+      .toArray().length > 0
+  );
+}
+
 function clearArchiveSearchProjection(sql: SqlStorage, sessionId: string, pageRows: number): void {
   let cursor = 0;
   for (;;) {
@@ -3104,15 +3132,12 @@ function commitCompactSearchProjectionChunk(
         strictInteger(groupedRow.rowid, 'archive_search.grouped_rowid'),
         content
       );
-      const equivalent = sql
-        .exec(
-          `SELECT 1 AS present FROM project_data_archive_search_documents
-           WHERE session_id = ? AND document_id = ? AND content = ? LIMIT 1`,
-          input.sessionId,
-          documentId,
-          content
-        )
-        .toArray()[0];
+      const equivalent = hasEquivalentArchiveSearchDocument(
+        sql,
+        input.sessionId,
+        documentId,
+        content
+      );
       if (!equivalent) {
         commitDocument({
           projectionId: `grouped:${input.sessionId}:${documentId}`,
@@ -3288,17 +3313,7 @@ async function rebuildArchiveSearchProjection(
   forEachGroupedRowPaged(sql, sessionId, pageRows, (row) => {
     const documentId = strictString(row.id, 'archive_search.grouped_id');
     const content = strictString(row.content, 'archive_search.grouped_content');
-    const equivalent = sql
-      .exec(
-        `SELECT 1 AS present
-         FROM project_data_archive_search_documents
-         WHERE session_id = ? AND document_id = ? AND content = ?
-         LIMIT 1`,
-        sessionId,
-        documentId,
-        content
-      )
-      .toArray()[0];
+    const equivalent = hasEquivalentArchiveSearchDocument(sql, sessionId, documentId, content);
     if (equivalent) return;
     insertArchiveSearchDocument(
       sql,
@@ -3410,9 +3425,20 @@ function verifyArchiveSearchProjection(
       .toArray();
     for (const row of rows) {
       lastRowid = strictInteger(row.rowid, 'archive_search.rowid');
+      const projectionId = strictString(row.projection_id, 'archive_search.projection_id');
+      const documentId = strictString(row.document_id, 'archive_search.document_id');
+      if (
+        projectionId !== `raw:${sessionId}:${documentId}` &&
+        projectionId !== `grouped:${sessionId}:${documentId}`
+      ) {
+        throw new ProjectDataArchiveInvariantError(
+          'archive_search_projection_identity_mismatch',
+          'Archive search projection has a noncanonical document identity'
+        );
+      }
       hasher.update({
-        projection_id: strictString(row.projection_id, 'archive_search.projection_id'),
-        document_id: strictString(row.document_id, 'archive_search.document_id'),
+        projection_id: projectionId,
+        document_id: documentId,
         session_id: strictString(row.session_id, 'archive_search.session_id'),
         role: strictString(row.role, 'archive_search.role'),
         content: strictString(row.content, 'archive_search.content'),
@@ -3707,15 +3733,7 @@ async function repairArchiveSearchProjectionStep(
   for (const row of groupedRows) {
     const documentId = strictString(row.id, 'archive_search.grouped_id');
     const content = strictString(row.content, 'archive_search.grouped_content');
-    const equivalent = sql
-      .exec(
-        `SELECT 1 AS present FROM project_data_archive_search_documents
-         WHERE session_id = ? AND document_id = ? AND content = ? LIMIT 1`,
-        sessionId,
-        documentId,
-        content
-      )
-      .toArray()[0];
+    const equivalent = hasEquivalentArchiveSearchDocument(sql, sessionId, documentId, content);
     if (!equivalent) {
       commitDocument({
         projectionId: `grouped:${sessionId}:${documentId}`,

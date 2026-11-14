@@ -33,6 +33,8 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
       schema.workspaces,
       schema.tasks,
       schema.sessionSnapshots,
+      schema.capacityPools,
+      schema.capacityPoolCandidates,
     ]);
     sqlite.exec(
       readFileSync(

@@ -128,6 +128,50 @@ function assertNewCatalogStorage(db: DatabaseSync, poolId: string): void {
 }
 
 describe('catalog publication on the current real migration chain', () => {
+  it('applies new catalog storage after main already applied later task and deletion migrations', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec('PRAGMA foreign_keys=ON');
+      apply(
+        db,
+        migrations.filter((filename) => filename !== catalogMigration)
+      );
+      seedIdentity(db);
+      insertPool(db, 'published', 'configured-ready', 'complete');
+      insertPool(db, 'bootstrap', 'migration-pending', 'pending');
+      insertArchive(db, 'late-catalog-archive');
+      db.exec(`
+        INSERT INTO tasks (id, project_id, user_id, title, status, agent_configuration_id, created_by)
+          VALUES ('task', 'project', 'owner', 'Existing run', 'queued', 'selected-account', 'owner');
+        INSERT INTO nodes
+          (id, user_id, name, status, provider_instance_id,
+           provider_deletion_requested_at, provider_deletion_json)
+          VALUES ('node', 'owner', 'Deletion in flight', 'stopping', 'provider-instance',
+                  '2026-11-14T19:00:00Z', '{"ticket":"existing-delete"}');
+      `);
+      const tasksBefore = db.prepare('SELECT * FROM tasks').all();
+      const nodesBefore = db.prepare('SELECT * FROM nodes').all();
+      const archiveBefore = db.prepare('SELECT * FROM project_data_archive_migrations').all();
+
+      apply(db, [catalogMigration]);
+
+      expect(db.prepare('SELECT * FROM tasks').all()).toEqual(tasksBefore);
+      expect(db.prepare('SELECT * FROM nodes').all()).toEqual(nodesBefore);
+      expect(db.prepare('SELECT * FROM project_data_archive_migrations').all()).toEqual(
+        archiveBefore
+      );
+      expect(
+        db.prepare('SELECT id, catalog_published_at FROM capacity_pools ORDER BY id').all()
+      ).toEqual([
+        { id: 'bootstrap', catalog_published_at: null },
+        { id: 'published', catalog_published_at: '2026-11-12T10:00:00.000Z' },
+      ]);
+      assertNewCatalogStorage(db, 'published');
+    } finally {
+      db.close();
+    }
+  });
+
   it('supports a clean install with archive reclaim and private catalog staging', () => {
     const db = new DatabaseSync(':memory:');
     try {

@@ -9,10 +9,7 @@ import {
   writeImmutableJson,
 } from '../../src/archive/compact-r2';
 import type { ProjectDataArchiveChunk } from '../../src/archive/contract';
-import {
-  canonicalRowsSha256,
-  createCanonicalRowsChainHasher,
-} from '../../src/archive/hashing';
+import { canonicalRowsSha256, createCanonicalRowsChainHasher } from '../../src/archive/hashing';
 import { runMigrations } from '../../src/do/migrations';
 import { createSqlStorage } from '../fixtures/sql-storage';
 
@@ -168,12 +165,9 @@ describe('compact archive migration compatibility', () => {
     'preserves exact paging, tools, search and default-size recovery for $count rows ($metadataBytes byte metadata)',
     { timeout: 30_000 },
     async ({ count, metadataBytes }) => {
-      const archive =
-        await import('../../src/do/archive-sharding');
-      const { getMessages } =
-        await import('../../src/do/messages');
-      const { PROJECT_DATA_ARCHIVE_TABLES } =
-        await import('../../src/archive/contract');
+      const archive = await import('../../src/do/archive-sharding');
+      const { getMessages } = await import('../../src/do/messages');
+      const { PROJECT_DATA_ARCHIVE_TABLES } = await import('../../src/archive/contract');
       const sourceDb = new Database(':memory:');
       const targetDb = new Database(':memory:');
       const source = createSqlStorage(sourceDb);
@@ -358,6 +352,7 @@ describe('compact archive migration compatibility', () => {
             )
             .toArray()[0]?.count ?? 0
         );
+        if (metadataBytes) expect(rawChunkCount).toBeGreaterThan(1);
         // Fresh seal consumes the per-chunk verification receipts and the
         // projection built during copy; it does not traverse R2 again.
         vi.mocked(bucket.get).mockClear();

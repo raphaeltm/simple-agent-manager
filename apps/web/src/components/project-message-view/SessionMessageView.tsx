@@ -155,7 +155,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     messageComments.comments
   );
 
-  const { jumpToMessage, highlightedRowId } = useConversationJump({
+  const { jumpToMessage, highlightedRowId, rowIdFor } = useConversationJump({
     sessionId,
     displayItems,
     virtuosoRef,
@@ -217,6 +217,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     projectId,
     onRequestCommentSurface: openComments,
     focusCommentThreadId,
+    commentSurfaceOpen: showComments,
+    rowIdFor,
   });
   const showDockedCommentRail = showComments && commentUi.usesDesktopRail;
   const showMobileCommentsDrawer = showComments && !commentUi.usesDesktopRail;

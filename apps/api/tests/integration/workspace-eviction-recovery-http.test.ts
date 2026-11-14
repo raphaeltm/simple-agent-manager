@@ -91,7 +91,7 @@ describe('workspace eviction HTTP recovery vertical slice', () => {
       env,
       expect.objectContaining({
         taskId: 'source-task',
-        vmLocation: 'hel1',
+        explicitVmLocation: false,
         excludedNodeId: 'node-1',
         evictionFence: {
           workspaceId: 'workspace-1',
@@ -101,6 +101,9 @@ describe('workspace eviction HTTP recovery vertical slice', () => {
       }),
       { reactivate: true }
     );
+    // The project row still carries a retired default_location ('hel1'); the compute pool now
+    // decides, so recovery must not rank hosts by it.
+    expect(mocks.startTaskRunnerDO.mock.calls[0]?.[1]).not.toMatchObject({ vmLocation: 'hel1' });
     expect(sqlite.prepare('SELECT id, status, triggered_by FROM tasks').get()).toEqual({
       id: 'source-task',
       status: 'queued',

@@ -449,6 +449,74 @@ describe('readiness RPC interleaving', () => {
     });
   });
 
+  it('rolls back wake activation when local readiness fails, then retries the same accepted work once', async () => {
+    const { stub, input } = await fixture('vm');
+    await stub.sleepSession(input.chatSessionId);
+    await runInDurableObject(stub, async (instance, state) => {
+      const internal = instance as unknown as { sql: SqlStorage };
+      const original = internal.sql;
+      const inbox = () =>
+        state.storage.sql.exec('SELECT * FROM session_inbox ORDER BY id').toArray();
+      const accepted = () =>
+        inbox().map(({ id, prompt_message_id, target_session_id, content, expires_at }) => ({
+          id,
+          prompt_message_id,
+          target_session_id,
+          content,
+          expires_at,
+        }));
+      const before = inbox();
+      const identity = accepted();
+      let statusAtFailure: unknown;
+      internal.sql = new Proxy(original, {
+        get(target, key) {
+          if (key === 'exec')
+            return (query: string, ...values: unknown[]) => {
+              if (/^\s*INSERT INTO session_wake_readiness\b/.test(query)) {
+                statusAtFailure = state.storage.sql
+                  .exec('SELECT status FROM chat_sessions WHERE id = ?', input.chatSessionId)
+                  .toArray()[0]?.status;
+                throw new Error('Injected local readiness failure');
+              }
+              return target.exec(query, ...values);
+            };
+          const value = Reflect.get(target, key, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      try {
+        await expect(instance.signalSessionWakeReady(input)).rejects.toThrow(
+          'Injected local readiness failure'
+        );
+        // The failure follows a real activation write, which the real SQLite transaction undoes.
+        expect(statusAtFailure).toBe('active');
+        expect(
+          state.storage.sql
+            .exec('SELECT status FROM chat_sessions WHERE id = ?', input.chatSessionId)
+            .toArray()
+        ).toEqual([{ status: 'sleeping' }]);
+        expect(state.storage.sql.exec('SELECT * FROM session_wake_readiness').toArray()).toEqual(
+          []
+        );
+        expect(inbox()).toEqual(before);
+
+        internal.sql = original;
+        expect(await instance.signalSessionWakeReady(input)).toBe(2);
+        expect(await instance.getSession(input.chatSessionId)).toMatchObject({ status: 'active' });
+        expect(accepted()).toEqual(identity);
+        expect(
+          state.storage.sql.exec('SELECT fence FROM session_wake_readiness').toArray()
+        ).toEqual([{ fence: JSON.stringify(input.fence) }]);
+        const released = inbox();
+        expect(await instance.signalSessionWakeReady(input)).toBe(0);
+        expect(inbox()).toEqual(released);
+      } finally {
+        internal.sql = original;
+        await state.storage.deleteAlarm();
+      }
+    });
+  });
+
   it('exact restored replay rejects stale attempts and terminal tasks without activating the chat', async () => {
     const { stub, input } = await fixture('vm');
     await stub.sleepSession(input.chatSessionId);

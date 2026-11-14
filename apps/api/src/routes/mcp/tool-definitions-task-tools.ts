@@ -237,12 +237,12 @@ export const TASK_LIFECYCLE_TOOLS = [
         provider: {
           type: 'string',
           description:
-            'Cloud provider for auto-provisioned nodes (e.g., "hetzner", "scaleway", "gcp", "vultr", "digitalocean"). Defaults to profile or project default.',
+            'Cloud provider for auto-provisioned nodes (e.g., "hetzner", "scaleway", "gcp", "vultr", "digitalocean"). Omit to let the effective compute pool choose; set only to restrict this one task to a provider.',
         },
         vmLocation: {
           type: 'string',
           description:
-            'VM location/datacenter. Must be valid for the selected provider. Defaults to profile or project default.',
+            'VM location/datacenter. Must be valid for the selected provider. Omit to let the effective compute pool choose; set only to restrict this one task to a location.',
         },
         missionId: {
           type: 'string',
