@@ -49,7 +49,7 @@ Usage-derived, not invoice: window November 1–13; 18.41M DO SQL writes and 7.5
 - [x] Delete each new guard, observe intended failing test, restore and record.
 - [x] Rebase on main after #2727; push early/often; preserve unrelated .codex/config.toml.
 - [x] Lint/typecheck/test/build, migration safety, local specialist reviews and task-completion validator.
-- [ ] Coordinate staging ownership; deploy and verify real producer/subscription wake on staging.
+- [x] Coordinate staging ownership; deploy and verify real producer/subscription wake on staging.
 - [ ] PR, CI, CodeRabbit best-effort wait, authorized merge, production deploy/health smoke.
 - [ ] Add idea note with before/after counts and product-reader decision; check item C only after deployment.
 
@@ -86,7 +86,6 @@ Expired-protected control now passes: with 2,000 expired protected events ordere
 
 Identity-hint mutation proof also passed: removing the PK hint makes the actual multi-ID DELETE plan assertion fail, showing `SEARCH project_events ... idx_project_events_project_received (project_id=?)` instead of the required `sqlite_autoindex_project_events_1 (id=?)`. Restored source and rebuilt before rebase/final tests.
 
-
 ### Final rebased validation and alarm recovery
 
 Rebased onto main after #2727 merged (`a7d05239d`) and rebuilt workspace dependencies so the producer tests include the new system-owner exclusion. Root lint, typecheck, build and full test suite passed (39 test tasks; API 15,166, web 5,228, project-data 528 tests). Subsequent scoped project-data tests (528), API/project-data lint and API typecheck pass after the alarm recovery change. Migration safety passes. The existing unrelated `.codex/config.toml` edit is preserved outside commits.
@@ -96,7 +95,6 @@ Admissions also repair missing alarm section memory when an existing due wake be
 Final rebased three-file workerd run passed **19/19** (154s), covering cost plans, real producer CI wakes, alarm recovery and the #2727 system-owner exclusion controls. All four valid mutation red proofs were restored before the run.
 
 Hosted CI [43601939585](https://github.com/raphaeltm/simple-agent-manager/actions/runs/43601939585) passed on exact head `0b6df632c2d8203655a805af0ac596349d77b2f5`, including every Durable Object worker shard, migration safety, full tests, lint, typecheck and build. Staging is coordinated behind the GCP task and then the urgent rollout-gate fix; no owned staging fixtures have been created yet.
-
 
 ### Cost regression post-mortem
 
@@ -108,10 +106,20 @@ Why it was missed: semantic unit coverage checked stored records and deliveries 
 
 Release gates remain pending below; archiving the implementation record after validation does not assert that staging or production deployment has completed.
 
-
 ### Release checkpoint (2026-11-14 15:32Z)
 
 Own staging run [43607699550](https://github.com/raphaeltm/simple-agent-manager/actions/runs/43607699550) is running implementation candidate `ac986afb6f7893501fa0a0953194ab0df968ecc6`; API Worker deployment began 15:29Z after queue/build. Slot ownership was released by the rollout-fix task after its run43605665349 succeeded. No owned staging task/subscription fixtures have been created yet. Branch additionally merged main `3c5921849` (#2732 rollout-gate fix) as `fd9f29607`, preserving identical project-event runtime changes. Production success of that fix remains a merge prerequisite. Signed webhook/wake/browser verification, PR and production release gates are still pending.
 
-
 Staging fixture ownership checkpoint (15:35Z): marker `github-trigger-audit-d9f62f2c-5439-4f26-97c4-5063d805c9f2`, task `01M7DB4RF839Z6698MH7HP5316`, session `8cb1ad00-835c-459c-b3cf-582564c77683`, project `01KJNR9R3TEN3KX1ETE33852R8`, signed delivery ID `1cfef24c-8fd7-497d-b941-1fe8bb5fc1fa`. One bounded lightweight conversation task, no sizing override. Subscription filter github/issues.opened/issue14112026, expiry45minutes; no GitHub trigger fanout. These are nonsecret ownership IDs for cleanup/recovery, not proof of successful delivery. Worker version `1e99a7af-d010-4b7a-8f8b-1490d471437b` serves candidateac986afb6 at100% (Cloudflare deployment `0287a610-8c46-4558-b7ba-ed80fed94c08`, managed read job `sx-622587f51ebc1b28ae30fbc17dcb0a79928ac36c59e8e448ba18c0b9e50c90dd`). Rollout gate still pending.
+
+### Successful staging wake proof (2026-11-14 16:01Z)
+
+Deploy43607699550 completed SUCCESS, including rollout gate, health and browser smoke. First fixture was interrupted when its shared Hetzner node was deleted by its owner; D1 task_status_events records SYSTEM cancellation at15:38:15.775Z. This was not a container rollout failure. Original fixture fully deleted; unknown caller attribution is tracked separately in idea01M7DC69DF3KX038RC5Y3A99NM, with parent/GCP owner reporting no related deletes.
+
+The single controlled retry used task01M7DC3GNCMCY395T11C1F5ASD, chatc747752d-c2a7-4024-bf57-a4afbd88a23c, workspace01M7DCCARPFH2GAB01GTZXX888, auto-node01M7DC3RSRMMGSYPP6FGNW0FMT, subscriptionce9589a1-1dc2-4c10-9e72-07a6fb913e31. Signed sender [43613111984](https://github.com/raphaeltm/simple-agent-manager/actions/runs/43613111984) passed and posted delivery43a9e80c-5bd4-4209-a725-a21fa14b105a twice (HTTP200 each). Exactly one batch703340a4-7c1f-4aaa-b5b1-d150287b018e was delivered to the real runtime and **acked**, with agent get_event/ack calls and a visible WOKE reply. Ack timestamp1794672012260 (16:00:12.260Z). Browser navigation passed dashboard/project/settings/chat with zero console/page errors; chat screenshot reviewed and shows READY, event notice, tool calls and WOKE. Test resources are being cleaned immediately after the final browser observation; node deletion requires zero remaining workspaces and creation after the owned test task.
+
+Production rollout-fix run43610800149 on main3c5921849 also passed, including Health Check and the successful deployment marker. The coordinator released the external merge hold. ItemC still needs its own PR/final-head CI/CodeRabbit/release gates.
+
+Cleanup confirmed at 16:03Z: cancelled the owned subscription, deleted the retry task and workspace, then deleted its auto-provisioned node only after checking zero remaining workspaces and that the node was created after the test task. Independent GET checks returned 404 for all three resources (managed job `sx-45531e59c07200f8902c6777f986d7b4223a883a43952bb0edf732ebf5e82a94`). Stage slot released to the coordinator. Final browser pass waited for real page content; dashboard, project, settings and chat all returned 200 with zero errors and the chat showed the acknowledged WOKE reply.
+
+After syncing main `567d8c084`, root build passed 18 tasks, targeted real-workerd producer/cost/recovery passed 19/19, and API typecheck passed. The remaining protected-prefix candidate bound is tracked separately in idea `01M7DCY03S5CTP15F71R40VSJV`; the first PR makes no universal O(deletions) claim.
