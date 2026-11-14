@@ -428,7 +428,11 @@ jobs:
         run: pnpm build
 
       - name: Run tests with coverage
-        run: pnpm test:coverage
+        # Bound both package scheduling and each Vitest pool. On the measured
+        # four-CPU runner this allows two pools of at most three workers.
+        run: |
+          node -e "console.log('Available test CPUs:', require('node:os').availableParallelism())"
+          pnpm test:coverage --concurrency=2 -- --maxWorkers=75%
 
   build:
     name: Build
