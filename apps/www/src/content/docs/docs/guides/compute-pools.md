@@ -273,8 +273,9 @@ to the next source in the order and tries there. That happens when the provider:
 
 - has no capacity for the machine (for example Google Cloud's `ZONE_RESOURCE_POOL_EXHAUSTED`, or
   Hetzner's "error during placement"),
-- refuses because an account quota is used up (a Google Cloud `QUOTA_EXCEEDED`, a Hetzner core or
-  server limit), or
+- refuses because an account quota is used up and no offering of this source escapes it (a Hetzner
+  core or server limit; a Google Cloud `QUOTA_EXCEEDED` once every remaining Google Cloud offering
+  is ruled out, see below), or
 - is cooling down after an account limit (SAM records one for a Hetzner core or server limit and
   holds new machines off that account for a while; a Google Cloud quota covers one region, so it
   is not recorded), or has no usable credential, or
@@ -286,7 +287,22 @@ These checks apply to the first source too, so a first source that is cooling do
 is skipped rather than waited on. A pool with a single source waits or fails as before.
 
 With the `fallback-chain` exhaustion policy SAM tries the best-ranked allowed offerings of a source
-(up to `operations.provisioningAttemptsPerProviderTier`, 8 by default) before moving on. With `fail` or `queue` it tries one offering per source. `queue` waits only after every
+(up to `operations.provisioningAttemptsPerProviderTier`, 8 by default) before moving on. Those slots
+are spread across quota buckets (on Google Cloud, region plus machine family), so one exhausted
+bucket cannot fill all eight (`selectAcrossQuotaBuckets()` in
+`apps/api/src/durable-objects/task-runner/node-provisioning-exhaustion.ts`).
+
+**A Google Cloud quota covers one bucket, not the whole provider.** Google reports a quota as one
+metric in one region, for example `Quota 'T2D_CPUS' exceeded. Limit: 24.0 in region europe-west1.`
+SAM then skips only the offerings that quota also rules out (the same family in that region needing
+at least as many vCPUs; for `SSD_TOTAL_GB`, disks at least as large; for other regional metrics, the
+region) and keeps trying the rest of Google Cloud: smaller types of that family, other families and
+other regions. It moves to the next provider only when no Google Cloud offering is left. Each skipped
+attempt in the placement record names the quota and region (`classifyGcpQuotaBucket()` in
+`packages/providers/src/gcp-quota-buckets.ts`, `quotaExclusionReason()` in
+`node-provisioning-quota-descent.ts`). A quota that names no region, such as `CPUS_ALL_REGIONS`, still
+moves straight to the next provider. Each refused attempt costs one create request, so with the
+default limit at most 8 refusals happen before the next provider is tried. With `fail` or `queue` it tries one offering per source. `queue` waits only after every
 source is exhausted, and the retry starts again from the first source.
 
 SAM does **not** move to another provider after an error that could mean a machine was created
@@ -490,8 +506,8 @@ So **Fail** is not a guarantee of an immediate error in every capacity situation
 machine type and location. On Google Cloud, a zone that "does not have enough resources available"
 (`ZONE_RESOURCE_POOL_EXHAUSTED`). Some failures are not sold out and stop the work at once whatever
 the policy: a rejected credential or missing permission, an invalid request, and on Google Cloud a
-project quota (for example regional CPUs), unless the pool's provider order has a source ranked
-after this one, in which case SAM moves to it. A Google Cloud create request that fails with a plain
+project quota (for example regional CPUs) once no Google Cloud offering outside that quota remains,
+unless the pool's provider order has a source ranked after this one, in which case SAM moves to it. A Google Cloud create request that fails with a plain
 "service unavailable" also stops the work, because SAM cannot tell whether the machine was created
 anyway, and trying another one could leave you paying for two.
 
