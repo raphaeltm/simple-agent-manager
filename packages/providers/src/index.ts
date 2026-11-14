@@ -67,6 +67,13 @@ export {
 } from './types';
 
 // Re-export utilities
+export type {
+  ProviderVmDeletionRequests,
+  VmDeletionRequestOptions,
+  VmDeletionRequestResult,
+  VmDeletionStatus,
+  VmDeletionTicket,
+} from './vm-deletion';
 export { isProviderCreateNotDispatched, markProviderCreateNotDispatched } from './create-dispatch';
 export { hasAmbiguousLabel } from './kv-tags';
 export {
