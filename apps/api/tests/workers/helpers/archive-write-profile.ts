@@ -51,12 +51,10 @@ export async function profileObject(
         if (['setAlarm', 'deleteAlarm', 'put', 'delete'].includes(String(key)))
           return async (...args: unknown[]) => {
             const result = await value.apply(target, args);
-            const count =
-              key === 'delete'
-                ? Number(result)
-                : key === 'put' && typeof args[0] === 'object' && args[0] !== null
-                  ? Object.keys(args[0]).length
-                  : 1;
+            let count = 1;
+            if (key === 'delete') count = Number(result);
+            else if (key === 'put' && typeof args[0] === 'object' && args[0] !== null)
+              count = Object.keys(args[0]).length;
             samples.push({
               owner,
               phase: phase.getStore() ?? 'other',

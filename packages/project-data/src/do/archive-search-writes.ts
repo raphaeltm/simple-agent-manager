@@ -26,11 +26,12 @@ export function insertArchiveSearchDocumentBatch(
 ): void {
   for (let offset = 0; offset < documents.length; offset += ARCHIVE_SEARCH_INSERT_BATCH_ROWS) {
     const batch = documents.slice(offset, offset + ARCHIVE_SEARCH_INSERT_BATCH_ROWS);
+    const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
     const inserted = sql
       .exec<{ rowid: number; projection_id: string }>(
         `INSERT OR IGNORE INTO project_data_archive_search_documents
        (projection_id, document_id, session_id, role, content, created_at)
-       VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')} RETURNING rowid, projection_id`,
+       VALUES ${placeholders} RETURNING rowid, projection_id`,
         ...batch.flatMap((document) => [
           document.projectionId,
           document.documentId,
@@ -53,11 +54,13 @@ export function insertArchiveSearchDocumentBatch(
         indexRows.push({ rowid, content: document.content });
       }
     }
-    if (indexRows.length)
+    if (indexRows.length) {
+      const placeholders = indexRows.map(() => '(?, ?)').join(', ');
       sql.exec(
         `INSERT INTO project_data_archive_search_documents_fts(rowid, content)
-       VALUES ${indexRows.map(() => '(?, ?)').join(', ')}`,
+       VALUES ${placeholders}`,
         ...indexRows.flatMap((row) => [row.rowid, row.content])
       );
+    }
   }
 }
