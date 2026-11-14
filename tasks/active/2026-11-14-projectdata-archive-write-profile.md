@@ -14,7 +14,7 @@ Production partial accounting: about 1.38 writes/message (source reclaim 1.04, t
 - [x] Post Part 1 results to idea and durable parent message before implementation.
 - [x] Implement measured highest-yield safe cuts; retain regression write ceilings.
 - [x] Prove exact reads, payloads/search, copyback and reset-resume; exceed page/chunk sizes; discriminate new guards.
-- [ ] Lint/typecheck/tests/build/migration safety, local specialist reviews.
+- [x] Lint/typecheck/tests/build/migration safety, local specialist reviews.
 - [ ] Coordinate staging; real sweep archive and app readback.
 - [ ] PR/CI/CodeRabbit/merge/deploy receipt and production before/after metrics note.
 
@@ -51,6 +51,6 @@ Throughput recommendation only: interval 540000 ms, daily budget 6000000, factor
 - Real workerd archive profile, accounting sentinel, coordinator reset, copyback, atomic failure, resumable cursor and compact archive: 4 files / 26 tests pass.
 - Go real reporter fixture test passes; repository lint passes (existing web warnings only).
 - DO migration safety passes.
-- Full typecheck passes; root tests/build still running. Cloudflare, constitution, doc sync, Go and test-engineer reviews pass. Completion review confirms implementation coverage, with release gates pending.
-- Discriminating mutations: removing duplicate-identity consumption fails the atomic duplicate test; removing bind paging fails the real coordinator with SQLITE_ERROR (too many SQL variables); removing occupied-slot diagnostic fails the real sweep test. All three changes restored; final control suite running.
+- Full lint/typecheck/test/build pass (39 test tasks; API 15,168 passed, 4 skipped). Cloudflare, constitution, doc sync, Go and test-engineer reviews pass. Completion review confirms implementation coverage, with release gates pending.
+- Discriminating mutations: removing duplicate-identity consumption fails the atomic duplicate test; removing bind paging fails the real coordinator with SQLITE_ERROR (too many SQL variables); removing occupied-slot diagnostic fails the real sweep test. All three changes restored; final control suite passes: 4 files / 27 tests.
 - Staging and release remain pending.
