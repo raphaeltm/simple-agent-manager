@@ -20,8 +20,8 @@ The Test job runs Turbo test:coverage, which launches package test processes who
 - [x] Remove a relevant guard once and prove the intended tests fail, then restore it.
 - [x] At least 30 normal and 30 CPU-loaded full-file runs for each affected test file; report counts and timings, without hidden retries.
 - [x] Run relevant lint, typecheck, build and broader tests.
-- [ ] Local specialist and task-completion reviews; address findings.
-- [ ] Test/config only: skip staging and state that in PR; production archive changes: request coordinator staging slot.
+- [x] Local specialist and task-completion reviews; address findings.
+- [x] Test/config only: skip staging and state that in PR; no production archive changes.
 - [ ] Push each unit; create separate DRAFT PR with needs-human-review; CI plus trusted CodeRabbit request and wait.
 - [ ] Send PR URL, full SHA and gate summary to coordinator; STOP until approval of that exact SHA.
 
@@ -40,13 +40,13 @@ No direct implementation changes on main. Local commands foreground and under ab
 
 ## Initial measured diagnosis
 
-Normal phase total 2605 ms; coverage plus two busy workers on the same two cores 5737 ms. Controlled oversubscription with eighteen busy workers on two cores reproduced the original 30-second timeout. Copy cost rose from 933 ms to 10629 ms. This models contention rather than asserting an exact historical CI process count. All fixture/timeout values remain unchanged. Proposed fix serializes Turbo package coverage tasks, leaving Vitest file parallelism intact. Initial measurements are committed in tasks/evidence/2026-11-14-archive-ci-flakes. Final stability and CI duration validation remain pending.
+Normal phase total 2605 ms; coverage plus two busy workers on the same two cores 5737 ms. Controlled oversubscription with eighteen busy workers on two cores reproduced the original 30-second timeout. Copy cost rose from 933 ms to 10629 ms. This models contention rather than asserting an exact historical CI process count. All fixture/timeout values remain unchanged. The initial serial experiment retained Vitest file parallelism; the selected middle budget bounds package and worker concurrency. Initial measurements are committed in tasks/evidence/2026-11-14-archive-ci-flakes. Final stability and CI budget comparison are complete, as recorded below.
 
 ## Current validation
 
-Compact file: all 30 normal + 30 loaded runs passed, 780 cases. Full ProjectData package: 528 passed. API build and dependency builds passed (12 tasks), both affected package typechecks passed after rebuild, targeted ESLint/formatting passed. Lifecycle real workerd file passed 9/9 with Date-only freezing and both persisted timestamps asserted equal. Emission mutation repeated under that final timing model failed as intended and was restored; Lifecycle 30 normal+30 loaded repetitions passed 540 cases. Local preliminary test and Cloudflare reviews found no remaining semantic finding; final completion review still pending.
+Compact file: all 30 normal + 30 loaded runs passed, 780 cases. Full ProjectData package: 528 passed. API build and dependency builds passed (12 tasks), both affected package typechecks passed after rebuild, targeted ESLint/formatting passed. Lifecycle real workerd file passed 9/9 with Date-only freezing and both persisted timestamps asserted equal. Emission mutation repeated under that final timing model failed as intended and was restored; Lifecycle 30 normal+30 loaded repetitions passed 540 cases. Final test, Cloudflare and completion reviews found no remaining implementation or evidence gaps.
 
-Coordinator requires actual CI wall-clock measurements for serial package concurrency versus a middle budget before accepting the final setting. Historical Test jobs took 32:00, 24:00, and 20:44. Prefer the fastest stable option, and a bounded middle option if serialization adds more than about five minutes unless that option flakes. Evidence is in ci-budget-comparison.json; no new CI budget measurement is claimed yet.
+Coordinator requires actual CI wall-clock measurements for serial package concurrency versus a middle budget before accepting the final setting. Historical Test jobs took 32:00, 24:00, and 20:44. Prefer the fastest stable option, and a bounded middle option if serialization adds more than about five minutes unless that option flakes. Completed measurements and selection are in ci-budget-comparison.json and the next section.
 
 ## Final CI budget selection
 
