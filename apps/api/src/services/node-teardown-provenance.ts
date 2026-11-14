@@ -16,7 +16,8 @@
  * cascades the source's pool candidates, and releases the column on every node placed from it.
  * A released column is accepted only in that exact shape: the column is NULL AND the candidate
  * the node names no longer exists, which is what the cascade leaves and nothing else does
- * (no code deletes a candidate row; only the source cascade does). Every other server-written
+ * (no code deletes a candidate row; only the FK cascades from `capacity_sources` and
+ * `capacity_pools` do, and a pool cascade leaves `capacity_source_id` set). Every other server-written
  * snapshot field is still required, so the release grants no admission a placed node lacked.
  *
  * The snapshot branch admits `stopped` and `destroying` nodes (the NodeLifecycle and cleanup
@@ -72,7 +73,10 @@ export function cleanupNodeProvenanceSql(
 /**
  * The exact shape the `capacity_sources` cascade leaves on a placed node: the column is NULL and
  * the pool candidate it was placed from is gone with its source. A NULL column whose candidate
- * still exists was not released by that cascade, so it is not this shape.
+ * still exists was not released by that cascade, so it is not this shape. As defence in depth the
+ * node's own pool must still exist and belong to the node's owner (user scope), the node's
+ * project (project scope) or the installation; a pool that is gone or belongs to someone else
+ * refuses.
  */
 export function capacitySourceReleasedSql(alias: string): string {
   return `(${alias}.capacity_source_id IS NULL
@@ -80,6 +84,15 @@ export function capacitySourceReleasedSql(alias: string): string {
       AND NOT EXISTS (
         SELECT 1 FROM capacity_pool_candidates released_candidate
         WHERE released_candidate.id = ${alias}.capacity_pool_candidate_id
+      )
+      AND EXISTS (
+        SELECT 1 FROM capacity_pools released_pool
+        WHERE released_pool.id = ${alias}.capacity_pool_id
+          AND released_pool.scope = ${alias}.capacity_pool_scope
+          AND ((released_pool.scope = 'user' AND released_pool.owner_user_id = ${alias}.user_id)
+            OR (released_pool.scope = 'project'
+              AND released_pool.owner_project_id = ${alias}.capacity_pool_project_id)
+            OR released_pool.scope = 'installation')
       ))`;
 }
 

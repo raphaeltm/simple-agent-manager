@@ -14,17 +14,27 @@
  * NodeLifecycle Durable Object). Faked: outbound HTTP (cloud APIs) and the provider catalog,
  * which is the cloud's network boundary.
  */
-import { capacityPlacementSnapshotForCandidate } from '@simple-agent-manager/scheduler-core';
-import type { CapacityPoolScope, CredentialProvider } from '@simple-agent-manager/shared';
+import {
+  capacityPlacementSnapshotForCandidate,
+  resolveReusableNodeCapacitySnapshot,
+} from '@simple-agent-manager/scheduler-core';
+import {
+  type CapacityPoolScope,
+  type CredentialProvider,
+  DEFAULT_GCP_COMPUTE_API_BASE_URL,
+  DEFAULT_GCP_SERVICE_ACCOUNT_TOKEN_URL,
+} from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import { exportPKCS8, generateKeyPair } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { adminPlatformCredentialRoutes } from '../../src/routes/admin-platform-credentials';
 import { credentialsRoutes } from '../../src/routes/credentials';
+import { gcpRoutes } from '../../src/routes/gcp';
 import { projectCredentialsRoutes } from '../../src/routes/projects/credentials';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import { claimNodeForCleanup } from '../../src/scheduled/node-cleanup/shared';
@@ -87,6 +97,7 @@ function appFor(userId: string, role: 'user' | 'superadmin' = 'user') {
     await next();
   });
   app.route('/api/credentials', credentialsRoutes);
+  app.route('/api/gcp', gcpRoutes);
   app.route('/api/projects', projectCredentialsRoutes);
   app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
   return app;
@@ -230,6 +241,7 @@ async function placeNode(
   const createdAt = new Date(Date.now() - 2 * DAY).toISOString();
   await seedNode(nodeId, userId, {
     status,
+    vmSize: candidate!.machineSize ?? 'medium',
     createdAt,
     updatedAt: createdAt,
     lastHeartbeatAt: new Date().toISOString(),
@@ -269,6 +281,30 @@ async function readNode(nodeId: string) {
       cleanupBlockedReason: string | null;
       cleanupBackoffUntil: string | null;
     }>();
+}
+
+/** The node row the TaskRunner's reuse query reads. */
+async function reuseRow(nodeId: string) {
+  const row = await env.DATABASE.prepare(
+    `SELECT vm_size AS vmSize, vm_location AS vmLocation, cloud_provider AS cloudProvider,
+            capacity_pool_id AS capacityPoolId, capacity_pool_scope AS capacityPoolScope,
+            capacity_pool_revision AS capacityPoolRevision,
+            capacity_source_id AS capacitySourceId,
+            capacity_source_generation AS capacitySourceGeneration,
+            capacity_pool_candidate_id AS capacityPoolCandidateId,
+            placement_credential_source AS placementCredentialSource,
+            placement_credential_reference AS placementCredentialReference,
+            placement_credential_version AS placementCredentialVersion,
+            capacity_pool_project_id AS capacityPoolProjectId, workload_role AS workloadRole,
+            provider_instance_type AS providerInstanceType,
+            provider_instance_vcpu_count AS providerInstanceVcpuCount,
+            provider_instance_memory_mb AS providerInstanceMemoryMb
+       FROM nodes WHERE id = ?`
+  )
+    .bind(nodeId)
+    .first<Parameters<typeof resolveReusableNodeCapacitySnapshot>[0]['node']>();
+  expect(row).not.toBeNull();
+  return row!;
 }
 
 async function userGcpCredentialId(userId: string): Promise<string> {
@@ -360,6 +396,78 @@ describe('a GCP connection re-saved through the product', () => {
   });
 });
 
+describe('a GCP service-account key rotated through PUT /api/gcp/service-account', () => {
+  it('keeps the source and its choices and moves its credential version to the new key', async () => {
+    const pair = await generateKeyPair('RS256', { extractable: true });
+    const privateKey = await exportPKCS8(pair.privateKey);
+    // Google is the network boundary: token exchange and the zone check succeed, everything
+    // else (catalog refresh) is unavailable.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url === DEFAULT_GCP_SERVICE_ACCOUNT_TOKEN_URL) {
+          return Response.json({
+            access_token: 'short-lived',
+            token_type: 'Bearer',
+            expires_in: 3600,
+          });
+        }
+        if (
+          url ===
+          `${DEFAULT_GCP_COMPUTE_API_BASE_URL}/projects/sam-test-project/zones/europe-west1-b`
+        ) {
+          return Response.json({});
+        }
+        return new Response('cloud api unavailable in tests', { status: 503 });
+      })
+    );
+    const rotate = (privateKeyId: string) =>
+      request(ownerId, 'PUT', '/api/gcp/service-account', {
+        serviceAccountJson: JSON.stringify({
+          type: 'service_account',
+          project_id: 'sam-test-project',
+          private_key_id: privateKeyId,
+          private_key: privateKey,
+          client_email: 'sam-vm@sam-test-project.iam.gserviceaccount.com',
+        }),
+        defaultZone: 'europe-west1-b',
+      });
+
+    expect((await rotate('key-1')).status).toBe(200);
+    await reconcile({ userId: ownerId });
+    const credentialId = await userGcpCredentialId(ownerId);
+    const picked = await pickProvider({
+      scope: 'user',
+      ownerUserId: ownerId,
+      ownerProjectId: null,
+      provider: 'gcp',
+    });
+    const sourceVersion = () =>
+      env.DATABASE.prepare(
+        `SELECT s.credential_version AS sourceVersion, c.updated_at AS credentialUpdatedAt
+           FROM capacity_sources s JOIN credentials c ON c.id = s.credential_id
+          WHERE s.id = ?`
+      )
+        .bind(picked.sourceId)
+        .first<{ sourceVersion: number; credentialUpdatedAt: string }>();
+    const before = await sourceVersion();
+    expect(before?.sourceVersion).toBe(Date.parse(before!.credentialUpdatedAt));
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect((await rotate('key-2')).status).toBe(200);
+
+    // No manual reconcile: the route itself must carry the source to the new key.
+    expect(await userGcpCredentialId(ownerId)).toBe(credentialId);
+    const after = await sourceVersion();
+    expect(after?.sourceVersion).toBe(Date.parse(after!.credentialUpdatedAt));
+    expect(after!.sourceVersion).toBeGreaterThan(before!.sourceVersion);
+    const pool = await defaultPool('user', ownerId, null);
+    expect(await activeCandidateIds(pool!.id, picked.sourceId)).toEqual(picked.activeCandidateIds);
+  });
+});
+
 describe('a source deleted with its credential (disconnect, platform rotation)', () => {
   it('a project-scoped node stays claimable after the project credential is removed', async () => {
     const installationId = `${prefix}-install`;
@@ -404,6 +512,40 @@ describe('a source deleted with its credential (disconnect, platform rotation)',
     const after = await readNode(nodeId);
     expect(after?.cleanupBackoffUntil).not.toBeNull();
     expect(after?.cleanupBlockedReason ?? '').not.toContain('provenance');
+
+    // The release grants cleanup only. After reconnecting, new work is never placed on the
+    // released node, while a node placed from the new connection is reused.
+    expect(
+      (await request(ownerId, 'PUT', path, { provider: 'hetzner', token: 'tok-3' })).status
+    ).toBe(201);
+    await reconcile({ userId: ownerId, projectId });
+    await pickProvider({
+      scope: 'project',
+      ownerUserId: null,
+      ownerProjectId: projectId,
+      provider: 'hetzner',
+    });
+    const controlNode = `${prefix}-project-control`;
+    await placeNode(controlNode, ownerId, projectId, 'running');
+    const selection = await placementSelection(ownerId, projectId);
+    const releasedRow = await reuseRow(nodeId);
+    const controlRow = await reuseRow(controlNode);
+    expect(
+      resolveReusableNodeCapacitySnapshot({
+        selection,
+        node: releasedRow,
+        projectId,
+        requestedVmSize: releasedRow.vmSize ?? 'medium',
+      })
+    ).toBeUndefined();
+    expect(
+      resolveReusableNodeCapacitySnapshot({
+        selection,
+        node: controlRow,
+        projectId,
+        requestedVmSize: controlRow.vmSize ?? 'medium',
+      })
+    ).toMatchObject({ capacitySourceId: controlRow.capacitySourceId });
   });
 
   it('a platform-placed node stays claimable after the platform credential is rotated', async () => {
@@ -545,6 +687,13 @@ describe('rows already damaged in the production shape', () => {
       .bind(noFingerprint)
       .run();
 
+    // The node names a pool that belongs to someone else.
+    const foreignPool = `${prefix}-foreign-pool`;
+    await seedReleasedNode(foreignPool, ownerId, 'stopped');
+    await env.DATABASE.prepare('UPDATE capacity_pools SET owner_user_id = ? WHERE id = ?')
+      .bind(otherUserId, `${foreignPool}-pool`)
+      .run();
+
     // Running, without the caller's opt-in.
     const running = `${prefix}-released-running`;
     await seedReleasedNode(running, ownerId, 'running');
@@ -552,6 +701,7 @@ describe('rows already damaged in the production shape', () => {
     expect(await claim(released, otherUserId, 'stopped')).toBe(false); // another user's claim
     expect(await claim(stillListed, ownerId, 'stopped')).toBe(false);
     expect(await claim(noFingerprint, ownerId, 'stopped')).toBe(false);
+    expect(await claim(foreignPool, ownerId, 'stopped')).toBe(false);
     expect(await claim(running, ownerId, 'running')).toBe(false);
     expect(await claim(released, ownerId, 'stopped')).toBe(true); // owner control
     expect(await claim(running, ownerId, 'running', true)).toBe(true); // opted-in control

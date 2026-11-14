@@ -121,15 +121,23 @@ export async function replaceUserGcpCredential(
   );
 
   const statements: D1PreparedStatement[] = [
-    // A user has one GCP connection. Should duplicates exist, keep the oldest (the one the
-    // default pool was built on) rather than deleting every row as the old replace did.
+    // A user has one GCP connection. Should duplicates exist (none in production on
+    // 2026-11-14), keep the one a capacity source is built on, else the oldest, and delete the
+    // rest, as the old replace deleted every row. A deleted duplicate's own source cascades;
+    // its nodes stay reapable through the released-source shape in `cleanupNodeProvenanceSql`.
     env.DATABASE.prepare(
       `DELETE FROM credentials
        WHERE ${USER_GCP_CREDENTIAL_ROW}
          AND id != (
-           SELECT id FROM credentials
-           WHERE ${USER_GCP_CREDENTIAL_ROW}
-           ORDER BY created_at, id
+           SELECT keep.id FROM credentials keep
+           WHERE keep.user_id = ?
+             AND keep.project_id IS NULL
+             AND keep.provider = 'gcp'
+             AND keep.credential_type = 'cloud-provider'
+           ORDER BY EXISTS (
+               SELECT 1 FROM capacity_sources source WHERE source.credential_id = keep.id
+             ) DESC,
+             keep.created_at, keep.id
            LIMIT 1
          )`
     ).bind(userId, userId),
