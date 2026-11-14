@@ -55,3 +55,8 @@ Measured four-CPU runner: serial job32:55/coverage30:41.896; bounded middle job2
 ## CodeRabbit follow-up
 
 The automatic review after approval found one minor evidence-harness interruption leak(comment4574159067). Added unconditional inner process-group cleanup, verified real SIGINT red/green with child/burner cleanup, and restored draft plus needs-human-review for the changed head. Previous72b653 approval does not authorize the new commit. No test-source or production change;120repeat evidence remains valid. New-head CI, incremental review wait and coordinator approval remain pending.
+
+
+### Incremental review simplification
+
+Review5905726902 identified stale timing disclosure and descendant-cleanup limits in the temporary repeat helper. At the coordinator's explicit direction, remove repeat-files.py from the PR and retain recorded results JSON plus a concise README procedure. README now includes completed middle Test jobs25:27/23:03/34:11 (median25:27, latest greater than serial32:55), separately identifies canceled partial attempts, and avoids claiming stable7:28 savings. CI configuration and both test sources remain byte-identical to a6f8ad869d56857bbc72d096452f9a5a97580ee3. This new evidence-only head needs CI, one incremental CodeRabbit request/wait, and renewed exact-SHA approval. Staging remains skipped as authorized. After merge, track the next three main CI Test durations and flag median above about30minutes.
