@@ -277,9 +277,11 @@ sweep reads the size from the store's periodic storage measurement (hourly by de
 `PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS`). A project that has never been
 measured, or whose last measurement is older than
 `operations.projectDataArchiveStorageTelemetryMaxAgeHours` (default 24 hours, 1 to 720), is archived
-as if it were full, because an old reading cannot show that the store has room. If storage
-measurement is turned off (`PROJECT_DATA_STORAGE_TELEMETRY_ENABLED=false`) no project has a
-reading, so every project is archived and this setting has no effect. Chats already being
+as if it were full, because an old reading cannot show that the store has room. The sweep does not
+look at whether measurement is switched on, only at the stored reading and its age. So if storage
+measurement is turned off (`PROJECT_DATA_STORAGE_TELEMETRY_ENABLED=false`), a reading taken before
+that still holds its project back until it passes the max age; after that no project has a usable
+reading, every project is archived, and this setting has no effect. Chats already being
 moved always finish, and an archive run a superadmin starts for one named project through the
 admin archive route is not held back by this setting.
 

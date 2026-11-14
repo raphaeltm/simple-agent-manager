@@ -16,7 +16,7 @@ import {
   runScopedProjectDataArchiveCanary,
 } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import { env } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import { projectDataStub, readLocation, withArchiveEnv } from './helpers/archive-fixtures';
@@ -313,12 +313,34 @@ describe('archive sweep storage-pressure gate', () => {
     const inFlightEnv = { ...SWEEP_ENV, PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '7' };
 
     await withArchiveEnv(inFlightEnv, async () => {
-      // Tick 1: the project is unmeasured, so the session is selected; a 150 ms wall budget makes
-      // the copy yield long before 600 rows in 7-row chunks are done.
+      // Tick 1: the project is unmeasured, so the session is selected. The clock is controlled so
+      // the yield does not depend on runner speed: time stands still except that every chunk
+      // written to R2 advances it 25 ms, so the 150 ms wall budget is spent by six chunk writes,
+      // long before 600 rows in 7-row chunks are copied, and never before the journal exists.
       await applyTelemetry([{ projectId: project.projectId, absent: true }]);
-      const first = await withArchiveEnv({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' }, () =>
-        runProjectDataArchiveSharding(testEnv, new Date(start), {})
-      );
+      const realR2 = testEnv.PROJECT_DATA_ARCHIVE_R2 as R2Bucket;
+      vi.useFakeTimers({ toFake: ['Date'] });
+      testEnv.PROJECT_DATA_ARCHIVE_R2 = new Proxy(realR2, {
+        get(target, property, receiver) {
+          if (property === 'put') {
+            return async (...args: unknown[]) => {
+              vi.setSystemTime(Date.now() + 25);
+              return (target.put as (...putArgs: unknown[]) => Promise<unknown>)(...args);
+            };
+          }
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      let first: Awaited<ReturnType<typeof runProjectDataArchiveSharding>>;
+      try {
+        first = await withArchiveEnv({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' }, () =>
+          runProjectDataArchiveSharding(testEnv, new Date(start), {})
+        );
+      } finally {
+        testEnv.PROJECT_DATA_ARCHIVE_R2 = realR2;
+        vi.useRealTimers();
+      }
       expect(first).toMatchObject({ skipped: false, failed: 0 });
       expect(first.yielded ?? 0).toBe(1);
       // Fixture precondition: genuinely in flight, neither finished nor back in root.
