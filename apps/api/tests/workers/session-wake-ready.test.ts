@@ -467,6 +467,11 @@ describe('readiness RPC interleaving', () => {
         }));
       const before = inbox();
       const identity = accepted();
+      expect(before).toMatchObject([
+        { id: 'first', delivery_state: 'retry_wait' },
+        { id: 'second', delivery_state: 'retry_wait' },
+      ]);
+      for (const row of before) expect(row.next_attempt_at).toBeGreaterThan(Date.now());
       let statusAtFailure: unknown;
       internal.sql = new Proxy(original, {
         get(target, key) {
@@ -501,13 +506,24 @@ describe('readiness RPC interleaving', () => {
         expect(inbox()).toEqual(before);
 
         internal.sql = original;
-        expect(await instance.signalSessionWakeReady(input)).toBe(2);
+        const retryStartedAt = Date.now();
+        const acknowledged = await instance.signalSessionWakeReady(input);
+        const retryFinishedAt = Date.now();
+        // SQLite's write count includes triggers; prompt identity is asserted on the rows.
+        expect(acknowledged).toBeGreaterThan(0);
         expect(await instance.getSession(input.chatSessionId)).toMatchObject({ status: 'active' });
         expect(accepted()).toEqual(identity);
         expect(
           state.storage.sql.exec('SELECT fence FROM session_wake_readiness').toArray()
         ).toEqual([{ fence: JSON.stringify(input.fence) }]);
         const released = inbox();
+        expect(released.map(({ next_attempt_at: _retryAt, ...row }) => row)).toEqual(
+          before.map(({ next_attempt_at: _retryAt, ...row }) => row)
+        );
+        for (const row of released) {
+          expect(row.next_attempt_at).toBeGreaterThanOrEqual(retryStartedAt);
+          expect(row.next_attempt_at).toBeLessThanOrEqual(retryFinishedAt);
+        }
         expect(await instance.signalSessionWakeReady(input)).toBe(0);
         expect(inbox()).toEqual(released);
       } finally {

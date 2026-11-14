@@ -1,9 +1,11 @@
 # Resilient compute catalog refresh and sleeping wake recovery
 
 Idea: 01M77P985TDMCJ28JTTQHEYMC7. SAM task 01M77Q6A32CJRZAE06QE8NH1YJ.
-Coordinator task 01M77NV1B621TKTV79272F7YX3. Sol / openai-codex.
+Original coordinator task 01M77NV1B621TKTV79272F7YX3; current coordinator task01M7CVSBR1SDZFDZNY3TD863RQ. Sol / openai-codex.
 
-Current status (2026-11-13): one coordinator-authorized code-only port to main527f16b9580ad7cd762c60ea7e711175dd843ada is under validation. The current unpublished catalog migration is0239; the0237 catalog references below describe earlier unshipped validation. Main's applied0237_archive_reclaim_pending.sql is preserved unchanged. No staging or release authorization is implied by this port.
+Current status (2026-11-14): main7bd2bcb7971cbe55211d8285cb557827c5484763 is incorporated with a history-preserving merge. The current unpublished catalog migration is0239; applied archive0237, task-account0238 and deletion0241 are unchanged. Final native34suites/1279cases and the final4case deadline suite pass (1280 unique cases); actual Workers8suites first passed109cases and failed the new rollback test's acknowledgement-cardinality assertion. The corrected full11case readiness suite passes, proving the exact two original rows rather than SQLite's trigger-inclusive write count (110 unique Workers cases across the affected matrix). Full local quality, final-head CI, required coordinated GCP staging and independent full-SHA release review remain open. PR2693 stays draft with needs-human-review.
+
+The historical physical-cleanup hold was cleared; the old combined4c73 staging input is retired. The current live staging lane belongs to another coordinator, so this task has no live window or reservation. Older dated hold/combined-port notes below are historical evidence, superseded by this status and the current coordination amendment.
 
 ## Problem and authorization
 
@@ -40,7 +42,7 @@ Coordination amendment: original coordinator is unreachable (`send_durable_messa
 
 ## Evidence
 
-Pending. No release authorization for a concrete SHA yet.
+Current-port logs and manifests are retained under .codex/tmp/refresh-20261114. Security, Cloudflare, test, constitution and documentation port reviews pass; the final completion audit finds no implementation omission but keeps the release verdict open for actual staging/quality/CI/approval. Read-only staging preflight at20:36–20:37UTC confirms1709workspace +1709deployment GCP candidates in the smoke user's established ready pool, all disabled; the supported independent GCP reader sees no instances, disks or reserved addresses. These are admission facts, not a live feature trial. No release approval for a final concrete SHA yet.
 
 ## Latency and throughput budget (rule 81)
 
