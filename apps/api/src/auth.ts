@@ -269,13 +269,18 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
   }
 
   if (gitlabOAuth) {
-    trustedProviders.push('gitlab');
+    // better-auth links a sign-in to the existing user with that email when the provider is
+    // trusted OR the provider says the email is verified, so an untrusted host must lose both.
+    const trusted = gitlabOAuth.identityTrusted;
+    if (trusted) trustedProviders.push('gitlab');
     socialProviders.gitlab = {
       clientId: gitlabOAuth.clientId,
       clientSecret: gitlabOAuth.clientSecret,
       issuer: gitlabOAuth.host,
       scope: ['read_user', 'api', 'read_repository', 'write_repository'],
-      overrideUserInfoOnSignIn: true,
+      overrideUserInfoOnSignIn: trusted,
+      // Spread over the profile by better-auth's GitLab provider, replacing the host's claim.
+      ...(trusted ? {} : { mapProfileToUser: () => ({ emailVerified: false }) }),
     };
   }
 

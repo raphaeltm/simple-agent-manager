@@ -32,12 +32,29 @@ function normalizeBaseUrl(value: string): string {
   }
 }
 
-export function selectGitLabOAuthConfig(config: Pick<ResolvedLoginOAuthConfig, 'gitlab'>): {
+/** GitLab.com, the GitLab host whose sign-ins vouch for emails GitLab itself verified. */
+const PUBLIC_GITLAB_HOST = 'https://gitlab.com';
+
+export interface GitLabOAuthConfig {
   host: string;
   apiBaseUrl: string;
   clientId: string;
   clientSecret: string;
-} | null {
+  /**
+   * Whether this host's sign-ins may vouch for an email address: link to an existing account
+   * with that email, and rewrite its profile. A GitLab sign-in proves an email only as far as
+   * the host does, and a self-managed host runs whatever its operator wants. GitLab.com is
+   * trusted, and so is a host the deployer pinned in the Worker environment (GITLAB_HOST). A
+   * self-managed host saved at runtime is not: on 2026-11-12 a host set through first-run setup
+   * answered `email_verified: true` for the owner's email and signed in as the superadmin.
+   * GitHub and Google need no such flag, because their identity hosts are fixed.
+   */
+  identityTrusted: boolean;
+}
+
+export function selectGitLabOAuthConfig(
+  config: Pick<ResolvedLoginOAuthConfig, 'gitlab'>
+): GitLabOAuthConfig | null {
   if (
     !config.gitlab.host.value ||
     !config.gitlab.clientId.value ||
@@ -50,15 +67,11 @@ export function selectGitLabOAuthConfig(config: Pick<ResolvedLoginOAuthConfig, '
     apiBaseUrl: `${host}/api/v4`,
     clientId: config.gitlab.clientId.value,
     clientSecret: config.gitlab.clientSecret.value,
+    identityTrusted: host === PUBLIC_GITLAB_HOST || config.gitlab.host.source === 'environment',
   };
 }
 
-export async function getGitLabOAuthConfig(env: Env): Promise<{
-  host: string;
-  apiBaseUrl: string;
-  clientId: string;
-  clientSecret: string;
-} | null> {
+export async function getGitLabOAuthConfig(env: Env): Promise<GitLabOAuthConfig | null> {
   return selectGitLabOAuthConfig(await resolveLoginOAuthConfig(env));
 }
 
