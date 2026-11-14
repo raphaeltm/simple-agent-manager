@@ -572,6 +572,14 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
     it('records why it cannot be deleted and keeps the blocked clock across retries', async () => {
       // No provider evidence is possible (never reached agent-ready), so no binding is recovered.
       await seedNode({ ...LEGACY, agentReadyAt: null });
+      // The legacy VM still runs, labelled before installation and incarnation labels existed.
+      provider.getVM.mockResolvedValue({
+        id: '123',
+        ip: '203.0.113.8',
+        location: 'fsn1',
+        createdAt: '2026-10-22T08:55:00.000Z',
+        labels: { node: 'node', managed: 'simple-agent-manager', role: 'deployment' },
+      });
       vi.useFakeTimers({ now: Date.parse('2026-11-01T00:00:00.000Z'), toFake: ['Date'] });
       try {
         await cleanupDeploymentNode(env, 'node', 'user', options);
@@ -583,9 +591,10 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
         expect(row()).toMatchObject({
           status: 'destroying',
           cleanup_blocked_since: '2026-11-01T00:00:00.000Z',
-          cleanup_blocked_reason: expect.stringContaining(
-            'exact provider credential binding is missing'
-          ),
+          // With no exact binding, teardown falls back to the owner's current credential and
+          // reads the VM. A legacy VM without SAM's installation and incarnation labels cannot
+          // prove it is this node's, so it is preserved and the named reason is recorded.
+          cleanup_blocked_reason: expect.stringContaining('teardown_instance_ownership_mismatch'),
         });
         expect(provider.deleteVM).not.toHaveBeenCalled();
         // Each attempt records the teardown failure and the ownership evidence that was missing.
@@ -600,7 +609,7 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
           {
             source: 'deployment_teardown',
             decision: 'destroy_failed',
-            reason: expect.stringContaining('exact provider credential binding is missing'),
+            reason: expect.stringContaining('teardown_instance_ownership_mismatch'),
           },
           {
             source: 'cleanup_sweep',
@@ -610,7 +619,7 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
           {
             source: 'deployment_teardown',
             decision: 'destroy_failed',
-            reason: expect.stringContaining('exact provider credential binding is missing'),
+            reason: expect.stringContaining('teardown_instance_ownership_mismatch'),
           },
         ]);
       } finally {
