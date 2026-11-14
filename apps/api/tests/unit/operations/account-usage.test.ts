@@ -169,6 +169,9 @@ describe('connector account monitoring', () => {
       DATABASE: createSqliteD1(sqlite),
       BASE_DOMAIN: 'example.com',
       KV: { get: vi.fn(async () => null) },
+      // A Cloudflare installation: an addressable AI Gateway keeps the SAM proxy on.
+      AI_GATEWAY_ID: 'sam',
+      CF_ACCOUNT_ID: 'account',
     } as unknown as Env;
   });
   afterEach(() => {

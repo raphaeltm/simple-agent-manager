@@ -2,10 +2,7 @@
  * Providerless strict teardown: a `destroying` VM row whose provider create response was lost.
  * Split out of `strict-node-deletion.ts` (rule 18); behavior unchanged.
  */
-import {
-  type ProviderRequestContext,
-  type VMInstance,
-} from '@simple-agent-manager/providers';
+import { type ProviderRequestContext, type VMInstance } from '@simple-agent-manager/providers';
 
 import type { Env } from '../env';
 import {
