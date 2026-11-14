@@ -21,7 +21,7 @@ Attribute SQL and storage writes to RPC and handler labels without adding persis
 - [x] Real stub RPC tests: message batch, events, heartbeats, alarm, no extra writes.
 - [x] Cadence, reset, cap, sync/error tests and guard discrimination.
 - [x] Local validation and specialist review.
-- [ ] Coordinated staging chat/log proof.
+- [x] Coordinated staging chat/log proof (workflow rollout/smoke remains a release gate).
 - [ ] PR/CI/CodeRabbit/merge; production smoke/query; first full hour idea note/checkoff.
 
 ## Acceptance
@@ -50,3 +50,7 @@ User requires primary checkout on assigned output branch, superseding /do worktr
 - Broader quality-script suite:899passed/8failed initially. Six audit failures were local EACCES under root-owned `.codex/tmp`; rerunning its suite with writable GITHUB_TRIGGER_AUDIT_OUTPUT passed40/40. Two dependency scanner failures are EACCES reading root-owned `.codex/tmp/arg0` (700). Exact base-commit test reproduced both failures, proving they precede this change; these files are unchanged. CI's clean checkout does not contain that local runtime directory.
 - Read-only staging Workers Observability probe succeeded: known row sums grouped by `$metadata.service` return sam-api-staging; unknown rank fields correctly return empty aggregate arrays rather than fabricated zeros. API request shape verified against live service before release.
 - Staging held by parent task01M7CVZNSP0EHV9BJ72HCFQJSC until its explicit release. Parent deploy43593297628 completed successfully; manual verification may still be active.
+
+## Staging functional verification (2026-11-14 13:08Z)
+
+Candidate fd84d2260c94ff770b8ca406e41b51f6fd21f928 deployed in workflow43596133512 (rollout/smoke still pending). Real VM chat returned ROW_ACCOUNTING_OK in Playwright. Workers log01M7D2NBYG0000000000000001 at13:06:33.040Z, testproject01M7D25432FBS6QRQFNJKMRES5, window13:05:32.170Z–13:06:33.040Z:16labels,0dropped. Includes RPC/fetch/webSocket/alarm sections; alarm2rowsWritten including1alarmWrite. Live calculations reporter returned the same totals. Quiet earlier windows were lost on eviction as documented; bounded reads kept the observed window alive. Session/workspace/empty node/testproject and profile deleted; interval restored to default900000ms. Earlier temporary archive environment overrides are gone (live sweep1080000ms; sessionGrace unbound).
