@@ -12,12 +12,12 @@ The Test job runs Turbo test:coverage, which launches package test processes who
 
 ## Checklist
 
-- [ ] Profile compact compatibility phases normally, with coverage, and under CPU contention.
+- [x] Profile compact compatibility phases normally, with coverage, and under CPU contention.
 - [ ] Assess Test-job process/worker overcommit using actual CI logs/configuration and measured local evidence.
 - [ ] Fix production inefficiency if found, otherwise fix the demonstrated testing/runner issue with measured justification.
-- [ ] Preserve 100-row, 200 KiB metadata, multi-object, real seal/read/recovery assertions.
-- [ ] Determine decision ordering contract; exercise equal timestamps through the real warm handoff.
-- [ ] Remove a relevant guard once and prove the intended tests fail, then restore it.
+- [x] Preserve 100-row, 200 KiB metadata, multi-object, real seal/read/recovery assertions.
+- [x] Determine decision ordering contract; exercise equal timestamps through the real warm handoff.
+- [x] Remove a relevant guard once and prove the intended tests fail, then restore it.
 - [ ] At least 30 normal and 30 CPU-loaded full-file runs for each affected test file; report counts and timings, without hidden retries.
 - [ ] Run relevant lint, typecheck, build and broader tests.
 - [ ] Local specialist and task-completion reviews; address findings.
@@ -41,3 +41,9 @@ No direct implementation changes on main. Local commands foreground and under ab
 ## Initial measured diagnosis
 
 Normal phase total 2605 ms; coverage plus two busy workers on the same two cores 5737 ms. Controlled oversubscription with eighteen busy workers on two cores reproduced the original 30-second timeout. Copy cost rose from 933 ms to 10629 ms. This models contention rather than asserting an exact historical CI process count. All fixture/timeout values remain unchanged. Proposed fix serializes Turbo package coverage tasks, leaving Vitest file parallelism intact. Initial measurements are committed in tasks/evidence/2026-11-14-archive-ci-flakes. Final stability and CI duration validation remain pending.
+
+## Current validation
+
+Compact file: all 30 normal + 30 loaded runs passed, 780 cases. Full ProjectData package: 528 passed. API build and dependency builds passed (12 tasks), both affected package typechecks passed after rebuild, targeted ESLint/formatting passed. Lifecycle real workerd file passed 9/9 with Date-only freezing and both persisted timestamps asserted equal. Emission mutation repeated under that final timing model failed as intended and was restored; lifecycle repeat counts remain pending. Local preliminary test and Cloudflare reviews found no remaining semantic finding; final completion review still pending.
+
+Coordinator requires actual CI wall-clock measurements for serial package concurrency versus a middle budget before accepting the final setting. Historical Test jobs took 32:00, 24:00, and 20:44. Prefer the fastest stable option, and a bounded middle option if serialization adds more than about five minutes unless that option flakes. Evidence is in ci-budget-comparison.json; no new CI budget measurement is claimed yet.
