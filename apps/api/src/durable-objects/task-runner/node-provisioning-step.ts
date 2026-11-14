@@ -37,7 +37,7 @@ import {
   buildAdmissionIdentity,
   waitOrThrowForCapacityPoolNodeLimit,
 } from './node-provisioning-admission';
-import { coreQuotaExclusionReason, type CoreQuotaRejection } from './node-provisioning-core-quota';
+import { quotaExclusionReason, type QuotaRejection } from './node-provisioning-quota-descent';
 import {
   buildProvisioningExhaustionPlan,
   firstAttemptIndexAfterTier,
@@ -225,9 +225,9 @@ export async function handleNodeProvisioning(
   );
   await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts, queue: {} });
 
-  // Offerings an account core quota has already ruled out, filled in by the failure
-  // handler. Skipped attempts keep `not-attempted`, with the handler's reason.
-  const coreQuotaRejections: CoreQuotaRejection[] = [];
+  // Offerings a quota (Hetzner core quota, GCP quota bucket) has already ruled out, filled in
+  // by the failure handler. Skipped attempts keep `not-attempted`, with the handler's reason.
+  const quotaRejections: QuotaRejection[] = [];
   let currentTier = 0;
   let lastProviderError: string | null = null;
   let i = 0;
@@ -242,7 +242,7 @@ export async function handleNodeProvisioning(
     const attempt = exhaustionPlan.attempts[i];
     const diagnosticAttempt = diagnosticAttempts[i];
     if (!attempt || !diagnosticAttempt) throw new Error('Missing provisioning attempt diagnostic');
-    if (coreQuotaExclusionReason(attempt, coreQuotaRejections)) {
+    if (quotaExclusionReason(attempt, quotaRejections)) {
       i++;
       continue;
     }
@@ -420,7 +420,7 @@ export async function handleNodeProvisioning(
         admissionIdentity,
         primaryAdmissionIdentity,
         createdNode,
-        coreQuotaRejections,
+        quotaRejections,
       });
       if (outcome.kind === 'waiting') return;
       lastProviderError = outcome.providerMessage;

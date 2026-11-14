@@ -129,6 +129,16 @@ export {
   normalizeGcpBootDiskPolicy,
 } from './gcp-boot-disk';
 export { GCP_MACHINE_TYPE_NAME_PATTERN } from './gcp-catalog';
+export {
+  classifyGcpQuotaBucket,
+  describeGcpQuotaBucket,
+  gcpMachineSeries,
+  type GcpQuotaBucket,
+  gcpQuotaBucketCovers,
+  type GcpQuotaOffering,
+  gcpOfferingQuotaBucketKey,
+  type GcpQuotaResource,
+} from './gcp-quota-buckets';
 export { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
 export {
   fetchGcpComputePriceTable,

@@ -140,6 +140,15 @@ const gcpStockout = () =>
     ],
   });
 
+/** A GCP quota refusal with GCP's own wording, through the real `GcpProvider` producer. */
+const gcpQuotaIn = (metric: string, scope: string, limit = '24.0') =>
+  gcpCreateError({
+    kind: 'operation',
+    errors: [
+      { code: 'QUOTA_EXCEEDED', message: `Quota '${metric}' exceeded.  Limit: ${limit} ${scope}.` },
+    ],
+  });
+
 const gcpQuota = () =>
   gcpCreateError({
     kind: 'operation',
@@ -529,17 +538,164 @@ describe('provider tiers: falling back to the next-ranked provider', () => {
     ]);
   });
 
-  it('a GCP quota refusal skips the rest of GCP (same project quota) and moves to Hetzner', async () => {
+  it('a generic CPUS quota rules out only the refused family in that region, so GCP keeps trying', async () => {
     const quota = await gcpQuota();
     expect(quota.category).toBe('quota_exceeded');
+    expect(quota.message).toContain("Quota 'CPUS' exceeded");
     provisionOutcomes({ 'e2-standard-4': quota });
     const { rc } = createContext();
     const state = createState([GCP_A, GCP_B, HETZNER_A]);
 
     await handleNodeProvisioning(state, rc);
 
-    expect(attempted()).toEqual(['gcp e2-standard-4', 'hetzner cx43']);
+    // n2d draws on its own family quota: tried before leaving GCP.
+    expect(attempted()).toEqual(['gcp e2-standard-4', 'gcp n2d-standard-4']);
+    expect(state.stepResults.capacityPlacementSnapshot?.capacitySourceId).toBe('source-gcp');
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+  });
+
+  it('control: an offering the same bucket rules out is skipped, then the chain moves to Hetzner', async () => {
+    provisionOutcomes({ 'e2-standard-4': await gcpQuota() });
+    const { rc } = createContext();
+    const sameBucket: Offering = { ...GCP_A, location: 'us-central1-b' };
+    const state = createState([GCP_A, sameBucket, HETZNER_A]);
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(attempted()).toEqual(['gcp e2-standard-4', 'hetzner cx43']);
+    const [refused, skipped] = diagnostics(state);
+    expect(refused?.outcome).toBe('capacity-exhausted');
+    expect(skipped?.outcome).toBe('not-attempted');
+    expect(skipped?.reason).toBe(
+      'Skipped: needs 4 vCPU, and GCP quota CPUS in us-central1 already rejected a 4-vCPU offering'
+    );
+  });
+
+  describe('the 2026-11-12 T2D_CPUS incident: GCP is exhausted before Hetzner', () => {
+    const ew1 = (type: string, vcpu: number, zone = 'europe-west1-b'): Offering => ({
+      ...GCP_A,
+      type,
+      vcpu,
+      location: zone,
+    });
+    const T2D_8_B = ew1('t2d-standard-8', 8);
+    const T2D_8_C = ew1('t2d-standard-8', 8, 'europe-west1-c');
+    const T2D_4_B = ew1('t2d-standard-4', 4);
+    const T2D_8_EW4 = ew1('t2d-standard-8', 8, 'europe-west4-a');
+    const E2_8_B = ew1('e2-standard-8', 8);
+
+    function outcomesAt(outcomes: Record<string, ProviderError>): void {
+      provisionNode.mockImplementation(async (nodeId: string) => {
+        const [, type, location] = nodeId.split(':');
+        const error = outcomes[`${type}@${location}`];
+        if (error) throw error;
+      });
+    }
+
+    it('descends to a smaller T2D in the same region and names the bucket on the skipped one', async () => {
+      const t2dEw1 = await gcpQuotaIn('T2D_CPUS', 'in region europe-west1');
+      outcomesAt({ 't2d-standard-8@europe-west1-b': t2dEw1 });
+      const { rc } = createContext();
+      const state = createState([T2D_8_B, T2D_8_C, T2D_4_B, T2D_8_EW4, HETZNER_A]);
+
+      await handleNodeProvisioning(state, rc);
+
+      expect(attempted()).toEqual(['gcp t2d-standard-8', 'gcp t2d-standard-4']);
+      const [refused, sameBucket] = diagnostics(state);
+      expect(refused?.reason).toContain(
+        'GCP quota T2D_CPUS in europe-west1 is used up for this offering; trying smaller types of this family, other families and other regions before another provider.'
+      );
+      expect(refused?.reason).toContain(
+        "Quota 'T2D_CPUS' exceeded.  Limit: 24.0 in region europe-west1."
+      );
+      expect(sameBucket?.reason).toBe(
+        'Skipped: needs 8 vCPU, and GCP quota T2D_CPUS in europe-west1 already rejected a 8-vCPU offering'
+      );
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    });
+
+    it('tries another region and another family before Hetzner', async () => {
+      const t2dEw1 = await gcpQuotaIn('T2D_CPUS', 'in region europe-west1');
+      const t2dEw4 = await gcpQuotaIn('T2D_CPUS', 'in region europe-west4');
+      outcomesAt({
+        't2d-standard-8@europe-west1-b': t2dEw1,
+        't2d-standard-4@europe-west1-b': t2dEw1,
+        't2d-standard-8@europe-west4-a': t2dEw4,
+      });
+      const { rc } = createContext();
+      const state = createState([T2D_8_B, T2D_8_C, T2D_4_B, T2D_8_EW4, E2_8_B, HETZNER_A]);
+
+      await handleNodeProvisioning(state, rc);
+
+      expect(attempted()).toEqual([
+        'gcp t2d-standard-8',
+        'gcp t2d-standard-4',
+        'gcp t2d-standard-8',
+        'gcp e2-standard-8',
+      ]);
+      expect(state.stepResults.capacityPlacementSnapshot?.providerInstanceType).toBe(
+        'e2-standard-8'
+      );
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    });
+
+    it('moves to Hetzner only once every GCP offering is ruled out', async () => {
+      const t2dEw1 = await gcpQuotaIn('T2D_CPUS', 'in region europe-west1');
+      const t2dEw4 = await gcpQuotaIn('T2D_CPUS', 'in region europe-west4');
+      outcomesAt({
+        't2d-standard-8@europe-west1-b': t2dEw1,
+        't2d-standard-4@europe-west1-b': t2dEw1,
+        't2d-standard-8@europe-west4-a': t2dEw4,
+      });
+      const { rc } = createContext();
+      const state = createState([T2D_8_B, T2D_8_C, T2D_4_B, T2D_8_EW4, HETZNER_A]);
+
+      await handleNodeProvisioning(state, rc);
+
+      expect(attempted()).toEqual([
+        'gcp t2d-standard-8',
+        'gcp t2d-standard-4',
+        'gcp t2d-standard-8',
+        'hetzner cx43',
+      ]);
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    });
+
+    it('control: a quota that names no region still leaves GCP at once', async () => {
+      const global = await gcpQuotaIn('CPUS_ALL_REGIONS', 'globally', '32.0');
+      expect(global.category).toBe('quota_exceeded');
+      outcomesAt({ 't2d-standard-8@europe-west1-b': global });
+      const { rc } = createContext();
+      const state = createState([T2D_8_B, T2D_4_B, E2_8_B, HETZNER_A]);
+
+      await handleNodeProvisioning(state, rc);
+
+      expect(attempted()).toEqual(['gcp t2d-standard-8', 'hetzner cx43']);
+    });
+
+    it('spreads the per-tier cap across buckets, so a family behind eight exhausted offerings is tried', async () => {
+      const t2dEw1 = await gcpQuotaIn('T2D_CPUS', 'in region europe-west1');
+      const zones = ['b', 'c', 'd'];
+      const t2d = [8, 4, 2].flatMap((vcpu) =>
+        zones.map((zone) => ew1(`t2d-standard-${vcpu}`, vcpu, `europe-west1-${zone}`))
+      );
+      outcomesAt(
+        Object.fromEntries(t2d.map((offering) => [`${offering.type}@${offering.location}`, t2dEw1]))
+      );
+      const { rc } = createContext();
+      // Nine t2d offerings rank ahead of e2; before this change the 8-offering cut dropped e2.
+      const state = createState([...t2d, E2_8_B, HETZNER_A]);
+
+      await handleNodeProvisioning(state, rc);
+
+      expect(attempted()).toEqual([
+        'gcp t2d-standard-8',
+        'gcp t2d-standard-4',
+        'gcp t2d-standard-2',
+        'gcp e2-standard-8',
+      ]);
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    });
   });
 
   it('a Hetzner account limit in the first tier records its cooldown and moves to the next tier', async () => {
