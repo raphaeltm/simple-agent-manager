@@ -19,9 +19,9 @@ Production's persisted complete verdict and no-progress poison logic behave as d
 
 ## Checklist / acceptance
 
-- [ ] Replace lease elapsed-time assumptions with Date-only controlled clock and persisted lease observations.
-- [ ] Observe real verification results per session; positively prove first verification and zero later re-verification.
-- [ ] Freeze poison-test wall clock so a slow runner cannot split its first claim.
+- [x] Replace lease elapsed-time assumptions with Date-only controlled clock and persisted lease observations.
+- [x] Observe real verification results per session; positively prove first verification and zero later re-verification.
+- [x] Freeze poison-test wall clock so a slow runner cannot split its first claim.
 - [ ] Remove renewal and poison guards separately; intended tests fail, then restore and pass.
 - [ ] At least 30 full-file runs normally and 30 under bounded CPU load; record exact counts.
 - [ ] Relevant lint/typecheck/build and archive regression checks.
@@ -39,3 +39,8 @@ Push each unit. Keep commands under 10 minutes. Do not archive until completion 
 `.claude/rules/62-tests-must-observe-the-real-trigger.md`, #2700, #2702;
 `packages/project-data/src/scheduled/project-data-archive-sharding.ts`;
 `packages/project-data/src/do/archive-sharding.ts`.
+
+## Validation in progress
+
+Initial full Workers file: 15/15 passed. Repository lint: 22/22 tasks passed (existing web warnings).
+Local test-engineer and Cloudflare review: PASS; completion audit awaits mutation/stability/CI evidence.
