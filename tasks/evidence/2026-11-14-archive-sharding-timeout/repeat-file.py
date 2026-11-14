@@ -1,6 +1,7 @@
 import os,subprocess,json,time,sys,statistics
 from pathlib import Path
 mode=sys.argv[1];start=int(sys.argv[2]);count=int(sys.argv[3]);root=Path.cwd(); began=time.monotonic();load=None
+(root/'.tmp').mkdir(parents=True, exist_ok=True)
 try:
  if mode=='loaded':
   cpu=int(sys.argv[4]) if len(sys.argv)>4 else min(os.sched_getaffinity(0));assert cpu in os.sched_getaffinity(0)
