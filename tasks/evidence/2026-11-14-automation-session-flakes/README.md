@@ -30,7 +30,7 @@ All mutations were temporary and restored with SHA256 equality checks; productio
 
 ## Stability proof
 
-PENDING:30 fresh full-file processes normally and30 under synthetic CPU load for EACH file. Ordinary first checks/profiling and intentional mutation failures are excluded.
+Web COMPLETE:30 normal +30 loaded fresh full-file processes,2340 assertions PASS/0FAIL. SamSession normal30 complete (750 PASS), loaded30 still running. Ordinary first checks/profiling and intentional mutation failures are excluded.
 
 Each run uses `pnpm exec vitest run <file> --reporter=json --outputFile=<unique-report>` from its app directory; native SamSession adds `--config=vitest.sam-runtime.config.ts`. No test-name filter or retry. Loaded runs pin the entire pnpm/Vitest/workerd process tree to two CPUs with `taskset -c <pair>`, while two Python `while True: pass` processes each pin to one of the same CPUs. Web pair0,1; API pair2,3. Each foreground measurement process terminates and waits for both children in `finally`. Per-run summaries record observed burner CPU seconds, counts, elapsed time, head SHA and SHA256 hashes of all4 changed test files and both production paths used for mutation. Hashes are checked after EVERY run. Loaded batches use15 runs per command to remain below10minutes.
 
@@ -38,7 +38,7 @@ Each run uses `pnpm exec vitest run <file> --reporter=json --outputFile=<unique-
 
 -11 API dependency builds PASS (fresh main required rebuilding previously stale local dist artifacts).
 -API and web typechecks PASS.
--PENDING final lint/build/native3-file regression and completion review.
+-Full API/web lint2 tasks PASS (2 preexisting web warnings); API/web build16 tasks PASS. All3 shared native-runtime files PASS66 assertions (35 grounding,6 live-stream,25 SamSession). Completion review pending final loaded proof.
 -Local test review: PASS; Cloudflare review: initial P2 unbounded drain addressed and re-review PASS; final completion review pending.
 
 Draft+needs-human-review and coordinator exact-SHA merge approval remain mandatory. Original PR2724 production watch through2026-11-15 11:59:39.619UTC and PR2728 main Test timing tracker remain separate obligations.
