@@ -613,6 +613,11 @@ chat fails with "No eligible compute-pool offering is available in the installat
 for this task's requirements (2 vCPU, 4096 MB memory, 15 GB disk)". On Google Cloud add
 `e2-standard-2` (2 vCPU, 8 GB); keep `e2-medium` for smaller work if you like.
 
+A node created through the API without a location (`POST /api/nodes` with only a name and size)
+goes wherever the installation pool places it; on a Cloudflare install the same request still
+means Hetzner `nbg1`. A location, when given, must be one the pool offers: on Google Cloud a zone
+(`europe-west1-b`), not a region (`europe-west1`).
+
 ## Backup, restore and upgrade
 
 ```bash

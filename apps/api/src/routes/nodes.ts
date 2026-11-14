@@ -21,6 +21,7 @@ import { scheduleDirectProvisioning } from '../services/direct-provisioning';
 import { getRuntimeLimits } from '../services/limits';
 import { stopWorkspaceOnNode } from '../services/node-agent';
 import { getNodeResourceUsage } from '../services/node-resource-usage';
+import { isReverseTunnelInstallation } from '../services/node-tunnel-config';
 import { createNodeRecord, stopNodeResources } from '../services/nodes';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { deleteNodeRoute } from './nodes/delete';
@@ -123,10 +124,16 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
   }
 
   const provider = body.provider;
-  const vmLocation = body.vmLocation ?? DEFAULT_VM_LOCATION;
+  // Without a location in the request: on Cloudflare installs, DEFAULT_VM_LOCATION (Hetzner
+  // nbg1), as always. On a self-hosted box (the reverse-tunnel installation, the box's existing
+  // self-host marker) none: the installation pool then decides, and it holds only the locations
+  // of the box's platform credential. A GCP-only box has no nbg1, so the constant could never be
+  // placed there (box round R13 D8).
+  const vmLocation =
+    body.vmLocation ?? (isReverseTunnelInstallation(c.env) ? null : DEFAULT_VM_LOCATION);
 
   // Validate location against provider if provider is specified
-  if (provider && !isValidLocationForProvider(provider, vmLocation)) {
+  if (provider && vmLocation !== null && !isValidLocationForProvider(provider, vmLocation)) {
     throw errors.badRequest(
       `Location '${vmLocation}' is not valid for provider '${provider}'. Expected ${describeValidLocations(provider)}`
     );
