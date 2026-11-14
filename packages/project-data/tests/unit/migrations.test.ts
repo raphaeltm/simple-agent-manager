@@ -1,10 +1,7 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
-import {
-  MIGRATIONS,
-  runMigrations,
-} from '../../src/do/migrations';
+import { MIGRATIONS, runMigrations } from '../../src/do/migrations';
 import { createSqlStorage } from '../fixtures/sql-storage';
 
 /**
@@ -575,7 +572,9 @@ describe('DO Migrations', () => {
       // Attention marker changes for the summary sync delta (070): two.
       // Anchored comment threads (073): seven (scope/sequence, scope/status, message,
       // updated_at, status/updated_at, reply thread/sequence, reply scope).
-      expect(indexes).toHaveLength(147);
+      // Project event cost (077): one FK lookup index; four retired event
+      // indexes remain CREATE statements in the append-only migration history.
+      expect(indexes).toHaveLength(148);
       expect(indexes.some((query) => query.includes('idx_session_access_grants_expiry_due'))).toBe(
         true
       );
