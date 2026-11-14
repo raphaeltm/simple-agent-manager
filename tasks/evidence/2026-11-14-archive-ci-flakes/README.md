@@ -17,3 +17,9 @@ Compact full-file runs: 30 normal and 10 CPU-loaded passed so far (520 tests, ze
 Coordinator requires real CI Test-job wall-clock comparisons for serial package concurrency and a middle option before choosing the final budget. Historical Test-job baselines are 32:00 (43585850934), 24:00 (43589298206), and 20:44 (latest successful retry of 43585844985). `ci-budget-comparison.json` currently contains baselines only; proposed serial budget is not final until comparison.
 
 Current additional verification: targeted ESLint and formatting passed, ProjectData typecheck passed, API and its dependencies built successfully (12 Turbo tasks), API typecheck passed after that rebuild, and the full ProjectData package passed 528 tests in 50 files. Loaded compact runs 11–20 also passed; final loaded batch is in progress. Preliminary local specialist reviews are running read-only; no PR is open yet.
+
+## Compact stability completed
+
+All 30 normal and 30 loaded full-file runs passed, 780 tests total, zero failures/skips/retries. Target 100-row case median/max: normal 2649.86/2967.58 ms; loaded 7255.38/10279.54 ms. Both CPU burners consumed positive CPU in every loaded run. `compact-summary.json` summarizes results, with raw per-case timings and source hashes in `repeat-results.jsonl`. Only the compact test source hash is relevant to compact runs; the independent lifecycle test gained a controlled-clock assertion during the last loaded compact batch.
+
+Reviewer gap addressed: lifecycle test now freezes Date only before the actual seed and handoff, then asserts both persisted decision timestamps equal that frozen instant. Full workerd file passed 9/9 and proves the freeze reaches both DO and handoff write contexts. `onTestFinished` restores the clock while real scheduling timers remain real. Repeating the emission omission under this final clock again produced exactly one failure; production source restored. Lifecycle 30+30 repetitions remain pending.

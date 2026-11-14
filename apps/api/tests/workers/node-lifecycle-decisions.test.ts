@@ -5,7 +5,7 @@
  */
 import { env, runInDurableObject } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
@@ -147,6 +147,10 @@ describe('warm handoff decisions', () => {
   });
 
   it('records handed_to_warm alongside the DO marked_warm decision', async () => {
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+    onTestFinished(() => vi.useRealTimers());
     await seedBase();
     const nodeId = 'node-decisions-handoff-warm';
     await seedNode(nodeId, USER_ID);
@@ -166,7 +170,11 @@ describe('warm handoff decisions', () => {
     });
     expect(result).toEqual({ outcome: 'handed_to_warm' });
     const rows = await decisions(nodeId);
-    // Both events may share a millisecond. Their random ULID suffixes give the
+    expect(rows.map((row) => row.createdAt)).toEqual([
+      new Date(now).toISOString(),
+      new Date(now).toISOString(),
+    ]);
+    // Both events share a millisecond. Their random ULID suffixes give the
     // list a stable tie order, but do not encode which event happened first.
     expect(rows.map((row) => `${row.source}:${row.decision}`).sort()).toEqual([
       'node_lifecycle:marked_warm',

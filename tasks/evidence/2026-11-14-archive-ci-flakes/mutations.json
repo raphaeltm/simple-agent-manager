@@ -24,5 +24,18 @@
       }
     ],
     "restored": true
+  },
+  {
+    "mutation": "handoff_emission_with_Date_only_clock",
+    "failed": 1,
+    "passed": 0,
+    "restored": true,
+    "cases": [
+      {
+        "name": "warm handoff decisions records handed_to_warm alongside the DO marked_warm decision",
+        "status": "failed",
+        "failure": "AssertionError: expected [ '2026-11-14T12:41:24.165Z' ] to deeply equal [ '2026-11-14T12:41:24.165Z', \u2026(1) ]"
+      }
+    ]
   }
 ]
