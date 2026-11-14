@@ -513,6 +513,11 @@ and target application version. Multiple new rollouts fail as ambiguous; no-op o
 metadata-only updates require no new rollout, but await an existing pending one.
 Gradual rollout behavior
 is preserved. API errors, unreadable state and timeout fail the deployment.
+The wait closes the window where deployment reports success mid-rollout; it does
+not prove every running instance's binary version. The authenticated `/ready`
+callback logs `instant_session.agent_version_mismatch` with expected and reported
+versions without rejecting readiness, providing evidence for remaining version
+discrepancies.
 Optional GitHub Environment variables `CONTAINER_ROLLOUT_TIMEOUT_MS` (default
 `1200000`, 20 minutes) and `CONTAINER_ROLLOUT_POLL_INTERVAL_MS` (default `10000`)
 accept positive integer milliseconds. These are deployment runner settings, not

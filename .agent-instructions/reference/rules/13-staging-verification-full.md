@@ -71,7 +71,9 @@ Multiple new rollouts fail as ambiguous. An unchanged or metadata-only deploymen
 awaits any existing pending rollout; a first direct creation needs no rollout.
 Application GET can report the old version during rollout, so version equality
 alone cannot prove a no-op. API errors, unreadable status and timeout fail the
-step. Keep gradual rollouts: even one 100% step has a mixed-image window while
+step. This closes the window where deploy reports success mid-rollout; it does
+not prove every running instance's binary. The unexplained post-rollout version
+transition remains tracked in idea01M7BQJ14BKVMPMKRA2GCSP8MJ. Keep gradual rollouts: even one 100% step has a mixed-image window while
 instances are replaced. After workflow success, verify the new Instant node's
 recorded `agent_version` matches the deployed `VM_AGENT_REQUIRED_VERSION` before
 counting a VM-agent trial as evidence. The authenticated `/ready` callback logs
