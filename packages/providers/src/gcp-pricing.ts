@@ -280,10 +280,14 @@ export function parseStoredGcpPriceTable(value: unknown): GcpPriceTable | null {
       }
       out[region] = parsedSeries;
     }
+    // Optional and newer than the rest: absent stays absent, so a caller can tell a table stored
+    // before boot disks were priced (refresh it) from one with no disk price for a region. A
+    // malformed disk map loses only the disk prices, never the core and RAM rates.
+    const storedDisk = root.balancedDiskGibMonthly;
+    if (storedDisk === undefined) return { currency: GCP_PRICE_CURRENCY, regions: out };
     const disk: Record<string, number | null> = {};
-    if (root.balancedDiskGibMonthly !== undefined) {
-      const stored = expectObject(root.balancedDiskGibMonthly, 'gcp', 'storedPriceTable.disk');
-      for (const [region, price] of Object.entries(stored)) {
+    if (storedDisk && typeof storedDisk === 'object' && !Array.isArray(storedDisk)) {
+      for (const [region, price] of Object.entries(storedDisk)) {
         disk[region] = finitePositiveOrNull(price);
       }
     }

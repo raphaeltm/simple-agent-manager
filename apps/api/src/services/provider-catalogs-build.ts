@@ -1,5 +1,7 @@
 import {
+  applyGcpBootDiskPolicy,
   createProvider,
+  type GcpBootDiskPolicy,
   type GcpPriceTable,
   getProviderCatalogOfferings,
   type Provider as CloudProvider,
@@ -101,18 +103,27 @@ export async function listProviderCatalogOfferings(
   }
 }
 
+/**
+ * The static catalog, used when a live catalog cannot be read. GCP offerings are re-sized to the
+ * boot disk policy (`gcpBootDiskPolicy`, default when omitted) so this fallback advertises the
+ * disk `GcpProvider.createVM` will create.
+ */
 export function getStaticProviderCatalogOfferings(
-  provider: CredentialProvider
+  provider: CredentialProvider,
+  options: { gcpBootDiskPolicy?: GcpBootDiskPolicy } = {}
 ): ProviderInstanceOffering[] {
   const locations = getLocationsForProvider(provider);
   const locationMetadata = Object.fromEntries(
     locations.map((location) => [location.id, { name: location.name, country: location.country }])
   );
-  return getProviderCatalogOfferings(
+  const offerings = getProviderCatalogOfferings(
     provider,
     locations.map((location) => location.id),
     locationMetadata
   );
+  return provider === 'gcp'
+    ? applyGcpBootDiskPolicy(offerings, options.gcpBootDiskPolicy)
+    : offerings;
 }
 
 export async function buildProviderCatalogForCredential(input: {

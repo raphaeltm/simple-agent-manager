@@ -253,7 +253,6 @@ export function gcpOfferingsFromMachineTypes(
             : diskHourly === null
               ? 'cloud-billing-catalog-machine-only'
               : 'cloud-billing-catalog',
-        bootDiskGb: diskGb,
       },
     } satisfies ProviderInstanceOffering;
   });

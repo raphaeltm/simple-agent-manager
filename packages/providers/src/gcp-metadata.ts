@@ -173,7 +173,11 @@ export const DEFAULT_GCP_FIREWALL_SOURCE_RANGES = CLOUDFLARE_IPV4_RANGES;
 /** Default source ranges for grey-cloud app routes and HTTP-01 ACME. */
 export const DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES = ['0.0.0.0/0'] as const;
 
-/** GCP machine type mappings for SAM VM sizes */
+/**
+ * GCP machine type mappings for SAM VM sizes. `storageGb` is the default boot disk policy's size
+ * for each machine (`gcpBootDiskSizeGb`, gcp-boot-disk.ts); every catalog path re-sizes it with
+ * `applyGcpBootDiskPolicy` so an admin policy change applies here too.
+ */
 export const SIZE_MAP: Record<VMSize, SizeConfig> = {
   small: { type: 'e2-medium', price: '~$25/mo', vcpu: 1, ramGb: 4, storageGb: 50 },
   medium: { type: 'e2-standard-2', price: '~$49/mo', vcpu: 2, ramGb: 8, storageGb: 50 },

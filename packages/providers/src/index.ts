@@ -118,6 +118,7 @@ export {
   GcpProvider,
 } from './gcp';
 export {
+  applyGcpBootDiskPolicy,
   DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,
   DEFAULT_GCP_BOOT_DISK_MIN_GB,
   DEFAULT_GCP_BOOT_DISK_POLICY,
@@ -316,7 +317,8 @@ export function createProvider(config: ProviderConfig): Provider {
         config.firewallSourceRanges,
         config.agentPorts,
         config.appRouteSourceRanges,
-        config.appRoutePorts
+        config.appRoutePorts,
+        config.catalog
       );
     default: {
       const _exhaustive: never = config;

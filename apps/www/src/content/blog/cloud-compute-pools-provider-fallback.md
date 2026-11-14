@@ -1,10 +1,10 @@
 ---
-title: "Cloud Compute Pools: Provider Order and Fallback"
+title: 'Cloud Compute Pools: Provider Order and Fallback'
 date: 2026-11-08
 author: SAM
 category: engineering
-tags: ["architecture", "gcp", "hetzner", "performance", "typescript"]
-excerpt: "SAM reuses warm machines, prefers your ranked cloud source for new VMs, and falls back to the next source when capacity runs out."
+tags: ['architecture', 'gcp', 'hetzner', 'performance', 'typescript']
+excerpt: 'SAM reuses warm machines, prefers your ranked cloud source for new VMs, and falls back to the next source when capacity runs out.'
 ---
 
 A cloud pool should be able to follow your priorities without wasting machines or getting stuck when a provider runs short. SAM can now reuse capacity that is already running, prefer one cloud account when it needs a new VM, and try the next ranked source when capacity runs out. Its Google Cloud catalog also comes from Google's current machine and pricing APIs instead of a small table of guesses.
@@ -44,7 +44,7 @@ Google prices a VM's CPU and memory separately. SAM combines those two rates for
 return billedVcpus * prices.coreHourly + (type.memoryMb / 1024) * prices.ramGibHourly;
 ```
 
-The [`gcp-catalog.ts` implementation](https://github.com/raphaeltm/simple-agent-manager/blob/main/packages/providers/src/gcp-catalog.ts) uses the machine's billed vCPU count, which matters for shared-core types. If SAM cannot identify a price confidently, it marks that price unavailable rather than guessing. These are Google's list prices; discounts, credits, and the boot disk are not included. The price data is refreshed in the background and cached, so placing work does not wait for a long catalog download. More detail is in the [Google Cloud guide](/docs/guides/google-cloud/#machine-types-zones-and-prices).
+The [`gcp-catalog.ts` implementation](https://github.com/raphaeltm/simple-agent-manager/blob/main/packages/providers/src/gcp-catalog.ts) uses the machine's billed vCPU count, which matters for shared-core types. If SAM cannot identify a price confidently, it marks that price unavailable rather than guessing. These are Google's list prices; discounts and credits are not included. (Since November 2026 the price also covers the node's boot disk.) The price data is refreshed in the background and cached, so placing work does not wait for a long catalog download. More detail is in the [Google Cloud guide](/docs/guides/google-cloud/#machine-types-zones-and-prices).
 
 The same live catalog includes zones Google reports for the configured machine types. If a zone cannot be read, SAM treats the response as incomplete and keeps the last known offerings rather than interpreting a partial response as proof that machines disappeared.
 

@@ -44,6 +44,10 @@ export function gcpBootDiskSizeGb(
 /**
  * vCPUs a machine type name states (`e2-standard-8` → 8). Shared-core and custom names
  * (`e2-medium`, `e2-custom-4-8192`) state none, so the policy floor applies to them.
+ *
+ * Only a fallback for requests that carry neither a disk nor a vCPU count. Pool plans carry
+ * both (`resources`), so a name this misreads (a suffixed type such as `c3-standard-4-lssd`) can
+ * only affect direct API requests, where it yields the floor rather than the catalog's size.
  */
 export function gcpMachineTypeNamedVcpus(machineType: string): number | null {
   const match = /^[a-z][a-z0-9]*-(?:standard|highmem|highcpu)-(\d+)$/.exec(machineType.trim());
@@ -64,4 +68,17 @@ export function normalizeGcpBootDiskPolicy(
 
 function positiveFinite(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * Re-size offerings to the policy: the static catalog's disk is written for the default policy
+ * (`SIZE_MAP` in gcp-metadata.ts), and an admin can change the policy at runtime.
+ */
+export function applyGcpBootDiskPolicy<
+  T extends { vcpu?: number | null; diskGb?: number | null; storageGb?: number | null },
+>(offerings: readonly T[], policy: GcpBootDiskPolicy = DEFAULT_GCP_BOOT_DISK_POLICY): T[] {
+  return offerings.map((offering) => {
+    const diskGb = gcpBootDiskSizeGb(offering.vcpu, policy);
+    return { ...offering, storageGb: diskGb, diskGb };
+  });
 }

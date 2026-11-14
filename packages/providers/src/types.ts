@@ -1,5 +1,7 @@
 import type { ProviderInstanceOffering, VMSize } from '@simple-agent-manager/shared';
 
+import type { GcpCatalogOptions } from './gcp';
+import type { GcpBootDiskPolicy } from './gcp-boot-disk';
 import type { ProviderVmDeletionRequests } from './vm-deletion';
 
 /**
@@ -498,7 +500,7 @@ export interface GcpProviderConfig {
   imageFamily?: string;
   imageProject?: string;
   /** Boot disk sizing (`gcp-boot-disk.ts`); defaults to 20 GB per vCPU with a 50 GB floor. */
-  bootDiskPolicy?: { gbPerVcpu: number; minGb: number };
+  bootDiskPolicy?: GcpBootDiskPolicy;
   timeoutMs?: number;
   operationPollTimeoutMs?: number;
   /** Source CIDR ranges allowed by the GCP VPC firewall rule for VM agent ingress. */
@@ -509,6 +511,8 @@ export interface GcpProviderConfig {
   appRouteSourceRanges?: readonly string[];
   /** TCP ports allowed by the GCP VPC firewall rule for public app-route ingress. */
   appRoutePorts?: readonly string[];
+  /** Live catalog inputs; without them `listInstanceOfferings` returns the static table. */
+  catalog?: GcpCatalogOptions;
 }
 
 /**

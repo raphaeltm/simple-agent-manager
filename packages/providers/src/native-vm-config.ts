@@ -33,7 +33,8 @@ export type NativeVMConfigSource = 'native' | 'top-level-instance-type' | 'legac
  * default scales with the machine (GCP) needs no legacy-size lookup of its own.
  */
 export type DefaultBootDiskSizeGb =
-  number | ((resolved: NativeVMConfig, source: NativeVMConfigSource) => number);
+  | number
+  | ((resolved: NativeVMConfig, source: NativeVMConfigSource) => number);
 
 export interface NativeVMResolveOptions {
   providerName: string;
@@ -156,14 +157,9 @@ export function assertBootDiskSizeGb(
 ): void {
   if (value === undefined) return;
   if (!Number.isInteger(value) || value <= 0) {
-    throw new ProviderError(
-      providerName,
-      400,
-      'bootDiskSizeGb must be a positive integer GB value',
-      {
-        category: 'invalid_config',
-      }
-    );
+    throw new ProviderError(providerName, 400, 'bootDiskSizeGb must be a positive integer GB value', {
+      category: 'invalid_config',
+    });
   }
   if (limits.min !== undefined && value < limits.min) {
     throw new ProviderError(
@@ -252,7 +248,7 @@ function normalizeNativeVMConfig(
 
   return {
     instanceType: candidate.instanceType,
-    ...((candidate.image ?? config.image) ? { image: candidate.image ?? config.image } : {}),
+    ...(candidate.image ?? config.image ? { image: candidate.image ?? config.image } : {}),
     ...(candidate.architecture ? { architecture: candidate.architecture } : {}),
     ...(bootDiskSizeGb !== undefined ? { bootDiskSizeGb } : {}),
     ...(resources ? { resources } : {}),
@@ -261,24 +257,14 @@ function normalizeNativeVMConfig(
 
 function validateResources(resources: VMHardwareResources, providerName: string): void {
   if (!Number.isInteger(resources.vcpuCount) || resources.vcpuCount <= 0) {
-    throw new ProviderError(
-      providerName,
-      400,
-      'native.resources.vcpuCount must be a positive integer',
-      {
-        category: 'invalid_config',
-      }
-    );
+    throw new ProviderError(providerName, 400, 'native.resources.vcpuCount must be a positive integer', {
+      category: 'invalid_config',
+    });
   }
   if (!Number.isInteger(resources.memoryMb) || resources.memoryMb <= 0) {
-    throw new ProviderError(
-      providerName,
-      400,
-      'native.resources.memoryMb must be a positive integer',
-      {
-        category: 'invalid_config',
-      }
-    );
+    throw new ProviderError(providerName, 400, 'native.resources.memoryMb must be a positive integer', {
+      category: 'invalid_config',
+    });
   }
   if (
     resources.diskGb !== undefined &&

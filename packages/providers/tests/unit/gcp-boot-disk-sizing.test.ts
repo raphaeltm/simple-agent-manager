@@ -115,8 +115,12 @@ describe('balanced disk prices', () => {
     expect(parseStoredGcpPriceTable({ currency: 'USD', regions: {} })).toEqual({
       currency: 'USD',
       regions: {},
-      balancedDiskGibMonthly: {},
     });
+    // A malformed disk map drops the disk prices only, never the machine rates.
+    const regions = { 'us-central1': { e2: { coreHourly: 0.02, ramGibHourly: 0.003 } } };
+    expect(
+      parseStoredGcpPriceTable({ currency: 'USD', regions, balancedDiskGibMonthly: ['bad'] })
+    ).toEqual({ currency: 'USD', regions, balancedDiskGibMonthly: {} });
   });
 });
 
@@ -220,10 +224,7 @@ describe('GcpProvider boot disk', () => {
     const machineHourly = 8 * T2D_CORE + 32 * T2D_RAM;
     const diskHourly = (160 * BALANCED_GIB_MONTH) / 730;
     expect(t2d.priceHourly).toBeCloseTo(machineHourly + diskHourly, 9);
-    expect(t2d.catalogMetadata).toMatchObject({
-      priceSource: 'cloud-billing-catalog',
-      bootDiskGb: 160,
-    });
+    expect(t2d.catalogMetadata).toMatchObject({ priceSource: 'cloud-billing-catalog' });
 
     expect(byType.get('e2-medium')).toMatchObject({ diskGb: 50 });
     // n4 boots from Hyperdisk, whose price the table does not hold: machine price alone.

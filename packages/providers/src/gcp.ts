@@ -3,6 +3,7 @@ import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { markProviderCreateNotDispatched } from './create-dispatch';
 import { pollGcpOperation } from './gcp-api';
 import {
+  applyGcpBootDiskPolicy,
   DEFAULT_GCP_BOOT_DISK_POLICY,
   type GcpBootDiskPolicy,
   gcpBootDiskSizeGb,
@@ -241,6 +242,8 @@ export class GcpProvider implements Provider {
           zone,
           nativeConfig.instanceType,
           resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
+          // Resolution always sets bootDiskSizeGb (the default above is a function that returns
+          // a number); the fallback only narrows the optional type.
           nativeConfig.bootDiskSizeGb ?? this.defaultBootDiskSizeGb(nativeConfig, 'native')
         ),
       ],
@@ -419,14 +422,14 @@ export class GcpProvider implements Provider {
   }
 
   private staticOfferings() {
-    return getProviderCatalogOfferings(
-      this.name as CredentialProvider,
-      this.locations,
-      this.locationMetadata
-    ).map((offering) => {
-      const diskGb = gcpBootDiskSizeGb(offering.vcpu, this.bootDiskPolicy);
-      return { ...offering, storageGb: diskGb, diskGb };
-    });
+    return applyGcpBootDiskPolicy(
+      getProviderCatalogOfferings(
+        this.name as CredentialProvider,
+        this.locations,
+        this.locationMetadata
+      ),
+      this.bootDiskPolicy
+    );
   }
 
   /**

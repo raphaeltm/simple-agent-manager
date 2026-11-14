@@ -11,6 +11,7 @@ import {
   createGcpProviderForEnv,
   resolveGcpBootDiskPolicy,
 } from '../../../src/services/gcp-provider-factory';
+import { getStaticProviderCatalogOfferings } from '../../../src/services/provider-catalogs';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 
 const ZONE = 'europe-west1-b';
@@ -115,5 +116,42 @@ describe('GCP boot disk admin settings', () => {
       })
     ).rejects.toThrow();
     expect(await resolveGcpBootDiskPolicy(env)).toEqual({ gbPerVcpu: 20, minGb: 50 });
+  });
+
+  it('falls back to the defaults when settings cannot be read, so providers still build', async () => {
+    const broken = {
+      ...env,
+      DATABASE: {
+        prepare: () => {
+          throw new Error('D1 unavailable');
+        },
+        batch: () => Promise.reject(new Error('D1 unavailable')),
+      },
+    } as unknown as Env;
+    expect(await resolveGcpBootDiskPolicy(broken)).toEqual({ gbPerVcpu: 20, minGb: 50 });
+    const provider = await createGcpProviderForEnv(
+      broken,
+      { gcpProjectId: 'p', defaultZone: ZONE },
+      async () => 'token'
+    );
+    expect(provider.name).toBe('gcp');
+  });
+
+  it('re-sizes the static catalog fallback to the admin policy', async () => {
+    await updateAdminSettings(env, {
+      changes: [{ name: 'gcpCatalog.bootDiskGbPerVcpu', value: 30 }],
+      actorUserId: 'admin',
+    });
+    const offerings = getStaticProviderCatalogOfferings('gcp', {
+      gcpBootDiskPolicy: await resolveGcpBootDiskPolicy(env),
+    });
+    const large = offerings.find((offering) => offering.providerInstanceType === 'e2-standard-4');
+    expect(large?.diskGb).toBe(120);
+    // Without a policy the default applies, matching SIZE_MAP.
+    expect(
+      getStaticProviderCatalogOfferings('gcp').find(
+        (offering) => offering.providerInstanceType === 'e2-standard-4'
+      )?.diskGb
+    ).toBe(80);
   });
 });

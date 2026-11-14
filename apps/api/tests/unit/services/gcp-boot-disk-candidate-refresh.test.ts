@@ -10,7 +10,7 @@
  * leaves `provider_instance_boot_disk_size_gb` NULL; the control test shows the node would be
  * refused if the size were written to the boot-disk column instead.
  */
-import { GcpProvider } from '@simple-agent-manager/providers';
+import { GcpProvider, type Provider } from '@simple-agent-manager/providers';
 import {
   capacityPlacementSnapshotForCandidate,
   resolveReusableNodeCapacitySnapshot,
@@ -21,7 +21,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
 import { ensureCandidatesForSource } from '../../../src/services/default-capacity-pool-candidates-publication';
+import { createGcpProviderForEnv } from '../../../src/services/gcp-provider-factory';
 import type { TaskStartCapacityPoolSelection } from '../../../src/services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../../src/services/reusable-node-authority';
 import {
@@ -135,10 +137,11 @@ function stubCompute(inserted: string[] = []) {
 async function publish(
   db: ReturnType<typeof drizzle<typeof schema>>,
   policy: { gbPerVcpu: number; minGb: number } | undefined,
-  generation: number
+  generation: number,
+  provider: Provider = gcpProvider(policy)
 ) {
   stubCompute();
-  const offerings = await gcpProvider(policy).listInstanceOfferings({
+  const offerings = await provider.listInstanceOfferings({
     preferApi: true,
     allowStaticFallback: false,
   });
@@ -233,13 +236,15 @@ async function reusable(database: D1Database, row: schema.CapacityPoolCandidate)
 
 describe('GCP boot disk: catalog refresh, reuse and the created VM agree', () => {
   /** Publishes the pre-change 50 GB catalog, picks the candidate, and seeds a node from it. */
-  async function legacyNodeOnPublishedCandidate() {
-    const { database, db } = setup();
+  async function legacyNodeOnPublishedCandidate(
     // max(50, 1 x 8) = 50: what the fixed 50 GB disk advertised before this change.
-    await publish(db, { gbPerVcpu: 1, minGb: 50 }, 1);
+    initial = { policy: { gbPerVcpu: 1, minGb: 50 }, diskGb: 50 }
+  ) {
+    const { database, db } = setup();
+    await publish(db, initial.policy, 1);
     const legacy = await workspaceCandidate(db);
     expect(legacy).toMatchObject({
-      providerInstanceDiskGb: 50,
+      providerInstanceDiskGb: initial.diskGb,
       providerInstanceBootDiskSizeGb: null,
     });
     sqlite!.exec(
@@ -301,5 +306,37 @@ describe('GCP boot disk: catalog refresh, reuse and the created VM agree', () =>
       selectionFor(refreshed).candidates[0]!
     );
     expect(snapshot.providerInstanceDiskGb).toBe(160);
+  });
+
+  it('keeps a 160 GB node reusable when an admin lowers the policy to 80 GB', async () => {
+    const { database, db } = await legacyNodeOnPublishedCandidate({
+      policy: { gbPerVcpu: 20, minGb: 50 },
+      diskGb: 160,
+    });
+    await publish(db, { gbPerVcpu: 10, minGb: 50 }, 2);
+    const lowered = await workspaceCandidate(db);
+    expect(lowered.providerInstanceDiskGb).toBe(80);
+    expect(await reusable(database, lowered)).toEqual(new Set(['node-old']));
+  });
+
+  it('an admin setting edit reaches the published candidate through the API factory', async () => {
+    const { database, db } = await legacyNodeOnPublishedCandidate();
+    sqlite!
+      .prepare(
+        `INSERT INTO platform_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)`
+      )
+      .run('gcpCatalog.bootDiskGbPerVcpu', '30', TS, 'admin');
+    const env = { DATABASE: database } as unknown as Env;
+    const provider = await createGcpProviderForEnv(
+      env,
+      { gcpProjectId: 'p', defaultZone: ZONE },
+      async () => 'token',
+      { machineTypes: ['t2d-standard-8'], priceTable: async () => null }
+    );
+
+    await publish(db, undefined, 2, provider);
+    const refreshed = await workspaceCandidate(db);
+    expect(refreshed.providerInstanceDiskGb).toBe(240);
+    expect(await reusable(database, refreshed)).toEqual(new Set(['node-old']));
   });
 });

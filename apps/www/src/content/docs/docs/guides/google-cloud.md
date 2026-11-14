@@ -97,14 +97,13 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
   settings `gcpCatalog.bootDiskGbPerVcpu` and `gcpCatalog.bootDiskMinGb`
   (`gcpBootDiskSizeGb()` in `packages/providers/src/gcp-boot-disk.ts`). The catalog advertises
   that size, the pool and its price use it, and the node is created with it. A changed setting
-  reaches a pool when its catalog is next refreshed (opening the pool's settings does this);
-  nodes already running keep the disk they were created with and stay usable. `pd-balanced`
+  reaches a pool when its catalog is next refreshed (opening the pool's settings does this, through `ensureDefaultCapacityPoolsForExistingCredentials()` and `ensureCandidatesForSource()` in `apps/api/src/services/`);
+  nodes already running keep the disk they were created with and stay usable. A VM's disk is, in order: an explicit `bootDiskSizeGb` on the request, then the disk recorded in its pool plan, then the policy size (`defaultBootDiskSizeGb()` in `packages/providers/src/gcp.ts`). So a plan made before a refresh still gets the disk its node row records. `pd-balanced`
   applies to machine series that support Persistent Disk, including every default type (e2, n2d,
   t2d). Hyperdisk-only series such as N4 and C4 get no disk type from SAM, and nodes created
   before SAM requested `pd-balanced` keep their original `pd-standard` disk. A `pd-balanced` disk
   counts against the region's `SSD_TOTAL_GB` quota ("Persistent disk SSD (GB)"), so each such
-  node needs its disk size in that quota. At 20 GB per vCPU, a region's whole default CPU quota
-  needs a few thousand GB, well under a typical 20,480 GB SSD quota. When the quota runs out,
+  node needs its disk size in that quota: its vCPU count times `gcpCatalog.bootDiskGbPerVcpu`. Check the region's `SSD_TOTAL_GB` and `CPUS` quotas before raising the setting. When the quota runs out,
   Google refuses the node with `Quota 'SSD_TOTAL_GB' exceeded`.
 - **Credits and discounts are not reflected.** These are list prices. Committed-use discounts,
   free-tier usage and promotional credits apply on your Google invoice, not in SAM's ranking.
