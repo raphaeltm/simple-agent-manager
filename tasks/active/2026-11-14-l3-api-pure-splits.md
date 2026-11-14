@@ -41,8 +41,8 @@ keeps the later self-host behaviour slices small.
 - [x] mechanical pure-move proof per split (symbol table + unmatched-lines lists)
 - [x] mock targets / import paths in tests updated only where needed, listed
 - [x] local gates: build order, typecheck, check:fast, api + ai-proxy unit tests, Workers tests touching these modules, file sizes, ast-checks, boundary rules
-- [ ] reviews: architecture-reviewer, task-completion-validator, cloudflare-specialist (agent-loop runs inside SamSession/ProjectAgent DOs)
-- [ ] staging: read-aloud audio, SAM agent chat, budget/usage page
+- [x] reviews: architecture-reviewer, task-completion-validator, cloudflare-specialist (agent-loop runs inside SamSession/ProjectAgent DOs)
+- [x] staging: read-aloud audio, SAM agent chat, budget/usage page
 - [ ] draft PR, CodeRabbit request via workflow dispatch, report to coordinator
 
 ## Acceptance criteria
@@ -72,3 +72,9 @@ keeps the later self-host behaviour slices small.
   `MonthlyCostCapCheck`, `currentUtcMonthStart`, `getLocalMonthlyAiCostUsd`, `SpeechAudioSource`,
   `isSpeechEndpoint`, `callOpenAIChatLLM` (integration-only behaviour). Main's `callWorkersAILLM`
   moved to agent-loop-llm.ts with `callLLM` (its only caller).
+- Staging (2026-11-14, head 7fc3cdf0b, Deploy Staging 43607690743): usage/budget APIs byte-identical
+  before/after; budget cap -5 → 400, 50 → 200, deleted back to baseline; Project Agent chat 200 with 3
+  tool calls on Workers AI (processOpenAIStream path); read-aloud on a VM-runtime message →
+  synthesize 200 + audio/mpeg 840,960 B, player 0:03/2:20. `/sam` operator page not exercised (SAM
+  disabled for the shared smoke user; it does not use runAgentLoop). VM node deleted, D1 audit 0 live
+  nodes; staging FREE 15:43Z.
