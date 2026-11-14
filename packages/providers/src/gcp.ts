@@ -45,7 +45,10 @@ import {
 } from './gcp-native-instance';
 import type { GcpPriceTable } from './gcp-pricing';
 import { getProviderCatalogOfferings } from './instance-offerings';
-import { type NativeVMConfigSource, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
+import {
+  type NativeVMConfigSource,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
 import {
   providerFetch,
   rethrowIfProviderRequestAborted,
@@ -446,8 +449,7 @@ export class GcpProvider implements Provider {
     ) {
       return plannedDiskGb;
     }
-    const vcpus =
-      resolved.resources?.vcpuCount ?? gcpMachineTypeNamedVcpus(resolved.instanceType);
+    const vcpus = resolved.resources?.vcpuCount ?? gcpMachineTypeNamedVcpus(resolved.instanceType);
     return gcpBootDiskSizeGb(vcpus, this.bootDiskPolicy);
   }
 
