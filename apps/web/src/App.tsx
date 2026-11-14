@@ -222,6 +222,11 @@ const SettingsNotifications = lazyNamed(
 const Setup = lazyNamed(() => import('./pages/Setup'), 'Setup');
 const TaskRedirect = lazyNamed(() => import('./pages/TaskRedirect'), 'TaskRedirect');
 const Tools = lazyNamed(() => import('./pages/Tools'), 'Tools');
+// PROTOTYPE (rule 37): remove before any merge to main.
+const ByoMachinePrototype = lazyNamed(
+  () => import('./pages/byo-machine-prototype'),
+  'ByoMachinePrototype'
+);
 const ToolsCli = lazyNamed(() => import('./pages/ToolsCli'), 'ToolsCli');
 const RetiredTrial = lazyNamed(() => import('./pages/RetiredTrial'), 'RetiredTrial');
 const UiStandards = lazyNamed(() => import('./pages/UiStandards'), 'UiStandards');
@@ -295,6 +300,8 @@ export default function App() {
                     <Route path="/oauth/consent" element={page(<ConnectorConsent />)} />
                     <Route path="/device" element={page(<DeviceAuth />)} />
                     <Route path="/setup" element={page(<Setup />)} />
+                    {/* PROTOTYPE (rule 37): remove before any merge to main. */}
+                    <Route path="/prototype/byo-machine" element={page(<ByoMachinePrototype />)} />
                     {showDevOnlyRoutes && (
                       <>
                         <Route
