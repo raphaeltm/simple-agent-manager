@@ -195,6 +195,7 @@ export async function findSessionSnapshotUploadRelay(
     workloadRole: 'workspace',
     capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
     requireProjectMembership: projectId !== null,
+    authorityMode: 'existing-node',
   });
 
   const relay = await env.DATABASE.prepare(
@@ -309,6 +310,7 @@ export async function verifySessionSnapshotRelayAuthorization(
     workloadRole: 'workspace',
     capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
     requireProjectMembership: projectId !== null,
+    authorityMode: 'existing-node',
   });
   const relay = await env.DATABASE.prepare(
     `SELECT n.id
