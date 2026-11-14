@@ -68,6 +68,8 @@ export type AdminSettingName =
   | 'operations.nodeCleanupBlockedRetirementMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'
+  | 'operations.projectDataArchiveMinStorageUsagePercent'
+  | 'operations.projectDataArchiveStorageTelemetryMaxAgeHours'
   | 'operations.providerLimitResetWindowToleranceMs'
   | 'operations.nodeLifetimeAdmissionCutoffPercent'
   | 'operations.nodeCleanupRefusalWarnAfterMs'

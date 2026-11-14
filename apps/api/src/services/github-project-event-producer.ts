@@ -4,7 +4,7 @@ import type {
   ProjectEventMetadata,
   ProjectEventSeverity,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
+import { DEFAULT_PROJECT_EVENT_LIMITS, SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { canonicalJson } from '../lib/canonical-json';
@@ -84,10 +84,14 @@ export async function admitGitHubWebhookProjectEvents(
     return { processed: false, deliveryId, eventType, admittedEvents: [], reason: 'no_repository' };
   }
 
-  const projects = await findProjectsForGitHubRepository(env, {
-    repositoryFullName,
-    repositoryId,
-  });
+  // Storing an event costs billed Durable Object row writes in every project it is admitted
+  // into, and nobody can read or subscribe to events in a project owned by the system sentinel
+  // user (leftovers of the retired anonymous trial). One such project bound to a busy
+  // repository took ~10,000 events a day in production. Same exclusion as every other
+  // business-logic read of sentinel-owned rows (`.claude/rules/40`).
+  const projects = (
+    await findProjectsForGitHubRepository(env, { repositoryFullName, repositoryId })
+  ).filter((project) => project.userId !== SYSTEM_USER_ID);
   if (projects.length === 0) {
     return { processed: false, deliveryId, eventType, admittedEvents: [], reason: 'no_project' };
   }

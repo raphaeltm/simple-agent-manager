@@ -6,6 +6,8 @@ import type { Env } from './env';
 
 export type GitHubProjectCandidate = {
   id: string;
+  /** Owner, so a caller can leave out projects no person owns (`SYSTEM_USER_ID`). */
+  userId: string;
   name: string;
   repository: string;
   githubRepoId: number | null;
@@ -29,6 +31,7 @@ export async function findProjectsForGitHubRepository(
   return await db
     .select({
       id: schema.projects.id,
+      userId: schema.projects.userId,
       name: schema.projects.name,
       repository: schema.projects.repository,
       githubRepoId: schema.projects.githubRepoId,

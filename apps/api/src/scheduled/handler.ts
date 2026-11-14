@@ -417,6 +417,14 @@ export async function scheduled(
     projectDataArchiveShardingFailed: projectDataArchiveSharding?.failed,
     projectDataArchiveShardingChunksCopied: projectDataArchiveSharding?.chunksCopied,
     projectDataArchiveShardingRowsCopied: projectDataArchiveSharding?.rowsCopied,
+    projectDataArchiveShardingStoragePressureMinUsageRatio:
+      projectDataArchiveSharding?.storagePressureMinUsageRatio,
+    projectDataArchiveShardingStoragePressureHeldSessions:
+      projectDataArchiveSharding?.storagePressureHeldSessions,
+    projectDataArchiveShardingStoragePressureHeldProjects:
+      projectDataArchiveSharding?.storagePressureHeldProjects,
+    projectDataArchiveShardingStoragePressureHeldMessages:
+      projectDataArchiveSharding?.storagePressureHeldMessages,
     sessionSleepSelected: sessionSleep?.selected,
     sessionSleepReconciled: sessionSleep?.reconciled,
     sessionSleepClaimed: sessionSleep?.claimed,
