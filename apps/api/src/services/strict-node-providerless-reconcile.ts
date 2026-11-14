@@ -52,10 +52,10 @@ export async function reconcileStrictProviderlessVm(
   requestContext?: ProviderRequestContext,
   beforeDestroy?: () => Promise<void>
 ): Promise<'deleted'> {
-  // A node whose capacity source was released is not admitted here: the release means the
-  // pinned credential was deleted, and this inventory proof is only sound with that exact
-  // credential (a different account's empty inventory proves nothing). Such a node stays
-  // `destroying` and surfaces through `node_destroying_too_long`.
+  // A node whose capacity source was released is not admitted here: the release means its
+  // pinned credential was deleted, and this path resolves only that exact credential
+  // (`requireStrictNodeProvider`). Such a node stays `destroying` and surfaces through
+  // `node_destroying_too_long`.
   if (node.status !== 'destroying' || !hasManagedVmPlacementProof(node)) {
     throw new Error(
       `Cannot confirm managed VM termination for node ${node.id}: instance identity is missing`
