@@ -142,3 +142,4 @@ export { type ProjectDataEnv } from './do/types';
 // Resolves where a session's rows live (root object or an archive shard). Worker services that
 // must not mistake an archived session for a missing one use it (services/session-expiry.ts).
 export { resolveProjectDataSessionLocation } from './client/project-data-archive-routing';
+export { DEFAULT_ROW_USAGE_INTERVAL_MS } from './do/row-usage-config';

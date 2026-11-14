@@ -45,6 +45,7 @@ export type AdminSettingName =
   | GcpCatalogSettingName
   | OperationsTelemetrySettingName
   | OutboundSettingName
+  | 'operations.projectDataRowUsageIntervalMs'
   | 'chat.profileUsageWindowDays'
   | 'nodes.usageWindowMinutes'
   | 'nodes.usageChunkLookbackMinutes'

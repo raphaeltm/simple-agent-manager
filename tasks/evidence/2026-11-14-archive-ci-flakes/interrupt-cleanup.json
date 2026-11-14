@@ -1,0 +1,24 @@
+{
+  "behavior": "SIGINT while waiting for real separate-session test process with child and CPU burners",
+  "before": {
+    "label": "cleanup guard removed",
+    "exitCode": -2,
+    "testProcessesStillActive": [131996, 131998],
+    "burnersStillActive": []
+  },
+  "after": {
+    "label": "current unconditional cleanup",
+    "exitCode": -2,
+    "testProcessesStillActive": [],
+    "burnersStillActive": []
+  },
+  "finallyCleanupOfAllProbeProcesses": true,
+  "sourceFixtureSizeOrTestSemanticsChanged": false,
+  "readinessFailureControl": {
+    "pidfileSuppressed": true,
+    "deadlineSeconds": 1,
+    "discoveredChildCount": 4,
+    "remainingActiveChildren": [],
+    "result": "PASS"
+  }
+}
