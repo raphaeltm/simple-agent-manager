@@ -38,11 +38,12 @@ main's structure, hunt silent breakages, prove green and bootable.
 - [x] Strict-node deletion: main structure + branch GCP/manual-deletion/reverse-tunnel changes
 - [x] Lockfile repair (isomorphic-git)
 - [x] Build, typecheck, check:fast, quality gates, selfhost:test
-- [ ] Full unit suite green
-- [ ] celld boot evidence (partial: no Docker for the object store)
-- [ ] CI run by hand green
-- [ ] task-completion-validator, scoped security-auditor
-- [ ] Draft PR, report to coordinator, channel post
+- [x] Full unit suite green (local 3 failures fixed in e08088cca; CI run 43618481233 green)
+- [x] celld boot evidence: partial (bundle, /health, capabilities under `celld dev`); D1 probes need the object store (no Docker here); CI live suite 297/297 on real celld
+- [x] CI run by hand green (43618481233 on e08088cca; final-head run recorded in the PR)
+- [x] task-completion-validator (PASS), scoped security-auditor (PASS)
+- [x] Draft PR #2736
+- [ ] Report to coordinator, channel post
 
 ## Acceptance criteria
 
@@ -50,3 +51,10 @@ main's structure, hunt silent breakages, prove green and bootable.
 - CI green on the PR head; selfhost:test green; celld boot evidence or explicit gap
 - PR body: main SHA, conflict table, silent breakages, migrations, tests, box checklist,
   shortstat before/after
+
+## Notes
+
+- Silent breakages S1-S7 are in the PR body (S7: a stale doc comment in teardown-gcp.ts, c6dd79553).
+- Findings outside the merge (reported, not fixed): `.metadata` name suffix not refused by
+  worker-core `classifyName`; manual node deletion does not release reverse-tunnel leases inline;
+  agent-key awaits the AI-proxy resolver before the eligibility check (pre-existing branch code).
