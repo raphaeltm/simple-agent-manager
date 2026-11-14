@@ -505,6 +505,25 @@ There's no rollback. If a release misbehaves, update to a newer one that fixes i
 
 Use the manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
 
+Staging and production deployments wait for container application rollouts to reach
+100% before reporting success. Wrangler returning successfully only means the
+rollout started; the workflow's **Wait for container rollout completion** step
+compares rollout records before/after deployment and checks the exact new rollout
+and target application version. Multiple new rollouts fail as ambiguous; no-op or
+metadata-only updates require no new rollout, but await an existing pending one.
+Gradual rollout behavior
+is preserved. API errors, unreadable state and timeout fail the deployment.
+The wait closes the window where deployment reports success mid-rollout; it does
+not prove every running instance's binary version. The authenticated `/ready`
+callback logs `instant_session.agent_version_mismatch` with expected and reported
+versions without rejecting readiness, providing evidence for remaining version
+discrepancies.
+Optional GitHub Environment variables `CONTAINER_ROLLOUT_TIMEOUT_MS` (default
+`1200000`, 20 minutes) and `CONTAINER_ROLLOUT_POLL_INTERVAL_MS` (default `10000`)
+accept positive integer milliseconds. These are deployment runner settings, not
+Worker runtime settings. Timeout errors include the rollout ID and last status.
+
+
 ## First Login & Admin Access
 
 On ordinary deployments without an installer owner binding, the first genuine human to sign in becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.

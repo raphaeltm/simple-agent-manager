@@ -29,6 +29,7 @@ import {
 } from '../services/jwt';
 import { recordLifecycleTimings } from '../services/lifecycle-timings';
 import { createWorkspaceOnNode } from '../services/node-agent';
+import { isNodeAgentVersionCompatible } from '../services/node-agent-compatibility';
 import { getNodeBackendBaseUrl } from '../services/node-agent-readiness';
 import {
   NODE_CALLBACK_TERMINAL_STATUSES,
@@ -117,7 +118,7 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
   await verifyNodeCallbackAuth(c, nodeId);
   const db = drizzle(c.env.DATABASE, { schema });
   const nodeRows = await db
-    .select({ status: schema.nodes.status })
+    .select({ status: schema.nodes.status, runtime: schema.nodes.runtime })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .limit(1);
@@ -133,6 +134,19 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
     : null;
   const agentVersion =
     typeof readyPayload?.agentVersion === 'string' ? readyPayload.agentVersion : null;
+
+  // The authenticated ready callback carries the compiled binary version.
+  // Instant sessions remain available during gradual image rollouts.
+  if (
+    node.runtime === 'cf-container' &&
+    !isNodeAgentVersionCompatible(agentVersion, c.env.VM_AGENT_REQUIRED_VERSION)
+  ) {
+    log.warn('instant_session.agent_version_mismatch', {
+      nodeId,
+      expectedVersion: c.env.VM_AGENT_REQUIRED_VERSION?.trim(),
+      reportedVersion: agentVersion?.trim() || null,
+    });
+  }
 
   recordLifecycleTimings('provision', readyPayload?.provisionTimings, { nodeId });
 
