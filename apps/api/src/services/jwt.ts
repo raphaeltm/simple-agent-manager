@@ -683,6 +683,7 @@ export async function signIdentityToken(
 ): Promise<string> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expirySeconds = expirySecondsOverride ?? getIdentityTokenExpiry(env);
+  const issuedAt = Math.floor(Date.now() / 1000);
   const issuer = getIssuer(env);
 
   const token = await new SignJWT({
@@ -696,8 +697,8 @@ export async function signIdentityToken(
     .setIssuer(issuer)
     .setSubject(`project:${claims.projectId}`)
     .setAudience(claims.audience)
-    .setExpirationTime(`${expirySeconds}s`)
-    .setIssuedAt()
+    .setExpirationTime(issuedAt + expirySeconds)
+    .setIssuedAt(issuedAt)
     .sign(privateKey);
 
   return token;
