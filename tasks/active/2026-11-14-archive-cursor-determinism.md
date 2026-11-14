@@ -22,7 +22,7 @@ Production's persisted complete verdict and no-progress poison logic behave as d
 - [x] Replace lease elapsed-time assumptions with Date-only controlled clock and persisted lease observations.
 - [x] Observe real verification results per session; positively prove first verification and zero later re-verification.
 - [x] Freeze poison-test wall clock so a slow runner cannot split its first claim.
-- [ ] Remove renewal and poison guards separately; intended tests fail, then restore and pass.
+- [x] Remove renewal and poison guards separately; intended tests fail, then restore and pass.
 - [ ] At least 30 full-file runs normally and 30 under bounded CPU load; record exact counts.
 - [ ] Relevant lint/typecheck/build and archive regression checks.
 - [ ] Local test-engineer, Cloudflare and completion reviews; resolve findings.
@@ -44,3 +44,10 @@ Push each unit. Keep commands under 10 minutes. Do not archive until completion 
 
 Initial full Workers file: 15/15 passed. Repository lint: 22/22 tasks passed (existing web warnings).
 Local test-engineer and Cloudflare review: PASS; completion audit awaits mutation/stability/CI evidence.
+
+Mutation proof on final test code9d5fc49a8 (source and dist changed temporarily, restored byte-for-byte):
+- Renewal disabled with early return: lease test fails at line509, only1 distinct expiry vs required >3.
+- Poison threshold disabled: poison test fails at line590, fourth state is failed instead of poisoned.
+Six fresh full-file reruns on final test code passed15/15 each before mutations. Remaining normal/stress
+runs execute after restoration. Root unit command bounded at540s:38 tasks passed, API suite incomplete
+after305 files, no observed failures; do not report full pnpm test success.
