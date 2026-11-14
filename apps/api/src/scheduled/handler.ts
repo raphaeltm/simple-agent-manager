@@ -294,6 +294,8 @@ export async function scheduled(
     staleNodesDestroyed: nodeCleanup?.staleDestroyed,
     lifetimeNodesDestroyed: nodeCleanup?.lifetimeDestroyed,
     lifetimeNodesSkipped: nodeCleanup?.lifetimeSkipped,
+    providerDeletionsRequested: nodeCleanup?.providerDeletionsRequested,
+    providerDeletionsPending: nodeCleanup?.providerDeletionsPending,
     nodeCleanupErrors: nodeCleanup?.errors,
     nodeTunnelsReleased: nodeTunnelCleanup?.released,
     nodeTunnelCleanupsAttempted: nodeTunnelCleanup?.attempted,

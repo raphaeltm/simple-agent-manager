@@ -60,6 +60,8 @@ export const NODE_TEARDOWN_BLOCKED_REASONS = [
   'teardown_ownership_scope_unavailable',
   /** Every credential that proved ownership was refused permission to delete the instance. */
   'teardown_delete_refused',
+  /** A started provider deletion is still not confirmed by the provider's own record. */
+  'teardown_deletion_unconfirmed',
 ] as const;
 
 export type NodeTeardownBlockedReason = (typeof NODE_TEARDOWN_BLOCKED_REASONS)[number];
@@ -388,17 +390,22 @@ export async function proveNodeInstanceOwnership(
  * again through the remaining ones before the next delete. Any other delete failure (timeout,
  * 5xx, rate limit) is ambiguous: it is rethrown without trying another credential.
  * `beforeDelete` runs between each proof and its delete (the incarnation fence).
+ * `deleteInstance` performs the delete through the proven credential (`sendProviderDeletion`:
+ * synchronous, or started without waiting in the cleanup cron's two-phase mode).
  */
-export async function deleteWithCurrentOwnerCredential(
+export async function deleteWithCurrentOwnerCredential<T>(
   node: NodeRow,
   env: Env,
   candidates: readonly ProviderForUserResult[],
   beforeDelete: () => Promise<void>,
-  requestContext?: ProviderRequestContext
-): Promise<void> {
+  requestContext: ProviderRequestContext | undefined,
+  deleteInstance: (provider: ProviderForUserResult['provider']) => Promise<T>
+): Promise<T> {
   const instanceId = node.providerInstanceId;
   if (!instanceId) {
-    throw new Error(`Cannot delete node ${node.id} through a current credential: instance ID is missing`);
+    throw new Error(
+      `Cannot delete node ${node.id} through a current credential: instance ID is missing`
+    );
   }
   let remaining = [...candidates];
   let refused = false;
@@ -421,9 +428,7 @@ export async function deleteWithCurrentOwnerCredential(
     }
     await beforeDelete();
     try {
-      if (requestContext) await proven.provider.deleteVM(instanceId, requestContext);
-      else await proven.provider.deleteVM(instanceId);
-      return;
+      return await deleteInstance(proven.provider);
     } catch (error) {
       if (requestContext?.signal?.aborted || !isCredentialRejection(error)) throw error;
       refused = true;
@@ -459,7 +464,10 @@ export function isCredentialRejection(error: unknown): boolean {
     return isRefusalStatus(error.statusCode) && !codes.some(namesTemporaryLimit);
   }
   if (error instanceof GcpApiError) {
-    return isRefusalStatus(error.statusCode) && !googleErrorBodyCodes(error.rawBody).some(namesTemporaryLimit);
+    return (
+      isRefusalStatus(error.statusCode) &&
+      !googleErrorBodyCodes(error.rawBody).some(namesTemporaryLimit)
+    );
   }
   return false;
 }
@@ -470,7 +478,10 @@ function isRefusalStatus(statusCode: number | undefined): boolean {
 
 /** A machine error code (Hetzner `rate_limit_exceeded`, Google `RESOURCE_EXHAUSTED`, `quotaExceeded`). */
 function namesTemporaryLimit(code: string | undefined): boolean {
-  return !!code && /rate_?limit|quota|limit_?exceeded|resource_?(limit|exhausted)|too_?many_?requests/i.test(code);
+  return (
+    !!code &&
+    /rate_?limit|quota|limit_?exceeded|resource_?(limit|exhausted)|too_?many_?requests/i.test(code)
+  );
 }
 
 /**
@@ -488,7 +499,11 @@ function googleErrorBodyCodes(rawBody: string | undefined): string[] {
   const error = (body as { error?: unknown } | undefined)?.error;
   if (typeof error === 'string') return [error];
   if (!error || typeof error !== 'object') return [];
-  const { status, errors, details } = error as { status?: unknown; errors?: unknown; details?: unknown };
+  const { status, errors, details } = error as {
+    status?: unknown;
+    errors?: unknown;
+    details?: unknown;
+  };
   const reasons = [errors, details].flatMap((list) =>
     Array.isArray(list) ? list.map((entry) => (entry as { reason?: unknown } | null)?.reason) : []
   );

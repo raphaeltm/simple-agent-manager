@@ -1,4 +1,5 @@
 import { type ProviderRequestContext } from '@simple-agent-manager/providers';
+import { DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS } from '@simple-agent-manager/shared';
 import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -7,6 +8,13 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { captureNodeLogsBeforeTeardown } from './node-log-capture';
+import {
+  confirmPendingProviderDeletion,
+  pendingProviderDeletionFor,
+  type ProviderDeletionMode,
+  type ProviderDeletionOutcome,
+  sendProviderDeletion,
+} from './node-provider-deletion';
 import {
   deleteWithCurrentOwnerCredential,
   NodeTeardownBlockedError,
@@ -33,7 +41,11 @@ import { reconcileStrictProviderlessVm } from './strict-node-providerless-reconc
 import { destroyVmAgentContainer } from './vm-agent-container';
 
 export type StrictNodeDeletionResult = {
-  providerVm: 'no-instance' | 'deleted' | 'already-absent';
+  /**
+   * `deletion_pending`: only in `providerDeletion: 'request'` mode. The provider deletion was
+   * started (or is still running) and no termination proof was written; call again later.
+   */
+  providerVm: 'no-instance' | 'deleted' | 'already-absent' | 'deletion_pending';
   runtimeTerminationConfirmedAt: string | null;
   runtimeIncarnationId: string | null;
   providerInstanceId: string | null;
@@ -59,14 +71,20 @@ function matchesExpectedRuntime(
   );
 }
 
+interface ProviderDeletionOptions {
+  mode: ProviderDeletionMode;
+  confirmMaxMs: number;
+}
+
 async function deleteStrictProviderInstance(
   db: NodeDb,
   node: NodeRow,
   userId: string,
   env: Env,
+  deletion: ProviderDeletionOptions,
   requestContext?: ProviderRequestContext,
   beforeDestroy?: () => Promise<void>
-): Promise<StrictNodeDeletionResult['providerVm']> {
+): Promise<ProviderDeletionOutcome> {
   const providerInstanceId = node.providerInstanceId;
   if (!providerInstanceId) {
     throw new Error(
@@ -76,28 +94,58 @@ async function deleteStrictProviderInstance(
 
   const authority = await resolveStrictNodeTeardownAuthority(db, node, userId, env);
 
+  // A deletion this exact runtime already started (two-phase mode) is resolved from the
+  // provider's own record. Its pre-delete guards ran before the record was written, and the
+  // delete may already be done, so they are not re-run; a record the provider shows to be void is
+  // cleared and the next attempt runs the guarded path again.
+  const pending = pendingProviderDeletionFor(node);
+  if (pending) {
+    await requireSameNodeIncarnation(db, node, 'provider deletion confirmation');
+    const providers =
+      authority.kind === 'pinned'
+        ? [authority.providerResult.provider]
+        : authority.candidates.map((candidate) => candidate.provider);
+    const outcome = await confirmPendingProviderDeletion(
+      db,
+      node,
+      providers,
+      pending,
+      deletion.confirmMaxMs,
+      requestContext
+    );
+    if (outcome === 'deletion_pending' && deletion.mode === 'wait') {
+      throw new Error(
+        `Provider deletion of node ${node.id} started at ${pending.requestedAt} is still in progress; retry shortly`
+      );
+    }
+    return outcome;
+  }
+
   await requireSameNodeIncarnation(db, node, 'provider delete');
   await beforeDestroy?.();
   // Black box recorder: bounded and best-effort, never blocks teardown beyond its timeout.
   await captureNodeLogsBeforeTeardown(env, node);
   if (authority.kind === 'pinned') {
-    const provider = authority.providerResult.provider;
-    if (requestContext) await provider.deleteVM(providerInstanceId, requestContext);
-    else await provider.deleteVM(providerInstanceId);
-  } else {
-    // The placement credential no longer resolves (rotated, re-saved, reconnected). Ownership
-    // comes from the instance itself, read immediately before each delete.
-    await deleteWithCurrentOwnerCredential(
+    return await sendProviderDeletion(
+      db,
       node,
-      env,
-      authority.candidates,
-      async () => {
-        await requireSameNodeIncarnation(db, node, 'provider delete after ownership proof');
-      },
+      authority.providerResult.provider,
+      deletion.mode,
       requestContext
     );
   }
-  return 'deleted';
+  // The placement credential no longer resolves (rotated, re-saved, reconnected). Ownership
+  // comes from the instance itself, read immediately before each delete.
+  return await deleteWithCurrentOwnerCredential(
+    node,
+    env,
+    authority.candidates,
+    async () => {
+      await requireSameNodeIncarnation(db, node, 'provider delete after ownership proof');
+    },
+    requestContext,
+    (provider) => sendProviderDeletion(db, node, provider, deletion.mode, requestContext)
+  );
 }
 
 /**
@@ -158,6 +206,9 @@ async function markRuntimeTerminationConfirmed(
       // Written in the same CAS as the proof, so a reader can never see the proof
       // without its provenance. See `isOwnerAttestedTermination`.
       runtimeTerminationAttestedAt: provenance === 'owner_attested' ? confirmedAt : null,
+      // The deletion this record tracked is now proven; nothing is in flight any more.
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     })
     .where(exactNodeIncarnationPredicate(node))
     .run();
@@ -247,6 +298,14 @@ export async function deleteNodeResourcesStrict(
     preservedVm?: PreservedVmRetirement;
     providerRequestContext?: ProviderRequestContext;
     requestDeadlineMs?: number;
+    /**
+     * `request`: start a provider deletion without waiting for it and return `deletion_pending`;
+     * a later call confirms it from the provider's record (deadline-bounded cleanup cron only).
+     * Default `wait`.
+     */
+    providerDeletion?: ProviderDeletionMode;
+    /** How long a started deletion may stay unconfirmed before `teardown_deletion_unconfirmed`. */
+    providerDeletionConfirmMaxMs?: number;
   } = {}
 ): Promise<StrictNodeDeletionResult> {
   const db = drizzle(env.DATABASE, { schema });
@@ -290,7 +349,10 @@ export async function deleteNodeResourcesStrict(
           options.preservedVm,
           options.boundedStrandedRetirement
         );
-  if (!initialNode.runtimeTerminationConfirmedAt) await beforeDestroy?.();
+  // A deletion already started for this exact runtime passed these guards before it was sent.
+  if (!initialNode.runtimeTerminationConfirmedAt && !pendingProviderDeletionFor(initialNode)) {
+    await beforeDestroy?.();
+  }
   const node = await claimManagedNodeDeletion(db, initialNode);
 
   if (node.runtimeTerminationConfirmedAt) {
@@ -364,6 +426,12 @@ export async function deleteNodeResourcesStrict(
             node,
             userId,
             env,
+            {
+              mode: options.providerDeletion ?? 'wait',
+              confirmMaxMs:
+                options.providerDeletionConfirmMaxMs ??
+                DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
+            },
             options.providerRequestContext,
             beforeDestroy
           );
@@ -374,6 +442,15 @@ export async function deleteNodeResourcesStrict(
       await recordNodeTeardownBlocked(env, node, error);
     }
     throw error;
+  }
+  if (providerVm === 'deletion_pending') {
+    // No proof: the provider has not confirmed the deletion yet.
+    return {
+      providerVm,
+      runtimeTerminationConfirmedAt: null,
+      runtimeIncarnationId: node.runtimeIncarnationId,
+      providerInstanceId: node.providerInstanceId,
+    };
   }
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   // The proof makes this incarnation non-live, which releases its Cloudflare tunnel (if it

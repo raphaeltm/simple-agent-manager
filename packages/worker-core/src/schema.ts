@@ -1844,6 +1844,14 @@ export const nodes = sqliteTable(
     cleanupBlockedReason: text('cleanup_blocked_reason'),
     cleanupBlockedAlertedAt: text('cleanup_blocked_alerted_at'),
     cleanupRetirementSourcesJson: text('cleanup_retirement_sources_json'),
+    /**
+     * Write-ahead record of a provider deletion started without waiting for it (two-phase
+     * deletion). Set before the DELETE is sent; never re-stamped while set; cleared with the
+     * termination proof or when the provider shows the delete never arrived or failed.
+     */
+    providerDeletionRequestedAt: text('provider_deletion_requested_at'),
+    /** `{ ticket, providerInstanceId, runtimeIncarnationId }`; see `node-provider-deletion.ts`. */
+    providerDeletionJson: text('provider_deletion_json'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

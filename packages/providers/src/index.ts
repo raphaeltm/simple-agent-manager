@@ -67,13 +67,6 @@ export {
 } from './types';
 
 // Re-export utilities
-export type {
-  ProviderVmDeletionRequests,
-  VmDeletionRequestOptions,
-  VmDeletionRequestResult,
-  VmDeletionStatus,
-  VmDeletionTicket,
-} from './vm-deletion';
 export { isProviderCreateNotDispatched, markProviderCreateNotDispatched } from './create-dispatch';
 export { hasAmbiguousLabel } from './kv-tags';
 export {
@@ -86,6 +79,13 @@ export {
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
 } from './provider-fetch';
+export type {
+  ProviderVmDeletionRequests,
+  VmDeletionRequestOptions,
+  VmDeletionRequestResult,
+  VmDeletionStatus,
+  VmDeletionTicket,
+} from './vm-deletion';
 
 // Re-export providers and classification functions
 export type { DigitalOceanProviderRuntimeOptions } from './digitalocean';

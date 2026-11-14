@@ -524,13 +524,7 @@ export type ProviderErrorCategory =
   | 'unknown';
 
 export type ProviderErrorContextValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | ProviderErrorContext
-  | ProviderErrorContextValue[];
+  string | number | boolean | null | undefined | ProviderErrorContext | ProviderErrorContextValue[];
 
 export interface ProviderErrorContext {
   [key: string]: ProviderErrorContextValue;

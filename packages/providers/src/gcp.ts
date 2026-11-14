@@ -2,6 +2,7 @@ import type { CredentialProvider } from '@simple-agent-manager/shared';
 
 import { markProviderCreateNotDispatched } from './create-dispatch';
 import { pollGcpOperation } from './gcp-api';
+import { fetchGcpMachineTypes, gcpOfferingsFromMachineTypes } from './gcp-catalog';
 import {
   deleteGcpInstance,
   type GcpDeletionScope,
@@ -9,7 +10,6 @@ import {
   getGcpInstanceDeletionStatus,
   requestGcpInstanceDeletion,
 } from './gcp-deletion';
-import { fetchGcpMachineTypes, gcpOfferingsFromMachineTypes } from './gcp-catalog';
 import { ensureGcpFirewallRules } from './gcp-firewall';
 import {
   findGcpInstanceByIdOrName,

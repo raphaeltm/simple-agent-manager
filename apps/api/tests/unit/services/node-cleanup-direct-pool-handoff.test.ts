@@ -628,8 +628,8 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
 
   it('aborts dead provider requests within the phase budget and reaches deferred work next tick', async () => {
     const f = await handoffFixture();
-    f.env.NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = '600';
-    f.env.NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS = '500';
+    f.env.NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = '1200';
+    f.configOverrides.providerDeletionRequestTimeoutMs = 1000;
     for (const id of ['dead-a', 'dead-b']) {
       await seedHost(f, f.starts[0]!, id);
       f.sqlite
@@ -645,14 +645,14 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     vi.setSystemTime(NOW);
     const pending = f.sweep();
     await vi.waitFor(() => expect(f.providerDeletes.length).toBeGreaterThan(0), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(() => expect(f.providerDeletes.length % 2).toBe(0), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(200);
     await pending;
     expect(f.result).toMatchObject({ errors: 2, lifetimeDestroyed: 0 });
     expect(f.providerDeletes).toHaveLength(2);
     expect(f.providerSignals.every((signal) => signal.aborted)).toBe(true);
-    expect(Date.now() - NOW.getTime()).toBeLessThan(1000);
+    expect(Date.now() - NOW.getTime()).toBeLessThan(1500);
     expect(
       f.sqlite.prepare("SELECT status, cleanup_backoff_until FROM nodes WHERE id = 'host'").get()
     ).toEqual({ status: 'stopped', cleanup_backoff_until: null });
@@ -663,9 +663,9 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     vi.setSystemTime(afterBackoff);
     const retry = f.sweep(afterBackoff);
     await vi.waitFor(() => expect(f.providerDeletes).toHaveLength(4), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(() => expect(f.providerDeletes).toHaveLength(5), { interval: 1 });
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(200);
     await retry;
     expect(f.providerDeletes).toHaveLength(5);
     expect(f.result.errors).toBe(4);
@@ -675,7 +675,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     'bounds a stalled DNS %s after provider termination without closing the recoverable session',
     async (mode) => {
       const f = await handoffFixture();
-      f.env.NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS = '500';
+      f.configOverrides.providerDeletionRequestTimeoutMs = 1000;
       f.env.CF_ZONE_ID = 'test-zone';
       f.env.CF_API_TOKEN = 'test-dns-token';
       f.env.CF_API_TIMEOUT_MS = '30000';
@@ -685,9 +685,9 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
       vi.setSystemTime(NOW);
       const pending = f.sweep();
       await vi.waitFor(() => expect(f.dnsRequests).toHaveLength(1), { interval: 1 });
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(1000);
       await pending;
-      expect(Date.now() - NOW.getTime()).toBeLessThan(1000);
+      expect(Date.now() - NOW.getTime()).toBeLessThan(1500);
       expect(f.result).toMatchObject({ lifetimeDestroyed: 1, errors: 0 });
       expect(f.providerDeletes).toHaveLength(1);
       expect(f.stopSession).not.toHaveBeenCalled();
@@ -697,7 +697,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     }
   );
 
-  it('backs off a saturated failing batch and reaches valid work on the next sweep', async () => {
+  it('rotates a failing batch so valid work is never stuck behind it, and backs every failure off', async () => {
     const f = await handoffFixture();
     f.env.NODE_CLEANUP_SWEEP_LIMIT = '2';
     for (const id of ['failed-null-deadline', 'failed-expired-deadline']) {
@@ -711,9 +711,19 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
         .run('2026-09-08T09:00:00.000Z', OLD, id === 'failed-null-deadline' ? null : OLD, id);
       f.rejectedProviderIds.add(`provider-${id}`);
     }
+    // Never-attempted candidates come before ones whose retry merely fell due: the failing
+    // never-attempted node and the valid host fill the page; the retried one waits a tick.
     await f.sweep();
-    expect(f.result).toMatchObject({ errors: 2, lifetimeDestroyed: 0 });
+    expect(f.result).toMatchObject({ errors: 1, lifetimeDestroyed: 1 });
     expect(f.providerDeletes).toHaveLength(2);
+    expect(f.providerDeletes[0]).toMatch(/provider-failed-null-deadline$/);
+    expect(f.providerDeletes[1]).toMatch(/provider-host$/);
+
+    await f.sweep();
+    expect(f.result).toMatchObject({ errors: 2, lifetimeDestroyed: 1 });
+    expect(f.providerDeletes).toHaveLength(3);
+    expect(f.providerDeletes[2]).toMatch(/provider-failed-expired-deadline$/);
+
     const failures = f.sqlite
       .prepare(
         `SELECT id, status, cleanup_backoff_until FROM nodes
@@ -727,19 +737,12 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
       expect(
         await claimNodeForCleanup(
           f.env,
-          {
-            id: node.id,
-            user_id: 'user-1',
-            status: 'stopped',
-          },
+          { id: node.id, user_id: 'user-1', status: 'stopped' },
           NOW.toISOString()
         )
       ).toBe(false);
     }
-    await f.sweep();
-    expect(f.result).toMatchObject({ errors: 2, lifetimeDestroyed: 1 });
-    expect(f.providerDeletes).toHaveLength(3);
-    expect(f.providerDeletes[2]).toMatch(/provider-host$/);
+    // Both failures are backed off: another tick at the same instant attempts nothing.
     await f.sweep();
     expect(f.providerDeletes).toHaveLength(3);
   });

@@ -49,7 +49,8 @@ function installFetch(handler: FetchHandler) {
 
 /** Instance lookup: the instance lives in europe-west1-b; every other zone is 404. */
 function lookupResponse(url: URL): Response | null {
-  if (url.pathname.endsWith(`/zones/europe-west1-b/instances/${INSTANCE.id}`)) return json(INSTANCE);
+  if (url.pathname.endsWith(`/zones/europe-west1-b/instances/${INSTANCE.id}`))
+    return json(INSTANCE);
   if (url.pathname.includes('/instances/') && !url.pathname.includes('/operations')) {
     return notFound();
   }

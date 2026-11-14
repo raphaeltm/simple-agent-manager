@@ -7,6 +7,8 @@ import {
   DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS,
   DEFAULT_NODE_CLEANUP_SWEEP_LIMIT,
   DEFAULT_NODE_EMPTY_WARM_HANDOFF_GRACE_MS,
+  DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
+  DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
   DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS,
   DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS,
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
@@ -69,6 +71,13 @@ export interface CleanupConfig {
   agentTimeoutMs: number;
   stoppedHandoffSweepBudgetMs: number;
   stoppedHandoffRequestTimeoutMs: number;
+  /**
+   * Per-candidate budget of a two-phase teardown attempt (start the provider deletion, or read
+   * its record). Admin setting `operations.nodeProviderDeletionRequestTimeoutMs`.
+   */
+  providerDeletionRequestTimeoutMs: number;
+  /** Admin setting `operations.nodeProviderDeletionConfirmMaxMs`. */
+  providerDeletionConfirmMaxMs: number;
 }
 
 /**
@@ -189,5 +198,8 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       env.NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS,
       DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS
     ),
+    // Admin settings; `runNodeCleanupSweep` replaces these defaults with the resolved values.
+    providerDeletionRequestTimeoutMs: DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
+    providerDeletionConfirmMaxMs: DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
   };
 }

@@ -123,3 +123,35 @@ export async function releaseNodeCleanupClaim(
     .bind(node.status, backoffUntil, nowIso, node.id, node.user_id)
     .run();
 }
+
+/**
+ * Claim a node whose provider deletion this sweep already started (two-phase teardown), to read
+ * the provider's record of it. The idle, artifact and active-workspace guards of
+ * `claimNodeForCleanup` held when the deletion was sent; they are not re-checked, because the
+ * deletion may already be done. The claim is a lease: `cleanup_backoff_until` moves to the end of
+ * this attempt, so an overlapping cron tick cannot confirm the same node concurrently. The
+ * attempt's outcome (pending, failure or proof) replaces the lease.
+ */
+export async function claimPendingProviderDeletion(
+  env: Env,
+  node: CleanupNode,
+  nowIso: string,
+  leaseUntilIso: string
+): Promise<boolean> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE nodes
+     SET cleanup_backoff_until = ?, updated_at = ?
+     WHERE id = ?
+       AND user_id = ?
+       AND status = 'destroying'
+       AND node_role = 'workspace'
+       AND node_class != 'user-owned'
+       AND runtime = 'vm'
+       AND provider_deletion_requested_at IS NOT NULL
+       AND runtime_termination_confirmed_at IS NULL
+       AND (cleanup_backoff_until IS NULL OR cleanup_backoff_until <= ?)`
+  )
+    .bind(leaseUntilIso, nowIso, node.id, node.user_id, nowIso)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
