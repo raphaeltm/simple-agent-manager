@@ -16,7 +16,7 @@ Open separate DRAFT PR with needs-human-review. After CI, local reviews and trus
 
 ## Checklist / acceptance
 
-- [ ] Measure and diagnose both causes; deterministic final fixes, production behavior unchanged.
+- [x] Measure and diagnose both causes; deterministic final fixes, production behavior unchanged. GitHub user-event waits60→27 (real paste); native Date.now boundary control, bounded drain and poisoned-runtime isolation.
 - [ ] At least30 normal +30 CPU-loaded fresh full-file runs EACH, report counts and durations.
 - [ ] Restore meaningful guard-removal RED proofs and final GREEN checks.
 - [ ] Relevant lint/typecheck/build and local test/Cloudflare/completion reviews.
