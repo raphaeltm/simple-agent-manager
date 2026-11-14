@@ -378,6 +378,7 @@ describe('runNodeCleanupSweep', () => {
           // Two-phase: start the provider deletion; a later tick confirms it.
           providerDeletion: 'request',
           providerDeletionConfirmMaxMs: 30 * 60 * 1000,
+          providerDeletionSendGraceMs: 15_000,
         }
       );
     });
