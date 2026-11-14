@@ -448,6 +448,13 @@ export async function scheduled(
     projectDataArchiveShardingFailed: projectDataArchiveSharding?.failed,
     projectDataArchiveShardingChunksCopied: projectDataArchiveSharding?.chunksCopied,
     projectDataArchiveShardingRowsCopied: projectDataArchiveSharding?.rowsCopied,
+    projectDataArchiveShardingStopReason: projectDataArchiveSharding?.stopReason,
+    projectDataArchiveShardingYielded: projectDataArchiveSharding?.yielded,
+    projectDataArchiveShardingBudgetWindowExhausted:
+      projectDataArchiveSharding?.budgetWindowExhausted,
+    projectDataArchiveShardingBudgetUnaffordable: projectDataArchiveSharding?.budgetUnaffordable,
+    projectDataArchiveShardingReclaimedRows: projectDataArchiveSharding?.reclaimedRows,
+    projectDataArchiveShardingVerifiedChunks: projectDataArchiveSharding?.verifiedChunks,
     projectDataArchiveShardingStoragePressureMinUsageRatio:
       projectDataArchiveSharding?.storagePressureMinUsageRatio,
     projectDataArchiveShardingStoragePressureHeldSessions:

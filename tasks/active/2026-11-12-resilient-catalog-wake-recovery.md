@@ -7,11 +7,11 @@ Current coordinator: `01M7CVSBR1SDZFDZNY3TD863RQ`; original coordinator `01M77NV
 
 ## Current state — November 14 review revision
 
-Main `7bd2bcb7971cbe55211d8285cb557827c5484763` is incorporated with a history-preserving merge.
+Main `4bdaaf61f6cecb83b6a3bab30e011257ea019710` is incorporated with a history-preserving merge, including2739 test stabilization and2740 bounded archive writes. The handler changes merge without conflict; archive metering and wake exact-write fencing are retained.
 Pushed head `fe6019eff0fcedc29eabe0958b88d413496a6163` passed all functional CI; coordinator reviews
 [part 1](https://github.com/raphaeltm/simple-agent-manager/pull/2693#issuecomment-6884423659) and
 [part 2](https://github.com/raphaeltm/simple-agent-manager/pull/2693#issuecomment-6884457589) requested changes.
-The source/test fixes below are local, with consolidated verification in progress before one new candidate push.
+The source/test fixes below are committed locally, with final current-main verification in progress before one new candidate push.
 Those earlier CI results do not certify the new candidate. Keep the PR DRAFT with `needs-human-review`
 until the coordinator approves the final full SHA and normal release gates pass.
 
@@ -68,8 +68,7 @@ References: `tasks/backlog/2026-11-09-capacity-pool-readiness-gate-during-republ
 
 Focused current-source evidence under `.codex/tmp/refresh-20261114/review-fixes/`: catalog59, refresh183,
 authority123, classification/recovery221, wake native161, wake/cron actual Workers64 pass. Counts overlap
-and must not be summed. Full current manifests are `native-manifest.txt` (38 suites) and the parent
-`workers-manifest.txt` (8 suites). Final combined results will replace this provisional evidence.
+and must not be summed. The consolidated38 native suites passed1,445 cases and failed the old configured-empty expectation for a switched-off sole account. Its corrected complete43-case suite passes while retaining the off/on reuse/admission/picks/revision assertions:1,446 unique cases covered. The original failure is retained. Current manifests are `native-manifest.txt` (38 suites) and the parent `workers-manifest.txt` (8 suites). Fresh current-main Workers/full quality remain in progress.
 Historical port evidence includes1,280 native/110 Workers and62 local quality tasks, plus functional
 CI43640124451 at fe6019. Original failed runs and corrected fixture assertions are retained; no test,
 timeout, retry or production guard was suppressed. UI is unchanged in this review revision;19 rendered

@@ -1,0 +1,221 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`profiles a full compact archive through the coordinator in real workerd 1`] = `
+{
+  "phases": {
+    "D1:coordinator": 103,
+    "source:archiveSourceFlip": 8,
+    "source:archiveSourceMarkRecoveryManifestPersisted": 2,
+    "source:archiveSourceMarkTargetSealed": 2,
+    "source:archiveSourcePrepareIntent": 6,
+    "source:archiveSourceReclaimPage": 2733,
+    "target:archiveTargetCommitChunk": 2617,
+    "target:archiveTargetPrepare": 14,
+    "target:archiveTargetSeal": 2,
+    "target:archiveTargetVerifyPage": 4,
+  },
+  "shape": {
+    "grouped": {
+      "n": 315,
+    },
+    "raw": {
+      "bytes": 164421,
+      "n": 2100,
+    },
+  },
+  "statements": {
+    "D1:coordinator:INSERT INTO project_data_archive_migrations ( migration_id, project_id, session_id, state, source_owner_name, target_owner_name, source_generation, target_generation, lease_epoch, attempt_count, candidate_at, created_at, updated_at, storage_format ) SELECT ?, ?, ?, 'candidate', ?, ?, 0, ?, 0, 0, ?, ?, ?, ? WHERE NOT EXISTS ( SELECT 1 FROM project_data_session_locations WHERE project_id = ? AND session_id = ? AND location_state != 'root' )": {
+      "calls": 1,
+      "rowsWritten": 8,
+    },
+    "D1:coordinator:INSERT INTO project_data_archive_write_budget (id, window_started_at, reserved_writes) VALUES ('global', ?, ?) ON CONFLICT(id) DO UPDATE SET window_started_at = excluded.window_started_at, reserved_writes = CASE WHEN project_data_archive_write_budget.window_started_at < excluded.window_started_at THEN excluded.reserved_writes ELSE project_data_archive_write_budget.reserved_writes + excluded.reserved_writes END WHERE project_data_archive_write_budget.window_started_at <= excluded.window_started_at AND (CASE WHEN project_data_archive_write_budget.window_started_at < excluded.window_started_at THEN 0 ELSE project_data_archive_write_budget.reserved_writes END) + excluded.reserved_writes <= ? RETURNING reserved_writes": {
+      "calls": 1,
+      "rowsWritten": 2,
+    },
+    "D1:coordinator:INSERT INTO project_data_session_locations ( project_id, session_id, location_state, owner_kind, owner_name, generation, migration_id, source_owner_name, target_owner_name, routing_schema_version, updated_at ) SELECT ?, ?, 'migrating', 'archive_shard', ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS ( SELECT 1 FROM project_data_session_locations WHERE project_id = ? AND session_id = ? AND location_state != 'root' ) ON CONFLICT(project_id, session_id) DO UPDATE SET location_state = CASE WHEN project_data_session_locations.location_state = 'root' THEN 'migrating' ELSE project_data_session_locations.location_state END, owner_kind = CASE WHEN project_data_session_locations.location_state = 'root' THEN 'archive_shard' ELSE project_data_session_locations.owner_kind END, owner_name = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.owner_name ELSE project_data_session_locations.owner_name END, generation = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.generation ELSE project_data_session_locations.generation END, migration_id = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.migration_id ELSE project_data_session_locations.migration_id END, source_owner_name = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.source_owner_name ELSE project_data_session_locations.source_owner_name END, target_owner_name = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.target_owner_name ELSE project_data_session_locations.target_owner_name END, updated_at = CASE WHEN project_data_session_locations.location_state = 'root' THEN excluded.updated_at ELSE project_data_session_locations.updated_at END": {
+      "calls": 1,
+      "rowsWritten": 4,
+    },
+    "D1:coordinator:INSERT OR IGNORE INTO project_data_archive_copy_checkpoints ( migration_id, table_name, storage_format, chunk_rows, chunk_bytes, next_ordinal, source_cursor, complete, copied_rows, copied_bytes, lease_epoch, updated_at ) VALUES (?, ?, ?, ?, ?, 0, NULL, 0, 0, 0, ?, ?)": {
+      "calls": 3,
+      "rowsWritten": 9,
+    },
+    "D1:coordinator:UPDATE project_data_archive_copy_checkpoints SET lease_epoch = ?, last_operation = ?, last_operation_id = ?, last_operation_started_at = ?, last_operation_completed_at = NULL, last_operation_duration_ms = NULL, updated_at = ? WHERE migration_id = ? AND table_name = ? AND next_ordinal = ? AND (source_cursor = ? OR (source_cursor IS NULL AND ? IS NULL)) AND EXISTS ( SELECT 1 FROM project_data_archive_migrations m WHERE m.migration_id = project_data_archive_copy_checkpoints.migration_id AND m.lease_owner = ? AND m.lease_epoch = ? AND m.lease_expires_at > ? )": {
+      "calls": 7,
+      "rowsWritten": 14,
+    },
+    "D1:coordinator:UPDATE project_data_archive_copy_checkpoints SET next_ordinal = next_ordinal + 1, source_cursor = ?, complete = ?, copied_rows = copied_rows + ?, copied_bytes = copied_bytes + ?, last_chunk_sha256 = ?, lease_epoch = ?, last_operation = ?, last_operation_completed_at = ?, last_operation_duration_ms = ?, updated_at = ? WHERE migration_id = ? AND table_name = ? AND next_ordinal = ? AND (source_cursor = ? OR (source_cursor IS NULL AND ? IS NULL)) AND last_operation_id = ? AND EXISTS ( SELECT 1 FROM project_data_archive_migrations m WHERE m.migration_id = project_data_archive_copy_checkpoints.migration_id AND m.lease_owner = ? AND m.lease_epoch = ? AND m.lease_expires_at > ? ) RETURNING migration_id, table_name, storage_format, chunk_rows, chunk_bytes, next_ordinal, source_cursor, complete, copied_rows, copied_bytes, last_chunk_sha256, lease_epoch, last_operation_id": {
+      "calls": 7,
+      "rowsWritten": 14,
+    },
+    "D1:coordinator:UPDATE project_data_archive_migrations SET reclaim_pending = 0 WHERE migration_id IN (?) AND reclaim_pending = 1 AND state IN ('source_deleted', 'published')": {
+      "calls": 1,
+      "rowsWritten": 1,
+    },
+    "D1:coordinator:UPDATE project_data_archive_migrations SET state = ?, lease_owner = ?, lease_epoch = lease_epoch + 1, lease_expires_at = ?, attempt_count = attempt_count + 1, updated_at = ? WHERE migration_id = ? AND state = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?) AND NOT EXISTS ( SELECT 1 FROM project_data_archive_circuit_breakers breaker WHERE breaker.project_id = project_data_archive_migrations.project_id AND breaker.state != 'closed' )": {
+      "calls": 1,
+      "rowsWritten": 6,
+    },
+    "D1:coordinator:UPDATE project_data_archive_migrations SET state = ?, updated_at = ?, copying_started_at = COALESCE(copying_started_at, ?) WHERE migration_id = ? AND state = ?": {
+      "calls": 1,
+      "rowsWritten": 6,
+    },
+    "D1:coordinator:UPDATE project_data_archive_migrations SET state = ?, updated_at = ?, published_at = COALESCE(published_at, ?) WHERE migration_id = ? AND state = ?": {
+      "calls": 1,
+      "rowsWritten": 6,
+    },
+    "D1:coordinator:UPDATE project_data_archive_migrations SET state = ?, updated_at = ?, source_intent_token = ?, terminal_version_sha256 = ?, intent_prepared_at = COALESCE(intent_prepared_at, ?) WHERE migration_id = ? AND state = ?": {
+      "calls": 1,
+      "rowsWritten": 6,
+    },
+    "D1:coordinator:UPDATE project_data_archive_migrations SET state = ?, updated_at = ?, target_aggregate_sha256 = ?, r2_manifest_key = ?, recovery_manifest_persisted_at = COALESCE(recovery_manifest_persisted_at, ?) WHERE migration_id = ? AND state = ?": {
+      "calls": 1,
+      "rowsWritten": 6,
+    },
+    "D1:coordinator:UPDATE project_data_archive_migrations SET state = ?, updated_at = ?, target_aggregate_sha256 = ?, r2_manifest_key = ?, source_deleted_at = COALESCE(source_deleted_at, ?) WHERE migration_id = ? AND state = ?": {
+      "calls": 1,
+      "rowsWritten": 6,
+    },
+    "D1:coordinator:UPDATE project_data_archive_migrations SET state = ?, updated_at = ?, target_aggregate_sha256 = ?, target_sealed_at = COALESCE(target_sealed_at, ?) WHERE migration_id = ? AND state = ?": {
+      "calls": 1,
+      "rowsWritten": 6,
+    },
+    "D1:coordinator:UPDATE project_data_archive_migrations SET state = ?, updated_at = ?, target_prepared_at = COALESCE(target_prepared_at, ?) WHERE migration_id = ? AND state = ?": {
+      "calls": 1,
+      "rowsWritten": 6,
+    },
+    "D1:coordinator:UPDATE project_data_session_locations SET location_state = 'archive_shard', owner_kind = 'archive_shard', owner_name = ?, generation = ?, target_aggregate_sha256 = ?, published_at = COALESCE(published_at, ?), updated_at = ? WHERE project_id = ? AND session_id = ? AND migration_id = ? AND location_state IN ('migrating', 'frozen', 'archive_shard')": {
+      "calls": 1,
+      "rowsWritten": 3,
+    },
+    "source:archiveSourceFlip:INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)": {
+      "calls": 1,
+      "rowsWritten": 2,
+    },
+    "source:archiveSourceFlip:UPDATE chat_sessions SET archive_last_message_at = ?, archive_owner_name = ?, archive_generation = ?, archive_migration_id = ?, archive_state = 'source_deleted', updated_at = updated_at WHERE id = ?": {
+      "calls": 1,
+      "rowsWritten": 4,
+    },
+    "source:archiveSourceFlip:UPDATE project_data_archive_source_intents SET state = 'source_deleted', target_aggregate_sha256 = ?, recovery_manifest_key = ?, source_deleted_at = ?, source_database_size_before = ?, source_database_size_after = ?, updated_at = ? WHERE session_id = ? AND migration_id = ? AND source_intent_token = ?": {
+      "calls": 1,
+      "rowsWritten": 2,
+    },
+    "source:archiveSourceMarkRecoveryManifestPersisted:UPDATE project_data_archive_source_intents SET state = 'recovery_manifest_persisted', target_aggregate_sha256 = ?, recovery_manifest_key = ?, recovery_manifest_persisted_at = ?, updated_at = ? WHERE session_id = ? AND migration_id = ? AND source_intent_token = ? AND state = 'target_sealed'": {
+      "calls": 1,
+      "rowsWritten": 2,
+    },
+    "source:archiveSourceMarkTargetSealed:UPDATE project_data_archive_source_intents SET state = 'target_sealed', target_aggregate_sha256 = ?, target_sealed_at = ?, updated_at = ? WHERE session_id = ? AND migration_id = ? AND source_intent_token = ? AND state IN ('intent_prepared', 'target_prepared', 'copying')": {
+      "calls": 1,
+      "rowsWritten": 2,
+    },
+    "source:archiveSourcePrepareIntent:INSERT INTO project_data_archive_source_intents ( session_id, project_id, migration_id, source_owner_name, target_owner_name, target_generation, source_intent_token, state, terminal_version_sha256, last_message_at, message_count, prepared_at, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, 'intent_prepared', ?, NULL, 0, ?, ?, ?)": {
+      "calls": 1,
+      "rowsWritten": 4,
+    },
+    "source:archiveSourcePrepareIntent:UPDATE project_data_archive_source_intents SET terminal_version_sha256 = ?, last_message_at = ?, message_count = ?, prepared_write_generation = ?, terminal_components_json = ?, updated_at = ? WHERE session_id = ? AND project_id = ? AND migration_id = ? AND state = ?": {
+      "calls": 1,
+      "rowsWritten": 2,
+    },
+    "source:archiveSourceReclaimPage:DELETE FROM chat_messages WHERE rowid IN ( SELECT rowid FROM chat_messages WHERE session_id = ? LIMIT ?)": {
+      "calls": 5,
+      "rowsWritten": 2100,
+    },
+    "source:archiveSourceReclaimPage:DELETE FROM chat_messages_grouped WHERE rowid = ?": {
+      "calls": 315,
+      "rowsWritten": 315,
+    },
+    "source:archiveSourceReclaimPage:DELETE FROM do_meta WHERE key = ?": {
+      "calls": 1,
+      "rowsWritten": 1,
+    },
+    "source:archiveSourceReclaimPage:DELETE FROM tool_payload_archives WHERE rowid IN ( SELECT rowid FROM tool_payload_archives WHERE session_id = ? LIMIT ?)": {
+      "calls": 1,
+      "rowsWritten": 1,
+    },
+    "source:archiveSourceReclaimPage:INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content) VALUES('delete', ?, ?)": {
+      "calls": 315,
+      "rowsWritten": 315,
+    },
+    "source:archiveSourceReclaimPage:UPDATE project_data_archive_source_intents SET source_database_size_after = ? WHERE session_id = ? AND migration_id = ? AND state = 'source_deleted'": {
+      "calls": 1,
+      "rowsWritten": 1,
+    },
+    "target:archiveTargetCommitChunk:INSERT INTO chat_messages_grouped (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)": {
+      "calls": 315,
+      "rowsWritten": 945,
+    },
+    "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_raw_chunks (session_id, ordinal, r2_key, compressed_bytes, body_bytes, body_sha256, first_created_at, last_created_at, role_counts_json, row_ids_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)": {
+      "calls": 5,
+      "rowsWritten": 15,
+    },
+    "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_search_documents_fts(rowid, content) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)": {
+      "calls": 1,
+      "rowsWritten": 10,
+    },
+    "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_search_documents_fts(rowid, content) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)": {
+      "calls": 3,
+      "rowsWritten": 33,
+    },
+    "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_search_documents_fts(rowid, content) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)": {
+      "calls": 17,
+      "rowsWritten": 272,
+    },
+    "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_target_chunks ( chunk_id, session_id, project_id, migration_id, owner_name, generation, table_name, ordinal, row_count, byte_count, sha256, committed_at , source_cursor, source_has_more ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)": {
+      "calls": 7,
+      "rowsWritten": 28,
+    },
+    "target:archiveTargetCommitChunk:INSERT INTO tool_payload_archives (message_id, session_id, r2_key, content_bytes, tool_metadata_bytes, archived_at, message_created_at, message_sequence, archive_version, archive_body_bytes, archive_body_sha256, root_object_bytes, root_object_sha256, verified_object_count, source_tool_metadata_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)": {
+      "calls": 1,
+      "rowsWritten": 5,
+    },
+    "target:archiveTargetCommitChunk:INSERT OR IGNORE INTO chat_messages_grouped_fts(rowid, content) VALUES (?, ?)": {
+      "calls": 315,
+      "rowsWritten": 315,
+    },
+    "target:archiveTargetCommitChunk:INSERT OR IGNORE INTO project_data_archive_search_documents (projection_id, document_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?) RETURNING rowid, projection_id": {
+      "calls": 1,
+      "rowsWritten": 31,
+    },
+    "target:archiveTargetCommitChunk:INSERT OR IGNORE INTO project_data_archive_search_documents (projection_id, document_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?) RETURNING rowid, projection_id": {
+      "calls": 3,
+      "rowsWritten": 102,
+    },
+    "target:archiveTargetCommitChunk:INSERT OR IGNORE INTO project_data_archive_search_documents (projection_id, document_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?) RETURNING rowid, projection_id": {
+      "calls": 17,
+      "rowsWritten": 833,
+    },
+    "target:archiveTargetCommitChunk:UPDATE project_data_archive_target_sessions SET search_index_version = ?, search_index_state = 'complete', search_index_message_count = ?, search_index_document_count = ?, search_index_sha256 = ?, search_indexed_at = ?, search_repair_phase = NULL, search_repair_next_ordinal = NULL, search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL, search_repair_pending_json = NULL, search_repair_message_count = NULL, search_repair_projection_sha256 = NULL, search_repair_document_count = NULL, updated_at = ? WHERE session_id = ?": {
+      "calls": 1,
+      "rowsWritten": 2,
+    },
+    "target:archiveTargetCommitChunk:UPDATE project_data_archive_target_sessions SET search_index_version = ?, search_index_state = 'repairing', search_index_message_count = NULL, search_index_document_count = NULL, search_index_sha256 = NULL, search_indexed_at = NULL, search_repair_phase = 'raw', search_repair_next_ordinal = 0, search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL, search_repair_pending_json = NULL, search_repair_message_count = 0, search_repair_projection_sha256 = ?, search_repair_document_count = 0, updated_at = ? WHERE session_id = ?": {
+      "calls": 1,
+      "rowsWritten": 2,
+    },
+    "target:archiveTargetCommitChunk:UPDATE project_data_archive_target_sessions SET search_repair_phase = ?, search_repair_next_ordinal = ?, search_repair_pending_json = ?, search_repair_message_count = ?, search_repair_projection_sha256 = ?, search_repair_document_count = ?, updated_at = ? WHERE session_id = ?": {
+      "calls": 5,
+      "rowsWritten": 10,
+    },
+    "target:archiveTargetCommitChunk:UPDATE project_data_archive_target_sessions SET state = 'copying', received_message_count = ?, updated_at = ? WHERE session_id = ?": {
+      "calls": 7,
+      "rowsWritten": 14,
+    },
+    "target:archiveTargetPrepare:INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, materialized_at, materialized_through_created_at, materialized_through_sequence, terminal_reconcile_deferred_until, terminal_reconcile_defer_reason, search_index_state, search_index_updated_at, search_index_degradation_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)": {
+      "calls": 1,
+      "rowsWritten": 10,
+    },
+    "target:archiveTargetPrepare:INSERT INTO project_data_archive_target_sessions ( session_id, project_id, migration_id, owner_name, generation, source_owner_name, source_intent_token, state, terminal_version_sha256, expected_message_count, received_message_count, created_at, updated_at, storage_format ) VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, 0, ?, ?, ?)": {
+      "calls": 1,
+      "rowsWritten": 4,
+    },
+    "target:archiveTargetSeal:UPDATE project_data_archive_target_sessions SET state = 'sealed', aggregate_sha256 = ?, received_message_count = ?, sealed_at = ?, updated_at = ? WHERE session_id = ?": {
+      "calls": 1,
+      "rowsWritten": 2,
+    },
+    "target:archiveTargetVerifyPage:INSERT OR REPLACE INTO do_meta (key, value) VALUES (?, ?)": {
+      "calls": 2,
+      "rowsWritten": 4,
+    },
+  },
+}
+`;
