@@ -82,6 +82,7 @@ function createCoordinatorTables(sqlite: Database.Database): void {
     schema.projectDataArchiveMigrations,
     schema.projectDataArchiveCopyCheckpoints,
     schema.projectDataSessionLocations,
+    schema.projectDataStorageTelemetry,
   ]);
 }
 

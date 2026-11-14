@@ -1,4 +1,9 @@
 import {
+  DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT,
+  DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
+  MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
+} from '@simple-agent-manager/project-data/scheduled';
+import {
   DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
   DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
   DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
@@ -82,6 +87,20 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Minutes an open agent turn may go with no new message and no background-work progress before it no longer keeps its session awake, so the session can sleep. Applies to sessions whose task is still running. 0 turns the bound off.',
     { min: 0, max: 10080 }
+  ),
+  integerDefinition(
+    'operations.projectDataArchiveMinStorageUsagePercent',
+    DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT,
+    'Operations',
+    "Percent of its storage limit a project's chat store must reach before the automatic archive sweep moves its ended chats to archive storage. Archiving costs billed row writes and only frees room in that store, so projects below this are left alone. 0 archives every project.",
+    { min: 0, max: 100 }
+  ),
+  integerDefinition(
+    'operations.projectDataArchiveStorageTelemetryMaxAgeHours',
+    DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
+    'Operations',
+    'Hours after which a project storage measurement is too old to hold the archive sweep back. A project with no measurement, or only an older one, is archived as if it were under pressure.',
+    { min: 1, max: MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS }
   ),
   integerDefinition(
     'operations.nodeLifetimeAdmissionCutoffPercent',

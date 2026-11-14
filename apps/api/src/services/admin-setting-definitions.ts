@@ -70,6 +70,8 @@ export type AdminSettingName =
   | 'operations.nodeProviderDeletionConfirmMaxMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'
+  | 'operations.projectDataArchiveMinStorageUsagePercent'
+  | 'operations.projectDataArchiveStorageTelemetryMaxAgeHours'
   | 'operations.providerLimitResetWindowToleranceMs'
   | 'operations.nodeLifetimeAdmissionCutoffPercent'
   | 'operations.nodeCleanupRefusalWarnAfterMs'

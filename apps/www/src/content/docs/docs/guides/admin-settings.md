@@ -263,6 +263,28 @@ admins can set a whole number from 0 to 99, and 0 turns the cutoff off. SAM star
 another VM, creating one if it needs to. Restarting a stopped workspace on its own VM is still
 allowed. VMs you added yourself, and VMs no task created, have no lifetime limit and no cutoff.
 
+## Archiving ended chats
+
+Each project keeps its chats in one store with a hard size limit. A scheduled sweep moves ended
+chats out of that store into archive storage, where they stay readable and searchable. Moving a
+chat costs billed Cloudflare Durable Object row writes on both sides, and the only thing it buys is
+room in the project's store, so the sweep leaves a project alone until its store is filling up.
+
+`operations.projectDataArchiveMinStorageUsagePercent` sets how full a project's store must be, as a
+percent of its limit, before the sweep archives that project's ended chats. The default is 50;
+admins can set a whole number from 0 to 100, and 0 archives every project regardless of size. The
+sweep reads the size from the store's periodic storage measurement (hourly by default,
+`PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS`). A project that has never been
+measured, or whose last measurement is older than
+`operations.projectDataArchiveStorageTelemetryMaxAgeHours` (default 24 hours, 1 to 720), is archived
+as if it were full, because an old reading cannot show that the store has room. The sweep does not
+look at whether measurement is switched on, only at the stored reading and its age. So if storage
+measurement is turned off (`PROJECT_DATA_STORAGE_TELEMETRY_ENABLED=false`), a reading taken before
+that still holds its project back until it passes the max age; after that no project has a usable
+reading, every project is archived, and this setting has no effect. Chats already being
+moved always finish, and an archive run a superadmin starts for one named project through the
+admin archive route is not held back by this setting.
+
 ## Stale agent turns
 
 An agent's turn can stop producing anything without ending: the VM keeps reporting the turn as
