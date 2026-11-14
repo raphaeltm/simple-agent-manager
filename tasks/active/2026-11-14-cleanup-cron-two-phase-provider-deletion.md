@@ -87,26 +87,26 @@ Two-phase provider deletion for the deadline-bounded cleanup callers, GCP first:
 
 ## Implementation checklist
 
-- [ ] Providers: `VmDeletionRequestResult`, `VmDeletionStatus` types; optional methods on
+- [x] Providers: `VmDeletionRequestResult`, `VmDeletionStatus` types; optional methods on
       `Provider`; GCP `requestVMDeletion` + `getVMDeletionStatus`; provider unit tests (ticket
       before DELETE, absent, 404, op list states incl. failed / wrong project / malformed ticket,
       abort)
-- [ ] Migration `0239`: `nodes.provider_deletion_requested_at`, `nodes.provider_deletion_json`
+- [x] Migration `0239`: `nodes.provider_deletion_requested_at`, `nodes.provider_deletion_json`
       (ADD COLUMN only); drizzle schema
-- [ ] Admin settings: request timeout + confirm max (definitions, key union, defaults in shared)
-- [ ] `strict-node-deletion.ts`: request mode, pending-record match/parse (malformed → ignored +
+- [x] Admin settings: request timeout + confirm max (definitions, key union, defaults in shared)
+- [x] `strict-node-deletion.ts`: request mode, pending-record match/parse (malformed → ignored +
       logged), status check across authority candidates, unconfirmed bound, clear on
       not_requested/failed and on proof write
-- [ ] `node-teardown-authority.ts`: `deleteWithCurrentOwnerCredential` takes the delete action;
+- [x] `node-teardown-authority.ts`: `deleteWithCurrentOwnerCredential` takes the delete action;
       new blocked reason `teardown_deletion_unconfirmed`
-- [ ] `node-cleanup/shared.ts`: `pending` result, `destroy_pending` decision, confirm claim
-- [ ] `node-phases.ts`: confirm phase; handoff phases exclude pending, rotate by backoff, use the
+- [x] `node-cleanup/shared.ts`: `pending` result, `destroy_pending` decision, confirm claim
+- [x] `node-phases.ts`: confirm phase; handoff phases exclude pending, rotate by backoff, use the
       request budget; `index.ts` phase order; result counter
-- [ ] `stranded-node-retirement.ts`: exclude pending; request mode + request budget
-- [ ] Decision enum `destroy_pending`
-- [ ] Docs: architecture overview/security/configuration where cleanup teardown is described
-- [ ] Tests (see below), each proven red on the reverted change
-- [ ] Backlog: UpCloud stop-wait and unhealthy release / orphan reconciliation still bounded by
+- [x] `stranded-node-retirement.ts`: exclude pending; request mode + request budget
+- [x] Decision enum `destroy_pending`
+- [x] Docs: architecture overview/security/configuration where cleanup teardown is described
+- [x] Tests (see below), each proven red on the reverted change
+- [x] Backlog: UpCloud stop-wait and unhealthy release / orphan reconciliation still bounded by
       the 5 s budget for slow providers
 
 ## Tests
@@ -123,9 +123,9 @@ Two-phase provider deletion for the deadline-bounded cleanup callers, GCP first:
 
 - [ ] An idle managed GCP node is torn down by SAM with no owner action within ~2 cron ticks of
       first selection, with its original credential and after an in-place re-save (staging).
-- [ ] Termination proof is never written because a DELETE was sent.
-- [ ] Failures stay named; the unconfirmed case alerts and backs off.
-- [ ] Hetzner behaviour unchanged.
+- [x] Termination proof is never written because a DELETE was sent.
+- [x] Failures stay named; the unconfirmed case alerts and backs off.
+- [x] Hetzner behaviour unchanged.
 - [ ] PR states per-tick wall time and worst-case time to reap at the outer limit.
 
 ## References
@@ -133,3 +133,31 @@ Two-phase provider deletion for the deadline-bounded cleanup callers, GCP first:
 - `.claude/rules/81-work-bounds-must-state-throughput.md`, `apps/api/.claude/rules/47-control-loop-io-budget.md`
 - `packages/providers/.claude/rules/56-destructive-provider-ownership-proof.md`
 - PR #2715 (fallback credential teardown), PR #2718 (credential re-save provenance)
+
+## Implementation notes (2026-11-14)
+
+- Providers: `packages/providers/src/vm-deletion.ts` (types), `gcp-deletion.ts` (sync delete moved
+  here; `requestGcpInstanceDeletion`, `getGcpInstanceDeletionStatus`). Tests:
+  `packages/providers/tests/unit/gcp-two-phase-deletion.test.ts`.
+- API: `services/node-provider-deletion.ts` (record, confirm, send), `strict-node-deletion.ts`
+  (`providerDeletion: 'request'`, `deletion_pending`), `node-teardown-authority.ts` (delete action
+  parameter, `teardown_deletion_unconfirmed`), `scheduled/node-cleanup/handoff-phases.ts` (confirm
+  phase, rotation, exclusion), `cleanup-claim.ts` (`claimPendingProviderDeletion` lease),
+  `shared.ts` (`pending` result). Splits for the 500-line limit: `cleanup-outcome.ts`,
+  `handoff-phases.ts`, `node-teardown-credential-rejection.ts`.
+- Migration `0239_node_provider_deletion_request.sql` (ADD COLUMN only).
+- Unhealthy release, deployment cleanup and orphan reconciliation stay on the synchronous path and
+  the 5 s knob: `tasks/backlog/2026-11-14-slow-provider-deletes-outside-cleanup-handoff.md`.
+
+## Discrimination record
+
+Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.test.ts`:
+
+| Change reverted | Tests that went red |
+| --- | --- |
+| Whole fix (main + only the two schema columns) | reap across ticks, still-deleting pending, re-save path, never-confirms, starvation (controls stay green) |
+| Confirm phase removed from the cron | reap, pending, re-save, never-confirms |
+| Handoff ordering back to blocked-first | starvation |
+| Pending nodes not excluded from handoff selection | reap, re-save |
+| Unconfirmed bound removed | never-confirms |
+| Request mode not passed (wait mode) | reap, pending, re-save, never-confirms, starvation |
