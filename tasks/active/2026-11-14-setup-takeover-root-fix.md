@@ -48,24 +48,24 @@ staging `setup.completed` written). This task fixes the causes.
 
 ## Implementation checklist
 
-- [ ] `scripts/deploy/setup-token.ts`: generate the token and register `::add-mask::` when
+- [x] `scripts/deploy/setup-token.ts`: generate the token and register `::add-mask::` when
       running in GitHub Actions; import from `sync-wrangler-config.ts` (shrinks the 1408-line file)
-- [ ] Unit test: masked inside Actions, nothing printed outside Actions
-- [ ] `isSetupCompleted`: an active, non-system superadmin closes setup and persists
+- [x] Unit test: masked inside Actions, nothing printed outside Actions
+- [x] `isSetupCompleted`: an active, non-system superadmin closes setup and persists
       `setup.completed` (write failure logged, still closed); `SETUP_FORCE` still reopens
-- [ ] Route tests: superadmin + no row → `GET /api/setup/status` and `POST /api/setup/complete`
+- [x] Route tests: superadmin + no row → `GET /api/setup/status` and `POST /api/setup/complete`
       answer 410 and the row is written; no superadmin → open; `SETUP_FORCE` → open
-- [ ] `selectGitLabOAuthConfig` returns `identityTrusted` (host is gitlab.com, or host came from
+- [x] `selectGitLabOAuthConfig` returns `identityTrusted` (host is gitlab.com, or host came from
       the Worker environment)
-- [ ] `auth.ts`: untrusted GitLab is not in `trustedProviders`, gets
+- [x] `auth.ts`: untrusted GitLab is not in `trustedProviders`, gets
       `overrideUserInfoOnSignIn: false` and `mapProfileToUser → { emailVerified: false }`
-- [ ] Vertical-slice test through the real `/api/auth` routes and better-auth with a fake GitLab:
+- [x] Vertical-slice test through the real `/api/auth` routes and better-auth with a fake GitLab:
       runtime self-managed host claiming an existing user's verified email does NOT link or sign
       in; control: same flow on gitlab.com / env-pinned host links; guard deletion turns the
       attack test red
-- [ ] `clientIdentifier`: `CF-Connecting-IP` only; test that rotating User-Agent / XFF does not
+- [x] `clientIdentifier`: `CF-Connecting-IP` only; test that rotating User-Agent / XFF does not
       escape the limit
-- [ ] Docs sync (list above)
+- [x] Docs sync (list above)
 
 ## Acceptance criteria
 
@@ -81,3 +81,22 @@ staging `setup.completed` written). This task fixes the causes.
 
 - Incident session task 01M7DJT04N8DYW1T5VF30ETCQZ; channel `feature.setup-takeover-fix`
 - `.claude/rules/74-proxy-signals-must-match-the-condition.md`, `62`, `28`
+
+## Implementation notes
+
+- Discrimination proofs (all reverted after):
+  - Mask removed from `generateSetupToken` → `setup-token-masking` "registers the exact token" and
+    `sync-wrangler-config` "masks the setup token" went red.
+  - Owner check removed from `isSetupCompleted` → "closes every setup route", "stays closed after
+    the owner is no longer a superadmin", "stays closed when recording setup.completed fails" went
+    red; open-install, sentinel and SETUP_FORCE controls stayed green.
+  - Old header fallback restored in `clientIdentifier` → only "cannot be escaped by rotating
+    client-controlled headers" went red.
+  - GitLab always trusted → attack, unverified-new-user and profile-unchanged tests went red;
+    gitlab.com and env-pinned controls green.
+  - GitLab out of `trustedProviders` but host `email_verified` kept → the 2026-11-12 attack test
+    still went red: removing GitLab from trustedProviders alone would not have stopped the attack.
+- No D1 migration: the runtime owner check closes setup on every install at deploy and records the
+  row on first read; a migration would only duplicate it.
+- `sync-wrangler-config.ts` is 1408 lines (pre-existing); the token logic moved out to
+  `scripts/deploy/setup-token.ts`, so the file shrank.
