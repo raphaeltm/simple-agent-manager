@@ -308,6 +308,11 @@ export type ProjectDataArchiveGlobalSweepCadenceState = {
 export type ProjectDataArchiveShardingStats = {
   /** Total write-budget refusals, whatever their cause. Sum of the two fields below. */
   budgetDeferred?: number;
+  /** Highest-priority boundary encountered by the selected batch: deadline, session
+   * slots, then budget-deferred candidates. Other candidates may still have progressed;
+   * selected_work_exhausted only describes this selection, not the global backlog.
+   * Diagnostic only: does not change scheduling or admission. */
+  stopReason?: 'wall_time' | 'write_budget' | 'session_limit' | 'selected_work_exhausted';
   /**
    * Refusals where the session's estimate exceeded the ENTIRE daily allowance. Waiting
    * cannot clear these; only a smaller candidate or a config change can. A tick that
@@ -5035,7 +5040,12 @@ async function processArchiveMigrationBatch(input: {
       return false;
     }
   };
-  const outOfTime = () => Date.now() - input.startedAt >= input.config.wallTimeMs;
+  input.stats.stopReason = 'selected_work_exhausted';
+  const outOfTime = () => {
+    const expired = Date.now() - input.startedAt >= input.config.wallTimeMs;
+    if (expired) input.stats.stopReason = 'wall_time';
+    return expired;
+  };
 
   // In-flight migrations resume without a new write reservation: a migration reserves its
   // whole estimate once, when its journal is created below. Re-reserving on every tick it
@@ -5061,13 +5071,19 @@ async function processArchiveMigrationBatch(input: {
   const slots = input.pendingSlots;
   let journaled = 0;
   for (const candidate of pending) {
-    if (journaled >= slots) break;
+    if (journaled >= slots) {
+      input.stats.stopReason = 'session_limit';
+      break;
+    }
     if (outOfTime()) return;
     const reservation =
       input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
         ? await reserve(candidate.project_id, candidate.session_id, Number(candidate.message_count))
         : undefined;
-    if (reservation === null) continue;
+    if (reservation === null) {
+      if ((input.stats.budgetWindowExhausted ?? 0) > 0) input.stats.stopReason = 'write_budget';
+      continue;
+    }
     const migration = await createCandidateJournal(input.env, candidate, input.now);
     if (!migration) {
       await releaseUnused(reservation);
@@ -5077,6 +5093,9 @@ async function processArchiveMigrationBatch(input: {
     const refused = await processOne(migration, reservation);
     if (!refused) journaled++;
   }
+  if ((input.stats.yielded ?? 0) > 0) input.stats.stopReason = 'wall_time';
+  else if (input.migrations.length + journaled >= input.config.sweepSessions)
+    input.stats.stopReason = 'session_limit';
 }
 
 export async function runProjectDataArchiveSharding(
