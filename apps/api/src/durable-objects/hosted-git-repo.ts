@@ -35,6 +35,7 @@ import { GitStore } from '../vendor/dgit/git/store';
 import { concat, td, te } from '../vendor/dgit/git/util';
 import { gunzipLimited } from '../vendor/dgit/git/zlib';
 import { type HostedGitGcResult, runHostedGitGc } from './hosted-git-gc';
+import { filterLsRefsResponse, lsRefsPrefixes } from './hosted-git-ls-refs';
 
 /** An upload-pack request is wants/haves/caps only. */
 const MAX_UPLOAD_PACK_BYTES = 16 * 1024 * 1024;
@@ -234,7 +235,10 @@ export class HostedGitRepo extends DurableObject {
       if (req.headers.get('content-encoding')?.includes('gzip')) {
         body = gunzipLimited(body, MAX_UPLOAD_PACK_BYTES);
       }
-      return await uploadPack(this.store, body, release);
+      // dgit answers ls-refs with every ref whatever `ref-prefix` asks; filter the answer here.
+      const prefixes = lsRefsPrefixes(body);
+      const response = await uploadPack(this.store, body, release);
+      return prefixes ? await filterLsRefsResponse(response, prefixes) : response;
     } catch (err) {
       release();
       if (
