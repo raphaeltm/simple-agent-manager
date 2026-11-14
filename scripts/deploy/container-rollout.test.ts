@@ -85,14 +85,31 @@ describe('container rollout deploy gate', () => {
       expect.stringContaining('application=second rollout=second-new status=completed')
     );
   });
-  it('waits for application version after rollout completion', async () => {
+  it('accepts an unchanged-image retry with a completed rollout and stale list', async () => {
     const h = harness();
     h.set(rollout(), 4);
-    h.options.sleep.mockImplementationOnce(async () => {
-      h.set(rollout());
-    });
-    await waitForContainerRollouts(h.api, before, h.options);
-    expect(h.options.sleep).toHaveBeenCalledTimes(1);
+    const saved = await snapshotApplications(h.api, [before[0].name]);
+    await waitForContainerRollouts(h.api, saved, h.options);
+    expect(h.options.sleep).not.toHaveBeenCalled();
+    expect(h.options.log).toHaveBeenLastCalledWith(
+      expect.stringContaining('completed with stale application list version')
+    );
+  });
+  it.each(['pending', 'progressing'])(
+    'still waits for %s with version already at target',
+    async (status) => {
+      const h = harness(rollout(status));
+      h.set(rollout(status), 5);
+      await expect(waitForContainerRollouts(h.api, before, h.options)).rejects.toThrow(
+        /timed out after 100ms/
+      );
+      expect(h.options.sleep).toHaveBeenCalledTimes(10);
+    }
+  );
+  it('rejects a list version beyond a newly pinned target', async () => {
+    const h = harness();
+    h.set(rollout(), 6);
+    await expect(waitForContainerRollouts(h.api, before, h.options)).rejects.toThrow('superseded');
   });
   it('fails bounded timeout with pinned id/status', async () => {
     const h = harness(rollout('progressing'));
@@ -132,12 +149,15 @@ describe('container rollout deploy gate', () => {
     });
     await expect(waitForContainerRollouts(h.api, before, h.options)).rejects.toThrow('superseded');
   });
-  it.each(['failed', 'cancelled', 'unknown'])('fails status=%s', async (status) => {
-    const h = harness(rollout(status));
-    await expect(waitForContainerRollouts(h.api, before, h.options)).rejects.toThrow(
-      /gate failed.*rollout=new status=/
-    );
-  });
+  it.each(['failed', 'cancelled', 'canceled', 'replaced', 'unknown'])(
+    'fails status=%s',
+    async (status) => {
+      const h = harness(rollout(status));
+      await expect(waitForContainerRollouts(h.api, before, h.options)).rejects.toThrow(
+        /gate failed.*rollout=new status=/
+      );
+    }
+  );
   it('rejects completed34% rollout', async () => {
     const r = rollout();
     r.steps[0].step_size.percentage = 34;
@@ -202,6 +222,38 @@ describe('container rollout deploy gate', () => {
   });
 });
 describe('Cloudflare response boundary', () => {
+  it('accepts completed pinned rollout when list is stale and application GET is current', async () => {
+    const application = { id: 'app', name: before[0].name, version: 5 };
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      const path = new URL(String(url)).pathname;
+      const result = path.endsWith('/rollouts')
+        ? [rollout(), rollout('completed', 'old', 4)]
+        : path.endsWith('/app')
+          ? application // Live GET response is an object, not an array.
+          : [{ ...application, version: 4 }];
+      return new Response(JSON.stringify({ success: true, result }));
+    });
+    const api = createRolloutApi(
+      'account',
+      'secret',
+      new AbortController().signal,
+      fetcher as typeof fetch
+    );
+    const h = harness();
+    // Record the independently available detail evidence; the gate need not depend on it.
+    const detail = await fetcher(
+      'https://api.cloudflare.com/client/v4/accounts/account/containers/applications/app'
+    );
+    expect(await detail.json()).toEqual({ success: true, result: application });
+    await expect(waitForContainerRollouts(api, before, h.options)).resolves.toBeUndefined();
+    expect(h.options.sleep).not.toHaveBeenCalled();
+    expect(h.options.log).toHaveBeenLastCalledWith(
+      expect.stringContaining(
+        'stale application list version (application=app rollout=new status=completed version=4 target=5)'
+      )
+    );
+  });
+
   it('snapshots and waits through the HTTP boundary without Wrangler stdout on either engine path', async () => {
     let activeVersion = 4;
     let records = [rollout('completed', 'old', 4)];
