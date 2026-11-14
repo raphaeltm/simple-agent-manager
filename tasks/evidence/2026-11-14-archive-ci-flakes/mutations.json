@@ -1,0 +1,28 @@
+[
+  {
+    "mutation": "archive_export_byte_bound",
+    "failed": 1,
+    "passed": 0,
+    "cases": [
+      {
+        "name": "compact archive migration compatibility preserves exact paging, tools, search and default-size recovery for 100 rows (204800 byte metadata)",
+        "status": "failed",
+        "failure": "Error: Compact archive exceeds object byte limit"
+      }
+    ],
+    "restored": true
+  },
+  {
+    "mutation": "handoff_emission",
+    "failed": 1,
+    "passed": 0,
+    "cases": [
+      {
+        "name": "warm handoff decisions records handed_to_warm alongside the DO marked_warm decision",
+        "status": "failed",
+        "failure": "AssertionError: expected [ 'node_lifecycle:marked_warm' ] to deeply equal [ 'node_lifecycle:marked_warm', \u2026(1) ]"
+      }
+    ],
+    "restored": true
+  }
+]
