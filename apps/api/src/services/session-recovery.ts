@@ -216,9 +216,9 @@ async function resolveRecoveryPlacement(
     }
   );
   if ('error' in resolved) {
-    // A catalog that cannot yet answer placement is a readiness wait, not proof
-    // the stored request is impossible. No claim/runtime is allocated until a
-    // later durable delivery retry can resolve an eligible committed offering.
+    // Pending publication or temporary committed-catalog capacity can recover.
+    // An unpublished catalog without live refresh work requires operator action.
+    // Refuse before claiming a snapshot or allocating a replacement runtime.
     let reason = 'placement_unsatisfiable';
     if (resolved.errorKind === 'credentials') {
       reason = 'placement_credentials_missing';
@@ -226,7 +226,10 @@ async function resolveRecoveryPlacement(
       switch (resolved.capacityPoolEffectiveState) {
         case 'migration-pending':
         case 'catalog-unavailable':
-          reason = 'session_recovery_placement_transient';
+          reason =
+            resolved.capacityPoolRefreshPending || resolved.capacityPoolCatalogPublished
+              ? 'session_recovery_placement_transient'
+              : 'placement_catalog_refresh_unavailable';
           break;
         case 'source-disabled':
           reason = 'placement_sources_disabled';

@@ -187,16 +187,85 @@ describe('committed VM wake readiness admission', () => {
     ['cancelled task', "UPDATE tasks SET status = 'cancelled'"],
   ])(
     'read-only steering rejects a %s mismatch already present at lookup',
-    async (_name, mutation) => {
+    async (name, mutation) => {
       sqlite.exec(mutation);
       expect(
         await resolveVmPromptDeliveryTarget(env, 'project', 'chat', undefined, async () => null, {
           allowWake: false,
         })
-      ).toMatchObject({ kind: 'retry' });
+      ).toMatchObject(
+        name === 'cancelled task'
+          ? { kind: 'failed', reason: 'terminal_target' }
+          : { kind: 'retry' }
+      );
       expect(signal).not.toHaveBeenCalled();
     }
   );
+
+  it.each(['completed', 'failed'])(
+    'durable active link skips historical %s wake authority with one target read',
+    async (status) => {
+      sqlite.prepare('UPDATE tasks SET status=?').run(status);
+      signal.mockRejectedValue(new Error('Activation RPC unavailable'));
+      const prepare = vi.spyOn(env.DATABASE, 'prepare');
+      const active = vi.fn(() => true);
+      expect(
+        await resolveVmPromptDeliveryTarget(env, 'project', 'chat', undefined, async () => null, {
+          isSessionActive: active,
+        })
+      ).toMatchObject({ kind: 'ready', target: { workspaceId: 'workspace' } });
+      expect(active).toHaveBeenCalledExactlyOnceWith('workspace');
+      expect(prepare).toHaveBeenCalledTimes(1);
+      expect(signal).not.toHaveBeenCalled();
+      expect(getSession).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ['node ownership', "UPDATE nodes SET user_id='foreign'", 'dead_target'],
+    [
+      'confirmed deletion',
+      "UPDATE workspaces SET runtime_deletion_confirmed_at='2026-11-14T00:00:00Z'",
+      'terminal_target',
+    ],
+  ])('active-link fast path preserves %s authority', async (_name, mutation, reason) => {
+    const active = vi.fn(() => true);
+    const options = { isSessionActive: active };
+    expect(
+      await resolveVmPromptDeliveryTarget(
+        env,
+        'project',
+        'chat',
+        undefined,
+        async () => null,
+        options
+      )
+    ).toMatchObject({ kind: 'ready' });
+    active.mockClear();
+    sqlite.exec(mutation);
+    expect(
+      await resolveVmPromptDeliveryTarget(
+        env,
+        'project',
+        'chat',
+        undefined,
+        async () => null,
+        options
+      )
+    ).toMatchObject({ kind: 'failed', reason });
+    expect(active).not.toHaveBeenCalled();
+    expect(signal).not.toHaveBeenCalled();
+  });
+
+  it('cancellation stays terminal even when a lagging local link is active', async () => {
+    sqlite.exec("UPDATE tasks SET status='cancelled'");
+    expect(
+      await resolveVmPromptDeliveryTarget(env, 'project', 'chat', undefined, async () => null, {
+        isSessionActive: () => true,
+      })
+    ).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(signal).not.toHaveBeenCalled();
+  });
 
   it.each([null, undefined, -1, 0.5, NaN, '0', 0, 2])(
     'a transported RPC result %s grants readiness only when authority accepted it',
@@ -395,13 +464,19 @@ describe('committed VM wake readiness admission', () => {
       ],
       ['snapshot owner', "UPDATE session_snapshots SET user_id = 'foreign'"],
       ['node owner', "UPDATE nodes SET user_id = 'foreign'"],
-    ])('rejects a changed %s', async (_name, mutation) => {
+    ])('rejects a changed %s', async (name, mutation) => {
       sqlite.exec(mutation);
       expect(
         await resolveVmPromptDeliveryTarget(env, 'project', 'chat', undefined, async () => null, {
           allowWake: false,
         })
-      ).toMatchObject({ kind: 'retry' });
+      ).toMatchObject(
+        name === 'node owner'
+          ? { kind: 'failed', reason: 'dead_target' }
+          : name === 'snapshot owner'
+            ? { kind: 'failed', reason: 'wake_refused' }
+            : { kind: 'retry' }
+      );
       expect(signal).not.toHaveBeenCalled();
     });
 

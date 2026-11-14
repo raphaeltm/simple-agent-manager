@@ -73,21 +73,15 @@ function insertArchive(db: DatabaseSync, id: string): void {
 }
 
 function assertNewCatalogStorage(db: DatabaseSync, poolId: string): void {
-  const payload = JSON.stringify({
-    id: 'replacement',
-    provider: 'hetzner',
-    providerInstanceType: 'cx23',
-    providerInstanceVcpuCount: 2,
-    providerInstanceMemoryMb: 4096,
-    location: 'nbg1',
-  });
   db.prepare(
     `
     INSERT INTO capacity_pool_candidate_staging
-      (id, pool_id, capacity_source_id, digest, ordinal, generation, payload)
-    VALUES ('replacement', ?, 'source', 'replacement-digest', 0, 8, ?)
+      (id, pool_id, capacity_source_id, digest, ordinal, generation, primary_id,
+       provider, location, provider_instance_type, provider_instance_vcpu_count, provider_instance_memory_mb)
+    VALUES ('replacement', ?, 'source', 'replacement-digest', 0, 8, 'replacement',
+            'hetzner', 'nbg1', 'cx23', 2, 4096)
   `
-  ).run(poolId, payload);
+  ).run(poolId);
   db.prepare(
     `
     INSERT INTO capacity_pool_refreshes
@@ -97,7 +91,7 @@ function assertNewCatalogStorage(db: DatabaseSync, poolId: string): void {
             1700007200000, 1700000015000, 1699999999000)
   `
   ).run(poolId);
-  expect(db.prepare('SELECT * FROM capacity_pool_candidate_staging').all()).toEqual([
+  expect(db.prepare('SELECT * FROM capacity_pool_candidate_staging').all()).toMatchObject([
     {
       id: 'replacement',
       pool_id: poolId,
@@ -105,7 +99,9 @@ function assertNewCatalogStorage(db: DatabaseSync, poolId: string): void {
       digest: 'replacement-digest',
       ordinal: 0,
       generation: 8,
-      payload,
+      primary_id: 'replacement',
+      provider: 'hetzner',
+      provider_instance_memory_mb: 4096,
     },
   ]);
   expect(db.prepare('SELECT * FROM capacity_pool_refreshes').all()).toEqual([

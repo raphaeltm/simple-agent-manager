@@ -17,16 +17,24 @@ import { CAPACITY_POOL_CONTINUATION_CRON } from '../../src/services/capacity-poo
 import { defaultPoolId } from '../../src/services/default-capacity-pool-helpers';
 import { seedUser } from './helpers/seed-d1';
 
+const refreshPoolIds: string[] = [];
 beforeEach(() => __resetAdminSettingsCacheForTest());
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
   __resetAdminSettingsCacheForTest();
+  for (const poolId of refreshPoolIds.splice(0)) {
+    await env.DATABASE.batch([
+      env.DATABASE.prepare('DELETE FROM capacity_pool_refreshes WHERE pool_id = ?').bind(poolId),
+      env.DATABASE.prepare('DELETE FROM capacity_pools WHERE id = ?').bind(poolId),
+    ]);
+  }
 });
 
 async function pendingRefresh(nextAttemptAt = Date.now() - 1) {
   const userId = `continuation-cron-${crypto.randomUUID()}`;
   await seedUser(userId);
   const poolId = defaultPoolId({ scope: 'user', ownerUserId: userId, ownerProjectId: null });
+  refreshPoolIds.push(poolId);
   const startedAt = Date.now() - 1000;
   await env.DATABASE.batch([
     env.DATABASE.prepare(
@@ -69,17 +77,35 @@ async function tick(database = env.DATABASE) {
   await waitOnExecutionContext(context);
 }
 
+function events(spy: ReturnType<typeof vi.spyOn>) {
+  return spy.mock.calls.flatMap(([line]) => {
+    try {
+      return [JSON.parse(String(line))];
+    } catch {
+      return [];
+    }
+  });
+}
+
 describe('one-minute catalog continuation on migrated D1', () => {
   it('leaves due work unchanged while disabled and resumes that same work after re-enable', async () => {
     const f = await pendingRefresh();
     await setCronEnabled(f.userId, false);
     const pending = await readRefresh(f.poolId);
     const external = vi.spyOn(globalThis, 'fetch');
+    const logged = vi.spyOn(console, 'log');
 
     await tick();
 
     expect(await readRefresh(f.poolId)).toEqual(pending);
     expect(external).not.toHaveBeenCalled();
+    expect(events(logged)).toContainEqual(
+      expect.objectContaining({
+        event: 'cron.skipped_disabled',
+        type: 'capacity-pool-continuation',
+        switch: 'cron',
+      })
+    );
 
     await setCronEnabled(f.userId, true);
     await tick();
@@ -100,6 +126,15 @@ describe('one-minute catalog continuation on migrated D1', () => {
         .first()
     ).toEqual({ status: 'active', configuration_state: 'configured-empty' });
     expect(external).not.toHaveBeenCalled();
+    expect(events(logged)).toContainEqual(
+      expect.objectContaining({
+        event: 'cron.completed',
+        type: 'capacity-pool-continuation',
+        resumed: 1,
+        failed: 0,
+        skipped: false,
+      })
+    );
   });
 
   it('drains due continuation only, preserving future retries and the daily full-refresh gate', async () => {
@@ -134,6 +169,7 @@ describe('one-minute catalog continuation on migrated D1', () => {
     const f = await pendingRefresh();
     await setCronEnabled(f.userId, true);
     const pending = await readRefresh(f.poolId);
+    const logged = vi.spyOn(console, 'log');
     let rejectedContinuationWrites = 0;
     const unavailable = new Proxy(env.DATABASE, {
       get(target, property) {
@@ -167,5 +203,42 @@ describe('one-minute catalog continuation on migrated D1', () => {
       recoveryType: 'cron_sweep_failure',
       sweep: 'capacity_pool_continuation',
     });
+    expect(events(logged)).toContainEqual(
+      expect.objectContaining({
+        event: 'cron.completed',
+        type: 'capacity-pool-continuation',
+        resumed: null,
+        failed: 1,
+        failedSweeps: ['capacity_pool_continuation'],
+      })
+    );
+  });
+
+  it('counts an exhausted owned refresh as failed and persists its operator-visible error', async () => {
+    const f = await pendingRefresh();
+    await setCronEnabled(f.userId, true);
+    await env.DATABASE.prepare(
+      'UPDATE capacity_pool_refreshes SET deadline_at = ? WHERE pool_id = ?'
+    )
+      .bind(Date.now() - 1, f.poolId)
+      .run();
+    const logged = vi.spyOn(console, 'log');
+    await tick();
+    expect(await readRefresh(f.poolId)).toMatchObject({ state: 'failed' });
+    expect(events(logged)).toContainEqual(
+      expect.objectContaining({
+        event: 'cron.completed',
+        type: 'capacity-pool-continuation',
+        resumed: 0,
+        failed: 1,
+      })
+    );
+    expect(
+      (
+        await env.OBSERVABILITY_DATABASE.prepare(
+          "SELECT level FROM platform_errors WHERE message LIKE 'Compute catalog refresh stopped%'"
+        ).all()
+      ).results
+    ).toEqual([{ level: 'error' }]);
   });
 });

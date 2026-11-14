@@ -30,6 +30,10 @@ import { DurableObject } from 'cloudflare:workers';
 
 import { measureArchiveSql } from '../archive/sql-metrics';
 import { estimateArchiveWrites } from '../archive/write-budget';
+import {
+  assertExactWriteAllowed,
+  isProjectDataArchiveExactRoutingEnabled,
+} from '../client/project-data-archive-routing';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import * as agentMessageChannels from './agent-message-channels';
@@ -701,10 +705,28 @@ export class ProjectData extends DurableObject<Env> {
     // cannot overwrite a newer fence and make its duplicate appear novel.
     const run = this.wakeReadyLock.then(async () => {
       this.ensureProjectId(input.projectId);
+      if (isProjectDataArchiveExactRoutingEnabled(this.env))
+        await assertExactWriteAllowed(
+          this.env,
+          input.projectId,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
+      messages.assertTranscriptWriteAllowed(
+        this.sql,
+        input.chatSessionId,
+        'signalSessionWakeReady'
+      );
       const activationGuard = sessionWakeReady.captureSessionWakeActivation(this.sql, input);
       if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return null;
       const now = Date.now();
       const { activated, released } = this.meteredStorage.transactionSync(() => {
+        // A source intent may have been prepared while the D1 authority read awaited.
+        messages.assertTranscriptWriteAllowed(
+          this.sql,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
         const activated = sessionWakeReady.activateSessionWakeReady(
           this.sql,
           input,

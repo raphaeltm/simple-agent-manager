@@ -595,7 +595,7 @@ describe('reuse selection agrees with final authority admission', () => {
     // accounts' running nodes stay reusable.
     expect(off.summary?.pool.revision).toBe(4);
     expect(off.summary?.activeCandidateCount).toBe(0);
-    expect(off.summary?.effectiveState).toBe('configured-empty');
+    expect(off.summary?.effectiveState).toBe('source-disabled');
     // Its picks are kept, not removed.
     expect(
       db().prepare('SELECT status FROM capacity_pool_candidates WHERE id = ?').get(pool.candidateId)

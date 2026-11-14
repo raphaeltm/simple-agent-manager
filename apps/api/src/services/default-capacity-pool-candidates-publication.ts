@@ -108,8 +108,43 @@ export async function ensureCandidatesForSource(
   }
 
   const cursorKey = candidatePublicationCursorKey(poolId, sourceId);
-  const digest = await candidateSetDigest(candidateValues, options.sourceAuthorityGeneration);
+  const digest = await candidateSetDigest(
+    candidateValues,
+    options.sourceAuthorityGeneration,
+    options.catalogComplete
+  );
   const progress = await readPublicationProgress(options.cursorStore, cursorKey, digest);
+  const catalogValidated = options.catalogValidated ?? options.catalogComplete !== false;
+  const committedRowsPresent = candidateIds.every((id) => existingCandidates.has(id));
+  // A validated reference is not an exhaustive inventory. Once committed, identical
+  // references need no publication writes (and cannot replace stronger API metadata).
+  // Authority/native edits change the digest; exhaustive discovery still runs cleanup.
+  if (
+    progress.complete &&
+    catalogValidated &&
+    options.catalogComplete === false &&
+    committedRowsPresent
+  ) {
+    const current = await db
+      .select({ id: schema.capacitySources.id })
+      .from(schema.capacitySources)
+      .where(
+        and(
+          eq(schema.capacitySources.id, sourceId),
+          eq(schema.capacitySources.status, ACTIVE_STATUS),
+          options.sourceGeneration === undefined
+            ? undefined
+            : eq(schema.capacitySources.sourceGeneration, options.sourceGeneration)
+        )
+      )
+      .limit(1);
+    return {
+      totalCandidates: candidateValues.length,
+      publishedCandidates: 0,
+      publicationComplete: current.length === 1,
+      markedMissing: false,
+    };
+  }
   // Incomplete legacy cursors wrote live rows; only a matching staged prefix can resume now.
   const staged = await db
     .select({ count: sql<number>`COUNT(*)` })
@@ -121,9 +156,7 @@ export async function ensureCandidatesForSource(
         eq(schema.capacityPoolCandidateStaging.digest, digest)
       )
     );
-  const catalogValidated = options.catalogValidated ?? options.catalogComplete !== false;
-  const stageReplacement =
-    !progress.complete || options.catalogComplete === false || !catalogValidated;
+  const stageReplacement = !progress.complete || !catalogValidated || !committedRowsPresent;
   const alreadyPublished =
     stageReplacement && Number(staged[0]?.count ?? 0) < progress.published ? 0 : progress.published;
   const batchSize = Math.max(
@@ -133,9 +166,9 @@ export async function ensureCandidatesForSource(
   // A completed catalog keeps its readiness proof while later bounded passes refresh
   // timestamps and write generations. Changed semantic content resets that proof.
   const publishFrom = alreadyPublished >= candidateValues.length ? 0 : alreadyPublished;
-  // An incomplete catalog leaves its pool unplaceable (migration-pending) until it finishes,
-  // and refreshes are rare, so it keeps writing batches until complete or the pass deadline
-  // (.claude/rules/81). A complete, unchanged catalog is already placeable: one batch per pass
+  // A never-published pool stays unplaceable until this completes; an established pool
+  // retains its committed catalog. Changed sets keep staging until complete or the pass
+  // deadline (.claude/rules/81). A complete, unchanged catalog needs only one batch per pass
   // refreshes its timestamps round-robin, exactly as before.
   const continueUntil = progress.complete
     ? Number.NEGATIVE_INFINITY
@@ -187,12 +220,19 @@ export async function ensureCandidatesForSource(
   }
   // Retain completion for multi-pass catalogs: clearing the cursor would make every
   // following identical refresh mark a ready pool migration-pending again. Small catalogs
-  // still complete in one pass without a progress row.
-  if (!publicationComplete || progress.cursorPresent || candidateValues.length > batchSize) {
+  // with exhaustive enumeration still complete in one pass without a progress row.
+  if (
+    !publicationComplete ||
+    progress.cursorPresent ||
+    candidateValues.length > batchSize ||
+    options.catalogComplete === false
+  ) {
     await writePublicationProgress(
       options.cursorStore,
       cursorKey,
-      candidateValues.length <= batchSize && publicationComplete
+      candidateValues.length <= batchSize &&
+        publicationComplete &&
+        options.catalogComplete !== false
         ? null
         : { digest, published: publishedTotal, complete: publicationComplete }
     );
@@ -276,12 +316,16 @@ export function candidatePublicationCursorKey(poolId: string, sourceId: string):
  */
 export async function candidateSetDigest(
   values: schema.NewCapacityPoolCandidate[],
-  sourceAuthority: number | undefined
+  sourceAuthority: number | undefined,
+  catalogComplete?: boolean
 ): Promise<string> {
   // Refresh timestamps/epochs change every tick; semantic authority and full catalog
   // content bind resumable progress without preventing a large inventory from finishing.
   const serialized = JSON.stringify([
     sourceAuthority ?? 0,
+    // Exhaustive enumeration changes the missing-offering proof even if all returned
+    // rows are identical. It must pass through atomic promotion before cleanup.
+    catalogComplete !== false,
     values.map((value) => {
       const {
         createdAt,
@@ -438,6 +482,7 @@ export async function markMissingCandidatesForSource(
         and(
           eq(schema.capacityPoolCandidates.poolId, poolId),
           eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
+          eq(schema.capacityPoolCandidates.catalogAvailability, 'available'),
           typeof options.sourceGeneration === 'number'
             ? sql`${schema.capacityPoolCandidates.catalogGeneration} < ${options.sourceGeneration}
                 AND EXISTS (

@@ -35,7 +35,7 @@ export async function withCapacityPoolRefresh(
     (options.refreshContinuation && Date.now() >= work.deadlineAt) ||
     Date.now() >= boundedOptions.reconciliationDeadlineAt
   ) {
-    await finishCapacityPoolRefresh(db, work, settings, false);
+    await finishCapacityPoolRefresh(db, work, settings, false, undefined, false, options.env);
     return readDefaultPoolSummary(db, scope, { includeDisabled: true });
   }
   boundedOptions.reconciliationDeadlineAt = Math.min(
@@ -50,7 +50,10 @@ export async function withCapacityPoolRefresh(
       settings,
       noActiveSeeds ||
         (result !== null && result.pool.status !== 'active') ||
-        result?.pool.migrationState === 'complete'
+        result?.pool.migrationState === 'complete',
+      undefined,
+      false,
+      options.env
     );
     return result;
   } catch (error) {
@@ -60,7 +63,9 @@ export async function withCapacityPoolRefresh(
       work,
       settings,
       false,
-      'Compute catalog refresh failed. SAM will retry automatically within its recovery budget.'
+      'Compute catalog refresh failed. SAM will retry automatically within its recovery budget.',
+      false,
+      options.env
     );
     throw error;
   }

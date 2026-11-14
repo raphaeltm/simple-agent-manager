@@ -296,6 +296,8 @@ export interface VmPromptDeliveryAdapterInput {
   claim: PromptDeliveryClaim;
   allowLegacyVm: boolean;
   requestTimeoutMs: number;
+  /** Synchronous persisted ProjectData link check; avoids a self-RPC after wake activation. */
+  isSessionActive?: (workspaceId: string) => boolean;
   /**
    * Authoritative target already resolved by a shared runtime-liveness adapter.
    * This is used by reconciliation so a suspect D1 health mirror cannot undo

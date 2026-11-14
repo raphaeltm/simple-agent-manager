@@ -1646,9 +1646,9 @@ describe('default capacity pool creation', () => {
     expect(result.user?.effectiveState).toBe('migration-pending');
     expect(
       getRows<{ provider_instance_catalog_source: string }>(`
-        SELECT json_extract(payload, '$.providerInstanceCatalogSource') AS provider_instance_catalog_source
+        SELECT provider_instance_catalog_source
         FROM capacity_pool_candidate_staging
-        WHERE json_extract(payload, '$.providerInstanceType') = 'cx23'
+        WHERE provider_instance_type = 'cx23'
         LIMIT 1
       `)[0]
     ).toEqual({ provider_instance_catalog_source: 'static' });
@@ -4173,11 +4173,19 @@ describe('default capacity pool creation', () => {
         ?.prepare(
           `
           UPDATE capacity_pools
-          SET configuration_state = ?, migration_state = CASE WHEN ? = 'migration-pending' THEN 'pending' ELSE 'complete' END
+          SET configuration_state = ?, migration_state = CASE WHEN ? = 'migration-pending' THEN 'pending' ELSE 'complete' END,
+              catalog_published_at = CASE WHEN ? = 'migration-pending' THEN NULL ELSE catalog_published_at END
           WHERE scope = 'user' AND owner_user_id = 'user-1'
         `
         )
-        .run(state, state);
+        .run(state, state, state);
+      if (state === 'migration-pending') {
+        sqlite
+          ?.prepare(
+            "UPDATE capacity_pool_refreshes SET state='pending',attempts=1,deadline_at=? WHERE scope='user'"
+          )
+          .run(Date.now() + 60_000);
+      }
       if (state === 'source-disabled') {
         sqlite?.prepare("UPDATE capacity_sources SET status = 'disabled'").run();
       } else {
@@ -4222,9 +4230,14 @@ describe('default capacity pool creation', () => {
     await pickStarterMachines(db as never);
     sqlite
       ?.prepare(
-        "UPDATE capacity_pools SET migration_state = 'pending', configuration_state = 'migration-pending' WHERE scope = 'user'"
+        "UPDATE capacity_pools SET migration_state = 'pending', configuration_state = 'migration-pending', catalog_published_at = NULL WHERE scope = 'user'"
       )
       .run();
+    sqlite
+      ?.prepare(
+        "UPDATE capacity_pool_refreshes SET state='pending',attempts=1,deadline_at=? WHERE scope='user'"
+      )
+      .run(Date.now() + 60_000);
 
     const selection = await resolveTaskStartCapacityPoolSelection(
       db as never,
@@ -7377,11 +7390,16 @@ describe('durable catalog refresh continuation', () => {
 
   it('resumes saved multi-batch work on cron within minutes, independently of the daily gate', async () => {
     const { env } = await interruptedCatalog();
+    const startedAt = Date.now();
     const daily = getRows<{ value: string }>(
       "SELECT value FROM platform_settings WHERE key='capacityPools.scheduledReconciliation.lastRun.v1'"
     )[0]!.value;
     for (let pass = 1; pass <= 4; pass++) {
-      vi.setSystemTime(new Date(Date.now() + 60_000));
+      const due = getRows<{ next_attempt_at: number }>(
+        "SELECT next_attempt_at FROM capacity_pool_refreshes WHERE scope='user'"
+      )[0]!.next_attempt_at;
+      // A minute cron resumes on its first tick after the saved retry time.
+      vi.setSystemTime(new Date(Math.max(Date.now() + 60_000, Math.ceil(due / 60_000) * 60_000)));
       // Fresh D1/Env handles simulate a replacement process with no continuation notification.
       const result = await runScheduledCapacityPoolReconciliation({
         ...env,
@@ -7395,6 +7413,7 @@ describe('durable catalog refresh continuation', () => {
       ).toBe(daily);
       expect(getCount('capacity_pool_candidates')).toBe(pass < 4 ? 0 : 10);
     }
+    expect(Date.now() - startedAt).toBeLessThanOrEqual(5 * 60_000);
     expect(
       getRows<{ state: string; attempts: number; last_success_at: number }>(
         "SELECT state, attempts, last_success_at FROM capacity_pool_refreshes WHERE scope='user'"
@@ -7403,6 +7422,99 @@ describe('durable catalog refresh continuation', () => {
     expect(
       getRows<{ migration_state: string }>('SELECT migration_state FROM capacity_pools')[0]
     ).toEqual({ migration_state: 'complete' });
+  });
+
+  it('backs off a persistently failing real provider and exhausts one fixed recovery episode', async () => {
+    const { env, fetchMock } = await interruptedCatalog();
+    const startedAt = Date.now();
+    const initial = getRows<{ started_at: number; deadline_at: number }>(
+      'SELECT started_at, deadline_at FROM capacity_pool_refreshes'
+    )[0]!;
+    clearCapacityCatalogCache();
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: 'unauthorized', message: 'Authentication failed' } }),
+          { status: 403 }
+        )
+    );
+    for (let minute = 1; minute <= 121; minute++) {
+      vi.setSystemTime(new Date(startedAt + minute * 60_000));
+      await runScheduledCapacityPoolReconciliation(env);
+      const work = getRows<{ started_at: number; deadline_at: number }>(
+        'SELECT started_at, deadline_at FROM capacity_pool_refreshes'
+      )[0]!;
+      expect(work).toEqual(initial);
+    }
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(5);
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(30);
+    expect(
+      getRows<{ state: string; next_attempt_at: number }>(
+        'SELECT state, next_attempt_at FROM capacity_pool_refreshes'
+      )[0]
+    ).toMatchObject({ state: 'failed', next_attempt_at: expect.any(Number) });
+    const before = fetchMock.mock.calls.length;
+    await runScheduledCapacityPoolReconciliation(env);
+    expect(fetchMock).toHaveBeenCalledTimes(before);
+  });
+
+  it('daily discovery recovers a failed real publication after cooldown without a manual refresh', async () => {
+    const { env, fetchMock } = await interruptedCatalog();
+    sqlite!.exec(
+      `UPDATE capacity_pool_refreshes SET deadline_at = ${Date.now()}, next_attempt_at = ${Date.now()} WHERE scope='user'`
+    );
+    await runScheduledCapacityPoolReconciliation(env);
+    const failed = getRows<{ generation: number; next_attempt_at: number }>(
+      "SELECT generation, next_attempt_at FROM capacity_pool_refreshes WHERE scope='user' AND state='failed'"
+    )[0]!;
+    expect(failed).toBeDefined();
+    const calls = fetchMock.mock.calls.length;
+
+    // Drive actual daily discovery before and at cooldown, with its discovery lease expired.
+    for (const now of [failed.next_attempt_at - 5 * 60_000, failed.next_attempt_at]) {
+      vi.setSystemTime(new Date(now));
+      sqlite!
+        .prepare(
+          "UPDATE platform_settings SET value=? WHERE key='capacityPools.scheduledReconciliation.lastRun.v1'"
+        )
+        .run(new Date(now - 24 * 60 * 60_000).toISOString());
+      await runScheduledCapacityPoolReconciliation({
+        ...env,
+        DATABASE: createSqliteD1WithBindLimit(sqlite!, 100),
+      });
+      const row = getRows<{
+        state: string;
+        attempts: number;
+        generation: number;
+        started_at: number;
+        deadline_at: number;
+      }>(
+        "SELECT state,attempts,generation,started_at,deadline_at FROM capacity_pool_refreshes WHERE scope='user'"
+      )[0]!;
+      if (now < failed.next_attempt_at) {
+        expect(row.state).toBe('failed');
+        expect(fetchMock).toHaveBeenCalledTimes(calls);
+        expect(getCount('capacity_pool_candidate_staging')).toBe(2);
+      } else {
+        expect(row).toMatchObject({ state: 'pending', attempts: 1, started_at: now });
+        expect(row.generation).toBeGreaterThan(failed.generation);
+        expect(row.deadline_at).toBe(now + 2 * 60 * 60_000);
+        expect(getCount('capacity_pool_candidate_staging')).toBe(4);
+      }
+    }
+    for (let pass = 0; pass < 3; pass++) {
+      const due = getRows<{ next_attempt_at: number }>(
+        "SELECT next_attempt_at FROM capacity_pool_refreshes WHERE scope='user'"
+      )[0]!.next_attempt_at;
+      vi.setSystemTime(new Date(Math.max(Date.now() + 60_000, Math.ceil(due / 60_000) * 60_000)));
+      await runScheduledCapacityPoolReconciliation(env);
+    }
+    expect(
+      getRows<{ state: string }>("SELECT state FROM capacity_pool_refreshes WHERE scope='user'")[0]
+    ).toEqual({ state: 'complete' });
+    expect(getCount('capacity_pool_candidates')).toBe(10);
+    expect(getCount('capacity_pool_candidate_staging')).toBe(0);
   });
 
   it('propagates the aggregate pass deadline through real credential preparation and a stalled provider', async () => {

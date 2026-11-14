@@ -2,6 +2,7 @@ import { capacityCandidateBaseId } from '@simple-agent-manager/scheduler-core';
 import { and, eq, getTableColumns, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
+import { log } from '../lib/logger';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import type {
   Db,
@@ -23,18 +24,39 @@ export async function stageCandidateValues(
   options: EnsureCandidatesForSourceOptions
 ): Promise<number> {
   if (values.length === 0) return 0;
+  const fields = Object.entries(getTableColumns(schema.capacityPoolCandidateStaging));
+  const columns = sql.join(
+    fields.map(([, field]) => sql.raw(`"${field.name}"`)),
+    sql`, `
+  );
+  const assignments = sql.join(
+    fields
+      .filter(([, field]) => !['id', 'pool_id', 'capacity_source_id'].includes(field.name))
+      .map(([, field]) => sql.raw(`"${field.name}" = excluded."${field.name}"`)),
+    sql`, `
+  );
   const results = await db.$client.batch(
     values.map((value, index) => {
+      const staged: typeof schema.capacityPoolCandidateStaging.$inferInsert = {
+        ...value,
+        primaryId: capacityCandidateBaseId(value.id),
+        digest,
+        ordinal: offset + index,
+        generation: options.sourceGeneration ?? 0,
+      };
       const query = db
         .run(
           sql`INSERT INTO capacity_pool_candidate_staging
-      (id, pool_id, capacity_source_id, digest, ordinal, generation, payload)
-      SELECT ${value.id}, ${value.poolId}, ${value.capacitySourceId}, ${digest}, ${offset + index},
-        ${options.sourceGeneration ?? 0}, ${JSON.stringify({ ...value, primaryId: capacityCandidateBaseId(value.id) })}
+      (${columns})
+      SELECT ${sql.join(
+        fields.map(([key]) => sql`${staged[key as keyof typeof staged] ?? null}`),
+        sql`, `
+      )}
       WHERE ${sourceFence(value.capacitySourceId, options)}
-      ON CONFLICT(id) DO UPDATE SET digest = excluded.digest, ordinal = excluded.ordinal,
-        generation = excluded.generation, payload = excluded.payload
-      WHERE capacity_pool_candidate_staging.generation <= excluded.generation`
+      ON CONFLICT(id) DO UPDATE SET ${assignments}
+      WHERE capacity_pool_candidate_staging.pool_id = excluded.pool_id
+        AND capacity_pool_candidate_staging.capacity_source_id = excluded.capacity_source_id
+        AND capacity_pool_candidate_staging.generation <= excluded.generation`
         )
         .getQuery();
       return db.$client.prepare(query.sql).bind(...query.params);
@@ -103,12 +125,11 @@ export async function promoteStagedCandidates(
   const replacements = await db
     .select({
       id: schema.capacityPoolCandidateStaging.id,
-      workloadRole: sql<string>`json_extract(${schema.capacityPoolCandidateStaging.payload}, '$.workloadRole')`,
-      status: sql<string>`json_extract(${schema.capacityPoolCandidateStaging.payload}, '$.status')`,
-      authorityGeneration: sql<number>`json_extract(${schema.capacityPoolCandidateStaging.payload}, '$.authorityGeneration')`,
-      providerInstanceCatalogSource: sql<
-        string | null
-      >`json_extract(${schema.capacityPoolCandidateStaging.payload}, '$.providerInstanceCatalogSource')`,
+      workloadRole: schema.capacityPoolCandidateStaging.workloadRole,
+      status: schema.capacityPoolCandidateStaging.status,
+      authorityGeneration: schema.capacityPoolCandidateStaging.authorityGeneration,
+      providerInstanceCatalogSource:
+        schema.capacityPoolCandidateStaging.providerInstanceCatalogSource,
     })
     .from(schema.capacityPoolCandidateStaging)
     .where(
@@ -185,7 +206,7 @@ export async function promoteStagedCandidates(
   const now = nextCapacityPoolTimestamp();
   const fields = Object.entries(getTableColumns(schema.capacityPoolCandidates));
   const column = (name: string) => sql.raw(`"${name}"`);
-  const payload = (key: string) => sql.raw(`json_extract(staged.payload, '$.${key}')`);
+  const stagedColumn = (name: string) => sql`staged.${column(name)}`;
   const fence = sql`${sourceFence(sourceId, options)} AND (
     SELECT COUNT(*) FROM capacity_pool_candidate_staging
     WHERE pool_id = ${poolId} AND capacity_source_id = ${sourceId} AND digest = ${digest}
@@ -197,9 +218,9 @@ export async function promoteStagedCandidates(
     JOIN capacity_pool_candidates live ON live.id = staged.id
     WHERE staged.pool_id = ${poolId} AND staged.capacity_source_id = ${sourceId}
       AND staged.digest = ${digest} AND (
-        live.provider_instance_boot_disk_size_gb IS NOT json_extract(staged.payload, '$.providerInstanceBootDiskSizeGb')
-        OR live.provider_instance_image IS NOT json_extract(staged.payload, '$.providerInstanceImage')
-        OR live.provider_instance_architecture IS NOT json_extract(staged.payload, '$.providerInstanceArchitecture')
+        live.provider_instance_boot_disk_size_gb IS NOT staged.provider_instance_boot_disk_size_gb
+        OR live.provider_instance_image IS NOT staged.provider_instance_image
+        OR live.provider_instance_architecture IS NOT staged.provider_instance_architecture
       )
   )`;
   const preserved = new Set([
@@ -230,14 +251,14 @@ export async function promoteStagedCandidates(
   ];
   queries.push(
     ...['workspace', 'deployment'].map((role) => {
-      const values = fields.map(([key]) => {
+      const values = fields.map(([key, field]) => {
         if (key === 'catalogGeneration') return sql`${options.sourceGeneration ?? 0}`;
         if (key === 'status')
           return role === 'workspace'
-            ? sql`COALESCE((SELECT status FROM capacity_pool_candidates WHERE id = staged.id), ${payload(key)})`
+            ? sql`COALESCE((SELECT status FROM capacity_pool_candidates WHERE id = staged.id), ${stagedColumn(field.name)})`
             : sql`COALESCE((SELECT status FROM capacity_pool_candidates
-            WHERE id = json_extract(staged.payload, '$.primaryId')), 'disabled')`;
-        return payload(key);
+            WHERE id = staged.primary_id), 'disabled')`;
+        return stagedColumn(field.name);
       });
       return sql`INSERT INTO capacity_pool_candidates (${sql.join(
         fields.map(([, field]) => column(field.name)),
@@ -245,7 +266,7 @@ export async function promoteStagedCandidates(
       )})
       SELECT ${sql.join(values, sql`, `)} FROM capacity_pool_candidate_staging staged
       WHERE staged.pool_id = ${poolId} AND staged.capacity_source_id = ${sourceId}
-        AND staged.digest = ${digest} AND json_extract(staged.payload, '$.workloadRole') = ${role}
+        AND staged.digest = ${digest} AND staged.workload_role = ${role}
         AND ${fence} AND ${nativeFence} AND ${poolFence}
       ON CONFLICT(id) DO UPDATE SET ${sql.join(assignments, sql`, `)},
         status = CASE WHEN excluded.workload_role = 'deployment' THEN excluded.status ELSE capacity_pool_candidates.status END
@@ -257,15 +278,19 @@ export async function promoteStagedCandidates(
     queries.push(sql`UPDATE capacity_pool_candidates
     SET catalog_availability = 'last-known-unavailable', catalog_unavailable_at = ${now}, updated_at = ${now}
     WHERE pool_id = ${poolId} AND capacity_source_id = ${sourceId} AND ${fence} AND ${nativeFence} AND ${poolFence}
+      AND catalog_availability = 'available'
       AND NOT EXISTS (SELECT 1 FROM capacity_pool_candidate_staging staged
         WHERE staged.id = capacity_pool_candidates.id AND staged.digest = ${digest}
           AND staged.pool_id = ${poolId} AND staged.capacity_source_id = ${sourceId})`);
   queries.push(sql`DELETE FROM capacity_pool_candidate_staging WHERE pool_id = ${poolId}
-    AND capacity_source_id = ${sourceId} AND digest <> ${digest} AND ${fence} AND ${nativeFence} AND ${poolFence}`);
+    AND capacity_source_id = ${sourceId} AND generation <= ${options.sourceGeneration ?? 0}
+    AND ${fence} AND ${nativeFence} AND ${poolFence}`);
   const compiled = queries.map((query) => db.run(query).getQuery());
+  const batchStartedAt = performance.now();
   const results = await db.$client.batch(
     compiled.map((query) => db.$client.prepare(query.sql).bind(...query.params))
   );
+  const batchWallMs = performance.now() - batchStartedAt;
   // Only our CAS result is adoptable. A re-read could accidentally certify a newer publisher.
   const ownGuard = results[0]?.results?.[0];
   if (
@@ -279,6 +304,16 @@ export async function promoteStagedCandidates(
     ownGuard.status !== pool.status
   )
     return { promoted: false };
+  const durations = results.map((result) => result.meta.duration);
+  log.info('capacity_pool.catalog_promotion_completed', {
+    poolId,
+    sourceId,
+    materializedRows: count,
+    batchWallMs,
+    ...(durations.every((duration) => typeof duration === 'number' && Number.isFinite(duration))
+      ? { d1DurationMs: durations.reduce((total, duration) => total + duration, 0) }
+      : {}),
+  });
   return {
     promoted: true,
     poolPublicationGuard: { revision, updatedAt: now, status: pool.status },

@@ -441,6 +441,8 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
         errorKind: 'placement',
         placementErrorCode: err.code,
         capacityPoolEffectiveState: capacityPoolSelection?.effectiveState,
+        capacityPoolRefreshPending: capacityPoolSelection?.catalogRefreshPending,
+        capacityPoolCatalogPublished: capacityPoolSelection?.catalogPublished,
       };
     }
     throw err;

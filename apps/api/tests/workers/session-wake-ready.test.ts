@@ -24,6 +24,7 @@ import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
 import { wakeSessionForSnapshotRecovery } from '../../src/services/project-data';
 import { completeSessionSnapshotRecoveryGeneration } from '../../src/services/session-snapshots';
 import { signalSessionWakeReadyBestEffort } from '../../src/services/session-wake-ready';
+import { transitionTaskToTerminal } from '../../src/services/task-terminal-transition';
 import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import { resolveVmPromptDeliveryTarget } from '../../src/services/vm-prompt-delivery-target';
 import {
@@ -161,6 +162,149 @@ async function addReadinessDistractors(input: SessionWakeReadyInput, userId: str
 }
 
 describe('wake completion → D1 authority → DO scheduling → HTTP prompt admission', () => {
+  it.each([
+    { taskStatus: 'completed' as const, workspaceStatus: 'running' },
+    { taskStatus: 'failed' as const, workspaceStatus: 'recovery' },
+  ])(
+    'delivers after a committed wake becomes $taskStatus while workspace remains $workspaceStatus',
+    async ({ taskStatus, workspaceStatus }) => {
+      const { stub, input, nodeId } = await fixture('vm');
+      expect(await stub.sleepSession(input.chatSessionId)).toBe(true);
+      expect(
+        await notifyWakeSettled({
+          env: bindings,
+          projectId: input.projectId,
+          chatSessionId: input.chatSessionId,
+          status: 'restored',
+          readiness: input,
+        })
+      ).toBe(true);
+      expect((await stub.getSession(input.chatSessionId))?.status).toBe('active');
+      expect(
+        await transitionTaskToTerminal(bindings, {
+          taskId: input.fence.runtime === 'vm' ? input.fence.taskId : '',
+          projectId: input.projectId,
+          status: taskStatus,
+          reason: 'Agent turn ended after successful restore',
+          source: 'wake-followup-regression',
+          stopWorkspace: false,
+        })
+      ).toBe('transitioned');
+      if (workspaceStatus === 'recovery')
+        await env.DATABASE.prepare('UPDATE workspaces SET status=? WHERE id=?')
+          .bind(workspaceStatus, input.workspaceId)
+          .run();
+      const originalFetch = globalThis.fetch;
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
+        const target = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
+        if (!target.startsWith(getNodeBackendBaseUrl(nodeId, bindings)))
+          return originalFetch(url, options);
+        if (target.endsWith(buildVmPromptDeliveryCapabilitiesPath(input.workspaceId)))
+          return Response.json(versionedPromptCapabilities('test-runtime'));
+        const body = JSON.parse(String(options?.body));
+        expect(body).toMatchObject({ deliveryId: 'first', prompt: 'First real prompt' });
+        return Response.json(
+          acceptedPromptResponse(input.agentSessionId, 'first', 'test-runtime', Date.now())
+        );
+      });
+      await runInDurableObject(stub, async (instance, state) => {
+        // An already activated chat must not depend on another wake signal or the completed task's authority.
+        const signal = vi
+          .spyOn(instance, 'signalSessionWakeReady')
+          .mockRejectedValue(new Error('Readiness RPC unavailable after activation'));
+        const claims = claimDuePromptDeliveries(state.storage.sql, config);
+        expect(claims).toHaveLength(1);
+        const result = await runPromptDeliveryClaim(
+          state.storage.sql,
+          bindings,
+          config,
+          claims[0]!,
+          new DefaultVmPromptDeliveryAdapter(bindings),
+          {
+            projectId: input.projectId,
+            recalculateAlarm: async () => {},
+            broadcastEvent: () => {},
+            armIdleCleanup: () => {},
+            nudgeDeliveries: () => 0,
+            scheduleSummarySync: () => {},
+          }
+        );
+        expect(result.kind).toBe('accepted');
+        expect(signal).not.toHaveBeenCalled();
+        expect(
+          state.storage.sql
+            .exec('SELECT id,delivery_state FROM session_inbox WHERE id=?', 'first')
+            .toArray()
+        ).toEqual([{ id: 'first', delivery_state: 'acked' }]);
+        expect(
+          state.storage.sql
+            .exec('SELECT status FROM chat_sessions WHERE id=?', input.chatSessionId)
+            .toArray()[0]?.status
+        ).toBe('active');
+      });
+    }
+  );
+
+  it.each(['migrating', 'frozen'] as const)(
+    'preserves the archive fence for a late wake-ready RPC while location is %s',
+    async (locationState) => {
+      const { stub, input } = await fixture('vm');
+      expect(await stub.sleepSession(input.chatSessionId)).toBe(true);
+      await env.DATABASE.prepare(
+        `INSERT INTO project_data_session_locations
+        (project_id,session_id,location_state,owner_kind,owner_name,generation,updated_at)
+        VALUES (?, ?, ?, 'archive_shard', ?, 1, ?)`
+      )
+        .bind(
+          input.projectId,
+          input.chatSessionId,
+          locationState,
+          input.projectId + ':archive:g1:s0',
+          Date.now()
+        )
+        .run();
+      await runInDurableObject(stub, async (instance, state) => {
+        const ownEnv = (instance as unknown as { env: Env }).env;
+        const previous = ownEnv.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED;
+        ownEnv.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = 'true';
+        const before = state.storage.sql
+          .exec('SELECT id,delivery_state,next_attempt_at FROM session_inbox ORDER BY id')
+          .toArray();
+        try {
+          await expect(instance.signalSessionWakeReady(input)).rejects.toThrow(
+            /fenced by archive state/
+          );
+          expect(
+            state.storage.sql
+              .exec('SELECT status FROM chat_sessions WHERE id=?', input.chatSessionId)
+              .toArray()[0]?.status
+          ).toBe('sleeping');
+          expect(state.storage.sql.exec('SELECT * FROM session_wake_readiness').toArray()).toEqual(
+            []
+          );
+          expect(
+            state.storage.sql
+              .exec('SELECT id,delivery_state,next_attempt_at FROM session_inbox ORDER BY id')
+              .toArray()
+          ).toEqual(before);
+          await env.DATABASE.prepare(
+            'DELETE FROM project_data_session_locations WHERE project_id=? AND session_id=?'
+          )
+            .bind(input.projectId, input.chatSessionId)
+            .run();
+          expect(await instance.signalSessionWakeReady(input)).toBeGreaterThan(0);
+          expect(
+            state.storage.sql
+              .exec('SELECT status FROM chat_sessions WHERE id=?', input.chatSessionId)
+              .toArray()[0]?.status
+          ).toBe('active');
+        } finally {
+          ownEnv.PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = previous;
+        }
+      });
+    }
+  );
+
   it.each(['vm', 'cf-container'] as const)(
     'delivers a saturated %s queue immediately once, in original order',
     async (runtime) => {

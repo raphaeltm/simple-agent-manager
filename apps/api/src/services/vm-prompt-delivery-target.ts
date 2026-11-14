@@ -79,6 +79,8 @@ interface DeliveryTargetRow {
   agent_session_status: string | null;
   agent_session_updated_at: string | null;
   snapshot_sleep_status: string | null;
+  snapshot_project_id: string | null;
+  snapshot_user_id: string | null;
   snapshot_sleep_claimed_at: string | null;
   snapshot_runtime: string | null;
   snapshot_recovery_status: string | null;
@@ -262,6 +264,8 @@ export interface ResolveTargetOptions {
    * steer, so the resolver reports it instead of starting a recovery or container wake.
    */
   allowWake?: boolean;
+  /** Read the caller's current durable chat link synchronously after the target lookup. */
+  isSessionActive?: (workspaceId: string) => boolean;
 }
 
 export async function resolveVmPromptDeliveryTarget(
@@ -288,6 +292,8 @@ export async function resolveVmPromptDeliveryTarget(
             a.id AS agent_session_id,
             a.status AS agent_session_status,
             a.updated_at AS agent_session_updated_at,
+            s.project_id AS snapshot_project_id,
+            s.user_id AS snapshot_user_id,
             s.sleep_status AS snapshot_sleep_status,
             s.sleep_claimed_at AS snapshot_sleep_claimed_at,
             s.runtime AS snapshot_runtime,
@@ -297,7 +303,7 @@ export async function resolveVmPromptDeliveryTarget(
             s.recovery_attempt_id AS snapshot_recovery_attempt_id,
             wake.status AS wake_task_status
      FROM workspaces w
-     LEFT JOIN nodes n ON n.id = w.node_id
+     LEFT JOIN nodes n ON n.id = w.node_id AND n.user_id = w.user_id
      LEFT JOIN agent_sessions a ON a.workspace_id = w.id AND a.user_id = w.user_id
      LEFT JOIN session_snapshots s ON s.chat_session_id = w.chat_session_id
      LEFT JOIN tasks wake ON wake.id = s.recovery_task_id AND wake.project_id = w.project_id
@@ -333,6 +339,15 @@ export async function resolveVmPromptDeliveryTarget(
     return recoveryResolution(recovery, 'Target workspace no longer exists');
   }
   if (
+    (row.snapshot_project_id != null && row.snapshot_project_id !== projectId) ||
+    (row.snapshot_user_id != null && row.snapshot_user_id !== row.user_id)
+  )
+    return {
+      kind: 'failed',
+      reason: 'wake_refused',
+      error: 'Snapshot authority does not match this conversation',
+    };
+  if (
     (row.snapshot_runtime ?? row.node_runtime) !== 'cf-container' &&
     ['sleeping', 'stopping', 'stopped', 'deleted', 'error'].includes(row.workspace_status)
   ) {
@@ -353,9 +368,21 @@ export async function resolveVmPromptDeliveryTarget(
       error: `Target workspace is ${row.workspace_status}`,
     };
   }
+  if (row.workspace_deletion_confirmed_at)
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Target workspace deletion is confirmed',
+    };
   if (!row.node_id) {
     return { kind: 'retry', reason: 'Target workspace has no assigned node yet' };
   }
+  if (!row.node_status)
+    return {
+      kind: 'failed',
+      reason: 'dead_target',
+      error: 'Target node is unavailable to this workspace',
+    };
   if (
     TERMINAL_NODE_STATUSES.includes(row.node_status ?? '') ||
     row.node_health_status === 'unhealthy'
@@ -408,6 +435,25 @@ export async function resolveVmPromptDeliveryTarget(
     row.snapshot_recovery_task_id &&
     row.snapshot_recovery_attempt_id
   ) {
+    // Activation is durably committed in ProjectData. Once this exact workspace is active,
+    // the old recovery task/snapshot is historical and must not gate later prompts.
+    // The DO delivery runner reads its own SQLite here; no D1 readiness read or self-RPC.
+    if (
+      row.snapshot_recovery_workspace_id === row.workspace_id &&
+      row.wake_task_status === 'cancelled'
+    )
+      return { kind: 'failed', reason: 'terminal_target', error: 'Wake task was cancelled' };
+    if (options.isSessionActive?.(row.workspace_id))
+      return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
+    if (
+      row.snapshot_recovery_workspace_id === row.workspace_id &&
+      ['completed', 'failed', 'cancelled', 'sleeping'].includes(row.wake_task_status ?? '')
+    )
+      return {
+        kind: 'failed',
+        reason: 'terminal_target',
+        error: 'Wake task ended before conversation activation committed',
+      };
     const expectedRuntime = {
       nodeId: row.node_id,
       workspaceCallbackGeneration: row.workspace_callback_generation,

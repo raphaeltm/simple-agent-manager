@@ -66,11 +66,30 @@ export async function scheduled(
   ctx: ExecutionContext
 ): Promise<void> {
   if (controller.cron === CAPACITY_POOL_CONTINUATION_CRON) {
-    if (!(await isOperationalLoopEnabled(env, 'cron'))) return;
+    const type = 'capacity-pool-continuation';
+    log.info('cron.started', { cron: controller.cron, type });
     const continuationSweeps = createSweepIsolator(env);
-    await continuationSweeps.isolate('capacity_pool_continuation', () =>
-      runScheduledCapacityPoolContinuations(env)
-    );
+    const result = await continuationSweeps.isolate('capacity_pool_continuation', async () => {
+      if (!(await isOperationalLoopEnabled(env, 'cron'))) {
+        log.info('cron.skipped_disabled', { cron: controller.cron, type, switch: 'cron' });
+        return { resumed: 0, failed: 0, skipped: true };
+      }
+      return { ...(await runScheduledCapacityPoolContinuations(env)), skipped: false };
+    });
+    const failedSweeps = continuationSweeps.failedSweeps();
+    log.info('cron.completed', {
+      cron: controller.cron,
+      type,
+      resumed: result?.resumed ?? null,
+      failed: result?.failed ?? 1,
+      skipped: result?.skipped ?? false,
+      failedSweeps,
+    });
+    if (failedSweeps.length > 0) {
+      await notifyFailedSweeps(env, failedSweeps).catch(() => {
+        log.error('cron.failed_sweep_notification_failed', { type });
+      });
+    }
     return;
   }
   const isDailyForward = controller.cron === '0 3 * * *';

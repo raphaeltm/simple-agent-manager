@@ -230,6 +230,27 @@ describe('VM prompt delivery adapter', () => {
         } else {
           expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledOnce();
         }
+        // Receipt reconciliation is read-only even if the wake signal is unavailable.
+        signalSessionWakeReady.mockClear().mockResolvedValue(null);
+        mocks.nodeAgentRequest
+          .mockReset()
+          .mockResolvedValueOnce(protocolFixture.capabilities)
+          .mockRejectedValueOnce(
+            new mocks.NodeAgentHttpError(
+              404,
+              JSON.stringify({
+                ...protocolFixture.notFoundReceipt,
+                deliveryId: 'delivery-1',
+              })
+            )
+          );
+        const probe = input(false);
+        probe.claim.mode = 'reconcile';
+        expect(await new DefaultVmPromptDeliveryAdapter(env).reconcile(probe)).toMatchObject({
+          kind: 'retry',
+          reason: 'receipt_not_found',
+        });
+        expect(signalSessionWakeReady).not.toHaveBeenCalled();
       } finally {
         sqlite.close();
       }

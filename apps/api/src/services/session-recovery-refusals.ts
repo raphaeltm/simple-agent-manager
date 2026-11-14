@@ -95,6 +95,11 @@ const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassifica
     action: 'report',
     description: 'Cloud provider credentials are missing for this wake.',
   },
+  placement_catalog_refresh_unavailable: {
+    action: 'report',
+    description:
+      'The compute catalog has not been published and has no active refresh within its budget. Check the selected account and use Infrastructure Refresh before retrying.',
+  },
   placement_sources_disabled: {
     action: 'report',
     description:

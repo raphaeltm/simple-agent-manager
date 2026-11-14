@@ -372,14 +372,15 @@ your decisions:
   inventory has been published.
 - Interrupted refreshes resume automatically, including after a restart. A dedicated check runs
   every minute, independently of the daily catalog discovery. Work becomes eligible after a
-  backoff that starts at 15 seconds and rises to 60 seconds by default; the next check picks it up.
+  backoff that starts at 15 seconds and rises to five minutes by default; the next check picks it up.
   A claimed pass that crashes can be retried after its lease expires (3 minutes by default).
   Upgrade adoption queues at most the configured scope batch size (25 by default) per pass;
   previously tracked failures do not prevent later scopes from being adopted.
 - By default, SAM spends up to 20 seconds per source publishing a changed catalog, within a shared
-  20-second budget across sources and scopes for each pass. An unfinished refresh has a two-hour
-  recovery deadline. If it runs out, the pool summary reports an error with a recovery action;
-  its last committed catalog is retained. Check the cloud account, then use **Refresh** to retry.
+  20-second budget across sources and scopes for each pass. Its two-hour recovery deadline starts
+  with the first claim, after discovery queue time. If it runs out, the pool summary and Admin Errors
+  report the failure and operators are notified; the last committed catalog is retained. Daily
+  discovery may retry after a six-hour cooldown. Check the cloud account and use **Refresh** to retry sooner.
   Superadmins can adjust these [refresh settings](/docs/guides/admin-settings/#compute-pool-refresh).
   Live provider lookup and its fallback share the remaining pass deadline, including credential
   preparation; a slow fallback cannot start a fresh timeout after that deadline.
@@ -395,11 +396,17 @@ your decisions:
   from the old size presets. Like any new row they start out of the pool, so a pool whose only
   machines were size presets is empty until you add machines.
 
-A sleeping session whose accepted wake is waiting for a temporary catalog problem resumes
-automatically when placement becomes available. The original message or event remains the request;
+A sleeping session with an accepted message or event waiting in its durable inbox resumes
+automatically when a temporary catalog problem clears and placement becomes available. The original message or event remains the request;
 you do not need to send **Continue** again. Cancellation, archive, lost permissions and the existing
 request and snapshot expirations still stop recovery. Missing credentials, an empty pool or
-requirements no allowed machine can meet remain actionable failures.
+requirements no allowed machine can meet remain actionable failures. Disabled sources and revoked
+accounts also require action; SAM reports an actionable failure instead of waiting for the request
+to expire. An unpublished
+pool waits automatically only while its refresh is pending within its recovery budget.
+
+An eviction blocked before its first recovery claim, without an accepted inbox message or event,
+is a separate recovery path and is not covered by this automatic continuation.
 
 :::note
 Adding a machine adds it for **both** workspace machines and

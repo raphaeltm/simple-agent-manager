@@ -500,7 +500,7 @@ describe('pool publication real SQL interleavings', () => {
         expect(
           sqlite
             .prepare(
-              "SELECT DISTINCT json_extract(payload, '$.providerInstanceMemoryMb') memory FROM capacity_pool_candidate_staging"
+              "SELECT DISTINCT provider_instance_memory_mb memory FROM capacity_pool_candidate_staging"
             )
             .all()
         ).toEqual([{ memory: 8192 }]);
@@ -904,7 +904,7 @@ describe('atomic replacement publication', () => {
     expect(
       sqlite
         .prepare(
-          "SELECT DISTINCT json_extract(payload, '$.providerInstanceMemoryMb') AS memory FROM capacity_pool_candidate_staging WHERE digest = ?"
+          "SELECT DISTINCT provider_instance_memory_mb AS memory FROM capacity_pool_candidate_staging WHERE digest = ?"
         )
         .all(JSON.parse([...store.values.values()][0]!).digest)
     ).toEqual([{ memory: 8192 }]);

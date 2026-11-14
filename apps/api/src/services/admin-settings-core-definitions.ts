@@ -36,6 +36,7 @@ import {
 import { agentModelSettingDefinitions } from './agent-models/settings-definition';
 import {
   DEFAULT_CAPACITY_POOL_REFRESH_DEADLINE_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_FAILURE_COOLDOWN_MS,
   DEFAULT_CAPACITY_POOL_REFRESH_LEASE_MS,
   DEFAULT_CAPACITY_POOL_REFRESH_PASS_BUDGET_MS,
   DEFAULT_CAPACITY_POOL_REFRESH_RETRY_BASE_MS,
@@ -165,6 +166,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Crash-recovery lease for a claimed catalog continuation or discovery sweep.',
     { min: 1, max: 900000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshFailureCooldownMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_FAILURE_COOLDOWN_MS,
+    'Operations',
+    'Minimum cooldown before daily discovery may restart a failed catalog recovery episode.',
+    { min: 60000, max: 604800000 }
   ),
   integerDefinition(
     'operations.capacityPoolPublishBudgetMs',

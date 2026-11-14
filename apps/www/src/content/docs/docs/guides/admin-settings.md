@@ -228,25 +228,28 @@ mark missing machines unavailable. Retaining the catalog never overrides disable
 machines you remove or current permissions. See
 [Compute pools](/docs/guides/compute-pools/#how-refresh-treats-your-choices).
 
-| Setting                                      | Default   | Range        | What it controls                                                                                            |
-| -------------------------------------------- | --------- | ------------ | ----------------------------------------------------------------------------------------------------------- |
-| `operations.capacityPoolPublishBudgetMs`     | 20,000    | 0–120,000    | Milliseconds per source per pass for publishing a changed catalog; 0 writes one batch (200 rows by default) |
-| `operations.capacityPoolRefreshPassBudgetMs` | 20,000    | 1–120,000    | Shared milliseconds per pass across sources and scopes; SAM stops starting more work when this is spent     |
-| `operations.capacityPoolRefreshRetryBaseMs`  | 15,000    | 1–300,000    | Initial eligibility delay after incomplete publication                                                      |
-| `operations.capacityPoolRefreshRetryMaxMs`   | 60,000    | 1–900,000    | Maximum eligibility backoff; its effective value is at least the base delay                                 |
-| `operations.capacityPoolRefreshDeadlineMs`   | 7,200,000 | 1–86,400,000 | Absolute recovery budget for one refresh, in milliseconds (2 hours by default)                              |
-| `operations.capacityPoolRefreshLeaseMs`      | 180,000   | 1–900,000    | Milliseconds before a crashed claim can be retried; its effective value is at least the shared pass budget  |
+| Setting                                           | Default    | Range              | What it controls                                                                                            |
+| ------------------------------------------------- | ---------- | ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `operations.capacityPoolPublishBudgetMs`          | 20,000     | 0–120,000          | Milliseconds per source per pass for publishing a changed catalog; 0 writes one batch (200 rows by default) |
+| `operations.capacityPoolRefreshPassBudgetMs`      | 20,000     | 1–120,000          | Shared milliseconds per pass across sources and scopes; SAM stops starting more work when this is spent     |
+| `operations.capacityPoolRefreshRetryBaseMs`       | 15,000     | 1–300,000          | Initial eligibility delay after incomplete publication                                                      |
+| `operations.capacityPoolRefreshRetryMaxMs`        | 300,000    | 1–900,000          | Maximum eligibility backoff; its effective value is at least the base delay                                 |
+| `operations.capacityPoolRefreshDeadlineMs`        | 7,200,000  | 1–86,400,000       | Recovery budget from the first claim, excluding queue time (2 hours by default)                             |
+| `operations.capacityPoolRefreshLeaseMs`           | 180,000    | 1–900,000          | Milliseconds before a crashed claim can be retried; its effective value is at least the shared pass budget  |
+| `operations.capacityPoolRefreshFailureCooldownMs` | 21,600,000 | 60,000–604,800,000 | Milliseconds before daily discovery may revive an exhausted refresh (6 hours by default)                    |
 
 A dedicated continuation check runs every minute and picks up eligible saved work independently
 of the daily discovery gate. A 15-second eligibility delay therefore does not promise a retry
-within 15 seconds. Saved progress survives process restarts and missed notifications; a crashed
+within 15 seconds. Repeated failures back off up to five minutes before the next eligible tick. Saved progress survives process restarts and missed notifications; a crashed
 claim must also wait for its lease to expire. An in-flight operation can finish after a pass's
-time budget, so these settings limit how much more work starts rather than cancelling provider
-requests already underway.
+time budget. Provider requests share the remaining deadline and attempt to abort on timeout;
+D1 batches already underway must finish. The pass budget also stops SAM starting more work.
 
-If the absolute recovery budget is exhausted, the pool summary shows an actionable error and
-retains the last committed catalog. Check the compute account, then select **Refresh** in its
-Infrastructure settings to start another attempt. Increasing the deadline setting applies to
+The recovery deadline starts with the first claim; time waiting in the discovery queue does not
+spend it. If that budget is exhausted, the pool summary and Admin Errors show an actionable error,
+operators receive a notification, and SAM retains the last committed catalog. Daily discovery can
+start another episode after the failure cooldown; it does not restart the failed episode every
+minute. Check the compute account and select **Refresh** in Infrastructure settings to retry sooner. Increasing the deadline setting applies to
 future attempts; it does not extend a deadline already saved for an unfinished attempt. Larger
 catalogs, more accounts and slower provider or database responses can exhaust the budget; the
 deadline is a recovery limit, not a completion guarantee.

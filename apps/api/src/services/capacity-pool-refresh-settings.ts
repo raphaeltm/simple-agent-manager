@@ -2,6 +2,7 @@ import type { Env } from '../env';
 import { resolveAdminSetting } from './admin-settings';
 import {
   DEFAULT_CAPACITY_POOL_REFRESH_DEADLINE_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_FAILURE_COOLDOWN_MS,
   DEFAULT_CAPACITY_POOL_REFRESH_LEASE_MS,
   DEFAULT_CAPACITY_POOL_REFRESH_PASS_BUDGET_MS,
   DEFAULT_CAPACITY_POOL_REFRESH_RETRY_BASE_MS,
@@ -14,6 +15,7 @@ export interface CapacityPoolRefreshSettings {
   retryMaxMs: number;
   deadlineMs: number;
   leaseMs: number;
+  failureCooldownMs: number;
 }
 
 export async function capacityPoolRefreshSettings(env?: Env): Promise<CapacityPoolRefreshSettings> {
@@ -28,24 +30,36 @@ export async function capacityPoolRefreshSettings(env?: Env): Promise<CapacityPo
       return fallback;
     }
   };
-  const [passBudgetMs, retryBaseMs, retryMaxMs, deadlineMs, leaseMs] = await Promise.all([
-    setting(
-      'operations.capacityPoolRefreshPassBudgetMs',
-      DEFAULT_CAPACITY_POOL_REFRESH_PASS_BUDGET_MS
-    ),
-    setting(
-      'operations.capacityPoolRefreshRetryBaseMs',
-      DEFAULT_CAPACITY_POOL_REFRESH_RETRY_BASE_MS
-    ),
-    setting('operations.capacityPoolRefreshRetryMaxMs', DEFAULT_CAPACITY_POOL_REFRESH_RETRY_MAX_MS),
-    setting('operations.capacityPoolRefreshDeadlineMs', DEFAULT_CAPACITY_POOL_REFRESH_DEADLINE_MS),
-    setting('operations.capacityPoolRefreshLeaseMs', DEFAULT_CAPACITY_POOL_REFRESH_LEASE_MS),
-  ]);
+  const [passBudgetMs, retryBaseMs, retryMaxMs, deadlineMs, leaseMs, failureCooldownMs] =
+    await Promise.all([
+      setting(
+        'operations.capacityPoolRefreshPassBudgetMs',
+        DEFAULT_CAPACITY_POOL_REFRESH_PASS_BUDGET_MS
+      ),
+      setting(
+        'operations.capacityPoolRefreshRetryBaseMs',
+        DEFAULT_CAPACITY_POOL_REFRESH_RETRY_BASE_MS
+      ),
+      setting(
+        'operations.capacityPoolRefreshRetryMaxMs',
+        DEFAULT_CAPACITY_POOL_REFRESH_RETRY_MAX_MS
+      ),
+      setting(
+        'operations.capacityPoolRefreshDeadlineMs',
+        DEFAULT_CAPACITY_POOL_REFRESH_DEADLINE_MS
+      ),
+      setting('operations.capacityPoolRefreshLeaseMs', DEFAULT_CAPACITY_POOL_REFRESH_LEASE_MS),
+      setting(
+        'operations.capacityPoolRefreshFailureCooldownMs',
+        DEFAULT_CAPACITY_POOL_REFRESH_FAILURE_COOLDOWN_MS
+      ),
+    ]);
   return {
     passBudgetMs,
     retryBaseMs,
     retryMaxMs: Math.max(retryBaseMs, retryMaxMs),
     deadlineMs,
     leaseMs: Math.max(leaseMs, passBudgetMs),
+    failureCooldownMs,
   };
 }

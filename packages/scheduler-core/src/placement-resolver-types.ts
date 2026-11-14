@@ -221,6 +221,8 @@ export interface TaskStartCapacityCandidate {
 }
 
 export interface TaskStartCapacityPoolSelection {
+  catalogRefreshPending?: boolean;
+  catalogPublished?: boolean;
   rollout?: PlacementRolloutDiagnostic;
   poolId: string;
   scope: CapacityPoolScope;
@@ -295,4 +297,6 @@ export interface PlacementCredentialResolutionFailure {
   errorKind: 'placement' | 'credentials';
   placementErrorCode?: PlacementResolutionErrorCode;
   capacityPoolEffectiveState?: TaskStartCapacityPoolSelection['effectiveState'];
+  capacityPoolRefreshPending?: boolean;
+  capacityPoolCatalogPublished?: boolean;
 }

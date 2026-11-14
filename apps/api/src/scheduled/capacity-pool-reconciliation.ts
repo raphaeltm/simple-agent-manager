@@ -28,7 +28,7 @@ export async function runScheduledCapacityPoolReconciliation(
   const db = drizzle(env.DATABASE, { schema });
   const settings = await capacityPoolRefreshSettings(env);
   const deadlineAt = Date.now() + settings.passBudgetMs;
-  const resumed = await continueCapacityPoolPublications(db, env, settings, deadlineAt);
+  const { resumed } = await continueCapacityPoolPublications(db, env, settings, deadlineAt);
   const gate =
     Date.now() >= deadlineAt
       ? {

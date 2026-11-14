@@ -86,6 +86,7 @@ export type AdminSettingName =
   | 'operations.capacityPoolRefreshRetryMaxMs'
   | 'operations.capacityPoolRefreshDeadlineMs'
   | 'operations.capacityPoolRefreshLeaseMs'
+  | 'operations.capacityPoolRefreshFailureCooldownMs'
   | 'operations.deadWakeReconcileBatchSize'
   | 'operations.resourceLinkTouchIntervalMs'
   | 'operations.resourceLinkWeakPerTarget'

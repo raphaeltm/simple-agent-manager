@@ -75,14 +75,59 @@ describe('scheduled operational sweep kill switch', () => {
 
   it('applies the same operational brake to the one-minute continuation', async () => {
     enabledMock.mockResolvedValue(false);
+    isolateMock.mockImplementation(async (_name, callback) => callback());
 
     await scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context);
 
     expect(enabledMock).toHaveBeenCalledWith(env, 'cron');
-    expect(isolateMock).not.toHaveBeenCalled();
+    expect(isolateMock.mock.calls.map(([name]) => name)).toEqual(['capacity_pool_continuation']);
     expect(capacityPoolContinuationMock).not.toHaveBeenCalled();
     expect(capacityPoolReconciliationMock).not.toHaveBeenCalled();
     expect(context.waitUntil).not.toHaveBeenCalled();
+    expect(logInfoMock).toHaveBeenCalledWith('cron.skipped_disabled', {
+      cron: CAPACITY_POOL_CONTINUATION_CRON,
+      type: 'capacity-pool-continuation',
+      switch: 'cron',
+    });
+  });
+
+  it('contains a failed one-minute kill-switch read and records the failed tick instead of success', async () => {
+    enabledMock.mockRejectedValue(new Error('Kill switch unavailable'));
+    isolateMock.mockImplementation(async (_name, callback) => {
+      try {
+        return await callback();
+      } catch {
+        return undefined;
+      }
+    });
+    await expect(
+      scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context)
+    ).resolves.toBeUndefined();
+    expect(capacityPoolContinuationMock).not.toHaveBeenCalled();
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        type: 'capacity-pool-continuation',
+        resumed: null,
+        failed: 1,
+      })
+    );
+  });
+
+  it('reports one-minute continuation outcomes without running unrelated sweeps', async () => {
+    enabledMock.mockResolvedValue(true);
+    capacityPoolContinuationMock.mockResolvedValue({ resumed: 3, failed: 1 });
+    isolateMock.mockImplementation(async (_name, callback) => callback());
+    await scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context);
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        type: 'capacity-pool-continuation',
+        resumed: 3,
+        failed: 1,
+      })
+    );
+    expect(capacityPoolReconciliationMock).not.toHaveBeenCalled();
   });
 
   it('dispatches only the isolated catalog continuation on the one-minute trigger', async () => {

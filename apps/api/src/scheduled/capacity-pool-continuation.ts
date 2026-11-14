@@ -18,6 +18,10 @@ import {
 } from '../services/default-capacity-pools-ensure';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
+export interface CapacityPoolContinuationResult {
+  resumed: number;
+  failed: number;
+}
 
 /** Cron discovers due rows, so neither alarms nor a live process are required for liveness. */
 export async function continueCapacityPoolPublications(
@@ -25,20 +29,20 @@ export async function continueCapacityPoolPublications(
   env: Env,
   settings: CapacityPoolRefreshSettings,
   deadlineAt: number
-): Promise<number> {
+): Promise<CapacityPoolContinuationResult> {
   const now = Date.now();
-  if (now >= deadlineAt) return 0;
+  const result = { resumed: 0, failed: 0 };
+  if (now >= deadlineAt) return result;
   // Adopt legacy unfinished pools at upgrade. They cannot prove a pre-upgrade atomic catalog,
   // so keep bootstrap gated while resuming them promptly rather than waiting a day.
   await db.run(sql`INSERT INTO capacity_pool_refreshes
     (pool_id, scope, owner_user_id, owner_project_id, state, generation, attempts, started_at, deadline_at, next_attempt_at)
-    SELECT id, scope, owner_user_id, owner_project_id, 'pending', 0, 0, ${now}, ${now + settings.deadlineMs}, ${now}
+    SELECT id, scope, owner_user_id, owner_project_id, 'pending', 0, 0, 0, 0, ${now}
     FROM capacity_pools
     WHERE is_default = 1 AND migration_state = 'pending'
       AND NOT EXISTS (SELECT 1 FROM capacity_pool_refreshes WHERE pool_id = capacity_pools.id)
     ORDER BY id LIMIT ${resolveBackfillScopeBatchSize({ env })}
     ON CONFLICT(pool_id) DO NOTHING`);
-  let resumed = 0;
   while (Date.now() < deadlineAt) {
     const [work] = await db
       .select()
@@ -82,18 +86,23 @@ export async function continueCapacityPoolPublications(
         ownerProjectId: work.ownerProjectId,
       }) !== work.poolId
     ) {
-      await finishCapacityPoolRefresh(
-        db,
-        claimed,
-        settings,
-        false,
-        'Catalog refresh scope is invalid. Reconnect its compute account.',
-        true
+      result.failed += Number(
+        await finishCapacityPoolRefresh(
+          db,
+          claimed,
+          settings,
+          false,
+          'Catalog refresh scope is invalid. Reconnect its compute account.',
+          true,
+          env
+        )
       );
       continue;
     }
-    if (Date.now() >= claimed.deadlineAt) {
-      await finishCapacityPoolRefresh(db, claimed, settings, false);
+    if (claimed.attempts > 0 && Date.now() >= claimed.deadlineAt) {
+      result.failed += Number(
+        await finishCapacityPoolRefresh(db, claimed, settings, false, undefined, false, env)
+      );
       continue;
     }
     const options = {
@@ -115,21 +124,41 @@ export async function continueCapacityPoolPublications(
           claimed,
           settings,
           false,
-          'Catalog scope is invalid. Reconnect its compute account.'
+          'Catalog scope is invalid. Reconnect its compute account.',
+          true,
+          env
         );
     } catch (error) {
+      result.failed += 1;
       log.warn('capacity_pools.continuation_failed', {
         poolId: work.poolId,
         ...serializeError(error),
       });
+      result.resumed += 1;
+      continue;
     }
-    resumed += 1;
+    // The ensure owns the next generation. Count a committed terminal outcome without
+    // mistaking a later unrelated publisher's state for this continuation's result.
+    const [outcome] = await db
+      .select({ state: schema.capacityPoolRefreshes.state })
+      .from(schema.capacityPoolRefreshes)
+      .where(
+        and(
+          eq(schema.capacityPoolRefreshes.poolId, claimed.poolId),
+          eq(schema.capacityPoolRefreshes.generation, claimed.generation + 1)
+        )
+      )
+      .limit(1);
+    if (outcome?.state === 'failed') result.failed += 1;
+    result.resumed += 1;
   }
-  return resumed;
+  return result;
 }
 
 /** The one-minute cron does continuation only, avoiding the unrelated five-minute sweeps. */
-export async function runScheduledCapacityPoolContinuations(env: Env): Promise<number> {
+export async function runScheduledCapacityPoolContinuations(
+  env: Env
+): Promise<CapacityPoolContinuationResult> {
   const settings = await capacityPoolRefreshSettings(env);
   return continueCapacityPoolPublications(
     drizzle(env.DATABASE, { schema }),
