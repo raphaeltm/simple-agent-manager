@@ -792,3 +792,9 @@ and [observability pricing](https://developers.cloudflare.com/observability/pric
 choosing ongoing sampling. The generated configuration redacts query strings from observability URLs because callback
 and terminal URLs can contain credentials. Traces can still include URL paths and database
 statement metadata; restrict access to observability data as you would for production logs.
+
+### Application deployment builds
+
+Instant sessions publish applications through a dedicated Cloudflare Container build executor. Cloudflare Containers are already part of SAM's supported setup, so this adds no separate cloud account or manual secret prerequisite. Deployment targets remain VMs. VM sessions retain the node executor by default; choose `deployments.buildExecutor=cloudflare` in **Admin → Settings** to move those builds off the source node. `DEPLOY_BUILDER_INSTANCE_TYPE` and `DEPLOY_BUILDER_MAX_INSTANCES` are deployment-time sizing controls; see the [configuration reference](/docs/reference/configuration/#cloudflare-application-build-executor).
+
+The builder runs one job per ephemeral container and can execute arbitrary Dockerfile steps as root inside DinD with host build networking. It receives no user or installation credentials, runtime secret values or workspace token. Its callback token authorizes only one job and attempt until that job's deadline or terminal state. A durable alarm stops it at the hard deadline, independent of source-session liveness.

@@ -364,3 +364,34 @@ describe('publish job atomic guards on SQLite', () => {
     expect(await release('owner-release')).toBe(true);
   });
 });
+
+describe('Cloudflare queue and attempt fences', () => {
+  it('does not stall queued context_ready jobs but enforces the absolute deadline', async () => {
+    seed('queued', 'context_ready', recent, old, old);
+    expect(await failExpiredDeploymentPublishJobs(db(), settings, now)).toHaveLength(0);
+    expect(
+      await failExpiredDeploymentPublishJobs(db(), settings, now + settings.deadlineMs)
+    ).toHaveLength(1);
+  });
+  it('atomically rejects an old attempt without history or state mutations', async () => {
+    seed();
+    sqlite.exec("UPDATE deployment_publish_jobs SET executor='cloudflare'");
+    expect(
+      await appendDeploymentPublishJobEvent(db(), {
+        ...event,
+        expectedAttempt: 2,
+        expectedExecutor: 'cloudflare',
+      })
+    ).toBe(false);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()).toEqual(
+      { n: 0 }
+    );
+    expect(
+      await appendDeploymentPublishJobEvent(db(), {
+        ...event,
+        expectedAttempt: 1,
+        expectedExecutor: 'cloudflare',
+      })
+    ).toBe(true);
+  });
+});

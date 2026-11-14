@@ -18,6 +18,83 @@ import {
 } from './deployment-publish-job-defaults';
 
 export const DEPLOYMENT_PUBLISH_SETTINGS = [
+  integerDefinition(
+    'deployments.builderCallbackTimeoutMs',
+    30000,
+    'Operations',
+    'Builder control-plane HTTP timeout and bootstrap HTTP shutdown budget.',
+    { min: 1000, max: 120000 }
+  ),
+  integerDefinition(
+    'deployments.builderCallbackAttempts',
+    3,
+    'Operations',
+    'Maximum attempts for retryable builder callbacks.',
+    { min: 1, max: 10 }
+  ),
+  integerDefinition(
+    'deployments.builderCallbackRetryDelayMs',
+    5000,
+    'Operations',
+    'Delay between retryable builder callbacks.',
+    { min: 100, max: 30000 }
+  ),
+  integerDefinition(
+    'deployments.builderDeadlineMs',
+    20 * 60_000,
+    'Operations',
+    'Absolute builder deadline after first admission, also capped by the overall publish-job deadline.',
+    { min: 10000, max: 1200000 }
+  ),
+  choiceDefinition(
+    'deployments.buildExecutor',
+    'node',
+    ['node', 'cloudflare'],
+    'Operations',
+    'Build executor for VM sessions. Instant always uses Cloudflare; explicit Cloudflare selection never silently falls back to the source node.'
+  ),
+  integerDefinition(
+    'deployments.builderMaxConcurrent',
+    6,
+    'Operations',
+    'Platform Cloudflare build reservations, clamped to the deployed container class maximum.',
+    { min: 1, max: 6 }
+  ),
+  integerDefinition(
+    'deployments.builderProjectMaxConcurrent',
+    2,
+    'Operations',
+    'Concurrent Cloudflare builds per project.',
+    { min: 1, max: 2 }
+  ),
+  integerDefinition(
+    'deployments.builderCapacityBackoffMs',
+    30000,
+    'Operations',
+    'Minimum delay before retrying Cloudflare platform capacity errors.',
+    { min: 1000, max: 300000 }
+  ),
+  integerDefinition(
+    'deployments.builderDrainLimit',
+    6,
+    'Operations',
+    'Maximum queued builds considered per cron tick.',
+    { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'deployments.builderDaemonReadyTimeoutMs',
+    60000,
+    'Operations',
+    'DinD daemon readiness deadline.',
+    { min: 1000, max: 120000 }
+  ),
+  integerDefinition(
+    'deployments.builderHeartbeatIntervalMs',
+    15000,
+    'Operations',
+    'Cloudflare builder heartbeat interval.',
+    { min: 1000, max: 30000 }
+  ),
   choiceDefinition(
     'deployments.buildContextCollectionMode',
     DEFAULT_BUILD_CONTEXT_COLLECTION_MODE,

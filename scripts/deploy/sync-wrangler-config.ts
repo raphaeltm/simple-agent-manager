@@ -180,6 +180,7 @@ const CONTAINER_MAX_INSTANCE_CONFIG = {
     envVar: 'SANDBOX_CONTAINER_MAX_INSTANCES',
     defaultValue: DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES,
   },
+  ComposeBuilderContainer: { envVar: 'DEPLOY_BUILDER_MAX_INSTANCES', defaultValue: 6 },
   VmAgentContainer: {
     envVar: 'VM_AGENT_CONTAINER_MAX_INSTANCES',
     defaultValue: DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES,
@@ -315,6 +316,13 @@ export function containerImageOverrides(
   return parsed as Record<string, string>;
 }
 
+function getBuilderInstanceType(): string {
+  const value = process.env.DEPLOY_BUILDER_INSTANCE_TYPE?.trim() || 'standard-4';
+  if (!['lite', 'basic', 'standard-1', 'standard-2', 'standard-3', 'standard-4'].includes(value))
+    throw new Error('DEPLOY_BUILDER_INSTANCE_TYPE must name a supported Cloudflare instance type');
+  return value;
+}
+
 function generateContainerBindings(
   containers: ContainerBinding[] | undefined
 ): ContainerBinding[] | undefined {
@@ -322,6 +330,9 @@ function generateContainerBindings(
   return containers?.map((container) => ({
     ...container,
     image: overrides[container.class_name] ?? container.image,
+    ...(container.class_name === 'ComposeBuilderContainer'
+      ? { instance_type: getBuilderInstanceType() }
+      : {}),
     max_instances: getConfiguredContainerMaxInstances(
       container.class_name,
       container.max_instances
@@ -649,6 +660,9 @@ export function getApiWorkerVars(
     ...(process.env.PREVIEW_URL_TTL_SECONDS
       ? { PREVIEW_URL_TTL_SECONDS: process.env.PREVIEW_URL_TTL_SECONDS }
       : {}),
+    DEPLOY_BUILDER_CLASS_MAX_INSTANCES: String(
+      parseContainerMaxInstances('DEPLOY_BUILDER_MAX_INSTANCES', 6)
+    ),
     VERSION: DEPLOYMENT_CONFIG.version,
     PAGES_PROJECT_NAME: outputs.pagesName,
     SAM_INSTALLATION_ID: outputs.installationId,

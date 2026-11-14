@@ -2013,9 +2013,36 @@ Installation admins edit these at **Admin → Settings**. They use the existing 
 | `deployments.buildContextStartTimeoutMs`   | 10,000  | Bounds control-plane wait for source collection acceptance                                                 |
 | `deployments.buildContextMaxBytes`         | 2 GiB   | Maximum raw tar (including headers) and compressed bundle bytes                                            |
 | `deployments.buildContextCollectTimeoutMs` | 120,000 | Source collection deadline                                                                                 |
-| `deployments.buildContextUploadTtlSeconds` | 300     | Presigned upload URL lifetime                                                                              |
+| `deployments.buildContextUploadTtlSeconds` | 300     | Presigned upload/download URL lifetime                                                                              |
 | `deployments.buildContextRetentionHours`   | 48      | Minimum age before abandoned/terminal bundles are deleted                                                  |
 | `deployments.buildContextCleanupBudgetMs`  | 10,000  | Work budget per daily cleanup pass                                                                         |
 | `deployments.buildContextCleanupPageSize`  | 250     | R2 listing page size; a persisted cursor resumes remaining pages                                           |
 
 Collection has no file-count cutoff. For a 100,000-file context near 1.5 GiB, tar headers add at least 49 MiB, plus filename/padding metadata. At 50 MiB/s the payload alone needs about 31 seconds to collect and another 31 seconds to upload; filesystem traversal, compression, and network conditions add time. Collection stops at its deadline rather than repeatedly processing a fixed batch. Phase timings are stored in publish-job events. The source request retains the existing overall VM publish timeout (20 minutes by default) and emits publish heartbeats throughout collection/upload.
+
+## Cloudflare application build executor
+
+Edit runtime controls in **Admin → Settings**. Instant sessions always use Cloudflare; `deployments.buildExecutor` selects the VM-session executor. These controls are independent of the default-off context shadow probe.
+
+| Runtime setting                           | Default   | Meaning                                                                                             |
+| ----------------------------------------- | --------- | --------------------------------------------------------------------------------------------------- |
+| `deployments.buildExecutor`               | `node`    | VM build executor (`node` or `cloudflare`); explicit Cloudflare selection never silently falls back |
+| `deployments.builderMaxConcurrent`        | 6         | Platform reservations, clamped to the deployed class capacity; maximum 6                            |
+| `deployments.builderProjectMaxConcurrent` | 2         | Per-project reservations; maximum 2                                                                 |
+| `deployments.builderDeadlineMs`           | 1,200,000 | Absolute deadline after first admission; also capped by the overall publish-job deadline            |
+| `deployments.builderCapacityBackoffMs`    | 30,000    | Delay before retrying platform capacity errors                                                      |
+| `deployments.builderDrainLimit`           | 6         | Maximum queued jobs considered per cron tick                                                        |
+| `deployments.builderDaemonReadyTimeoutMs` | 60,000    | DinD readiness deadline                                                                             |
+| `deployments.builderCallbackTimeoutMs`    | 30,000    | Control-plane HTTP timeout; also controls bootstrap HTTP shutdown                                   |
+| `deployments.builderCallbackAttempts`     | 3         | Maximum attempts for retryable callbacks                                                            |
+| `deployments.builderCallbackRetryDelayMs` | 5,000     | Delay between retryable callbacks                                                                   |
+| `deployments.builderHeartbeatIntervalMs`  | 15,000    | Builder liveness callback interval                                                                  |
+
+Deployment topology is configured through GitHub Environment variables:
+
+| Variable                       | Default      | Meaning                                                                      |
+| ------------------------------ | ------------ | ---------------------------------------------------------------------------- |
+| `DEPLOY_BUILDER_INSTANCE_TYPE` | `standard-4` | Cloudflare Container instance type; applies on deployment                    |
+| `DEPLOY_BUILDER_MAX_INSTANCES` | 6            | `ComposeBuilderContainer` class capacity; runtime admission never exceeds it |
+
+The deploy generator mirrors actual class capacity into the Worker binding `DEPLOY_BUILDER_CLASS_MAX_INSTANCES`; do not set that binding independently. Builder images contain Docker, Compose and `sam-builder`; no installation or user credentials are baked into them. Each job receives only a job-and-attempt callback token and short-lived presigned URLs for its context and image keys. The control plane checks the builder against `VM_AGENT_REQUIRED_VERSION`, when configured, before accepting a job.

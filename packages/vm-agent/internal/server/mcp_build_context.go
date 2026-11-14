@@ -118,7 +118,7 @@ func (s *Server) runAcceptedContextCollection(ctx context.Context, cancel contex
 		event.Terminal = true
 	}
 	if result != nil {
-		event.Detail = map[string]any{"sizeBytes": result.Bytes, "sha256": result.SHA256, "durationMs": result.DurationMs}
+		event.Detail = map[string]any{"sizeBytes": result.Bytes, "sha256": result.SHA256, "durationMs": result.DurationMs, "projectName": result.ProjectName}
 	}
 	reportTimeout := s.config.HTTPCallbackTimeout
 	if reportTimeout <= 0 {
@@ -158,7 +158,7 @@ func (s *Server) collectAndUploadBuildContext(ctx context.Context, workspaceID, 
 	}
 	collectCancel()
 	callbackPath := "/api/projects/" + url.PathEscape(projectID) + "/deployment-publish-jobs/" + url.PathEscape(jobID) + "/context/"
-	body := map[string]any{"attempt": req.Attempt, "sizeBytes": result.Bytes, "sha256": result.SHA256, "durationMs": result.DurationMs}
+	body := map[string]any{"attempt": req.Attempt, "sizeBytes": result.Bytes, "sha256": result.SHA256, "durationMs": result.DurationMs, "projectName": result.ProjectName}
 	var slot struct {
 		UploadURL string `json:"uploadUrl"`
 	}

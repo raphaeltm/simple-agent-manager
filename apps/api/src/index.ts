@@ -1040,3 +1040,5 @@ export default {
     await handleInboundAgentEmail(message, env);
   },
 };
+
+export { ComposeBuilderContainer } from './durable-objects/compose-builder-container';

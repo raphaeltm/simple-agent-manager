@@ -90,3 +90,32 @@ describe('build context conditional state on real SQLite D1', () => {
     expect(await reserveBuildContext(db, owner, descriptor)).toBeNull();
   });
 });
+
+it('binds Compose project identity to exact context receipts', async () => {
+  const named = { ...descriptor, projectName: 'original-project' };
+  expect(await reserveBuildContext(db, owner, named)).toMatchObject({
+    contextProjectName: 'original-project',
+  });
+  expect(await reserveBuildContext(db, owner, { ...named, projectName: 'other' })).toBeNull();
+  expect(await completeBuildContext(db, owner, { ...named, projectName: 'other' })).toBeNull();
+  expect(await completeBuildContext(db, owner, named)).toMatchObject({ status: 'context_ready' });
+});
+
+it('reconciles a lost complete response after admission without rewinding the builder', async () => {
+  await reserveBuildContext(db, owner, descriptor);
+  await completeBuildContext(db, owner, descriptor);
+  sqlite.exec("UPDATE deployment_publish_jobs SET status='building', executor_instance_id='job'");
+  const before = sqlite.prepare('SELECT updated_at FROM deployment_publish_jobs').get();
+  const events = sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get();
+  expect(await completeBuildContext(db, owner, descriptor)).toMatchObject({
+    status: 'building',
+    replayed: true,
+  });
+  expect(sqlite.prepare('SELECT updated_at FROM deployment_publish_jobs').get()).toEqual(before);
+  expect(sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()).toEqual(
+    events
+  );
+  expect(await completeBuildContext(db, owner, { ...descriptor, sizeBytes: 101 })).toBeNull();
+  sqlite.exec("UPDATE deployment_publish_jobs SET status='canceled'");
+  expect(await completeBuildContext(db, owner, descriptor)).toBeNull();
+});

@@ -11,9 +11,15 @@
 export { collectBuildContextOnSource } from './build-context-collection';
 export * from './build-context-defaults';
 export { scheduleBuildContextShadow } from './build-context-shadow';
-export type { BuildContextDescriptor,BuildContextOwner } from './build-context-state';
-export { buildContextKey, completeBuildContext,reserveBuildContext } from './build-context-state';
-export { createBuildContextUpload, verifyBuildContextObject } from './build-context-upload';
+export type { BuildContextDescriptor, BuildContextOwner } from './build-context-state';
+export { buildContextKey, completeBuildContext, reserveBuildContext } from './build-context-state';
+export {
+  createBuildContextDownload,
+  createBuildContextUpload,
+  verifyBuildContextObject,
+} from './build-context-upload';
+export * from './cloudflare-build-admission';
+export * from './cloudflare-build-executor';
 export type {
   ComposeImageArtifactDescriptor,
   ComposeImageArtifactDownload,
