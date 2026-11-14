@@ -1406,7 +1406,8 @@ The unscoped sweep selects sessions only from projects under storage pressure
 `project_data_storage_telemetry` row must report a `usage_ratio` at or above the admin setting
 `operations.projectDataArchiveMinStorageUsagePercent` (default 50, 0 turns the gate off). A project
 with no telemetry row, or one older than `operations.projectDataArchiveStorageTelemetryMaxAgeHours`
-(default 24), stays eligible. In-flight migrations, pending reclaim and the operator-scoped canary
+(default 24), stays eligible, so with `PROJECT_DATA_STORAGE_TELEMETRY_ENABLED=false` the gate
+holds nothing. In-flight migrations, pending reclaim and the operator-scoped canary
 are not gated. Each `cron.completed` log carries
 `projectDataArchiveShardingStoragePressureMinUsageRatio` and the
 `...StoragePressureHeldSessions`/`HeldProjects`/`HeldMessages` counts of what the gate left in root

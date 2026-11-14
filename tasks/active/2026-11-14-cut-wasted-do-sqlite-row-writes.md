@@ -12,17 +12,17 @@ week earlier. Month to date is 19.9M, so the included amount is exhausted around
 Two parts of that are writes that buy nothing:
 
 A. The unscoped archive sweep picks candidates largest-first across every project
-   (`projectDataArchiveCandidateSql()` in
-   `packages/project-data/src/scheduled/project-data-archive-sharding.ts`) and never looks at
-   storage. On 11-13 it archived 177,407 messages from project TTV, whose root object is at 11.4%
-   of its limit, plus ~17k from other small projects: about 320k row writes (14% of the day).
-   Only the SAM root (92%) needs the drain.
+(`projectDataArchiveCandidateSql()` in
+`packages/project-data/src/scheduled/project-data-archive-sharding.ts`) and never looks at
+storage. On 11-13 it archived 177,407 messages from project TTV, whose root object is at 11.4%
+of its limit, plus ~17k from other small projects: about 320k row writes (14% of the day).
+Only the SAM root (92%) needs the drain.
 B. `admitGitHubWebhookProjectEvents()` (`apps/api/src/services/github-project-event-producer.ts`)
-   admits every GitHub webhook into every project bound to the repository. Project
-   `01KQFZA5N37Y32SREBGRYHNXFB` is owned by the retired trial sentinel user
-   (`SYSTEM_USER_ID`), has no tasks, sessions or triggers, and is bound to
-   `raphaeltm/simple-agent-manager`. It receives 10,373 events a day: ~125k row writes and 26M rows
-   read a day, and its object has grown to 1.04 GB.
+admits every GitHub webhook into every project bound to the repository. Project
+`01KQFZA5N37Y32SREBGRYHNXFB` is owned by the retired trial sentinel user
+(`SYSTEM_USER_ID`), has no tasks, sessions or triggers, and is bound to
+`raphaeltm/simple-agent-manager`. It receives 10,373 events a day: ~125k row writes and 26M rows
+read a day, and its object has grown to 1.04 GB.
 
 ## Research findings
 

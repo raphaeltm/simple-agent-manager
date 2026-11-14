@@ -113,27 +113,66 @@ async function isArchived(fixture: Fixture): Promise<boolean> {
   return location?.location_state === 'archive_shard';
 }
 
+type TelemetryFixture =
+  | { projectId: string; usageRatio: number; measuredAt: number }
+  | {
+      projectId: string;
+      absent: true;
+    };
+
+/**
+ * Fixture projects are real ProjectData objects, and their own storage alarm writes a fresh
+ * near-zero telemetry row whenever it measures. Re-applying the fixture before every tick, and
+ * reading it back, means the sweep always sees exactly the telemetry the case describes.
+ */
+async function applyTelemetry(fixtures: TelemetryFixture[]) {
+  for (const fixture of fixtures) {
+    if ('absent' in fixture) await clearTelemetry(fixture.projectId);
+    else await setTelemetry(fixture.projectId, fixture.usageRatio, fixture.measuredAt);
+  }
+  for (const fixture of fixtures) {
+    const row = await env.DATABASE.prepare(
+      'SELECT usage_ratio, measured_at FROM project_data_storage_telemetry WHERE project_id = ?'
+    )
+      .bind(fixture.projectId)
+      .first<{ usage_ratio: number; measured_at: number }>();
+    if ('absent' in fixture) expect(row).toBeNull();
+    else expect(row).toEqual({ usage_ratio: fixture.usageRatio, measured_at: fixture.measuredAt });
+  }
+}
+
 /** Runs real ticks until every fixture in `until` is archived, or the tick bound is reached. */
 async function runTicks(
   options: Parameters<typeof runProjectDataArchiveSharding>[2],
   until: Fixture[],
-  startClock: number
+  startClock: number,
+  telemetry: TelemetryFixture[] = []
 ) {
   let clock = startClock;
+  await applyTelemetry(telemetry);
   let last = await runProjectDataArchiveSharding(testEnv, new Date(clock), options);
   for (let tick = 0; tick < 8; tick += 1) {
     expect(last).toMatchObject({ skipped: false, failed: 0 });
     const done = await Promise.all(until.map(isArchived));
     if (done.every(Boolean)) break;
     clock += 60_000;
+    await applyTelemetry(telemetry);
     last = await runProjectDataArchiveSharding(testEnv, new Date(clock), options);
   }
   return { stats: last, clock };
 }
 
+async function journalStates(projectId: string): Promise<string[]> {
+  const rows = await env.DATABASE.prepare(
+    'SELECT state FROM project_data_archive_migrations WHERE project_id = ? ORDER BY created_at'
+  )
+    .bind(projectId)
+    .all<{ state: string }>();
+  return rows.results.map((row) => row.state);
+}
+
 describe('archive sweep storage-pressure gate', () => {
   it('archives pressured, unmeasured and stale-telemetry projects and leaves a quiet one in root', async () => {
-    const now = Date.now();
     const quiet = await seedProjectWithTerminalSession('quiet', QUIET_MESSAGES);
     const pressured = await seedProjectWithTerminalSession('pressured', OTHER_MESSAGES);
     const boundary = await seedProjectWithTerminalSession('boundary', OTHER_MESSAGES);
@@ -142,21 +181,25 @@ describe('archive sweep storage-pressure gate', () => {
     const all = [quiet, pressured, boundary, unmeasured, stale];
     await isolateTo(all.map((fixture) => fixture.projectId));
 
-    await setTelemetry(quiet.projectId, 0.11, now);
-    await setTelemetry(pressured.projectId, 0.92, now);
-    await setTelemetry(
-      boundary.projectId,
-      DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT / 100,
-      now
-    );
-    await clearTelemetry(unmeasured.projectId);
-    // Same low reading as the quiet project, but older than the default 24 h max age.
-    await setTelemetry(stale.projectId, 0.11, now - 30 * HOUR_MS);
+    // Sessions ended a moment ago; ticks run on a clock safely past the 1 ms grace.
+    const start = Date.now() + 1_000;
+    const telemetry: TelemetryFixture[] = [
+      { projectId: quiet.projectId, usageRatio: 0.11, measuredAt: start },
+      { projectId: pressured.projectId, usageRatio: 0.92, measuredAt: start },
+      {
+        projectId: boundary.projectId,
+        usageRatio: DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT / 100,
+        measuredAt: start,
+      },
+      { projectId: unmeasured.projectId, absent: true },
+      // Same low reading as the quiet project, but older than the default 24 h max age.
+      { projectId: stale.projectId, usageRatio: 0.11, measuredAt: start - 30 * HOUR_MS },
+    ];
 
     await withArchiveEnv(SWEEP_ENV, async () => {
       // Default options: the gate the cron handler runs with when no admin override exists.
       const eligible = [pressured, boundary, unmeasured, stale];
-      const { stats, clock } = await runTicks({}, eligible, now);
+      const { stats, clock } = await runTicks({}, eligible, start, telemetry);
 
       // Liveness beside the absence assertion: the sweep really ran and archived the others.
       for (const fixture of eligible) expect(await isArchived(fixture)).toBe(true);
@@ -182,7 +225,12 @@ describe('archive sweep storage-pressure gate', () => {
 
       // Control: the gate, and nothing else, was holding the quiet session. Turned off, the
       // same sweep archives it.
-      const off = await runTicks({ minStorageUsagePercent: 0 }, [quiet], clock + 120_000);
+      const off = await runTicks(
+        { minStorageUsagePercent: 0 },
+        [quiet],
+        clock + 120_000,
+        telemetry
+      );
       expect(await isArchived(quiet)).toBe(true);
       expect(off.stats.storagePressureMinUsageRatio).toBe(0);
       expect(off.stats.storagePressureHeldSessions).toBe(0);
@@ -190,25 +238,135 @@ describe('archive sweep storage-pressure gate', () => {
   });
 
   it('starts archiving a quiet project once its storage reaches the threshold', async () => {
-    const now = Date.now();
     const project = await seedProjectWithTerminalSession('growing', OTHER_MESSAGES);
     await isolateTo([project.projectId]);
-    await setTelemetry(project.projectId, 0.3, now);
+    const start = Date.now() + 1_000;
 
     await withArchiveEnv(SWEEP_ENV, async () => {
-      const held = await runTicks({ minStorageUsagePercent: 40 }, [project], now);
+      const held = await runTicks({ minStorageUsagePercent: 40 }, [project], start, [
+        { projectId: project.projectId, usageRatio: 0.3, measuredAt: start },
+      ]);
       expect(await isArchived(project)).toBe(false);
       expect(held.stats.storagePressureHeldSessions).toBe(1);
 
-      // The next hourly measurement reports the project above the threshold.
-      await setTelemetry(project.projectId, 0.41, held.clock);
+      // The next measurement reports the project above the threshold.
       const released = await runTicks(
         { minStorageUsagePercent: 40 },
         [project],
-        held.clock + 60_000
+        held.clock + 60_000,
+        [{ projectId: project.projectId, usageRatio: 0.41, measuredAt: held.clock }]
       );
       expect(await isArchived(project)).toBe(true);
       expect(released.stats.storagePressureHeldSessions).toBe(0);
+    });
+  });
+
+  it('decides the threshold and the telemetry age at their exact boundaries', async () => {
+    const justBelow = await seedProjectWithTerminalSession('just-below', OTHER_MESSAGES);
+    const atThreshold = await seedProjectWithTerminalSession('at-threshold', OTHER_MESSAGES);
+    const exactlyMaxAge = await seedProjectWithTerminalSession('exactly-max-age', OTHER_MESSAGES);
+    const pastMaxAge = await seedProjectWithTerminalSession('past-max-age', OTHER_MESSAGES);
+    const all = [justBelow, atThreshold, exactlyMaxAge, pastMaxAge];
+    await isolateTo(all.map((fixture) => fixture.projectId));
+    const tickAt = Date.now() + 1_000;
+    const maxAgeHours = 6;
+
+    await withArchiveEnv(SWEEP_ENV, async () => {
+      await applyTelemetry([
+        { projectId: justBelow.projectId, usageRatio: 0.4999, measuredAt: tickAt },
+        { projectId: atThreshold.projectId, usageRatio: 0.5, measuredAt: tickAt },
+        // A reading exactly as old as the max age is still trusted; one millisecond older is not.
+        {
+          projectId: exactlyMaxAge.projectId,
+          usageRatio: 0.1,
+          measuredAt: tickAt - maxAgeHours * HOUR_MS,
+        },
+        {
+          projectId: pastMaxAge.projectId,
+          usageRatio: 0.1,
+          measuredAt: tickAt - maxAgeHours * HOUR_MS - 1,
+        },
+      ]);
+
+      // One tick at one instant, so "exactly" means exactly.
+      const stats = await runProjectDataArchiveSharding(testEnv, new Date(tickAt), {
+        minStorageUsagePercent: 50,
+        storageTelemetryMaxAgeHours: maxAgeHours,
+      });
+
+      expect(stats).toMatchObject({ skipped: false, failed: 0 });
+      expect(stats.storagePressureHeldSessions).toBe(2);
+      expect(stats.storagePressureHeldProjects).toBe(2);
+      expect(await journalStates(justBelow.projectId)).toEqual([]);
+      expect(await journalStates(exactlyMaxAge.projectId)).toEqual([]);
+      // Liveness: the same tick did take the two projects on the other side of each boundary.
+      expect(await journalStates(atThreshold.projectId)).toHaveLength(1);
+      expect(await journalStates(pastMaxAge.projectId)).toHaveLength(1);
+    });
+  });
+
+  it('finishes a migration already in flight for a project the gate now holds', async () => {
+    const LARGE_MESSAGES = 600;
+    const project = await seedProjectWithTerminalSession('in-flight', LARGE_MESSAGES);
+    await isolateTo([project.projectId]);
+    const start = Date.now() + 1_000;
+    const inFlightEnv = { ...SWEEP_ENV, PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '7' };
+
+    await withArchiveEnv(inFlightEnv, async () => {
+      // Tick 1: the project is unmeasured, so the session is selected; a 150 ms wall budget makes
+      // the copy yield long before 600 rows in 7-row chunks are done.
+      await applyTelemetry([{ projectId: project.projectId, absent: true }]);
+      const first = await withArchiveEnv({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' }, () =>
+        runProjectDataArchiveSharding(testEnv, new Date(start), {})
+      );
+      expect(first).toMatchObject({ skipped: false, failed: 0 });
+      expect(first.yielded ?? 0).toBe(1);
+      // Fixture precondition: genuinely in flight, neither finished nor back in root.
+      expect((await readLocation(project.projectId, project.sessionId))?.location_state).toBe(
+        'migrating'
+      );
+
+      // The project is now measured and far below the threshold, and it has a second ended
+      // session that was never selected.
+      const source = projectDataStub(project.projectId);
+      const laterSessionId = await source.createSession(null, 'later session');
+      await source.persistMessageBatch(laterSessionId, [
+        {
+          messageId: `${project.projectId}-later-0`,
+          role: 'user',
+          content: 'later message',
+          toolMetadata: null,
+          timestamp: new Date(9_000_000).toISOString(),
+          sequence: 1,
+        },
+      ]);
+      await source.stopSession(laterSessionId);
+      await source.runSummarySyncForTest();
+      const later = { projectId: project.projectId, sessionId: laterSessionId };
+      const lowTelemetry: TelemetryFixture[] = [
+        { projectId: project.projectId, usageRatio: 0.11, measuredAt: start + 120_000 },
+      ];
+
+      // The flip publishes the session; its root rows are then reclaimed in pages on later
+      // ticks. Both must keep going for a project the gate holds.
+      let clock = start + 120_000;
+      let stats = first;
+      const finished = async () =>
+        (await isArchived(project)) && (await source.getMessageCount(project.sessionId)) === 0;
+      for (let tick = 0; tick < 60 && !(await finished()); tick += 1) {
+        clock += 60_000;
+        await applyTelemetry(lowTelemetry);
+        stats = await runProjectDataArchiveSharding(testEnv, new Date(clock), {});
+        expect(stats).toMatchObject({ skipped: false, failed: 0 });
+      }
+
+      // The in-flight migration ran to completion under the gate, reclaim included...
+      expect(await isArchived(project)).toBe(true);
+      expect(await source.getMessageCount(project.sessionId)).toBe(0);
+      // ...while the never-selected session of the same held project stayed in root.
+      expect(await readLocation(later.projectId, later.sessionId)).toBeNull();
+      expect(await source.getMessageCount(later.sessionId)).toBe(1);
+      expect(stats.storagePressureHeldSessions).toBe(1);
     });
   });
 });

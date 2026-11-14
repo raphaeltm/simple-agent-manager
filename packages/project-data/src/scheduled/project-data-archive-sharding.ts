@@ -571,6 +571,8 @@ export type ProjectDataArchiveSweepOptions = {
 
 export const DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT = 50;
 export const DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS = 24;
+/** Shared with the admin settings registry so the two bounds cannot drift apart. */
+export const MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS = 30 * 24;
 const HOUR_MS = 60 * 60 * 1000;
 
 function boundedOption(value: number | undefined, fallback: number, min: number, max: number) {
@@ -619,7 +621,7 @@ export function resolveConfig(
         options.storageTelemetryMaxAgeHours,
         DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
         1,
-        30 * 24
+        MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS
       ) * HOUR_MS,
     budgetStallAlertSweeps: envInt(
       env.PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS,
@@ -5109,10 +5111,6 @@ export async function runProjectDataArchiveSharding(
     stats.failed += crashGapRecovery.failed;
     await reclaimPendingSources(env, config, stats, startedAt + config.wallTimeMs);
     const work = await selectMigrationWork(env, config, nowDate, now);
-    const held = await countStoragePressureHeld(env, config, nowDate);
-    stats.storagePressureHeldSessions = held?.sessions ?? null;
-    stats.storagePressureHeldProjects = held?.projects ?? null;
-    stats.storagePressureHeldMessages = held?.messages ?? null;
     // Only what the tick could actually journal. The fall-through padding exists to be
     // skipped past, so counting it would inflate the figure `budgetStallLastError` reports.
     stats.selected = work.migrations.length + Math.min(work.pending.length, work.pendingSlots);
@@ -5132,6 +5130,12 @@ export async function runProjectDataArchiveSharding(
       markFailedErrorEvent: 'project_data_archive_mark_failed_failed',
       candidateFailedEvent: 'project_data_archive_candidate_failed',
     });
+    // After the batch on purpose: the count only feeds this tick's stats and must not take
+    // wall time from the migrations themselves.
+    const held = await countStoragePressureHeld(env, config, nowDate);
+    stats.storagePressureHeldSessions = held?.sessions ?? null;
+    stats.storagePressureHeldProjects = held?.projects ?? null;
+    stats.storagePressureHeldMessages = held?.messages ?? null;
     await finishGlobalSweepCadence(
       env,
       config,

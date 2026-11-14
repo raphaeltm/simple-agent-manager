@@ -6,6 +6,7 @@ export {
   DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
   getProjectDataArchiveFrozenIntentInspectionConfig,
   inspectFrozenProjectDataArchiveIntents,
+  MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
   ProjectDataArchiveCoordinatorStateError,
   type ProjectDataArchiveSweepOptions,
   runProjectDataArchiveSharding,

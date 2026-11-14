@@ -273,10 +273,13 @@ room in the project's store, so the sweep leaves a project alone until its store
 `operations.projectDataArchiveMinStorageUsagePercent` sets how full a project's store must be, as a
 percent of its limit, before the sweep archives that project's ended chats. The default is 50;
 admins can set a whole number from 0 to 100, and 0 archives every project regardless of size. The
-sweep reads the size from the store's hourly storage measurement. A project that has never been
+sweep reads the size from the store's periodic storage measurement (hourly by default,
+`PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS`). A project that has never been
 measured, or whose last measurement is older than
 `operations.projectDataArchiveStorageTelemetryMaxAgeHours` (default 24 hours, 1 to 720), is archived
-as if it were full, because an old reading cannot show that the store has room. Chats already being
+as if it were full, because an old reading cannot show that the store has room. If storage
+measurement is turned off (`PROJECT_DATA_STORAGE_TELEMETRY_ENABLED=false`) no project has a
+reading, so every project is archived and this setting has no effect. Chats already being
 moved always finish, and an archive run a superadmin starts for one named project through the
 admin archive route is not held back by this setting.
 

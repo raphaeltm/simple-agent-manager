@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import type { OperationContext } from '@simple-agent-manager/operations';
 import { getPullRequestStates } from '@simple-agent-manager/operations';
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -111,6 +112,23 @@ describe('verified GitHub PR webhooks', () => {
       closed_at: null,
       ...changes,
     },
+  });
+
+  // Leftovers of the retired anonymous trial are owned by the system sentinel user. Nobody can
+  // open them, so a webhook must not be paid for in row writes on their behalf.
+  it('tracks nothing for a project owned by the system sentinel user', async () => {
+    sqlite
+      .prepare(
+        'INSERT INTO projects (id, name, repository, github_repo_id, user_id) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run('trial-leftover', 'Leftover', 'acme/widget', 91, SYSTEM_USER_ID);
+
+    await deliver('pull_request', pr('opened'));
+
+    // Owner control in the same delivery: both user-owned projects on the repository are tracked.
+    expect(
+      sqlite.prepare('SELECT project_id FROM pull_requests ORDER BY project_id').all()
+    ).toEqual([{ project_id: 'p1' }, { project_id: 'p2' }]);
   });
 
   it('tracks lifecycle for both projects and refuses older or unrelated events', async () => {

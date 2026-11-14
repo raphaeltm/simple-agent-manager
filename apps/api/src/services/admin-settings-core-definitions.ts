@@ -1,6 +1,7 @@
 import {
   DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT,
   DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
+  MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
 } from '@simple-agent-manager/project-data/scheduled';
 import {
   DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
@@ -83,7 +84,7 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
     'Operations',
     'Hours after which a project storage measurement is too old to hold the archive sweep back. A project with no measurement, or only an older one, is archived as if it were under pressure.',
-    { min: 1, max: 720 }
+    { min: 1, max: MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS }
   ),
   integerDefinition(
     'operations.nodeLifetimeAdmissionCutoffPercent',
