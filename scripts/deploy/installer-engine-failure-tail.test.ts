@@ -29,6 +29,24 @@ describe('failure tail', () => {
     expect(tail.at(-1)).toHaveLength(300);
   });
 
+  it('replaces every value the command declared secret with an Actions mask', () => {
+    // The sync step masks the generated SETUP_TOKEN, and wrangler later prints it in
+    // its bindings table; neither may reach the owner's failure report in clear.
+    const token = 'Zx9setupTokenValue_0123456789abcd';
+    const text = [
+      `::add-mask::${token}`,
+      `env.SETUP_TOKEN ("${token}")   Environment Variable`,
+      'wrangler deploy failed',
+    ].join('\n');
+    const tail = failureTail(text, {});
+    expect(tail.join('\n')).not.toContain(token);
+    expect(tail).toEqual([
+      '::add-mask::[redacted]',
+      'env.SETUP_TOKEN ("[redacted]")   Environment Variable',
+      'wrangler deploy failed',
+    ]);
+  });
+
   it('attaches the scrubbed stdout and stderr tail to a real failed command', async () => {
     const env = { ...process.env, DEPLOY_TOKEN: 'deploy-private-token-123' };
     const error = await processRunner
