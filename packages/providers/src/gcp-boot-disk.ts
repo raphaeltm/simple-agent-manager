@@ -9,19 +9,26 @@
  * `gcpCatalog.bootDiskMinGb`) resolved by the API and passed to the provider.
  */
 
+import {
+  DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,
+  DEFAULT_GCP_BOOT_DISK_MIN_GB,
+  GCP_BOOT_DISK_FLOOR_GB,
+  GCP_BOOT_DISK_MAX_GB,
+} from '@simple-agent-manager/shared';
+
+export {
+  DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,
+  DEFAULT_GCP_BOOT_DISK_MIN_GB,
+  GCP_BOOT_DISK_FLOOR_GB,
+  GCP_BOOT_DISK_MAX_GB,
+};
+
 export interface GcpBootDiskPolicy {
   /** GB of boot disk per vCPU. */
   gbPerVcpu: number;
   /** Smallest boot disk SAM creates, whatever the vCPU count. */
   minGb: number;
 }
-
-export const DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU = 20;
-export const DEFAULT_GCP_BOOT_DISK_MIN_GB = 50;
-/** Smallest boot disk the Ubuntu images SAM boots accept. */
-export const GCP_BOOT_DISK_FLOOR_GB = 10;
-/** Persistent Disk's own ceiling for a single disk is far above this; it bounds a typo. */
-export const GCP_BOOT_DISK_MAX_GB = 4_096;
 
 export const DEFAULT_GCP_BOOT_DISK_POLICY: GcpBootDiskPolicy = Object.freeze({
   gbPerVcpu: DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,

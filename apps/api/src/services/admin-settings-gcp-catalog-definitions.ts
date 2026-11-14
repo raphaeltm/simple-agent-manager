@@ -1,10 +1,10 @@
+import { GCP_MACHINE_TYPE_NAME_PATTERN } from '@simple-agent-manager/providers';
 import {
   DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,
   DEFAULT_GCP_BOOT_DISK_MIN_GB,
   GCP_BOOT_DISK_FLOOR_GB,
   GCP_BOOT_DISK_MAX_GB,
-  GCP_MACHINE_TYPE_NAME_PATTERN,
-} from '@simple-agent-manager/providers';
+} from '@simple-agent-manager/shared';
 
 import { type AdminSettingDefinition, integerDefinition } from './admin-setting-definitions';
 

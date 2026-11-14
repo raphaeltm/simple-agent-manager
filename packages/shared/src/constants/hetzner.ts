@@ -54,6 +54,18 @@ export const DEFAULT_GCP_IMAGE_FAMILY = 'ubuntu-2404-lts-amd64';
 /** Default GCP image project. Override via GCP_IMAGE_PROJECT env var. */
 export const DEFAULT_GCP_IMAGE_PROJECT = 'ubuntu-os-cloud';
 
+/**
+ * GCP boot disk policy defaults: max(minGb, gbPerVcpu x vCPUs), bounded by the floor and max.
+ * Admin-editable as `gcpCatalog.bootDiskGbPerVcpu` and `gcpCatalog.bootDiskMinGb`; applied by
+ * `gcpBootDiskSizeGb()` in packages/providers/src/gcp-boot-disk.ts.
+ */
+export const DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU = 20;
+export const DEFAULT_GCP_BOOT_DISK_MIN_GB = 50;
+/** Smallest boot disk the Ubuntu images SAM boots accept. */
+export const GCP_BOOT_DISK_FLOOR_GB = 10;
+/** Persistent Disk allows far more for one disk; this bounds a typo in the admin setting. */
+export const GCP_BOOT_DISK_MAX_GB = 4_096;
+
 /** Default GCP WIF pool ID. Override via GCP_WIF_POOL_ID env var. */
 export const DEFAULT_GCP_WIF_POOL_ID = 'sam-pool';
 
