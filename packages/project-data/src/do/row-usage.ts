@@ -113,7 +113,7 @@ export class RowUsage {
 
         if (key === 'setAlarm' || key === 'deleteAlarm' || key === 'put' || key === 'delete') {
           return (...args: unknown[]) => {
-            // Storage API write requests (including no-op alarm deletes) are billable writes.
+            // Alarms have no SQL cursor; record successful alarm mutations separately.
             // SQLite-backed KV puts write one hidden-table row per key (not legacy 4 KiB units).
             const count =
               key === 'put' && typeof args[0] === 'object' && args[0] !== null

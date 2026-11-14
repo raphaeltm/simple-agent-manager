@@ -86,6 +86,37 @@ describe('ProjectData optional row writer report', () => {
     expect(report).toContain('not available');
     expect(report).not.toContain('batch |');
   });
+  it.each(['duplicate-alias', 'unknown-alias', 'duplicate-label', 'negative', 'infinite', 'limit'])(
+    'rejects %s aggregates',
+    (kind) => {
+      const payload = response(0, 'batch', 19);
+      const calculations = payload.result.calculations;
+      if (kind === 'duplicate-alias') calculations[0]!.alias = 'rowsWritten';
+      if (kind === 'unknown-alias') calculations[0]!.alias = 'unknown';
+      if (kind === 'duplicate-label')
+        calculations[0]!.aggregates.push(calculations[0]!.aggregates[0]!);
+      if (kind === 'negative') calculations[0]!.aggregates[0]!.value = -1;
+      if (kind === 'infinite') calculations[0]!.aggregates[0]!.value = Infinity;
+      if (kind === 'limit')
+        for (const calculation of calculations)
+          calculation.aggregates = Array.from({ length: 1000 }, (_, n) => ({
+            value: 1,
+            groups: [{ key: 'labels.rank0.label', value: `unique-${n}` }],
+          }));
+      expect(() => parseRowUsage(payload, 0)).toThrow();
+    }
+  );
+  it('fails before network access when required reporting configuration is missing', async () => {
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    const report = await reportProjectDataRows({
+      token: '',
+      accountId: 'account',
+      service: 'worker',
+      fetcher,
+    });
+    expect(report).toContain('not available');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it.each(['http', 'malformed', 'empty', 'throw'])(
     'reports unavailable instead of zero for %s telemetry',
     async (mode) => {
@@ -106,6 +137,7 @@ describe('ProjectData optional row writer report', () => {
       });
       expect(report).toContain('not available');
       expect(report).not.toContain('| 0');
+      if (mode === 'http') expect(report).toContain('HTTP 403');
     }
   );
 });

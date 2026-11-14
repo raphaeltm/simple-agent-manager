@@ -75,13 +75,6 @@ export function parseRowUsage(payload: unknown, rank: number): LabelRows[] {
   const parsed = v.parse(resultSchema, payload);
   const rows = new Map<string, LabelRows>();
   const seen = new Map<string, Set<string>>();
-  const calculations = parsed.result.calculations;
-  if (
-    calculations.length &&
-    (calculations.length !== metricNames.length ||
-      new Set(calculations.map((entry) => entry.alias)).size !== metricNames.length)
-  )
-    throw new Error('Incomplete calculations');
   for (const calculation of parsed.result.calculations) {
     if (!metricNames.some((name) => name === calculation.alias))
       throw new Error('Unexpected calculation');
@@ -91,9 +84,12 @@ export function parseRowUsage(payload: unknown, rank: number): LabelRows[] {
       const label = aggregate.groups?.find(
         (group) => group.key === `labels.rank${rank}.label`
       )?.value;
-      // Slots absent on some objects are not operations and cannot be reported as zero usage.
-      if (label === undefined || label === '') continue;
-      if (typeof label !== 'string' || !Number.isFinite(aggregate.value) || aggregate.value < 0)
+      if (
+        typeof label !== 'string' ||
+        label === '' ||
+        !Number.isFinite(aggregate.value) ||
+        aggregate.value < 0
+      )
         throw new Error('Invalid row usage aggregate');
       const row = rows.get(label) ?? {
         label,

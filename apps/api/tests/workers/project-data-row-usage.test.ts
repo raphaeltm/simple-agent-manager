@@ -157,9 +157,41 @@ describe('ProjectData operation row usage in workerd', () => {
         (entry) => entry.label === 'alarm:storage_safety' && entry.rowsRead > 0
       )
     ).toBe(true);
+    const completion = spy.mock.calls
+      .map(([line]) => {
+        try {
+          return JSON.parse(String(line));
+        } catch {
+          return null;
+        }
+      })
+      .find(
+        (line) =>
+          line?.event === 'project_data.alarm.completed' && line.projectId === 'row-usage-alarm'
+      );
+    expect(completion).toBeDefined();
+    const alarmLabels = logs(spy)[0]!.labels;
+    expect(alarmLabels.find((entry) => entry.label === 'alarm:storage_safety')).toMatchObject({
+      rowsWritten: 10,
+      alarmWrites: 0,
+    });
+    expect(alarmLabels.find((entry) => entry.label === 'alarm')).toMatchObject({ alarmWrites: 1 });
+    // Scheduled actions intentionally continue via waitUntil after the old tick meter ends.
+    // Async context retains that section's later SQL + setAlarm, without changing the old log.
     expect(
-      spy.mock.calls.some(([line]) => String(line).includes('project_data.alarm.completed'))
-    ).toBe(true);
+      completion.sections.find(
+        (section: { section: string }) => section.section === 'scheduled_actions'
+      )
+    ).toMatchObject({ rowsWritten: 0 });
+    expect(alarmLabels.find((entry) => entry.label === 'alarm:scheduled_actions')).toMatchObject({
+      rowsWritten: 3,
+      alarmWrites: 1,
+    });
+    const alarmOnly = alarmLabels.filter(
+      (entry) => entry.label === 'alarm' || entry.label.startsWith('alarm:')
+    );
+    expect(alarmOnly.reduce((sum, entry) => sum + entry.rowsWritten, 0)).toBe(15);
+    expect(alarmOnly.reduce((sum, entry) => sum + entry.alarmWrites, 0)).toBe(2);
   });
 
   it('flushes only once at the interval and resets counters', async () => {
@@ -184,6 +216,8 @@ describe('ProjectData operation row usage in workerd', () => {
       expect(logs(spy)[1]!.labels.find((entry) => entry.label === 'getSummary')).toMatchObject({
         calls: 1,
       });
+      usage.flush(start + 3 * usage.intervalMs);
+      expect(logs(spy)).toHaveLength(2);
     });
   });
 
@@ -282,6 +316,7 @@ describe('ProjectData operation row usage in workerd', () => {
       const storage = usage.storage(state.storage);
       await usage.run('kv', async () => {
         await storage.put({ a: 'one', b: 'two' });
+        expect(await storage.get('b')).toBe('two');
         expect(await storage.delete(['a', 'absent'])).toBe(1);
         await storage.transaction(async (txn) => {
           await txn.put('c', 'three');
