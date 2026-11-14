@@ -6,7 +6,9 @@ import {
   PROJECT_DATA_ARCHIVE_TABLES,
   type ProjectDataArchiveSurface,
 } from '@simple-agent-manager/project-data/internal/archive/contract';
+import { createCanonicalRowsChainHasher } from '@simple-agent-manager/project-data/internal/archive/hashing';
 import {
+  ARCHIVE_SEARCH_EQUIVALENT_DOCUMENT_SQL,
   abandonArchiveSourceIntent,
   abandonArchiveTargetSession,
   type ArchiveSourceExportChunkInput,
@@ -1610,49 +1612,198 @@ describe('ProjectData archive terminal-version hashing streams bounded pages', (
   });
 
   it.each([300, 1200, 4800])(
-    'indexes document-equivalence lookups at %i rows and preserves rows across upgrade',
+    'seeks projection identities at %i rows without another index',
     (count) => {
       const store = makeSql();
       try {
         const insert = store.db.prepare(`INSERT INTO project_data_archive_search_documents
-          (projection_id, document_id, session_id, role, content, created_at)
-          VALUES (?, ?, 'session-scaling', 'user', ?, ?)`);
+        (projection_id, document_id, session_id, role, content, created_at)
+        VALUES (?, ?, 'session-scaling', 'user', ?, ?)`);
         store.db.transaction(() => {
           for (let index = 0; index < count; index++) {
-            insert.run(`raw:${index}`, `document-${index}`, `payload ${index}`, index);
+            insert.run(
+              `raw:session-scaling:document-${index}`,
+              `document-${index}`,
+              `payload ${index}`,
+              index
+            );
           }
         })();
-        const assertIndexedLookup = () => {
-          const plan = store.db
-            .prepare(
-              `EXPLAIN QUERY PLAN SELECT 1 AS present
-            FROM project_data_archive_search_documents
-            WHERE session_id = ? AND document_id = ? AND content = ? LIMIT 1`
-            )
-            .all('session-scaling', 'missing-document', 'missing-content') as Array<{
-            detail: string;
-          }>;
-          // Deterministic scaling check: the seek must include document_id. A plan
-          // using only session_id visits every document for EACH absent grouped ID.
-          expect(plan.some((row) => row.detail.includes('(session_id=? AND document_id=?)'))).toBe(
-            true
-          );
-        };
-        assertIndexedLookup(); // clean install
-        store.db.exec('DROP INDEX idx_project_data_archive_search_documents_document');
         store.db
-          .prepare('DELETE FROM migrations WHERE name = ?')
-          .run('077-archive-search-document-lookup');
-        runMigrations(store.sql); // existing object, with populated projection
-        runMigrations(store.sql); // repeat is idempotent
-        assertIndexedLookup();
+          .prepare(
+            `UPDATE project_data_archive_search_documents SET projection_id = ? WHERE document_id = ?`
+          )
+          .run('grouped:session-scaling:document-0', 'document-0');
+        const query = store.db.prepare(ARCHIVE_SEARCH_EQUIVALENT_DOCUMENT_SQL);
+        const plan = store.db
+          .prepare(`EXPLAIN QUERY PLAN ${ARCHIVE_SEARCH_EQUIVALENT_DOCUMENT_SQL}`)
+          .all(
+            'raw:session-scaling:missing',
+            'grouped:session-scaling:missing',
+            'session-scaling',
+            'missing',
+            'content'
+          ) as Array<{ detail: string }>;
+        // Plan shape, not elapsed time: two unique-key seeks must replace the old
+        // whole-session scan per absent grouped document, regardless of runner load.
+        expect(plan.some((row) => row.detail.includes('(projection_id=?)'))).toBe(true);
         expect(
-          store.db
-            .prepare('SELECT COUNT(*) AS count FROM project_data_archive_search_documents')
-            .get()
-        ).toEqual({ count });
+          query.get(
+            'raw:session-scaling:document-0',
+            'grouped:session-scaling:document-0',
+            'session-scaling',
+            'document-0',
+            'payload 0'
+          )
+        ).toEqual({ present: 1 });
+        const present = `document-${count - 1}`;
+        expect(
+          query.get(
+            `raw:session-scaling:${present}`,
+            `grouped:session-scaling:${present}`,
+            'session-scaling',
+            present,
+            `payload ${count - 1}`
+          )
+        ).toEqual({ present: 1 });
+        expect(
+          query.get(
+            'raw:session-scaling:missing',
+            'grouped:session-scaling:missing',
+            'session-scaling',
+            'missing',
+            'content'
+          )
+        ).toBeUndefined();
+        expect(
+          query.get(
+            `raw:session-scaling:${present}`,
+            `grouped:session-scaling:${present}`,
+            'session-scaling',
+            present,
+            'different content'
+          )
+        ).toBeUndefined();
+        expect(
+          query.get(
+            `raw:session-scaling:${present}`,
+            `grouped:session-scaling:${present}`,
+            'other-session',
+            present,
+            `payload ${count - 1}`
+          )
+        ).toBeUndefined();
       } finally {
         store.db.close();
+      }
+    }
+  );
+
+  it.each(['legacy-document', 'raw:other-session:document'])(
+    'refuses a noncanonical projection identity (%s) before source flip or reclaim',
+    async (projectionId) => {
+      const source = makeSql();
+      const target = makeSql();
+      try {
+        seedTerminalSession(source.sql);
+        const base = {
+          projectId: 'project-archive',
+          sessionId: 'session-archive',
+          migrationId: 'migration-wide',
+          sourceOwnerName: 'project-archive',
+          targetOwnerName: 'project-archive:archive:g1:s1',
+          targetGeneration: 1,
+          sourceIntentToken: 'intent-wide',
+        };
+        const prepared = await prepareArchiveSourceIntent(source.sql, {
+          ...base,
+          now: NOW,
+          minTerminalAgeMs: 0,
+        });
+        prepareArchiveTarget(target.sql, {
+          ...base,
+          terminalVersionSha256: prepared.terminalVersionSha256,
+          sessionRow: prepared.sessionRow,
+          expectedMessageCount: prepared.messageCount,
+          now: NOW,
+        });
+        const hashes = await copyAllChunks(source.sql, target.sql, {
+          ...base,
+          maxRows: 1,
+          maxBytes: 1024 * 1024,
+        });
+        const sealInput = {
+          ...base,
+          terminalVersionSha256: prepared.terminalVersionSha256,
+          expectedChunkHashes: hashes,
+          now: NOW,
+        };
+        const sealed = await sealArchiveTarget(target.sql, sealInput);
+        expect(sealed.messageCount).toBe(2);
+        target.db
+          .prepare(
+            `UPDATE project_data_archive_search_documents SET projection_id = ?
+          WHERE rowid = (SELECT MIN(rowid) FROM project_data_archive_search_documents)`
+          )
+          .run(projectionId);
+        // Model an internally consistent older on-disk projection, not just bit rot:
+        // its stored digest covers the legacy identity too. Only the identity guard
+        // can refuse it; removing that guard must make this test red.
+        const columns = [
+          'projection_id',
+          'document_id',
+          'session_id',
+          'role',
+          'content',
+          'created_at',
+        ];
+        const hasher = createCanonicalRowsChainHasher(columns);
+        for (const row of target.db
+          .prepare(
+            `SELECT ${columns.join(', ')}
+          FROM project_data_archive_search_documents ORDER BY rowid`
+          )
+          .all()) {
+          hasher.update(row as Record<string, unknown>);
+        }
+        target.db
+          .prepare(
+            `UPDATE project_data_archive_target_sessions SET search_index_sha256 = ?
+          WHERE session_id = ?`
+          )
+          .run(hasher.digestHex, base.sessionId);
+        await expect(sealArchiveTarget(target.sql, sealInput)).rejects.toMatchObject({
+          reason: 'archive_search_projection_identity_mismatch',
+        });
+        await expect(
+          finalizeSourceDelete(source.sql, {
+            ...base,
+            expectedTerminalVersionSha256: prepared.terminalVersionSha256,
+            targetAggregateSha256: sealed.aggregateSha256,
+            r2ManifestKey: 'unapproved/manifest.json',
+            now: NOW,
+            minTerminalAgeMs: 0,
+          })
+        ).rejects.toBeInstanceOf(ProjectDataArchiveInvariantError);
+        expect(() =>
+          reclaimArchiveSourcePage(source.sql, {
+            projectId: base.projectId,
+            sessionId: base.sessionId,
+            migrationId: base.migrationId,
+            maxRows: 500,
+          })
+        ).toThrow(ProjectDataArchiveInvariantError);
+        expect(inspectArchiveSourceIntent(source.sql, base)).toMatchObject({
+          state: 'intent_prepared',
+        });
+        expect(
+          source.db
+            .prepare('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?')
+            .get(base.sessionId)
+        ).toEqual({ count: 2 });
+      } finally {
+        source.db.close();
+        target.db.close();
       }
     }
   );
@@ -1739,10 +1890,14 @@ describe('ProjectData archive terminal-version hashing streams bounded pages', (
       for (const query of equivalenceQueries) {
         const plan = target.db
           .prepare(`EXPLAIN QUERY PLAN ${query}`)
-          .all(base.sessionId, 'missing-document', 'missing-content') as Array<{ detail: string }>;
-        expect(plan.some((row) => row.detail.includes('(session_id=? AND document_id=?)'))).toBe(
-          true
-        );
+          .all(
+            `raw:${base.sessionId}:missing-document`,
+            `grouped:${base.sessionId}:missing-document`,
+            base.sessionId,
+            'missing-document',
+            'missing-content'
+          ) as Array<{ detail: string }>;
+        expect(plan.some((row) => row.detail.includes('(projection_id=?)'))).toBe(true);
       }
       expect(sealed.messageCount).toBe(WIDE_SESSION_ROWS);
       expect(sealed.groupedCount).toBe(WIDE_SESSION_ROWS);

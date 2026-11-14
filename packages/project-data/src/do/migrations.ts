@@ -2707,15 +2707,6 @@ export const MIGRATIONS: Migration[] = [
       for (const statement of ARCHIVE_WRITE_GENERATION_TRIGGERS) sql.exec(statement);
     },
   },
-  {
-    // Projection rebuild/repair checks each grouped document for an equivalent raw
-    // document. A session-only range scan per row makes that work quadratic.
-    name: '077-archive-search-document-lookup',
-    run(sql) {
-      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_data_archive_search_documents_document
-        ON project_data_archive_search_documents(session_id, document_id)`);
-    },
-  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
