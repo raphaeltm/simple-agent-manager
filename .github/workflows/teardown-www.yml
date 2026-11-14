@@ -38,6 +38,13 @@ jobs:
           RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
         run: node scripts/deploy/workflow-resource-names.mjs marketing
 
+      - name: Remove Managed Apex Single Redirect
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ steps.domain.outputs.base }}
+        run: node scripts/deploy/apex-redirect.mjs --remove --apply
+
       # ========================================
       # Phase 1: Remove Page Rule (apex redirect)
       # ========================================
