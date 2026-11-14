@@ -54,3 +54,11 @@ User requires primary checkout on assigned output branch, superseding /do worktr
 ## Staging functional verification (2026-11-14 13:08Z)
 
 Candidate fd84d2260c94ff770b8ca406e41b51f6fd21f928 deployed in workflow43596133512 (rollout/smoke still pending). Real VM chat returned ROW_ACCOUNTING_OK in Playwright. Workers log01M7D2NBYG0000000000000001 at13:06:33.040Z, testproject01M7D25432FBS6QRQFNJKMRES5, window13:05:32.170Z–13:06:33.040Z:16labels,0dropped. Includes RPC/fetch/webSocket/alarm sections; alarm2rowsWritten including1alarmWrite. Live calculations reporter returned the same totals. Quiet earlier windows were lost on eviction as documented; bounded reads kept the observed window alive. Session/workspace/empty node/testproject and profile deleted; interval restored to default900000ms. Earlier temporary archive environment overrides are gone (live sweep1080000ms; sessionGrace unbound).
+
+## CI follow-up and main integration (2026-11-14 13:28Z)
+
+Merged main a7d05239d976e186e0c8436f3c9f6de4bc17ec89 (#2727) without conflicts. Protected files have zero diff against main. Seven Sonar findings fixed with type/style cleanup and fixed33-rank concurrent read-only queries; specialist re-review PASS. Reporter14 tests, live telemetry reporter, combined real-workerd21 tests, targeted ESLint/APItypecheck, dependency build and runtime tunable checks pass. APItypecheck initially used stale dependency declarations after merge; rebuilding dependencies resolved it.
+
+Initial CI worker shard found alarm exact-total fixture race14vs15: existing scheduler skips duplicate persisted due times if recalculations share a millisecond. Test clock now advances one millisecond perread to make both writes deterministic; no production behavior change. FreshheadCI required.
+
+Staging deployment attempt1 timed out on activation/version consistency: VM-agent listversion1622, directGET1623, rollout1623completed100%; sandbox1908 in both. Prior gate PR2722 documents active-version lag, so this is not treated as proof the gate is incorrect. Parent coordinated one bounded attempt2; no new VM/functional test, no gate weakening. Release still waits final deployment/smoke completion.

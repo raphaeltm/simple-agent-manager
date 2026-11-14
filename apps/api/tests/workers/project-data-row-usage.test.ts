@@ -97,6 +97,10 @@ describe('ProjectData operation row usage in workerd', () => {
 
   it('attributes event admission, heartbeats and actual alarm sections through stubs', async () => {
     const spy = vi.spyOn(console, 'log');
+    // Alarm schedule persistence skips identical due times. Give each clock read a distinct
+    // millisecond so both recalculations write, independent of CI/workerd execution speed.
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => ++now);
     const stub = stubFor();
     const projectId = 'row-usage-events';
     await stub.ensureProjectId(projectId);

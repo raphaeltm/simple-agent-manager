@@ -20,7 +20,7 @@ const context = new AsyncLocalStorage<{ owner: RowUsage; label: string }>();
 
 /** Instance-local counters only: never persists, arms an alarm, or schedules a timer. */
 export class RowUsage {
-  private totals = new Map<string, RowUsageTotals>();
+  private readonly totals = new Map<string, RowUsageTotals>();
   private pending: {
     cursor: { readonly rowsRead?: number; readonly rowsWritten?: number };
     totals: RowUsageTotals;
@@ -115,12 +115,10 @@ export class RowUsage {
           return (...args: unknown[]) => {
             // Alarms have no SQL cursor; record successful alarm mutations separately.
             // SQLite-backed KV puts write one hidden-table row per key (not legacy 4 KiB units).
-            const count =
-              key === 'put' && typeof args[0] === 'object' && args[0] !== null
-                ? Object.keys(args[0]).length
-                : key === 'delete' && Array.isArray(args[0])
-                  ? args[0].length
-                  : 1;
+            let count = 1;
+            if (key === 'put' && typeof args[0] === 'object' && args[0] !== null)
+              count = Object.keys(args[0]).length;
+            else if (key === 'delete' && Array.isArray(args[0])) count = args[0].length;
             const result = value.apply(target, args);
             const record = (deleted?: number | boolean) => {
               const totals = this.current();

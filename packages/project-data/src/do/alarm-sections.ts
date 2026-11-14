@@ -350,8 +350,8 @@ export class ProjectDataAlarmTick {
     private readonly scheduler: ProjectDataAlarmSectionScheduler,
     private readonly runSection: (
       section: ProjectDataAlarmSection,
-      work: () => Promise<unknown> | unknown
-    ) => Promise<unknown> | unknown = (_section, work) => work()
+      work: () => unknown
+    ) => unknown = (_section, work) => work()
   ) {}
 
   /**

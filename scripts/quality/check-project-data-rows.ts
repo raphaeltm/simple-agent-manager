@@ -76,7 +76,7 @@ export function parseRowUsage(payload: unknown, rank: number): LabelRows[] {
   const rows = new Map<string, LabelRows>();
   const seen = new Map<string, Set<string>>();
   for (const calculation of parsed.result.calculations) {
-    if (!metricNames.some((name) => name === calculation.alias))
+    if (!(metricNames as readonly string[]).includes(calculation.alias))
       throw new Error('Unexpected calculation');
     if (calculation.aggregates.length >= 1000)
       throw new Error('Telemetry label results reached the query limit');
@@ -98,7 +98,7 @@ export function parseRowUsage(payload: unknown, rank: number): LabelRows[] {
         rowsWritten: 0,
         alarmWrites: 0,
       };
-      const metric = metricNames.find((name) => name === calculation.alias)!;
+      const metric = calculation.alias as (typeof metricNames)[number];
       const metrics = seen.get(label) ?? new Set<string>();
       if (metrics.has(metric)) throw new Error('Duplicate label aggregate');
       metrics.add(metric);
@@ -128,19 +128,29 @@ export async function reportProjectDataRows(options: {
     const timeframe = options.timeframe ?? completeUtcDay();
     // Each log contains ranked slots. Group each slot by its label and merge across ranks;
     // otherwise a method moving rank between windows would be attributed to the wrong writer.
-    for (let rank = 0; rank <= ROW_USAGE_LABEL_LIMIT; rank++) {
-      const response = await (options.fetcher ?? fetch)(
-        options.endpoint ??
-          `https://api.cloudflare.com/client/v4/accounts/${options.accountId}/workers/observability/telemetry/query`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${options.token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(rowUsageQuery(rank, timeframe, options.service, options.projectId)),
-          signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
-        }
-      );
-      if (!response.ok) throw new Error(`Workers telemetry HTTP ${response.status}`);
-      for (const row of parseRowUsage(await response.json(), rank)) {
+    const rankedRows = await Promise.all(
+      Array.from({ length: ROW_USAGE_LABEL_LIMIT + 1 }, async (_, rank) => {
+        const response = await (options.fetcher ?? fetch)(
+          options.endpoint ??
+            `https://api.cloudflare.com/client/v4/accounts/${options.accountId}/workers/observability/telemetry/query`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${options.token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(
+              rowUsageQuery(rank, timeframe, options.service, options.projectId)
+            ),
+            signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
+          }
+        );
+        if (!response.ok) throw new Error(`Workers telemetry HTTP ${response.status}`);
+        return parseRowUsage(await response.json(), rank);
+      })
+    );
+    for (const rows of rankedRows) {
+      for (const row of rows) {
         const total = totals.get(row.label) ?? {
           label: row.label,
           calls: 0,
