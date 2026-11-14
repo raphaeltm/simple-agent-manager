@@ -95,6 +95,24 @@ export const DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = 20_000;
 export const DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS = 5_000;
 
 /**
+ * Per-candidate wall-time budget of a cleanup-cron teardown that starts a provider deletion
+ * without waiting for it (two-phase deletion; admin setting
+ * `operations.nodeProviderDeletionRequestTimeoutMs`). It covers the pre-teardown node log capture
+ * (its own timeout is 5 s, `nodeLogCaptureTimeoutMs`), provider auth, the ownership re-read and the
+ * provider's instance lookup (GCP: up to 8 zone GETs plus an aggregated list, measured ~3.3 s with
+ * no hit, twice on the current-credential path), and the DELETE. No operation wait is inside it.
+ */
+export const DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * How long a started provider deletion may stay unconfirmed before the node is reported blocked
+ * (`teardown_deletion_unconfirmed`) and alerted (admin setting
+ * `operations.nodeProviderDeletionConfirmMaxMs`). GCP deletes of SAM VMs finished in 20 s to
+ * 2.4 min in production and staging, so 30 min is several times the slowest observed.
+ */
+export const DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS = 30 * 60 * 1000;
+
+/**
  * Default maximum workspace candidates processed per cleanup phase per sweep (rule 47).
  * Override via WORKSPACE_CLEANUP_SWEEP_LIMIT env var.
  */

@@ -8,8 +8,6 @@ export function workflowProjectSnapshot(project: Project) {
     defaultAgentType: project.defaultAgentType,
     agentDefaults: project.agentDefaults,
     defaultVmSize: project.defaultVmSize,
-    defaultProvider: project.defaultProvider,
-    defaultLocation: project.defaultLocation,
     defaultWorkspaceProfile: project.defaultWorkspaceProfile,
     defaultDevcontainerConfigName: project.defaultDevcontainerConfigName,
     resourceRequirementsJson: project.resourceRequirementsJson,

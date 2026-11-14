@@ -6,7 +6,7 @@ Repository hosting for the API worker: GitHub App installation tokens and JWTs, 
 tokens and refresh, installation account bookkeeping, the repo-id backfill and installation leak
 sweep, the workspace GitHub CLI policy, GitLab OAuth and API calls, and read-only repository
 browsing (`src/repo-browse/`: GitHub, GitLab and Artifacts). Extracted from `apps/api` by the
-worker modularization (`tasks/active/2026-11-12-worker-modularization.md`, W7).
+worker modularization (`tasks/archive/2026-11-12-worker-modularization.md`, W7).
 
 The package imports nothing from `apps/*`. It depends on `@simple-agent-manager/shared` and
 `@simple-agent-manager/worker-core` (kernel helpers, D1 tables from `./schema`). HTTP routes stay

@@ -433,7 +433,11 @@ jobs:
         run: pnpm build
 
       - name: Run tests with coverage
-        run: pnpm test:coverage
+        # Bound both package scheduling and each Vitest pool. On the measured
+        # four-CPU runner this allows two pools of at most three workers.
+        run: |
+          node -e "console.log('Available test CPUs:', require('node:os').availableParallelism())"
+          pnpm test:coverage --concurrency=2 -- --maxWorkers=75%
 
   build:
     name: Build
@@ -899,6 +903,10 @@ jobs:
 
       - name: Assert Go version
         run: go version | grep -E '^go version go1\.26\.11 '
+
+      # The real Instant collect route resolves its canonical /workspaces mount.
+      - name: Prepare Instant workspace mountpoint
+        run: sudo install -d -o "$(id -u)" -g "$(id -g)" /workspaces
 
       - name: Run VM Agent tests
         working-directory: packages/vm-agent

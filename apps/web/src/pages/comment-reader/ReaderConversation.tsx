@@ -22,8 +22,6 @@ import {
 } from 'react';
 
 import { AcpConversationItemView } from '../../components/project-message-view/AcpConversationItemView';
-import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
-import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 import {
   boxPlacement,
   itemElement,
@@ -32,7 +30,10 @@ import {
   scrollBoxIntoView,
   targetBox,
   useQuoteHighlights,
-} from './quote-highlight';
+  USER_SCROLL_EVENTS,
+} from '../../components/project-message-view/comments/quote-highlight';
+import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
+import { usePlatformCapabilities } from '../../hooks/usePlatformCapabilities';
 
 /** Distance from an edge, in px, at which a reader's own scroll loads more. */
 const EDGE_LOAD_PX = 160;
@@ -315,13 +316,10 @@ export function ReaderConversation({
     const mark = () => {
       userScrolled.current = true;
     };
-    scroller.addEventListener('wheel', mark, { passive: true });
-    scroller.addEventListener('touchmove', mark, { passive: true });
-    scroller.addEventListener('keydown', mark);
+    // The same signals end the chat's and the library's reveal window.
+    for (const name of USER_SCROLL_EVENTS) scroller.addEventListener(name, mark, { passive: true });
     return () => {
-      scroller.removeEventListener('wheel', mark);
-      scroller.removeEventListener('touchmove', mark);
-      scroller.removeEventListener('keydown', mark);
+      for (const name of USER_SCROLL_EVENTS) scroller.removeEventListener(name, mark);
     };
   }, []);
 

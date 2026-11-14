@@ -1,0 +1,134 @@
+{
+  "status": "initial_profiling_not_final_stability",
+  "fixture": {
+    "rows": 100,
+    "metadataBytesPerRow": 204800,
+    "timeoutMs": 30000
+  },
+  "measurements": [
+    {
+      "name": "normal",
+      "cpuAffinity": null,
+      "busyWorkers": 0,
+      "coverage": false,
+      "phases": [
+        {
+          "phase": "migrations-fixture-refusal",
+          "ms": 294.00497399999995
+        },
+        {
+          "phase": "prepare",
+          "ms": 92.60206800000014
+        },
+        {
+          "phase": "copy",
+          "ms": 932.5277789999998
+        },
+        {
+          "phase": "seal-revalidation",
+          "ms": 474.95227300000033
+        },
+        {
+          "phase": "24-paging-variants",
+          "ms": 386.6927219999998
+        },
+        {
+          "phase": "tools-search",
+          "ms": 22.92131500000005
+        },
+        {
+          "phase": "default-recovery",
+          "ms": 397.0671449999995
+        },
+        {
+          "phase": "negative-read-checks",
+          "ms": 4.330337000000327
+        }
+      ],
+      "timeout": false,
+      "phaseTotalMs": 2605.098613
+    },
+    {
+      "name": "loaded",
+      "cpuAffinity": [
+        0,
+        1
+      ],
+      "busyWorkers": 2,
+      "coverage": true,
+      "phases": [
+        {
+          "phase": "migrations-fixture-refusal",
+          "ms": 602.0909980000001
+        },
+        {
+          "phase": "prepare",
+          "ms": 217.734555
+        },
+        {
+          "phase": "copy",
+          "ms": 1989.7974629999999
+        },
+        {
+          "phase": "seal-revalidation",
+          "ms": 1067.6213790000002
+        },
+        {
+          "phase": "24-paging-variants",
+          "ms": 936.8161249999994
+        },
+        {
+          "phase": "tools-search",
+          "ms": 35.949516000000585
+        },
+        {
+          "phase": "default-recovery",
+          "ms": 874.8176160000003
+        },
+        {
+          "phase": "negative-read-checks",
+          "ms": 11.748982999999498
+        }
+      ],
+      "timeout": false,
+      "phaseTotalMs": 5736.576634999999
+    },
+    {
+      "name": "oversubscribed",
+      "cpuAffinity": [
+        0,
+        1
+      ],
+      "busyWorkers": 18,
+      "coverage": true,
+      "phases": [
+        {
+          "phase": "migrations-fixture-refusal",
+          "ms": 5036.439562
+        },
+        {
+          "phase": "prepare",
+          "ms": 1103.3331940000007
+        },
+        {
+          "phase": "copy",
+          "ms": 10629.424911999999
+        },
+        {
+          "phase": "seal-revalidation",
+          "ms": 5556.280745
+        },
+        {
+          "phase": "24-paging-variants",
+          "ms": 4822.078344999998
+        },
+        {
+          "phase": "tools-search",
+          "ms": 221.09300200000143
+        }
+      ],
+      "timeout": true,
+      "phaseTotalMs": 27368.64976
+    }
+  ]
+}

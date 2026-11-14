@@ -1,9 +1,8 @@
 import { requireOpenIdeaForWorkStart } from '@simple-agent-manager/operations';
 import { inheritedCredentialAttributionForCaller } from '@simple-agent-manager/scheduler-core';
-import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
+import type { CredentialSource } from '@simple-agent-manager/shared';
 import { ACP_SESSION_DEFAULTS } from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
-import { isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -19,6 +18,7 @@ import { jsonValidator, StartChatSessionSchema } from '../schemas';
 import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
+import { validateRunAgentConfiguration } from '../services/run-agent-configuration';
 import { resolveSkillProfile } from '../services/skills';
 import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { truncateTitle } from '../services/task-title';
@@ -57,15 +57,6 @@ function appendSystemPrompt(
 ): string {
   const suffix = systemPromptAppend?.trim();
   return suffix ? `${message}\n\n${suffix}` : message;
-}
-
-function resolveProvider(
-  profileProvider: string | null | undefined,
-  projectProvider: string | null | undefined
-): CredentialProvider | null {
-  if (profileProvider && isValidProvider(profileProvider)) return profileProvider;
-  if (projectProvider && isValidProvider(projectProvider)) return projectProvider;
-  return null;
 }
 
 async function resolveParentLineage(
@@ -148,11 +139,9 @@ chatStartRoutes.post(
       body.agentProfileId || body.skillId
         ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
         : null;
-    const provider = resolveProvider(resolvedProfile?.provider, project.defaultProvider);
     const runtime = await resolveWorkspaceRuntime(db, c.env, {
       userId,
       projectId,
-      provider,
       explicitRuntime: resolvedProfile?.runtime ?? null,
     });
 
@@ -177,6 +166,11 @@ chatStartRoutes.post(
       'opencode';
     // Before any effect: an effort the resolved agent cannot run is rejected here.
     const agentRun = resolveTaskAgentOverrides(agentType, body, resolvedProfile ?? {});
+    const agentConfigurationId = await validateRunAgentConfiguration(db, {
+      userId,
+      configurationId: body.agentConfigurationId,
+      agentType,
+    });
 
     const parentTask = await resolveParentLineage(
       db,
@@ -211,6 +205,7 @@ chatStartRoutes.post(
       agentProfileHint: resolvedProfile?.profileId ?? null,
       skillId: resolvedProfile?.skillId ?? null,
       skillHint: body.skillId ?? null,
+      agentConfigurationId,
       taskMode: 'conversation',
       triggeredBy: 'user',
       // Never another member's credentials: a teammate's parent task must not make this one

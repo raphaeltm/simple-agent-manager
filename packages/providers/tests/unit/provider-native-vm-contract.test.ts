@@ -482,7 +482,7 @@ describe('provider native VM request contracts', () => {
       'us-central1-a',
       'ubuntu-2404-lts-amd64',
       'ubuntu-os-cloud',
-      200
+      { gbPerVcpu: 20, minGb: 200 }
     );
     await provider.createVM({
       name: 'sam-native-node',
@@ -526,7 +526,7 @@ describe('provider native VM request contracts', () => {
       'us-central1-a',
       'ubuntu-2404-lts-amd64',
       'ubuntu-os-cloud',
-      200
+      { gbPerVcpu: 20, minGb: 200 }
     );
     await provider.createVM({
       name: 'sam-native-node',
@@ -553,7 +553,7 @@ describe('provider native VM request contracts', () => {
       'us-central1-a',
       'ubuntu-2404-lts-amd64',
       'ubuntu-os-cloud',
-      200
+      { gbPerVcpu: 20, minGb: 200 }
     );
     await provider.createVM({
       ...nativeConfig('small'),

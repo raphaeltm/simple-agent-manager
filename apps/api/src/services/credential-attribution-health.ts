@@ -11,16 +11,16 @@ import type { AppDb } from '../middleware/project-auth';
 import { parseCacheTtlMs } from './cache-config';
 import { getProjectMultiplayerState } from './project-multiplayer';
 
-type ProjectRow = Pick<
-  schema.Project,
-  'id' | 'defaultAgentType' | 'defaultProvider'
->;
+type ProjectRow = Pick<schema.Project, 'id' | 'defaultAgentType'>;
 
 type TriggerWithProfile = schema.TriggerRow & {
   profileAgentType: string | null;
-  profileProvider: string | null;
 };
 
+/**
+ * Compute placement has no per-project or per-profile provider: the effective compute pool picks
+ * it, so every trigger's compute target is the inherited one.
+ */
 const INHERITED_COMPUTE_TARGET = 'inherited-provider';
 export const DEFAULT_CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS = 10_000;
 
@@ -60,12 +60,17 @@ interface ProjectAttachmentCoverage {
   ownerId: string | null;
 }
 
-function userMeta(row: {
-  id: string;
-  name: string | null;
-  email: string | null;
-  avatarUrl: string | null;
-} | null | undefined): CredentialAttributionUser | null {
+function userMeta(
+  row:
+    | {
+        id: string;
+        name: string | null;
+        email: string | null;
+        avatarUrl: string | null;
+      }
+    | null
+    | undefined
+): CredentialAttributionUser | null {
   if (!row) return null;
   return {
     id: row.id,
@@ -96,7 +101,7 @@ function findCoverage(
   const computeCoverage = Array.from(coverage.entries())
     .filter(([key]) => key.startsWith('compute:'))
     .map(([, item]) => item);
-  return computeCoverage.length === 1 ? computeCoverage[0] ?? null : null;
+  return computeCoverage.length === 1 ? (computeCoverage[0] ?? null) : null;
 }
 
 function resourceHasPersonalWarning(resource: CredentialAttributionResource): boolean {
@@ -163,7 +168,10 @@ async function loadProjectAttachmentCoverage(
       schema.ccConfigurations,
       eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id)
     )
-    .leftJoin(schema.ccCredentials, eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id))
+    .leftJoin(
+      schema.ccCredentials,
+      eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id)
+    )
     .where(
       and(
         eq(schema.ccAttachments.projectId, projectId),
@@ -186,7 +194,10 @@ async function loadProjectAttachmentCoverage(
   return coverage;
 }
 
-async function loadUsers(db: AppDb, userIds: string[]): Promise<Map<string, CredentialAttributionUser>> {
+async function loadUsers(
+  db: AppDb,
+  userIds: string[]
+): Promise<Map<string, CredentialAttributionUser>> {
   const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
   if (uniqueIds.length === 0) return new Map();
 
@@ -216,10 +227,6 @@ function inferAgentTarget(
   return trigger.profileAgentType ?? project.defaultAgentType ?? defaultAgentType;
 }
 
-function inferComputeTarget(trigger: TriggerWithProfile, project: ProjectRow): string {
-  return trigger.profileProvider ?? project.defaultProvider ?? INHERITED_COMPUTE_TARGET;
-}
-
 export async function buildCredentialAttributionForTriggers(input: {
   db: AppDb;
   project: ProjectRow;
@@ -237,7 +244,6 @@ export async function buildCredentialAttributionForTriggers(input: {
         .select({
           id: schema.agentProfiles.id,
           agentType: schema.agentProfiles.agentType,
-          provider: schema.agentProfiles.provider,
         })
         .from(schema.agentProfiles)
         .where(inArray(schema.agentProfiles.id, profileIds))
@@ -249,7 +255,6 @@ export async function buildCredentialAttributionForTriggers(input: {
     return {
       ...trigger,
       profileAgentType: profile?.agentType ?? null,
-      profileProvider: profile?.provider ?? null,
     };
   });
 
@@ -264,7 +269,7 @@ export async function buildCredentialAttributionForTriggers(input: {
   for (const trigger of triggersWithProfile) {
     const owner = users.get(trigger.userId) ?? null;
     const agentTarget = inferAgentTarget(trigger, project, defaultAgentType);
-    const computeTarget = inferComputeTarget(trigger, project);
+    const computeTarget = INHERITED_COMPUTE_TARGET;
     const fixHref = `/projects/${project.id}/settings/connections`;
     const agentCoverage = findCoverage(coverage, 'agent', agentTarget);
     const computeCoverage = findCoverage(coverage, 'compute', computeTarget);
@@ -276,7 +281,7 @@ export async function buildCredentialAttributionForTriggers(input: {
         label: `Agent credential (${agentTarget})`,
         owner,
         coverage: agentCoverage,
-        coverageOwner: agentCoverage?.ownerId ? users.get(agentCoverage.ownerId) ?? null : null,
+        coverageOwner: agentCoverage?.ownerId ? (users.get(agentCoverage.ownerId) ?? null) : null,
         fixHref,
       }),
       buildCheck({
@@ -285,7 +290,9 @@ export async function buildCredentialAttributionForTriggers(input: {
         label: `Compute credential (${computeTarget})`,
         owner,
         coverage: computeCoverage,
-        coverageOwner: computeCoverage?.ownerId ? users.get(computeCoverage.ownerId) ?? null : null,
+        coverageOwner: computeCoverage?.ownerId
+          ? (users.get(computeCoverage.ownerId) ?? null)
+          : null,
         fixHref,
       }),
     ]);
@@ -310,8 +317,9 @@ export async function getProjectCredentialAttributionHealth(input: {
     return cached.summary;
   }
 
-  const multiplayerActive = input.multiplayerActive
-    ?? (await getProjectMultiplayerState(db, project.id, new Date(nowMs), input.env))
+  const multiplayerActive =
+    input.multiplayerActive ??
+    (await getProjectMultiplayerState(db, project.id, new Date(nowMs), input.env))
       .multiplayerActive;
   const triggerRows = await db
     .select()
@@ -332,9 +340,7 @@ export async function getProjectCredentialAttributionHealth(input: {
       projectId: project.id,
       kind: 'trigger',
       title: trigger.name,
-      subtitle: trigger.sourceType === 'cron'
-        ? trigger.cronExpression
-        : trigger.sourceType,
+      subtitle: trigger.sourceType === 'cron' ? trigger.cronExpression : trigger.sourceType,
       href: `/projects/${project.id}/triggers/${trigger.id}`,
       createdBy,
       checks,

@@ -13,8 +13,8 @@ them as **Your compute pool**, **Project compute pool**, or **Shared compute poo
 where you are.
 
 :::note
-Most people never open this page in the product. If you have connected a cloud provider (or you
-are on the hosted platform, where compute is provided for you), SAM sets up a sensible pool the
+Most people never open this page in the product. If you have connected a cloud provider (or your
+installation's administrator provides compute for you), SAM sets up a sensible pool the
 first time it needs one and keeps it in sync. Read on when you want to control _which_ machines
 get rented, _how big_ they are, or _what happens when your provider is out of capacity_.
 :::
@@ -112,25 +112,22 @@ is which:
 | **Default Resources**      | How much machine work asks for, when nothing more specific says otherwise                                  |
 | **Workspace Idle Timeout** | How long a quiet workspace is kept (see [Warm reuse](#warm-reuse) for how it differs from warm machines)   |
 | **Project compute pool**   | Which concrete machines SAM may rent, and how it chooses between them — for workspaces and for deployments |
-| **Scaling & Scheduling**   | The default provider and region, plus how densely nodes are packed and how long they stay warm             |
+| **Scaling & Scheduling**   | Task limits, how densely nodes are packed, and how long they stay warm                                     |
 
 **Default Resources** and **Scaling & Scheduling** feed the pool decisions described below, so they
 are covered here too.
 
-### Default provider and region
+### Provider and region come from the pool
 
-**Scaling & Scheduling → Provider & Location** sets a project's default provider and region. They
-are not part of the pool, but they narrow what the pool may choose from:
+Projects, agent profiles, and skills have no provider or region setting. Where a VM runs is decided
+by the effective compute pool and the work's resource requirements: any offering in the pool that
+fits the requirements is eligible, whatever its cloud or region. To keep a project on a particular
+cloud or region, give the project its own pool containing only those offerings.
 
-- The **provider** is a hard filter. Once a provider is resolved — from an explicit request, then
-  the agent profile, then the project default — offerings from every other provider are dropped,
-  even if the pool allows them. If your pool spans two clouds and everything lands on one of them,
-  this setting is usually why.
-- The **region** is only a preference. A project default region influences which offering is picked
-  but does not exclude the others; only a region requested explicitly for that piece of work pins
-  placement to it.
-
-Leave both blank and SAM uses whatever the pool and the resolved credentials allow.
+Only a provider or region requested explicitly for one piece of work (for example the `provider` and
+`vmLocation` options of `dispatch_task` or task submission) narrows placement, and only for that
+work. (`resolveProvider()` and `resolveVmLocation()` in
+`packages/scheduler-core/src/placement-field-resolution.ts`)
 
 **Waking a sleeping session** keeps the resources the session originally resolved, not its machine
 type or region. The region it slept in is a preference: a running machine there is reused first,
@@ -152,8 +149,8 @@ project  →  user  →  installation
 - A project with its own pool uses that pool. Its nodes are dedicated to that project.
 - No project pool? Your personal pool applies, and your nodes can host your work across the
   projects you have access to.
-- Neither? The installation pool applies. On the hosted platform this is the "installation-funded"
-  compute that lets you work without connecting a cloud account of your own.
+- Neither? The installation pool applies. When the administrator connected a shared cloud account, this is the
+  "installation-funded" compute that lets you work without connecting a cloud account of your own.
 
 :::caution
 **There is no fallback _between_ pools.** Precedence is decided by whether a pool _exists_, not by
@@ -210,9 +207,17 @@ connection (for example **Google Cloud · SAM GCP Prod**), or where you manage i
 (**Hetzner · Infrastructure settings**), so you can tell two accounts apart without seeing credential
 ids (`attachCapacitySourceLabels()`).
 
-An account that is disconnected, deleted or disabled disappears from the pool on its own, with its
-machines, and SAM never places on it. Its records are kept rather than deleted, because running
-machines may still reference them.
+Saving an account's credential again, or rotating its key, keeps the account in the pool together
+with the machines you picked from it and its place in the provider order: the connection keeps its
+identity across a save (`replaceUserGcpCredential()` for Google Cloud, an in-place update for every
+other provider).
+
+An account that is disabled disappears from the pool on its own, with its machines, and SAM never
+places on it; its records are kept. Disconnecting or deleting an account removes it from the pool
+together with the machines you picked from it. Connecting it again adds it as a new account with
+nothing picked, so pick its machines again. Machines SAM already created from a removed account
+are still cleaned up normally (`capacitySourceReleasedSql()` in
+`apps/api/src/services/node-teardown-provenance.ts`).
 
 #### Switching an account off
 
@@ -232,8 +237,7 @@ strategy or price would otherwise prefer. Within one source, the strategy still 
 order does not list come after every listed one.
 
 Every account you want in the order must already be connected as one of the pool's
-[sources](#sources) and have machines in the pool, and a project or agent profile that sets a
-default provider still limits the pool to that provider. To choose which cloud account SAM tries
+[sources](#sources) and have machines in the pool. To choose which cloud account SAM tries
 first:
 
 1. Open the pool: **Project → Settings → Infrastructure** for a project's pool, or the
@@ -263,7 +267,6 @@ The same order can be set through the pool update API (`sourceOrder`, a list of 
 - **No order (the default) means every source is equal**, which is how pools behaved before ordering
   existed.
 - **Changing the order does not disturb running machines.** It applies to the next new machine.
-- A project or agent profile that sets a default provider still limits the pool to that provider.
 
 **Falling back to the next provider.** When the first source cannot create a machine, SAM moves on
 to the next source in the order and tries there. That happens when the provider:
@@ -384,8 +387,7 @@ A few things worth knowing:
   every workspace still being set up there. Among existing machines that already fit, the one with fewer workspaces waiting goes
   first; strategy breaks ties. A machine that is busy setting up is still used when it is the only
   one that fits: SAM queues the work there and does not start a new machine just to avoid the
-  wait. A location you asked for explicitly still comes before the queue; a default location does
-  not. (`compareReusableHosts()` in `apps/api/src/durable-objects/task-runner/task-placement-strategy.ts`)
+  wait. A location you asked for explicitly still comes before the queue. (`compareReusableHosts()` in `apps/api/src/durable-objects/task-runner/task-placement-strategy.ts`)
 
 The session's infrastructure panel spells the applied ordering out in plain language — for
 example, _"Why this node: lowest projected utilization first"_.
@@ -715,7 +717,6 @@ remove it so a lower scope applies.
 | A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                                                                                                                                                        |
 | The pool cannot be edited                                              | The project has no pool of its own and shows the one it falls back to, read-only: follow **Edit your pool** (or **Edit the shared pool**), or connect a cloud account to the project to give it its own. Otherwise, editing a project's pool takes the project's owner or admin role (everyone who joins through an invitation is an admin), and the installation pool takes a superadmin.              |
 | The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                                                                                                                                                         |
-| Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                                                                                                                                           |
 | Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and **Machine limit**. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                                                                                                                                           |
 | Work waits for capacity even though the policy is **Fail**             | The provider reported an account limit (server or vCPU core limit, the latter after trying smaller offerings under Fallback chain), or the pool's [Machine limit](#machine-limit) is reached. Both always wait.                                                                                                                                                                                         |
 

@@ -2,7 +2,6 @@
  * Incarnation fences and exact provider resolution shared by strict node teardown.
  * Split out of `strict-node-deletion.ts` (rule 18); behavior unchanged.
  */
-import { hasAmbiguousLabel, type VMInstance } from '@simple-agent-manager/providers';
 import { type CredentialProvider } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
@@ -130,7 +129,12 @@ export function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
   const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
   return { targetProvider, attributionUserId, attributionProjectId, exactCredential };
 }
-export function hasManagedVmPlacementProof(node: NodeRow): boolean {
+/**
+ * Code twin of `cleanupNodeProvenanceSql`'s snapshot branch. A released `capacity_source_id`
+ * (its source was deleted with the credential) counts only when the caller has checked the
+ * release in D1 with `isNodeCapacitySourceReleased`; a NULL column alone proves nothing.
+ */
+export function hasManagedVmPlacementProof(node: NodeRow, capacitySourceReleased = false): boolean {
   const hasText = (value: string | null): boolean => !!value?.trim();
   return (
     ['workspace', 'deployment'].includes(node.nodeRole) &&
@@ -147,7 +151,8 @@ export function hasManagedVmPlacementProof(node: NodeRow): boolean {
     (node.providerInstanceVcpuCount ?? 0) > 0 &&
     (node.providerInstanceMemoryMb ?? 0) > 0 &&
     hasText(node.capacityPoolId) &&
-    hasText(node.capacitySourceId) &&
+    (hasText(node.capacitySourceId) ||
+      (capacitySourceReleased && node.capacitySourceId === null)) &&
     hasText(node.capacityPoolCandidateId) &&
     hasText(node.placementCredentialReference) &&
     hasText(node.placementCredentialFingerprint) &&
@@ -222,25 +227,6 @@ export async function requireStrictNodeProvider(
   return providerResult;
 }
 
-export async function resolveStrictNodeProvider(
-  db: NodeDb,
-  node: NodeRow,
-  userId: string,
-  env: Env
-): Promise<ProviderForUserResult> {
-  if (!node.providerInstanceId) {
-    throw new Error(`Cannot strictly resolve provider for node ${node.id}: instance ID is missing`);
-  }
-  const targetProvider = node.cloudProvider as CredentialProvider | null;
-  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
-  if (!targetProvider || providerResult.providerName !== targetProvider) {
-    throw new Error(
-      `Cannot strictly delete node ${node.id}: persisted provider binding did not resolve exactly`
-    );
-  }
-  return providerResult;
-}
-
 /**
  * Providers whose filtered inventory read is complete or fails closed. Hetzner: fully paginated,
  * fail-closed list. GCP: fully paginated aggregated list that throws when any zone is
@@ -249,13 +235,3 @@ export async function resolveStrictNodeProvider(
  * (self-host box, 2026-11-11); its VM is found here by its exact ownership labels.
  */
 export const COMPLETE_INVENTORY_PROVIDERS = new Set(['hetzner', 'gcp']);
-
-/** Every ownership label repeats exactly, and none is ambiguous, on the server the provider returned. */
-export function providerInventoryMatchesLabels(
-  server: VMInstance,
-  labels: Record<string, string>
-): boolean {
-  return Object.entries(labels).every(
-    ([key, value]) => !hasAmbiguousLabel(server.labels, key) && server.labels[key] === value
-  );
-}

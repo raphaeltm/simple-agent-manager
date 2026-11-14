@@ -4,7 +4,8 @@ import * as v from 'valibot';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { prepareBoundedStrandedRetirement } from '../../services/bounded-stranded-retirement-authority';
-import { persistError } from '../../services/observability';
+import { NODE_TEARDOWN_BLOCKED_REASON_PREFIX } from '../../services/node-teardown-authority';
+import { alertNodeCleanupBlocked } from '../../services/node-teardown-blocked';
 import { preparePreservedVmRetirement } from '../../services/preserved-vm-retirement';
 import { repairRetiredVmSleepSnapshots } from '../../services/retired-vm-sleep-repair';
 import {
@@ -13,7 +14,7 @@ import {
   diagnoseCleanupRefusal,
   recordCleanupRefusal,
 } from './cleanup-refusal';
-import type { CleanupConfig } from './config';
+import { type CleanupConfig, minimumTeardownAttemptMs } from './config';
 import {
   type CleanupDb,
   destroyNodeForCleanup,
@@ -23,43 +24,28 @@ import {
 import { repairStrandedRetirementNotices } from './stranded-retirement-notices';
 import { type RetirementSource, verifyRetirementSource } from './stranded-source-preservation';
 
-async function alertBlockedNode(
+function alertBlockedNode(
   env: Env,
   node: CleanupRefusalNode,
   refusal: CleanupRefusal,
   now: Date,
   intervalMs: number
 ): Promise<void> {
-  const cutoff = new Date(now.getTime() - intervalMs).toISOString();
-  const claimed = await env.DATABASE.prepare(
-    `UPDATE nodes SET cleanup_blocked_alerted_at=?
-    WHERE id=? AND user_id=? AND status=? AND cleanup_blocked_since IS NOT NULL
-      AND (cleanup_blocked_alerted_at IS NULL OR cleanup_blocked_alerted_at <= ?)`
-  )
-    .bind(now.toISOString(), node.id, node.user_id, node.status, cutoff)
-    .run();
-  if (!claimed.meta.changes) return;
-  const context = {
-    recoveryType: 'bounded_stranded_node_ownership_blocked',
-    nodeId: node.id,
-    userId: node.user_id,
-    blockedSince: refusal.cleanup_blocked_since,
-    reasons: refusal.reasons,
-    provider: refusal.cloud_provider,
-    providerInstanceId: refusal.provider_instance_id,
-  };
-  log.error('node_cleanup.stranded_node_ownership_blocked', context);
-  await persistError(
-    env.OBSERVABILITY_DATABASE,
+  return alertNodeCleanupBlocked(
+    env,
     {
-      source: 'api',
-      level: 'error',
       nodeId: node.id,
       userId: node.user_id,
-      message: `VM may still exist at provider: ${refusal.cloud_provider ?? 'unknown'} ${refusal.provider_instance_id ?? 'unknown'}; cleanup requires ownership/operator resolution`,
-      context,
+      status: node.status,
+      blockedSince: refusal.cleanup_blocked_since,
+      reasons: refusal.reasons,
+      provider: refusal.cloud_provider,
+      providerInstanceId: refusal.provider_instance_id,
+      runtimeIncarnationId: refusal.runtime_incarnation_id,
+      recoveryType: 'bounded_stranded_node_ownership_blocked',
     },
-    env
+    now,
+    intervalMs
   );
 }
 
@@ -151,6 +137,8 @@ export async function sweepStrandedNodes(
   const candidates = await env.DATABASE.prepare(
     `SELECT id,user_id,status,cleanup_blocked_since FROM nodes
     WHERE node_class='managed' AND runtime='vm' AND status IN ('stopped','destroying')
+      -- A started provider deletion belongs to the confirm phase, which bounds and alerts it.
+      AND provider_deletion_requested_at IS NULL
       AND (cleanup_blocked_since IS NULL OR cleanup_backoff_until IS NULL OR cleanup_backoff_until <= ?
         OR (cleanup_blocked_since <= ? AND (cleanup_blocked_alerted_at IS NULL OR cleanup_blocked_alerted_at <= ?)))
     ORDER BY CASE WHEN cleanup_blocked_since <= ? THEN 0 ELSE 1 END,
@@ -165,7 +153,7 @@ export async function sweepStrandedNodes(
     )
     .all<CleanupRefusalNode>();
   for (const node of candidates.results) {
-    if (Date.now() >= sweepDeadline) break;
+    if (sweepDeadline - Date.now() < minimumTeardownAttemptMs(config)) break;
     try {
       const refusal = await diagnoseCleanupRefusal(env, node, nowIso, idleThreshold);
       if (!refusal) continue;
@@ -245,8 +233,11 @@ export async function sweepStrandedNodes(
         workspaceIdleThresholdIso: idleThreshold,
         requestDeadlineMs: Math.min(
           sweepDeadline,
-          Date.now() + config.stoppedHandoffRequestTimeoutMs
+          Date.now() + config.providerDeletionRequestTimeoutMs
         ),
+        providerDeletion: 'request',
+        providerDeletionConfirmMaxMs: config.providerDeletionConfirmMaxMs,
+        providerDeletionSendGraceMs: config.providerDeletionRequestTimeoutMs,
         logEvent: 'node_cleanup.stranded_node_force_retiring',
         failureLogEvent: 'node_cleanup.stranded_node_force_retirement_failed',
         successMessage: 'Automatically retired stranded VM after cleanup refusal deadline',
@@ -261,7 +252,10 @@ export async function sweepStrandedNodes(
           unpreservedSources: JSON.stringify(lost),
         },
       });
-      if (destroyed === 'destroyed') {
+      if (destroyed === 'pending') {
+        // The DELETE is out; the confirm phase writes proof once the provider records it done.
+        result.providerDeletionsRequested++;
+      } else if (destroyed === 'destroyed') {
         result.lifetimeDestroyed++;
         log.warn('node_cleanup.stranded_node_force_retired', {
           nodeId: node.id,
@@ -272,12 +266,18 @@ export async function sweepStrandedNodes(
       } else if (destroyed === 'failed') {
         result.errors++;
         // A provider ownership refusal must retain the original deadline, even
-        // though the ordinary release helper intentionally clears its claim clock.
+        // though the ordinary release helper intentionally clears its claim clock. A named
+        // teardown refusal recorded by the failure itself is more specific than the catch-all.
         await env.DATABASE.prepare(
-          `UPDATE nodes SET cleanup_blocked_since=COALESCE(cleanup_blocked_since,?), cleanup_blocked_reason=? WHERE id=? AND user_id=? AND status IN ('stopped','destroying')`
+          `UPDATE nodes SET cleanup_blocked_since=COALESCE(cleanup_blocked_since,?),
+            cleanup_blocked_reason=CASE WHEN substr(COALESCE(cleanup_blocked_reason,''),1,?)=?
+              THEN cleanup_blocked_reason ELSE ? END
+          WHERE id=? AND user_id=? AND status IN ('stopped','destroying')`
         )
           .bind(
             firstBlocked,
+            NODE_TEARDOWN_BLOCKED_REASON_PREFIX.length,
+            NODE_TEARDOWN_BLOCKED_REASON_PREFIX,
             'strict_provider_ownership_or_deletion_failure',
             node.id,
             node.user_id

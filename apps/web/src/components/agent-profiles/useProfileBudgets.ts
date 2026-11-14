@@ -12,7 +12,13 @@ import { useAccountsData } from '../../hooks/useAccounts';
 import { explainProfileAccount } from '../accounts/profile-account-resolution';
 
 export type ProfileBudget =
-  | { kind: 'account'; label: string; usage: CredentialLimitCredentialSummary | null }
+  | {
+      kind: 'account';
+      /** The account's id (`cc_configurations.id`), the identity a run account is chosen by. */
+      accountId?: string;
+      label: string;
+      usage: CredentialLimitCredentialSummary | null;
+    }
   | { kind: 'platform' }
   | { kind: 'paused'; label: string | null }
   | { kind: 'none' };
@@ -45,6 +51,7 @@ export function useProfileBudgets(
         case 'account':
           budgets.set(profile.id, {
             kind: 'account',
+            accountId: outcome.account.id,
             label: outcome.account.label,
             usage: outcome.account.usage,
           });

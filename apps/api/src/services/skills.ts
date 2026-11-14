@@ -349,8 +349,6 @@ export async function resolveSkillProfile(
     vmSizeOverride: skill?.vmSizeOverride ?? profile.vmSizeOverride,
     skillVmSizeOverride: skill?.vmSizeOverride ?? null,
     agentProfileVmSizeOverride: profile.vmSizeOverride ?? null,
-    provider: skill?.provider ?? profile.provider,
-    vmLocation: skill?.vmLocation ?? profile.vmLocation,
     workspaceProfile: skill?.workspaceProfile ?? profile.workspaceProfile,
     runtime: isAgentProfileRuntime(skillRuntime) ? skillRuntime : profile.runtime,
     devcontainerConfigName: skill?.devcontainerConfigName ?? profile.devcontainerConfigName,

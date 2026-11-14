@@ -146,9 +146,16 @@ unresolved, or their count when the rail shows labels.
 On a narrow screen, such as a phone, it opens as a list instead, filtered to **Needs you** when
 something is waiting for you.
 
+The words an open comment is about are highlighted in blue in the chat. Select highlighted words to
+open their thread: in the **Comments** panel on a wide screen, or under the message on a narrower
+one. Where comments overlap, the newest open one is opened. Resolved comments are not highlighted.
+The same works in a library Markdown file: commented words are highlighted in the rendered file, and
+selecting them opens the file's comments on that thread.
+
 To see the threads across the whole project, open **Comments** in the project's navigation. It sorts
 them into **Needs you** (open threads where someone else had the last word), **With agent**,
-**Open**, and **Resolved**, and selecting one opens it in its conversation (next section).
+**Open**, and **Resolved**, and selecting one opens it in its conversation (next section). Selecting
+a comment on a library file opens the file with its comments on that thread.
 
 A comment never messages the agent by itself: an agent that reads comments treats them as
 background, not instructions, unless someone [sends one to it](#send-a-comment-to-the-agent). If you
@@ -174,7 +181,8 @@ view comes with v2026.10.24; before that, a comment opens in the chat itself.
 Scroll up or down to read more of the chat; earlier and later messages load as you reach them.
 **Back to the comment** takes you back to the highlighted words. The arrows at the top step to the
 previous or next comment in the order the Comments page shows them, and **Open in chat** opens the
-chat itself at that message. Comment and Mention notifications open the same view.
+chat itself at that message, with the quoted words highlighted and the thread open. Comment and
+Mention notifications open the same view.
 
 On a phone, **Open in chat** is the arrow at the top right, and the thread is a sheet at the bottom:
 tap or drag it up to see the whole thread. **Send to agent** shows only if you can drive the chat.

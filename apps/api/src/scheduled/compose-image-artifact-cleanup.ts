@@ -1,9 +1,13 @@
-// Moved to @simple-agent-manager/app-deployment (worker modularization W4).
-// Re-exported so existing importers keep working. A vi.mock of this path does not reach
-// imports made inside the package (see packages/app-deployment/AGENTS.md).
+/** Worker settings adapter for the canonical artifact/context retention sweeps. */
+import { runScheduledComposeImageArtifactCleanup as run } from '@simple-agent-manager/app-deployment/scheduled';
+
+import type { Env } from '../env';
+import { resolveAdminSetting } from '../services/admin-settings';
 export type { ComposeImageArtifactCleanupStats } from '@simple-agent-manager/app-deployment/scheduled';
 export {
   COMPOSE_IMAGE_ARTIFACT_PREFIX,
   runComposeImageArtifactCleanup,
-  runScheduledComposeImageArtifactCleanup,
 } from '@simple-agent-manager/app-deployment/scheduled';
+export function runScheduledComposeImageArtifactCleanup(env: Env, now: Date = new Date()) {
+  return run(env, { resolveSetting: (name) => resolveAdminSetting(env, name) }, now);
+}

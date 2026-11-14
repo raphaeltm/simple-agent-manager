@@ -1,8 +1,10 @@
 export {
+  activeChatAgentOverrides,
   chatAgentDefaults,
   type ChatAgentOverrides,
   effectiveChatAgent,
   EMPTY_CHAT_AGENT_OVERRIDES,
+  withChatAccount,
 } from './agent-overrides';
 export {
   ComposerOptionsButton,
@@ -23,4 +25,6 @@ export { ProfileAvatar } from './ProfileAvatar';
 export { ProfilePickerSheet } from './ProfilePickerSheet';
 export { ProfileToControl } from './ProfileToControl';
 export { ProfileUsageNudge } from './ProfileUsageNudge';
+export { type RunAccount, useRunAccounts } from './run-accounts';
+export { RunAccountButton, RunAccountPanel } from './RunAccountControl';
 export { type ProfileUsage, usageEntry, useProfileUsages } from './usage';

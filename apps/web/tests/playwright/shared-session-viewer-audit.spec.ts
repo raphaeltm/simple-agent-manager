@@ -39,7 +39,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-shared-viewer',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   defaultWorkspaceProfile: 'full',
   defaultDevcontainerConfigName: '',
   workspaceIdleTimeoutMs: null,

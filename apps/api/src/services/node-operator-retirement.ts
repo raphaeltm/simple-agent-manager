@@ -23,6 +23,7 @@ import { log, serializeError } from '../lib/logger';
 import { AppError, errors } from '../middleware/error';
 import {
   buildNodeProviderLabels,
+  nodeProviderLabelsMatch,
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
@@ -31,7 +32,6 @@ import {
   COMPLETE_INVENTORY_PROVIDERS,
   type NodeDb,
   type NodeRow,
-  providerInventoryMatchesLabels,
   requireStrictNodeProvider,
 } from './strict-node-deletion-shared';
 import { getProvisioningTimeoutMs } from './timeout';
@@ -92,7 +92,7 @@ async function askProvider(db: NodeDb, env: Env, node: NodeRow): Promise<Provide
   });
   try {
     const servers = await providerResult.provider.listVMs(labels);
-    const exact = servers.filter((server) => providerInventoryMatchesLabels(server, labels));
+    const exact = servers.filter((server) => nodeProviderLabelsMatch(server.labels, labels));
     if (exact.length > 0) {
       return {
         status: 'present',

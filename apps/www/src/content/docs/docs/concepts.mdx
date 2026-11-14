@@ -67,7 +67,7 @@ After a piece of work finishes, SAM keeps the environment **warm** for a short w
 
 A **provider** is the cloud your compute runs on. For running workspaces, SAM supports **Hetzner**, **Scaleway**, **Vultr**, **Infomaniak**, **DigitalOcean**, **UpCloud**, and **Google Cloud**. SAM follows a **Bring Your Own Cloud (BYOC)** model: you add your own provider credential as a cloud account in **Settings → Infrastructure**, and VM costs are billed directly to your account. An installation administrator can share compute credentials, so individual users may not need their own. Cloud credentials are never stored as environment variables.
 
-You can set a **default provider** and **default location** per project, and the resource requirements new work inherits. The exact machine types, regions, and pricing are shown when you start work.
+Which provider and location a VM uses is decided by the effective [compute pool](/docs/guides/compute-pools/) and the work's resource requirements; projects and agent profiles do not pin a provider or location. The exact machine types, regions, and pricing are shown when you start work.
 
 ## Accounts
 
@@ -90,7 +90,7 @@ Each project has:
 - A **chat** — the main surface where you describe work and watch agents run it
 - **Agent profiles** and **skills** — reusable configurations you pick from per chat (see below)
 - An **Ideas list** — what you want done, with whatever needs you first
-- A **default provider**, **default location**, and **default resource requirements** for new workspaces
+- An optional **compute pool** and **default resource requirements** for new workspaces
 - **Runtime configuration** — environment variables and files made available to workspaces
 
 ## Agent Profiles
@@ -210,7 +210,7 @@ For GitHub repositories (and GitHub sign-in), SAM uses a **GitHub App**. The app
 - **Contents: Read and write** — for cloning repos and pushing changes
 - **Email addresses: Read-only** — for user profile information
 - **Pull requests, Checks, Actions, and Issues: Read-only** — for project event facts from pull request, review, check, workflow, and issue webhooks
-- **Pull requests: Read and write**, instead of read-only, if agents should open pull requests. The hosted SAM App has it; a self-hosted App starts without it (see [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests))
+- **Pull requests: Read and write**, instead of read-only, if agents should open pull requests. A newly created App starts without it (see [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests))
 
 <Aside type="caution">
   User credentials (cloud provider credentials and agent credentials) are encrypted at rest using

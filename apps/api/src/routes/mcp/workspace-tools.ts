@@ -94,7 +94,7 @@ export async function lookupWorkspaceForVmAgent(
   };
 }
 
-function vmAgentUrlForPath(env: Env, nodeId: string, path: string): string {
+export function vmAgentUrlForPath(env: Env, nodeId: string, path: string): string {
   return `${getNodeBackendBaseUrl(nodeId, env)}${path}`;
 }
 

@@ -31,7 +31,7 @@ export const samTasksList = defineOperation({
   name: 'sam_tasks_list',
   title: 'List or search tasks',
   description:
-    'Use this when you need recent tasks or tasks matching a query across your projects or in one project. Filter by status and use nextCursor for another page.',
+    'Use this when you need recent tasks or tasks matching a query across your projects or in one project. Each task carries parentTaskId (its parent in a team), executionStep and sessionId (its chat). Filter by status and use nextCursor for another page; sam_team_status reads a whole parent-child tree.',
   kind: 'read',
   input: v.object({
     projectId: v.optional(v.string()),
@@ -259,7 +259,7 @@ export const samProfilesList = defineOperation({
   name: 'sam_profiles_list',
   title: 'List agent profiles',
   description:
-    'Use this when you need available agent profiles in a project before choosing sam_chat_start agentProfileId. Returns profile IDs, agent/model and runtime settings with cursor paging; query filters profile names/descriptions.',
+    'Use this when you need available agent profiles in a project before choosing sam_chat_start agentProfileId. Returns profile IDs, agent/model and runtime settings, and for each profile the account it runs on for you (account.state, account.tier, account.poolId, account.accountName) with cursor paging; query filters profile names/descriptions. Profiles sharing a poolId share one provider quota: read remaining usage with sam_usage_get. Never returns credentials.',
   kind: 'read',
   input: v.object({
     ...base,

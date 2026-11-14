@@ -5,7 +5,7 @@
 The worker side of SAM app deployments: Compose rendering and compose-publish apply, release
 routing, provider-backed volumes, custom domains, environment config and state, publish jobs,
 release events and failure recording, image tag resolution, and their two scheduled sweeps.
-Part of the worker modularization (`tasks/active/2026-11-12-worker-modularization.md`, W4).
+Part of the worker modularization (`tasks/archive/2026-11-12-worker-modularization.md`, W4).
 
 The package imports nothing from `apps/*`. It reads only `AppDeploymentEnv` (`src/env.ts`); the
 worker's `Env` extends it. Anything another area owns comes in through a port (`src/ports.ts`).

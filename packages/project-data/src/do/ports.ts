@@ -440,6 +440,8 @@ export interface StalledTaskClassifierConfig {
 }
 
 export interface OperationsPort {
+  /** Cached admin setting, refreshed only at object initialization and usage-window flush. */
+  rowUsageIntervalMs?(env: Env): Promise<number>;
   /** Record an archive circuit-breaker opening and notify operators once; never throws. */
   alertArchiveBreakerOpened(env: Env, opening: ProjectDataArchiveBreakerOpening): Promise<void>;
   /** Operational master brake for DO alarms; true means the alarm was deferred. */

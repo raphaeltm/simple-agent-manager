@@ -38,6 +38,7 @@ import {
   UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE,
 } from '../lib/library-cache';
 import { searchIndex } from '../lib/library-search';
+import { LIBRARY_COMMENT_THREAD_PARAM } from '../lib/project-routes';
 import { libraryFileQueryOptions } from '../lib/query-options';
 import { useProjectContext } from './ProjectContext';
 
@@ -87,19 +88,21 @@ export function ProjectLibrary() {
 }
 
 /**
- * The `?preview=fileId` viewer. It sits beside the listing, not inside it, so a direct link
- * opens the file without waiting for the library index to load.
+ * The `?preview=fileId[&commentThread=threadId]` viewer. It sits beside the listing, not inside
+ * it, so a direct link opens the file without waiting for the library index to load.
  */
 function LibraryUrlPreview() {
   const { projectId } = useProjectContext();
   const [searchParams, setSearchParams] = useSearchParams();
   const previewFileId = searchParams.get('preview');
+  const commentThreadId = searchParams.get(LIBRARY_COMMENT_THREAD_PARAM);
 
   const closePreview = useCallback(() => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
         next.delete('preview');
+        next.delete(LIBRARY_COMMENT_THREAD_PARAM);
         return next;
       },
       { replace: true }
@@ -107,7 +110,16 @@ function LibraryUrlPreview() {
   }, [setSearchParams]);
 
   if (!previewFileId) return null;
-  return <LibraryFilePreview projectId={projectId} fileId={previewFileId} onClose={closePreview} />;
+  return (
+    <LibraryFilePreview
+      // A new file or thread opens a fresh viewer, so its panel and focus start from the link.
+      key={`${previewFileId}:${commentThreadId ?? ''}`}
+      projectId={projectId}
+      fileId={previewFileId}
+      commentThreadId={commentThreadId}
+      onClose={closePreview}
+    />
+  );
 }
 
 function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {

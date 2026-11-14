@@ -23,11 +23,23 @@ export const projectChatPath = (projectId: string, sessionId: string) =>
 export const projectIdeaPath = (projectId: string, ideaId: string) =>
   `${projectRoot(projectId)}/ideas/${encodeURIComponent(ideaId)}`;
 
+/** Query parameter naming the comment thread a library file preview opens on. */
+export const LIBRARY_COMMENT_THREAD_PARAM = 'commentThread';
+
 /**
- * The project library, opened on one file's preview.
+ * The project library, opened on one file's preview, optionally with its comments panel open on
+ * one thread.
  *
- * The library page reads `?preview=<fileId>` and opens the modal for it, fetching the file
- * directly when it is not on the current page of results (`pages/ProjectLibrary.tsx`).
+ * The library page reads `?preview=<fileId>[&commentThread=<threadId>]` and opens the modal for
+ * it, fetching the file directly when it is not on the current page of results
+ * (`pages/ProjectLibrary.tsx`).
  */
-export const projectLibraryFilePath = (projectId: string, fileId: string) =>
-  `${projectRoot(projectId)}/library?preview=${encodeURIComponent(fileId)}`;
+export const projectLibraryFilePath = (
+  projectId: string,
+  fileId: string,
+  commentThreadId?: string
+) => {
+  const params = new URLSearchParams({ preview: fileId });
+  if (commentThreadId) params.set(LIBRARY_COMMENT_THREAD_PARAM, commentThreadId);
+  return `${projectRoot(projectId)}/library?${params.toString()}`;
+};

@@ -83,6 +83,13 @@ export const CONNECTOR_READ_SETTINGS = [
     description: 'Characters of each channel message returned to an app.',
     range: { min: 200, max: 4_096 },
   },
+  {
+    name: 'connector.usageStaleAfterMinutes',
+    defaultValue: 60,
+    description:
+      'Minutes after which sam_usage_get calls a provider usage sample stale. Samples arrive only while an agent runs on that account, so an idle account goes stale.',
+    range: { min: 1, max: 10_080 },
+  },
 ] as const;
 
 export type ConnectorReadSettingName = (typeof CONNECTOR_READ_SETTINGS)[number]['name'];

@@ -16,12 +16,17 @@ import { ProfilePickerSheet } from '../../../../src/components/project-chat/prof
 import { ProfileToControl } from '../../../../src/components/project-chat/profile-picker/ProfileToControl';
 import { ProfileUsageNudge } from '../../../../src/components/project-chat/profile-picker/ProfileUsageNudge';
 import {
+  roomiestAccount,
+  type RunAccount,
+} from '../../../../src/components/project-chat/profile-picker/run-accounts';
+import {
   type ProfileUsage,
   profileUsage,
-  roomierProfile,
+  ringLeft,
   usageNotice,
   usageSpoken,
 } from '../../../../src/components/project-chat/profile-picker/usage';
+import { USAGE_COLORS } from '../../../../src/components/project-chat/profile-picker/usage-windows';
 
 const NOW = Date.parse('2026-11-08T16:10:00Z');
 const MIN = 60_000;
@@ -138,7 +143,8 @@ describe('profileUsage', () => {
       window('claude.five_hour', 100, 'rejected', HOUR),
       window('claude.seven_day', 100, 'rejected', null),
     ]);
-    expect(usageNotice(profileUsage(unknown, NOW))).toBe('Out for now');
+    // The week is the one used up, and its return is unknown.
+    expect(usageNotice(profileUsage(unknown, NOW))).toBe('Week used up');
   });
 
   it('takes the countdown from the window the percentage is measured on', () => {
@@ -170,15 +176,19 @@ describe('profileUsage', () => {
 });
 
 describe('usage words', () => {
-  it('stays quiet while there is room, and speaks the room for screen readers', () => {
+  it('stays quiet while both windows have more than half left, and speaks both', () => {
     const roomy = profileUsage(ROOMY, NOW);
     expect(usageNotice(roomy)).toBeNull();
-    expect(usageSpoken(roomy)).toBe('83% left');
+    expect(usageSpoken(roomy)).toBe('5h 83% left, Week 91% left');
   });
 
-  it('names the reset when low, and the return when out', () => {
-    expect(usageNotice(profileUsage(LOW, NOW))).toBe('6% left · resets 52m');
-    expect(usageNotice(profileUsage(OUT, NOW))).toBe('Out · back in 2h 10m');
+  it('names each window at or below half, the session first, with its reset', () => {
+    expect(usageNotice(profileUsage(LOW, NOW))).toBe(
+      '5h 6% left · resets 52m · Week 31% left · resets 7h'
+    );
+    expect(usageNotice(profileUsage(OUT, NOW))).toBe(
+      '5h used up · back in 2h 10m · Week 44% left · resets 4h'
+    );
     expect(usageNotice(profileUsage({ kind: 'paused', label: 'Old Max' }, NOW))).toBe(
       'Old Max paused'
     );
@@ -187,47 +197,114 @@ describe('usage words', () => {
   });
 });
 
-describe('roomierProfile', () => {
-  const opus = profile('opus');
-  const usages = new Map<string, ProfileUsage>([
-    ['opus', profileUsage(LOW, NOW)],
-    ['claudiii', profileUsage(ROOMY, NOW)],
-    ['same-account', profileUsage(LOW, NOW)],
-    ['other-model', profileUsage(ROOMY, NOW)],
-    ['other-agent', profileUsage(ROOMY, NOW)],
+describe('usage ring and windows (approved 2026-11-13)', () => {
+  it('splits the session window from the week and sorts the meters shortest first', () => {
+    const usage = profileUsage(
+      account('three', 'Team seat', [
+        window('claude.seven_day_opus', 88, 'warning', 100 * HOUR),
+        window('claude.five_hour', 12, 'ok', 3 * HOUR),
+        window('claude.seven_day', 40, 'ok', 100 * HOUR),
+      ]),
+      NOW
+    );
+    expect(usage.session).toMatchObject({ label: '5h', left: 88 });
+    // The tightest long window colours the ring: the Opus week, not the plain week.
+    expect(usage.week).toMatchObject({ label: 'Opus week', left: 12 });
+    expect(usage.windows.map((reading) => reading.shortLabel)).toEqual(['5h', 'Opus', 'Wk']);
+    expect(usage.color).toBe(USAGE_COLORS.urgent);
+    expect(ringLeft(usage)).toBe(88);
+  });
+
+  it('colours the ring by the week: green above half, amber to a quarter, red below', () => {
+    const at = (weekUsed: number) =>
+      profileUsage(
+        account('w', 'W', [
+          window('claude.five_hour', 10, 'ok', HOUR),
+          window('claude.seven_day', weekUsed, 'ok', 50 * HOUR),
+        ]),
+        NOW
+      ).color;
+    expect(at(49)).toBe(USAGE_COLORS.calm);
+    expect(at(50)).toBe(USAGE_COLORS.low);
+    expect(at(75)).toBe(USAGE_COLORS.low);
+    expect(at(76)).toBe(USAGE_COLORS.urgent);
+  });
+
+  it('a used-up 5h on a healthy week is an empty arc in the week’s colour', () => {
+    const usage = profileUsage(
+      account('session-out', 'Session out', [
+        window('claude.five_hour', 100, 'rejected', HOUR),
+        window('claude.seven_day', 20, 'ok', 50 * HOUR),
+      ]),
+      NOW
+    );
+    expect(usage.state).toBe('out');
+    expect(ringLeft(usage)).toBe(0);
+    expect(usage.color).toBe(USAGE_COLORS.calm);
+    // Control: the same session with the week nearly gone is red.
+    const tight = profileUsage(
+      account('both', 'Both', [
+        window('claude.five_hour', 100, 'rejected', HOUR),
+        window('claude.seven_day', 80, 'ok', 50 * HOUR),
+      ]),
+      NOW
+    );
+    expect(tight.color).toBe(USAGE_COLORS.urgent);
+  });
+
+  it('a used-up week empties the arc whatever the session says', () => {
+    const usage = profileUsage(
+      account('week-out', 'Week out', [
+        window('claude.five_hour', 30, 'ok', HOUR),
+        window('claude.seven_day', 100, 'rejected', 52 * HOUR),
+      ]),
+      NOW
+    );
+    expect(usage.state).toBe('out');
+    expect(ringLeft(usage)).toBe(0);
+    expect(usageNotice(usage)).toBe('Week used up · back in 2d 4h');
+  });
+
+  it('a weekly-only account draws the week as the arc', () => {
+    const usage = profileUsage(
+      account('weekly', 'ChatGPT Pro', [
+        { ...window('codex.primary', 94, 'critical', 52 * HOUR), windowMinutes: 10080 },
+      ]),
+      NOW
+    );
+    expect(usage.session).toBeNull();
+    expect(usage.week).toMatchObject({ label: 'Week', left: 6 });
+    expect(ringLeft(usage)).toBe(6);
+    expect(usageNotice(usage)).toBe('Week 6% left · resets 2d 4h');
+  });
+});
+
+describe('roomiestAccount', () => {
+  const run = (id: string, budget: ProfileBudget): RunAccount => ({
+    id,
+    label: id,
+    usage: profileUsage(budget, NOW),
+  });
+  const WEEK_NEARLY_GONE = account('tight', 'Tight', [
+    window('claude.five_hour', 5, 'ok', HOUR),
+    window('claude.seven_day', 90, 'critical', 30 * HOUR),
   ]);
-  const usageFor = (id: string) => usages.get(id);
 
-  it('offers a same-agent, same-model profile on another account with room', () => {
-    const candidates = [
-      opus,
-      profile('same-account'),
-      profile('other-model', { model: 'claude-fable-5-1' }),
-      profile('other-agent', { agentType: 'openai-codex' }),
-      profile('claudiii'),
-    ];
-    expect(roomierProfile(opus, candidates, usageFor)?.profile.id).toBe('claudiii');
+  it('offers the account with the most room on the window that stops it first', () => {
+    const accounts = [run('low', LOW), run('tight', WEEK_NEARLY_GONE), run('roomy', ROOMY)];
+    expect(roomiestAccount(accounts, 'low')?.id).toBe('roomy');
   });
 
-  it('never offers another profile on the same account, however much room it shows', () => {
-    // Same credential as the selected profile, but read with room (e.g. a fresher sample).
-    const shared = new Map(usages);
-    shared.set('twin', { ...profileUsage(ROOMY, NOW), accountKey: 'cc_credentials:support' });
-    const candidates = [opus, profile('twin')];
-    expect(roomierProfile(opus, candidates, (id) => shared.get(id))).toBeNull();
-    // Control: the same profile on a different account is offered.
-    shared.set('twin', profileUsage(ROOMY, NOW));
-    expect(roomierProfile(opus, candidates, (id) => shared.get(id))?.profile.id).toBe('twin');
+  it('never offers the current account, an out one, or one nearly out on its week', () => {
+    const accounts = [run('roomy', ROOMY), run('out', OUT), run('tight', WEEK_NEARLY_GONE)];
+    expect(roomiestAccount(accounts, 'roomy')).toBeNull();
+    // Control: with the current account elsewhere, the roomy one is offered.
+    expect(roomiestAccount(accounts, 'other')?.id).toBe('roomy');
   });
 
-  it('does not offer a profile that builds and opens PRs in place of a chat one', () => {
-    const candidates = [opus, profile('claudiii', { taskMode: 'task' })];
-    expect(roomierProfile(opus, candidates, usageFor)).toBeNull();
-  });
-
-  it('offers nothing when no other account has room for that model', () => {
-    const candidates = [opus, profile('same-account'), profile('other-model', { model: 'x' })];
-    expect(roomierProfile(opus, candidates, usageFor)).toBeNull();
+  it('does not offer an account with no reading', () => {
+    const fresh = run('fresh', { kind: 'account', label: 'Fresh', usage: null });
+    expect(roomiestAccount([fresh], 'low')).toBeNull();
   });
 });
 
@@ -285,13 +362,19 @@ describe('picker surfaces with usage', () => {
       />
     );
     const low = screen.getByRole('button', { name: /^Opus 5\.5 Chat/ });
-    expect(low).toHaveAccessibleName(/6% left · resets 52m$/);
-    expect(within(low).getByText('6% left · resets 52m')).toBeInTheDocument();
+    expect(low).toHaveAccessibleName(/5h 6% left · resets 52m · Week 31% left · resets 7h$/);
+    expect(within(low).getByTestId('profile-usage-notice')).toHaveTextContent(
+      '5h 6% left · resets 52m · Week 31% left · resets 7h'
+    );
     expect(within(low).getByTestId('profile-usage-ring')).toHaveAttribute('data-usage-left', '6');
     const out = screen.getByRole('button', { name: /^SamSamC/ });
-    expect(within(out).getByText('Out · back in 2h 10m')).toBeInTheDocument();
+    expect(within(out).getByTestId('profile-usage-notice')).toHaveTextContent(
+      '5h used up · back in 2h 10m'
+    );
+    // The used-up session still shows a dot, not an empty ring.
+    expect(within(out).getByTestId('profile-usage-ring-empty')).toBeInTheDocument();
     const roomy = screen.getByRole('button', { name: /^Claudiii/ });
-    expect(roomy).toHaveAccessibleName(/83% left$/);
+    expect(roomy).toHaveAccessibleName(/5h 83% left, Week 91% left$/);
     expect(within(roomy).queryByTestId('profile-usage-notice')).not.toBeInTheDocument();
     expect(within(roomy).getByTestId('profile-usage-ring')).toHaveAttribute(
       'data-usage-left',
@@ -343,9 +426,9 @@ describe('picker surfaces with usage', () => {
     expect(fold).toHaveAttribute('aria-expanded', 'true');
     const row = within(sheet).getByRole('button', { name: /^SamSamC/ });
     expect(row).toHaveTextContent('Outback in 2h 10m');
-    expect(within(sheet).getByRole('button', { name: /^Opus 5\.5 Chat/ })).toHaveTextContent(
-      '6% leftresets 52m'
-    );
+    // Rows show every window as a labelled meter in percent left.
+    const lowRow = within(sheet).getByRole('button', { name: /^Opus 5\.5 Chat/ });
+    expect(within(lowRow).getByTestId('usage-meters')).toHaveTextContent('5h6% leftWk31% left');
   });
 
   it('the To chip carries the ring and says what is left', () => {
@@ -359,34 +442,67 @@ describe('picker surfaces with usage', () => {
       />
     );
     const chip = screen.getByRole('button', { name: /^To Opus 5\.5 Chat/ });
-    expect(chip).toHaveAccessibleName('To Opus 5.5 Chat, 6% left · resets 52m, change profile');
+    expect(chip).toHaveAccessibleName(
+      'To Opus 5.5 Chat, 5h 6% left · resets 52m · Week 31% left · resets 7h, change profile'
+    );
     expect(within(chip).getByTestId('profile-usage-ring')).toHaveAttribute('data-usage-left', '6');
   });
 
-  it('the nudge offers the roomier profile and switches to it', () => {
-    const onSwitch = vi.fn();
+  it('the nudge names the limit and offers your roomiest account for this chat', () => {
+    const onChooseAccount = vi.fn();
+    const accounts: RunAccount[] = [
+      { id: 'cfg-support', label: 'Sam Support', usage: profileUsage(LOW, NOW) },
+      { id: 'cfg-samsam', label: 'Sam Sam', usage: profileUsage(ROOMY, NOW) },
+    ];
     render(
       <ProfileUsageNudge
-        profile={opus}
         usage={usages.get('opus')}
-        candidates={[opus, social, claudiii]}
-        usageFor={(id) => usages.get(id)}
-        onSwitch={onSwitch}
+        profileUsage={usages.get('opus')}
+        accounts={accounts}
+        chosenAccount={null}
+        onChooseAccount={onChooseAccount}
       />
     );
-    expect(screen.getByRole('status')).toHaveTextContent('6% left on Sam Support · resets in 52m');
-    fireEvent.click(screen.getByRole('button', { name: 'Use Claudiii · 83% left' }));
-    expect(onSwitch).toHaveBeenCalledWith('claudiii');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '5h limit · 6% left on Sam Support · resets in 52m'
+    );
+    const offer = screen.getByRole('button', { name: 'Run on Sam Sam' });
+    expect(within(offer).getByTestId('usage-meters')).toHaveTextContent('5h83% leftWk91% left');
+    fireEvent.click(offer);
+    expect(onChooseAccount).toHaveBeenCalledWith('cfg-samsam');
+  });
+
+  it('after choosing, one line says which account the chat runs on, with an undo', () => {
+    const onChooseAccount = vi.fn();
+    const samSam: RunAccount = {
+      id: 'cfg-samsam',
+      label: 'Sam Sam',
+      usage: profileUsage(ROOMY, NOW),
+    };
+    render(
+      <ProfileUsageNudge
+        usage={samSam.usage}
+        profileUsage={usages.get('opus')}
+        accounts={[samSam]}
+        chosenAccount={samSam}
+        onChooseAccount={onChooseAccount}
+      />
+    );
+    expect(screen.getByTestId('run-account-swapped')).toHaveTextContent(
+      'This chat runs on Sam Sam instead of Sam Support'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use Sam Support again' }));
+    expect(onChooseAccount).toHaveBeenCalledWith(null);
   });
 
   it('the nudge stays away while there is room', () => {
     const { container } = render(
       <ProfileUsageNudge
-        profile={claudiii}
         usage={usages.get('claudiii')}
-        candidates={[opus, claudiii]}
-        usageFor={(id) => usages.get(id)}
-        onSwitch={vi.fn()}
+        profileUsage={usages.get('claudiii')}
+        accounts={[]}
+        chosenAccount={null}
+        onChooseAccount={vi.fn()}
       />
     );
     expect(container).toBeEmptyDOMElement();

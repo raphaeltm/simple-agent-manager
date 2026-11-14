@@ -62,6 +62,11 @@ interface ConversationJump {
   jumpToMessage: (target: TimelineJumpTarget) => void;
   /** Id of the rendered row currently flashing, or null. */
   highlightedRowId: string | null;
+  /**
+   * Id of the rendered row a message id belongs to: itself, or the reply or group that absorbed
+   * it (a later streamed chunk, a tool call). Null when it is not loaded.
+   */
+  rowIdFor: (messageId: string) => string | null;
 }
 
 /**
@@ -171,10 +176,16 @@ export function useConversationJump({
   );
 
   const jumpToMessage = useCallback(
-    (target: TimelineJumpTarget) => {
+    (target: TimelineJumpTarget, options: { confirm?: boolean } = {}) => {
       onJump();
-      // Fast path: exact message already loaded and on screen.
-      if (listReady && target.messageId && resolveIndex(target.messageId) !== undefined) {
+      // Fast path: exact message already loaded and on screen. `confirm` skips it for a jump
+      // that must be re-checked until it lands (a route deep link into a chat just opened).
+      if (
+        !options.confirm &&
+        listReady &&
+        target.messageId &&
+        resolveIndex(target.messageId) !== undefined
+      ) {
         scrollAndHighlight(target.messageId);
         return;
       }
@@ -186,19 +197,19 @@ export function useConversationJump({
     [listReady, loadUntil, onJump, resolveIndex, scrollAndHighlight]
   );
 
-  // Route-driven jump from the project Comments page. This deliberately reuses
-  // the same jump path as the timeline and session comments drawer so URL
-  // deep-links inherit the existing virtualized-list coordinate fix and
-  // fallback loading behavior.
+  // Route-driven jump from the project Comments page ("Open in chat"). Always confirmed, never
+  // the one-shot fast path: the chat has just opened, and the list's own first scroll to the
+  // newest message can land after a single scroll and undo it, leaving the reader at the bottom
+  // with the target never mounted.
   useEffect(() => {
     if (!targetMessageId) return;
     const targetKey = `${sessionId}:${targetMessageId}`;
     if (consumedTargetMessageRef.current === targetKey) return;
     consumedTargetMessageRef.current = targetKey;
-    jumpToMessage({
-      messageId: targetMessageId,
-      timestamp: targetMessageTimestamp ?? Date.now(),
-    });
+    jumpToMessage(
+      { messageId: targetMessageId, timestamp: targetMessageTimestamp ?? Date.now() },
+      { confirm: true }
+    );
     onTargetMessageConsumed?.();
   }, [jumpToMessage, onTargetMessageConsumed, sessionId, targetMessageId, targetMessageTimestamp]);
 
@@ -273,5 +284,13 @@ export function useConversationJump({
     return index === undefined ? null : (displayItems[index]?.id ?? null);
   }, [highlightedItemId, itemIndexById, displayItems]);
 
-  return { jumpToMessage, highlightedRowId };
+  const rowIdFor = useCallback(
+    (messageId: string): string | null => {
+      const index = resolveIndex(messageId);
+      return index === undefined ? null : (displayItems[index]?.id ?? null);
+    },
+    [displayItems, resolveIndex]
+  );
+
+  return { jumpToMessage, highlightedRowId, rowIdFor };
 }

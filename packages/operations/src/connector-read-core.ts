@@ -6,6 +6,7 @@ import * as v from 'valibot';
 
 import { questionMetadata } from './attention-core';
 import { authorizeProjectOperation } from './authorization';
+import { chatTaskStates } from './chat-operational';
 import { OperationError } from './errors';
 import { ideaTaskPredicateSql } from './idea-identity';
 import { getPlatformOperationLimits } from './limits';
@@ -112,6 +113,8 @@ export async function chatsList(
       status: schema.sessionSummaries.status,
       taskId: schema.sessionSummaries.taskId,
       updatedAt: schema.sessionSummaries.updatedAt,
+      lastMessageAt: schema.sessionSummaries.lastMessageAt,
+      agentCompletedAt: schema.sessionSummaries.agentCompletedAt,
       createdByUserId: schema.sessionSummaries.createdByUserId,
       attention: schema.sessionSummaries.attentionJson,
     })
@@ -133,9 +136,11 @@ export async function chatsList(
     .limit(limit + 1);
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
+  const taskStates = await chatTaskStates(db, page);
   return {
     chats: page.map(({ attention, ...row }) => ({
       ...row,
+      operational: taskStates.get(row.id) ?? null,
       attention:
         row.createdByUserId === ctx.actor.userId && attention
           ? (JSON.parse(attention) as unknown)

@@ -73,7 +73,10 @@ describe('shared deployment workflow routing', () => {
     const engine = steps.find((step) => step.id === 'shared_engine');
     expect(engine).toBeDefined();
     expect(active(engine ?? {}, shared, dry)).toBe(shared);
-    const legacy = steps.slice(boundary);
+    // Rollout inspection is read-only and intentionally shared by both deploy paths.
+    const legacy = steps
+      .slice(boundary)
+      .filter((step) => step.name !== 'Wait for container rollout completion');
     expect(legacy.length).toBeGreaterThan(20);
     for (const step of legacy) {
       expect(step.if).toContain('!inputs.use_shared_engine');
@@ -93,6 +96,30 @@ describe('shared deployment workflow routing', () => {
     // Only the opt-in shared-engine path depends on the engine; CI covers it otherwise.
     expect(active(gate ?? {}, shared, dry)).toBe(shared);
     expect(gate?.run).toContain('installer-engine.vitest.config.ts');
+  });
+  it.each([false, true])('waits for rollouts on both deployment paths (shared=%s)', (shared) => {
+    const snapshot = steps.find((step) => step.name === 'Snapshot container rollout identities');
+    const wait = steps.find((step) => step.name === 'Wait for container rollout completion');
+    expect(snapshot).toBeDefined();
+    expect(wait).toBeDefined();
+    expect(active(snapshot ?? {}, shared, false)).toBe(true);
+    expect(active(wait ?? {}, shared, false)).toBe(true);
+    expect(active(snapshot ?? {}, shared, true)).toBe(false);
+    expect(active(wait ?? {}, shared, true)).toBe(false);
+    expect(steps.indexOf(snapshot ?? {})).toBeLessThan(
+      steps.findIndex((step) => step.id === 'shared_engine')
+    );
+    expect(steps.indexOf(wait ?? {})).toBeGreaterThan(
+      steps.findIndex((step) => step.name === 'Deploy API Worker')
+    );
+    expect(wait?.run).toContain('wait-container-rollout.ts wait');
+    expect(snapshot?.run).toContain('wait-container-rollout.ts snapshot');
+    expect(wait?.env?.CONTAINER_ROLLOUT_TIMEOUT_MS).toBe(
+      '${{ vars.CONTAINER_ROLLOUT_TIMEOUT_MS }}'
+    );
+    expect(wait?.env?.CONTAINER_ROLLOUT_POLL_INTERVAL_MS).toBe(
+      '${{ vars.CONTAINER_ROLLOUT_POLL_INTERVAL_MS }}'
+    );
   });
   it('retains output contracts and sends existing secrets only through private environment', () => {
     expect(reusable.jobs.deploy?.outputs?.api_url).toBe(

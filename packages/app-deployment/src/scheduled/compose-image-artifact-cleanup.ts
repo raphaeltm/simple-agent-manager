@@ -8,7 +8,9 @@
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
-import type { AppDeploymentEnv } from '../env';
+import type { AppDeploymentEnv as Env } from '../env';
+import type { DeploymentSettingsPort } from '../ports';
+import { runBuildContextCleanup } from './build-context-cleanup';
 
 const log = createModuleLogger('compose-image-artifact-cleanup');
 
@@ -70,32 +72,32 @@ function emptyStats(
   };
 }
 
-function cleanupEnabled(env: AppDeploymentEnv): boolean {
+function cleanupEnabled(env: Env): boolean {
   return env.COMPOSE_IMAGE_ARTIFACT_CLEANUP_ENABLED !== 'false';
 }
 
-function retentionHours(env: AppDeploymentEnv): number {
+function retentionHours(env: Env): number {
   return parsePositiveInt(
     env.COMPOSE_IMAGE_ARTIFACT_ABANDONED_RETENTION_HOURS,
     DEFAULT_ABANDONED_RETENTION_HOURS
   );
 }
 
-function batchSize(env: AppDeploymentEnv): number {
+function batchSize(env: Env): number {
   return parsePositiveInt(
     env.COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE,
     DEFAULT_CLEANUP_BATCH_SIZE
   );
 }
 
-function cleanupIntervalHours(env: AppDeploymentEnv): number {
+function cleanupIntervalHours(env: Env): number {
   return parsePositiveInt(
     env.COMPOSE_IMAGE_ARTIFACT_CLEANUP_INTERVAL_HOURS,
     DEFAULT_CLEANUP_INTERVAL_HOURS
   );
 }
 
-function lastRunKey(env: AppDeploymentEnv): string {
+function lastRunKey(env: Env): string {
   return env.COMPOSE_IMAGE_ARTIFACT_CLEANUP_LAST_RUN_KV_KEY?.trim() || DEFAULT_LAST_RUN_KV_KEY;
 }
 
@@ -161,7 +163,7 @@ function objectIsOlderThan(object: R2ListedObject, cutoffMs: number): boolean {
 }
 
 export async function runComposeImageArtifactCleanup(
-  env: AppDeploymentEnv,
+  env: Env,
   now: Date = new Date()
 ): Promise<ComposeImageArtifactCleanupStats> {
   if (!cleanupEnabled(env)) {
@@ -242,7 +244,8 @@ export async function runComposeImageArtifactCleanup(
 }
 
 export async function runScheduledComposeImageArtifactCleanup(
-  env: AppDeploymentEnv,
+  env: Env,
+  settings: DeploymentSettingsPort,
   now: Date = new Date()
 ): Promise<ComposeImageArtifactCleanupStats> {
   if (!cleanupEnabled(env)) {
@@ -267,6 +270,18 @@ export async function runScheduledComposeImageArtifactCleanup(
   }
 
   const result = await runComposeImageArtifactCleanup(env, now);
+  try {
+    const contexts = await runBuildContextCleanup(env, settings, now);
+    result.scannedObjects += contexts.scanned;
+    result.deletedObjects += contexts.deleted;
+    result.deletedBytes += contexts.bytes;
+    result.errors += contexts.errors;
+  } catch (error) {
+    result.errors += 1;
+    log.error('context_cleanup_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   if (!result.skipped || result.skipReason === 'reference-collection-failed') {
     try {

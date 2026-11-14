@@ -827,3 +827,38 @@ func TestMcpBuildAndPublish_RequiresAttemptBeforeBuild(t *testing.T) {
 		})
 	}
 }
+func TestMcpBuildStartIgnoresContextShadowAdmission(t *testing.T) {
+	s, key := mcpBuildTestServer(t)
+	callbacks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "{\"ok\":true}") }))
+	defer callbacks.Close()
+	s.config.ControlPlaneURL = callbacks.URL
+	s.workspaces["ws-001"] = &WorkspaceRuntime{ID: "ws-001", Status: "running", WorkspaceDir: t.TempDir(), ProjectID: "proj-1", CallbackToken: "callback"}
+	s.publishJobs = map[string]publishJobState{"shadow": {ID: "shadow", WorkspaceID: "ws-001", ContextOnly: true}}
+	done := make(chan struct{})
+	s.buildPublishRunner = func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error) {
+		close(done)
+		return &publish.ReleaseResult{ReleaseID: "release", Version: 1, Status: "created"}, nil
+	}
+	rec := mcpBuildJobStartPOST(t, s, key, "ws-001", "normal", McpBuildAndPublishRequest{Environment: "staging", EnvironmentID: "env", PublishJobID: "normal", Attempt: 1}, context.Background())
+	if rec.Code != 202 {
+		t.Fatalf("shadow blocked node admission: %d %s", rec.Code, rec.Body.String())
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("node build was delayed by shadow")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		s.publishJobsMu.Lock()
+		state := s.publishJobs["normal"]
+		s.publishJobsMu.Unlock()
+		if !state.CompletedAt.IsZero() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("node runner did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}

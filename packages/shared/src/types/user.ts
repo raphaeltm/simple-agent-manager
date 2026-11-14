@@ -255,11 +255,12 @@ export type PlatformCredentialType = 'cloud-provider' | 'agent-api-key';
 export type CredentialSource = 'user' | 'project' | 'platform' | 'self-hosted';
 
 /**
- * Which resolution tier chose an agent's credential: a profile pin, a project pin,
- * the user's default, or the platform. Ownership stays in `CredentialSource`; a
- * profile pin is the user's own credential (`credentialSource: 'user'`).
+ * Which resolution tier chose an agent's credential: the account chosen for this run,
+ * a profile pin, a project pin, the user's default, or the platform. Ownership stays in
+ * `CredentialSource`; a run account and a profile pin are the user's own credential
+ * (`credentialSource: 'user'`).
  */
-export type AgentCredentialScope = 'profile' | 'project' | 'user' | 'platform';
+export type AgentCredentialScope = 'run' | 'profile' | 'project' | 'user' | 'platform';
 
 /** Which account a chat's agent ran on, for session details. */
 export interface SessionAgentCredential {

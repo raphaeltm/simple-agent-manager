@@ -187,7 +187,7 @@ function fixture(failOn?: string) {
         throw new EngineCommandFailure(23, null, ['wrangler: D1 count failed for users']);
       if (command.args[0] === 'build-local-codex') stageRuntime(root);
       if (command.executable === 'make') simulateMake(root, command.args);
-      if (command.executable === 'go') return 'go version go1.26.10 linux/amd64';
+      if (command.executable === 'go') return 'go version go1.26.11 linux/amd64';
       if (command.executable === 'git' && command.args[0] === 'status') return dirty;
       if (command.executable === 'git')
         return command.args.includes('HEAD') ? `${config.sourceCommit}\n` : 'false\n';
@@ -257,6 +257,25 @@ describe('installation engine', () => {
     );
     expect(() => validateEngineConfig({ ...config, healthAttempts: 0 })).toThrow('healthAttempts');
   });
+  it.each(['go1.26.10', 'go1.27.4'])(
+    'rejects unsupported toolchain %s before infrastructure or artifact mutation',
+    async (version) => {
+      const f = fixture();
+      const runner: EngineRunner = {
+        ...f.runner,
+        run(command, options) {
+          if (command.executable === 'go')
+            return Promise.resolve(`go version ${version} linux/amd64`);
+          return f.runner.run(command, options);
+        },
+      };
+      await expect(
+        runInstallerEngine(config, { ...f, runner, environment: privateEnv, emit() {}, save() {} })
+      ).rejects.toThrow('Installation phase preflight failed; private tool output was withheld');
+      expect(f.commands.every((command) => command.executable === 'git')).toBe(true);
+    }
+  );
+
   it('executes migrations and immutable artifacts before API code; applies secrets before final revision', async () => {
     const f = fixture();
     const events: unknown[] = [];
@@ -482,7 +501,7 @@ describe('installation engine', () => {
     writeFileSync(join(root, 'apps/api/Dockerfile.sandbox'), 'FROM x\nCOPY entry.sh /entry.sh\n');
     writeFileSync(join(root, 'apps/api/entry.sh'), 'entry');
     const imageKey = imageContextKey(join(root, 'apps/api'), 'Dockerfile.sandbox');
-    const vmAgentKey = `release=${'d'.repeat(40)};build=2026-10-28T00:00:00Z;go version go1.26.10 linux/amd64`;
+    const vmAgentKey = `release=${'d'.repeat(40)};build=2026-10-28T00:00:00Z;go version go1.26.11 linux/amd64`;
     const bodies: Record<string, string> = Object.fromEntries(
       VM_AGENT_OUTPUTS.map((path, index) => [`file-${index}`, `prebuilt ${path}`])
     );

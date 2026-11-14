@@ -1,4 +1,8 @@
-import { AcpInteractionIdSchema } from '@simple-agent-manager/shared';
+import {
+  AcpInteractionIdSchema,
+  AGENT_EFFORT_LEVELS,
+  AGENT_MODEL_MAX_LENGTH,
+} from '@simple-agent-manager/shared';
 import * as schema from '@simple-agent-manager/worker-core/schema';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -53,7 +57,7 @@ export const samChatsList = defineOperation({
   name: 'sam_chats_list',
   title: 'List chats',
   description:
-    'Use this when you need chats across your current projects or one project, sorted by activity. Optionally filter by status. Results are an eventually consistent D1 index and include SAM links.',
+    'Use this when you need chats across your current projects or one project, sorted by activity. Optionally filter by status. status is the chat lifecycle label from an eventually consistent index and can still read active after its work ended; operational carries the backing task status, execution step and parentTaskId, and labelMayBeStale flags an active label on a finished task. For runtime evidence (agent mid-prompt, workspace up) use sam_chat_status. Results include SAM links.',
   kind: 'read',
   input: v.object({
     projectId: v.optional(id),
@@ -67,7 +71,7 @@ export const samChatStart = defineOperation({
   name: 'sam_chat_start',
   title: 'Start project work',
   description:
-    'Use this when you want to start a visible, resumable project chat or task. Always use this for requests needing repository code or files; the Connector cannot read files directly. Optional profile and skill choose the agent and VM or Instant runtime. Returns task/session IDs and a link immediately. Reuse requestKey to retry without starting duplicate work.',
+    'Use this when you want to start a visible, resumable project chat or task. Always use this for requests needing repository code or files; the Connector cannot read files directly. Optional profile and skill choose the agent, its account and VM or Instant runtime. Optional model and effort apply to this chat only: the profile, its account and every other chat are unchanged. SAM passes the model id to the agent as given (no catalog check), so use an id the profile’s agent supports. Returns task/session IDs and a link immediately. Reuse requestKey to retry without starting duplicate work.',
   kind: 'write',
   input: v.object({
     ...project,
@@ -75,6 +79,10 @@ export const samChatStart = defineOperation({
     taskMode: v.optional(v.picklist(['conversation', 'task'])),
     agentProfileId: v.optional(id),
     skillId: v.optional(id),
+    // No v.trim(): the Connector publishes this schema as JSON Schema, which cannot express a
+    // transform. Submission trims, and a blank model inherits (`resolveTaskAgentOverrides`).
+    model: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(AGENT_MODEL_MAX_LENGTH))),
+    effort: v.optional(v.picklist(AGENT_EFFORT_LEVELS)),
     requestKey,
   }),
   async run(ctx, input) {
@@ -102,7 +110,19 @@ export const samChatStart = defineOperation({
         ctx.samDispatchReservation,
         ctx.assertEffectAllowed
       );
-      return { ...result, link: operationLink(ctx, input.projectId, result.sessionId) };
+      return {
+        ...result,
+        ...(input.model || input.effort
+          ? {
+              agentOverrides: {
+                model: input.model ?? null,
+                effort: input.effort ?? null,
+                scope: 'this_chat_only',
+              },
+            }
+          : {}),
+        link: operationLink(ctx, input.projectId, result.sessionId),
+      };
     });
   },
 });

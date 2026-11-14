@@ -1,4 +1,4 @@
-import { expect, type Page, type Route,test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Mock Data Factories
@@ -36,8 +36,6 @@ function makeProject(overrides: Record<string, unknown> = {}) {
     githubInstallationId: 'inst-1',
     defaultVmSize: null,
     defaultAgentType: null,
-    defaultProvider: null,
-    defaultLocation: null,
     workspaceIdleTimeoutMs: null,
     nodeIdleTimeoutMs: null,
     taskExecutionTimeoutMs: null,
@@ -79,6 +77,37 @@ const CREDS_THREE: CredentialEntry[] = [
 ];
 const CREDS_NONE: CredentialEntry[] = [];
 
+/** No pool at any scope: the Infrastructure page shows its empty compute-pool state. */
+const EMPTY_CAPACITY_DEFAULTS = {
+  effective: null,
+  effectiveScope: null,
+  defaults: [
+    {
+      scope: 'project',
+      visibility: 'visible',
+      visibilityReason: 'project-secret-read',
+      canReconcile: true,
+      summary: null,
+    },
+    {
+      scope: 'user',
+      visibility: 'visible',
+      visibilityReason: 'authenticated-user',
+      canReconcile: true,
+      summary: null,
+    },
+    {
+      scope: 'installation',
+      visibility: 'hidden',
+      visibilityReason: 'superadmin-required',
+      canReconcile: false,
+      summary: null,
+    },
+  ],
+  precedence: ['project', 'user', 'installation'],
+  reconciledScopes: ['project', 'user'],
+};
+
 // ---------------------------------------------------------------------------
 // API Mock Setup
 // ---------------------------------------------------------------------------
@@ -92,6 +121,11 @@ async function setupMocks(
 ) {
   const project = makeProject(options.projectOverrides ?? {});
   const credentials = options.credentials ?? CREDS_ONE;
+
+  // Without this the first-run onboarding modal covers the page and every screenshot shows it.
+  await page.addInitScript(() =>
+    localStorage.setItem('sam-onboarding-wizard-dismissed-user-test-1', 'true')
+  );
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -123,6 +157,13 @@ async function setupMocks(
     // Credentials
     if (path.startsWith('/api/credentials')) {
       return respond(200, credentials);
+    }
+
+    if (path === '/api/agents') {
+      return respond(200, { agents: [] });
+    }
+    if (path === '/api/providers/catalog') {
+      return respond(200, { catalogs: [] });
     }
 
     // Provider catalog
@@ -157,6 +198,9 @@ async function setupMocks(
       if (subPath.startsWith('/agent-profiles')) {
         return respond(200, []);
       }
+      if (subPath === '/capacity-pools/defaults') {
+        return respond(200, EMPTY_CAPACITY_DEFAULTS);
+      }
       if (subPath.startsWith('/deployment')) {
         return respond(404, { error: 'Not found' });
       }
@@ -190,6 +234,9 @@ async function goToSettings(page: Page) {
 }
 
 async function screenshot(page: Page, name: string) {
+  // The settings page scrolls inside its own container, so a full-page capture only shows the
+  // top of the page. Bring the section under test into view first.
+  await page.getByRole('heading', { name: 'Scaling & Scheduling' }).scrollIntoViewIfNeeded();
   await page.waitForTimeout(600);
   await page.screenshot({
     path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
@@ -223,11 +270,9 @@ test.describe('ScalingSettings — Mobile (375x667)', () => {
     await assertNoOverflow(page);
   });
 
-  test('prefilled: provider + location + all scaling params set', async ({ page }) => {
+  test('prefilled: all scaling params set', async ({ page }) => {
     await setupMocks(page, {
       projectOverrides: {
-        defaultProvider: 'hetzner',
-        defaultLocation: 'ash',
         taskExecutionTimeoutMs: 7200000,
         maxConcurrentTasks: 3,
         maxDispatchDepth: 2,
@@ -244,30 +289,32 @@ test.describe('ScalingSettings — Mobile (375x667)', () => {
     await assertNoOverflow(page);
   });
 
-  test('two providers: dropdown options visible', async ({ page }) => {
+  test('no provider or location controls, even for a project row that still has them', async ({
+    page,
+  }) => {
+    // Provider and location come from the compute pool. An API payload that still carries the
+    // retired fields must not bring the controls back.
     await setupMocks(page, {
       projectOverrides: { defaultProvider: 'scaleway', defaultLocation: 'nl-ams-1' },
-      credentials: CREDS_TWO,
-    });
-    await goToSettings(page);
-    await screenshot(page, 'scaling-two-providers-mobile');
-    await assertNoOverflow(page);
-  });
-
-  test('no providers configured: system picks shown', async ({ page }) => {
-    await setupMocks(page, { credentials: CREDS_NONE });
-    await goToSettings(page);
-    await screenshot(page, 'scaling-no-providers-mobile');
-    await assertNoOverflow(page);
-  });
-
-  test('three providers with GCP long location label', async ({ page }) => {
-    await setupMocks(page, {
-      projectOverrides: { defaultProvider: 'gcp', defaultLocation: 'asia-northeast1-a' },
       credentials: CREDS_THREE,
     });
     await goToSettings(page);
-    await screenshot(page, 'scaling-long-labels-mobile');
+
+    // Liveness: the section rendered.
+    await expect(page.locator('text=Task Limits')).toBeVisible();
+    await expect(page.locator('button:has-text("Save Scaling Settings")')).toBeVisible();
+    await expect(page.locator('text=Provider & Location')).toHaveCount(0);
+    await expect(page.locator('#scaling-provider')).toHaveCount(0);
+    await expect(page.locator('#scaling-location')).toHaveCount(0);
+
+    await screenshot(page, 'scaling-no-provider-controls-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('no providers configured', async ({ page }) => {
+    await setupMocks(page, { credentials: CREDS_NONE });
+    await goToSettings(page);
+    await screenshot(page, 'scaling-no-providers-mobile');
     await assertNoOverflow(page);
   });
 
@@ -275,21 +322,14 @@ test.describe('ScalingSettings — Mobile (375x667)', () => {
     await setupMocks(page, { credentials: CREDS_TWO });
     await goToSettings(page);
 
-    // "Default Cloud Provider" toggle section was removed from ProjectSettings
-    // (canonical control lives in ScalingSettings as a dropdown)
-    const duplicateProviderSection = page.locator(
-      'text=Default Cloud Provider'
-    );
-    // ScalingSettings has "Default Provider" (not "Default Cloud Provider")
-    // so "Default Cloud Provider" should not appear anywhere on the page
-    await expect(duplicateProviderSection).not.toBeVisible();
+    // Projects have no provider setting at all: the compute pool decides.
+    await expect(page.locator('text=Default Cloud Provider')).not.toBeVisible();
+    await expect(page.locator('text=Default Provider')).toHaveCount(0);
 
     // "Compute Lifecycle" was renamed to "Workspace Idle Timeout" after
     // nodeIdleTimeoutMs was removed (it now only has workspaceIdleTimeoutMs)
     await expect(page.locator('text=Compute Lifecycle')).not.toBeVisible();
-    await expect(
-      page.locator('text=Workspace Idle Timeout')
-    ).toBeVisible();
+    await expect(page.locator('text=Workspace Idle Timeout').first()).toBeVisible();
 
     await screenshot(page, 'scaling-no-duplicates-mobile');
     await assertNoOverflow(page);
@@ -325,11 +365,9 @@ test.describe('ScalingSettings — Desktop (1280x800)', () => {
     await assertNoOverflow(page);
   });
 
-  test('prefilled: all params set with Hetzner Nuremberg', async ({ page }) => {
+  test('prefilled: all params set', async ({ page }) => {
     await setupMocks(page, {
       projectOverrides: {
-        defaultProvider: 'hetzner',
-        defaultLocation: 'nbg1',
         taskExecutionTimeoutMs: 14400000,
         maxConcurrentTasks: 5,
         maxDispatchDepth: 3,
@@ -346,38 +384,29 @@ test.describe('ScalingSettings — Desktop (1280x800)', () => {
     await assertNoOverflow(page);
   });
 
-  test('location dropdown visible when provider is selected', async ({ page }) => {
+  test('no provider or location controls, even for a project row that still has them', async ({
+    page,
+  }) => {
     await setupMocks(page, {
       projectOverrides: { defaultProvider: 'hetzner', defaultLocation: 'fsn1' },
       credentials: CREDS_TWO,
     });
     await goToSettings(page);
-    await expect(page.locator('#scaling-location')).toBeVisible();
-    await screenshot(page, 'scaling-location-dropdown-desktop');
+
+    // Liveness: the section rendered.
+    await expect(page.locator('text=Node Scheduling')).toBeVisible();
+    await expect(page.locator('text=Provider & Location')).toHaveCount(0);
+    await expect(page.locator('#scaling-provider')).toHaveCount(0);
+    await expect(page.locator('#scaling-location')).toHaveCount(0);
+    await screenshot(page, 'scaling-no-provider-controls-desktop');
     await assertNoOverflow(page);
   });
 
-  test('location dropdown absent when no provider selected', async ({ page }) => {
-    await setupMocks(page, {
-      projectOverrides: { defaultProvider: null, defaultLocation: null },
-      credentials: CREDS_ONE,
-    });
-    await goToSettings(page);
-    await expect(page.locator('#scaling-location')).not.toBeVisible();
-    await screenshot(page, 'scaling-no-location-desktop');
-    await assertNoOverflow(page);
-  });
-
-  test('primary save buttons meet minimum 36px height (size=sm)', async ({ page }) => {
+  test('primary save button meets minimum 36px height (size=sm)', async ({ page }) => {
     await setupMocks(page, { credentials: CREDS_ONE });
     await goToSettings(page);
 
-    const saveProvBtn = page.locator('button:has-text("Save Provider & Location")');
-    await expect(saveProvBtn).toBeVisible();
-    const box = await saveProvBtn.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.height).toBeGreaterThanOrEqual(36);
-
+    await expect(page.locator('button:has-text("Save Provider & Location")')).toHaveCount(0);
     const saveScalingBtn = page.locator('button:has-text("Save Scaling Settings")');
     await expect(saveScalingBtn).toBeVisible();
     const box2 = await saveScalingBtn.boundingBox();

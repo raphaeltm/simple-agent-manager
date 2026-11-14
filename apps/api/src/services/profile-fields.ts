@@ -34,8 +34,6 @@ export interface BaseProfileRow {
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
   resourceRequirementsJson: string | null;
-  provider: string | null;
-  vmLocation: string | null;
   workspaceProfile: string | null;
   runtime: unknown;
   devcontainerConfigName: string | null;
@@ -62,8 +60,6 @@ export interface BaseProfileFieldsResponse {
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
   resourceRequirementsJson: string | null;
-  provider: string | null;
-  vmLocation: string | null;
   workspaceProfile: string | null;
   runtime: AgentProfileRuntime | null;
   devcontainerConfigName: string | null;
@@ -97,8 +93,6 @@ export function toBaseProfileFields<R extends BaseProfileRow>(
     timeoutMinutes: row.timeoutMinutes,
     vmSizeOverride: row.vmSizeOverride,
     resourceRequirementsJson: row.resourceRequirementsJson,
-    provider: row.provider,
-    vmLocation: row.vmLocation,
     workspaceProfile: row.workspaceProfile,
     runtime: isAgentProfileRuntime(row.runtime) ? row.runtime : null,
     devcontainerConfigName: row.devcontainerConfigName,
@@ -125,8 +119,6 @@ export interface BaseProfileWriteInput {
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
   resourceRequirementsJson?: string | null;
-  provider?: string | null;
-  vmLocation?: string | null;
   workspaceProfile?: string | null;
   runtime?: AgentProfileRuntime | null;
   devcontainerConfigName?: string | null;
@@ -155,8 +147,6 @@ export function baseProfileInsertValues(
     timeoutMinutes: body.timeoutMinutes ?? null,
     vmSizeOverride: body.vmSizeOverride ?? null,
     resourceRequirementsJson: body.resourceRequirementsJson ?? null,
-    provider: body.provider ?? null,
-    vmLocation: body.vmLocation ?? null,
     workspaceProfile: body.workspaceProfile ?? null,
     runtime: body.runtime ?? null,
     devcontainerConfigName: body.devcontainerConfigName ?? null,
@@ -180,8 +170,6 @@ const BASE_PROFILE_UPDATE_FIELDS = [
   'timeoutMinutes',
   'vmSizeOverride',
   'resourceRequirementsJson',
-  'provider',
-  'vmLocation',
   'workspaceProfile',
   'runtime',
   'devcontainerConfigName',

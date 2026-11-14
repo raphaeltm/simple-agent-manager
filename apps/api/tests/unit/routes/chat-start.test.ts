@@ -28,6 +28,9 @@ const mocks = vi.hoisted(() => ({
   runtime: {
     resolveWorkspaceRuntime: vi.fn(),
   },
+  runAccount: {
+    validateRunAgentConfiguration: vi.fn(),
+  },
 }));
 
 /** The idea store this route validates against; seeded per test with real SQLite. */
@@ -52,6 +55,9 @@ vi.mock('../../../src/services/instant-session', () => mocks.instant);
 vi.mock('../../../src/services/mention-enrichment', () => mocks.mention);
 vi.mock('../../../src/services/skills', () => mocks.skills);
 vi.mock('../../../src/services/workspace-runtime', () => mocks.runtime);
+// The validator's own behaviour runs on real SQL in task-submit-run-account.test.ts; here only
+// the route's use of it is under test: called with the resolved agent, before any insert.
+vi.mock('../../../src/services/run-agent-configuration', () => mocks.runAccount);
 
 import { chatStartRoutes } from '../../../src/routes/chat-start';
 
@@ -119,6 +125,10 @@ describe('chatStartRoutes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.runAccount.validateRunAgentConfiguration.mockImplementation(
+      async (_db: unknown, { configurationId }: { configurationId?: string | null }) =>
+        configurationId?.trim() || null
+    );
     mocks.drizzle.mockReturnValue(db);
     mocks.auth.getUserId.mockReturnValue('user-1');
     mocks.projectAuth.requireProjectCapability.mockResolvedValue({
@@ -467,6 +477,52 @@ describe('chatStartRoutes', () => {
       const ok = await startWith({ effort: 'auto' });
       expect(ok.status).toBe(202);
       expect(launchedOverrides()).toMatchObject({ effort: 'auto' });
+    });
+  });
+
+  describe('account chosen for this chat', () => {
+    function start(overrides: Record<string, unknown>) {
+      return makeApp().request(
+        `${BASE_URL}${REQUEST_PATH}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'hello', agentProfileId: 'profile-1', ...overrides }),
+        },
+        makeEnv()
+      );
+    }
+
+    function insertedTask() {
+      return db.insert.mock.results[0]?.value.values.mock.calls[0]?.[0] as Record<string, unknown>;
+    }
+
+    it('checks the account against the resolved agent and stores it on the task', async () => {
+      const res = await start({ agentConfigurationId: 'cfg-work-max' });
+      expect(res.status).toBe(202);
+      expect(mocks.runAccount.validateRunAgentConfiguration).toHaveBeenCalledWith(db, {
+        userId: 'user-1',
+        configurationId: 'cfg-work-max',
+        agentType: 'claude-code',
+      });
+      expect(insertedTask()).toMatchObject({ agentConfigurationId: 'cfg-work-max' });
+    });
+
+    it('control: no choice stores null', async () => {
+      const res = await start({});
+      expect(res.status).toBe(202);
+      expect(insertedTask()).toMatchObject({ agentConfigurationId: null });
+    });
+
+    it('a refused account creates nothing', async () => {
+      const { errors } = await import('../../../src/middleware/error');
+      mocks.runAccount.validateRunAgentConfiguration.mockRejectedValueOnce(
+        errors.badRequest('That account is paused. Choose another account for this chat.')
+      );
+      const res = await start({ agentConfigurationId: 'cfg-paused' });
+      expect(res.status).toBe(400);
+      expect(db.insert).not.toHaveBeenCalled();
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
     });
   });
 });

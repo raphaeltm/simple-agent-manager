@@ -53,3 +53,23 @@ it('sweeps real persisted jobs and hands lifecycle delivery to waitUntil', async
     expect.objectContaining({ publishJobId: 'job', status: 'failed', terminal: true })
   );
 });
+it('expires shadow probes without public events or publish failure counts', async () => {
+  const old = new Date(Date.now() - 120000).toISOString();
+  sqlite
+    .prepare(
+      "INSERT INTO deployment_publish_jobs(id,project_id,environment_id,workspace_id,node_id,status,created_at,updated_at,last_heartbeat_at,context_shadow) VALUES('shadow','project','environment','workspace','node','collecting',?,?,?,1)"
+    )
+    .run(old, old, old);
+  const pending: Promise<unknown>[] = [];
+  expect(
+    await runDeploymentPublishJobSweep({ DATABASE: createSqliteD1(sqlite) }, ports, (p) =>
+      pending.push(p)
+    )
+  ).toEqual({ failed: 0 });
+  await Promise.all(pending);
+  expect(sqlite.prepare('SELECT status FROM deployment_publish_jobs').get()).toEqual({
+    status: 'failed',
+  });
+  expect(record).not.toHaveBeenCalled();
+  expect(cancel).toHaveBeenCalledWith('workspace', null, 'node', 'shadow', 1000);
+});

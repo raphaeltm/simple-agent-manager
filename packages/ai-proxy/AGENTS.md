@@ -6,7 +6,7 @@ The platform AI proxy's non-HTTP logic: upstream billing auth (Unified Billing v
 AI Gateway log reads and aggregation, the monthly cost cache cron, per-user token budgets and
 allowances, model-tier gating, token-usage accounting on proxied responses, Anthropic/OpenAI
 translation, and the `AiTokenBudgetCounter` Durable Object class. Part of the worker
-modularization (`tasks/active/2026-11-12-worker-modularization.md`, workstream W5).
+modularization (`tasks/archive/2026-11-12-worker-modularization.md`, workstream W5).
 
 It reads only `AiProxyEnv` (`src/env.ts`), which the worker `Env` extends, uses worker-core for
 logging, validation, timeouts and errors, and never imports `apps/*`.

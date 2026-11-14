@@ -61,6 +61,11 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { assertProviderLimitCredentialPin } from '../../services/provider-limit-credential-pin';
+import { refuseHaltedRunAccount } from '../../services/run-agent-configuration';
+import {
+  PROXY_ELIGIBLE_AGENTS,
+  requiresExplicitSamProvider,
+} from '../../services/sam-ai-proxy-fallback';
 import {
   signalWorkspaceDeletionUnconfirmedCallback,
   type WorkspaceDeletionCallbackKind,
@@ -83,13 +88,6 @@ import {
   persistAgentCredentialAttribution,
   platformProxyAttribution,
 } from './agent-credential-attribution';
-
-/** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
-const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(
-  HARNESS_CAPABILITIES.filter(
-    (capability) => capability.proxyRouteSegment && capability.proxyProviderTag
-  ).map((capability) => capability.agentType)
-);
 
 function getProxyCapability(agentType: string) {
   const capability = HARNESS_CAPABILITIES.find((entry) => entry.agentType === agentType);
@@ -758,6 +756,20 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   );
   let credentialProviderMode = 'direct';
 
+  // An account chosen for this run that can no longer be used (paused, removed) must stop
+  // the run here. Without this, "no credential" would continue to the platform proxy or a
+  // fallback below and run the chat on an account nobody chose for it.
+  if (!credentialData && profile?.runConfigurationId) {
+    await refuseHaltedRunAccount(db, {
+      workspaceId,
+      userId: workspace.userId,
+      projectId: workspace.projectId,
+      agentType: body.agentType,
+      encryptionKey,
+      profile,
+    });
+  }
+
   // SECURITY: Never return raw platform-managed credentials to tenant workspaces.
   // Platform credentials are control-plane secrets and must only be used via
   // SAM-mediated proxy flows (callback-token auth), not injected into tenant
@@ -990,7 +1002,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     // Claude Code and Codex require an explicit SAM provider selection before
     // using platform proxy. OpenCode never reaches this block — it always
     // requires a dedicated user credential and returns/throws above.
-    if (isClaudeCode || isCodex) {
+    if (requiresExplicitSamProvider(body.agentType)) {
       const providerMode = await getExplicitProviderMode();
 
       if (providerMode !== 'sam') {

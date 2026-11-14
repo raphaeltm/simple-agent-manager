@@ -11,9 +11,7 @@
  */
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import {
-  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
-} from './workspace-reservation-usage';
+import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from './workspace-reservation-usage';
 
 export type NodeLifecycleDecisionSource =
   | 'node_lifecycle'
@@ -38,6 +36,8 @@ export type NodeLifecycleDecision =
   | 'destroy_attempted'
   | 'destroyed'
   | 'destroy_failed'
+  /** Two-phase teardown: provider deletion started or still running; no proof yet. */
+  | 'destroy_pending'
   | 'skipped'
   | 'legacy_binding_refused'
   // Warm handoff
