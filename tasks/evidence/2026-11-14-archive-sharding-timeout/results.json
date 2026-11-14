@@ -1,7 +1,7 @@
 {
   "ideaId": "01M7C75DDYYXGHDW5WW7X1M8WY",
-  "status": "complete",
-  "recordedAt": "2026-11-14T06:23:03.547589+00:00",
+  "status": "validation_complete",
+  "recordedAt": "2026-11-14T06:27:21.216889+00:00",
   "codeCommit": "90994fa7a3024b5e6e922d1e1c9a7edb0d4ae2ab",
   "inputSha256": {
     "apps/api/tests/unit/durable-objects/project-data-archive-sharding.test.ts": "ae0674f1086c7f2ee6c94d95555101d6cf7a99beb0c64aa9a0252a4ca39d5cd7",
@@ -724,7 +724,6 @@
     "doMigrationSafety": "passed"
   },
   "pendingReleaseGates": [
-    "task completion review",
     "draft PR with needs-human-review",
     "technical CI (label intentionally blocks review-evidence check)",
     "explicit coordinator staging grant and verification",

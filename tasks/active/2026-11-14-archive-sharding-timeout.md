@@ -11,7 +11,7 @@ The 1,205-row lifecycle case intermittently exceeds Vitest's five-second limit. 
 - [x] Add deterministic query-plan/scaling regression coverage if production complexity confirmed.
 - [x] Remove the bound/index once, demonstrate intended red test, restore and pass.
 - [x] Run complete sharding file at least 30 times normally and 30 under bounded CPU load; report counts and timing distributions.
-- [ ] Relevant lint/typecheck/tests/build and migration safety checks; specialist and task-completion reviews.
+- [x] Relevant lint/typecheck/tests/build and migration safety checks; specialist and task-completion reviews.
 - [ ] Production change requires coordinator-granted staging slot; test-only skips staging explicitly.
 - [ ] Draft PR, needs-human-review, green CI, CodeRabbit request/wait, exact-SHA coordinator handoff. No merge before approval of that SHA.
 - [ ] After approval, merge with --match-head-commit and monitor main CI / Deploy Production before completing SAM task.
@@ -41,3 +41,5 @@ Candidate source:90994fa7a; frozen source SHA256 and all per-run data at `tasks/
 Every run is a fresh Vitest CLI process with47cases; five-run bounded batches, up to3independent batches at once. Loaded batches pin Vitest and one busy worker to the same CPU on distinct cores. Each worker was alive and consumed positive measured CPU time for every run. No test retries. Max command42.84s normal,105.0s loaded; batch bounds below10minutes.
 
 All three mutations repeated after the10s adjustment: removing unique seek fails the real seal query-plan assertion; relaxing the real grouped page bound fails1205<=500; removing identity guard makes both noncanonical seal controls unexpectedly resolve. Restored all before final60file runs. Project-data528/528tests and real-workerd archive16/16tests passed; affected lint/typecheck/build and DO migration safety passed. Source/query changes were locally reviewed by test-engineer and Cloudflare specialist; timeout evidence received a further test-engineer PASS. Remaining release gates stay open below the mandatory coordinator hold; task remains active until approved merge and main/deploy monitoring finish.
+
+Task-completion-validator at80316bfa0: implementation PASS (A–C/F pass, D/E N/A); evidence hashes/counts/mutations independently checked. Release completion pending; task remains active.
