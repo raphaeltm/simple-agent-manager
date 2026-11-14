@@ -52,3 +52,9 @@ Cloudflare activates the Worker and starts a gradual container rollout before wr
 | --- | --- | --- |
 | rollout_review | PASS | Cloudflare identity, environment, security, constitution; prior first-poll ambiguity, shared-engine and metadata-only findings fixed; API-only visibility assumption noted without a concrete consistency failure. |
 | completion_review | PASS | Task implementation, test engineering and docs; HTTP-boundary regression and readiness projection mock resolve prior findings. Operational staging/PR/release gates remain open. |
+
+## Additional validation and runtime evidence
+
+- Full API run and API shard1/4 each reached the540s command ceiling without a completion summary. Full web run also reached540s; its observed Comments-page failure reproduced in one isolated rerun (17/18 passed). This is already tracked in idea01M7C1Z68PR1AST8TW6PXJQSZZ on an unchanged main-based branch; this branch has no apps/web or packages diff. Added evidence there; no UI changes here.
+- API shard2/4 reported one deployment-error-recovery assertion under concurrent load; the one isolated rerun passed all34 tests. Shard2 also reached540s without a completion summary. No local test commands remain in flight; full-suite completion is not established. No claim of full-suite green.
+- Another staging owner reported completed rollout1616 before its sole Instant fixture, callback-persisted version6d797 initially, then expectedba3ba01 after recovery before termination. Sanitized evidence library01M7C6AWCAGTM75XQY2Y1E2JH0. Initial runtime image/incarnation was not captured, so the precise cause remains unproven. Application/rollout metadata is not independent running-binary evidence; our staging verification retains the actual agent-reported version check. No mutation or extra fixture was performed during this read-only coordination.
