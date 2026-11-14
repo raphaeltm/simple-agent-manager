@@ -1,11 +1,12 @@
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { importPKCS8, importSPKI, jwtVerify, SignJWT } from 'jose';
+import { importPKCS8, SignJWT } from 'jose';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { AppError, errors } from '../middleware/error';
+import { errors } from '../middleware/error';
 import { PUBLISH_JOB_TERMINAL_STATUSES } from './deployment-publish-jobs';
+import { verifyPublishJobClaims } from './jwt';
 
 const AUDIENCE = 'workspace-callback';
 export interface PublishJobClaims {
@@ -35,32 +36,7 @@ export async function signPublishJobToken(
 }
 
 export async function verifyPublishJobToken(env: Env, token: string) {
-  const key = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
-  let payload;
-  try {
-    ({ payload } = await jwtVerify(token, key, {
-      algorithms: ['RS256'],
-      issuer: `https://api.${env.BASE_DOMAIN}`,
-      audience: AUDIENCE,
-    }));
-  } catch {
-    throw new AppError(401, 'UNAUTHORIZED', 'Invalid or expired publish job token');
-  }
-  if (
-    payload.scope !== 'publish-job' ||
-    payload.type !== 'callback' ||
-    typeof payload.jobId !== 'string' ||
-    payload.sub !== payload.jobId ||
-    typeof payload.projectId !== 'string' ||
-    typeof payload.environmentId !== 'string' ||
-    typeof payload.agentProfileId !== 'string' ||
-    typeof payload.attempt !== 'number' ||
-    !Number.isSafeInteger(payload.attempt) ||
-    payload.attempt < 1 ||
-    typeof payload.iat !== 'number' ||
-    typeof payload.exp !== 'number'
-  )
-    throw new AppError(401, 'UNAUTHORIZED', 'Invalid publish job claims');
+  const payload = await verifyPublishJobClaims(env, token);
   const db = drizzle(env.DATABASE, { schema });
   const j = schema.deploymentPublishJobs;
   const [job] = await db

@@ -14,7 +14,13 @@ const mock = vi.hoisted(() => ({
 }));
 vi.mock('../../../src/services/admin-settings', () => ({
   resolveAdminSetting: async (_env: unknown, key: string) =>
-    key.endsWith('CollectionMode') ? mock.mode : key.endsWith('MaxBytes') ? 2147483648 : 10000,
+    key === 'deployments.buildExecutor'
+      ? 'node'
+      : key.endsWith('CollectionMode')
+        ? mock.mode
+        : key.endsWith('MaxBytes')
+          ? 2147483648
+          : 10000,
 }));
 vi.mock('@simple-agent-manager/worker-core', async (load) => ({
   ...(await load<typeof import('@simple-agent-manager/worker-core')>()),
@@ -84,7 +90,7 @@ beforeEach(() => {
   ]);
   sqlite.exec("INSERT INTO nodes(id,runtime) VALUES('node','vm')");
   env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'staging.invalid' } as Env;
-  mock.fetch.mockResolvedValue(new Response('{}', { status: 202 }));
+  mock.fetch.mockReset().mockResolvedValue(new Response('{}', { status: 202 }));
 });
 afterEach(() => sqlite.close());
 describe('shadow collection through the real publish handler', () => {
@@ -127,18 +133,22 @@ describe('shadow collection through the real publish handler', () => {
         .get()
     ).toEqual({ status: 'failed', release_id: null });
   });
-  it('Instant shadow collects via a workspace JWT while retaining the early node-build gate', async () => {
+  it('Instant always collects a real Cloudflare job even when shadow collection is enabled', async () => {
     mock.mode = 'shadow';
     sqlite.exec("UPDATE nodes SET runtime='cf-container'");
     const result = await publish();
     await Promise.all(pending);
-    expect(result.error?.message).toContain("Instant sessions isn't available");
+    expect(result.error).toBeUndefined();
+    expect(JSON.parse(result.result!.content[0].text)).toMatchObject({
+      executor: 'cloudflare',
+      status: 'queued',
+    });
     expect(mock.start).not.toHaveBeenCalled();
     expect(mock.fetch).toHaveBeenCalledTimes(1);
     const request = mock.fetch.mock.calls[0] as unknown as [string, Env, string, RequestInit];
     const body = JSON.parse(String(request[3].body));
     expect(body).toMatchObject({
-      shadow: true,
+      shadow: false,
       attempt: 1,
       workingDir: '/workspaces/app',
       secretInterpolationKeys: ['PRIVATE'],
@@ -146,7 +156,7 @@ describe('shadow collection through the real publish handler', () => {
     expect(body).not.toHaveProperty('PRIVATE');
     expect(
       sqlite.prepare('SELECT executor,context_shadow FROM deployment_publish_jobs').all()
-    ).toEqual([{ executor: 'cloudflare', context_shadow: 1 }]);
+    ).toEqual([{ executor: 'cloudflare', context_shadow: 0 }]);
   });
   it('hides shadow jobs from status and user cancel reads, with normal owner controls', async () => {
     mock.mode = 'shadow';

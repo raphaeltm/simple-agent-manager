@@ -396,6 +396,45 @@ export async function verifyCallbackToken(
   };
 }
 
+/** Verify only publish-job claims. Callers must additionally bind these claims to
+ * the current non-terminal job row and attempt in publish-job-token.ts. Generic
+ * workspace/node callback sinks continue to reject the publish-job scope. */
+export async function verifyPublishJobClaims(env: Env, token: string) {
+  const key = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
+  let payload;
+  try {
+    ({ payload } = await jwtVerify(token, key, {
+      algorithms: ['RS256'],
+      issuer: `https://api.${env.BASE_DOMAIN}`,
+      audience: CALLBACK_AUDIENCE,
+    }));
+  } catch {
+    throw new AppError(401, 'UNAUTHORIZED', 'Invalid or expired publish job token');
+  }
+  if (
+    payload.scope !== 'publish-job' ||
+    payload.type !== 'callback' ||
+    typeof payload.jobId !== 'string' ||
+    payload.sub !== payload.jobId ||
+    typeof payload.projectId !== 'string' ||
+    typeof payload.environmentId !== 'string' ||
+    typeof payload.agentProfileId !== 'string' ||
+    typeof payload.attempt !== 'number' ||
+    !Number.isSafeInteger(payload.attempt) ||
+    payload.attempt < 1 ||
+    typeof payload.iat !== 'number' ||
+    typeof payload.exp !== 'number'
+  )
+    throw new AppError(401, 'UNAUTHORIZED', 'Invalid publish job claims');
+  return {
+    jobId: payload.jobId,
+    projectId: payload.projectId,
+    environmentId: payload.environmentId,
+    agentProfileId: payload.agentProfileId,
+    attempt: payload.attempt,
+  };
+}
+
 /**
  * Verify a browser-to-workspace terminal token.
  *

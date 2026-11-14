@@ -36,3 +36,7 @@ Adjacent fixes logged: Compose project-name provenance01M7C3V7PQWQFXX8H3Y6J9A59Q
 ## Migration coordination — 2026-11-14 05:40 UTC
 
 Merged current main `8409636ec` without conflicts; DO migration tag remains v22 on main, so builder adds v23. Renumbered the unapplied builder D1 migration to `0240_cloudflare_build_executor.sql`: PR #2693 already owns 0239. Checked other open PR migration paths before choosing 0240. Migration safety and ordering both pass. The main merge touches none of Deploy Installer’s push path filters. Egress decision and explicit staging grant remain pending; no staging deployment or migration has run.
+
+## CI regression fixes — 2026-11-14
+
+The complete API test run exposed stale phase-2 shadow fixtures and the central JWT verifier inventory guard. Signature and claim verification now lives in `services/jwt.ts`; `publish-job-token.ts` retains exact live job-row and attempt binding. Generic callback sinks still reject publish-job tokens. The shadow fixture explicitly selects the node default and resets its deferred fetch mock; Instant asserts a real nonshadow Cloudflare job. Focused fixture/JWT tests: 26 passed. Independent security review passed the verifier move with no new trust-boundary blocker. Logged as idea `01M7CAY9AC980PT4AB9DV0B45M`.
