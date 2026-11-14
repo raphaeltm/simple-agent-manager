@@ -9,3 +9,9 @@ Normal phases totaled about 2.6 seconds. Coverage with two busy processes on the
 The lifecycle list already sorts by timestamp then ULID. ULID suffixes are random within a millisecond; the test's causal insertion-order assumption was stronger than the listing contract. Both real handoff decisions and the matching handoff detail remain asserted.
 
 Outstanding: final guard mutations, 30 normal + 30 loaded full-file runs for each affected test file, broader checks, local reviews, draft PR, CI and CodeRabbit gate. No claim of final stability yet.
+
+## Repeat progress
+
+Compact full-file runs: 30 normal and 10 CPU-loaded passed so far (520 tests, zero failures). Normal 100-row target median 2649.86 ms, maximum 2967.58 ms. Loaded runs pin the entire test process tree to two cores and keep one measured busy process on each core. The JSONL records positive busy-worker CPU time for every loaded run and preserves every case result. No hidden retries. Lifecycle repetitions and the remaining 20 loaded compact runs are still pending.
+
+Coordinator requires real CI Test-job wall-clock comparisons for serial package concurrency and a middle option before choosing the final budget. Historical Test-job baselines are 32:00 (43585850934), 24:00 (43589298206), and 20:44 (latest successful retry of 43585844985). `ci-budget-comparison.json` currently contains baselines only; proposed serial budget is not final until comparison.

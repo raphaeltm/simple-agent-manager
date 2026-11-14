@@ -1,0 +1,32 @@
+{
+  "status": "historical_baseline_only_comparison_pending",
+  "historicalTestJobs": [
+    {
+      "runId": 43585850934,
+      "start": "2026-11-14T10:34:40Z",
+      "end": "2026-11-14T11:06:40Z",
+      "seconds": 1920,
+      "conclusion": "success"
+    },
+    {
+      "runId": 43589298206,
+      "start": "2026-11-14T11:28:07Z",
+      "end": "2026-11-14T11:52:07Z",
+      "seconds": 1440,
+      "conclusion": "success"
+    },
+    {
+      "runId": 43585844985,
+      "attempt": "latest_successful_retry",
+      "start": "2026-11-14T10:55:17Z",
+      "end": "2026-11-14T11:16:01Z",
+      "seconds": 1244,
+      "conclusion": "success"
+    }
+  ],
+  "requiredComparisons": [
+    "serial Turbo package concurrency1",
+    "middle budget concurrency2 or worker cap"
+  ],
+  "decisionRule": "Choose fastest stable measured option. Prefer middle if serialization adds more than about five minutes unless middle still flakes."
+}
