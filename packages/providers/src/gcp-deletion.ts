@@ -4,7 +4,7 @@
  * of the delete operation for that exact instance id). See `./vm-deletion.ts`.
  */
 import { type GcpApiScope, pollGcpOperation } from './gcp-api';
-import { findGcpInstanceByIdOrName } from './gcp-instance-lookup';
+import { findGcpInstanceByIdOrName, getGcpInstanceInZone } from './gcp-instance-lookup';
 import {
   providerFetch,
   rethrowIfProviderRequestAborted,
@@ -168,6 +168,19 @@ export async function requestGcpInstanceDeletion(
   parseTicket(ticket);
   throwIfProviderRequestAborted(context);
   await options?.beforeSend?.(ticket);
+  throwIfProviderRequestAborted(context);
+  // DELETE addresses the instance by name. Re-read it right before sending, so a replacement
+  // created under the same name while `beforeSend` ran is never deleted in its place.
+  const current = await getGcpInstanceInZone(scope, zone, instance.name, context);
+  if (!current) return { state: 'absent' };
+  if (current.id !== instance.id) {
+    throw new ProviderError(
+      'gcp',
+      undefined,
+      `GCP instance ${instance.name} in ${zone} was replaced (id ${instance.id} -> ${current.id}); refusing to delete it`,
+      { category: 'invalid_config' }
+    );
+  }
   throwIfProviderRequestAborted(context);
   const op = await sendInstanceDelete(scope, zone, instance.name, context);
   // A 404 on the DELETE means the instance vanished between lookup and send: same as `deleteVM`.

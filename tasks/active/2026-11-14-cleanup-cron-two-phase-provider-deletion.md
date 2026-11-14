@@ -166,6 +166,9 @@ Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.t
 | Confirm failures before the status read not bounded by record age (adversarial fix) | bounded-confirm |
 | No send grace on `not_requested` (adversarial fix) | race-with-sender |
 | Recorded sender grace ignored (adversarial delta LOW) | sender-budget |
+| Minimum attempt not capped at half the phase budget (CodeRabbit) | short-budget (4 s) case; the 60 s case cannot discriminate under the frozen test clock |
+| `failed` not held within the send grace (CodeRabbit) | earlier-failed-delete |
+| GCP re-read before DELETE removed (CodeRabbit) | provider: replacement-under-same-name |
 
 ## Review fixes (Phase 5)
 
@@ -189,3 +192,4 @@ Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.t
   per-attempt budget is still pending; (4) LOW: GCP operations list now follows `nextPageToken`
   (bounded at 5 pages, unfinished walk is an error, never "not requested").
 - Adversarial delta re-check: fixes hold; two LOWs fixed: the sender's grace is stored in the record and honoured by any confirming caller; the GCP operations walk stops at the first conclusive page.
+- CodeRabbit review 5903306684 (on 63a008c4), three Major findings, all valid and fixed: minimum attempt capped at half the phase budget (a 4 s budget or a 60 s attempt budget could otherwise skip every attempt); `failed` held during the sender grace like `not_requested`; GCP request re-reads the instance by name after `beforeSend` and refuses a different numeric id (remaining gap: the re-read to DELETE round trip, ~0.2 s, since `instances.delete` addresses by name only). The extra GET (~0.12-1 s) is inside the 15 s attempt budget.

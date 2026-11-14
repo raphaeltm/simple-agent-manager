@@ -243,6 +243,7 @@ export function boundedConfirmationError(
  * - `not_requested` within `sendGraceMs` of the record → still `deletion_pending`: the record is
  *   written just before the DELETE leaves, so a confirmation racing the sender (an owner delete,
  *   an overlapping tick) must not clear it and let a second DELETE follow.
+ * - `failed` within the same grace is also still pending (an earlier attempt's failure, not this one's).
  * - `not_requested` after that, or `failed` → the record is cleared and the attempt fails
  *   (`ProviderDeletionRecordVoidError`), so the next attempt runs the full guarded teardown.
  *
@@ -257,6 +258,7 @@ export async function confirmPendingProviderDeletion(
   context?: ProviderRequestContext
 ): Promise<ProviderDeletionOutcome> {
   const ageMs = Date.now() - Date.parse(pending.requestedAt);
+  const withinSendGrace = ageMs < Math.max(bounds.sendGraceMs, pending.sendGraceMs ?? 0);
   const status = await readProviderDeletionStatus(node, providers, pending.ticket, context);
   switch (status.state) {
     case 'deleted':
@@ -267,13 +269,16 @@ export async function confirmPendingProviderDeletion(
       }
       return 'deletion_pending';
     case 'not_requested':
-      if (ageMs < Math.max(bounds.sendGraceMs, pending.sendGraceMs ?? 0)) return 'deletion_pending';
+      if (withinSendGrace) return 'deletion_pending';
       await clearProviderDeletionRecord(db, node, 'not_requested');
       throw new ProviderDeletionRecordVoidError(
         `Provider has no record of the deletion requested for node ${node.id}; ` +
           'cleared it so the next attempt runs teardown again'
       );
     case 'failed':
+      // GCP's record is per instance, not per attempt: a failed delete from an earlier attempt
+      // still reads `failed` until this record's own DELETE is listed. Hold it like `not_requested`.
+      if (withinSendGrace) return 'deletion_pending';
       await clearProviderDeletionRecord(db, node, 'failed');
       throw new ProviderDeletionRecordVoidError(
         `Provider deletion of node ${node.id} failed: ${status.message}`

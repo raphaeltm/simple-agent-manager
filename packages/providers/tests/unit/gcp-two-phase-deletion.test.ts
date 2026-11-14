@@ -49,8 +49,12 @@ function installFetch(handler: FetchHandler) {
 
 /** Instance lookup: the instance lives in europe-west1-b; every other zone is 404. */
 function lookupResponse(url: URL): Response | null {
-  if (url.pathname.endsWith(`/zones/europe-west1-b/instances/${INSTANCE.id}`))
+  if (
+    url.pathname.endsWith(`/zones/europe-west1-b/instances/${INSTANCE.id}`) ||
+    url.pathname.endsWith(`/zones/europe-west1-b/instances/${INSTANCE.name}`)
+  ) {
     return json(INSTANCE);
+  }
   if (url.pathname.includes('/instances/') && !url.pathname.includes('/operations')) {
     return notFound();
   }
@@ -103,6 +107,46 @@ describe('GcpProvider two-phase deletion', () => {
       expect(String(deletes[0]?.[0])).toContain(
         `/projects/${PROJECT}/zones/europe-west1-b/instances/${INSTANCE.name}`
       );
+    });
+
+    it('re-reads the instance after beforeSend and refuses a replacement under the same name', async () => {
+      let replaced = false;
+      const fetchMock = installFetch((url, init) => {
+        if (init?.method === 'DELETE') return json({ name: 'operation-1', status: 'RUNNING' });
+        if (replaced && url.pathname.endsWith(`/instances/${INSTANCE.name}`)) {
+          return json({ ...INSTANCE, id: '999' });
+        }
+        return lookupResponse(url) ?? notFound();
+      });
+
+      await expect(
+        provider.requestVMDeletion(INSTANCE.id, undefined, {
+          beforeSend: async () => {
+            replaced = true;
+          },
+        })
+      ).rejects.toThrow(/was replaced/);
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+    });
+
+    it('reports absent, sending nothing, when the instance is gone by the re-read', async () => {
+      let gone = false;
+      const fetchMock = installFetch((url, init) => {
+        if (init?.method === 'DELETE') return json({ name: 'operation-1', status: 'RUNNING' });
+        if (gone) {
+          return url.pathname.endsWith('/aggregated/instances') ? json({ items: {} }) : notFound();
+        }
+        return lookupResponse(url) ?? notFound();
+      });
+
+      await expect(
+        provider.requestVMDeletion(INSTANCE.id, undefined, {
+          beforeSend: async () => {
+            gone = true;
+          },
+        })
+      ).resolves.toEqual({ state: 'absent' });
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
     });
 
     it('sends nothing when beforeSend throws', async () => {

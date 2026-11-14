@@ -35,6 +35,8 @@ const cloud = vi.hoisted(() => ({
   loseDeleteResponse: false,
   /** Runs after the write-ahead record and before the DELETE leaves (a racing caller). */
   betweenRecordAndSend: undefined as undefined | (() => Promise<void>),
+  /** Forces the provider's answer, e.g. an earlier attempt's failed delete of the same instance. */
+  statusOverride: undefined as undefined | { state: 'failed'; message: string },
   /** API token -> server id -> labels. */
   accounts: new Map<string, Map<string, Record<string, string>>>(),
   /** Started deletes: server id -> { account, sentAt }. */
@@ -112,6 +114,7 @@ vi.mock('@simple-agent-manager/providers', async (importOriginal) => {
           const parsed = JSON.parse(ticket) as { account: string; id: string };
           cloud.statusReads.push(`${account}:${parsed.id}`);
           if (parsed.account !== account) return { state: 'wrong_scope' };
+          if (cloud.statusOverride) return cloud.statusOverride;
           const op = cloud.operations.get(parsed.id);
           if (!op) return { state: 'not_requested' };
           return present(parsed.id) ? { state: 'in_progress' } : { state: 'deleted' };
@@ -144,6 +147,7 @@ afterEach(() => {
   cloud.neverConfirms = false;
   cloud.loseDeleteResponse = false;
   cloud.betweenRecordAndSend = undefined;
+  cloud.statusOverride = undefined;
   cloud.accounts.clear();
   cloud.operations.clear();
   cloud.deletes.length = 0;
@@ -450,6 +454,38 @@ describe('two-phase provider deletion at the cleanup cron entry point', () => {
     expect((raced as Error).message).toMatch(/still in progress/);
     expect(cloud.deletes).toEqual([`${TOKEN}:${INSTANCE}`]);
     expect(f.node()).toMatchObject({ requestedAt: NOW.toISOString() });
+  });
+
+  it("an earlier attempt's failed delete does not void the record while this attempt's DELETE is leaving", async () => {
+    const f = await twoPhaseFixture();
+    // GCP's record is per instance: an older failed delete of the same instance reads `failed`.
+    cloud.statusOverride = { state: 'failed', message: 'RESOURCE_IN_USE: earlier attempt' };
+    let raced: unknown = 'not run';
+    cloud.betweenRecordAndSend = async () => {
+      cloud.betweenRecordAndSend = undefined;
+      raced = await deleteNodeResourcesStrict('host', 'user-1', f.env).catch(
+        (error: Error) => error
+      );
+    };
+
+    await f.tick(0);
+
+    expect((raced as Error).message).toMatch(/still in progress/);
+    expect(cloud.deletes).toEqual([`${TOKEN}:${INSTANCE}`]);
+    expect(f.node()).toMatchObject({ status: 'destroying', requestedAt: NOW.toISOString() });
+  });
+
+  it.each([
+    ['a short phase budget (4 s) with the default 15 s attempt budget', '4000', 15_000],
+    ['the default 20 s phase budget with the maximum 60 s attempt budget', undefined, 60_000],
+  ])('still starts attempts with %s', async (_name, budget, requestTimeoutMs) => {
+    const f = await twoPhaseFixture({ requestTimeoutMs });
+    if (budget) f.env.NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = budget;
+
+    await f.tick(0);
+    expect(cloud.deletes).toEqual([`${TOKEN}:${INSTANCE}`]);
+    await f.tick(1);
+    expect(f.node()).toMatchObject({ status: 'deleted', proof: expect.any(String) });
   });
 
   it('keeps the node pending, without an error row, while the provider is still deleting', async () => {

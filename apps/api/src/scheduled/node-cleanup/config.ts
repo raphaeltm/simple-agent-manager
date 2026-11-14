@@ -206,10 +206,15 @@ function buildCleanupConfig(env: Env): CleanupConfig {
 
 /**
  * The least sweep budget worth starting a teardown attempt with: a third of the per-attempt
- * budget (5 s at the 15 s default; a GCP request measured ~3-8 s, a confirmation ~0.4 s). An
- * attempt started with less would almost surely hit its deadline and be recorded as a failure the
- * node did not earn, so the candidate waits for the next tick instead.
+ * budget (5 s at the 15 s default; a GCP request measured ~3-8 s, a confirmation ~0.4 s), and
+ * never more than half the phase budget. An attempt started with less would almost surely hit its
+ * deadline and be recorded as a failure the node did not earn, so the candidate waits for the next
+ * tick instead. The half-budget cap keeps a short phase budget, or a long per-attempt budget, from
+ * leaving no room to start any attempt at all (the remaining time is always below the full budget).
  */
 export function minimumTeardownAttemptMs(config: CleanupConfig): number {
-  return Math.ceil(config.providerDeletionRequestTimeoutMs / 3);
+  return Math.min(
+    Math.ceil(config.providerDeletionRequestTimeoutMs / 3),
+    Math.floor(config.stoppedHandoffSweepBudgetMs / 2)
+  );
 }
