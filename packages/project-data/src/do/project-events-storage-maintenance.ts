@@ -107,7 +107,7 @@ export function deleteOldEventsWithoutMatches(
            SELECT 1 FROM project_event_matches m
            WHERE m.project_id = ? AND m.event_id = e.id
          )
-       ORDER BY e.received_at ASC, e.id
+       ORDER BY e.received_at ASC, e.id DESC
        LIMIT ?`,
       projectId,
       cutoff,
@@ -207,7 +207,12 @@ function deleteOldRowsSelectSql(
 }
 
 function deleteRowsByIdsSql(table: ProjectEventTable, placeholders: string): string {
-  return `DELETE FROM ${table}
+  // Without an identity hint SQLite may scan every project event for each
+  // ID chunk via the received-time index. The id TEXT PRIMARY KEY is frozen
+  // by the append-only schema (migration 038), including this autoindex name.
+  const identityIndex =
+    table === 'project_events' ? ' INDEXED BY sqlite_autoindex_project_events_1' : '';
+  return `DELETE FROM ${table}${identityIndex}
      WHERE project_id = ? AND id IN (${placeholders})`;
 }
 

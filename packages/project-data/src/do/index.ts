@@ -1817,10 +1817,36 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.AdmitProjectEventInput
   ): projectEvents.ProjectEventAdmissionResult {
     this.ensureProjectId(input.projectId);
+    const now = Date.now();
+    const previousRetentionAt = projectEvents.readSchedulerState(
+      this.sql,
+      input.projectId
+    ).nextRetentionAt;
+    const previousWakeAt = projectEvents.computeProjectEventMaterializationAlarmTime(
+      this.sql,
+      this.env,
+      input.projectId,
+      now
+    );
     const result = this.ctx.storage.transactionSync(() =>
       projectEvents.admitProjectEvent(this.sql, this.env, this.getProjectId(), input)
     );
-    this.rescheduleProjectEventAlarm(input.projectId);
+    const nextRetentionAt = projectEvents.readSchedulerState(
+      this.sql,
+      input.projectId
+    ).nextRetentionAt;
+    const nextWakeAt = projectEvents.computeProjectEventMaterializationAlarmTime(
+      this.sql,
+      this.env,
+      input.projectId,
+      now
+    );
+    // Duplicate/unmatched admissions generally leave both schedules unchanged.
+    // Retain the cold-start and new-wake paths without rewriting alarm memory
+    // or paying for setAlarm again on every webhook.
+    if (previousRetentionAt !== nextRetentionAt || previousWakeAt !== nextWakeAt) {
+      this.rescheduleProjectEventAlarm(input.projectId);
+    }
     return result;
   }
 

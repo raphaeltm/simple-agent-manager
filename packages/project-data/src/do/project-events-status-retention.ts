@@ -544,7 +544,7 @@ function deleteEligibleEvents(
          SELECT 1 FROM project_event_matches m
          WHERE m.project_id = ? AND m.event_id = e.id
        )
-     ORDER BY e.received_at ASC, e.id
+     ORDER BY e.received_at ASC, e.id DESC
      LIMIT ?`,
     [projectId, cutoff, projectId],
     budget
