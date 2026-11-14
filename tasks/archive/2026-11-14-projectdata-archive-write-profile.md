@@ -15,7 +15,7 @@ Production partial accounting: about 1.38 writes/message (source reclaim 1.04, t
 - [x] Implement measured highest-yield safe cuts; retain regression write ceilings.
 - [x] Prove exact reads, payloads/search, copyback and reset-resume; exceed page/chunk sizes; discriminate new guards.
 - [x] Lint/typecheck/tests/build/migration safety, local specialist reviews.
-- [ ] Coordinate staging; real sweep archive and app readback.
+- [x] Coordinate staging; real sweep archive and app readback.
 - [ ] PR/CI/CodeRabbit/merge/deploy receipt and production before/after metrics note.
 
 ## Acceptance criteria
@@ -48,9 +48,12 @@ Source reclaim already has only three non-delete/FTS bookkeeping writes; verifie
 Throughput recommendation only: interval 540000 ms, daily budget 6000000, factor 2 and wall 60000 unchanged. At 12000 rows per 10-minute effective tick, 72k/hour drains 4.75M in 65.97 hours excluding inflow (36k/hour: 131.94 hours). Fixture reservation is 6476/2100 = 3.08381 per raw row, requiring 5.329M/day at 72k/hour; actual production inventory must confirm headroom. Current 2.4M budget cannot sustain doubling. No production settings changed. Full notes and official CF billing links are on idea 01M7CX61WVX72T7CFQNRTX0DVM, updates 01M7DMSHEZKW7F7W23ZS4B8Q1A and 01M7DNBWR1VM5G3A99YAJGCF8P.
 
 ## Verification so far
-- Real workerd archive profile, accounting sentinel, coordinator reset, copyback, atomic failure, resumable cursor and compact archive: 4 files / 26 tests pass.
+- Real workerd archive profile, accounting sentinel, coordinator reset, copyback, atomic failure, resumable cursor and compact archive: 5 files / 28 tests pass (including final SQL telemetry guard).
 - Go real reporter fixture test passes; repository lint passes (existing web warnings only).
 - DO migration safety passes.
 - Full lint/typecheck/test/build pass (39 test tasks; API 15,168 passed, 4 skipped). Cloudflare, constitution, doc sync, Go and test-engineer reviews pass. Completion review confirms implementation coverage, with release gates pending.
 - Discriminating mutations: removing duplicate-identity consumption fails the atomic duplicate test; removing bind paging fails the real coordinator with SQLITE_ERROR (too many SQL variables); removing occupied-slot diagnostic fails the real sweep test. All three changes restored; final control suite passes: 4 files / 27 tests.
-- Staging and release remain pending.
+- Staging positive proof: Deploy Staging 43630741691 succeeded at head8197eb52b. Natural global sweep at20:15Z archived session e634a751-ba10-4810-bb66-a6e7a36fa029 (39 messages) to compact R2, published with reclaim_pending=0. Exact full-message SHA256 before/after: 15ede33631686ffce3a3d9edf6e146c102e4cae3f3494b326ed3c165164f2edd. Playwright opened the archived chat with expected content/no page errors; MCP search found that session.
+- Staging admin pressure restored to50 at20:21Z (revision56→57). Restored-config pipeline43637050170 atbbd90cf63 is live100% (CFversiondf7c9b8a-0822-440c-bc74-2dc4be326aa4 at20:29:54Z); compact=false / interval1080000 / sessions50 confirmed. Exact39-message hash, Playwright archived readback and MCP search pass again20:35Z. Full workflow passed, including rollout and smoke; shared staging released20:46Z. Final wrangler diff against origin/main is empty; no CF Worker PATCH or GH Environment edits.
+- Literal /do VM-path gate: one bounded cx23 (2vCPU/4GB) smoke workspace01M7DVNXJ8801PY66ECPV7K7KJ/node01M7DVNX6J92SWY7EMYTHPTVV6 created20:23Z. Heartbeat20:26:04Z (42seconds after first observed agent provisioning event), authenticated ws-subdomain terminal command and real agent session create/list/stop passed20:38Z. Physical workspace deletion confirmed and node deleted20:39Z; API lists confirm both absent. No fixtures left. No runtime Go changes.
+- PR, CI, CodeRabbit, merge, production deployment and clean-window metrics remain pending.
