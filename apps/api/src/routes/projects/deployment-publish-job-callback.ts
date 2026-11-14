@@ -12,7 +12,7 @@ import {
   PUBLISH_JOB_TERMINAL_STATUSES,
 } from '../../services/deployment-publish-jobs';
 import { recordDeploymentPublishJobLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
-import { verifyWorkspacePublishCallback } from './_callback-auth';
+import { verifyPublishCallback } from './_publish-callback-auth';
 
 const deploymentPublishJobCallbackRoute = new Hono<{ Bindings: Env }>();
 
@@ -50,8 +50,8 @@ const publishJobEventSchema = v.object({
 });
 
 deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/events', async (c) => {
-  const { projectId, workspaceId, userId, db, assertCurrent } =
-    await verifyWorkspacePublishCallback(
+  const { projectId, workspaceId, userId, db, assertCurrent, job: authenticatedJob } =
+    await verifyPublishCallback(
       c,
       'deployment_publish_job_event',
       'Invalid token scope for deployment publish job event'
@@ -107,10 +107,14 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   ) {
     throw errors.badRequest('Release metadata requires releaseId');
   }
+  if (authenticatedJob && event.releaseId && event.releaseId !== authenticatedJob.releaseId)
+    throw errors.forbidden('Event release must already be linked to this job');
   const currentStep = optionalString(event.currentStep) ?? optionalString(event.step);
   await assertCurrent();
   const accepted = await appendDeploymentPublishJobEvent(db, {
     publishJobId,
+    expectedAttempt: authenticatedJob?.attempt,
+    expectedExecutor: authenticatedJob ? 'cloudflare' : undefined,
     projectId,
     environmentId: job.environmentId,
     nodeId: job.nodeId,
@@ -132,7 +136,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
 
   if (accepted === false)
     throw errors.conflict('Publish job is terminal or release does not match');
-  await assertCurrent();
+  if (!authenticatedJob) await assertCurrent();
   if (
     !job.contextShadow &&
     eventType !== 'publish.job.heartbeat' &&
@@ -158,7 +162,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     );
   }
 
-  await assertCurrent();
+  if (!authenticatedJob) await assertCurrent();
   return c.json({ ok: true });
 });
 

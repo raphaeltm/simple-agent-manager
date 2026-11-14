@@ -129,6 +129,8 @@ export async function createDeploymentPublishJob(
 }
 
 export interface AppendDeploymentPublishJobEventInput {
+  expectedAttempt?: number;
+  expectedExecutor?: 'cloudflare';
   publishJobId: string;
   projectId: string;
   environmentId: string;
@@ -162,6 +164,8 @@ export async function appendDeploymentPublishJobEvent(
   const terminal = input.terminal || (status ? PUBLISH_JOB_TERMINAL_STATUSES.has(status) : false);
   const predicate = and(
     eq(schema.deploymentPublishJobs.id, input.publishJobId),
+    input.expectedAttempt !== undefined ? eq(schema.deploymentPublishJobs.attempt, input.expectedAttempt) : undefined,
+    input.expectedExecutor ? eq(schema.deploymentPublishJobs.executor, input.expectedExecutor) : undefined,
     input.releaseId != null ? visiblePublishJobPredicate() : undefined,
     input.releaseId != null
       ? or(

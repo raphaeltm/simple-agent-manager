@@ -17,7 +17,7 @@ import {
 } from '../../services/compose-image-artifacts';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import type { WorkspaceDeletionCallbackKind } from '../../services/workspace-deletion-callback-signal';
-import { verifyWorkspacePublishCallback } from './_callback-auth';
+import { verifyPublishCallback } from './_publish-callback-auth';
 
 const composeImageArtifactsCallbackRoute = new Hono<{ Bindings: Env }>();
 
@@ -80,7 +80,7 @@ async function verifyArtifactPolicy(
   c: Context<{ Bindings: Env }>,
   logPrefix: WorkspaceDeletionCallbackKind
 ) {
-  const verified = await verifyWorkspacePublishCallback(
+  const verified = await verifyPublishCallback(
     c,
     logPrefix,
     'Invalid token scope for compose image artifact upload'
@@ -151,7 +151,7 @@ composeImageArtifactsCallbackRoute.post('/:id/compose-image-artifacts/init', asy
   if (services.length === 0) {
     throw errors.badRequest('Artifact upload init requires at least one service');
   }
-  const uploadId = ulid();
+  const uploadId = verified.job ? `${verified.job.id}-${verified.job.attempt}` : ulid();
 
   await verified.assertCurrent();
   const uploads = await createComposeImageArtifactUploads(c.env, {

@@ -45,7 +45,7 @@ import {
   placeReleaseOnDeploymentNode,
   updateDeploymentEnvironmentForLatestRelease,
 } from '../deployment-release-submission';
-import { verifyWorkspacePublishCallback } from './_callback-auth';
+import { verifyPublishCallback } from './_publish-callback-auth';
 
 /**
  * Compose-publish release ingestion callback — mounted BEFORE projectsRoutes in
@@ -212,7 +212,7 @@ function resolveComposePublishReservation(
 
 composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c) => {
   const { projectId, workspaceId, userId, db, assertCurrent } =
-    await verifyWorkspacePublishCallback(
+    await verifyPublishCallback(
       c,
       'compose_publish_release',
       'Invalid token scope for compose-publish release'
