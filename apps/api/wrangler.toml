@@ -73,7 +73,7 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED = "true"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS = "300000"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
 # Compact format stays off until the staged rollout and production mutation approval.
-PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
+PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "true"
 # Tripled with the sweep cadence on 2026-09-27 (was 800000): the same ~33k estimate units per
 # tick at 3x the ticks. Real candidates reserve ~21.5k units (six production samples, 17.8k-27.1k),
 # so 72 ticks/day use ~1.55M; 800000 would have stopped the drain at ~37/day. Cost
@@ -122,14 +122,14 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 # this sweep, while the SAM root ProjectData DO sat ~550 MB under Cloudflare's hard 10 GiB cap
 # (it hit the cap on 2026-10-02). This drain is storage protection, not a cost lever: do not slow
 # it to save money.
-PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "1080000"
+PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "300000"
 # Most sessions one tick may copy. A candidate refused by the write budget or by the root object
 # takes no slot, so this caps work done, not candidates looked at. It also sets the
 # reclaimable-migration limit and the candidate over-fetch LIMIT
 # (min(limit, _SWEEP_PROJECTS * this) + _FALLTHROUGH_DEPTH). At _WALL_TIME_MS = 60 s a tick
 # publishes ~6 small sessions (8-14 s each, measured 2026-11-12), so 50 is a safety cap that
 # wall time reaches first; it binds only for a run of near-empty sessions. Code default is 10.
-PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "50"
+PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "1"
 # Cumulative message_count the operator-scoped canary packs into one run (largest first), and its
 # SQL ceiling for unnamed sessions. Since 2026-11-13 the UNSCOPED sweep no longer uses it: a
 # migration is a resumable cursor that copies, verifies and reclaims across ticks, so the only
