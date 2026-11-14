@@ -124,6 +124,8 @@ const INSTANCE = '777';
 const INCARNATION = 'inc-host';
 const INSTALLATION = '0123456789abcdef0123456789abcdef';
 const databases: Database.Database[] = [];
+/** Captured before any test fakes timers. */
+const REAL_SET_TIMEOUT = globalThis.setTimeout;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -277,6 +279,9 @@ async function twoPhaseFixture(options: { requestTimeoutMs?: number; confirmMaxM
    * per-attempt deadlines run on one clock. Returns the tick's duration on that clock.
    */
   const timedTick = async (n: number) => {
+    // Real async work (WebCrypto, D1 adapter) completes on real time; let it settle before each
+    // fake step so the fake clock cannot run ahead of work that is merely pending.
+    const settleRealWork = () => new Promise<void>((resolve) => REAL_SET_TIMEOUT(resolve, 5));
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const start = NOW.getTime() + n * TICK_MS;
     vi.setSystemTime(new Date(start));
@@ -284,7 +289,10 @@ async function twoPhaseFixture(options: { requestTimeoutMs?: number; confirmMaxM
     const run = runNodeCleanupSweep(f.env).finally(() => {
       done = true;
     });
-    for (let i = 0; i < 1000 && !done; i++) await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 1000 && !done; i++) {
+      await settleRealWork();
+      await vi.advanceTimersByTimeAsync(100);
+    }
     const result = await run;
     return { result, wallMs: Date.now() - start };
   };
@@ -466,7 +474,7 @@ describe('two-phase provider deletion at the cleanup cron entry point', () => {
       attemptedPerTick.push(cloud.lookups.length - before);
       // The stopped-handoff phase stops starting attempts at its 2.5 s budget; the one in flight
       // ends at its deadline, which is capped by the same budget.
-      expect(wallMs).toBeLessThanOrEqual(2500 + 100);
+      expect(wallMs).toBeLessThanOrEqual(2500 + 200);
       if (f.node().requestedAt !== null) reachedAt = n;
     }
     // The budget admits three slow attempts per tick (1 s + 1 s + the 0.5 s left). Without
@@ -478,5 +486,5 @@ describe('two-phase provider deletion at the cleanup cron entry point', () => {
     expect(reachedAt).not.toBeNull();
     expect(reachedAt!).toBeLessThanOrEqual(2);
     expect(cloud.deletes).toEqual([`${TOKEN}:${INSTANCE}`]);
-  });
+  }, 30_000);
 });
