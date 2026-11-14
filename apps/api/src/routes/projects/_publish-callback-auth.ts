@@ -16,10 +16,10 @@ export async function verifyPublishCallback(
   logPrefix: WorkspaceDeletionCallbackKind,
   scopeErrorMessage: string
 ) {
-  const token = extractBearerToken(c.req.header('Authorization'));
+  const authorization = c.req.header('Authorization');
   let jobScope = false;
   try {
-    jobScope = decodeJwt(token).scope === 'publish-job';
+    jobScope = decodeJwt(extractBearerToken(authorization)).scope === 'publish-job';
   } catch {
     /* verifier returns 401 */
   }
@@ -28,6 +28,7 @@ export async function verifyPublishCallback(
       ...(await verifyWorkspacePublishCallback(c, logPrefix, scopeErrorMessage)),
       job: null,
     };
+  const token = extractBearerToken(authorization);
   const { db, job } = await verifyPublishJobToken(c.env, token);
   if (
     job.projectId !== c.req.param('id') ||

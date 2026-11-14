@@ -164,8 +164,12 @@ export async function appendDeploymentPublishJobEvent(
   const terminal = input.terminal || (status ? PUBLISH_JOB_TERMINAL_STATUSES.has(status) : false);
   const predicate = and(
     eq(schema.deploymentPublishJobs.id, input.publishJobId),
-    input.expectedAttempt !== undefined ? eq(schema.deploymentPublishJobs.attempt, input.expectedAttempt) : undefined,
-    input.expectedExecutor ? eq(schema.deploymentPublishJobs.executor, input.expectedExecutor) : undefined,
+    input.expectedAttempt !== undefined
+      ? eq(schema.deploymentPublishJobs.attempt, input.expectedAttempt)
+      : undefined,
+    input.expectedExecutor
+      ? eq(schema.deploymentPublishJobs.executor, input.expectedExecutor)
+      : undefined,
     input.releaseId != null ? visiblePublishJobPredicate() : undefined,
     input.releaseId != null
       ? or(
@@ -374,7 +378,7 @@ export async function failExpiredDeploymentPublishJobs(
   const deadlineCutoff = new Date(nowMs - settings.deadlineMs).toISOString();
   // SQL NULL never satisfies the heartbeat comparison: legacy agents are deadline-only.
   const expired = sql`(${schema.deploymentPublishJobs.createdAt} <= ${deadlineCutoff}
-    OR ${schema.deploymentPublishJobs.lastHeartbeatAt} <= ${stallCutoff})`;
+    OR (${schema.deploymentPublishJobs.status} <> 'context_ready' AND ${schema.deploymentPublishJobs.lastHeartbeatAt} <= ${stallCutoff}))`;
   // Disjoint status ranges use the existing (status, updated_at) index and
   // exclude terminal history. Unlike a fixed active-status list, this also
   // covers new non-terminal states introduced by later executors.

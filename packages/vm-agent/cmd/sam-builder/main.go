@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +22,13 @@ const bootstrapTimeout = 60 * time.Second
 const controllerAddress = ":8080"
 const maxLaunchBytes = 16 * 1024
 
+func durationEnv(name string, fallback time.Duration) time.Duration {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err == nil && value > 0 {
+		return time.Duration(value) * time.Millisecond
+	}
+	return fallback
+}
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "sam-builder stopped:", err)
@@ -28,6 +36,8 @@ func main() {
 	}
 }
 func run() error {
+	bootstrapBudget := durationEnv("SAM_BUILDER_BOOTSTRAP_TIMEOUT_MS", bootstrapTimeout)
+	controlBudget := durationEnv("SAM_BUILDER_CONTROL_TIMEOUT_MS", builder.DefaultCallbackTimeout)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	listener, err := net.Listen("tcp", controllerAddress)
@@ -55,17 +65,17 @@ func run() error {
 		}
 		w.WriteHeader(http.StatusAccepted)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: controlBudget, ReadTimeout: controlBudget, WriteTimeout: controlBudget}
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.Serve(listener) }()
-	timer := time.NewTimer(bootstrapTimeout)
+	timer := time.NewTimer(bootstrapBudget)
 	defer timer.Stop()
 	defer server.Close()
 	select {
 	case launch := <-launches:
 		// Close the bootstrap listener before any Dockerfile runs. A RUN with host
 		// networking can neither retrieve a token nor submit a second launch.
-		shutdownCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+		shutdownCtx, stop := context.WithTimeout(ctx, controlBudget)
 		defer stop()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			return errors.New("controller shutdown failed")

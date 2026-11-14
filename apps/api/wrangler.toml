@@ -516,3 +516,18 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *"]
 # - CF_AIG_TOKEN (optional — Cloudflare AI Gateway Unified Billing token; enables OpenAI/Anthropic models without separate API keys)
 # - SMOKE_TEST_AUTH_ENABLED (optional — enables smoke-test token auth for test environments)
 # - AGENT_SIGN_IN_TRUST (optional — test instances only: JSON trust configuration for agent sign-in through workload identity; see services/agent-sign-in/config.ts)
+
+# Dedicated per-publish-job DinD build executor (instance sizing resolved at deploy time).
+[[containers]]
+class_name = "ComposeBuilderContainer"
+image = "./Dockerfile.compose-builder"
+instance_type = "standard-4"
+max_instances = 6
+
+[[durable_objects.bindings]]
+name = "COMPOSE_BUILDER"
+class_name = "ComposeBuilderContainer"
+
+[[migrations]]
+tag = "v23"
+new_sqlite_classes = ["ComposeBuilderContainer"]

@@ -32,9 +32,10 @@ type Options struct {
 	Timeout    time.Duration
 }
 type Result struct {
-	Bytes      int64  `json:"sizeBytes"`
-	SHA256     string `json:"sha256"`
-	DurationMs int64  `json:"durationMs"`
+	ProjectName string `json:"projectName"`
+	Bytes       int64  `json:"sizeBytes"`
+	SHA256      string `json:"sha256"`
+	DurationMs  int64  `json:"durationMs"`
 }
 type budgetWriter struct {
 	ctx    context.Context
@@ -142,7 +143,7 @@ func Collect(parent context.Context, opts Options, output io.Writer) (*Result, e
 	if err := encoder.Close(); err != nil {
 		return nil, err
 	}
-	return &Result{Bytes: compressed.n, SHA256: hex.EncodeToString(hash.Sum(nil)), DurationMs: time.Since(started).Milliseconds()}, nil
+	return &Result{ProjectName: plan.projectName, Bytes: compressed.n, SHA256: hex.EncodeToString(hash.Sum(nil)), DurationMs: time.Since(started).Milliseconds()}, nil
 }
 func writeEntry(ctx context.Context, tw *tar.Writer, safe *os.Root, plan *collectionPlan, path, rel string) error {
 	if err := plan.validatePath(path); err != nil {

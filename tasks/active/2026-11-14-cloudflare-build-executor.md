@@ -12,11 +12,12 @@ Data flow: MCP compose-publish-tools → app-deployment job/executor selection �
 Spike: standard-4 only demonstrated, overlayfs, root dockerd/cgroupfs, /tmp mount, build.network host required. Keep20min deadline and60s readiness. >100MiB real R2 PUT/GET not measured; mandatory here. Root RUN can access builder-local state: no broad credentials, job token scope exactly one job, deny-default egress. No runtime secret values supplied.
 
 ## Implementation
-- [ ] Publish-job JWT and dual callback authorization; atomically fence attempt; env/profile/job artifact identity.
-- [ ] Atomic D1 admission, project2/platform6 clamped class maximum; queue/backoff/drain, no silent source fallback.
-- [ ] Builder Go supervisor: safe bounded download/hash/extraction, daemon startup/readiness, host network augmentation, existing publish engine, signals/heartbeats.
+
+- [x] Publish-job JWT and dual callback authorization; atomically fence attempt; env/profile/job artifact identity.
+- [x] Atomic D1 admission, project2/platform6 clamped class maximum; queue/backoff/drain, no silent source fallback.
+- [x] Builder Go supervisor: safe bounded download/hash/extraction, daemon startup/readiness, host network augmentation, existing publish engine, signals/heartbeats.
 - [ ] ComposeBuilderContainer alarm/terminal lifecycle; image, env instance type, max config, v23 SQLite migration and allowlist.
-- [ ] Runtime admin executor selection, Instant cloudflare, VM node default, old-agent compatibility.
+- [x] Runtime admin executor selection, Instant cloudflare, VM node default, old-agent compatibility.
 - [ ] Guide/config/self-host docs and contract updates.
 - [ ] Local meaningful regression/contract/admission tests, lint/type/build gates.
 - [ ] Independent security/domain/completion reviews resolved.
@@ -26,3 +27,8 @@ Spike: standard-4 only demonstrated, overlayfs, root dockerd/cgroupfs, /tmp moun
 - [ ] Draft PR needs-human-review, CI, CodeRabbit request/wait; send URL/full SHA/gates to coordinator then STOP.
 
 Never commit to main. Preserve .codex/config.toml environment change. Staging Claude VMs0.2CPU/0.5GB. Known archive flake retry at most once. No merge absent coordinator exact-SHA approval.
+
+## Implementation validation state — 2026-11-14
+
+Auth/admission and Go supervisor pushed in fe4ffa848 /27fda1536. Container/cron/admin/config integration now uses durable alarm kickoff (HTTP callback returns promptly), idempotent acceptance across SDK healthy state, stop-confirmed capacity backoff, destruction before database deadline verdict, and explicit retry of failed deadline destruction. Root lint and typecheck passed; focused executor tests85PASS and Go race builder/publish/contextcollector PASS. Full root tests hit unrelated archive/UI timing failures under concurrent load; bounded isolated retries pending. Migration/config tests91PASS. Network allowlist remains a known unvalidated placeholder: SDK outbound handler100MiB limit and CA propagation into arbitrary RUN images conflict with required transfer/build semantics. Coordinator requested human approval for open egress; not granted yet. No staging slot requested or used. No PR exists yet.
+Adjacent fixes logged: Compose project-name provenance01M7C3V7PQWQFXX8H3Y6J9A59Q; self-host build-cache binary manifest01M7C5YZ354D72XZX7K6F70HHE. Cache/prebuilt manifest must include new builder binary or skip-compile restore cannot build its image. Callback/bootstrap operational budgets are configurable; context GET reuses existing configured URL TTL.

@@ -8,6 +8,7 @@ import type { ProjectDataEnv } from '@simple-agent-manager/project-data';
 import type { ArtifactsBinding, RepoHostingEnv } from '@simple-agent-manager/repo-hosting';
 import type { WorkspaceAdmissionEnv } from '@simple-agent-manager/scheduler-core';
 
+import type { ComposeBuilderContainer } from './durable-objects/compose-builder-container';
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
 import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
@@ -25,6 +26,8 @@ export interface Env
     OperationsEnv,
     RepoHostingEnv,
     AiProxyEnv {
+  COMPOSE_BUILDER: DurableObjectNamespace<ComposeBuilderContainer>;
+  DEPLOY_BUILDER_CLASS_MAX_INSTANCES?: string;
   CLI_RECEIPT_REQUEST_MAX_BYTES?: string; // default 262144
   CLI_RECEIPT_RESPONSE_MAX_BYTES?: string; // default 65536
   // D1 Database.

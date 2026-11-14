@@ -17,6 +17,16 @@ const recordDeploymentPublishJobLifecycleEventBestEffort = vi.hoisted(() =>
   vi.fn(async () => undefined)
 );
 
+const { collectContext, executorSetting } = vi.hoisted(() => ({
+  collectContext: vi.fn(async () => ({ supported: true })),
+  executorSetting: vi.fn(async () => 'node'),
+}));
+vi.mock('../../src/services/build-context-collection', () => ({
+  collectBuildContextOnSource: collectContext,
+  createBuildContextCollectionPorts: vi.fn(() => ({})),
+}));
+vi.mock('../../src/services/admin-settings', () => ({ resolveAdminSetting: executorSetting }));
+
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(() => ({
     mockedDb: true,
@@ -83,6 +93,8 @@ describe('async build_and_publish MCP tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     nodeRuntime = 'vm';
+    executorSetting.mockResolvedValue('node');
+    collectContext.mockResolvedValue({ supported: true });
     currentStatus = 'building';
     mockAppendDeploymentPublishJobEvent.mockResolvedValue(true);
     mockAssertAgentDeploymentAllowed.mockResolvedValue({
@@ -134,18 +146,34 @@ describe('async build_and_publish MCP tools', () => {
     }
   );
 
-  it('rejects Instant sessions before creating or starting a job', async () => {
+  it('collects an Instant context independently of the VM default', async () => {
     nodeRuntime = 'cf-container';
-    const result = await handleBuildAndPublish(
-      'instant',
-      { environment: 'staging' },
-      tokenData(),
-      env()
+    const result = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+    expect(JSON.parse(result.result?.content?.[0]?.text as string)).toMatchObject({
+      executor: 'cloudflare',
+      publishJobId: 'job-1',
+    });
+    expect(mockCreateDeploymentPublishJob).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ executor: 'cloudflare' })
     );
-    expect(result.error?.message).toContain(
-      "Deploying from Instant sessions isn't available yet; use a VM session"
+    expect(collectContext).toHaveBeenCalled();
+    expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
+  });
+  it('uses explicit Cloudflare selection for a VM without starting a source build', async () => {
+    executorSetting.mockResolvedValue('cloudflare');
+    const result = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+    expect(JSON.parse(result.result?.content?.[0]?.text as string).executor).toBe('cloudflare');
+    expect(collectContext).toHaveBeenCalled();
+    expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
+  });
+  it('never falls back to the source after explicit Cloudflare collection fails', async () => {
+    executorSetting.mockResolvedValue('cloudflare');
+    collectContext.mockRejectedValueOnce(
+      new Error('source collection route unavailable; upgrade source agent')
     );
-    expect(mockCreateDeploymentPublishJob).not.toHaveBeenCalled();
+    const result = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+    expect(JSON.parse(result.result?.content?.[0]?.text as string).status).toBe('failed');
     expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
   });
 
@@ -193,6 +221,7 @@ describe('async build_and_publish MCP tools', () => {
 
     expect(result.error).toBeUndefined();
     expect(mockCreateDeploymentPublishJob).toHaveBeenCalledWith(expect.anything(), {
+      executor: 'node',
       projectId: 'proj-1',
       environmentId: 'env-1',
       workspaceId: 'ws-1',

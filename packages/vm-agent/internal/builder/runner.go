@@ -23,16 +23,20 @@ const DefaultCallbackTimeout = 30 * time.Second
 const MaxSpecBytes = 2 * 1024 * 1024
 
 type Launch struct {
-	ControlPlaneURL string    `json:"controlPlaneUrl"`
-	ProjectID       string    `json:"projectId"`
-	JobID           string    `json:"jobId"`
-	Attempt         int       `json:"attempt"`
-	Token           string    `json:"token"`
-	DeadlineAt      time.Time `json:"deadlineAt"`
+	CallbackTimeoutMs    int       `json:"callbackTimeoutMs"`
+	CallbackAttempts     int       `json:"callbackAttempts"`
+	CallbackRetryDelayMs int       `json:"callbackRetryDelayMs"`
+	ControlPlaneURL      string    `json:"controlPlaneUrl"`
+	ProjectID            string    `json:"projectId"`
+	JobID                string    `json:"jobId"`
+	Attempt              int       `json:"attempt"`
+	Token                string    `json:"token"`
+	DeadlineAt           time.Time `json:"deadlineAt"`
 }
 type Spec struct {
-	DaemonReadyTimeoutMs int `json:"daemonReadyTimeoutMs"`
-	HeartbeatIntervalMs  int `json:"heartbeatIntervalMs"`
+	ProjectName          string `json:"projectName"`
+	DaemonReadyTimeoutMs int    `json:"daemonReadyTimeoutMs"`
+	HeartbeatIntervalMs  int    `json:"heartbeatIntervalMs"`
 
 	JobID          string            `json:"jobId"`
 	Attempt        int               `json:"attempt"`
@@ -67,9 +71,22 @@ func (e callbackStatusError) Error() string {
 const DefaultCallbackAttempts = 3
 const DefaultCallbackRetryDelay = 5 * time.Second
 
+func (l Launch) callbackTimeout() time.Duration {
+	if l.CallbackTimeoutMs > 0 {
+		return time.Duration(l.CallbackTimeoutMs) * time.Millisecond
+	}
+	return DefaultCallbackTimeout
+}
 func (l Launch) send(ctx context.Context, method, url string, body any, result any) error {
+	attempts, retryDelay := l.CallbackAttempts, time.Duration(l.CallbackRetryDelayMs)*time.Millisecond
+	if attempts < 1 {
+		attempts = DefaultCallbackAttempts
+	}
+	if retryDelay <= 0 {
+		retryDelay = DefaultCallbackRetryDelay
+	}
 	var last error
-	for attempt := 0; attempt < DefaultCallbackAttempts; attempt++ {
+	for attempt := 0; attempt < attempts; attempt++ {
 		last = l.sendOnce(ctx, method, url, body, result)
 		if last == nil {
 			return nil
@@ -78,8 +95,8 @@ func (l Launch) send(ctx context.Context, method, url string, body any, result a
 		if errors.As(last, &status) && status.status < 500 {
 			return last
 		}
-		if attempt+1 < DefaultCallbackAttempts {
-			timer := time.NewTimer(DefaultCallbackRetryDelay)
+		if attempt+1 < attempts {
+			timer := time.NewTimer(retryDelay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -105,7 +122,7 @@ func (l Launch) sendOnce(ctx context.Context, method, url string, body any, resu
 	}
 	req.Header.Set("Authorization", "Bearer "+l.Token)
 	req.Header.Set("Content-Type", "application/json")
-	response, err := Client(DefaultCallbackTimeout).Do(req)
+	response, err := Client(l.callbackTimeout()).Do(req)
 	if err != nil {
 		return errors.New("builder callback failed")
 	}
@@ -160,7 +177,7 @@ func Run(parent context.Context, launch Launch) error {
 	}()
 	err := run(ctx, launch, spec, sink)
 	if err != nil {
-		finalCtx, stop := context.WithTimeout(context.Background(), DefaultCallbackTimeout)
+		finalCtx, stop := context.WithTimeout(context.Background(), launch.callbackTimeout())
 		defer stop()
 		_ = launch.send(finalCtx, http.MethodPost, launch.jobURL()+"/events", publish.Event{Status: "failed", CurrentStep: "builder", Level: "error", EventType: "publish.builder.failed", Message: "Cloudflare build failed; inspect publish progress", ErrorCode: "cloudflare_build_failed", Terminal: true}, nil)
 	}
@@ -180,7 +197,10 @@ func run(ctx context.Context, launch Launch, spec Spec, sink publish.EventSink) 
 	if err = Download(ctx, Client(time.Until(launch.DeadlineAt)), spec.ContextURL, spec.ContextBytes, spec.ContextSHA256, spec.MaxBytes, archive); err != nil {
 		return err
 	}
-	source := filepath.Join(temp, "source")
+	if !validProjectName(spec.ProjectName) {
+		return errors.New("invalid Compose project identity")
+	}
+	source := filepath.Join(temp, spec.ProjectName)
 	if err = os.Mkdir(source, 0700); err != nil {
 		return err
 	}
@@ -210,7 +230,7 @@ func run(ctx context.Context, launch Launch, spec Spec, sink publish.EventSink) 
 		select {
 		case <-readyCtx.Done():
 			return errors.New("dockerd readiness deadline")
-		case <-time.After(200 * time.Millisecond):
+		case <-time.After(time.Duration(spec.DaemonReadyTimeoutMs) * time.Millisecond / 300):
 		}
 	}
 	sink.Event(ctx, publish.Event{Status: "building", CurrentStep: "builder_ready", EventType: "publish.builder.ready", Message: "DinD builder ready"})
@@ -218,11 +238,24 @@ func run(ctx context.Context, launch Launch, spec Spec, sink publish.EventSink) 
 	if err != nil {
 		return errors.New("compose build failed")
 	}
-	plane := publish.NewHTTPControlPlane(publish.HTTPControlPlaneOptions{BaseURL: launch.ControlPlaneURL, Token: launch.Token, Client: Client(DefaultCallbackTimeout)})
+	plane := publish.NewHTTPControlPlane(publish.HTTPControlPlaneOptions{BaseURL: launch.ControlPlaneURL, Token: launch.Token, Client: Client(launch.callbackTimeout())})
 	orchestrator := publish.New(publish.Options{PublishJobID: launch.JobID, Attempt: launch.Attempt, ControlPlane: plane, Docker: publish.NewHostDocker(), HTTPClient: Client(time.Until(launch.DeadlineAt)), Events: sink})
 	result, err := orchestrator.Publish(ctx, launch.ProjectID, spec.Environment, spec.EnvironmentID, artifact, &publish.ReleaseSubmittedBy{AgentProfileID: spec.AgentProfileID, TaskID: spec.TaskID})
 	if err != nil {
 		return errors.New("image publication failed")
 	}
 	return launch.send(ctx, http.MethodPost, launch.jobURL()+"/events", publish.Event{Status: "succeeded", CurrentStep: "complete", EventType: "publish.job.completed", Message: "Cloudflare publish complete", Terminal: true, ReleaseID: result.ReleaseID, ReleaseVersion: result.Version, ReleaseStatus: result.Status}, nil)
+}
+
+func validProjectName(name string) bool {
+	if name == "" || len(name) > 255 {
+		return false
+	}
+	for i, c := range name {
+		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || i > 0 && (c == '_' || c == '-') {
+			continue
+		}
+		return false
+	}
+	return true
 }

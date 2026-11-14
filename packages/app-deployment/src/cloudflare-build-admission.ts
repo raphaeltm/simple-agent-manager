@@ -9,25 +9,39 @@ export const DEFAULT_DEPLOY_BUILDER_MAX_CONCURRENT = 6;
 export const DEFAULT_DEPLOY_BUILDER_PROJECT_MAX_CONCURRENT = 2;
 export const DEFAULT_DEPLOY_BUILDER_CAPACITY_BACKOFF_MS = 30_000;
 export const DEFAULT_DEPLOY_BUILDER_DRAIN_LIMIT = 6;
+export const DEFAULT_DEPLOY_BUILDER_DEADLINE_MS = 20 * 60_000;
 
 /** Reservation ownership outlives a terminal verdict until stop is confirmed.
  * Both caps are checked in the final mutation, never a preceding SELECT. */
 export async function admitCloudflareBuild(
   db: Db,
   jobId: string,
-  limits: { platform: number; project: number; classMax: number; deadlineMs: number },
+  limits: {
+    platform: number;
+    project: number;
+    classMax: number;
+    deadlineMs: number;
+    buildTimeoutMs?: number;
+  },
   nowMs = Date.now()
 ) {
   const j = schema.deploymentPublishJobs;
   const platform = Math.min(limits.platform, limits.classMax);
-  if (![platform, limits.project, limits.deadlineMs].every((n) => Number.isSafeInteger(n) && n > 0))
+  if (
+    ![
+      platform,
+      limits.project,
+      limits.deadlineMs,
+      limits.buildTimeoutMs ?? DEFAULT_DEPLOY_BUILDER_DEADLINE_MS,
+    ].every((n) => Number.isSafeInteger(n) && n > 0)
+  )
     throw new Error('Invalid Cloudflare build admission limits');
   const now = new Date(nowMs).toISOString();
   const rows = await db
     .update(j)
     .set({
       executorInstanceId: jobId,
-      executorDeadlineAt: sql`coalesce(${j.executorDeadlineAt}, strftime('%Y-%m-%dT%H:%M:%fZ', ${j.createdAt}, ${'+' + limits.deadlineMs / 1000 + ' seconds'}))`,
+      executorDeadlineAt: sql`coalesce(${j.executorDeadlineAt}, min(strftime('%Y-%m-%dT%H:%M:%fZ', ${j.createdAt}, ${'+' + limits.deadlineMs / 1000 + ' seconds'}), ${new Date(nowMs + (limits.buildTimeoutMs ?? DEFAULT_DEPLOY_BUILDER_DEADLINE_MS)).toISOString()}))`,
       status: 'starting',
       currentStep: 'builder_start',
       updatedAt: now,

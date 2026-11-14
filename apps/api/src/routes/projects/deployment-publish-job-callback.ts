@@ -3,8 +3,10 @@ import { Hono } from 'hono';
 import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
 
+import { createCloudflareBuildPorts } from '../../app-deployment-ports/cloudflare-builder';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { log } from '../../lib/logger';
 import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import {
@@ -13,8 +15,10 @@ import {
 } from '../../services/deployment-publish-jobs';
 import { recordDeploymentPublishJobLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import { verifyPublishCallback } from './_publish-callback-auth';
+import { publishJobSpecRoute } from './publish-job-spec';
 
 const deploymentPublishJobCallbackRoute = new Hono<{ Bindings: Env }>();
+deploymentPublishJobCallbackRoute.route('/', publishJobSpecRoute);
 
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
@@ -50,12 +54,18 @@ const publishJobEventSchema = v.object({
 });
 
 deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/events', async (c) => {
-  const { projectId, workspaceId, userId, db, assertCurrent, job: authenticatedJob } =
-    await verifyPublishCallback(
-      c,
-      'deployment_publish_job_event',
-      'Invalid token scope for deployment publish job event'
-    );
+  const {
+    projectId,
+    workspaceId,
+    userId,
+    db,
+    assertCurrent,
+    job: authenticatedJob,
+  } = await verifyPublishCallback(
+    c,
+    'deployment_publish_job_event',
+    'Invalid token scope for deployment publish job event'
+  );
   const publishJobId = c.req.param('jobId');
   const [job] = await db
     .select()
@@ -109,6 +119,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   }
   if (authenticatedJob && event.releaseId && event.releaseId !== authenticatedJob.releaseId)
     throw errors.forbidden('Event release must already be linked to this job');
+  const terminal = event.terminal === true || PUBLISH_JOB_TERMINAL_STATUSES.has(status ?? '');
   const currentStep = optionalString(event.currentStep) ?? optionalString(event.step);
   await assertCurrent();
   const accepted = await appendDeploymentPublishJobEvent(db, {
@@ -125,7 +136,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     eventType,
     message,
     detail: requestBody.detail,
-    terminal: event.terminal === true,
+    terminal,
     releaseId: optionalString(event.releaseId) ?? undefined,
     releaseVersion: optionalNumber(event.releaseVersion) ?? undefined,
     releaseStatus: optionalString(event.releaseStatus) ?? undefined,
@@ -155,7 +166,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
         workspaceId,
         releaseId: optionalString(event.releaseId) ?? undefined,
         releaseVersion: optionalNumber(event.releaseVersion) ?? undefined,
-        terminal: event.terminal === true,
+        terminal,
         source: 'deployment_publish_job_callback.status',
         occurredAt: Date.now(),
       })
@@ -163,6 +174,12 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   }
 
   if (!authenticatedJob) await assertCurrent();
+  if (job.executor === 'cloudflare' && job.executorInstanceId && terminal)
+    c.executionCtx.waitUntil(
+      createCloudflareBuildPorts(c.env)
+        .builder.stop(job)
+        .catch(() => log.warn('cloudflare_builder.stop_pending', { publishJobId: job.id }))
+    );
   return c.json({ ok: true });
 });
 

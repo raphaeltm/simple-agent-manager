@@ -5184,6 +5184,7 @@ export const deploymentPublishJobs = sqliteTable(
     contextR2Key: text('context_r2_key'),
     contextBytes: integer('context_bytes'),
     contextSha256: text('context_sha256'),
+    contextProjectName: text('context_project_name'),
     queuedAt: text('queued_at'),
     attempt: integer('attempt').notNull().default(1),
     lastEventAt: text('last_event_at'),

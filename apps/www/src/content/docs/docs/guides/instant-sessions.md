@@ -44,7 +44,7 @@ The practical trade: an Instant session needs **no cloud provider credential**, 
 | Survives runtime teardown                           | Yes — via snapshot restore, see below              | Yes — via snapshot and replacement VM restore            |
 | [Resource history](/docs/guides/session-resources/) | No — the **Resources** panel stays empty           | Yes — CPU, memory, I/O and OOM events are retained       |
 
-Instant is the right choice for conversation, planning, code reading, and focused edits. Reach for a VM when the agent has to build your stack, run your test suite, start services, or use Docker.
+Instant is the right choice for conversation, planning, code reading, and focused edits. Reach for a VM when the agent needs to build or test locally, start services, or use Docker. Instant can [publish a Compose application](/docs/guides/app-deployments/) through a separate Cloudflare builder.
 
 `git` and `gh` in an Instant session are signed in to GitHub for your repository, and SAM
 renews that sign-in as it expires, so an agent can still push and open a pull request after the

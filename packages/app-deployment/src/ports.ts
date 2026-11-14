@@ -24,6 +24,8 @@ export interface DeploymentSecretCipher {
 }
 
 export type DeploymentPublishJobSettingName =
+  | 'deployments.buildExecutor'
+  | `deployments.builder${'DeadlineMs' | 'MaxConcurrent' | 'ProjectMaxConcurrent' | 'CapacityBackoffMs' | 'DrainLimit' | 'DaemonReadyTimeoutMs' | 'HeartbeatIntervalMs' | 'CallbackTimeoutMs' | 'CallbackAttempts' | 'CallbackRetryDelayMs'}`
   | `deployments.buildContext${'CollectionMode' | 'StartTimeoutMs' | 'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
   | 'deployments.publishJobStallMs'
   | 'deployments.publishJobDeadlineMs'
@@ -71,6 +73,11 @@ export interface DeploymentLifecyclePort {
 export interface DeploymentPublishJobPorts {
   settings: DeploymentSettingsPort;
   vm: DeploymentPublishVmPort;
+  builder?: {
+    stop(
+      job: Pick<import('@simple-agent-manager/worker-core/schema').DeploymentPublishJobRow, 'id'>
+    ): Promise<void>;
+  };
   lifecycle: DeploymentLifecyclePort;
 }
 

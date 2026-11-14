@@ -1,15 +1,30 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { signPublishJobToken } from '../../../src/services/publish-job-token';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 let sqlite: Database.Database;
 let database: D1Database;
+let keyEnv: Partial<Env>;
+beforeAll(async () => {
+  const keys = await generateKeyPair('RS256', { extractable: true });
+  keyEnv = {
+    JWT_PRIVATE_KEY: await exportPKCS8(keys.privateKey),
+    JWT_PUBLIC_KEY: await exportSPKI(keys.publicKey),
+    BASE_DOMAIN: 'example.test',
+  };
+});
+vi.mock('@aws-sdk/s3-request-presigner', () => ({
+  getSignedUrl: vi.fn(async () => 'https://signed.invalid/artifact'),
+}));
+const stopBuilder = vi.hoisted(() => vi.fn(async () => {}));
 const cancelVm = vi.hoisted(() =>
   vi.fn(async () => {
     throw new Error('VM returned 404');
@@ -23,7 +38,14 @@ vi.mock('../../../src/services/admin-settings', async (importOriginal) => {
     resolveAdminSetting: (async (env, name) =>
       name === 'deployments.publishJobCancelTimeoutMs'
         ? 10
-        : actual.resolveAdminSetting(env, name)) as typeof actual.resolveAdminSetting,
+        : ((
+            {
+              'deployments.buildContextMaxBytes': 536870912,
+              'deployments.buildContextUploadTtlSeconds': 900,
+              'deployments.builderDaemonReadyTimeoutMs': 60000,
+              'deployments.builderHeartbeatIntervalMs': 15000,
+            } as Record<string, number>
+          )[name] ?? actual.resolveAdminSetting(env, name))) as typeof actual.resolveAdminSetting,
   };
 });
 vi.mock('../../../src/routes/mcp/workspace-tools', async (importOriginal) => ({
@@ -60,6 +82,8 @@ vi.mock('../../../src/services/project-lifecycle-events', () => ({
   recordDeploymentPublishJobLifecycleEventBestEffort: lifecycle,
 }));
 
+const { composeImageArtifactsCallbackRoute } =
+  await import('../../../src/routes/projects/compose-image-artifacts-callback');
 const { handleCancelPublish } = await import('../../../src/routes/mcp/compose-publish-tools');
 const { composePublishReleaseCallbackRoute } =
   await import('../../../src/routes/projects/compose-publish-release-callback');
@@ -72,12 +96,20 @@ app.onError((err, c) =>
     : c.json({ error: err.message }, 500)
 );
 app.route('/projects', composePublishReleaseCallbackRoute);
+app.route('/projects', composeImageArtifactsCallbackRoute);
 app.route('/projects', deploymentPublishJobCallbackRoute);
-function request(path: string, body: unknown) {
+function request(path: string, body: unknown, bearer?: string, extraEnv: Partial<Env> = {}) {
   return app.request(
     `/projects/project/${path}`,
-    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
-    { DATABASE: database } as Env,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+      },
+      body: JSON.stringify(body),
+    },
+    { ...extraEnv, DATABASE: database } as Env,
     {
       waitUntil: () => undefined,
       passThroughOnException: () => undefined,
@@ -106,6 +138,7 @@ beforeEach(() => {
     schema.deploymentPublishJobs,
     schema.deploymentPublishJobEvents,
     schema.deploymentReleases,
+    schema.deploymentEnvironmentConfigVars,
   ]);
   database = createSqliteD1(sqlite);
   sqlite.exec(
@@ -117,6 +150,7 @@ beforeEach(() => {
   lifecycle.mockClear();
   provisionVolumes.mockClear();
   cancelVm.mockClear();
+  stopBuilder.mockClear();
 });
 afterEach(() => sqlite.close());
 describe('publish callback routes with real SQL', () => {
@@ -301,5 +335,201 @@ describe('publish callback routes with real SQL', () => {
     expect(lifecycle).not.toHaveBeenCalled();
     sqlite.exec("UPDATE deployment_publish_jobs SET context_shadow=0, status='building'");
     expect((await submit()).status).toBe(200);
+  });
+});
+
+describe('real signed job tokens through actual publish callback routes', () => {
+  async function identity() {
+    sqlite.exec(
+      "UPDATE deployment_publish_jobs SET executor='cloudflare',executor_instance_id='job',context_shadow=0,agent_profile_id='profile',environment_name='staging'"
+    );
+    const env = {
+      ...keyEnv,
+      DATABASE: database,
+      R2: { head: async () => ({ size: 100 }) },
+      CF_ACCOUNT_ID: 'test-account',
+      R2_ACCESS_KEY_ID: 'fake-access',
+      R2_SECRET_ACCESS_KEY: 'fake-secret',
+      R2_BUCKET_NAME: 'bucket',
+      COMPOSE_BUILDER: { idFromName: (id: string) => id, get: () => ({ stopJob: stopBuilder }) },
+    } as unknown as Env;
+    const token = await signPublishJobToken(
+      env,
+      {
+        jobId: 'job',
+        projectId: 'project',
+        environmentId: 'environment',
+        agentProfileId: 'profile',
+        attempt: 1,
+      },
+      Date.now() + 60000
+    );
+    return { env, token };
+  }
+  const artifact = {
+    serviceName: 'web',
+    sourceRef: 'fixture:latest',
+    localImageRef: 'fixture:latest',
+    r2Key: 'compose-image-artifacts/project/environment/workspace/job-1/web.docker-save.tar',
+    sizeBytes: 100,
+    archiveSha256: 'sha256:' + 'a'.repeat(64),
+    archiveType: 'docker-save',
+    mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+    platform: { os: 'linux', architecture: 'amd64' },
+  };
+  it('parses the original body at events, artifact init/complete and release sinks, then revokes terminal identity', async () => {
+    const { env, token } = await identity();
+    const policy = {
+      environment: 'staging',
+      environmentId: 'environment',
+      agentProfileId: 'profile',
+    };
+    const progress = await request(
+      'deployment-publish-jobs/job/events',
+      { eventType: 'publish.build.started', message: 'building', status: 'building' },
+      token,
+      env
+    );
+    expect(progress.status, await progress.clone().text()).toBe(200);
+    const init = await request(
+      'compose-image-artifacts/init',
+      { ...policy, services: [{ serviceName: 'web', sourceRef: 'fixture:latest' }] },
+      token,
+      env
+    );
+    expect(init.status, await init.clone().text()).toBe(200);
+    expect(await init.json()).toMatchObject({ uploadId: 'job-1' });
+    const complete = await request(
+      'compose-image-artifacts/complete',
+      { ...policy, artifacts: [artifact] },
+      token,
+      env
+    );
+    expect(complete.status, await complete.clone().text()).toBe(200);
+    const release = await request(
+      'compose-publish-release',
+      {
+        publishJobId: 'job',
+        attempt: 1,
+        environment: 'staging',
+        environmentId: 'environment',
+        composeYaml: 'services:\n  web:\n    image: fixture:latest\n',
+        services: [artifact],
+        submittedBy: { agentProfileId: 'profile' },
+      },
+      token,
+      env
+    );
+    expect(release.status, await release.clone().text()).toBe(200);
+    const recorded = await release.json();
+    const terminal = await request(
+      'deployment-publish-jobs/job/events',
+      {
+        eventType: 'publish.job.completed',
+        message: 'complete',
+        status: 'succeeded',
+        releaseId: recorded.releaseId,
+      },
+      token,
+      env
+    );
+    expect(terminal.status, await terminal.clone().text()).toBe(200);
+    expect(stopBuilder).toHaveBeenCalled();
+    expect(
+      (
+        await request(
+          'compose-image-artifacts/init',
+          { ...policy, services: [{ serviceName: 'web', sourceRef: 'fixture:latest' }] },
+          token,
+          env
+        )
+      ).status
+    ).toBe(410);
+  });
+  it('serves only a verified admitted context through the existing job spec route', async () => {
+    const { env, token } = await identity();
+    const get = (id = 'job') =>
+      app.request(
+        `/projects/project/deployment-publish-jobs/${id}/spec`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+        env
+      );
+    expect((await get()).status).toBe(409);
+    sqlite
+      .prepare(
+        'UPDATE deployment_publish_jobs SET context_r2_key=?,context_sha256=?,context_bytes=100,context_project_name=?,executor_deadline_at=?'
+      )
+      .run(
+        'compose-build-contexts/project/environment/job/1.tar.zst',
+        'a'.repeat(64),
+        'source-project',
+        new Date(Date.now() + 60000).toISOString()
+      );
+    const response = await get();
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(await response.json()).toMatchObject({
+      jobId: 'job',
+      attempt: 1,
+      projectName: 'source-project',
+      contextBytes: 100,
+      buildInterpolationEnv: {},
+      secretInterpolationKeys: [],
+    });
+    expect((await get('foreign')).status).toBe(403);
+    sqlite.exec("UPDATE deployment_publish_jobs SET status='canceled'");
+    expect((await get()).status).toBe(410);
+  });
+  it('rejects missing release fence and foreign artifact attempts with live owner controls', async () => {
+    const { env, token } = await identity();
+    const policy = {
+      environment: 'staging',
+      environmentId: 'environment',
+      agentProfileId: 'profile',
+    };
+    expect(
+      (
+        await request(
+          'compose-publish-release',
+          { ...policy, submittedBy: { agentProfileId: 'profile' } },
+          token,
+          env
+        )
+      ).status
+    ).toBe(403);
+    expect(
+      (
+        await request(
+          'compose-image-artifacts/complete',
+          {
+            ...policy,
+            artifacts: [{ ...artifact, r2Key: artifact.r2Key.replace('job-1', 'job-2') }],
+          },
+          token,
+          env
+        )
+      ).status
+    ).toBe(403);
+    expect(
+      (
+        await request(
+          'compose-image-artifacts/complete',
+          { ...policy, artifacts: [artifact] },
+          token,
+          env
+        )
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await request(
+          'deployment-publish-jobs/job/events',
+          { eventType: 'publish.release', message: 'fake', releaseId: 'foreign' },
+          token,
+          env
+        )
+      ).status
+    ).toBe(403);
   });
 });
