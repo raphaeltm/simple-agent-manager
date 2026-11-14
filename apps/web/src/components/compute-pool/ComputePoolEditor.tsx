@@ -2,7 +2,11 @@ import type { CapacityPool, DefaultCapacityPoolUpdateRequest } from '@simple-age
 import { Button, Chip } from '@simple-agent-manager/ui';
 import { useMemo, useState } from 'react';
 
-import { POOL_EDITOR_COPY } from '../../lib/compute-pool-copy';
+import {
+  emptyPoolChip,
+  type InstantAvailability,
+  POOL_EDITOR_COPY,
+} from '../../lib/compute-pool-copy';
 import { buildMachineChanges, type MachineGroup } from '../../lib/compute-pool-machines';
 import {
   ambiguousRowKeys,
@@ -35,6 +39,8 @@ interface ComputePoolEditorProps {
   /** The order the editor opened with (see `initialSourceOrder`). */
   initialOrder: string[] | null;
   saving: boolean;
+  /** Whether Instant sessions can run here (undefined until known): what an empty pool means. */
+  instantEnabled: InstantAvailability;
   onDiscard: () => void;
   onSave: (request: DefaultCapacityPoolUpdateRequest) => void;
 }
@@ -54,6 +60,7 @@ export function ComputePoolEditor({
   sources,
   initialOrder,
   saving,
+  instantEnabled,
   onDiscard,
   onSave,
 }: ComputePoolEditorProps) {
@@ -125,7 +132,7 @@ export function ComputePoolEditor({
           </Chip>
         ) : (
           <Chip tone="warning" dot>
-            Empty · Instant sessions only
+            {emptyPoolChip(instantEnabled)}
           </Chip>
         )}
         <span className="text-xs text-fg-muted">
@@ -141,6 +148,7 @@ export function ComputePoolEditor({
 
       <PoolAccountsPane
         scope={pool.scope}
+        instantEnabled={instantEnabled}
         accounts={sources}
         rows={rows}
         draft={draft}

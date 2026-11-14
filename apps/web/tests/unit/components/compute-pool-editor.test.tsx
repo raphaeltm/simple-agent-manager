@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   updateProjectDefaultCapacityPools: vi.fn(),
   providerCatalogs: [] as ProviderCatalog[],
   toast: { success: vi.fn(), error: vi.fn() },
+  // GET /api/config/instant-runtime: on (a Cloudflare install) unless a test says otherwise.
+  instantEnabled: vi.fn(async () => true),
 }));
 
 vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'user-1' }));
@@ -35,6 +37,10 @@ vi.mock('../../../src/hooks/useProviderCatalog', () => ({
   }),
 }));
 vi.mock('../../../src/hooks/useToast', () => ({ useToast: () => mocks.toast }));
+vi.mock('../../../src/lib/api/projects', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/projects')>()),
+  getInstantRuntimeEnabled: mocks.instantEnabled,
+}));
 vi.mock('../../../src/lib/api/capacity-pools', () => ({
   fetchProjectDefaultCapacityPools: mocks.fetchProjectDefaultCapacityPools,
   fetchUserDefaultCapacityPools: vi.fn(),
@@ -158,6 +164,8 @@ async function save() {
 describe('compute pool editor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.instantEnabled.mockReset();
+    mocks.instantEnabled.mockResolvedValue(true);
     mocks.providerCatalogs = [providerCatalog(), gcpCatalog()];
   });
 
@@ -226,6 +234,34 @@ describe('compute pool editor', () => {
     expect(
       screen.queryByText("This project's pool is empty, so only Instant sessions can run.")
     ).toBeNull();
+  });
+
+  it('on an installation without Instant sessions (a self-hosted box) says nothing can run (box round R12)', async () => {
+    mocks.instantEnabled.mockResolvedValue(false);
+    const empty = summary('project');
+    empty.candidates = empty.candidates.map((row) => ({ ...row, status: 'disabled' as const }));
+    load(empty);
+    renderPanel();
+    expect(await screen.findByText('Empty · nothing can run')).toBeInTheDocument();
+    expect(
+      screen.getByText("This project's pool is empty, so no work can run.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Instant sessions only|only Instant sessions/)).toBeNull();
+    expect(screen.queryByText(/Instant runs in a container on Cloudflare/)).toBeNull();
+    // Liveness: adding a machine still makes the pool ready.
+    await click('Add cx22 in Nuremberg');
+    expect(screen.getByText('Ready · 1 in pool')).toBeInTheDocument();
+  });
+
+  it('claims nothing about Instant until the installation has said whether it has it', async () => {
+    mocks.instantEnabled.mockReturnValue(new Promise<boolean>(() => {}));
+    const empty = summary('project');
+    empty.candidates = empty.candidates.map((row) => ({ ...row, status: 'disabled' as const }));
+    load(empty);
+    renderPanel();
+    expect(await screen.findByText("This project's pool is empty.")).toBeInTheDocument();
+    expect(screen.getByText('Empty')).toBeInTheDocument();
+    expect(screen.queryByText(/Instant/)).toBeNull();
   });
 
   it('warns that the pool is empty when its last account with machines is switched off', async () => {
