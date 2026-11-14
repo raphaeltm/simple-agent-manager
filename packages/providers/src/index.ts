@@ -136,6 +136,16 @@ export {
   parseStoredGcpPriceTable,
   probeGcpBillingAccess,
 } from './gcp-pricing';
+export {
+  classifyGcpQuotaBucket,
+  describeGcpQuotaBucket,
+  gcpMachineSeries,
+  gcpOfferingQuotaBucketKey,
+  type GcpQuotaBucket,
+  gcpQuotaBucketCovers,
+  type GcpQuotaOffering,
+  type GcpQuotaResource,
+} from './gcp-quota-buckets';
 export { type GoogleErrorInfo, googleErrorInfoOf } from './google-error-info';
 export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
