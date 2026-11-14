@@ -46,11 +46,12 @@ Initial full Workers file: 15/15 passed. Repository lint: 22/22 tasks passed (ex
 Local test-engineer and Cloudflare review: PASS; completion audit awaits mutation/stability/CI evidence.
 
 Mutation proof on final test code9d5fc49a8 (source and dist changed temporarily, restored byte-for-byte):
+
 - Renewal disabled with early return: lease test fails at line509, only1 distinct expiry vs required >3.
 - Poison threshold disabled: poison test fails at line590, fourth state is failed instead of poisoned.
-Six fresh full-file reruns on final test code passed15/15 each before mutations. Remaining normal/stress
-runs execute after restoration. Root unit command bounded at540s:38 tasks passed, API suite incomplete
-after305 files, no observed failures; do not report full pnpm test success.
+  Six fresh full-file reruns on final test code passed15/15 each before mutations. Remaining normal/stress
+  runs execute after restoration. Root unit command bounded at540s:38 tasks passed, API suite incomplete
+  after305 files, no observed failures; do not report full pnpm test success.
 
 ## Stability-discovered sibling timing assumption
 
@@ -68,3 +69,17 @@ All prior repeated-run counts are superseded for final stability proof; restart3
 Final-version f1a9b823b mutation proof: all3 targeted tests fail intended assertions and source/dist restored.
 Deadline yield disabled => first case publishes in1 tick and fails ticks>1 (line247).
 Targeted final ESLint passed. Final stability batches use v2 prefixes; older rows are excluded.
+
+## Stability-discovered fixture lifecycle race
+
+The v2 repetition proof stopped on normal batchB3: the later budget-refund case migrated its own
+small session but also failed an old fixture with a source-intent identity mismatch. Deleting old
+D1 journals is insufficient while finished DOs retain pending summary debounce callbacks. Those
+callbacks can restore candidate summaries after isolation, leaving source intents with no journal.
+The test double now supports retiring summary syncs: disable future writes and await the existing
+serialized write-back chain. Every seeded source registers retirement in onTestFinished, so real
+summary behavior remains active throughout each test, including the poison case's explicit decoy.
+No production archive behavior changes. Final stability proof restarts with v3 prefixes.
+
+Separate telemetry follow-up (outside this test-only change): idea01M7C1MHXM1B8S9XJ89Y9V5T7A
+tracks verifiedChunks omitting verification work before an eventual migration exception.

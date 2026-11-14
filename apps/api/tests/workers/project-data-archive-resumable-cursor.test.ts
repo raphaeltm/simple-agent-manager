@@ -83,6 +83,9 @@ async function seedCandidate(
   await seedInstallation(installationId, userId);
   await seedProject(projectId, userId, installationId, { name: `${prefix} ${suffix}` });
   const source = projectDataStub(projectId);
+  // A completed fixture must not repopulate global sweep inputs after the next fixture
+  // removes its journal. Drain in-flight syncs and suppress its pending debounce callback.
+  onTestFinished(() => source.disableSummarySyncForTest());
   await source.ensureProjectId(projectId);
   const sessionId = await source.createSession(null, prefix);
   const messages = messagesFor(prefix, count);

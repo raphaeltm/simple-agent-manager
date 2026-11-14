@@ -77,6 +77,18 @@ type ProjectDataExpectedErrorOperation =
  * behavior while returning a serializable assertion value to Vitest.
  */
 export class ProjectDataTestDouble extends ProjectData {
+  private summarySyncDisabledForTest = false;
+
+  /** Retire a finished fixture and drain any summary write-back already in flight. */
+  async disableSummarySyncForTest(): Promise<void> {
+    this.summarySyncDisabledForTest = true;
+    await this.runSummarySyncLocked();
+  }
+
+  protected override async syncSummaryToD1(): Promise<void> {
+    if (!this.summarySyncDisabledForTest) await super.syncSummaryToD1();
+  }
+
   /**
    * Remaining injected failures for `archiveSourceReclaimPage` and
    * `archiveSourceMarkCopyBackRestored`. They stand in for a reset or a lost RPC after the
