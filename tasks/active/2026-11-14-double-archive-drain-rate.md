@@ -14,9 +14,9 @@ Measurement idea: 01M7CX61WVX72T7CFQNRTX0DVM; notes 01M7DMSHEZKW7F7W23ZS4B8Q1A a
 
 ## Checklist
 
-- [ ] Set only budget and interval in wrangler; update explanatory comments and configuration docs.
-- [ ] Update shipped assertions; retain local/historical fixtures; run quality checks.
-- [ ] Local completion, Cloudflare/environment, documentation, constitution and test reviews.
+- [x] Set only budget and interval in wrangler; update explanatory comments and configuration docs.
+- [x] Update shipped assertions; retain local/historical fixtures; run quality checks.
+- [x] Local completion, Cloudflare/environment, documentation, constitution and test reviews.
 - [ ] Deploy shared staging branch; verify plain-text bindings and natural cron cadence.
 - [ ] PR CI and CodeRabbit request/wait; record throughput and load review.
 - [ ] Immediately before merge change only production budget override; record old/new/time.
@@ -36,3 +36,9 @@ Expected writes 2.38M-4.44M/day at 1.38-2.57 writes/raw row, under 3d; D1/R2/com
 
 Primary checkout and assigned output branch per user; no external worktree or main task-only commit.
 Keep task active until post-release observations complete.
+
+## Local validation
+Full lint (22 tasks), typecheck (36 tasks), test (39 tasks), build (18 tasks) pass.
+API: 1014 files / 15178 tests pass, 3 files / 4 tests skipped.
+Shipped-value suites: 13 pass; real Worker drain-relief: 17 pass.
+Local reviews: Cloudflare/environment/constitution PASS; completion/docs/test findings addressed.
