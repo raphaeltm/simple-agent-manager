@@ -9,7 +9,7 @@ exports[`profiles a full compact archive through the coordinator in real workerd
     "source:archiveSourceMarkTargetSealed": 2,
     "source:archiveSourcePrepareIntent": 6,
     "source:archiveSourceReclaimPage": 2733,
-    "target:archiveTargetCommitChunk": 2911,
+    "target:archiveTargetCommitChunk": 2617,
     "target:archiveTargetPrepare": 14,
     "target:archiveTargetSeal": 2,
     "target:archiveTargetVerifyPage": 4,
@@ -148,9 +148,17 @@ exports[`profiles a full compact archive through the coordinator in real workerd
       "calls": 5,
       "rowsWritten": 15,
     },
-    "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_search_documents_fts(rowid, content) VALUES (?, ?)": {
-      "calls": 315,
-      "rowsWritten": 315,
+    "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_search_documents_fts(rowid, content) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)": {
+      "calls": 1,
+      "rowsWritten": 10,
+    },
+    "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_search_documents_fts(rowid, content) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)": {
+      "calls": 3,
+      "rowsWritten": 33,
+    },
+    "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_search_documents_fts(rowid, content) VALUES (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?), (?, ?)": {
+      "calls": 17,
+      "rowsWritten": 272,
     },
     "target:archiveTargetCommitChunk:INSERT INTO project_data_archive_target_chunks ( chunk_id, session_id, project_id, migration_id, owner_name, generation, table_name, ordinal, row_count, byte_count, sha256, committed_at , source_cursor, source_has_more ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)": {
       "calls": 7,
@@ -164,9 +172,17 @@ exports[`profiles a full compact archive through the coordinator in real workerd
       "calls": 315,
       "rowsWritten": 315,
     },
-    "target:archiveTargetCommitChunk:INSERT OR IGNORE INTO project_data_archive_search_documents ( projection_id, document_id, session_id, role, content, created_at ) VALUES (?, ?, ?, ?, ?, ?) RETURNING rowid": {
-      "calls": 315,
-      "rowsWritten": 1260,
+    "target:archiveTargetCommitChunk:INSERT OR IGNORE INTO project_data_archive_search_documents (projection_id, document_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?) RETURNING rowid, projection_id": {
+      "calls": 1,
+      "rowsWritten": 31,
+    },
+    "target:archiveTargetCommitChunk:INSERT OR IGNORE INTO project_data_archive_search_documents (projection_id, document_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?) RETURNING rowid, projection_id": {
+      "calls": 3,
+      "rowsWritten": 102,
+    },
+    "target:archiveTargetCommitChunk:INSERT OR IGNORE INTO project_data_archive_search_documents (projection_id, document_id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?) RETURNING rowid, projection_id": {
+      "calls": 17,
+      "rowsWritten": 833,
     },
     "target:archiveTargetCommitChunk:UPDATE project_data_archive_target_sessions SET search_index_version = ?, search_index_state = 'complete', search_index_message_count = ?, search_index_document_count = ?, search_index_sha256 = ?, search_indexed_at = ?, search_repair_phase = NULL, search_repair_next_ordinal = NULL, search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL, search_repair_pending_json = NULL, search_repair_message_count = NULL, search_repair_projection_sha256 = NULL, search_repair_document_count = NULL, updated_at = ? WHERE session_id = ?": {
       "calls": 1,

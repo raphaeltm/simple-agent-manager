@@ -7,13 +7,13 @@ The SAM root is at 92% storage capacity. Archive drain must accelerate while red
 Production partial accounting: about 1.38 writes/message (source reclaim 1.04, target commit 0.34); prepare/export/verify/flip/checkpoints/D1 missing. Compact raw storage is R2; target retains grouped rows and two FTS representations. Existing real-workerd sweep-throughput and compact-archive tests exercise full coordinator, routed reads/search/copyback and injected failures.
 
 ## Checklist
-- [ ] Profile ~2000 production-shaped streamed rows through real ingest/coordinator in workerd, SQL phase/statement, source/target/D1/alarm/KV.
-- [ ] Quantify grouped/raw bytes and hypothetical coalescing; trace VM reporter.
-- [ ] Query billed metrics; verify official Cloudflare DELETE/index/DROP/deleteAll semantics.
-- [ ] Identify effective throughput bound; calculate 4.75M drain and doubled-rate recommendation without production config edits.
-- [ ] Post Part 1 results to idea and durable parent message before implementation.
-- [ ] Implement measured highest-yield safe cuts; retain regression write ceilings.
-- [ ] Prove exact reads, payloads/search, copyback and reset-resume; exceed page/chunk sizes; discriminate new guards.
+- [x] Profile ~2000 production-shaped streamed rows through real ingest/coordinator in workerd, SQL phase/statement, source/target/D1/alarm/KV.
+- [x] Quantify grouped/raw bytes and hypothetical coalescing; trace VM reporter.
+- [x] Query billed metrics; verify official Cloudflare DELETE/index/DROP/deleteAll semantics.
+- [x] Identify effective throughput bound; calculate 4.75M drain and doubled-rate recommendation without production config edits.
+- [x] Post Part 1 results to idea and durable parent message before implementation.
+- [x] Implement measured highest-yield safe cuts; retain regression write ceilings.
+- [x] Prove exact reads, payloads/search, copyback and reset-resume; exceed page/chunk sizes; discriminate new guards.
 - [ ] Lint/typecheck/tests/build/migration safety, local specialist reviews.
 - [ ] Coordinate staging; real sweep archive and app readback.
 - [ ] PR/CI/CodeRabbit/merge/deploy receipt and production before/after metrics note.
@@ -23,3 +23,34 @@ Measured lower writes/message through the real coordinator; no weakening of veri
 
 ## References
 Idea 01M7CX61WVX72T7CFQNRTX0DVM; task 01M7DKNVSWXBVWE9ZPSYZCY9GT. Rules 44/47/58/62/69/76/81; packages/project-data/{src/do/archive-sharding.ts,src/scheduled/project-data-archive-sharding.ts,src/archive/write-budget.ts}.
+
+## Measured implementation
+Reporter fixture: 2,100 rows, 315 grouped rows, 164,421 content bytes (78.30 bytes/raw row). Hypothetical run-based assistant coalescing saves 1,680 raw rows (80%); no shared semantic message identity exists today. This task does not implement coalescing.
+
+| Warm coordinator phase | Before writes | After writes | After / raw message |
+| --- | ---: | ---: | ---: |
+| Source prepare | 6 | 6 | 0.002857 |
+| Source mark sealed + manifest | 4 | 4 | 0.001905 |
+| Source flip | 8 | 8 | 0.003810 |
+| Source reclaim | 2733 | 2733 | 1.301429 |
+| Target prepare | 14 | 14 | 0.006667 |
+| Target commit | 2911 | 2617 | 1.246190 |
+| Target seal | 2 | 2 | 0.000952 |
+| Target verify | 4 | 4 | 0.001905 |
+| Total DO | 5682 | 5388 | 2.565714 |
+| D1 | 103 | 103 | 0.049048 |
+| setAlarm / DO-KV / Workers KV | 0 | 0 | 0 |
+
+Batching search-document inserts amortizes sqlite_sequence writes: 1260 to 966. Paired document/FTS write statements fall from 630 to 42. Existing transaction still commits documents, FTS, projection progress and chunk receipt atomically. No format, migration, settings or budget changes. Per-statement snapshot is committed; initial schema creation and pre-archive ingest/materialization excluded (warm-shard per-migration profile). Scoped canary excludes constant global-cadence overhead.
+
+Source reclaim already has only three non-delete/FTS bookkeeping writes; verifier has four. Larger grouped-copy removal needs representation-aware terminal hashing, assertTargetComponentsMatch, grouped copyback/rehome export and search repair plus durable layout discriminator. Grouped FTS alone has mixed-old/new cleanup implications; keep it. All grouped/projection indexes have current query-plan consumers.
+
+Throughput recommendation only: interval 540000 ms, daily budget 6000000, factor 2 and wall 60000 unchanged. At 12000 rows per 10-minute effective tick, 72k/hour drains 4.75M in 65.97 hours excluding inflow (36k/hour: 131.94 hours). Fixture reservation is 6476/2100 = 3.08381 per raw row, requiring 5.329M/day at 72k/hour; actual production inventory must confirm headroom. Current 2.4M budget cannot sustain doubling. No production settings changed. Full notes and official CF billing links are on idea 01M7CX61WVX72T7CFQNRTX0DVM, updates 01M7DMSHEZKW7F7W23ZS4B8Q1A and 01M7DNBWR1VM5G3A99YAJGCF8P.
+
+## Verification so far
+- Real workerd archive profile, accounting sentinel, coordinator reset, copyback, atomic failure, resumable cursor and compact archive: 4 files / 26 tests pass.
+- Go real reporter fixture test passes; repository lint passes (existing web warnings only).
+- DO migration safety passes.
+- Full typecheck passes; root tests/build still running. Cloudflare, constitution, doc sync, Go and test-engineer reviews pass. Completion review confirms implementation coverage, with release gates pending.
+- Discriminating mutations: removing duplicate-identity consumption fails the atomic duplicate test; removing bind paging fails the real coordinator with SQLITE_ERROR (too many SQL variables); removing occupied-slot diagnostic fails the real sweep test. All three changes restored; final control suite running.
+- Staging and release remain pending.
