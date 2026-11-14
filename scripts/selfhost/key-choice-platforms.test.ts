@@ -354,6 +354,18 @@ describe('no silent fallback through a missing identity or a missed probe', () =
     );
     expect(init.out).toContain('SAM_KEY_PROVIDER=gcp-kms');
     expectNothingSealed();
+    // Sealed with the key file on purpose, status still says the configured key was not used.
+    const envFile = writeBox(dir, [
+      ...elsewhere('gce'),
+      `SAM_GCE_METADATA_HOST=${CLOSED_HOST}`,
+      `SAM_GCP_KMS_KEY=${GCP_KEY}`,
+      'SAM_KEY_PROVIDER=file',
+    ]);
+    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
+    const status = await runTsx(SECRETS, ['status', '--box-env', envFile]);
+    expect(status.out).toContain(
+      'WARNING: SAM_GCP_KMS_KEY is set in .env, but no cloud instance identity was detected'
+    );
   });
 
   it('control: off a cloud with no cloud key configured, the key file as before', async () => {

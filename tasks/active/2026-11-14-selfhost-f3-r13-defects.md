@@ -43,26 +43,26 @@ parts 1-3, D1-D8).
 
 ## Implementation checklist
 
-- [ ] 1a bootstrap: read the key's primary version state; stop by default with exact commands;
+- [x] 1a bootstrap: read the key's primary version state; stop by default with exact commands;
       `--new-key-version` creates a new primary version; `--restore-key-version` restores and
       enables the scheduled/disabled version and makes it primary. Fake gcloud models versions.
-- [ ] 1b one rule (`sealingFloor` + refusal) in key-choice.ts: automatic choice never seals with
+- [x] 1b one rule (`sealingFloor` + refusal) in key-choice.ts: automatic choice never seals with
       the file key when a cloud key is configured in .env, exists but is unusable, or the box is
       sealed with a stronger provider now (switch --to auto). Error status from the key service
       named in the reason (no body text).
-- [ ] 1c `secrets status`: names what seals the box and warns when a cloud key on this platform
+- [x] 1c `secrets status`: names what seals the box and warns when a cloud key on this platform
       works or exists while the box seals with the file key.
-- [ ] 1 tests: R13 sequence (key present, version DESTROY_SCHEDULED) against the fake KMS, red
+- [x] 1 tests: R13 sequence (key present, version DESTROY_SCHEDULED) against the fake KMS, red
       before; deliberate file box (no cloud, explicit SAM_KEY_PROVIDER=file, recorded file)
       unchanged.
-- [ ] 2 README prerequisites: build-essential.
-- [ ] 3 `--kms-only` skips the issuer check; failure message says what to do; README command.
-- [ ] 4 README "Create the box" section from R13's commands.
-- [ ] 5 bootstrap reads pool/provider state; DELETED stops with the undelete command or new
+- [x] 2 README prerequisites: build-essential.
+- [x] 3 `--kms-only` skips the issuer check; failure message says what to do; README command.
+- [x] 4 README "Create the box" section from R13's commands.
+- [x] 5 bootstrap reads pool/provider state; DELETED stops with the undelete command or new
       `--pool-id`; README 30-day rule next to teardown.
-- [ ] 6 teardown lists the box account's KMS grant with the command.
-- [ ] 7 node API default location on self-host (shared code; Cloudflare unchanged).
-- [ ] 8 hosted git ls-refs honours ref-prefix (DO), "HEAD" not listed as a branch.
+- [x] 6 teardown lists the box account's KMS grant with the command.
+- [x] 7 node API default location on self-host (shared code; Cloudflare unchanged).
+- [x] 8 hosted git ls-refs honours ref-prefix (DO), "HEAD" not listed as a branch.
 - [ ] Gates: build order, typecheck, check:fast, unit tests, selfhost:test, live suite (if
       possible), manual CI run.
 - [ ] security-auditor on 1/5 changes; task-completion-validator.
@@ -77,5 +77,19 @@ parts 1-3, D1-D8).
 - Each item has a test that fails without its fix (docs items excepted).
 
 ## Notes
+
+- Security review (security-auditor) found 0 CRITICAL/HIGH, 4 MEDIUM (M1 configured key ignored
+  when no platform is detected; M2 `config` kind conflated "no key" with "no VM identity"; M3
+  "denied" worded as "exists"; M4 re-added entries after a teardown), all fixed in e72f2da4c with
+  tests that fail without the fix. L1/L3/L5 fixed; L2 (errorStatus token bound) and L4
+  (`--kms-only` skips the issuer check by design) left.
+- Item 7 gate: `isReverseTunnelInstallation(env)` is the existing self-host marker, used as a proxy
+  for "self-hosted box". Divergence: a Cloudflare install configured with reverse-tunnel would also
+  get pool-decided locations; none exists (the transport needs frps on the box).
+- Pre-existing, not fixed: hosted git conformance "imports the source..." fails with a harness
+  HTTP 500 (tasks/backlog/2026-11-14-hosted-git-conformance-import-test-500.md); the conformance
+  entry also lacked the repo-hosting wiring (fixed here). CI does not run `test:hosted-git`.
+- Live suite (`pnpm selfhost:live-test`) cannot run in this workspace: no Docker (spawnSync docker
+  ENOENT in every Docker-backed file).
 
 - Item 7 is shared code: state exactly what changes on Cloudflare (target: nothing).

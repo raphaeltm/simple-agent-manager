@@ -12,6 +12,7 @@ import {
   applyKeyChoice,
   candidateFix,
   type ChooseInput,
+  configuredKeyFloors,
   explicitKeyProvider,
   readKeyChoice,
   sealingStrength,
@@ -139,6 +140,10 @@ export async function cloudKeyWarnings(
         `${candidate.configuredBy ? `; ${candidate.configuredBy} is set in .env` : ''}, and this ` +
         `box seals with a key file instead.${fix ? ` ${fix}` : ''} Then, to move to it: ${move}.`
     );
+  }
+  // A key configured in .env that this machine's platform did not offer as a candidate.
+  for (const floor of configuredKeyFloors(box, found.candidates, found.platform)) {
+    lines.push(`WARNING: ${floor.why}, and this box seals with a key file. ${floor.fix ?? ''}`);
   }
   return lines;
 }
