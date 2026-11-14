@@ -13,13 +13,13 @@
  * the real writers (`reportActivity`, `failSession`, `createAttentionMarker`), never seeded into
  * `session_state` directly (`.claude/rules/62`).
  */
-import { SHIPPED_DAILY_WRITE_BUDGET } from '../helpers/archive-sweep-ceiling';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
 import { runSessionSnapshotPurge } from '../../src/scheduled/session-snapshot-purge';
+import { SHIPPED_DAILY_WRITE_BUDGET } from '../helpers/archive-sweep-ceiling';
 import {
   isolateSweepFixture,
   projectDataStub,
