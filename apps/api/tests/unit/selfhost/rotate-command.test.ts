@@ -244,6 +244,24 @@ describe('rotate --dry-run', () => {
     expect(tree(stateDir)).toEqual(before);
   });
 
+  it('refuses --dry-run with --resume instead of running the recorded steps without the lock (security review M1)', async () => {
+    healthy = () => !logs.some((l) => l.startsWith('reseal:'));
+    await expect(runRotate(input({ names: ['vapid-keys'] }), deps())).rejects.toThrow();
+    const before = JSON.stringify(readJournal(stateDir));
+    const bundles = listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId);
+    healthy = () => true;
+    await expect(runRotate(input({ resume: true, dryRun: true }), deps())).rejects.toThrow(
+      /--dry-run previews a new rotation/
+    );
+    expect(JSON.stringify(readJournal(stateDir))).toBe(before);
+    expect(listBundles(join(stateDir, 'key-agent', 'bundles')).map((b) => b.bundleId)).toEqual(
+      bundles
+    );
+    // Control: the real resume still finishes it.
+    await runRotate(input({ resume: true }), deps());
+    expect(readJournal(stateDir)).toBeNull();
+  });
+
   it('with a JWT overlap of 0 says the old key is removed in this run (hard cut)', async () => {
     await runRotate(input({ names: ['jwt-keys'], jwtOverlapHours: 0, dryRun: true }), deps());
     const text = logs.join('\n');

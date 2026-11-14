@@ -4,7 +4,7 @@
  * Emptying it survives read-only trees (Go's module cache) and an entry it cannot remove, so the
  * secrets always go first and the summary names what is left (box round R12).
  */
-import { chmodSync, existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 
@@ -40,7 +40,7 @@ export function stateItems(ctx: TeardownContext): Item[] {
       forGood:
         'every sealed bundle and every backup of this box sealed with this key can never be opened again, unless you keep a copy',
       runKey: 'state',
-      goneDespiteGroupFailure: () => !existsSync(keyFile),
+      goneDespiteGroupFailure: () => isGone(keyFile),
       record: { cloud: 'box', kind: 'key-file', name: keyFile, createdBy: 'deploy' },
     });
   }
@@ -55,7 +55,7 @@ export function stateItems(ctx: TeardownContext): Item[] {
       plan: keyDecision,
       forGood: 'the box copy of the platform keys; backups hold their own copy',
       runKey: 'state',
-      goneDespiteGroupFailure: () => !existsSync(legacyKeys),
+      goneDespiteGroupFailure: () => isGone(legacyKeys),
       record: { cloud: 'box', kind: 'platform-keys', name: legacyKeys, createdBy: 'deploy' },
     });
   }
@@ -92,6 +92,19 @@ export function stateItems(ctx: TeardownContext): Item[] {
     plan: both({ act: 'keep', why: 'the receipt a second run resumes from' }),
   });
   return items;
+}
+
+/**
+ * True only when the path provably does not exist (ENOENT). existsSync also answers false for a
+ * path it may not look at (EACCES) and for a dangling link, which must not read as removed.
+ */
+function isGone(path: string): boolean {
+  try {
+    lstatSync(path);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
 }
 
 /** Everything in .state except the record, and the keys when they are kept. */
@@ -134,6 +147,8 @@ export function clearStateEntries(
   for (const entry of entries) {
     const path = join(stateDir, entry);
     if (entry === 'key-agent' && keepKey) {
+      // Not a plain directory (a link): left whole, since the kept key is behind it.
+      if (!lstatSync(path).isDirectory()) continue;
       for (const inner of readdirSync(path)) {
         if (inner !== basename(KEY_FILE)) attempt(join(path, inner), false);
       }
@@ -195,7 +210,11 @@ export function isProtectedDir(path: string, selfhostDir: string): boolean {
  * holding the key agent's files.
  */
 function assertStateDir(ctx: TeardownContext): void {
-  if (isProtectedDir(ctx.stateDir, ctx.selfhostDir)) {
+  // Also through symbolic links: a .state that links to the home directory is still refused.
+  if (
+    isProtectedDir(ctx.stateDir, ctx.selfhostDir) ||
+    isProtectedDir(realpathSync(ctx.stateDir), ctx.selfhostDir)
+  ) {
     throw new Error(`refused: ${ctx.stateDir} is /, your home or contains the checkout`);
   }
   const recordedHere = ctx.record.some(

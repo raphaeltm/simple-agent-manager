@@ -235,6 +235,12 @@ function acquireLock(stateDir: string): () => void {
 }
 
 export async function runRotate(input: RotateInput, deps: RotateDeps): Promise<Journal | null> {
+  if (input.dryRun && input.resume) {
+    // A resume carries out the recorded steps: there is nothing to preview without doing them.
+    throw new Error(
+      '--dry-run previews a new rotation; use rotate --status to see where a rotation is, and rotate --resume to continue it'
+    );
+  }
   // A dry run only reads (the journal, the bundles), so it takes no lock and creates nothing.
   if (input.dryRun) return await runRotateLocked(input, deps);
   const release = acquireLock(input.stateDir);

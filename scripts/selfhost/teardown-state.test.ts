@@ -5,8 +5,17 @@
  * removal failure that no chmod can fix (another owner's file) is injected, through the same
  * items and executor teardown.ts runs.
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -125,6 +134,52 @@ describe('emptying .state when an entry cannot be removed', () => {
     expect(left).toEqual([]);
     expect(order.at(-1)).toBe('go-cache');
     expect(order).not.toContain('created-resources.json');
+  });
+
+  it('does not report the key file removed when it cannot be looked at (security review L1)', () => {
+    const keyDir = join(state, 'key-agent');
+    // The removal fails on key-agent and leaves it unsearchable: the key file is still there.
+    const blocked = context((path) => {
+      if (path.endsWith('key-agent')) {
+        chmodSync(keyDir, 0o000);
+        throw new Error(`EACCES: permission denied, rmdir '${path}'`);
+      }
+      removeTree(path);
+    });
+    try {
+      const again = execute(
+        boxItems(blocked).filter((i) => i.id.startsWith('box:key') || i.id === 'box:state'),
+        'remove-everything',
+        blocked.recordFile
+      );
+      expect(again.find((o) => o.item.id === 'box:key-file')?.status).toBe('failed');
+    } finally {
+      chmodSync(keyDir, 0o700);
+    }
+  });
+
+  it('refuses a .state that is a link to the home directory (security review L2)', () => {
+    const link = join(root, 'linked-state');
+    symlinkSync(homedir(), link);
+    const ctx = { ...context(removeTree), stateDir: link };
+    ctx.record = [
+      ...ctx.record,
+      {
+        cloud: 'box',
+        kind: 'state-dir',
+        name: link,
+        action: 'created',
+        createdBy: 'deploy',
+        attributes: {},
+      },
+    ];
+    const outcomes = execute(
+      boxItems(ctx).filter((i) => i.id === 'box:state'),
+      'remove-everything',
+      ctx.recordFile
+    );
+    expect(outcomes[0]?.status).toBe('failed');
+    expect(outcomes[0]?.why).toContain('is /, your home or contains the checkout');
   });
 
   it('keeps the key file when asked and still removes the rest of key-agent', () => {
