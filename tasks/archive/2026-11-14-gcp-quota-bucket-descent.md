@@ -52,7 +52,7 @@ chain move on. Per-tier attempt list must span buckets.
 - [x] Quota naming no region → next provider at once (control)
 - [x] Per-tier cap spans buckets (9 exhausted t2d + 1 e2: e2 tried)
 - [x] Hetzner core quota behaviour, fail-fast controls unchanged (existing tests green)
-- [ ] Staging: a GCP quota refusal descends within GCP on the live TaskRunner
+- [x] Staging: a GCP quota refusal descends within GCP on the live TaskRunner
 
 ## Notes
 
@@ -78,3 +78,24 @@ chain move on. Per-tier attempt list must span buckets.
   a metric with no region (`CPUS_ALL_REGIONS`) leaves the source at once (the old behaviour).
 - Discrimination: GCP rejection disabled → 6 descent tests red (global-quota control stays green); cap
   reverted to "first 8 by rank" → spread test red; distinct-size ordering removed → zone-duplicate test red.
+
+## Staging Evidence (2026-11-14, staging at c0629d5dd, run 43620525214)
+
+Smoke-user pool temporarily set to `fallback-chain` with only t2d-standard-16 enabled in europe-west1-b,
+europe-west1-c and europe-west4-a (reverted afterwards). Staging T2D_CPUS quota is 24 per region.
+- Node 01M7DHWJCNVTFFTXG2BZZJF2TP (t2d-standard-16, europe-west1-b) took 16 of europe-west1's 24 T2D vCPUs.
+- Task 01M7DJ4D5P4429DX8Q8XZ8TFNC (exclusive, provider gcp, ≥9 vCPU) placement record:
+  1. europe-west1-b t2d-standard-16 — `capacity-exhausted`: "GCP quota T2D_CPUS in europe-west1 is used up for
+     this offering; trying smaller types of this family, other families and other regions before another
+     provider. Provider error: GCP operation failed: QUOTA_EXCEEDED: Quota 'T2D_CPUS' exceeded.  Limit: 24.0 in
+     region europe-west1."
+  2. europe-west1-c t2d-standard-16 — `not-attempted`: "Skipped: needs 16 vCPU, and GCP quota T2D_CPUS in
+     europe-west1 already rejected a 16-vCPU offering"
+  3. europe-west4-a t2d-standard-16 — `succeeded` (node 01M7DJ5CG7MJSXPTNCPVMNSRGG).
+- Real `provisionNode` + D1 path: no node row left behind for the refused europe-west1 attempt (only the two
+  real nodes existed), which answers the validator's MEDIUM about repeated descents.
+- Side finding (pre-existing, filed as idea 01M7DJ7TJA6CAWHX3VEBTXCZZN): an exclusive task took another task's
+  freshly provisioned node, and the provisioner failed after 3 placement refusals instead of re-provisioning.
+- Cleanup: tasks terminal, workspaces deleted, node 01M7DHWJCNVTFFTXG2BZZJF2TP deleted, node 01M7DJ5CG7MJSXPTNCPVMNSRGG
+  in `destroying` with its GCP instance already gone (read-only `aggregated/instances` check), pool reverted to
+  `queue` (revision 78).
