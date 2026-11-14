@@ -71,7 +71,7 @@ Remove the dead `GCP_DISK_SIZE_GB`.
 - [x] Changing the two admin settings changes the advertised and created size without a deploy.
 - [x] Shown price includes the boot disk cost.
 - [x] `GCP_DISK_SIZE_GB` no longer appears in code or docs.
-- [ ] Staging: a real GCP VM boots with the scaled disk (checked at GCP and in node capacity), two default
+- [x] Staging: a real GCP VM boots with the scaled disk (checked at GCP and in node capacity), two default
       workspaces placed on it, then cleaned up.
 
 ## References
@@ -107,3 +107,8 @@ Remove the dead `GCP_DISK_SIZE_GB`.
 - Task 01M7D5X04C54BZ6VJCB5D6WTMX (provider gcp, vmSize large) provisioned node 01M7D5X7ZP4PDEAVP0X8NN9QFQ:
   e2-standard-4 europe-west1-b, node row disk 80, observed disk 80. GCP (read-only reader): instance
   node-01m7d5x7zp4pdeavp0x8nn9qfq RUNNING, boot disk pd-balanced 80 GB.
+- Two tasks pinned to that node, each reserving 1 vCPU / 2 GB / 40,960 MB disk, ran there at the same
+  time (81,920 MB on the 80 GB disk; at 50 GB only one fits). A `vmSize: large` task is refused as a
+  second tenant because the legacy workload mapping reserves the whole machine (4 vCPU / 80 GB).
+- Cleanup: both workspaces and the node deleted (GCP instance gone), candidate reverted to disabled,
+  leftover tasks cancelled. Final head fe3e504ae redeployed (run 43604120643) and smoke-checked.
