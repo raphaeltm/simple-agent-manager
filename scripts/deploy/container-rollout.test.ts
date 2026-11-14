@@ -62,6 +62,29 @@ describe('container rollout deploy gate', () => {
       expect.stringContaining('rollout=new status=completed version=5 target=5')
     );
   });
+  it('waits for every application while preserving independent rollout identities', async () => {
+    const h = harness();
+    let secondComplete = false;
+    vi.mocked(h.api.applications).mockImplementation(async () => [
+      { id: 'app', name: before[0].name, version: 5 },
+      { id: 'second', name: 'second-app', version: secondComplete ? 5 : 4 },
+    ]);
+    vi.mocked(h.api.rollouts).mockImplementation(async (id) => [
+      rollout(id === 'app' || secondComplete ? 'completed' : 'progressing', `${id}-new`),
+    ]);
+    h.options.sleep.mockImplementationOnce(async () => {
+      secondComplete = true;
+    });
+    await waitForContainerRollouts(
+      h.api,
+      [before[0], { ...before[0], name: 'second-app', applicationId: 'second' }],
+      h.options
+    );
+    expect(h.options.sleep).toHaveBeenCalledTimes(1);
+    expect(h.options.log).toHaveBeenLastCalledWith(
+      expect.stringContaining('application=second rollout=second-new status=completed')
+    );
+  });
   it('waits for application version after rollout completion', async () => {
     const h = harness();
     h.set(rollout(), 4);
@@ -155,11 +178,13 @@ describe('container rollout deploy gate', () => {
   it('accepts first direct creation without inventing rollout', async () => {
     const h = harness();
     vi.mocked(h.api.rollouts).mockResolvedValue([]);
-    await waitForContainerRollouts(
-      h.api,
-      [{ ...before[0], applicationId: null, version: null, rollouts: [] }],
-      h.options
-    );
+    await expect(
+      waitForContainerRollouts(
+        h.api,
+        [{ ...before[0], applicationId: null, version: null, rollouts: [] }],
+        h.options
+      )
+    ).resolves.toBeUndefined();
   });
   it('records absent apps for first install', async () => {
     const h = harness();
