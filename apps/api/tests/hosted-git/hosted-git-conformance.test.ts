@@ -472,8 +472,12 @@ describe('browsing a hosted repository through the repo-browse API', () => {
     const branches = (await get('/repo/branches')) as {
       branches: Array<{ name: string; isDefault: boolean }>;
     };
-    expect(branches.branches[0]).toEqual({ name: project.defaultBranch, isDefault: true });
-    expect(branches.branches.map((b) => b.name)).toContain('feature/browse');
+    // Exactly the branches: the list asks the server for refs/heads/ only, so HEAD is never one
+    // (box round R13 D11: dgit ignored ref-prefix and "HEAD" showed up as a branch).
+    expect(branches.branches).toEqual([
+      { name: project.defaultBranch, isDefault: true },
+      { name: 'feature/browse', isDefault: false },
+    ]);
 
     const tree = (await get('/repo/tree?ref=feature/browse')) as {
       entries: Array<{ path: string }>;

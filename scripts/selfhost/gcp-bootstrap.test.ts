@@ -52,12 +52,15 @@ function run(args: string[], advertisedIssuer = ISSUER, env: NodeJS.ProcessEnv =
 }
 
 interface FakeGcp {
-  pools: Record<string, { description: string }>;
-  providers: Record<string, { issuer: string }>;
+  pools: Record<string, { description: string; state?: string }>;
+  providers: Record<string, { issuer: string; state?: string }>;
   accounts: Record<string, { description: string }>;
   bindings: string[];
   rings: Record<string, object>;
-  keys: Record<string, { labels: Record<string, string>; versions: Record<string, string> }>;
+  keys: Record<
+    string,
+    { labels: Record<string, string>; versions: Record<string, string>; primary?: string }
+  >;
 }
 
 function gcp(): FakeGcp {
@@ -85,7 +88,7 @@ function calls(): string[] {
 }
 
 const MUTATING =
-  /^(services enable|iam workload-identity-pools( providers)? (create|delete)|iam service-accounts (create|delete)|projects (add|remove)-iam-policy-binding|iam service-accounts add-iam-policy-binding|kms (keyrings|keys) (create|delete|add-iam-policy-binding|remove-iam-policy-binding)|kms keys versions (destroy|delete))/;
+  /^(services enable|iam workload-identity-pools( providers)? (create|delete)|iam service-accounts (create|delete)|projects (add|remove)-iam-policy-binding|iam service-accounts add-iam-policy-binding|kms (keyrings|keys) (create|delete|add-iam-policy-binding|remove-iam-policy-binding)|kms keys versions (destroy|delete|create|restore|enable)|kms keys set-primary-version)/;
 
 describe('pnpm selfhost:gcp-bootstrap', () => {
   it('creates the pool, issuer-scoped provider, service account and bindings, and prints the five form values', () => {
@@ -183,6 +186,67 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('does not advertise issuer');
     expect(result.calls.filter((c) => MUTATING.test(c))).toEqual([]);
+  });
+
+  it('a soft-deleted pool of the same id: stops with the undelete command, creates nothing (R13 D5)', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    const pool = Object.keys(gcp().pools)[0] ?? '';
+    // Teardown deleted it; Google keeps the id, and describe still answers, for 30 days.
+    setGcp((db) => {
+      const entry = db.pools[pool];
+      if (entry) entry.state = 'DELETED';
+      delete db.providers['sam-api'];
+    });
+    const before = calls().length;
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`workload identity pool ${pool} was deleted`);
+    expect(result.stderr).toContain(
+      `gcloud iam workload-identity-pools undelete ${pool} --project=sam-vm-test --location=global`
+    );
+    expect(result.stderr).toContain('--pool-id');
+    expect(
+      result.calls.slice(before).filter((c) => MUTATING.test(c) && !c.startsWith('services'))
+    ).toEqual([]);
+    expect(gcp().providers).toEqual({});
+  });
+
+  it('a soft-deleted provider: stops with its undelete command', () => {
+    expect(run(['--project', 'sam-vm-test', '--api-url', ISSUER]).status).toBe(0);
+    setGcp((db) => {
+      const entry = db.providers['sam-api'];
+      if (entry) entry.state = 'DELETED';
+    });
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'gcloud iam workload-identity-pools providers undelete sam-api'
+    );
+  });
+
+  it('--kms-only does not need the install to answer: no issuer check (R13 D2)', () => {
+    writeFileSync(join(bin, 'curl'), '#!/usr/bin/env bash\nexit 7\n');
+    const result = run([
+      '--project',
+      'sam-vm-test',
+      '--api-url',
+      ISSUER,
+      '--kms-only',
+      '--box-service-account',
+      'sam-box@sam-vm-test.iam.gserviceaccount.com',
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('SAM_GCP_KMS_KEY=');
+  });
+
+  it('the node setup with the install not up yet: says to run it after the deploy, or --kms-only', () => {
+    writeFileSync(join(bin, 'curl'), '#!/usr/bin/env bash\nexit 7\n');
+    const result = run(['--project', 'sam-vm-test', '--api-url', ISSUER]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('after `pnpm selfhost:deploy`');
+    expect(result.stderr).toContain('use --kms-only');
+    expect(result.stderr).toContain('--skip-issuer-check');
+    expect(result.calls).toEqual([]);
   });
 
   it('refuses an API URL that is not https://api.<domain>', () => {
@@ -307,6 +371,130 @@ describe('--kms: the sealed-secrets key', () => {
     const result = run(kmsArgs);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('not labelled sam-install=');
+  });
+});
+
+/**
+ * Box round R13: after `teardown --destroy-key` the key's name stays with its only version
+ * DESTROY_SCHEDULED, and the bootstrap reused it as ready. The box then could not seal with it.
+ */
+describe('--kms: a key with no enabled primary version (box round R13)', () => {
+  function destroyedKey(versions: Record<string, string> = { 1: 'DESTROY_SCHEDULED' }) {
+    expect(run(kmsArgs).status).toBe(0);
+    const key = keyName();
+    setGcp((db) => {
+      const entry = db.keys[KEY_PATH(key)];
+      if (entry) entry.versions = versions;
+      // The teardown removed the grant; the record lived where the bootstrap ran.
+      db.bindings = db.bindings.filter((b) => !b.startsWith('key:'));
+    });
+    rmSync(join(state, 'box-state'), { recursive: true, force: true });
+    return key;
+  }
+
+  it('stops, names the versions and what to run, and changes nothing', () => {
+    const key = destroyedKey();
+    const before = calls().length;
+    const result = run(kmsArgs);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('has no enabled primary version (1=DESTROY_SCHEDULED)');
+    expect(result.stderr).toContain('--new-key-version');
+    expect(result.stderr).toContain('--restore-key-version');
+    expect(result.stdout).not.toContain('SAM_GCP_KMS_KEY=');
+    expect(result.calls.slice(before).filter((c) => MUTATING.test(c) && c.includes('kms'))).toEqual(
+      ['services enable cloudkms.googleapis.com --project=sam-vm-test']
+    );
+    expect(gcp().keys[KEY_PATH(key)]?.versions).toEqual({ 1: 'DESTROY_SCHEDULED' });
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toEqual([]);
+  });
+
+  it('--new-key-version: a new enabled primary version, then the grant and the key line', () => {
+    const key = destroyedKey();
+    const result = run([...kmsArgs, '--new-key-version']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(gcp().keys[KEY_PATH(key)]).toMatchObject({
+      versions: { 1: 'DESTROY_SCHEDULED', 2: 'ENABLED' },
+      primary: '2',
+    });
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toHaveLength(1);
+    expect(result.stdout).toContain('SAM_GCP_KMS_KEY=');
+  });
+
+  it('--restore-key-version: restores the scheduled primary version and enables it', () => {
+    const key = destroyedKey();
+    const result = run([...kmsArgs, '--restore-key-version']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(gcp().keys[KEY_PATH(key)]).toMatchObject({ versions: { 1: 'ENABLED' }, primary: '1' });
+    expect(result.stdout).toContain('version 1 restored and enabled');
+  });
+
+  it('--restore-key-version with no primary: restores the newest version that can come back', () => {
+    const key = destroyedKey({ 1: 'DESTROYED', 2: 'DESTROY_SCHEDULED' });
+    setGcp((db) => {
+      const entry = db.keys[KEY_PATH(key)];
+      if (entry) entry.primary = '';
+    });
+    const result = run([...kmsArgs, '--restore-key-version']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(gcp().keys[KEY_PATH(key)]).toMatchObject({
+      versions: { 1: 'DESTROYED', 2: 'ENABLED' },
+      primary: '2',
+    });
+  });
+
+  it('--restore-key-version with nothing restorable: stops and points to --new-key-version', () => {
+    destroyedKey({ 1: 'DESTROYED' });
+    const result = run([...kmsArgs, '--restore-key-version']);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('no version to restore (1=DESTROYED): use --new-key-version');
+  });
+
+  it('dry run with --new-key-version shows the version it would create and changes nothing', () => {
+    const key = destroyedKey();
+    const before = calls().length;
+    const result = run([...kmsArgs, '--new-key-version', '--dry-run']);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('would run: gcloud kms keys versions create');
+    expect(result.calls.slice(before).filter((c) => MUTATING.test(c))).toEqual([]);
+    expect(gcp().keys[KEY_PATH(key)]?.versions).toEqual({ 1: 'DESTROY_SCHEDULED' });
+  });
+
+  it('destroy, re-bootstrap with --new-key-version, teardown again: the new grant and version go too', () => {
+    const kmsOnly = [...kmsArgs.slice(0, 5), '--kms-only', '--box-service-account', BOX_SA];
+    const teardown = ['--project', 'sam-vm-test', '--api-url', ISSUER, '--teardown'];
+    expect(run(kmsOnly).status).toBe(0);
+    const key = keyName();
+    expect(run([...teardown, '--destroy-key-versions', key]).status).toBe(0);
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toEqual([]);
+
+    // Rebuilt within the 30 days, with the record still here (the bootstrap ran in the same place).
+    const again = run([...kmsOnly, '--new-key-version']);
+    expect(again.status, again.stderr).toBe(0);
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toHaveLength(1);
+    const grant = record().resources.find(
+      (r) => r.kind === 'iam-binding' && String(r.name).includes('/cryptoKeys/')
+    );
+    // The record says the grant exists again; it must not read as already removed.
+    expect(grant).toMatchObject({ action: 'created' });
+    expect(grant).not.toHaveProperty('removedAt');
+
+    const second = run([...teardown, '--destroy-key-versions', key]);
+    expect(second.status, second.stderr).toBe(0);
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toEqual([]);
+    expect(gcp().keys[KEY_PATH(key)]?.versions).toEqual({
+      1: 'DESTROY_SCHEDULED',
+      2: 'DESTROY_SCHEDULED',
+    });
+  });
+
+  it('a healthy key needs no flag and gets no new version', () => {
+    expect(run(kmsArgs).status).toBe(0);
+    const before = calls().length;
+    const again = run([...kmsArgs, '--new-key-version']);
+    expect(again.status, again.stderr).toBe(0);
+    expect(again.calls.slice(before).some((c) => c.startsWith('kms keys versions create'))).toBe(
+      false
+    );
   });
 });
 

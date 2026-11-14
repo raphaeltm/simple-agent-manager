@@ -76,6 +76,7 @@ export function createGcpKmsProvider(
     try {
       return await jsonCall(`${endpoint}/v1/${key}:${op}`, {
         service,
+        keyResource: true,
         headers: { authorization: `Bearer ${await accessToken()}` },
         body,
       });

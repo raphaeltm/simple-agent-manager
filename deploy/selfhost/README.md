@@ -25,9 +25,83 @@ install, the bundled mail collector (see Email sign-in below).
 Profile `mail-collector` (off by default, test installs only) adds `mail-collector`: Mailpit on
 `127.0.0.1:1025` (SMTP) and `127.0.0.1:8025` (UI, published at `mail.SAM_DOMAIN`). See Email sign-in.
 
+## Create the box (Google Cloud)
+
+The box shape box round R13 created in an empty project (November 14, 2026; about 90 s of
+`gcloud`, then 3 minutes of preparation on the VM: Docker, Node 22, build tools, clone,
+`pnpm install`). Run it as a project owner, or as an identity
+with Compute, IAM, Cloud DNS and Storage admin rights, in Cloud Shell or anywhere `gcloud` is
+logged in. The names below are examples; keep them consistent. `BOX` is what
+`pnpm selfhost:gcp-bootstrap -- --box-instance` takes, and teardown lists all of these under
+"Left for you", since it runs on the box and cannot remove the box. Values are made up.
+
+```bash
+PROJECT=my-sam-project; REGION=europe-west1; ZONE=europe-west1-b
+DOMAIN=sam.example.com                 # SAM_DOMAIN
+DNS_ZONE=sam-example-com               # an existing Cloud DNS managed zone for $DOMAIN
+BUCKET=my-sam-fleet                    # CELLD_BUCKET=gs://$BUCKET/celld
+BOX=sam-box; BOX_SA=sam-box@$PROJECT.iam.gserviceaccount.com
+MY_IP=203.0.113.7                      # where you SSH from
+
+gcloud config set project "$PROJECT"
+gcloud services enable compute.googleapis.com dns.googleapis.com storage.googleapis.com iam.googleapis.com
+
+# The box's own service account: the bucket (objects only) and DNS-01 for the wildcard certificate.
+gcloud iam service-accounts create sam-box --display-name="SAM box"
+gcloud storage buckets create "gs://$BUCKET" --location="$REGION" --uniform-bucket-level-access
+gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
+  --member="serviceAccount:$BOX_SA" --role=roles/storage.objectAdmin
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:$BOX_SA" --role=roles/dns.admin --condition=None
+
+# Network, firewall (80/443 for everyone: app, API and the nodes' tunnel; SSH for you), static IP.
+gcloud compute networks create sam-selfhost --subnet-mode=custom
+gcloud compute networks subnets create sam-selfhost-ew1 --network=sam-selfhost \
+  --region="$REGION" --range=10.10.0.0/24
+gcloud compute firewall-rules create sam-selfhost-allow-web --network=sam-selfhost \
+  --allow=tcp:80,tcp:443 --source-ranges=0.0.0.0/0 --target-tags=sam-box
+gcloud compute firewall-rules create sam-selfhost-allow-ssh --network=sam-selfhost \
+  --allow=tcp:22 --source-ranges="$MY_IP/32" --target-tags=sam-box
+gcloud compute addresses create sam-box-ip --region="$REGION"
+IP=$(gcloud compute addresses describe sam-box-ip --region="$REGION" --format='value(address)')
+
+# DNS: the wildcard is required, the apex record optional.
+gcloud dns record-sets create "*.$DOMAIN." --zone="$DNS_ZONE" --type=A --ttl=300 --rrdatas="$IP"
+gcloud dns record-sets create "$DOMAIN." --zone="$DNS_ZONE" --type=A --ttl=300 --rrdatas="$IP"
+
+# The VM: Ubuntu 24.04, 4 vCPU / 16 GB, its own service account with the cloud-platform scope
+# (Cloud KMS and the gs:// bucket refuse its token without it).
+gcloud compute instances create "$BOX" --zone="$ZONE" --machine-type=e2-standard-4 \
+  --subnet=sam-selfhost-ew1 --address=sam-box-ip --tags=sam-box \
+  --image-family=ubuntu-2404-lts-amd64 --image-project=ubuntu-os-cloud \
+  --boot-disk-size=60GB --boot-disk-type=pd-balanced \
+  --service-account="$BOX_SA" --scopes=cloud-platform
+```
+
+Then the sealed-secrets key (Sealed secrets, Cloud key, one-time setup:
+`pnpm selfhost:gcp-bootstrap -- ... --kms-only --box-instance "$BOX" --box-zone "$ZONE"`), and on
+the VM (`gcloud compute ssh "$BOX" --zone "$ZONE"`):
+
+```bash
+sudo apt-get update && sudo apt-get install -y build-essential git ca-certificates curl
+curl -fsSL https://get.docker.com | sudo sh            # Docker Engine with the Compose plugin
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs
+sudo corepack enable pnpm
+git clone https://github.com/raphaeltm/simple-agent-manager.git sam && cd sam   # full clone
+```
+
+Add yourself to the `docker` group (`sudo usermod -aG docker "$USER"`, then log in again) only if
+you are trusted with every secret on the box (Install or upgrade says why). In `.env`: `SAM_DOMAIN=$DOMAIN`,
+`SAM_TLS_MODE=dns-googleclouddns`, `GCP_PROJECT=$PROJECT`, `COMPOSE_PROFILES=tunnel,gce` and
+`CELLD_BUCKET=gs://$BUCKET/celld`; then Install or upgrade, below. The node setup
+(`pnpm selfhost:gcp-bootstrap` without `--kms-only`) runs once the install answers.
+
 ## Install or upgrade
 
-Needs Docker with Compose v2.20+, Node 22+ and pnpm, and a checkout of this repository.
+Needs Docker with Compose v2.20+, Node 22+ and pnpm, a C/C++ toolchain with `make` (`pnpm install`
+builds `better-sqlite3` from source where no prebuilt binary matches, as on stock Ubuntu 24.04:
+`sudo apt-get install -y build-essential`), and a full clone of this repository. On a new
+Google Cloud machine, Create the box (above) prepares all of it.
 
 ```bash
 cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env
@@ -105,9 +179,22 @@ The automatic choice:
 3. On a cloud, it tries the key for this install through the VM's own identity: the key set in
    `.env`, else the one the one-time setup below creates (named `sam-<8 hex>` from your domain,
    like the bootstrap's pool id). It is chosen only if a real wrap and unwrap round trip succeeds.
-4. Otherwise, and on any other host, the file key. The printed line says why in plain words, for
-   example `key provider: file (on Google Cloud (project p), but Cloud KMS key projects/p/... is
-not usable (denied: ...); using a key file on this box)`.
+4. The file key only when nothing better was set up: off a cloud, on a cloud that offers no key
+   (Azure without `SAM_AZURE_KEY_VAULT_URL`), or when the cloud says the conventional key does
+   not exist. The printed line says why, for example `key provider: file (on AWS (eu-west-1),
+but AWS KMS key alias/sam-... is not usable (config: ... NotFoundException); using a key file on this box)`.
+5. Never a weaker key by itself. A key set in `.env` that fails or is not tried (no cloud
+   detected, another cloud), or a key that cannot be used for any reason other than the key
+   service saying it does not exist (denied, disabled, no enabled version, no VM identity,
+   unreachable), stops `--init` with the reason and what to run; nothing is recorded or sealed. Google Cloud answers "denied" also for a key the VM
+   may not see, so on Google Cloud without a key either set one up (below) or set
+   `SAM_KEY_PROVIDER=file` in `.env`: that line is how you choose the key file on purpose. The
+   rule is one function, `sealingFloorRefusal` in `scripts/selfhost/key-choice.ts`; `switch --to
+auto` follows it too and never moves a box below the provider it seals with now.
+
+`pnpm selfhost:secrets status` names what seals the box (`sealed by: a key file on this box`) and,
+on a box sealed with the key file, warns when this machine's cloud key works (move with
+`switch --to auto`) or exists but cannot be used (with what to run).
 
 Moving to another provider later (for example after setting up a cloud key) is never a silent
 change at a deploy:
@@ -331,10 +418,24 @@ pnpm selfhost:gcp-bootstrap -- --project <id> --api-url https://api.<SAM_DOMAIN>
   --box-instance <box VM> --box-zone <zone> --dry-run    # then again without --dry-run
 ```
 
+`--kms-only` runs before the install exists, so it does not check the install's token issuer (only
+the node setup, which trusts that issuer, needs the install up).
+
 It creates or reuses the key ring `sam-selfhost` (location `global`; `--kms-location`) and the
 key `$NAME` labelled `sam-install`, grants `roles/cloudkms.cryptoKeyEncrypterDecrypter` to the box
 VM's service account on that key only, and prints `SAM_GCP_KMS_KEY=...`. Use `--kms` instead of
 `--kms-only` to also run the node setup above.
+
+A reused key must have an enabled primary version. After `pnpm selfhost:teardown --destroy-key`
+the key's name stays (Cloud KMS never deletes it) with its version scheduled for destruction, so
+the bootstrap stops and lists the versions. Run it again with one of:
+
+- `--new-key-version`: a new primary version. Anything sealed with the old version stays lost.
+- `--restore-key-version`: undo the destruction, only within 30 days of it
+  (`destroyScheduledDuration`): the version is restored, enabled and kept primary.
+- `--key <another id>`: a new key (then put the printed `SAM_GCP_KMS_KEY=...` line in `.env`).
+
+The box's `deploy --init` refuses such a key the same way rather than falling back to the file key.
 
 **AWS** (the box is an EC2 instance with an instance profile; IMDSv2 is enough):
 
@@ -587,6 +688,11 @@ chat fails with "No eligible compute-pool offering is available in the installat
 for this task's requirements (2 vCPU, 4096 MB memory, 15 GB disk)". On Google Cloud add
 `e2-standard-2` (2 vCPU, 8 GB); keep `e2-medium` for smaller work if you like.
 
+A node created through the API without a location (`POST /api/nodes` with only a name and size)
+goes wherever the installation pool places it; on a Cloudflare install the same request still
+means Hetzner `nbg1`. A location, when given, must be one the pool offers: on Google Cloud a zone
+(`europe-west1-b`), not a region (`europe-west1`).
+
 ## Backup, restore and upgrade
 
 ```bash
@@ -677,10 +783,10 @@ so the sealed bundles and key material go even when a cache does not. The summar
 path that is left, says whether it is only a cache, and gives the command to remove it
 (`clearStateEntries` in `teardown-state-dir.ts`).
 
-| Mode                  | Removes                                                                                                                                                | Keeps                                                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `--keep-data`         | node VMs and their disks; the bootstrap's pool, provider, node service account and its roles; containers                                               | bucket, volumes, images, `.state/` (bundles, key file), `.env`, backups, the KMS key and the box's grant on it, DNS, GitHub App |
-| `--remove-everything` | the above, plus the KMS grant, every object under `CELLD_BUCKET`, compose volumes (the bundled store's bucket too) and built images, `.state/`, `.env` | the record, the key file and the KMS key (without `--destroy-key`), backups (without `--delete-backups`)                        |
+| Mode                  | Removes                                                                                                                                                                                 | Keeps                                                                                                                           |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--keep-data`         | node VMs and their disks; the bootstrap's pool, provider, node service account and its roles; containers                                                                                | bucket, volumes, images, `.state/` (bundles, key file), `.env`, backups, the KMS key and the box's grant on it, DNS, GitHub App |
+| `--remove-everything` | the above, plus the KMS grant a recorded bootstrap run created, every object under `CELLD_BUCKET`, compose volumes (the bundled store's bucket too) and built images, `.state/`, `.env` | the record, the key file and the KMS key (without `--destroy-key`), backups (without `--delete-backups`)                        |
 
 Destructive flags, each only with `--remove-everything`:
 
@@ -692,10 +798,22 @@ Destructive flags, each only with `--remove-everything`:
   after 30 days by default (`gcloud kms keys versions restore` undoes it until then); run the
   teardown again after that to delete the key and its ring.
 
+**What Google Cloud keeps after a teardown, for 30 days or for good.** A deleted workload identity
+pool (and provider) stays for 30 days in state DELETED, and its id cannot be reused until Google
+purges it. A KMS key ring and key name are never deleted; `--destroy-key` only schedules the key's
+versions for destruction (30 days, restorable until then). Enabled APIs stay enabled. So rebuilding
+the same domain soon after a teardown meets old names, and the bootstrap says so instead of reusing
+them as if they were ready:
+
+- a deleted pool or provider stops it with the undelete command
+  (`gcloud iam workload-identity-pools undelete sam-<hash> --location=global --project <id>`, the
+  provider likewise with `providers undelete`), or pass a new `--pool-id`;
+- a key with no enabled version stops it until you pass `--new-key-version` or
+  `--restore-key-version` (Cloud key, one-time setup), and `deploy --init` refuses such a key rather
+  than sealing with the file key.
+
 **Bringing a `--keep-data` install back:** `docker compose -f deploy/selfhost/docker-compose.yml up
--d`, then `pnpm selfhost:gcp-bootstrap` again. Google keeps a deleted workload identity pool for 30
-days and its id cannot be reused until then, so within that window either undelete it
-(`gcloud iam workload-identity-pools undelete sam-<hash> --location=global --project <id>`) or pass
+-d`, then `pnpm selfhost:gcp-bootstrap` again. Its pool was deleted (above): undelete it, or pass
 a new `--pool-id` and put the new values in the platform credential (Admin → Credentials). The app still lists the deleted
 nodes: delete them in Admin → Nodes once it is up (the provider treats a VM that is already gone
 as deleted: `deleteVM` in `packages/providers/src/gcp.ts`).
@@ -720,6 +838,10 @@ VM uses it. Another install's VM is listed as refused and never touched.
 - the DNS records (`*.SAM_DOMAIN` and the apex record if you made one, and with inbound mail the MX
   record and the `sam-smtp-in` rule), the bucket itself when you created it, OAuth clients and SMTP
   credentials, and an AWS or Azure key (commands under Removing what setup created);
+- the box VM account's grant on the KMS key when no recorded bootstrap run created it (the
+  bootstrap ran elsewhere, or found the key already there), with the
+  `gcloud kms keys remove-iam-policy-binding` command: a grant on a key the bootstrap did not
+  create may predate SAM, so teardown does not remove it;
 - the machine and what you made for it: its boot disk, static IP, network, subnet and the firewall
   rules you opened for it (80/443, SSH), its service account and bucket grant. Teardown runs on the
   box and cannot tell which network or address you made for it.

@@ -155,6 +155,38 @@ describe('secrets switch', () => {
     expect(steps).toEqual([]);
   });
 
+  it('switch --to auto never goes down: a Cloud KMS box is not moved to the key file', async () => {
+    await runSwitch({ box: box(), stateDir: state, to: 'gcp-kms' }, deps());
+    steps = [];
+    logs = [];
+    const before = [read('choice.json'), readdirSync(join(state, 'key-agent/bundles')).join()];
+    // The automatic choice on this box would find no cloud key (the conventional one does not
+    // exist): on a new box that means the key file, but this box is sealed with Cloud KMS now.
+    const absent = {
+      ...deps(),
+      detect: async (): Promise<PlatformCandidates> => ({
+        platform: 'Google Cloud (project sam-fake-project)',
+        candidates: [
+          {
+            provider: 'gcp-kms',
+            settings: { SAM_GCP_KMS_KEY: 'projects/x/no-such-key' },
+            label: 'Cloud KMS key projects/x/no-such-key',
+          },
+        ],
+      }),
+    };
+    await expect(runSwitch({ box: box(), stateDir: state, to: 'auto' }, absent)).rejects.toThrow(
+      /refusing to seal this box's secrets with a key file on this box: this box is sealed with gcp-kms now/
+    );
+    expect([read('choice.json'), readdirSync(join(state, 'key-agent/bundles')).join()]).toEqual(
+      before
+    );
+    expect(steps).toEqual([]);
+    // Moving down on purpose stays possible.
+    const down = await runSwitch({ box: box(), stateDir: state, to: 'file' }, deps());
+    expect(down.provider).toBe('file');
+  });
+
   it('reseal: same provider, a new bundle and data key, no previous provider', async () => {
     const before = readdirSync(join(state, 'key-agent/bundles'));
     await runSwitch({ box: box(), stateDir: state, to: null }, deps());

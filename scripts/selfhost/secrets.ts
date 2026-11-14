@@ -26,6 +26,7 @@ import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { loadBox, SELFHOST_DIR } from './backup-cli';
+import { detectKeyCandidates } from './key-platforms';
 import {
   formatPlaintextReport,
   knownSecrets,
@@ -41,7 +42,7 @@ import { assertPrivateFile, parseDotenv } from './secret-files';
 import { boxMigrateDeps, boxSwitchDeps } from './secrets-box-deps';
 import { describeKeyFile, verifyKeyCopy } from './secrets-keyfile';
 import { runMigration } from './secrets-migrate';
-import { describeKeyStatus } from './secrets-status';
+import { cloudKeyWarnings, describeKeyStatus } from './secrets-status';
 import { runSwitch } from './secrets-switch';
 
 const USAGE = `usage: pnpm selfhost:secrets <command> [--box-env <path>] [--state-dir <dir>]
@@ -125,6 +126,9 @@ try {
   switch (command) {
     case 'status':
       for (const line of describeKeyStatus(box, stateDir)) console.log(line);
+      for (const line of await cloudKeyWarnings(box, stateDir, detectKeyCandidates)) {
+        console.log(line);
+      }
       break;
     case 'key-file':
       for (const line of describeKeyFile(stateDir)) console.log(line);

@@ -1,13 +1,23 @@
 /**
  * `pnpm selfhost:secrets status`: which key provider seals this box's secrets, why it was chosen,
- * which bundles exist, and which plaintext copies are still on the box. Prints names, paths,
- * fingerprints and bundle ids only, never key material or secret values.
+ * which bundles exist, and which plaintext copies are still on the box; on a box sealed with the
+ * key file, also whether a cloud key on this platform works or exists (cloudKeyWarnings). Prints
+ * names, paths, fingerprints and bundle ids only, never key material or secret values.
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createKeyProvider } from '../../deploy/selfhost/key-agent/providers.ts';
-import { applyKeyChoice, explicitKeyProvider, readKeyChoice } from './key-choice.js';
+import {
+  applyKeyChoice,
+  candidateFix,
+  type ChooseInput,
+  configuredKeyFloors,
+  explicitKeyProvider,
+  readKeyChoice,
+  sealingStrength,
+  tryKeyCandidate,
+} from './key-choice.js';
 import {
   KEY_AGENT_DIR,
   keyServiceSettings,
@@ -32,6 +42,7 @@ export function describeKeyStatus(box: Box, stateDir: string): string[] {
   const provider = explicit ?? recorded?.provider ?? '';
   const reason = explicit ? `SAM_KEY_PROVIDER=${explicit} in .env` : (recorded?.reason ?? '');
   lines.push(`key provider: ${provider}`);
+  lines.push(`  sealed by:  ${sealedBy(provider)}`);
   lines.push(`  why:        ${reason}`);
   if (recorded && !explicit) lines.push(`  recorded:   ${recorded.chosenAt} (${recorded.source})`);
   if (recorded && explicit && recorded.provider !== explicit) {
@@ -69,6 +80,70 @@ export function describeKeyStatus(box: Box, stateDir: string): string[] {
       `plaintext secret files still on the box: ${plaintext.join(', ')} ` +
         '(pnpm selfhost:secrets migrate verifies the sealed deploy and removes them)'
     );
+  }
+  return lines;
+}
+
+function sealedBy(provider: string): string {
+  if (provider === LEGACY_KEY_PROVIDER) return 'nothing: plaintext deploy vars';
+  if (provider === 'file') return 'a key file on this box (weaker than a key held off the box)';
+  return `a key held off this box (${provider})`;
+}
+
+/** The provider this box seals with, or null when none was chosen yet. */
+function effectiveProvider(box: Box, stateDir: string): string | null {
+  return explicitKeyProvider(box) ?? readKeyChoice(stateDir)?.provider ?? null;
+}
+
+/**
+ * For a box sealed with the key file: each cloud key this platform offers (the one configured in
+ * .env, or the one the one-time setup creates) that works, or that exists but cannot be used, is
+ * a warning, because the box seals more weakly than what was prepared for it. A key the cloud says
+ * does not exist is not: nothing was set up. Off a cloud, or with an off-box provider, no lines.
+ */
+export async function cloudKeyWarnings(
+  box: Box,
+  stateDir: string,
+  detect: ChooseInput['detect']
+): Promise<string[]> {
+  const provider = effectiveProvider(box, stateDir);
+  if (provider !== 'file') return [];
+  const found = await detect(box);
+  const lines: string[] = [];
+  // `switch` refuses while SAM_KEY_PROVIDER is set (secrets-switch.ts), so say to remove it first.
+  const move = explicitKeyProvider(box)
+    ? 'remove the SAM_KEY_PROVIDER=file line from .env, then `pnpm selfhost:secrets switch --to auto`'
+    : '`pnpm selfhost:secrets switch --to auto` (try --dry-run first)';
+  for (const candidate of found.candidates) {
+    if (sealingStrength(candidate.provider) <= sealingStrength(provider)) continue;
+    const failure = await tryKeyCandidate(box, stateDir, candidate);
+    if (failure === null) {
+      lines.push(
+        `WARNING: ${candidate.label} works on this machine, but this box seals with a key file. ` +
+          `To move to it: ${move}.`
+      );
+      continue;
+    }
+    // The key service said there is no such key and nobody configured one: nothing was set up.
+    if (failure.keyMissing && !candidate.configuredBy) continue;
+    // Only `invalid` proves the key exists (no enabled version, disabled). Google Cloud and AWS
+    // answer `denied` for a key the VM may not see as well (security review M3).
+    const what =
+      failure.kind === 'invalid'
+        ? 'exists but is not usable'
+        : failure.kind === 'denied'
+          ? 'could not be used (it may not exist, or this VM may not use it)'
+          : 'is not usable';
+    const fix = candidateFix(box, candidate, failure);
+    lines.push(
+      `WARNING: ${candidate.label} ${what} (${failure.text})` +
+        `${candidate.configuredBy ? `; ${candidate.configuredBy} is set in .env` : ''}, and this ` +
+        `box seals with a key file instead.${fix ? ` ${fix}` : ''} Then, to move to it: ${move}.`
+    );
+  }
+  // A key configured in .env that this machine's platform did not offer as a candidate.
+  for (const floor of configuredKeyFloors(box, found.candidates, found.platform)) {
+    lines.push(`WARNING: ${floor.why}, and this box seals with a key file. ${floor.fix ?? ''}`);
   }
   return lines;
 }

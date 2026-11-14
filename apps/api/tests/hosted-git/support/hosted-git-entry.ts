@@ -5,6 +5,10 @@
  * browser session is replaced (an `x-test-user-id` header stands in for BetterAuth), plus two
  * test-only endpoints that mint credentials the production code would mint elsewhere.
  */
+// The production entry (src/index.ts) wires repo-hosting's ports first; the branch list,
+// project create and import reach them, so this entry must too.
+import '../../../src/repo-hosting-wiring';
+
 import { Hono } from 'hono';
 
 import { HostedGitRepo } from '../../../src/durable-objects/hosted-git-repo';

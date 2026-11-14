@@ -78,6 +78,7 @@ export function createAzureKeyVaultProvider(
     try {
       return await jsonCall(`${url}?api-version=${API_VERSION}`, {
         service,
+        keyResource: true,
         headers: { authorization: `Bearer ${await accessToken()}` },
         body,
       });
