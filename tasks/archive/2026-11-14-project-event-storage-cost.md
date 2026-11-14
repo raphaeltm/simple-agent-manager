@@ -107,3 +107,8 @@ Root cause: the original event schema maintained four secondary indexes that cur
 Why it was missed: semantic unit coverage checked stored records and deliveries without measuring workerd cursor rows or the real multi-ID DELETE plan. Process fix: the new real-runtime test files assert physical counters, actual statement plans, >one-batch throughput and protected-prefix controls, plus producer-to-subscriber delivery. No additional standing instruction files are needed.
 
 Release gates remain pending below; archiving the implementation record after validation does not assert that staging or production deployment has completed.
+
+
+### Release checkpoint (2026-11-14 15:32Z)
+
+Own staging run [43607699550](https://github.com/raphaeltm/simple-agent-manager/actions/runs/43607699550) is running implementation candidate `ac986afb6f7893501fa0a0953194ab0df968ecc6`; API Worker deployment began 15:29Z after queue/build. Slot ownership was released by the rollout-fix task after its run43605665349 succeeded. No owned staging task/subscription fixtures have been created yet. Branch additionally merged main `3c5921849` (#2732 rollout-gate fix) as `fd9f29607`, preserving identical project-event runtime changes. Production success of that fix remains a merge prerequisite. Signed webhook/wake/browser verification, PR and production release gates are still pending.
