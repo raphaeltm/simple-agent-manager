@@ -168,7 +168,7 @@ Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.t
 | Recorded sender grace ignored (adversarial delta LOW) | sender-budget |
 | Minimum attempt not capped at half the phase budget (CodeRabbit) | short-budget (4 s) case; the 60 s case cannot discriminate under the frozen test clock |
 | `failed` not held within the send grace (CodeRabbit) | earlier-failed-delete |
-| GCP re-read before DELETE removed (CodeRabbit) | provider: replacement-under-same-name |
+| GCP identity check after the re-read removed (CodeRabbit + adversarial LOW) | provider: renamed-instance |
 
 ## Review fixes (Phase 5)
 
@@ -193,3 +193,4 @@ Cron-entry tests `apps/api/tests/unit/services/node-cleanup-two-phase-deletion.t
   (bounded at 5 pages, unfinished walk is an error, never "not requested").
 - Adversarial delta re-check: fixes hold; two LOWs fixed: the sender's grace is stored in the record and honoured by any confirming caller; the GCP operations walk stops at the first conclusive page.
 - CodeRabbit review 5903306684 (on 63a008c4), three Major findings, all valid and fixed: minimum attempt capped at half the phase budget (a 4 s budget or a 60 s attempt budget could otherwise skip every attempt); `failed` held during the sender grace like `not_requested`; GCP request re-reads the instance by name after `beforeSend` and refuses a different numeric id (remaining gap: the re-read to DELETE round trip, ~0.2 s, since `instances.delete` addresses by name only). The extra GET (~0.12-1 s) is inside the 15 s attempt budget.
+- Adversarial delta pass on 63a008c4..d0a75ecd: PASS (no CRITICAL/HIGH/MEDIUM). LOW-1 taken: the re-read is by numeric id (404 = this exact instance gone) and refuses a changed name; LOW-2 (operator-set tiny phase budgets now fail visibly instead of stranding) accepted; LOW-3 test gaps noted (frozen-clock 60 s case; `absent` after the record covered at provider level only).

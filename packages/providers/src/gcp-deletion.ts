@@ -169,15 +169,16 @@ export async function requestGcpInstanceDeletion(
   throwIfProviderRequestAborted(context);
   await options?.beforeSend?.(ticket);
   throwIfProviderRequestAborted(context);
-  // DELETE addresses the instance by name. Re-read it right before sending, so a replacement
-  // created under the same name while `beforeSend` ran is never deleted in its place.
-  const current = await getGcpInstanceInZone(scope, zone, instance.name, context);
+  // DELETE addresses the instance by name. Re-read it by its numeric id right before sending: a
+  // 404 then means this exact instance is gone, and a different name (renamed, or the name now
+  // belongs to a replacement) is refused rather than deleted by name.
+  const current = await getGcpInstanceInZone(scope, zone, instance.id, context);
   if (!current) return { state: 'absent' };
-  if (current.id !== instance.id) {
+  if (current.id !== instance.id || current.name !== instance.name) {
     throw new ProviderError(
       'gcp',
       undefined,
-      `GCP instance ${instance.name} in ${zone} was replaced (id ${instance.id} -> ${current.id}); refusing to delete it`,
+      `GCP instance ${instance.id} in ${zone} changed identity (name ${instance.name} -> ${current.name}); refusing to delete it`,
       { category: 'invalid_config' }
     );
   }

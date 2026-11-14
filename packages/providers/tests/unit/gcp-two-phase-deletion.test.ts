@@ -109,12 +109,12 @@ describe('GcpProvider two-phase deletion', () => {
       );
     });
 
-    it('re-reads the instance after beforeSend and refuses a replacement under the same name', async () => {
-      let replaced = false;
+    it('re-reads the instance by numeric id after beforeSend and refuses a renamed instance', async () => {
+      let renamed = false;
       const fetchMock = installFetch((url, init) => {
         if (init?.method === 'DELETE') return json({ name: 'operation-1', status: 'RUNNING' });
-        if (replaced && url.pathname.endsWith(`/instances/${INSTANCE.name}`)) {
-          return json({ ...INSTANCE, id: '999' });
+        if (renamed && url.pathname.endsWith(`/instances/${INSTANCE.id}`)) {
+          return json({ ...INSTANCE, name: 'someone-elses-name' });
         }
         return lookupResponse(url) ?? notFound();
       });
@@ -122,11 +122,17 @@ describe('GcpProvider two-phase deletion', () => {
       await expect(
         provider.requestVMDeletion(INSTANCE.id, undefined, {
           beforeSend: async () => {
-            replaced = true;
+            renamed = true;
           },
         })
-      ).rejects.toThrow(/was replaced/);
+      ).rejects.toThrow(/changed identity/);
       expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+      // The re-read addressed the exact instance by id, not by its (reusable) name.
+      expect(
+        fetchMock.mock.calls.filter(([u]) =>
+          String(u).endsWith(`/zones/europe-west1-b/instances/${INSTANCE.id}`)
+        ).length
+      ).toBeGreaterThanOrEqual(2);
     });
 
     it('reports absent, sending nothing, when the instance is gone by the re-read', async () => {
