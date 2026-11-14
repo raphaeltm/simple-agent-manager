@@ -129,7 +129,12 @@ export function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
   const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
   return { targetProvider, attributionUserId, attributionProjectId, exactCredential };
 }
-export function hasManagedVmPlacementProof(node: NodeRow): boolean {
+/**
+ * Code twin of `cleanupNodeProvenanceSql`'s snapshot branch. A released `capacity_source_id`
+ * (its source was deleted with the credential) counts only when the caller has checked the
+ * release in D1 with `isNodeCapacitySourceReleased`; a NULL column alone proves nothing.
+ */
+export function hasManagedVmPlacementProof(node: NodeRow, capacitySourceReleased = false): boolean {
   const hasText = (value: string | null): boolean => !!value?.trim();
   return (
     ['workspace', 'deployment'].includes(node.nodeRole) &&
@@ -146,7 +151,8 @@ export function hasManagedVmPlacementProof(node: NodeRow): boolean {
     (node.providerInstanceVcpuCount ?? 0) > 0 &&
     (node.providerInstanceMemoryMb ?? 0) > 0 &&
     hasText(node.capacityPoolId) &&
-    hasText(node.capacitySourceId) &&
+    (hasText(node.capacitySourceId) ||
+      (capacitySourceReleased && node.capacitySourceId === null)) &&
     hasText(node.capacityPoolCandidateId) &&
     hasText(node.placementCredentialReference) &&
     hasText(node.placementCredentialFingerprint) &&

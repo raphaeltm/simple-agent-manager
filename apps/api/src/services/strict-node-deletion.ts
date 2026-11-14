@@ -16,6 +16,7 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
+import { isNodeCapacitySourceReleased } from './node-teardown-provenance';
 import { releaseNodeTunnels } from './node-tunnel-cleanup';
 import {
   type ContainerWorkspaceDeletionAuthority,
@@ -127,7 +128,10 @@ async function reconcileStrictProviderlessVm(
   requestContext?: ProviderRequestContext,
   beforeDestroy?: () => Promise<void>
 ): Promise<StrictNodeDeletionResult['providerVm']> {
-  if (node.status !== 'destroying' || !hasManagedVmPlacementProof(node)) {
+  if (
+    node.status !== 'destroying' ||
+    !hasManagedVmPlacementProof(node, await isNodeCapacitySourceReleased(env.DATABASE, node))
+  ) {
     throw new Error(
       `Cannot confirm managed VM termination for node ${node.id}: instance identity is missing`
     );
@@ -423,7 +427,10 @@ export async function deleteNodeResourcesStrict(
       initialNode.status === 'destroying' &&
       node.runtime === 'vm' &&
       !node.providerInstanceId &&
-      !hasManagedVmPlacementProof(initialNode)
+      !hasManagedVmPlacementProof(
+        initialNode,
+        await isNodeCapacitySourceReleased(env.DATABASE, initialNode)
+      )
     ) {
       throw new Error(`Providerless VM termination proof lacks managed placement: node=${nodeId}`);
     }
