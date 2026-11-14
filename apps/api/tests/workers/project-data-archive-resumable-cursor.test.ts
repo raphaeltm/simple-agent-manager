@@ -16,7 +16,7 @@
  */
 import type { MessagePosition } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
@@ -151,12 +151,16 @@ async function readAllMessageIds(projectId: string, sessionId: string): Promise<
 }
 
 /** Counts R2 puts per key on the binding the coordinator writes chunks through. */
-function countingR2(inner: R2Bucket, options: { failPuts?: () => boolean } = {}) {
+function countingR2(
+  inner: R2Bucket,
+  options: { failPuts?: () => boolean; beforePut?: () => void } = {}
+) {
   const puts = new Map<string, number>();
   const bucket = new Proxy(inner, {
     get(target, property, receiver) {
       if (property === 'put') {
         return async (key: string, ...rest: unknown[]) => {
+          options.beforePut?.();
           if (options.failPuts?.()) throw new Error('injected R2 put failure');
           puts.set(key, (puts.get(key) ?? 0) + 1);
           return (target.put as (...args: unknown[]) => Promise<unknown>)(key, ...rest);
@@ -189,8 +193,14 @@ function tick(overrides: Record<string, string> = {}) {
 
 describe('resumable archive cursor', () => {
   it('copies a large session across ticks, readable and write-fenced throughout, with one reservation and no duplicate puts', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => vi.useRealTimers());
     const { projectId, sessionId, messageIds } = await seedCandidate('cursor', LARGE_MESSAGES);
-    const { bucket, puts } = countingR2(env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket);
+    const { bucket, puts } = countingR2(env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket, {
+      // Six real writes consume the 150 ms tick. Copy progress per claim is independent of
+      // runner speed; the 60-claim bound still catches a cursor that stops advancing.
+      beforePut: () => vi.setSystemTime(Date.now() + 25),
+    });
 
     let ticks = 0;
     let yields = 0;
@@ -246,8 +256,7 @@ describe('resumable archive cursor', () => {
       expect((await readLocation(projectId, sessionId))?.location_state).toBe('archive_shard');
       expect(await readAllMessageIds(projectId, sessionId)).toEqual(messageIds);
     });
-    // The pre-flip R2 verification resumed across ticks without re-reading: every raw chunk was
-    // verified exactly once.
+    // After the resumed copy, pre-flip R2 verification reads every raw chunk exactly once.
     const owner = (await readLocation(projectId, sessionId))?.owner_name ?? '';
     const rawChunks = await runInDurableObject(projectDataStub(owner), async (_instance, state) =>
       Number(

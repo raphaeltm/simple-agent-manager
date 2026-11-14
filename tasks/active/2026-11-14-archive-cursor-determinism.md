@@ -51,3 +51,16 @@ Mutation proof on final test code9d5fc49a8 (source and dist changed temporarily,
 Six fresh full-file reruns on final test code passed15/15 each before mutations. Remaining normal/stress
 runs execute after restoration. Root unit command bounded at540s:38 tasks passed, API suite incomplete
 after305 files, no observed failures; do not report full pnpm test success.
+
+## Stability-discovered sibling timing assumption
+
+Initial bounded runs on CPUs0-7 found the existing first large-session test exhausted60 real150ms ticks
+under CPU pressure (state copying/recovery_manifest_persisted rather than published), while both
+repaired tests passed. This is the same scheduler-budget assumption, not a production race.
+The first test now advances Date25ms per real R2 write: six writes consume each150ms tick,
+retaining every existing readability/fencing/reservation/no-duplicate assertion and the60-tick bound.
+Date cleanup uses Vitest onTestFinished. Full file smoke passed15/15 after this change.
+All prior repeated-run counts are superseded for final stability proof; restart30normal+30stress.
+
+- [x] Control the sibling large-session test's clock; preserve all assertions and tick bound.
+- [ ] Re-run renewal/poison mutations and additionally remove the yield guard to prove the sibling test.
