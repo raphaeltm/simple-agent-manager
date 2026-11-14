@@ -32,7 +32,7 @@ Cloudflare activates the Worker and starts a gradual container rollout before wr
 
 - Full build:18/18 tasks passed; full lint:22/22; full typecheck:36/36.
 - Deployment-script TypeScript check passed.
-- Deployment engine/workflow/rollout suite:108 tests passed across9 files.
+- Deployment engine/workflow/rollout suite:113 tests passed across9 files after review corrections.
 - Ready callback route suite:20 tests passed, including Instant mismatch warning with HTTP200 and normal readiness persistence.
 - Agent-context budget measured successfully after updating the staging reference.
 - Read-only live Cloudflare snapshot/wait compatibility check passed for staging's existing completed Sandbox1900 and VmAgent1615 rollouts. This is not an exact-head deployment trial.
@@ -45,3 +45,10 @@ Cloudflare activates the Worker and starts a gradual container rollout before wr
 - Coordinator explicitly rejected patching Wrangler. Revised implementation uses only Containers API records: baseline all rollout IDs/targets, require at most one new rollout, pin it, reject later supersession. No stdout coupling on either deploy path. Pre-existing pending rollout still waits on no-op; metadata-only version advancement without a new rollout is allowed.
 - Application version equality cannot classify no-op: original live evidence had active1612 with pending target1613 until01:38:07Z. Exact proof library01M7BVQ3A3TPDNBTX8FQ87ARXX. Both deployment entry workflows serialize using deploy-staging/deploy-production concurrency groups with cancel-in-progress:false.
 - New HTTP-boundary regression snapshots an old rollout, presents new pending target while application version remains old, then completes. Unit regressions cover multiple first-poll targets and metadata-only updates. Readiness mock now projects selected schema columns.
+
+## Specialist review evidence
+
+| Reviewer | Status | Outcome |
+| --- | --- | --- |
+| rollout_review | PASS | Cloudflare identity, environment, security, constitution; prior first-poll ambiguity, shared-engine and metadata-only findings fixed; API-only visibility assumption noted without a concrete consistency failure. |
+| completion_review | PASS | Task implementation, test engineering and docs; HTTP-boundary regression and readiness projection mock resolve prior findings. Operational staging/PR/release gates remain open. |
