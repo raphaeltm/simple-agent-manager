@@ -18,7 +18,10 @@ vi.mock('drizzle-orm/d1', () => ({
       let table: unknown;
       const selectRows = async () => {
         // No platform credentials exist in this harness; every other read is the node row.
-        if ((table as Record<symbol, unknown>)?.[Symbol.for('drizzle:Name')] === 'platform_credentials')
+        if (
+          (table as Record<symbol, unknown>)?.[Symbol.for('drizzle:Name')] ===
+          'platform_credentials'
+        )
           return [];
         selectCallCount += 1;
         beforeSelectReturn?.(selectCallCount);
@@ -314,6 +317,8 @@ describe('node resource deletion services', () => {
       runtimeTerminationConfirmedAt: expect.any(String),
       // Strict proof is never owner-attested (`isOwnerAttestedTermination`).
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
   });
 
@@ -341,6 +346,8 @@ describe('node resource deletion services', () => {
       runtimeTerminationConfirmedAt: expect.any(String),
       // Strict proof is never owner-attested (`isOwnerAttestedTermination`).
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
     expect(updateCalls).toContainEqual(
       expect.objectContaining({ status: 'deleted', healthStatus: 'stale' })
@@ -398,6 +405,8 @@ describe('node resource deletion services', () => {
       runtimeTerminationConfirmedAt: expect.any(String),
       // Strict proof is never owner-attested (`isOwnerAttestedTermination`).
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
   });
 
@@ -537,6 +546,8 @@ describe('node resource deletion services', () => {
     expect(updateCalls).toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
 
     nodeRows[0] = {
@@ -780,10 +791,7 @@ describe('node resource deletion services', () => {
       'a valid source but no reference',
       { placementCredentialReference: null },
     ],
-    [
-      'a reference but an unrecognised source',
-      { placementCredentialSource: 'nonsense' },
-    ],
+    ['a reference but an unrecognised source', { placementCredentialSource: 'nonsense' }],
     [
       'a reference but no generation proof of either kind',
       { placementCredentialVersion: null, placementCredentialFingerprint: null },
@@ -944,7 +952,7 @@ describe('node resource deletion services', () => {
     });
   });
 
-  it('tries the owner user credential when a project-attributed node\'s project credential cannot see the VM', async () => {
+  it("tries the owner user credential when a project-attributed node's project credential cannot see the VM", async () => {
     nodeRows.push(managedPoolNode({ id: 'project-node', status: 'destroying' }));
     const projectGetVM = vi.fn(async () => null);
     const userDeleteVM = vi.fn(async () => {});
@@ -1032,6 +1040,8 @@ describe('node resource deletion services', () => {
     expect(updateCalls).toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
       runtimeTerminationAttestedAt: null,
+      providerDeletionRequestedAt: null,
+      providerDeletionJson: null,
     });
     expect(persistError).toHaveBeenCalledWith(
       undefined,

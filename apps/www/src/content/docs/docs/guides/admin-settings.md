@@ -294,6 +294,15 @@ Active workspaces and provider ownership checks remain protected. When SAM can't
 
 Blocked nodes show the time and reason in their error message on the node list and detail page, as **Cleanup blocked since** _time_ followed by reason codes; [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away) explains each one.
 
+## Provider deletion in the cleanup cron
+
+The cleanup cron starts a VM deletion and confirms it on a later run instead of waiting for it, for providers whose delete runs as a long operation (GCP today). Two settings bound it:
+
+- `operations.nodeProviderDeletionRequestTimeoutMs` is the time one cleanup attempt may take to start a deletion or read its result: the log capture before teardown, provider sign-in, the ownership check and the delete request. The default is 15,000 milliseconds (15 seconds); admins can set a whole number from 1,000 to 60,000. A cleanup phase starts an attempt only while at least a third of this value (and never more than half the phase budget) remains, so a long value cannot stop cleanup from starting.
+- `operations.nodeProviderDeletionConfirmMaxMs` is how long a started deletion may stay unconfirmed. After it, the node shows the cleanup reason `teardown_deletion_unconfirmed` and SAM records **VM may still exist at provider** in **Admin → Errors**, then checks again hourly. The default is 1,800,000 milliseconds (30 minutes); admins can set a whole number from 60,000 to 86,400,000.
+
+An idle GCP node is normally removed within two cron runs (about 10 minutes) of its first cleanup attempt: the first run sends the delete, the next confirms it from GCP's own record and removes the node.
+
 ## Lifecycle latency monitoring
 
 SAM watches how long workspaces, nodes, session sleeps and session wakes stay in states that should

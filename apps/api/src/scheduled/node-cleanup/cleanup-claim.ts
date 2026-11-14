@@ -107,19 +107,62 @@ export async function claimNodeForCleanup(
   return (result.meta.changes ?? 0) > 0;
 }
 
+/** A provider deletion was sent for this row and has not been proven. */
+const PENDING_DELETION_SQL =
+  'provider_deletion_requested_at IS NOT NULL AND runtime_termination_confirmed_at IS NULL';
+
 export async function releaseNodeCleanupClaim(
   env: Env,
   node: CleanupNode,
   nowIso: string,
   backoffUntil: string
 ): Promise<void> {
+  // A node whose provider deletion was already sent (two-phase write-ahead record) stays
+  // `destroying` and due: the confirm phase owns it and must read the provider's record next
+  // tick. Returning it to `stopped` would leave it in no phase's selection, since every other
+  // phase excludes nodes with a record.
   await env.DATABASE.prepare(
     `UPDATE nodes
-     SET status = ?, cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_backoff_until = ?, updated_at = ?
+     SET status = CASE WHEN ${PENDING_DELETION_SQL} THEN 'destroying' ELSE ? END,
+       cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL,
+       cleanup_backoff_until = CASE WHEN ${PENDING_DELETION_SQL} THEN NULL ELSE ? END,
+       updated_at = ?
      WHERE id = ?
        AND user_id = ?
        AND status = 'destroying'`
   )
     .bind(node.status, backoffUntil, nowIso, node.id, node.user_id)
     .run();
+}
+
+/**
+ * Claim a node whose provider deletion this sweep already started (two-phase teardown), to read
+ * the provider's record of it. The idle, artifact and active-workspace guards of
+ * `claimNodeForCleanup` held when the deletion was sent; they are not re-checked, because the
+ * deletion may already be done. The claim is a lease: `cleanup_backoff_until` moves to the end of
+ * this attempt, so an overlapping cron tick cannot confirm the same node concurrently. The
+ * attempt's outcome (pending, failure or proof) replaces the lease.
+ */
+export async function claimPendingProviderDeletion(
+  env: Env,
+  node: CleanupNode,
+  nowIso: string,
+  leaseUntilIso: string
+): Promise<boolean> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE nodes
+     SET cleanup_backoff_until = ?, updated_at = ?
+     WHERE id = ?
+       AND user_id = ?
+       AND status = 'destroying'
+       AND node_role = 'workspace'
+       AND node_class != 'user-owned'
+       AND runtime = 'vm'
+       AND provider_deletion_requested_at IS NOT NULL
+       AND runtime_termination_confirmed_at IS NULL
+       AND (cleanup_backoff_until IS NULL OR cleanup_backoff_until <= ?)`
+  )
+    .bind(leaseUntilIso, nowIso, node.id, node.user_id, nowIso)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
 }

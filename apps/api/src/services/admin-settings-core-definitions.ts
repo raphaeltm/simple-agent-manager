@@ -12,6 +12,8 @@ import {
   DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
   DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
   DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
+  DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
+  DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
   DEFAULT_WEBHOOK_QUEUE_MAX_PENDING,
   DEFAULT_WEBHOOK_QUEUE_TTL_SECONDS,
   DEFAULT_WEBHOOK_SIGNATURE_TOLERANCE_SECONDS,
@@ -52,6 +54,20 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Maximum continuous node cleanup refusal in milliseconds before automatic VM retirement or ownership alert.',
     { min: 1, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.nodeProviderDeletionRequestTimeoutMs',
+    DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
+    'Operations',
+    'Time budget in milliseconds for one cleanup attempt that starts a provider VM deletion without waiting for it (log capture, provider auth, ownership re-read, lookup and the delete request).',
+    { min: 1000, max: 60000 }
+  ),
+  integerDefinition(
+    'operations.nodeProviderDeletionConfirmMaxMs',
+    DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
+    'Operations',
+    'How long in milliseconds a started provider VM deletion may stay unconfirmed before the node is reported blocked and an operator alert is raised.',
+    { min: 60000, max: 86400000 }
   ),
   integerDefinition(
     'operations.nodeLifetimeForceSleepAfterMs',

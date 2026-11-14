@@ -1,5 +1,7 @@
 import type { ProviderInstanceOffering, VMSize } from '@simple-agent-manager/shared';
 
+import type { ProviderVmDeletionRequests } from './vm-deletion';
+
 /**
  * Configuration for creating a VM.
  * Contains ONLY non-secret operational parameters.
@@ -277,7 +279,7 @@ export interface ProviderRequestContext {
  * Cloud provider interface.
  * Implementations handle VM lifecycle through their respective cloud APIs.
  */
-export interface Provider {
+export interface Provider extends ProviderVmDeletionRequests {
   /** Provider identifier matching CredentialProvider type */
   readonly name: string;
 
@@ -522,13 +524,7 @@ export type ProviderErrorCategory =
   | 'unknown';
 
 export type ProviderErrorContextValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | ProviderErrorContext
-  | ProviderErrorContextValue[];
+  string | number | boolean | null | undefined | ProviderErrorContext | ProviderErrorContextValue[];
 
 export interface ProviderErrorContext {
   [key: string]: ProviderErrorContextValue;
