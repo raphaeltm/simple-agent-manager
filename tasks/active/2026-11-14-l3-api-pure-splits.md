@@ -35,12 +35,12 @@ keeps the later self-host behaviour slices small.
 
 ## Checklist
 
-- [ ] tts split reproduced on main's code, `tts.ts` re-exports every previous export
-- [ ] ai-token-budget split reproduced, `ai-token-budget.ts` re-exports every previous export; package entry and apps/api shim unchanged in names
-- [ ] agent-loop split reproduced; `agent-loop.ts` exports unchanged
-- [ ] mechanical pure-move proof per split (symbol table + unmatched-lines lists)
-- [ ] mock targets / import paths in tests updated only where needed, listed
-- [ ] local gates: build order, typecheck, check:fast, api + ai-proxy unit tests, Workers tests touching these modules, file sizes, ast-checks, boundary rules
+- [x] tts split reproduced on main's code, `tts.ts` re-exports every previous export
+- [x] ai-token-budget split reproduced, `ai-token-budget.ts` re-exports every previous export; package entry and apps/api shim unchanged in names
+- [x] agent-loop split reproduced; `agent-loop.ts` exports unchanged
+- [x] mechanical pure-move proof per split (symbol table + unmatched-lines lists)
+- [x] mock targets / import paths in tests updated only where needed, listed
+- [x] local gates: build order, typecheck, check:fast, api + ai-proxy unit tests, Workers tests touching these modules, file sizes, ast-checks, boundary rules
 - [ ] reviews: architecture-reviewer, task-completion-validator, cloudflare-specialist (agent-loop runs inside SamSession/ProjectAgent DOs)
 - [ ] staging: read-aloud audio, SAM agent chat, budget/usage page
 - [ ] draft PR, CodeRabbit request via workflow dispatch, report to coordinator
@@ -51,3 +51,24 @@ keeps the later self-host behaviour slices small.
 - Every previous import path and export name still resolves.
 - Existing tests pass with at most import-path / mock-target edits.
 - Staging read-aloud, SAM chat and budget page behave as before.
+
+## Implementation notes
+
+- Splits generated mechanically from main's text (whole top-level statements with leading comments,
+  moved verbatim) by a scratch tool; imports and re-exports written by hand.
+- Proof (scratch `verify.cjs`, compares against `git show origin/main`): tts 23/23, ai-token-budget
+  38/38, agent-loop 9/9 identical; no new top-level statements; removed/added lines are only imports,
+  re-exports, header comments and the `export` keyword on `callLLM`, `processAnthropicStream`,
+  `processOpenAIStream`. Proven discriminating (one-word edit in a moved string → NO).
+- Test edits: none needed. No mock target follows a moved symbol (every consumer still imports
+  through the original module).
+- Local gates: build in order OK; typecheck api + ai-proxy OK; `pnpm check:fast` OK; ai-proxy 140/140;
+  apps/api full vitest 3,399 files / 15,177 tests, 15,173 passed, 4 skipped, 0 failed; Workers
+  project-agent-do 5/5, sam-runtime (sam-session-do, sam-grounding-runtime, sam-live-stream) 63/63;
+  `quality:file-sizes` pass (no exemption involved; tts 799→436, ai-token-budget 660→462,
+  agent-loop 676→271); `quality:ast-checks` 0 errors, 752 warnings, same as main (the 4 agent-loop
+  throw-without-log warnings moved with their code).
+- Left out: gitlab split (obsolete per coordinator); `MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE`,
+  `MonthlyCostCapCheck`, `currentUtcMonthStart`, `getLocalMonthlyAiCostUsd`, `SpeechAudioSource`,
+  `isSpeechEndpoint`, `callOpenAIChatLLM` (integration-only behaviour). Main's `callWorkersAILLM`
+  moved to agent-loop-llm.ts with `callLLM` (its only caller).
