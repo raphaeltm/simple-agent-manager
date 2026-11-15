@@ -29,7 +29,8 @@ Measurement idea: 01M7CX61WVX72T7CFQNRTX0DVM; notes 01M7DMSHEZKW7F7W23ZS4B8Q1A a
 Config-only: no archive logic, wall-time, factor, sessions or storage gate changes.
 36k/h => 131.94h / 5.50d; target 72k/h => 65.97h / 2.75d, excluding inflow.
 18m rounds to ~20m; 9m rounds to ~10m on 5m cron; per-tick wall bound stays 60s.
-6M reservation ceiling ~$6/day at $1/M if fully used, +$3.60/day vs old ceiling.
+If billed writes equal reservation units, 6M is ~$6/day at $1/M, +$3.60/day vs 2.4M.
+This ceiling-equivalent comparison is not a measured billing cap; expected writes cost ~$2.4-$4.4/day.
 Expected writes 2.38M-4.44M/day at 1.38-2.57 writes/raw row, under 3d; D1/R2/compute separate.
 
 ## Workflow

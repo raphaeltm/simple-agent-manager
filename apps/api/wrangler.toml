@@ -78,7 +78,8 @@ PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
 # reservations/day at the measured fixture shape; 6M leaves ~12.6% headroom.
 # Reservation units are not billed rows. At 1.38-2.57 measured writes/raw row,
 # expected writes are ~2.4M-4.4M/day for ~2.75 days, excluding inflow.
-# The full ceiling is ~$6/day at $1/M, $3.60/day above the previous 2.4M ceiling.
+# If billed writes equalled reserved units, 6M would cost ~$6/day at $1/M,
+# $3.60/day above 2.4M. This comparison is not a measured billed-write cap.
 # The GitHub production Environment pins this var and must change in lockstep (rule 70).
 PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "6000000"
 # Safety multiplier applied to the row inventory `estimateArchiveWrites` already counts, NOT
