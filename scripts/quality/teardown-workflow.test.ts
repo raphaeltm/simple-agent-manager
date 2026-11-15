@@ -164,4 +164,11 @@ describe('teardown workflow', () => {
     expect(workflow).toContain('BUCKET_NAME: ${{ steps.names.outputs.assets_bucket }}');
     expect(workflow.match(/workers\/scripts\/\$WORKER_NAME\?force=true/g)).toHaveLength(2);
   });
+
+  it('matches workspace and node DNS records by literal domain suffix', () => {
+    expect(workflow).toContain(
+      `jq -r --arg d ".\${BASE_DOMAIN}" '.result[] | select((.name | endswith($d)) and ((.name | startswith("ws-")) or (.name | endswith(".vm" + $d)))) | .id + " " + .name'`
+    );
+    expect(workflow).not.toContain('test(\\"^ws-.*');
+  });
 });

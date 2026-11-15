@@ -260,7 +260,7 @@ jobs:
           FAILED=0
           PAGE=1
 
-          echo "Searching for workspace DNS records (ws-*.${BASE_DOMAIN})..."
+          echo "Searching for workspace and node DNS records (ws-*.${BASE_DOMAIN}, *.vm.${BASE_DOMAIN})..."
 
           while true; do
             RESPONSE=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?per_page=100&page=$PAGE" \
@@ -273,8 +273,10 @@ jobs:
               exit 0
             fi
 
-            # Extract ws-* records — no type filter so we catch A, AAAA, and CNAME
-            WS_IDS=$(echo "$RESPONSE" | jq -r ".result[] | select(.name | test(\"^ws-.*\\.${BASE_DOMAIN}$\")) | .id + \" \" + .name")
+            # Workspace (ws-*.<domain>) and node backend (<node>.vm.<domain>) records, matched
+            # as literal suffixes of this installation's domain. No type filter so we catch A,
+            # AAAA, and CNAME.
+            WS_IDS=$(echo "$RESPONSE" | jq -r --arg d ".${BASE_DOMAIN}" '.result[] | select((.name | endswith($d)) and ((.name | startswith("ws-")) or (.name | endswith(".vm" + $d)))) | .id + " " + .name')
 
             if [ -n "$WS_IDS" ]; then
               echo "$WS_IDS" | while IFS=' ' read -r RECORD_ID RECORD_NAME; do
