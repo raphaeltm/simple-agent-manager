@@ -24,6 +24,15 @@ func NewGitCredentialExchangeToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(random), nil
 }
 
+// gitCredentialHelperScriptMaxBytes bounds how much of an existing helper file
+// is read when looking for a reusable exchange token. Rendered helpers are a
+// few KiB; anything larger is not one of ours.
+const gitCredentialHelperScriptMaxBytes = 64 << 10
+
+// gitCredentialExchangeTokenLinePrefix is the shell assignment both the node
+// and the standalone helper templates use to embed the exchange bearer.
+const gitCredentialExchangeTokenLinePrefix = "exchange_token="
+
 // InstallGitCredentialExchange retains only a SHA-256 digest on the VM host.
 // Install it after the helper script is in place so a failed replacement does
 // not revoke the previous running helper.
@@ -66,6 +75,70 @@ func ValidateGitCredentialExchange(workspaceID, token string) bool {
 	}
 	actual := sha256.Sum256([]byte(token))
 	return subtle.ConstantTimeCompare(actual[:], expected) == 1
+}
+
+// ExchangeTokenFromHelperScript returns the exchange bearer embedded in a
+// rendered credential helper, or "" when the script carries none (for example a
+// helper written by an agent build that predates the exchange bearer).
+func ExchangeTokenFromHelperScript(script string) string {
+	for _, line := range strings.Split(script, "\n") {
+		line = strings.TrimSpace(line)
+		value, ok := strings.CutPrefix(line, gitCredentialExchangeTokenLinePrefix)
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+			value = value[1 : len(value)-1]
+		}
+		if value == "" || strings.ContainsAny(value, "'\"\\ \t$`") {
+			return ""
+		}
+		return value
+	}
+	return ""
+}
+
+// ResolveGitCredentialExchangeToken returns the exchange bearer to embed in a
+// workspace's helper. It reuses the bearer of the existing helper at helperPath
+// while that bearer still validates against the workspace's installed digest,
+// and mints a new one otherwise; reused reports which.
+//
+// Reuse keeps the bearer stable for the workspace's lifetime. A running
+// devcontainer holds its helper through a single-file bind mount, which pins the
+// inode it was started with, so a reprovision (rebuild, restart, recovery,
+// snapshot restore) that rotated the bearer would leave the container presenting
+// a bearer the digest no longer accepts, and every fetch and push would fail.
+func ResolveGitCredentialExchangeToken(workspaceID, helperPath string) (token string, reused bool, err error) {
+	if existing := readHelperExchangeToken(helperPath); existing != "" &&
+		ValidateGitCredentialExchange(workspaceID, existing) {
+		return existing, true, nil
+	}
+	token, err = NewGitCredentialExchangeToken()
+	if err != nil {
+		return "", false, err
+	}
+	return token, false, nil
+}
+
+func readHelperExchangeToken(helperPath string) string {
+	if strings.TrimSpace(helperPath) == "" {
+		return ""
+	}
+	info, err := os.Lstat(helperPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	f, err := os.Open(helperPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	content, err := io.ReadAll(io.LimitReader(f, gitCredentialHelperScriptMaxBytes))
+	if err != nil {
+		return ""
+	}
+	return ExchangeTokenFromHelperScript(string(content))
 }
 
 func gitCredentialExchangeDigestPath(workspaceID string) string {

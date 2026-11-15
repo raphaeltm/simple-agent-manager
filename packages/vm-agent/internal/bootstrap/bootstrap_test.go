@@ -204,6 +204,7 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	cfg := &config.Config{
 		Port:                 8080,
 		CallbackToken:        "callback-token-123",
+		WorkspaceID:          "ws-render",
 		GitCredentialTimeout: 1750 * time.Millisecond,
 	}
 
@@ -397,6 +398,7 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 	cfg := &config.Config{
 		Port:          8443,
 		CallbackToken: "callback-token-tls",
+		WorkspaceID:   "ws-render-tls",
 		TLSEnabled:    true,
 	}
 
@@ -449,8 +451,12 @@ func TestRenderGitCredentialHelperScriptValidation(t *testing.T) {
 		t.Fatal("expected error for invalid port")
 	}
 
-	if _, err := renderGitCredentialHelperScript(&config.Config{CallbackToken: "token", Port: 8080}, ""); err == nil {
+	if _, err := renderGitCredentialHelperScript(&config.Config{CallbackToken: "token", Port: 8080, WorkspaceID: "ws-1"}, ""); err == nil {
 		t.Fatal("expected error for missing git credential exchange token")
+	}
+
+	if _, err := renderGitCredentialHelperScript(&config.Config{CallbackToken: "token", Port: 8080}, testGitCredentialExchangeToken); err == nil {
+		t.Fatal("expected error for missing workspace id: the exchange bearer is validated per workspace")
 	}
 }
 
@@ -2757,7 +2763,7 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 		Port:          8080,
 	}
 
-	hostPath, err := writeCredentialHelperToHost(cfg)
+	hostPath, _, _, err := writeCredentialHelperToHost(cfg)
 	if err != nil {
 		t.Fatalf("writeCredentialHelperToHost failed: %v", err)
 	}
@@ -2811,7 +2817,7 @@ func TestWriteCredentialHelperToHostReplacesExistingRegularFile(t *testing.T) {
 		Port:          8080,
 	}
 
-	gotPath, err := writeCredentialHelperToHost(cfg)
+	gotPath, _, _, err := writeCredentialHelperToHost(cfg)
 	if err != nil {
 		t.Fatalf("writeCredentialHelperToHost failed: %v", err)
 	}
@@ -2848,7 +2854,7 @@ func TestWriteCredentialHelperToHostRejectsNonRegularPath(t *testing.T) {
 		Port:          8080,
 	}
 
-	_, err := writeCredentialHelperToHost(cfg)
+	_, _, _, err := writeCredentialHelperToHost(cfg)
 	if err == nil {
 		t.Fatal("expected error for non-regular existing path")
 	}
@@ -2867,7 +2873,7 @@ func TestWriteCredentialHelperToHostSkipsNonGitHub(t *testing.T) {
 		Port:          8080,
 	}
 
-	hostPath, err := writeCredentialHelperToHost(cfg)
+	hostPath, _, _, err := writeCredentialHelperToHost(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2886,7 +2892,7 @@ func TestWriteCredentialHelperToHostMissingToken(t *testing.T) {
 		Port:        8080,
 	}
 
-	_, err := writeCredentialHelperToHost(cfg)
+	_, _, _, err := writeCredentialHelperToHost(cfg)
 	if err == nil {
 		t.Fatal("expected error for missing callback token")
 	}
@@ -2902,7 +2908,7 @@ func TestWriteCredentialHelperToHostInvalidPort(t *testing.T) {
 		Port:          0,
 	}
 
-	_, err := writeCredentialHelperToHost(cfg)
+	_, _, _, err := writeCredentialHelperToHost(cfg)
 	if err == nil {
 		t.Fatal("expected error for invalid port")
 	}
