@@ -5,7 +5,8 @@
  */
 import { createAuth } from '../auth';
 import type { Env } from '../env';
-import { getBetterAuthAccountIdForProvider } from './better-auth-account';
+import { getBetterAuthAccountIdForProvider, type GitLabAccountScope } from './better-auth-account';
+import { gitlabAccountScope } from './gitlab-sign-in-identity';
 
 type OAuthProviderId = 'github' | 'gitlab';
 
@@ -15,7 +16,16 @@ export async function getBetterAuthAccessTokenForProvider(
   userId: string,
   providerId: OAuthProviderId
 ) {
-  const accountId = await getBetterAuthAccountIdForProvider(env, userId, providerId);
+  let gitlabScope: GitLabAccountScope | undefined;
+  if (providerId === 'gitlab') {
+    // Only a row the configured host issued: another host's token must not reach this one.
+    // Loaded here, not at module scope: the GitHub path never needs the platform-config graph.
+    const { getGitLabOAuthConfig } = await import('./platform-config-oauth');
+    const config = await getGitLabOAuthConfig(env);
+    if (!config) return null;
+    gitlabScope = gitlabAccountScope(config);
+  }
+  const accountId = await getBetterAuthAccountIdForProvider(env, userId, providerId, gitlabScope);
   if (!accountId) {
     return null;
   }

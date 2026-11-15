@@ -1,10 +1,10 @@
 import type { GitlabOptions, GitlabProfile } from 'better-auth/social-providers';
 import * as v from 'valibot';
 
-import { createModuleLogger } from '../lib/logger';
+import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
-
-const log = createModuleLogger('gitlab-sign-in-identity');
+import type { GitLabAccountScope } from './better-auth-account';
+import type { GitLabOAuthConfig } from './platform-config-oauth';
 
 type GitLabUserInfo = NonNullable<GitlabOptions['getUserInfo']>;
 
@@ -29,6 +29,15 @@ export function untrustedGitLabAccountSubject(host: string, gitlabUserId: string
   return `${host}/users/${String(gitlabUserId)}`;
 }
 
+/** The account rows the configured GitLab host issued, for token lookups (`GitLabAccountScope`). */
+export function gitlabAccountScope(
+  config: Pick<GitLabOAuthConfig, 'host' | 'identityTrusted'>
+): GitLabAccountScope {
+  return config.identityTrusted
+    ? { kind: 'raw' }
+    : { kind: 'host', accountIdPrefix: untrustedGitLabAccountSubject(config.host, '') };
+}
+
 /**
  * `getUserInfo` for a GitLab host whose sign-ins SAM does not trust (a self-managed host saved at
  * runtime; see `GitLabOAuthConfig.identityTrusted`). It reads the same `/api/v4/user` profile as
@@ -44,7 +53,7 @@ export function untrustedGitLabUserInfo(host: string): GitLabUserInfo {
         headers: { authorization: `Bearer ${token.accessToken}` },
       });
       if (!response.ok) {
-        log.warn('gitlab_user_fetch_failed', { status: response.status });
+        log.warn('gitlab_sign_in.user_fetch_failed', { status: response.status });
         return null;
       }
       const profile = await readResponseJson(response, gitlabUserSchema, 'gitlab.user');
@@ -66,7 +75,7 @@ export function untrustedGitLabUserInfo(host: string): GitLabUserInfo {
         } as unknown as GitlabProfile,
       };
     } catch (err) {
-      log.warn('gitlab_user_fetch_exception', {
+      log.warn('gitlab_sign_in.user_fetch_exception', {
         error: err instanceof Error ? err.message : String(err),
       });
       return null;
