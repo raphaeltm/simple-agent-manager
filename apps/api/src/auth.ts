@@ -159,7 +159,7 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
   const platformConfig = await resolveLoginOAuthConfig(env);
   const githubOAuth = selectGitHubOAuthConfig(platformConfig);
   const googleOAuth = selectGoogleLoginOAuthConfig(platformConfig);
-  const gitlabOAuth = selectGitLabOAuthConfig(platformConfig);
+  const gitlabOAuth = selectGitLabOAuthConfig(platformConfig, env.GITLAB_HOST);
   // Typed with better-auth's own provider contract so a library upgrade that changes what a
   // provider hook must return fails `pnpm typecheck` instead of failing sign-in in production.
   const socialProviders: SocialProviders = {};

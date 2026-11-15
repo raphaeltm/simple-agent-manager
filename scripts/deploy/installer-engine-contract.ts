@@ -259,18 +259,36 @@ const FAILURE_TAIL_LINE_CHARS = 300;
 const ACTIONS_MASK_COMMAND = /::add-mask::(\S+)/g;
 
 /**
- * The last lines of a failed command's stdout and stderr, bounded, with the exact
- * value of every secret-named environment variable replaced, and every value the
- * command itself declared secret with `::add-mask::` (the sync step does this for
- * the generated SETUP_TOKEN, which wrangler then prints). Only installations
- * report it (to the owner's own account); public CI never prints it.
+ * Every value any command of this installer run declared secret with `::add-mask::`. The sync
+ * step masks the generated SETUP_TOKEN, and a later, separate `wrangler deploy` prints it, so a
+ * declaration must outlive both its own command and the bounded output buffer.
  */
-export function failureTail(text: string, env: NodeJS.ProcessEnv): string[] {
-  const declared = [...text.matchAll(ACTIONS_MASK_COMMAND)].map((match) => match[1] ?? '');
+const declaredMaskedValues = new Set<string>();
+
+function rememberMaskDeclarations(text: string): void {
+  for (const match of text.matchAll(ACTIONS_MASK_COMMAND)) {
+    if (match[1]) declaredMaskedValues.add(match[1]);
+  }
+}
+
+/**
+ * The last lines of a failed command's stdout and stderr, bounded, with the exact
+ * value of every secret-named environment variable replaced, and every value a
+ * command declared secret with `::add-mask::`: in this text, or earlier in the run
+ * (`declared`). Only installations report it (to the owner's own account); public
+ * CI never prints it.
+ */
+export function failureTail(
+  text: string,
+  env: NodeJS.ProcessEnv,
+  declared: Iterable<string> = []
+): string[] {
+  const inText = [...text.matchAll(ACTIONS_MASK_COMMAND)].map((match) => match[1] ?? '');
   const secrets = [
     ...Object.entries(env)
       .filter(([name, value]) => SECRET_NAME.test(name) && typeof value === 'string')
       .map(([, value]) => value as string),
+    ...inText,
     ...declared,
   ]
     .filter((value) => value.length >= 8)
@@ -304,6 +322,8 @@ export const processRunner: EngineRunner = {
       let recent = '';
       const remember = (chunk: Buffer) => {
         recent = (recent + chunk.toString()).slice(-64 * 1024);
+        // Scanned on the buffer, so a declaration split across chunks is still seen.
+        rememberMaskDeclarations(recent);
       };
       // Its own process group, so a stop reaches every descendant: killing only
       // `pnpm` left `tsx`/`wrangler` running, and the failure surfaced minutes
@@ -353,7 +373,7 @@ export const processRunner: EngineRunner = {
         }
         const tail = options.privateOutput
           ? ['Output withheld: it may contain credentials.']
-          : failureTail(recent, options.env);
+          : failureTail(recent, options.env, declaredMaskedValues);
         reject(new EngineCommandFailure(code, signal, stopped ? [...tail, stopped] : tail));
       });
     });

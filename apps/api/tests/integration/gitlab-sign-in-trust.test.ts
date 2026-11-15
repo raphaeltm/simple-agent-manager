@@ -150,8 +150,8 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
   }
 
   /** The provider stored the way first-run setup and Admin → Integrations store it. */
-  async function runtimeGitLabEnv(host: string): Promise<Env> {
-    const env = baseEnv();
+  async function runtimeGitLabEnv(host: string, overrides: Partial<Env> = {}): Promise<Env> {
+    const env = baseEnv(overrides);
     await completeSetupWithConfig(env, {
       gitlab: { host, clientId: CLIENT_ID, clientSecret: CLIENT_SECRET },
     });
@@ -277,6 +277,62 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
       .get() as { id: string } | undefined;
     expect(attacker?.id).toBeDefined();
     expect(attacker?.id).not.toBe(OWNER.id);
+  });
+
+  it('closes better-auth provider-token endpoints over HTTP, even for a signed-in owner', async () => {
+    // A signed-in user could otherwise refresh any of their accounts against, or send its token
+    // to, whatever GitLab host is configured now. SAM reads tokens only server-side, scoped to
+    // the configured host (getBetterAuthAccessTokenForProvider).
+    const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
+    await signInWithGitLab(env, PUBLIC_HOST);
+    expect(await currentUserId(env)).toBe(OWNER.id);
+
+    for (const [method, path] of [
+      ['POST', '/api/auth/get-access-token'],
+      ['POST', '/api/auth/refresh-token'],
+      ['GET', '/api/auth/account-info'],
+      ['POST', '/api/auth/Get-Access-Token/'],
+    ] as const) {
+      const res = await app.request(
+        `${API_ORIGIN}${path}`,
+        {
+          method,
+          headers: { 'content-type': 'application/json', origin: APP_ORIGIN, cookie: jar.header() },
+          ...(method === 'POST' ? { body: JSON.stringify({ providerId: 'gitlab' }) } : {}),
+        },
+        env
+      );
+      expect(res.status, `${method} ${path}`).toBe(404);
+    }
+    // The session itself still works: the refusal is the route, not a broken sign-in.
+    expect(await currentUserId(env)).toBe(OWNER.id);
+  });
+
+  it('trusts a runtime-saved host that equals the GITLAB_HOST the deployer pinned', async () => {
+    const env = await runtimeGitLabEnv(SELF_MANAGED_HOST, {
+      GITLAB_HOST: `${SELF_MANAGED_HOST}/`,
+    } as Partial<Env>);
+    vi.stubGlobal('fetch', createFakeGitLab(SELF_MANAGED_HOST, profileClaiming(OWNER.email)).fetch);
+
+    const callback = await signInWithGitLab(env, SELF_MANAGED_HOST);
+
+    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
+    expect(await currentUserId(env)).toBe(OWNER.id);
+    expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+  });
+
+  it('still refuses a runtime-saved host that differs from the pinned GITLAB_HOST', async () => {
+    const env = await runtimeGitLabEnv(SELF_MANAGED_HOST, {
+      GITLAB_HOST: 'https://gitlab.pinned.example',
+    } as Partial<Env>);
+    vi.stubGlobal('fetch', createFakeGitLab(SELF_MANAGED_HOST, profileClaiming(OWNER.email)).fetch);
+
+    const callback = await signInWithGitLab(env, SELF_MANAGED_HOST);
+
+    expect(callback.headers.get('location')).toMatch(/[?&]error=account_not_linked\b/);
+    expect(await currentUserId(env)).toBeNull();
+    expect(gitlabAccounts()).toEqual([]);
   });
 
   it('links gitlab.com to the owner even when it was configured at runtime', async () => {

@@ -47,6 +47,37 @@ describe('failure tail', () => {
     ]);
   });
 
+  it('redacts a value an earlier command declared, after the buffer dropped the declaration', async () => {
+    // The sync step declares the SETUP_TOKEN mask and succeeds; a later, separate command
+    // (wrangler deploy) prints the token, here after more output than the 64 KiB buffer holds.
+    const token = 'Run-wide-setup-token_0123456789';
+    const env = { ...process.env };
+    await processRunner.run(
+      {
+        executable: process.execPath,
+        args: ['-e', `console.log('::add-mask::${token}'); console.log('synced')`],
+      },
+      { cwd: process.cwd(), env, timeoutMs: 10000 }
+    );
+    const error = await processRunner
+      .run(
+        {
+          executable: process.execPath,
+          args: [
+            '-e',
+            `console.log('x'.repeat(70000)); console.log('env.SETUP_TOKEN ("${token}")'); process.exit(1)`,
+          ],
+        },
+        { cwd: process.cwd(), env, timeoutMs: 10000 }
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(EngineCommandFailure);
+    const tail = (error as EngineCommandFailure).tail;
+    expect(tail.join('\n')).not.toContain(token);
+    expect(tail.at(-1)).toBe('env.SETUP_TOKEN ("[redacted]")');
+  });
+
   it('attaches the scrubbed stdout and stderr tail to a real failed command', async () => {
     const env = { ...process.env, DEPLOY_TOKEN: 'deploy-private-token-123' };
     const error = await processRunner

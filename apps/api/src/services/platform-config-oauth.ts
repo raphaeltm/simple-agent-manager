@@ -56,8 +56,13 @@ export interface GitLabOAuthConfig {
   identityTrusted: boolean;
 }
 
+/**
+ * @param pinnedHost The Worker environment's GITLAB_HOST. A runtime-saved host equal to it is
+ * the host the deployer pinned, so it is trusted like the pin itself.
+ */
 export function selectGitLabOAuthConfig(
-  config: Pick<ResolvedLoginOAuthConfig, 'gitlab'>
+  config: Pick<ResolvedLoginOAuthConfig, 'gitlab'>,
+  pinnedHost?: string
 ): GitLabOAuthConfig | null {
   if (
     !config.gitlab.host.value ||
@@ -71,12 +76,15 @@ export function selectGitLabOAuthConfig(
     apiBaseUrl: `${host}/api/v4`,
     clientId: config.gitlab.clientId.value,
     clientSecret: config.gitlab.clientSecret.value,
-    identityTrusted: host === PUBLIC_GITLAB_HOST || config.gitlab.host.source === 'environment',
+    identityTrusted:
+      host === PUBLIC_GITLAB_HOST ||
+      config.gitlab.host.source === 'environment' ||
+      (Boolean(pinnedHost?.trim()) && host === normalizeBaseUrl(pinnedHost ?? '')),
   };
 }
 
 export async function getGitLabOAuthConfig(env: Env): Promise<GitLabOAuthConfig | null> {
-  return selectGitLabOAuthConfig(await resolveLoginOAuthConfig(env));
+  return selectGitLabOAuthConfig(await resolveLoginOAuthConfig(env), env.GITLAB_HOST);
 }
 
 /**
