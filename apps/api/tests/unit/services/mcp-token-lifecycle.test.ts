@@ -4,6 +4,7 @@
  * real SQLite engine, and the route cases enter through the real `/mcp` router, so a
  * deleted predicate or a bypassed call site turns them red.
  */
+import { DEFAULT_MCP_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -11,7 +12,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
-import { DEFAULT_MCP_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
 import { validateActiveWorkspaceMcpToken } from '../../../src/services/mcp-token-lifecycle';
 import { createJsonKv, createMcpApp, storeMcpToken } from '../../helpers/mcp-route';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
