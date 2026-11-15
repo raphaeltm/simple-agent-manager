@@ -554,7 +554,8 @@ describe('Test merges only what ran and requires unselected suites to be skipped
 
 /**
  * Jobs a ready PR starts, matrix entries counted. Before this change (main at 3f88f49b2):
- * API only 19, web only 16, shared package 19, lockfile 19, every filter 27.
+ * API only 19, web only 16, shared package 19, lockfile 15 (no Workers suite: the old `api`
+ * filter had no root inputs), public site or docs 5, every filter 27.
  */
 describe('runner budget (GitHub caps the account at 20 concurrent jobs)', () => {
   const count = (paths: string[]) =>
