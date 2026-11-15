@@ -246,10 +246,12 @@ describe('credential inventory and real SQL orphan claims', () => {
           },
         } as D1PreparedStatement;
       });
+      // A failed D1 claim lookup is shared infrastructure: a failed sweep (`errors`), not an
+      // account failure, even when it happens inside a user account's pass.
       expect(await reconcileProviderOrphans(env, now, scope)).toMatchObject({
         destroyed: 0,
-        errors: 0,
-        accountErrors: 1,
+        errors: 1,
+        accountErrors: 0,
         skipReason: 'claim-lookup-failed',
       });
       expect(p.deleteVM).not.toHaveBeenCalled();

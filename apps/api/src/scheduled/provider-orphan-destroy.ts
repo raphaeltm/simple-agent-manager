@@ -40,6 +40,14 @@ export interface DestroyBounds {
   deadline: number;
 }
 
+/**
+ * Where a failure attributable to the provider account goes: `errors` for the installation's
+ * platform account (the sweep itself is failing), `accountErrors` for a user/project account
+ * (that account's credential or cloud). Shared-infrastructure failures (D1 claim lookup,
+ * credential listing) always count in `errors`, whichever account they happen in.
+ */
+export type ProviderErrorKey = 'errors' | 'accountErrors';
+
 /** Deletions this pass started: completed synchronously, or requested and still in flight. */
 export function deletionsStarted(result: ProviderOrphanResult): number {
   return result.destroyed + result.deletionRequested;
@@ -54,7 +62,8 @@ export async function destroyEligibleCandidates(
   minAgeMs: number,
   destroyLimit: number,
   result: ProviderOrphanResult,
-  bounds: DestroyBounds
+  bounds: DestroyBounds,
+  providerErrors: ProviderErrorKey
 ): Promise<void> {
   for (const [index, candidate] of candidates.entries()) {
     if (deletionsStarted(result) >= destroyLimit) {
@@ -78,7 +87,8 @@ export async function destroyEligibleCandidates(
       candidate,
       scope,
       result,
-      requestContext(bounds)
+      requestContext(bounds),
+      providerErrors
     );
     if (!proven) continue;
     await destroyCandidate(
@@ -90,7 +100,8 @@ export async function destroyEligibleCandidates(
       scope,
       minAgeMs,
       result,
-      requestContext(bounds)
+      requestContext(bounds),
+      providerErrors
     );
   }
 }
@@ -125,9 +136,10 @@ async function finalOwnershipMatches(
   candidate: Candidate,
   scope: OwnershipScope,
   result: ProviderOrphanResult,
-  context: ProviderRequestContext
+  context: ProviderRequestContext,
+  providerErrors: ProviderErrorKey
 ): Promise<VMInstance | null> {
-  const current = await readCurrentServer(provider, candidate, result, context);
+  const current = await readCurrentServer(provider, candidate, result, context, providerErrors);
   if (!current) return null;
   const labels = current.labels ?? {};
   if (hasAmbiguousOwnershipLabels(labels)) {
@@ -157,7 +169,8 @@ async function readCurrentServer(
   provider: Provider,
   candidate: Candidate,
   result: ProviderOrphanResult,
-  context: ProviderRequestContext
+  context: ProviderRequestContext,
+  providerErrors: ProviderErrorKey
 ): Promise<VMInstance | null> {
   try {
     const current = await provider.getVM(candidate.serverId, context);
@@ -165,7 +178,7 @@ async function readCurrentServer(
     result.skippedAmbiguousOwnership++;
     finalOwnershipSkip('provider resource disappeared before exact ownership could be revalidated');
   } catch {
-    result.errors++;
+    result[providerErrors]++;
     log.warn('provider_orphan.final_ownership_unavailable', {
       reason: 'provider resource could not be re-read for exact ownership proof',
       action: 'preserved for retry without calling the provider delete boundary',
@@ -220,7 +233,8 @@ async function destroyCandidate(
   scope: OwnershipScope,
   minAgeMs: number,
   result: ProviderOrphanResult,
-  context: ProviderRequestContext
+  context: ProviderRequestContext,
+  providerErrors: ProviderErrorKey
 ): Promise<void> {
   // The two-phase binding needs both halves. A re-read without a location cannot bind the
   // zone, so refuse rather than fall back to an id-only binding.
@@ -292,7 +306,7 @@ async function destroyCandidate(
       nodeId: candidate.nodeId,
       error: err instanceof Error ? err.message : String(err),
     });
-    result.errors++;
+    result[providerErrors]++;
   }
 }
 
