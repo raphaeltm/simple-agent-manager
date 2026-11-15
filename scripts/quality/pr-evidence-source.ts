@@ -6,17 +6,17 @@
  * snapshot, not current state. Two consequences bit us repeatedly:
  *
  *   1. Editing a PR body to add missing evidence changed nothing, because
- *      `.github/workflows/ci.yml` declares `pull_request:` with no `types:` and
- *      therefore defaults to [opened, synchronize, reopened] — `edited` and
- *      `labeled` never fire it.
+ *      `.github/workflows/ci.yml` runs on `pull_request` types [opened,
+ *      synchronize, reopened, ready_for_review] — `edited` and `labeled` never
+ *      fire it.
  *   2. `gh run rerun`, the obvious operator response to a failed evidence check,
  *      replays the SAME stale payload and fails identically on a body that was
  *      already fixed.
  *
  * The result was that fixing evidence required pushing a throwaway empty commit.
  *
- * Adding `types: [... edited, labeled ...]` to ci.yml would be worse: the CI
- * concurrency group is `ci-${{ github.ref }}` with
+ * Adding `edited` or `labeled` to those types would be worse: pull request runs
+ * share one concurrency group per PR with
  * `cancel-in-progress: github.event_name == 'pull_request'`, so applying the
  * routine `coderabbit-review` label would cancel and restart the whole in-flight
  * suite. So the fix belongs here, at the source of truth, not in the trigger.

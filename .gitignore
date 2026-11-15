@@ -10,6 +10,8 @@ build/
 # Test coverage
 coverage/
 packages/cli/coverage.out
+# Vitest blob reports written by sharded CI test runs (`--reporter=blob`)
+.vitest-reports/
 **/test-results/
 **/storybook-static/
 

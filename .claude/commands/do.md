@@ -25,7 +25,7 @@ TodoWrite([
   { content: "Phase 4: Pre-PR validation (lint, typecheck, test, build)", status: "pending", activeForm: "Running full quality suite" },
   { content: "Phase 5: Review (local specialist subagents)", status: "pending", activeForm: "Running local reviewer subagents" },
   { content: "Phase 6: Staging verification (deploy + Playwright)", status: "pending", activeForm: "Verifying on staging" },
-  { content: "Phase 7: Create PR, wait for CI, request CodeRabbit and wait, merge", status: "pending", activeForm: "Creating PR and completing review gates" },
+  { content: "Phase 7: Finish CI and CodeRabbit on the ready PR, merge, monitor deploy", status: "pending", activeForm: "Completing PR gates and merging" },
 ])
 ```
 
@@ -112,6 +112,14 @@ Execute the checklist from the task file. Follow these rules:
    git push origin <branch-name>
    ```
 
+   **After the first push, open the PR as a draft** so the work is visible and cheap checks run early:
+
+   ```
+   gh pr create --draft --title "<short title>" --body-file <filled-in .github/pull_request_template.md>
+   ```
+
+   CI on a draft PR runs only the quick checks: Detect Changes, PR Evidence, Lint, Build and Type Check, Code Quality Checks and Secret Scan. The test suites, browser audits, deploy-script, VM, CLI and Workers jobs start only when the PR is marked ready (Phase 4, step 5), and the required `Durable Object Workers` check is not reported for a draft run, so a draft can never be merged on quick checks. Push as often as you like while it is a draft. PR Evidence is expected to fail until the Specialist Review Evidence table is filled in; after the final body edit, re-run it with `gh run rerun <run-id> --failed` (body edits alone do not start CI, and the check reads the live body).
+
 4. **Run quality checks regularly** during implementation:
    - `pnpm typecheck` after type-related changes
    - `pnpm lint` after any code changes
@@ -132,7 +140,7 @@ Execute the checklist from the task file. Follow these rules:
 
 ## Phase 4: Pre-PR Validation
 
-Before creating the PR, ensure everything is solid:
+Before marking the PR ready for review, ensure everything is solid:
 
 1. **Run the full quality suite:**
 
@@ -147,6 +155,17 @@ Before creating the PR, ensure everything is solid:
 3. **Run the task-completion-validator** (see `.claude/rules/09-task-tracking.md`). This validates that research findings became checklist items, checklist items are in the diff, acceptance criteria have tests, and UI inputs reach the backend. **CRITICAL/HIGH findings block merge — fix them now, do not defer to backlog.** The only exception is explicit human approval.
 
 4. **Move the task file** from `tasks/active/` to `tasks/archive/` and commit.
+
+5. **Mark the PR ready for review as soon as the candidate is complete**, and request CodeRabbit at the same moment. Do not wait for reviewers or staging; they run in parallel with CI and CodeRabbit (Phases 5 and 6):
+
+   ```
+   gh pr ready <pr-number>
+   gh pr edit <pr-number> --add-label coderabbit-review
+   ```
+
+   `ready_for_review` starts the full CI suite on the current commit. Every later push to the ready PR re-runs the full suite and cancels the superseded run, so batch review and staging fixes into as few pushes as practical. If the label run did not fire, dispatch `gh workflow run coderabbit-bot-review.yml --ref main -f pr_number=<pr-number>` once (see Phase 7, steps 4 and 5, for the wait rules).
+
+   If the user asked for a draft PR or "do not merge", do not mark it ready. Get the full suite with `gh workflow run ci.yml --ref <branch-name>` instead (it runs the path-filtered jobs your change triggers, minus the PR-only Playwright visual audit and PR Evidence, and does not report the required merge check), and stop at the draft PR.
 
 ---
 
@@ -168,14 +187,14 @@ Run local subagent review based on what the PR touches. **Always include** the t
 
 Address every bug or correctness issue raised. Push fixes and re-run quality checks.
 
-**HARD STOP: Wait for ALL local subagents to complete before proceeding.** If local reviewers are running in the background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to PR creation. Context compaction WILL make you forget outstanding reviewers — the tracking mechanisms below exist specifically to prevent this.
+**HARD STOP: Wait for ALL local subagents to complete before proceeding.** If local reviewers are running in the background, you MUST wait for their results and address findings before moving to Phase 6. Do NOT use idle time to jump ahead to merging. Context compaction WILL make you forget outstanding reviewers — the tracking mechanisms below exist specifically to prevent this.
 
 **Update todo list and `.do-state.md`**: When starting local reviewers, immediately add each one to the "Phase 5: Review Tracker" section with status `PENDING`. Update each reviewer's status as results arrive. **Phase 5 CANNOT be marked complete until every local reviewer shows `PASS` or `ADDRESSED`.** If any reviewer is still `PENDING`, you are NOT done with Phase 5 — wait for it.
 
 **Reviewer tracking is merge-blocking (see `.claude/rules/25-review-merge-gate.md`):**
 
-1. When you create the PR in Phase 7, you MUST copy the review tracker into the PR description's "Specialist Review Evidence" section — one row per reviewer with their status and outcome.
-2. If ANY reviewer is still `PENDING` or `FAILED` at PR creation time, you MUST add the `needs-human-review` label and MUST NOT merge. The human will decide when to proceed.
+1. Before merging, you MUST copy the review tracker into the PR description's "Specialist Review Evidence" section — one row per reviewer with their status and outcome. The PR already exists (draft since Phase 3, ready since Phase 4); update its body.
+2. If ANY reviewer is still `PENDING` or `FAILED` when you are ready to merge, you MUST add the `needs-human-review` label and MUST NOT merge. The human will decide when to proceed.
 3. Filing findings as backlog tasks does NOT count as "addressed" for CRITICAL/HIGH severity. Fix them or get human approval to defer.
 4. Re-read `.do-state.md` and the todo list before EVERY phase transition. If you cannot confirm all reviewers completed, STOP.
 
@@ -185,7 +204,7 @@ Address every bug or correctness issue raised. Push fixes and re-run quality che
 
 > **Checkpoint**: Before entering Phase 6, re-read `.do-state.md` and verify the "Phase 5: Review Tracker" has ZERO reviewers with status `PENDING`. Every reviewer must show `PASS` or `ADDRESSED`. If any reviewer is still outstanding, STOP — go back to Phase 5 and wait for it. If you have lost track of reviewer status due to context compaction, assume they are NOT complete — re-read `.do-state.md` to recover state. If `.do-state.md` is also incomplete, add `needs-human-review` label and do NOT merge.
 
-If this PR includes **any code changes** (not just docs/tasks), deploy to staging and verify before creating the PR.
+If this PR includes **any code changes** (not just docs/tasks), deploy to staging and verify before merging the PR.
 
 > **Skip this phase** only for documentation-only, config-only, or task-file-only changes.
 
@@ -198,6 +217,12 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
      -f environment=staging -f task=staging-lease -f per_page=1 \
      --jq '.[0] | {id, payload}'
    ```
+
+   There are two staging installations, `staging` (`sammy.party`) and `staging2`
+   (`sammy2.party`). Read both leases and take whichever is free; use that name in
+   every command below. They share the `staging` credentials but nothing else, so
+   your checks cannot disturb an agent on the other one. staging2 sign-in is
+   workload identity only; see "Two Staging Installations" in the full reference.
 
    Use your selected environment name in every command. The latest `staging-lease`
    deployment payload is authoritative; ordinary deployment statuses and a quiet
@@ -255,9 +280,9 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    holder. Expiry permits another branch to acquire automatically. Do not mistake
    successful deployment completion for a release. Only the lease job receives
    `deployments: write`; agents can inspect records with their existing `gh api`
-   read access. Leases are keyed by environment name for future staging slots.
+   read access. Leases are keyed by installation name (`staging`, `staging2`).
 
-4. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
+4. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging) or `app.sammy2.party` (staging2).
 
 5. **Authenticate** using the smoke test token via token-login API:
 
@@ -269,13 +294,17 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    Do this inside Playwright so the browser context receives the session cookie, then navigate that browser to `https://app.sammy.party`. Do not exchange the staging smoke/API token against `SAM_API_URL`; these tokens correctly fail against production.
    If the env var is not set, ask the human for credentials.
 
+   On `staging2` (`sammy2.party`), sign in with your workload identity instead (audience
+   `https://api.sammy2.party/api/auth/workload-identity-login`, target `staging2-agent-user` or
+   `staging2-agent-admin`); see "Two Staging Installations" in the full reference.
+
 6. **Verify the changed behavior works end-to-end:**
    - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
    - **API/backend changes**: verify affected endpoints respond correctly and downstream behavior works through the UI
 
 7. **Report findings** to the user with evidence (screenshots or Playwright observations).
 
-8. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
+8. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT merge with known staging failures.
 
 ### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
 
@@ -288,7 +317,7 @@ If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, `scr
 5. **Clean up** — delete the test workspace and node.
 6. **Record evidence** — report to the user: "VM provisioned, heartbeat received at [time], workspace accessible at [URL]" or "FAILED: [specific failure]".
 
-**If infrastructure verification fails, DO NOT create the PR. DO NOT merge. Fix the issue first.**
+**If infrastructure verification fails, DO NOT merge. Fix the issue first.**
 
 > **Why this is mandatory**: The TLS YAML indentation bug (the retained incident lesson in this rule) shipped to production because staging verification only checked UI rendering and API responses. Nobody provisioned a VM. The result: all workspace provisioning broke for ~2.5 hours in production.
 
@@ -296,19 +325,17 @@ If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, `scr
 
 **Fixing a broken gate does not exempt you from the gate.** If staging is currently broken by the bug you are fixing, deploy your fix branch to staging and verify it _fixes_ the broken state. "This is the fix for the thing the gate tests" is the **strongest** reason to run the gate, not a reason to skip it.
 
-### If You Already Created the PR Without Completing Phase 6
+### A Ready PR Is Not Permission to Merge
 
-You made a mistake. Close the PR, complete staging verification, then re-open. Do NOT merge a PR that skipped Phase 6 and "verify post-merge" — that is how bugs reach production.
+The PR is open as a draft from Phase 3 and ready from Phase 4, so CI and CodeRabbit run while you verify staging. That is intended. What is forbidden is merging before Phase 6 passes. Do NOT merge a PR that skipped Phase 6 and "verify post-merge" — that is how bugs reach production.
 
 ---
 
 ## Phase 7: Pull Request, CodeRabbit Review & Post-Merge Deploy Monitoring
 
-1. **Create the PR** using `gh pr create`:
-   - Title: short, under 70 characters
-   - Body: use the PR template from `.github/pull_request_template.md`
+1. **Make sure the PR is open and ready.** It was opened as a draft in Phase 3 and marked ready in Phase 4. If it does not exist yet, create it with `gh pr create` (title under 70 characters, body from `.github/pull_request_template.md`), not as a draft; if it is still a draft, run `gh pr ready <pr-number>`. Update the body with the review tracker and staging evidence.
 
-2. **Push and wait for CI.** Check GitHub Actions:
+2. **Push and wait for the full CI run on the ready PR.** Quick-check results from draft runs do not count. The required `Durable Object Workers` check reports only after every job of the ready run has finished, and fails if any of them failed. Check GitHub Actions:
 
    ```
    gh pr checks <pr-number> --watch
@@ -316,7 +343,7 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 
 3. **If CI fails:** inspect logs, fix issues, commit, push, repeat.
 
-4. **Once CI is fully green, every other gate is satisfied, and the PR is not a draft**, request CodeRabbit review through the repository's trusted GitHub Actions path, not by posting `@coderabbitai review` yourself. Apply the opt-in label first:
+4. **CodeRabbit is requested when the PR is marked ready (Phase 4, step 5)**, in parallel with CI, local reviewers and staging, not after them. If that did not happen (for example the PR was created late), request it now. Use the repository's trusted GitHub Actions path, not a `@coderabbitai review` comment of your own. Apply the opt-in label first:
 
    ```
    gh pr edit <pr-number> --add-label coderabbit-review
@@ -330,7 +357,7 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 
    Agents MUST NOT post `@coderabbitai review` directly with their own GitHub App token; CodeRabbit ignores bot-authored review commands. The workflow is the human-identity bridge.
 
-5. **Wait about 15 minutes for CodeRabbit, then follow whichever case applies.** If you have nothing else to do while waiting, you may subscribe to the PR's review and comment events (`create_project_event_subscription`, source `github`, subjectType `pull_request`, subjectId = the PR number; `requestedDelivery` defaults to `runtime_steer`) and end your turn instead of sleeping in a loop; only PR comment wakes of a live chat are verified so far, so still check the PR once when the wait ends and say if eventing did not wake you. If CodeRabbit has visibly started a review that is still in progress, let it finish, up to about 45 minutes in total. A CodeRabbit review is not required; requesting one and waiting is. See `.claude/rules/25-review-merge-gate.md`.
+5. **Wait about 15 minutes from the request for CodeRabbit, then follow whichever case applies.** The wait ends at once when CodeRabbit replies with a rate-limit, quota or `Review skipped` notice, or the request workflow fails. If you have nothing else to do while waiting, you may subscribe to the PR's review and comment events (`create_project_event_subscription`, source `github`, subjectType `pull_request`, subjectId = the PR number; `requestedDelivery` defaults to `runtime_steer`) and end your turn instead of sleeping in a loop; only PR comment wakes of a live chat are verified so far, so still check the PR once when the wait ends and say if eventing did not wake you. If CodeRabbit has visibly started a review that is still in progress, let it finish, up to about 45 minutes in total. A CodeRabbit review is not required; requesting one and waiting is. See `.claude/rules/25-review-merge-gate.md`.
    - **A review arrived: it blocks merge until its feedback is resolved.** Read every CodeRabbit review comment, thread, and summary. Implement valid feedback, push fixes, and re-run the affected validation/CI checks. For feedback you believe is not applicable, explicitly review it, document the reason, and resolve the thread. Keep the `coderabbit-review` label on the PR so pushed fixes get incremental reviews, and give each one the same wait. You are done when no CodeRabbit feedback is unresolved and you independently agree the PR is ready. CodeRabbit not re-reviewing your fixes within the wait does not block.
    - **No review arrived: skip CodeRabbit and continue.** This covers silence after the wait, a `Review skipped` status (for example `bot user not eligible for review`), a rate-limit or quota notice, and a failed request workflow. Record what you observed in the PR's "CodeRabbit Review Evidence" section. **Do NOT add `needs-human-review`, call `request_human_input`, or wait for a waiver because CodeRabbit is silent.**
 
@@ -381,6 +408,7 @@ After merging to main, you MUST monitor the production deployment to completion.
      - Whether this is something the agent can fix (code issue) or requires human intervention (missing secrets, infrastructure config)
    - If it's a code issue you introduced: fix it, push to main, and monitor the next deploy
    - If it requires human intervention (missing secrets, permissions, external config): **tell the user explicitly what action they need to take** and do NOT silently move on
+   - **Exception: a fail-closed "does not match the current trusted main tip" at "Re-verify current main after deployment queue"** means a newer commit reached `main` first; your change ships with the tip. Main CI runs overlap, so this deploy run can also have displaced the tip's pending deploy. Check that a Deploy Production run for the current tip succeeded or is queued or running (`gh run list --workflow=deploy.yml --limit=5 --json headSha,status,conclusion,displayTitle` and `git ls-remote origin main`). If none exists and CI on the tip succeeded, start one with `gh workflow run deploy.yml --ref main` (it defaults to the tip and re-checks CI on that exact SHA) and monitor it. Report what you did.
 
 5. **Check for pre-existing deploy failures**: Before monitoring your own deploy, check if recent deploys have been failing:
    ```bash

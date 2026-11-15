@@ -663,6 +663,14 @@ resolve stuck archive migrations through **Admin → Storage** before writes sto
 
 To remove all resources: Actions → Teardown → Run workflow → type `DELETE` to confirm.
 
+A full teardown (with **keep_data** off) empties the installation's assets bucket before it
+deletes the stack, because R2 refuses to delete a non-empty bucket. The emptying stops after
+`TEARDOWN_R2_EMPTY_DEADLINE_SECONDS` (GitHub Environment variable, default 600, roughly 2,000
+objects); if anything is left the bucket deletion fails and the summary says so, and running the
+teardown again continues where it stopped. Full teardown also deletes the API Worker's Durable
+Object data; **keep_data** leaves the Worker in place. Teardown does not delete VMs: delete
+workspaces and nodes in the app first.
+
 ## Cost Estimation
 
 ### Platform Costs
