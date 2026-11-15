@@ -20,6 +20,11 @@ Select **Admin** in the sidebar (only superadmins see it), then the **Settings**
 titled **Runtime settings**. An account must be an approved, active superadmin to use it; admins
 can't.
 
+On an ordinary self-hosted instance, the first account to sign in while it is the only account
+becomes the superadmin, once. SAM never promotes anyone automatically after that, even if that
+superadmin is deleted. If no account can open **Admin**, follow
+[Recovering when no account can administer the instance](/docs/guides/self-hosting/#recovering-when-no-account-can-administer-the-instance).
+
 Settings are grouped into **OAuth**, **Connector**, **Operations**, **Collaboration**,
 **Chat**, **AI models**, and **Email**. Type in **Search settings** to filter by name, group, or
 description. Each card is named after the setting, split into words (`operations.cronSweepsEnabled`
