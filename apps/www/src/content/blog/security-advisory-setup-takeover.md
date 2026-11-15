@@ -1,6 +1,6 @@
 ---
 title: 'Security Advisory: Check That Your SAM Setup Is Closed'
-date: 2026-11-14
+date: 2026-11-15
 author: Raphaël Titsworth-Morin
 category: announcement
 tags: ['security', 'open-source', 'cloudflare-workers', 'd1']
