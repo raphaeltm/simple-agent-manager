@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/bootlog"
@@ -2467,7 +2468,13 @@ func writeCredentialHelperToHost(cfg *config.Config) (hostPath, script string, m
 			return hostPath, script, false, nil
 		}
 	}
-	if err := writeCredentialHelperScriptAtomically(hostPath, script); err != nil {
+	if reused {
+		// Same bearer, changed helper: replace the file so a running container
+		// keeps its old inode, which still carries the valid bearer.
+		if err := writeCredentialHelperScriptAtomically(hostPath, script); err != nil {
+			return "", "", false, err
+		}
+	} else if err := writeMintedCredentialHelper(hostPath, script); err != nil {
 		return "", "", false, err
 	}
 	if !reused {
@@ -2509,7 +2516,7 @@ func cleanupCredentialHelperAfterFailedPrepare(cfg *config.Config, minted bool) 
 	lookupCtx, cancel := context.WithTimeout(context.Background(), credentialHelperCleanupLookupTimeout)
 	defer cancel()
 	if _, err := findRunningDevcontainerForCleanup(lookupCtx, cfg); err == nil ||
-		!strings.Contains(strings.ToLower(err.Error()), "no running devcontainer found") {
+		!errors.Is(err, container.ErrNoRunningDevcontainer) {
 		slog.Warn("Keeping git credential exchange after failed provisioning: a devcontainer may be running",
 			"workspaceID", cfg.WorkspaceID, "lookupError", err)
 		return
@@ -2517,6 +2524,41 @@ func cleanupCredentialHelperAfterFailedPrepare(cfg *config.Config, minted bool) 
 	if err := RemoveCredentialHelperFromHost(cfg.WorkspaceID); err != nil {
 		slog.Warn("Failed to remove credential helper after failed provisioning", "workspaceID", cfg.WorkspaceID, "error", err)
 	}
+}
+
+// writeMintedCredentialHelper writes a helper carrying a newly minted bearer.
+// An existing regular file is rewritten in place rather than replaced: a
+// running container's single-file bind mount is pinned to that inode, and the
+// bearer it holds is no longer accepted, so only an in-place write can repair
+// it. (A replaced file would leave the container on the old inode, and docker
+// cp cannot write through a read-only bind mount.)
+func writeMintedCredentialHelper(hostPath, script string) error {
+	info, err := os.Lstat(hostPath)
+	if os.IsNotExist(err) {
+		return writeCredentialHelperScriptAtomically(hostPath, script)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to inspect credential helper on host: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("refusing to replace non-regular credential helper path %s", hostPath)
+	}
+	f, err := os.OpenFile(hostPath, os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open credential helper on host: %w", err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("failed to rewrite credential helper on host: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to finalize credential helper on host: %w", err)
+	}
+	// 0o755 is intentional: the devcontainer user must execute the bind-mounted helper.
+	if err := os.Chmod(hostPath, 0o755); err != nil { // NOSONAR
+		return fmt.Errorf("failed to chmod credential helper on host: %w", err)
+	}
+	return nil
 }
 
 func writeCredentialHelperScriptAtomically(hostPath, script string) error {

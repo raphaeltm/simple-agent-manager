@@ -258,8 +258,19 @@ func TestInstallStandaloneGitCredentialExchange(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		firstInfo, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := installStandaloneGitCredentialExchange(path, workspaceID, 5*time.Second); err != nil {
 			t.Fatal(err)
+		}
+		secondInfo, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !os.SameFile(firstInfo, secondInfo) || secondInfo.Mode().Perm() != 0o700 {
+			t.Fatal("an unchanged helper must be left in place (a git command may be running it), owner-only")
 		}
 		second, err := os.ReadFile(path)
 		if err != nil {

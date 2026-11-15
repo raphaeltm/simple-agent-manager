@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"syscall"
 )
 
 const gitCredentialExchangeTokenBytes = 32
@@ -55,14 +56,14 @@ func ValidateGitCredentialExchange(workspaceID, token string) bool {
 		return false
 	}
 
-	f, err := os.Open(gitCredentialExchangeDigestPath(workspaceID))
+	f, err := os.OpenFile(gitCredentialExchangeDigestPath(workspaceID), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || !ownedByCurrentUser(info) {
 		return false
 	}
 	encoded, err := io.ReadAll(io.LimitReader(f, sha256.Size*2+1))
@@ -109,9 +110,20 @@ func ExchangeTokenFromHelperScript(script string) string {
 // inode it was started with, so a reprovision (rebuild, restart, recovery,
 // snapshot restore) that rotated the bearer would leave the container presenting
 // a bearer the digest no longer accepts, and every fetch and push would fail.
+//
+// When the digest itself is gone (a /tmp cleaner, a partial cleanup) but the
+// helper this agent wrote still holds a bearer, the digest is reinstalled from
+// that bearer rather than rotating it under a running container. A digest that
+// exists and does not match is never overridden: something rotated it on purpose.
 func ResolveGitCredentialExchangeToken(workspaceID, helperPath string) (token string, reused bool, err error) {
-	if existing := readHelperExchangeToken(helperPath); existing != "" &&
-		ValidateGitCredentialExchange(workspaceID, existing) {
+	existing := readHelperExchangeToken(helperPath)
+	if existing != "" && ValidateGitCredentialExchange(workspaceID, existing) {
+		return existing, true, nil
+	}
+	if existing != "" && gitCredentialExchangeDigestMissing(workspaceID) {
+		if err := InstallGitCredentialExchange(workspaceID, existing); err != nil {
+			return "", false, err
+		}
 		return existing, true, nil
 	}
 	token, err = NewGitCredentialExchangeToken()
@@ -125,20 +137,33 @@ func readHelperExchangeToken(helperPath string) string {
 	if strings.TrimSpace(helperPath) == "" {
 		return ""
 	}
-	info, err := os.Lstat(helperPath)
-	if err != nil || !info.Mode().IsRegular() {
-		return ""
-	}
-	f, err := os.Open(helperPath)
+	f, err := os.OpenFile(helperPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return ""
 	}
 	defer f.Close()
+	// Only a helper this agent wrote can carry the workspace's bearer.
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || !ownedByCurrentUser(info) {
+		return ""
+	}
 	content, err := io.ReadAll(io.LimitReader(f, gitCredentialHelperScriptMaxBytes))
 	if err != nil {
 		return ""
 	}
 	return ExchangeTokenFromHelperScript(string(content))
+}
+
+func gitCredentialExchangeDigestMissing(workspaceID string) bool {
+	_, err := os.Lstat(gitCredentialExchangeDigestPath(workspaceID))
+	return os.IsNotExist(err)
+}
+
+// ownedByCurrentUser reports whether a file belongs to this process's user, so
+// a file another local user pre-created at a predictable /tmp path is ignored.
+func ownedByCurrentUser(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(stat.Uid) == os.Geteuid()
 }
 
 func gitCredentialExchangeDigestPath(workspaceID string) string {

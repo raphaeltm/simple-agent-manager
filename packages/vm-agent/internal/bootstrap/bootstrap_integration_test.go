@@ -675,6 +675,55 @@ func TestIntegration_ReprovisionKeepsBindMountedHelperAuthenticated(t *testing.T
 	}
 }
 
+// A running container whose bind-mounted helper predates the exchange bearer
+// (or holds a bearer whose digest is gone and cannot be recovered) pins that
+// helper's inode. Reprovisioning must reach it: a minted bearer is written into
+// the existing host inode, because docker cp cannot write through the read-only
+// bind mount.
+func TestIntegration_ReprovisionRepairsBindMountedBearerlessHelper(t *testing.T) {
+	requireDockerAvailable(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	workspaceID := "ws-bind-bearerless-" + fmt.Sprint(time.Now().UnixNano())
+	t.Cleanup(func() { _ = RemoveCredentialHelperFromHost(workspaceID) })
+	labelKey := "devcontainer.local_folder"
+	labelValue := "/workspace-bind-bearerless-" + workspaceID
+	cfg := &config.Config{
+		WorkspaceID:         workspaceID,
+		Repository:          "https://github.com/test/repo",
+		CallbackToken:       "bind-bearerless-callback-token",
+		Port:                startExchangeEndpoint(t, workspaceID),
+		ContainerMode:       true,
+		ContainerLabelKey:   labelKey,
+		ContainerLabelValue: labelValue,
+	}
+
+	hostPath := credentialHelperHostPath(workspaceID)
+	oldScript := fmt.Sprintf("#!/bin/sh\ncat >/dev/null\ncurl -fsS \"http://host.docker.internal:%d/git-credential?workspaceId=%s\" || true\n", cfg.Port, workspaceID)
+	if err := os.WriteFile(hostPath, []byte(oldScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	containerArgs := append([]string{
+		"--add-host", "host.docker.internal:host-gateway",
+		"--mount", credentialHelperMountEntry(hostPath),
+	}, nodeImage.dockerRunArgs...)
+	containerID := mustStartContainer(t, nodeImage.image, labelKey, labelValue, containerArgs...)
+	if out := runInContainerHelper(t, ctx, containerID); strings.Contains(out, "password=") {
+		t.Fatalf("test setup: a bearerless helper must not authenticate: %q", out)
+	}
+
+	if _, _, minted, err := writeCredentialHelperToHost(cfg); err != nil || !minted {
+		t.Fatalf("reprovision host helper: minted=%v err=%v", minted, err)
+	}
+	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
+		t.Fatalf("ensureGitCredentialHelper: %v", err)
+	}
+	if out := runInContainerHelper(t, ctx, containerID); !strings.Contains(out, "password=exchanged-test-credential") {
+		t.Fatalf("the running container's bind-mounted helper was not repaired: %q", out)
+	}
+}
+
 // A container whose helper was copied in by an agent build that predates the
 // exchange bearer (for example a container restored on a newer node) carries a
 // bearerless helper. It must be reinstalled, not skipped because a file exists.

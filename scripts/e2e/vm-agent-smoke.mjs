@@ -695,11 +695,29 @@ async function runOpenCodeNoKeySmoke(jwtToken, controlPlane) {
 }
 
 async function runGitCredentialSmoke(controlPlane) {
-  const response = await fetch(`http://127.0.0.1:${VM_AGENT_PORT}/git-credential`, {
-    headers: {
-      Authorization: `Bearer ${CALLBACK_TOKEN}`,
-    },
+  // A bearer is validated for the workspace the request names; a request that
+  // names none, or names it without a bearer, must be refused.
+  const unscoped = await fetch(`http://127.0.0.1:${VM_AGENT_PORT}/git-credential`, {
+    headers: { Authorization: `Bearer ${CALLBACK_TOKEN}` },
   });
+  if (unscoped.status !== 401) {
+    throw new Error(`/git-credential without a workspace id returned HTTP ${unscoped.status}, want 401`);
+  }
+  const bearerless = await fetch(
+    `http://127.0.0.1:${VM_AGENT_PORT}/git-credential?workspaceId=${WORKSPACE_ID}`
+  );
+  if (bearerless.status !== 401) {
+    throw new Error(`/git-credential without a bearer returned HTTP ${bearerless.status}, want 401`);
+  }
+
+  const response = await fetch(
+    `http://127.0.0.1:${VM_AGENT_PORT}/git-credential?workspaceId=${WORKSPACE_ID}`,
+    {
+      headers: {
+        Authorization: `Bearer ${CALLBACK_TOKEN}`,
+      },
+    }
+  );
 
   if (!response.ok) {
     throw new Error(`/git-credential returned HTTP ${response.status}`);

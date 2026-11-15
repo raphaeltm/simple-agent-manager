@@ -53,7 +53,16 @@ from its own `sam/` branch, closing the bot PR with a link.
 - [x] Old-helper policy decided per rule 54 and stated in PR
 - [x] Standalone: empty ID fails closed with an error log and writes nothing; bearer reused across agent restart; digest installed before git is configured in the docker-cp path
 - [x] Helper bearer refused on relayed/tunnel/non-local requests (restored the orphaned `isRelayedRequest` guard)
-- [x] security.md documents the exchange
+- [x] security.md documents the exchange (incl. residual risk: host-level access defeats the bearer)
+- [x] Review fixes: e2e smoke script sends workspaceId and asserts unscoped/bearerless refusal; minted bearer is written into the existing host inode (repairs a pinned bind mount); lost digest reinstalled from an owned helper; digest/helper reads require owner + O_NOFOLLOW; container `ErrNoRunningDevcontainer` sentinel; standalone helper rewrite skips unchanged content and replaces by rename
+
+### #2755 old-helper compatibility policy (rule 54)
+
+- A bearerless `/git-credential` request is refused (401); there is no compatibility fallback, because that fallback is the vulnerability.
+- A node's helpers are written by that node's own agent, and agents are not upgraded in place: a new VM-agent release makes nodes ineligible for new work and they are retired after draining (rule 54 §6-7). Old-agent nodes keep their old (still vulnerable) behaviour until retired; their exposure ends with node retirement (24h absolute lifetime by default).
+- Any bearerless or stale helper a new agent does meet (a container restored from an older snapshot, or a helper left by an earlier build) is repaired on the next provisioning: a docker-cp copy is reinstalled, and a bind-mounted one is rewritten in place on the host.
+- Instant containers rewrite their helper on every agent start, so no old helper survives a new image.
+- Coverage of `recoverWorkspaceRuntime` and snapshot restore is at the seam (they pass the runtime's workspace ID into `PrepareWorkspace`) plus the bootstrap layer (real Docker bind mounts); there is no single test from recovery through Docker.
 - [ ] Staging: fresh agent binary, clone/fetch/push, after restart/rebuild, Instant session, cross-workspace refusal, cleanup
 
 ### #2754

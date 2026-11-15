@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -187,9 +188,40 @@ func writeStandaloneGitCredentialHelper(path string, timeout time.Duration, exch
 // broader permissions, so the mode is re-applied explicitly. The vm-agent and
 // the agent run as the same node user, so owner-only access is sufficient and
 // avoids exposing the credential exchange.
+//
+// A git or gh process may be executing the file while it is rewritten (an
+// in-container agent restart), so an unchanged script is left alone and a
+// changed one is replaced by rename. If the directory does not let this user
+// create a sibling temp file, the file is rewritten in place as before.
 func writeOwnerOnlyExecutable(path, script string) error {
+	if current, err := os.ReadFile(path); err == nil && string(current) == script {
+		return os.Chmod(path, 0o700)
+	}
+	if err := replaceOwnerOnlyExecutable(path, script); err == nil {
+		return nil
+	}
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		return err
 	}
 	return os.Chmod(path, 0o700)
+}
+
+func replaceOwnerOnlyExecutable(path, script string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.WriteString(script); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, 0o700); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }

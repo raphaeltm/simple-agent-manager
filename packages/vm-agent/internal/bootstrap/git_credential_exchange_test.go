@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/container"
 )
 
 func newExchangeTestConfig(t *testing.T) *config.Config {
@@ -95,30 +96,74 @@ func TestReprovisionWithChangedHelperKeepsOldInodeBearerValid(t *testing.T) {
 }
 
 // A helper written by an agent build that predates the exchange bearer, or a
-// helper whose digest is gone, cannot be reused: a fresh bearer is minted.
+// helper whose bearer a deliberately rotated digest no longer accepts, cannot be
+// reused: a fresh bearer is minted.
 func TestHelperWithoutValidBearerIsReplacedWithFreshBearer(t *testing.T) {
-	cases := map[string]string{
-		"pre-bearer agent helper": "#!/bin/sh\ncredential_query=\"?workspaceId=x\"\ncurl -fsS http://host/git-credential\n",
-		"bearer without digest":   "#!/bin/sh\nexchange_token='never-installed-bearer'\n",
+	cases := map[string]struct {
+		helper        string
+		installDigest bool
+	}{
+		"pre-bearer agent helper":          {helper: "#!/bin/sh\ncredential_query=\"?workspaceId=x\"\ncurl -fsS http://host/git-credential\n"},
+		"bearer the digest does not match": {helper: "#!/bin/sh\nexchange_token='rotated-away-bearer'\n", installDigest: true},
 	}
-	for name, stale := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			cfg := newExchangeTestConfig(t)
 			hostPath := credentialHelperHostPath(cfg.WorkspaceID)
-			if err := os.WriteFile(hostPath, []byte(stale), 0o755); err != nil {
+			if err := os.WriteFile(hostPath, []byte(tc.helper), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tc.installDigest {
+				if err := InstallGitCredentialExchange(cfg.WorkspaceID, "current-digest-bearer"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := os.Stat(hostPath)
+			if err != nil {
 				t.Fatal(err)
 			}
 			_, script, minted := mustWriteHostHelper(t, cfg)
 			if !minted {
 				t.Fatal("a helper with no accepted bearer must not be reused")
 			}
-			if ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(stale)) {
+			if ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(tc.helper)) {
 				t.Fatal("the stale helper's bearer must not validate")
 			}
 			if !ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(script)) {
 				t.Fatal("the fresh helper's bearer must validate")
 			}
+			after, err := os.Stat(hostPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A running container's bind mount is pinned to the existing inode;
+			// a minted bearer must reach it, so the file is rewritten in place.
+			if !os.SameFile(before, after) {
+				t.Fatal("a minted bearer must be written into the existing helper inode")
+			}
 		})
+	}
+}
+
+// A lost digest (a /tmp cleaner, a partial cleanup) must not rotate the bearer
+// under a running container: the digest is reinstalled from the helper's bearer.
+func TestLostDigestIsReinstalledFromHelperBearer(t *testing.T) {
+	cfg := newExchangeTestConfig(t)
+	_, containerView, _ := mustWriteHostHelper(t, cfg)
+	token := ExchangeTokenFromHelperScript(containerView)
+	if err := os.Remove(gitCredentialExchangeDigestPath(cfg.WorkspaceID)); err != nil {
+		t.Fatal(err)
+	}
+	if ValidateGitCredentialExchange(cfg.WorkspaceID, token) {
+		t.Fatal("test setup: bearer must not validate without a digest")
+	}
+
+	_, script, minted := mustWriteHostHelper(t, cfg)
+	if minted || ExchangeTokenFromHelperScript(script) != token {
+		t.Fatal("a lost digest must be reinstalled from the helper's bearer, not rotate it")
+	}
+	if !ValidateGitCredentialExchange(cfg.WorkspaceID, token) {
+		t.Fatal("the running container's bearer must validate again")
 	}
 }
 
@@ -142,7 +187,7 @@ func TestExchangeBearerDoesNotAuthenticateAnotherWorkspace(t *testing.T) {
 }
 
 func TestCleanupAfterFailedPrepare(t *testing.T) {
-	notRunning := errors.New("no running devcontainer found (label: k=v)")
+	notRunning := fmt.Errorf("%w (label: k=v)", container.ErrNoRunningDevcontainer)
 	cases := []struct {
 		name       string
 		minted     bool

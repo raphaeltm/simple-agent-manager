@@ -322,6 +322,7 @@ Git inside a workspace authenticates through a credential helper that asks the V
 - The helper bearer is node-local: it is accepted only from a loopback or private peer on a request no proxy or tunnel relayed (`isDirectLocalGitCredentialExchange`). It is never forwarded to the control plane.
 - The bearer lives as long as the workspace. A rebuild, restart, recovery or snapshot restore reuses it, because a running devcontainer keeps the bind-mounted helper it started with (`ResolveGitCredentialExchangeToken`). A helper whose bearer the digest does not accept is reinstalled (`ensureGitCredentialHelper` in `packages/vm-agent/internal/bootstrap/bootstrap.go`). Deleting the workspace removes the helper and digest.
 - Instant workspaces run the same check inside their container, keyed to the container's single workspace (`ConfigureStandaloneGitCredentialHelper` in `packages/vm-agent/internal/server/standalone_git.go`).
+- The bearer protects against code that stays inside its devcontainer. Code that reaches the VM host (a privileged container, which nested Docker requires, or a repository `mounts` entry) can read other workspaces' helpers there. That is consistent with the node VM, not the devcontainer, being the isolation boundary; a node runs only one user's workspaces.
 
 ### Legacy Origin CA Rotation
 
