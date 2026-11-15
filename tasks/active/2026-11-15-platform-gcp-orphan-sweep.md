@@ -1,6 +1,6 @@
 # Authenticate platform GCP orphan reconciliation
 
-**Final status (November 15, 06:03 UTC): blocked at staging gate.** Classification (b). Narrow fix, behavioral regressions, full local validation and specialist reviews pass. Required live eligible sweep ownership proof remains unexercised. Final fixed reservation was explicitly refused because it overlaps another granted staging window; parent instructed final stop on refusal. No PR, merge or production deploy. All R1/R2/R3 resources independently cleaned; zero R4 resources created. Branch retained for continuation by the coordinator.
+**Current status (November 15, 06:04 UTC): waiting for L7 actual FREE under explicit parent amendment.** Classification (b). Fix, behavioral regressions, full local validation and specialist reviews pass; required live eligible sweep proof remains unexercised. Parent amended the refusal stop before SAM task closure: remain open, no resources/writes/cost, then one final fresh-marker fixed request after L7 actual release. All R1/R2/R3 resources independently cleaned; zero R4 resources created. No PR, merge or production deploy.
 
 ## Problem and findings
 
@@ -185,3 +185,10 @@ Not proven: live naturally eligible platform-GCP sweep deletes the owned fixture
 Production finding remains (b), with observation limits: latest read-only credential/inventory check01:43 had one enabled platform Hetzner and no platform GCP; five exact production-scope GCPVMs, all claimed by nonterminal nodes, zero observed orphan candidates. Earlier narrow failure searches found none; incomplete historical queries do not prove absence for all history. No production mutations occurred. Any future merge must repeat the production deletion-risk check and stop if newly enabled deletions would occur.
 
 Coordinator owns next decision: staging KV write capability or an authorized interval override; agent does not ask the owner or bypass the gate. Final source branch and encrypted recovery kits retained; task file intentionally not archived as a completed implementation release.
+
+
+## Parent amendment before closure supersedes prior final-stop paragraph
+
+Parent event34c380e6-c430-4675-84f0-26e59fec28b1 arrived BEFORE complete_task was called. Explicit once-only amendment: do not close yet; L7 queue overlap is coordinated by parent. Wait with NO fixtures/stagingwrites/cost until L7 publishes actualFREE. After07:05naturalrun readfreshM/E/T (notpredict), requestonlyonceactualFREEonchannel, for FIRSTnaturalTwhosewhole45minwindowstartsafterFREE; fixturesONLYafterrootYES+guards. Any refusalorTmiss ofthatrequest thenendsforgood/completeblockedatstaginggate/noPR. No other automatic shift. Earlier rootNO263bd05e remains valid for06:40–07:25 and guard9734iscancelledv2.
+
+Additional immutable age constraint remains binding: rootYES and actual BOTH VM creations must precedeT-1h. If L7FREE/request acceptance is later than that cutoff, do not provision invalid/youngfixtures or inferproof; report preciseNO-FIT. Existing R4 preparation/recovery source retained, but no R4 resources/admission/guard/currentgrant. SAM task has NOT been completed; earlier finalblocked record is preserved as superseded history, not current closure.
