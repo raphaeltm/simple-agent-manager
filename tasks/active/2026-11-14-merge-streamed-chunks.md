@@ -159,3 +159,43 @@ The parent requested65 minutes to give all four modes enough margin. A managed s
 The ignored operational helpers and13 initial phase tests were extended with further discriminating guards: prelogin overlap/one-attempt rules; exact two NULL baselines in both contexts; attribution of each setting/restoration revision; strict root proof BEFORE phase A logout; separate actual auth-job terminal receipt before B; exact one nonempty node/provider/workspace/task/session identity; fail-closed unknown auth/signout receipts and B login failure; source/phase deadline clamps including the actual observer. Independent security/test review passed with40/40 offline tests in45.35 seconds, formatting/syntax/diff checks clean. The current CLOSED40261-byte third-window ledger remains byte-identical. The local Vite process was stopped after the completed native browser tests. No live auth, settings, resources or new deployment were used for this review.
 
 Next: publish the exact reviewed kit/hash and pushed full head, wait for Catalog's actual strict FREE and a new direct staging grant, prepare three newly accepted cleanup guards, run one fresh green deploy, then the four-mode live recipe. Earlier sampled savings and NOT MET results stay recorded. All live release gates remain open; no PR or merge yet.
+
+
+### Fourth staging window: VM ON full PASS; OFF desktop reload capture unresolved
+
+Frozen head `83705cb4ecc1e238f1510e76e9debefc839419d1`, Deploy Staging run43705116232: whole workflow and smoke SUCCESS. Direct Cloudflare read confirmed one100% Worker version23908861-02be-435c-8f2b-c756ec9ccc62 at that exact head. Source T0 before allocation11:00:33.945Z;65-minute hard end12:05:33.945Z. Only one cx23/fsn1 VM was created.
+
+| Mode | Long reply | Stored reload | Desktop live | Mobile live | Desktop reload | Mobile reload | Overall |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| VM ON |9,428 characters in one assistant row | Identical all-field hash | PASS | PASS | PASS | PASS | PASS |
+| VM OFF |9,442 characters in1,801 new assistant rows | Identical all-field hash | PASS | PASS | NOT MET | PASS | NOT MET |
+| Instant ON | Not run | Not measured | Not measured | Not measured | Not measured | Not measured | NOT MET |
+| Instant OFF | Not run | Not measured | Not measured | Not measured | Not measured | Not measured | NOT MET |
+
+VM initial startup reply ended short at216 characters and reported MCP unavailable (boolean only); that NOT MET record remains. One ordinary same-session ON follow-up produced the long PASS. ON whole session had8 raw rows/1,849 logical messages. All four captures verified exact ordered inventory and anchors, two independent stable complete sweeps, equal rendered/prose hashes, code, Unicode and no overflow. The comment anchor survived reload. The browser received297 `message.append` events to one canonical row and297 batches, with9 positive DOM growth steps and zero page errors.
+
+OFF whole mixed session had1,810 raw rows/3,651 logical messages. Its full stored hash was identical before and after reload, including every role/metadata field. Three full captures passed with two independent complete sweeps, matching rendered/prose hashes and no overflow. Desktop reload failed with `TimeoutError`/`full-ui-capture-failed`, diagnostic stage `history-pagination`, step0, sweeps0, captured0, expected9; no full result exists for that view. The observer recorded241 batches,2 positive DOM growth steps and zero page errors. Per-view elapsed times were not persisted by the frozen helper and are unknown. The timeout's cause (baseline behavior, branch regression, or audit race) remains unproven.
+
+| Partial contained row_usage | Covered time | Calls | rowsWritten | alarmWrites | Writes/call |
+| --- | --- | --- | --- | --- | --- |
+| VM ON |60.151 seconds /1 window |157 |1,407 |0 |8.96178 |
+| VM OFF |60.612 seconds /1 window |153 |6,620 |0 |43.26797 |
+
+This is about79.29% fewer writes per call in incomplete logged windows from different real replies, not a full-session or production saving. The alarm count is already a subset of rowsWritten and must not be added again.
+
+The frozen reviewed phase handoff and phase B prelogin require both VM modes to have full PASS; the OFF NOT MET therefore prevented B. Parent/root reconciled the constraint and confirmed no bypass, extra authenticated capture, or live helper edits. Both Instant modes remain unrun. The release gate is not waived and no PR/merge is claimed.
+
+Cleanup restored BOTH original unconfigured settings FIRST viaCAS74→75, verified11:14:43.692Z; resolved the anchored comment; stopped the session; deleted the workspace and VM through normal owner APIs by11:15:06.403Z. ROOT independently accepted strict owner-deletion audit plus repeated late D1 absence. A signed out200/sessionNULL/browser closed11:19:47.891Z; its managed job completed exit0 at11:19:47.939Z, and every source managed job is terminal. Repeated post-logout independent D1 checks passed all9 checks at11:20:47.978/50.279Z; strict FREE accepted event `cbb6a919-8c59-4b65-ad36-5ed0b5d43275`. Canonical ledger/window are CLOSED; source guard cancelledv3. No Instant or residual paid test resource remains. Counts-only cost-idea note `01M7FESCWP1CYBK22Y6KPXCKAQ` records the results.
+
+Next offline work: reproduce an1,810-raw-row unmerged transcript with realistic paginated API latency on the branch and pinned main; capture elapsed time/stage for each view and identify the exact timeout. Keep release equality strict. Any later Instant-only ON/OFF or VM OFF verification needs a new coordinated grant; this closed window provides no retry authority.
+
+
+### Offline classification of fourth-window pagination failure
+
+A synthetic1,810-row transcript now uses real500-row pages with500ms API latency, rather than the prior all-rows/no-pagination mock. Under the old helper, branch desktop cold/reload captures failed after32,109/32,041ms; pinned main `fd0be69bd4c50e1299d114724f27f857901a1b45` failed at the same `history-pagination` stage after31,970/32,020ms. Subsequent mobile captures passed after all older pages had arrived (branch976/967ms, main970/950ms). Main's six temporarily substituted web source files were restored byte-identically in `finally`; no worktree or product source change was retained.
+
+The synthetic Playwright error identifies the audit race: scrolling starts automatic pagination; the capture's `locator.click` waits on the disabled loading button. Automatic paging fetches the remaining500+500+310 rows and removes that button, so the locator keeps waiting until its30-second timeout despite complete loaded history. This reproduces on main as well as the branch. It classifies the reproduced helper failure; the original staging mode remains NOT MET and is not retrospectively promoted.
+
+The capture helper now inspects and activates the enabled fallback button atomically in the stable scroller; it does not wait for a loading button that can disappear. Exact ordered inventory/anchors/content/structure/Unicode and two independent complete sweeps are unchanged. Fixed branch views passed at3,566/945/3,506/944ms; fixed pinned main at3,635/988/3,544/954ms with identical synthetic rendered hashes. The new tracked native regression asserts500-row pagination with latency, all10 expected display IDs/7 anchors, two complete sweeps, both code blocks, Unicode, equal captures and at least3 older-page requests for cold/reload views. A stable restored-branch run passed that regression in18.013 seconds (3,564/968/3,540/956ms per view) and the existing4,525-chunk/tall-Markdown/card/tool/system regression in36.106 seconds (6,663/6,134/6,984/6,168ms). No renderer/storage code changed. The ignored live observer additionally records start/end/elapsed metadata per capture so a future timeout has exact duration evidence.
+
+The new tracked test itself failed with only the helper reverted to HEAD (exit1, history-pagination,7,002ms), proving discrimination; the fixed helper was restored byte-identically. Independent review passed with no findings and an independent paginated native run in18.637 seconds (3,606/981/3,560/969ms). Targeted web typecheck and diff checks passed. No new staging time or live effects have been requested. Proposed next verification is a separately bounded Instant-only ON/OFF run, plus a read-only full UI recapture of the stored stopped VM OFF transcript, using fresh reviewed auth/cleanup rules and new direct coordinator grant(s). Neither the failed mode nor any remaining release gate is waived.

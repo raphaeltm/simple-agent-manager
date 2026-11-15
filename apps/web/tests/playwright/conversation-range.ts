@@ -55,19 +55,30 @@ async function captureRanges(
     sweeps: number;
     captured: number;
     expected: number | null;
+    historyPage?: number;
   }
 ) {
   const scroller = page.locator('[data-sam-conversation-scroller="true"]');
   await scroller.waitFor({ state: 'visible' });
   diagnostic.stage = 'history-pagination';
   for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+    diagnostic.historyPage = pageNumber;
     await scroller.evaluate((element) => {
       element.scrollTop = 0;
     });
     await page.waitForTimeout(200);
-    const earlier = scroller.getByRole('button', { name: 'Load earlier messages', exact: true });
-    if (!(await earlier.count())) break;
-    await earlier.click();
+    // Scrolling can start pagination itself. A locator click can wait on the
+    // disabled loading button until pagination removes it, then wait forever
+    // for its replacement. Inspect and activate the fallback atomically; full
+    // inventory and independent complete sweeps still prove every page loaded.
+    const hasEarlier = await scroller.evaluate((element) => {
+      const button = [...element.querySelectorAll('button')].find(
+        (candidate) => candidate.textContent?.trim() === 'Load earlier messages'
+      );
+      if (button && !button.disabled) button.click();
+      return Boolean(button);
+    });
+    if (!hasEarlier) break;
     await page.waitForTimeout(200);
     if (pageNumber === 99) throw new Error('Conversation history exceeded the audit page bound');
   }
