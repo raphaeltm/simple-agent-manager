@@ -11,6 +11,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
+import { DEFAULT_MCP_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
 import { validateActiveWorkspaceMcpToken } from '../../../src/services/mcp-token-lifecycle';
 import { createJsonKv, createMcpApp, storeMcpToken } from '../../helpers/mcp-route';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -159,6 +160,27 @@ describe('validateActiveWorkspaceMcpToken', () => {
 
     setUserStatus('active');
     await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+  });
+
+  it('does not slide the idle TTL of a token it rejects, and slides it again once accepted', async () => {
+    seed({ status: 'running' });
+    // Make the sliding refresh due: last refreshed longer ago than half the idle TTL.
+    const due = new Date(Date.now() - (DEFAULT_MCP_TOKEN_TTL_SECONDS * 1000 * 3) / 4).toISOString();
+    await env.KV.put(
+      `mcp:${TOKEN}`,
+      JSON.stringify({ ...TOKEN_DATA, createdAt: due, lastRefreshedAt: due })
+    );
+    const storedRefresh = async () =>
+      ((await env.KV.get(`mcp:${TOKEN}`, { type: 'json' })) as { lastRefreshedAt?: string } | null)
+        ?.lastRefreshedAt;
+
+    setUserStatus('suspended');
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await storedRefresh()).toBe(due);
+
+    setUserStatus('active');
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).not.toBeNull();
+    expect(await storedRefresh()).not.toBe(due);
   });
 
   it.each(['invited', 'suspended'])(

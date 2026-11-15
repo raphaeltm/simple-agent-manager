@@ -50,7 +50,7 @@
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { type McpTokenData, revokeMcpToken, validateMcpToken } from './mcp-token';
+import { type McpTokenData, readMcpToken, revokeMcpToken } from './mcp-token';
 import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
 import { WORKSPACE_CALLBACK_ACTIVE_STATUSES } from './workspace-callback-identity';
 
@@ -132,8 +132,9 @@ export async function validateActiveWorkspaceMcpToken(
   env: Env,
   token: string
 ): Promise<McpTokenData | null> {
-  const data = await validateMcpToken(env.KV, token, env);
-  if (!data) return null;
+  const read = await readMcpToken(env.KV, token, env);
+  if (!read) return null;
+  const { data } = read;
 
   const row = data.workspaceId
     ? await env.DATABASE.prepare(
@@ -161,7 +162,9 @@ export async function validateActiveWorkspaceMcpToken(
     : null;
 
   const verdict = workspaceVerdict(data, row);
-  if (!verdict) return data;
+  // Only an accepted token slides its idle TTL: a token rejected while its user is
+  // suspended or its workspace is stopped must still expire on the normal idle schedule.
+  if (!verdict) return read.refreshIfDue();
 
   log.info('mcp_token.workspace_rejected', {
     workspaceId: data.workspaceId || null,
