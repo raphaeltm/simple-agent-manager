@@ -263,12 +263,16 @@ func TestBuildAllowsSafeComposeVolumesBeforeBuild(t *testing.T) {
 		t.Fatalf("write fake compose: %v", err)
 	}
 
+	beforeExecution := ExecutionCounters()
 	_, _ = Build(context.Background(), BuildOptions{
 		WorkspaceDir: dir,
 		ComposeCmd:   compose,
 	})
 	if _, statErr := os.Stat(buildMarker); statErr != nil {
 		t.Fatalf("compose build should run after safe named volume validation, stat err: %v", statErr)
+	}
+	if ExecutionCounters().ComposeBuildAttempts != beforeExecution.ComposeBuildAttempts+1 {
+		t.Fatal("node publisher build attempt not observed")
 	}
 }
 

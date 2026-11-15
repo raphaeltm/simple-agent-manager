@@ -277,6 +277,16 @@ Updated VM agents include `publishJobId` and `attempt` in release callbacks. SAM
 
 ## Portable build contexts
 
+The authenticated node system-info response includes optional `publishExecution`
+diagnostics on updated agents: a process incarnation and monotonically increasing
+Compose-build and Docker-save execution-attempt counts. Failed attempts count too.
+These snapshots are uncached. To verify remote execution, compare snapshots from
+the same source node, agent version, and process incarnation before and after its
+publish job. An unchanged count confirms that the vm-agent publish path attempted
+no source build or save during that interval. A restart, missing fields, or an
+increased count cannot establish that proof. These counters do not observe other
+host processes; older agents omit them and remain compatible.
+
 Cloudflare builds use a portable context collected from the calling session. This applies to application deployments; deployment targets remain VMs. It does not build SAM installation or self-hosting releases.
 
 The collector uses Compose discovery, overrides, and server-supplied non-secret interpolation config. It creates one `tar.zst` bundle with the original relative layout of local build contexts, Dockerfiles, and Compose files. Docker ignore filtering is conservative: if either the context `.dockerignore` or the Dockerfile-specific ignore rules include a file, the bundle retains it. Runtime `env_file`, Compose secret files, and interpolation dotenv files become empty placeholders, including filesystem aliases. Ordinary Compose config files retain their contents. Supply build interpolation values through SAM deployment config; runtime secrets cannot be used in image/build fields.

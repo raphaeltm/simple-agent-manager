@@ -687,6 +687,11 @@ func runCompose(ctx context.Context, composeCmd, dir string, env map[string]stri
 		return nil, fmt.Errorf("empty compose command")
 	}
 	cmdArgs := append(parts[1:], args...)
+	// Publish supplies the subcommand arguments; both normal and host-network
+	// builds end in "build". Count at execution, never during config collection.
+	if len(args) > 0 && args[len(args)-1] == "build" {
+		composeBuildAttempts.Add(1)
+	}
 	result, err := runCommand(ctx, dir, env, parts[0], cmdArgs...)
 	if err != nil {
 		return nil, err
