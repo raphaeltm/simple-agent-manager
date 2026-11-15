@@ -56,14 +56,14 @@ On November 14, around 22:45 UTC, I removed the fake integration, the linked ide
 
 ## What we're changing
 
-A fix is in review. It:
+The fix is merged as [#2748](https://github.com/raphaeltm/simple-agent-manager/pull/2748). It:
 
 - keeps the setup token out of deploy logs;
 - treats setup as complete whenever an owner exists, whether or not the row was ever written;
-- stops login providers configured inside SAM from linking accounts automatically or overwriting profiles;
+- stops a GitLab login configured inside SAM from linking to existing accounts by email or overwriting profiles, unless it points at gitlab.com or at a host you pin with the `GITLAB_HOST` environment variable;
 - fixes the rate limiter on setup attempts.
 
-A second change emails the owner when an integration changes, when setup completes, and when a new login is linked to an admin account. It also adds a control to clear an integration from the admin UI.
+A second change, [#2747](https://github.com/raphaeltm/simple-agent-manager/pull/2747), emails the owner when an integration changes, when setup completes, and when a new login is linked to an admin account. It also adds a control to clear an integration from the admin UI.
 
 ## Who is affected
 
@@ -178,9 +178,9 @@ Anyone with a session can create a long-lived API token for that account, and de
    DELETE FROM smoke_test_tokens WHERE id = '<token id>';
    ```
 
-5. **Upgrade** to the fixed release once it ships, with the **Update Self-Hosted Instance** workflow in your fork.
+5. **Upgrade** to a release that includes #2748 and #2747, with the **Update Self-Hosted Instance** workflow in your fork.
 6. **Email me** at [support@simple-agent-manager.org](mailto:support@simple-agent-manager.org). I want to know, and I can help you work out what was touched.
 
-If everything looks clean, close setup if it was open, and upgrade when the fix ships.
+If everything looks clean, close setup if it was open, and upgrade to a release that includes the fix.
 
 I'm sorry about this one. The setup gate was built for fresh installs and never accounted for instances that existed before it, and that gap stayed open for months on public repositories. If you have questions, or you find something this post doesn't cover, email me.
