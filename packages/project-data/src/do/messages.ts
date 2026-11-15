@@ -196,7 +196,7 @@ export function persistMessageBatch(
       workspaceId: context.source.workspaceId,
     });
   const latest =
-    previousStream?.open || (context?.config.enabled && context.source?.callbackGeneration)
+    previousStream?.open || (context?.config.enabled && context.source?.outboxIncarnation)
       ? sql
           .exec(
             'SELECT id, created_at, sequence FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, sequence DESC, id DESC LIMIT 1',
@@ -205,7 +205,7 @@ export function persistMessageBatch(
           .toArray()[0]
       : null;
   const stream =
-    context && (previousStream || (context.config.enabled && context.source?.callbackGeneration))
+    context && (previousStream || (context.config.enabled && context.source?.outboxIncarnation))
       ? new MessageStreamBatch(
           sessionId,
           context.config,

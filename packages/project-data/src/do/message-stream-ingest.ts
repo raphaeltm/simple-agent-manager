@@ -19,6 +19,8 @@ export interface MessageMergeConfig {
 export interface MessageIngestSource {
   workspaceId: string;
   callbackGeneration: string | null;
+  /** Absent on deployed reporters that cannot distinguish a recreated outbox. */
+  outboxIncarnation?: string;
 }
 export interface StoredBatchMessage {
   id: string;
@@ -47,6 +49,9 @@ const IngestState = v.object({
   maxSequence: v.number(),
   lastCreatedAt: v.optional(v.number(), 0),
   recent: v.array(v.string()),
+  // Retain exact replay frontiers when a delayed request belongs to an older
+  // outbox. Never evict them to make room for a new source: fall back instead.
+  retired: v.optional(v.record(v.string(), v.number()), {}),
   open: v.nullable(OpenRow),
 });
 export type MessageIngestState = v.InferOutput<typeof IngestState>;
@@ -82,6 +87,7 @@ export class MessageStreamBatch {
   private readonly updates = new Map<string, ChatMessageAppend>();
   private readonly canSequence: boolean;
   private readonly canMerge: boolean;
+  private readonly retiredSource: string | null;
   private latestPosition: MessagePosition | null;
   private messageCount: number;
 
@@ -99,10 +105,10 @@ export class MessageStreamBatch {
   ) {
     this.latestPosition = latestPosition;
     this.messageCount = messageCount;
-    const sourceKey = source?.callbackGeneration
-      ? JSON.stringify([source.workspaceId, source.callbackGeneration])
+    const sourceKey = source?.outboxIncarnation
+      ? JSON.stringify([source.workspaceId, source.callbackGeneration, source.outboxIncarnation])
       : null;
-    this.canSequence =
+    const validSequence =
       sourceKey !== null &&
       sequences.every(
         (sequence, index) =>
@@ -112,17 +118,21 @@ export class MessageStreamBatch {
           (index === 0 || sequence > (sequences[index - 1] ?? Number.MAX_SAFE_INTEGER))
       );
     const sameSource = sourceKey !== null && previous?.source === sourceKey;
-    this.initialThrough = sameSource && this.canSequence ? previous.through : 0;
+    const retired = { ...(previous?.retired ?? {}) };
+    this.retiredSource = sourceKey !== null && Object.hasOwn(retired, sourceKey) ? sourceKey : null;
+    if (sourceKey && !sameSource && !this.retiredSource && previous?.source)
+      retired[previous.source] = previous.through;
     this.priorRecent = new Set(previous?.recent ?? []);
-    this.state = {
-      source: this.canSequence ? (sourceKey ?? '') : (previous?.source ?? ''),
-      through: this.canSequence && !sameSource ? 0 : (previous?.through ?? 0),
+    const candidate: MessageIngestState = {
+      source: validSequence && !this.retiredSource ? (sourceKey ?? '') : (previous?.source ?? ''),
+      through: validSequence && !sameSource && !this.retiredSource ? 0 : (previous?.through ?? 0),
       maxSequence: previous?.maxSequence ?? 0,
       recent: previous?.recent ?? [],
+      retired,
       lastCreatedAt: previous?.lastCreatedAt ?? 0,
       open: sameSource ? (previous?.open ?? null) : null,
     };
-    const receipt = new Set(this.state.recent);
+    const receipt = new Set(candidate.recent);
     for (const id of messageIds) {
       receipt.delete(id);
       receipt.add(id);
@@ -131,8 +141,28 @@ export class MessageStreamBatch {
     // Arbitrary callback IDs must never turn one session row into an oversized
     // receipt. If the complete retry window cannot fit, retain ordinary rows.
     const receiptFits =
-      new TextEncoder().encode(JSON.stringify(bounded)).byteLength <= config.maxRowBytes;
-    this.canMerge = config.enabled && this.canSequence && receiptFits;
+      new TextEncoder().encode(JSON.stringify({ ...candidate, recent: bounded })).byteLength <=
+      config.maxRowBytes;
+    // An already-known frontier must remain usable even if an operator lowers
+    // the cap. Unknown incarnations that cannot fit retain per-ID stored rows.
+    this.canSequence = validSequence && (sameSource || this.retiredSource !== null || receiptFits);
+    this.state = this.canSequence
+      ? candidate
+      : {
+          ...candidate,
+          source: previous?.source ?? '',
+          through: previous?.through ?? 0,
+          retired: previous?.retired ?? {},
+          open: null,
+        };
+    this.initialThrough = this.canSequence
+      ? sameSource
+        ? (previous?.through ?? 0)
+        : this.retiredSource
+          ? (retired[this.retiredSource] ?? 0)
+          : 0
+      : 0;
+    this.canMerge = config.enabled && this.canSequence && !this.retiredSource && receiptFits;
     const open = this.state.open;
     if (
       !this.canMerge ||
@@ -160,8 +190,14 @@ export class MessageStreamBatch {
 
   consume(messageId: string, sequence?: number): void {
     this.consumed.push(messageId);
-    if (this.canSequence && typeof sequence === 'number')
-      this.state.through = Math.max(this.state.through, sequence);
+    if (this.canSequence && typeof sequence === 'number') {
+      if (this.retiredSource)
+        this.state.retired[this.retiredSource] = Math.max(
+          this.state.retired[this.retiredSource] ?? 0,
+          sequence
+        );
+      else this.state.through = Math.max(this.state.through, sequence);
+    }
   }
 
   /** Role/metadata/origin/gaps/cap/turn boundaries end a run, even on duplicate user echoes. */

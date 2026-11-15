@@ -10,6 +10,7 @@ import {
   getAgentDefinition,
   HARNESS_CAPABILITIES,
   isValidAgentType,
+  MESSAGE_OUTBOX_INCARNATION_HEADER,
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
@@ -1600,13 +1601,22 @@ runtimeRoutes.post('/:id/messages', async (c) => {
     messageCount: body.messages.length,
   };
   let result: MessageBatchPersistenceRouteResult;
+  const outboxIncarnation = c.req.header(MESSAGE_OUTBOX_INCARNATION_HEADER);
   try {
     result = await projectDataService.persistMessageBatch(
       c.env,
       currentWorkspace.projectId,
       sessionId,
       toProjectDataMessages(body),
-      { workspaceId, callbackGeneration: currentWorkspace.callbackGeneration ?? null }
+      {
+        workspaceId,
+        callbackGeneration: currentWorkspace.callbackGeneration ?? null,
+        // This is transport identity, not an auth claim. Missing/malformed IDs
+        // retain the legacy per-message path instead of guessing about replay.
+        outboxIncarnation: v.is(v.pipe(v.string(), v.uuid()), outboxIncarnation)
+          ? outboxIncarnation.toLowerCase()
+          : undefined,
+      }
     );
   } catch (err) {
     return handleMessagePersistenceError(c, context, err);

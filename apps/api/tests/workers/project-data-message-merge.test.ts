@@ -9,7 +9,11 @@ import reporterMessages from './fixtures/archive-reporter-messages.json';
 import { projectDataStub } from './helpers/archive-fixtures';
 import { profileObject, type WriteSample } from './helpers/archive-write-profile';
 
-const source = { workspaceId: 'merge-workspace', callbackGeneration: 'generation-a' };
+const source = {
+  workspaceId: 'merge-workspace',
+  callbackGeneration: 'generation-a',
+  outboxIncarnation: '7aba0c09-bbf4-4d84-8a0a-4fcab3bdce50',
+};
 const fixtureEnd = Date.parse(reporterMessages.at(-1)!.timestamp);
 const fixtureNow = Date.now();
 const batch = reporterMessages.map((row) => ({

@@ -55,7 +55,8 @@ async function runProfile(reset: boolean, merged = false) {
       merged
         ? {
             workspaceId: 'archive-merge-workspace',
-            callbackGeneration: 'archive-generation',
+            callbackGeneration: null,
+            outboxIncarnation: '9d0a1501-d7dc-4150-bc09-587cb91e5498',
           }
         : undefined
     );
@@ -80,7 +81,11 @@ async function runProfile(reset: boolean, merged = false) {
           sequence: 2102,
         },
       ],
-      { workspaceId: 'archive-merge-workspace', callbackGeneration: 'archive-generation' }
+      {
+        workspaceId: 'archive-merge-workspace',
+        callbackGeneration: null,
+        outboxIncarnation: '9d0a1501-d7dc-4150-bc09-587cb91e5498',
+      }
     );
   const toolKey = `write-profile-tool/${projectId}`;
   const archivedTool = JSON.parse(seeded[2099].toolMetadata!);

@@ -18,7 +18,7 @@ export const MESSAGE_MERGE_SETTINGS: AdminSettingDefinition[] = [
     'chat.messageMergeMaxRowBytes',
     DEFAULT_MESSAGE_MERGE_CONFIG.maxRowBytes,
     'Operations',
-    'Maximum serialized bytes in a merged row and retry receipt; oversized individual messages or receipts keep individual rows.',
+    'Maximum serialized bytes in a merged row and retry-state admission budget; oversized individual messages or retry states keep individual rows.',
     { min: 1024, max: 256 * 1024 }
   ),
   integerDefinition(

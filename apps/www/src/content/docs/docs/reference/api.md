@@ -7,6 +7,15 @@ The SAM API runs on a Cloudflare Worker at `api.{domain}`. All authenticated end
 
 ## Incremental chat message appends
 
+The workspace callback `POST /api/workspaces/:id/messages` accepts the optional
+`X-SAM-Outbox-Incarnation` UUID header. Updated reporters persist one random UUID with their
+SQLite outbox, retaining it across reopen, retries and session changes; recreating the database
+creates a new UUID. The JSON message body is unchanged. The header is transport identity, not an
+authentication claim: normal callback authentication and workspace/session fencing still apply.
+The server keys retry progress by the authenticated workspace, its current callback generation
+(including the valid initial NULL generation), and the incarnation. Missing or malformed headers
+use ordinary individual-row persistence. Older Workers ignore the header.
+
 Chat clients connecting to `GET /api/projects/:projectId/sessions/ws` can add
 `messageAppend=message-append-v1` to advertise canonical message append support. The existing
 optional `sessionId` still limits the subscription. Clients without this capability keep the

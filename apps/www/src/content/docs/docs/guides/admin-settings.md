@@ -71,8 +71,27 @@ The **Operations** category includes these chat storage settings:
 | Setting                        | Code default | Effect                                                                                                                                     |
 | ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                          |
-| `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also bounds the retry receipt; a batch whose receipt does not fit keeps individual rows. |
+| `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows. |
 | `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                   |
+
+Merging requires an updated reporter that sends its durable outbox incarnation. Older reporters,
+and requests with a missing or malformed incarnation, keep individual inserts and provide **zero
+merge savings** until the runtime is replaced. Both VM and Instant use the same reporter binary.
+A new reporter remains compatible with an older Worker: the extra header is ignored and the JSON
+body is unchanged.
+
+The row cap applies to newly merged message rows, not oversized individual messages. Retry-state
+admission uses the same value as a soft budget: existing replay frontiers are retained when the
+budget is lowered, and later descriptor growth can exceed it. It is not a hard cap on the whole
+session metadata row.
+
+Managed VM replacement is gradual. Code defaults start lifetime drain at 24 hours
+(`NODE_ABSOLUTE_MAX_LIFETIME_MS`), force-sleep a still-running turn after another 30 minutes
+(`operations.nodeLifetimeForceSleepAfterMs`), and retain an empty warm node for 30 minutes
+(`NODE_WARM_TIMEOUT_MS`). These are defaults, not measured deployment values or a strict rollout
+deadline: configured overrides, sweep scheduling and cleanup failures affect completion. Check the
+effective settings and actual reporter versions before forecasting fleet savings. Measure the
+rollout through successive row-usage windows.
 
 Existing message rows and their comment anchors remain unchanged. Tool, user, system, thinking,
 plan and typed-card rows keep their existing storage format. A connected browser that does not
