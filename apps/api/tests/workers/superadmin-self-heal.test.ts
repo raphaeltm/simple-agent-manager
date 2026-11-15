@@ -229,22 +229,16 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     expect(await getUser('later-user')).toMatchObject({ role: 'user', status: 'pending' });
   });
 
-  it('never promotes a suspended user, even as sole operator', async () => {
-    await insertUser('real-1', { role: 'user', status: 'suspended' });
+  it.each([
+    ['never promotes a suspended user, even as sole operator', 'suspended', { role: 'user', status: 'suspended' }],
+    ['promotes a sole pending user on login (edge case 10)', 'pending', { role: 'superadmin', status: 'active' }],
+  ])('%s', async (_name, status, expected) => {
+    await insertUser('real-1', { role: 'user', status });
     const hook = await getSessionAfterHook();
 
     await hook({ userId: 'real-1' });
 
-    expect(await getUser('real-1')).toMatchObject({ role: 'user', status: 'suspended' });
-  });
-
-  it('promotes a sole pending user on login (edge case 10)', async () => {
-    await insertUser('real-1', { role: 'user', status: 'pending' });
-    const hook = await getSessionAfterHook();
-
-    await hook({ userId: 'real-1' });
-
-    expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
+    expect(await getUser('real-1')).toMatchObject(expected);
   });
 
   it('promotes the sole user even when REQUIRE_APPROVAL is unset (open registration)', async () => {

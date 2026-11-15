@@ -99,17 +99,23 @@ describe('establishFirstSuperadmin — the election', () => {
   });
 
   describe('a later sign-up never wins against an existing account', () => {
-    it('(a) does not promote a new sign-up while the sole existing user is suspended', async () => {
-      const f = fixture();
-      f.user('suspended-owner', 'user', 'suspended', 2);
-      f.user('stranger', 'user', 'pending', 3);
+    it.each([
+      ['(a)', 'suspended', 'suspended-owner'],
+      ['(b)', 'a non-admin', 'existing-user'],
+    ])(
+      '%s does not promote a new sign-up while the sole existing user is %s',
+      async (_case, _label, existingId) => {
+        const f = fixture();
+        f.user(existingId, 'user', existingId === 'suspended-owner' ? 'suspended' : 'active', 2);
+        f.user('stranger', 'user', 'pending', 3);
 
-      await establishFirstSuperadmin(f.env, 'stranger');
+        await establishFirstSuperadmin(f.env, 'stranger');
 
-      expect(f.superadmins()).toEqual([]);
-      expect(f.get('stranger')).toMatchObject({ role: 'user', status: 'pending' });
-      expect(f.electionOwner()).toBeUndefined();
-    });
+        expect(f.superadmins()).toEqual([]);
+        expect(f.get('stranger')).toMatchObject({ role: 'user', status: 'pending' });
+        expect(f.electionOwner()).toBeUndefined();
+      }
+    );
 
     it('(a) control: the same sign-up is promoted when no other account exists', async () => {
       const f = fixture();
@@ -118,18 +124,6 @@ describe('establishFirstSuperadmin — the election', () => {
       await establishFirstSuperadmin(f.env, 'stranger');
 
       expect(f.superadmins()).toEqual(['stranger']);
-    });
-
-    it('(b) does not promote a new sign-up while the sole existing user is a non-admin', async () => {
-      const f = fixture();
-      f.user('existing-user', 'user', 'active', 2);
-      f.user('stranger', 'user', 'pending', 3);
-
-      await establishFirstSuperadmin(f.env, 'stranger');
-
-      expect(f.superadmins()).toEqual([]);
-      expect(f.get('stranger')).toMatchObject({ role: 'user', status: 'pending' });
-      expect(f.electionOwner()).toBeUndefined();
     });
 
     it('(b) control: the sole existing user is still elected on their own sign-in', async () => {
