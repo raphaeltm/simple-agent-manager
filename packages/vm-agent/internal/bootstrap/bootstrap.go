@@ -2205,7 +2205,7 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 // container, or ok=false when there is none. It is a variable so tests can
 // model a container's helper without Docker.
 var readInContainerHelper = func(ctx context.Context, containerID, installPath string) (string, bool) {
-	out, err := exec.CommandContext(ctx, "docker", "exec", containerID, "cat", installPath).Output()
+	out, err := exec.CommandContext(ctx, container.DockerCLIPath(), "exec", containerID, "cat", installPath).Output()
 	if err != nil {
 		return "", false
 	}

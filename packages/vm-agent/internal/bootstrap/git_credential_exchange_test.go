@@ -108,41 +108,48 @@ func TestHelperWithoutValidBearerIsReplacedWithFreshBearer(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			cfg := newExchangeTestConfig(t)
-			hostPath := credentialHelperHostPath(cfg.WorkspaceID)
-			if err := os.WriteFile(hostPath, []byte(tc.helper), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if tc.installDigest {
-				if err := InstallGitCredentialExchange(cfg.WorkspaceID, "current-digest-bearer"); err != nil {
-					t.Fatal(err)
-				}
-			}
-			before, err := os.Stat(hostPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, script, minted := mustWriteHostHelper(t, cfg)
-			if !minted {
-				t.Fatal("a helper with no accepted bearer must not be reused")
-			}
-			if ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(tc.helper)) {
-				t.Fatal("the stale helper's bearer must not validate")
-			}
-			if !ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(script)) {
-				t.Fatal("the fresh helper's bearer must validate")
-			}
-			after, err := os.Stat(hostPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// A running container's bind mount is pinned to the existing inode;
-			// a minted bearer must reach it, so the file is rewritten in place.
-			if !os.SameFile(before, after) {
-				t.Fatal("a minted bearer must be written into the existing helper inode")
-			}
+			assertStaleHelperGetsFreshBearerInPlace(t, tc.helper, tc.installDigest)
 		})
 	}
+}
+
+func assertStaleHelperGetsFreshBearerInPlace(t *testing.T, staleHelper string, installDigest bool) {
+	t.Helper()
+	cfg := newExchangeTestConfig(t)
+	hostPath := credentialHelperHostPath(cfg.WorkspaceID)
+	if err := os.WriteFile(hostPath, []byte(staleHelper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if installDigest {
+		if err := InstallGitCredentialExchange(cfg.WorkspaceID, "current-digest-bearer"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := mustStat(t, hostPath)
+	_, script, minted := mustWriteHostHelper(t, cfg)
+	if !minted {
+		t.Fatal("a helper with no accepted bearer must not be reused")
+	}
+	if ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(staleHelper)) {
+		t.Fatal("the stale helper's bearer must not validate")
+	}
+	if !ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(script)) {
+		t.Fatal("the fresh helper's bearer must validate")
+	}
+	// A running container's bind mount is pinned to the existing inode; a
+	// minted bearer must reach it, so the file is rewritten in place.
+	if !os.SameFile(before, mustStat(t, hostPath)) {
+		t.Fatal("a minted bearer must be written into the existing helper inode")
+	}
+}
+
+func mustStat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info
 }
 
 // A lost digest (a /tmp cleaner, a partial cleanup) must not rotate the bearer
@@ -213,34 +220,37 @@ func TestCleanupAfterFailedPrepare(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := newExchangeTestConfig(t)
-			hostPath, script, _ := mustWriteHostHelper(t, cfg)
-
-			looked := false
-			original := findRunningDevcontainerForCleanup
-			t.Cleanup(func() { findRunningDevcontainerForCleanup = original })
-			findRunningDevcontainerForCleanup = func(ctx context.Context, c *config.Config) (string, error) {
-				looked = true
-				if tc.lookup == nil {
-					t.Fatal("unexpected container lookup")
-				}
-				return tc.lookup(ctx, c)
-			}
-
-			cleanupCredentialHelperAfterFailedPrepare(cfg, tc.minted)
-
-			if looked != tc.wantLookup {
-				t.Fatalf("container lookup = %v, want %v", looked, tc.wantLookup)
-			}
-			_, statErr := os.Stat(hostPath)
-			valid := ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(script))
-			if tc.wantKept && (statErr != nil || !valid) {
-				t.Fatalf("expected helper and digest kept: statErr=%v valid=%v", statErr, valid)
-			}
-			if !tc.wantKept && (statErr == nil || valid) {
-				t.Fatalf("expected helper and digest removed: statErr=%v valid=%v", statErr, valid)
-			}
+			runCleanupCase(t, tc.minted, tc.lookup, tc.wantLookup, tc.wantKept)
 		})
+	}
+}
+
+func runCleanupCase(t *testing.T, minted bool, lookup func(context.Context, *config.Config) (string, error), wantLookup, wantKept bool) {
+	t.Helper()
+	cfg := newExchangeTestConfig(t)
+	hostPath, script, _ := mustWriteHostHelper(t, cfg)
+
+	looked := false
+	original := findRunningDevcontainerForCleanup
+	t.Cleanup(func() { findRunningDevcontainerForCleanup = original })
+	findRunningDevcontainerForCleanup = func(ctx context.Context, c *config.Config) (string, error) {
+		looked = true
+		if lookup == nil {
+			t.Fatal("unexpected container lookup")
+		}
+		return lookup(ctx, c)
+	}
+
+	cleanupCredentialHelperAfterFailedPrepare(cfg, minted)
+
+	if looked != wantLookup {
+		t.Fatalf("container lookup = %v, want %v", looked, wantLookup)
+	}
+	_, statErr := os.Stat(hostPath)
+	kept := statErr == nil
+	valid := ValidateGitCredentialExchange(cfg.WorkspaceID, ExchangeTokenFromHelperScript(script))
+	if kept != wantKept || valid != wantKept {
+		t.Fatalf("helper kept=%v digest valid=%v, want both %v", kept, valid, wantKept)
 	}
 }
 
