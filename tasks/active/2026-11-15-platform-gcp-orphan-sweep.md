@@ -32,3 +32,9 @@ The sweep recovers billable provider VMs left without a live D1 claim by create/
 ## Implementation evidence
 
 Both platform GCP WIF/key tests failed before the fix with configuration errors; after the fix all 74 orphan tests passed. Tests use real encrypted platform credential lookup, parser, token exchange and provider HTTP/delete implementation; foreign and legacy resources are returned beside the owned positive control. Baseline repository lint/typecheck passed. Main task-only push rejected GH013 (required Durable Object Workers); keeping task commits in the feature PR.
+
+## Review and staging preparation
+
+Local security-auditor, cloudflare-specialist, test-engineer, constitution-validator, implementation task-completion-validator A-F and doc-sync-validator all PASS; no findings. Full lint and typecheck PASS; full tests/build underway.
+
+Isolated test-project fixtures (cleanup required): sam-vm-control-plane-test, us-central1-a; sam-orphan-jq3vp8-owned (7791020495571601202, created00:16:29Z) and sam-orphan-jq3vp8-foreign (2345179896148739888, created00:16:31Z), two e2-micro/10GB pd-standard/no public IP/no attached SA. Both stopped after creation; age floor reached01:16:32Z. Conservative total budget < $0.10. Own SA orphan-jq3vp8, own compute role membership, own pool orphan-jq3vp8/provider staging; trust initially refuses all tokens. Must remove all own resources after proof. No shared staging credential/pool/deploy change yet, handoff requested.
