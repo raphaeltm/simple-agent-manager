@@ -89,11 +89,12 @@ approved the extension (event 44439269) with conditions recorded in the checklis
 
 - [x] Box branch: draft PR #2750 (base `sam/selfhost-pass-2`, adopted from cancelled copy
       01M7FBJF8CK4Y9KTY1PW4Y9QTR, identical tree), CI started by hand
-- [ ] Box round R16: baseline failure, preflight, fixtures, positive deletion proof, controls,
+- [x] Box round R16: baseline failure, preflight, fixtures, positive deletion proof, controls,
       clean next run, cleanup, restore, FREE, note on idea 01M77HYN8N41MQ17TQZ622PPPV
 - [x] Main branch change (this PR), byte-identical runtime files
 - [x] Extended fix: per-call timeouts, sweep budget, send-and-return GCP delete bound to re-read (`expectedInstance`), `deletionRequested` counter, Hetzner unchanged control, tests incl. incident reproduction (proven red on shared signal), limit > one pass, budget, next-pass present/absent, identity change
-- [ ] Pre-PR validation: lint, typecheck, test, build
+- [x] Pre-PR validation: lint 22/22, typecheck 36/36, build 18/18, test 39/39 tasks (API 1022 files /
+      15254 tests passed, 4 skipped; providers 48/892) on 73f570618; later commits test/task-only
 - [ ] task-completion-validator
 - [ ] Staging no-regression: one natural sweep tick with unchanged platform Hetzner credential,
       zero errors, zero destroyed (no fixtures, swaps or KV/D1 writes)
@@ -135,8 +136,19 @@ PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS=240000, PROVIDER_ORPHAN_MIN_AGE_MS=900000 
   owned2; young2 skipped young; foreign not listed; errors 0, failedSweeps []. GCP: owned2 gone,
   foreign + young2 present. 12:00: young2 (eligible since 11:56) requested, errors 0.
 - Final build (box branch 6265923f3 = main 73f570618 runtime, deploy 12:00:13, version
-  746831d13a0c99a6): owned3 766231454351106104 (12:00:23); 12:05 tick scanned 1, young 1,
-  errors 0, accountErrors 0. Proof tick 12:20, clean run 12:25: in progress.
+  746831d13a0c99a6): owned3 766231454351106104 (12:00:23), young3 4389463958291226569
+  (12:10:14), foreign 8501352887410241593. 12:05: scanned 1, young 1, errors 0, accountErrors 0.
+  **12:20 proof:** `destroying` + `deletion_requested` for exactly owned3 (claim no-row); GCP
+  delete op by sam-nodes 12:20:03.489, DONE 12:20:09; young3 skipped young; foreign never listed;
+  errors 0, failedSweeps []. **12:25 next run clean:** scanned 1 (young3), young 1, requested 0,
+  errors 0, failedSweeps []. No live nodes on the box (claimed-node control covered by tests).
+- Cleanup 12:25-12:37: young3 + foreign deleted after name/id/label check; project holds only
+  sam-box. secrets.env restored byte-for-byte; sealed bundles MERGE secrets.env, so the override
+  bundle was moved out and the box redeployed onto the pre-R16 bundle e46cd268 (Worker
+  75b926858b62153c); 12:35 tick `interval-not-elapsed` confirms the hourly interval is back.
+  SSH key + rule sam-selfhost-allow-ssh-p1b removed. FREE published (event 897c3ff6). Box left on
+  the fix (6265923f3). Write-up: note 01M7FKCN6R7R4H6EY75S9KFX73 "BOX ROUND R16 (orphan sweep
+  fix)" on idea 01M77HYN8N41MQ17TQZ622PPPV.
 
 ### Discrimination (each guard reverted alone; exactly these went red)
 - shared pass signal (list/re-read/delete on one signal): INCIDENT test only.
