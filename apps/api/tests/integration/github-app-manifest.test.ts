@@ -223,6 +223,64 @@ describe('GitHub App manifest flow (vertical slice)', () => {
     });
   });
 
+  it('alerts the owners and returns the same actor labels as the settings page read', async () => {
+    const sent: Array<{ to: string; subject: string; text: string }> = [];
+    Object.assign(env, {
+      AGENT_EMAIL: {
+        send: async (message: { to: string; subject: string; text: string }) => {
+          sent.push(message);
+          return { messageId: 'm' };
+        },
+      },
+    });
+    // A name unlike the user id, so a label resolved from the users table differs from the bare id.
+    sqlite.prepare(`UPDATE users SET name = 'Ada Admin' WHERE id = 'admin'`).run();
+    const admin = await cookieFor('admin');
+    const started = await start(admin);
+    const code = github.createAppFromManifest(started.body.manifest);
+    const done = await post('/api/admin/platform-config/github-app/manifest/complete', admin, {
+      code,
+      state: started.body.state,
+    });
+    expect(done.status).toBe(200);
+    const doneStatus = (
+      (await done.json()) as {
+        status: {
+          integrations: { githubApp: { fields: { appId: { updatedByLabel?: string | null } } } };
+        };
+      }
+    ).status;
+
+    // Storing the App is an integration change, so the owners get the same alert a save from
+    // the settings page sends, without the App's secrets.
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+    expect(sent.map((message) => message.to)).toContain('admin@example.com');
+    for (const message of sent) {
+      expect(message.text).not.toContain('client-secret-0123456789abcdef');
+      expect(message.text).not.toContain('PRIVATE KEY');
+    }
+
+    // The page writes this status into the query the GET fills: the labels must match it.
+    const read = await app.request(
+      `${API}/api/admin/platform-config`,
+      { headers: { cookie: admin } },
+      env
+    );
+    expect(read.status).toBe(200);
+    const readStatus = (
+      (await read.json()) as {
+        status: {
+          integrations: { githubApp: { fields: { appId: { updatedByLabel?: string | null } } } };
+        };
+      }
+    ).status;
+    expect(readStatus.integrations.githubApp.fields.appId.updatedByLabel).not.toBe('admin');
+    expect(readStatus.integrations.githubApp.fields.appId.updatedByLabel).toBeTruthy();
+    expect(doneStatus.integrations.githubApp.fields.appId.updatedByLabel).toBe(
+      readStatus.integrations.githubApp.fields.appId.updatedByLabel
+    );
+  });
+
   it('uses the organization path when an organization is named', async () => {
     const started = await start(await cookieFor('admin'), { organization: 'acme-org' });
     expect(started.body.postUrl).toBe(

@@ -127,7 +127,14 @@ adminPlatformConfigRoutes.post(
         errors: validation.errors,
       });
     }
-    await savePlatformIntegrationConfig(c.env, created.config, userId);
+    // The same owner alert as a save from the settings page: the App's credentials are
+    // integration settings, so storing them must not be a silent path (security-alerts.ts).
+    const changes = await savePlatformIntegrationConfig(c.env, created.config, userId);
+    scheduleSecurityAlert(c.env, requestWaitUntil(c), {
+      kind: 'integration-changed',
+      actorUserId: userId,
+      changes,
+    });
     return c.json({
       app: {
         slug: created.slug,
@@ -135,7 +142,9 @@ adminPlatformConfigRoutes.post(
         owner: created.owner,
         installUrl: `https://github.com/apps/${created.slug}/installations/new`,
       },
-      status: await getPlatformConfigStatus(c.env, { userId }),
+      // The admin page stores this status in the same query the GET fills, so it carries the
+      // same actor labels.
+      status: await getPlatformConfigStatus(c.env, { userId, includeActorLabels: true }),
     });
   }
 );
