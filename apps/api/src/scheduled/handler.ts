@@ -174,9 +174,17 @@ export async function scheduled(
   const reverseTunnelLeases = await sweeps.isolate('reverse_tunnel_lease_release', () =>
     runReverseTunnelLeaseSweep(env)
   );
-  const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
-    runProviderOrphanReconciliation(env)
-  );
+  let providerOrphans: Awaited<ReturnType<typeof runProviderOrphanReconciliation>> | undefined;
+  await sweeps.isolate('provider_orphan_reconciliation', async () => {
+    const result = await runProviderOrphanReconciliation(env);
+    providerOrphans = result;
+    // Account failures are contained inside the sweep so every credential is attempted.
+    // Keep partial-success counters and report failures through the durable path.
+    if (result.errors > 0) {
+      throw new Error(`Provider orphan reconciliation encountered ${result.errors} errors`);
+    }
+    return result;
+  });
   const capacityPools = await sweeps.isolate('capacity_pool_reconciliation', () =>
     runScheduledCapacityPoolReconciliation(env)
   );
