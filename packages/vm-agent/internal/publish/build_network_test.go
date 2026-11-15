@@ -33,7 +33,7 @@ cp "$7" "$3/network.yaml"
 	}
 	cfg := &composeConfig{Services: map[string]composeConfigService{"web": {Build: json.RawMessage(`{"context":"."}`)}, "db": {Image: "postgres"}}}
 	beforeExecution := ExecutionCounters()
-	if _, err := runComposeBuild(context.Background(), "docker compose", BuildOptions{WorkspaceDir: dir, BuildNetwork: "host"}, cfg, nil); err != nil {
+	if _, err := buildComposeServices(context.Background(), "docker compose", BuildOptions{WorkspaceDir: dir, BuildNetwork: "host"}, cfg, nil); err != nil {
 		t.Fatal(err)
 	}
 	if ExecutionCounters().ComposeBuildAttempts != beforeExecution.ComposeBuildAttempts+1 {

@@ -11,9 +11,9 @@ import (
 
 // Compose auto-discovery/overrides are resolved before augmentation. Never
 // overwrite the user's compose files or include builder networking in releases.
-func runComposeBuild(ctx context.Context, command string, opts BuildOptions, cfg *composeConfig, env map[string]string) ([]byte, error) {
+func buildComposeServices(ctx context.Context, command string, opts BuildOptions, cfg *composeConfig, env map[string]string) ([]byte, error) {
 	if opts.BuildNetwork == "" {
-		return runCompose(ctx, command, opts.WorkspaceDir, env, "build")
+		return runComposeBuild(ctx, command, opts.WorkspaceDir, env, nil)
 	}
 	if opts.BuildNetwork != "host" {
 		return nil, fmt.Errorf("unsupported builder network")
@@ -45,5 +45,5 @@ func runComposeBuild(ctx context.Context, command string, opts BuildOptions, cfg
 	if err = os.WriteFile(overlayPath, overlay, 0600); err != nil {
 		return nil, err
 	}
-	return runCompose(ctx, command, opts.WorkspaceDir, env, "--project-directory", opts.WorkspaceDir, "-f", basePath, "-f", overlayPath, "build")
+	return runComposeBuild(ctx, command, opts.WorkspaceDir, env, []string{"--project-directory", opts.WorkspaceDir, "-f", basePath, "-f", overlayPath})
 }

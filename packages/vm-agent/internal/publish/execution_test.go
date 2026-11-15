@@ -25,7 +25,7 @@ func TestExecutionCountersObserveActualBuildAndSaveAttempts(t *testing.T) {
 	if after := ExecutionCounters(); after != before {
 		t.Fatal("config must not count as build/save")
 	}
-	if _, err := runComposeBuild(context.Background(), binary+" compose", BuildOptions{WorkspaceDir: dir}, nil, nil); err != nil {
+	if _, err := buildComposeServices(context.Background(), binary+" compose", BuildOptions{WorkspaceDir: dir}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if after := ExecutionCounters(); after.ComposeBuildAttempts != before.ComposeBuildAttempts+1 || after.DockerSaveAttempts != before.DockerSaveAttempts {
@@ -47,7 +47,7 @@ func TestExecutionCountersObserveActualBuildAndSaveAttempts(t *testing.T) {
 	if ExecutionCounters().DockerSaveAttempts != after.DockerSaveAttempts+1 {
 		t.Fatal("failed save not observed")
 	}
-	if _, err := runComposeBuild(context.Background(), filepath.Join(dir, "missing"), BuildOptions{WorkspaceDir: dir}, nil, nil); err == nil {
+	if _, err := buildComposeServices(context.Background(), filepath.Join(dir, "missing"), BuildOptions{WorkspaceDir: dir}, nil, nil); err == nil {
 		t.Fatal("expected build exec failure")
 	}
 	if ExecutionCounters().ComposeBuildAttempts != after.ComposeBuildAttempts+1 {
@@ -75,7 +75,7 @@ func TestExecutionCountersConcurrentReadsDuringBuild(t *testing.T) {
 		}
 	})
 	for range 8 {
-		if _, err := runComposeBuild(context.Background(), binary, BuildOptions{WorkspaceDir: dir}, nil, nil); err != nil {
+		if _, err := buildComposeServices(context.Background(), binary, BuildOptions{WorkspaceDir: dir}, nil, nil); err != nil {
 			close(done)
 			readers.Wait()
 			t.Fatal(err)
@@ -85,5 +85,41 @@ func TestExecutionCountersConcurrentReadsDuringBuild(t *testing.T) {
 	readers.Wait()
 	if ExecutionCounters().ComposeBuildAttempts != before.ComposeBuildAttempts+8 {
 		t.Fatal("writer did not execute")
+	}
+}
+
+func TestGenericComposeRefusesUncountedBuild(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "compose")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	before := ExecutionCounters()
+	for _, args := range [][]string{{"build"}, {"build", "web"}, {"build", "--pull"}} {
+		if _, err := runCompose(context.Background(), binary, dir, nil, args...); err == nil {
+			t.Fatalf("uncounted build allowed: %v", args)
+		}
+	}
+	if _, err := runCompose(context.Background(), binary+" build", dir, nil, "web"); err == nil {
+		t.Fatal("embedded uncounted build allowed")
+	}
+	if after := ExecutionCounters(); after != before {
+		t.Fatal("refused commands must not execute")
+	}
+}
+
+func TestCountedComposeBuildIncludesTrailingServiceAndOptions(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "compose")
+	script := "#!/bin/sh\n[ \"$1\" = --project-directory ] && [ \"$3\" = build ] && [ \"$4\" = --pull ] && [ \"$5\" = web ]\n"
+	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	before := ExecutionCounters()
+	if _, err := runComposeBuild(context.Background(), binary, dir, nil, []string{"--project-directory", dir}, "--pull", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if after := ExecutionCounters(); after.ComposeBuildAttempts != before.ComposeBuildAttempts+1 || after.DockerSaveAttempts != before.DockerSaveAttempts {
+		t.Fatalf("trailing service build not counted: %+v -> %+v", before, after)
 	}
 }
