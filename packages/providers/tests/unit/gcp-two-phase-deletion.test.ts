@@ -326,3 +326,84 @@ describe('GcpProvider two-phase deletion', () => {
     });
   });
 });
+
+describe('GcpProvider requestVMDeletion expectedInstance binding', () => {
+  const originalFetch = globalThis.fetch;
+  const tokenProvider = vi.fn().mockResolvedValue('test-gcp-token');
+  let provider: GcpProvider;
+  const OWNED = { managed: 'simple-agent-manager', installation: 'abc' };
+
+  beforeEach(() => {
+    provider = new GcpProvider(PROJECT, tokenProvider, 'us-central1-a');
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function fakeGcp(labelsAfterFirstRead?: Record<string, string>) {
+    let reads = 0;
+    return installFetch((url, init) => {
+      if (init?.method === 'DELETE') return json({ name: 'operation-1', status: 'RUNNING' });
+      if (url.pathname.endsWith(`/zones/europe-west1-b/instances/${INSTANCE.id}`)) {
+        reads++;
+        const labels =
+          reads > 1 && labelsAfterFirstRead ? { ...OWNED, ...labelsAfterFirstRead } : OWNED;
+        return json({ ...INSTANCE, labels: { ...INSTANCE.labels, ...labels } });
+      }
+      return lookupResponse(url) ?? notFound();
+    });
+  }
+  const deletesOf = (fetchMock: ReturnType<typeof installFetch>) =>
+    fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE');
+
+  it('with a known zone, reads only that zone and sends the delete for the exact id and labels', async () => {
+    const fetchMock = fakeGcp();
+    const result = await provider.requestVMDeletion(INSTANCE.id, undefined, {
+      expectedInstance: { id: INSTANCE.id, location: 'europe-west1-b', labels: OWNED },
+    });
+    expect(result.state).toBe('requested');
+    expect(deletesOf(fetchMock)).toHaveLength(1);
+    // No zone walk: every GET addressed the expected zone.
+    const gets = fetchMock.mock.calls.filter(([, init]) => (init?.method ?? 'GET') === 'GET');
+    expect(gets.every(([u]) => String(u).includes('/zones/europe-west1-b/'))).toBe(true);
+  });
+
+  it('refuses before beforeSend and sends nothing when the lookup resolved a different instance id', async () => {
+    const fetchMock = fakeGcp();
+    const beforeSend = vi.fn(async () => undefined);
+    const error = await provider
+      .requestVMDeletion(INSTANCE.id, undefined, {
+        beforeSend,
+        expectedInstance: { id: '999', location: 'europe-west1-b' },
+      })
+      .catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect((error as Error).message).toMatch(/refusing to delete it/);
+    expect(beforeSend).not.toHaveBeenCalled();
+    expect(deletesOf(fetchMock)).toHaveLength(0);
+  });
+
+  it('sends nothing when the instance is not in the expected zone (reads as absent there)', async () => {
+    const fetchMock = fakeGcp();
+    const beforeSend = vi.fn(async () => undefined);
+    const result = await provider.requestVMDeletion(INSTANCE.id, undefined, {
+      beforeSend,
+      expectedInstance: { id: INSTANCE.id, location: 'us-central1-a' },
+    });
+    expect(result.state).toBe('absent');
+    expect(beforeSend).not.toHaveBeenCalled();
+    expect(deletesOf(fetchMock)).toHaveLength(0);
+  });
+
+  it('refuses and sends nothing when an ownership label changed by the last read before the delete', async () => {
+    const fetchMock = fakeGcp({ installation: 'someone-else' });
+    const error = await provider
+      .requestVMDeletion(INSTANCE.id, undefined, {
+        expectedInstance: { id: INSTANCE.id, location: 'europe-west1-b', labels: OWNED },
+      })
+      .catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ProviderError);
+    expect((error as Error).message).toMatch(/installation label; refusing to delete it/);
+    expect(deletesOf(fetchMock)).toHaveLength(0);
+  });
+});
