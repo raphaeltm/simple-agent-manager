@@ -134,6 +134,9 @@ const mockEnv = {
 } as unknown as Env;
 
 function chainMocks() {
+  // mockReset also drops an unconsumed mockRejectedValueOnce, so one test's denial
+  // cannot leak into the next test when the route under test skips the check.
+  mockRequireProjectCapability.mockReset().mockResolvedValue(undefined);
   mockSelect.mockReturnValue({ from: mockFrom });
   mockFrom.mockReturnValue({ where: mockWhere });
   // where() returns an object with limit() and is also thenable (for DELETE)
