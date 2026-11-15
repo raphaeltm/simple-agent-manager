@@ -2,7 +2,7 @@
 
 ## Rule: Infrastructure and Configuration Phases Cannot Be Deferred
 
-If your task file has an Infrastructure, Configuration, or Deployment phase, **every item in that phase must be checked off before you may create a PR**. These items cannot be deferred to follow-up tasks.
+If your task file has an Infrastructure, Configuration, or Deployment phase, **every item in that phase must be checked off before you may mark the PR ready for review or merge it**. These items cannot be deferred to follow-up tasks.
 
 ### Why This Rule Exists
 
@@ -27,7 +27,7 @@ Any checklist item that involves:
 
 ### Enforcement
 
-1. **Before creating a PR**: Scan the task file for any phase with "Infrastructure", "Configuration", "Deployment", or "Setup" in the name. Every item must be `[x]`.
+1. **Before marking the PR ready**: Scan the task file for any phase with "Infrastructure", "Configuration", "Deployment", or "Setup" in the name. Every item must be `[x]`.
 2. **If an infrastructure item cannot be completed**: Do NOT merge. Push the branch, document what's blocked and why, and let a follow-up task handle it.
 3. **"Document it for self-hosters" is not completion**: If the deployment pipeline needs a step, automate it. Documentation alone does not count as completing an infrastructure item — the R2 CORS configuration was documented in `self-hosting.md` but never automated, and the feature shipped broken.
 

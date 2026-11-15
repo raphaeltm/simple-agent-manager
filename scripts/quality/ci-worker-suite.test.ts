@@ -57,14 +57,17 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
   expect(step).toContain('WORKERS_SHARD: ${{ matrix.shard }}');
   expect(step).toContain('--shard="${WORKERS_SHARD}/3"');
   expect(step).toContain('--reporter=./tests/workers/timing-reporter.ts');
+  // The required check now gates the whole suite (scripts/quality/ci-draft-and-gate.test.ts);
+  // for API changes it must still demand that every Workers shard succeeded.
   const gate = jobBlock(workflow, 'durable-object-workers');
-  expect(gate).toContain('name: Durable Object Workers');
-  expect(gate).toContain('needs: [changes, durable-object-worker-shards]');
+  expect(gate).toContain("&& 'Durable Object Workers' ||");
+  expect(gate).toContain('      - durable-object-worker-shards\n');
   expect(gate).toContain('if: always()');
-  expect(gate).toContain("needs.changes.outputs.api == 'true'");
-  expect(gate).toContain('SHARD_RESULT: ${{ needs.durable-object-worker-shards.result }}');
   expect(gate).not.toContain('continue-on-error');
-  const command = stepBlock(gate, 'Require every Workers shard to pass').match(/run: (.+)/)?.[1];
+  const shardStep = stepBlock(gate, 'Require every Workers shard to pass');
+  expect(shardStep).toContain("if: needs.changes.outputs.api == 'true'");
+  expect(shardStep).toContain('SHARD_RESULT: ${{ needs.durable-object-worker-shards.result }}');
+  const command = shardStep.match(/run: (.+)/)?.[1];
   expect(command).toBeDefined();
   for (const result of ['success', 'failure', 'cancelled', 'skipped', '']) {
     const execution = spawnSync('bash', ['-c', command!], {
@@ -100,7 +103,11 @@ describe('Workers shard gate discrimination', () => {
 
   it('rejects an omitted shard and a disabled shard selector', () => {
     for (const weakened of [
-      readCiWorkflow().replace('shard: [1, 2, 3]', 'shard: [1, 2]'),
+      // Anchor on the Workers matrix: the API unit-test matrix also lists [1, 2, 3].
+      readCiWorkflow().replace(
+        'shard: [1, 2, 3]\n    timeout-minutes: 30',
+        'shard: [1, 2]\n    timeout-minutes: 30'
+      ),
       readCiWorkflow().replace('--shard="${WORKERS_SHARD}/3"', ''),
       readCiWorkflow().replace('WORKERS_SHARD: ${{ matrix.shard }}', ''),
     ])
@@ -115,7 +122,7 @@ describe('CI Playwright visual audit wiring', () => {
     const runStep = stepBlock(job, 'Run Playwright visual audit tests');
 
     expect(job).toContain(
-      "if: github.event_name == 'pull_request' && (needs.changes.outputs.web-ui == 'true' || needs.changes.outputs.browser-install == 'true')"
+      "if: github.event_name == 'pull_request' && !github.event.pull_request.draft && (needs.changes.outputs.web-ui == 'true' || needs.changes.outputs.browser-install == 'true')"
     );
     expect(selectionStep).toContain(
       'pnpm exec tsx scripts/quality/select-playwright-visual-audits.ts'
