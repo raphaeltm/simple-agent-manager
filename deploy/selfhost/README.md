@@ -603,7 +603,10 @@ off the box, or the cloud key), the install's platform keys and every backup are
 SAM emails a six-digit sign-in code. On a box there is no Cloudflare Email Sending, so the Worker
 sends through SMTP (`packages/agent-email/src/smtp-client.ts`). Codes go only to
 addresses that already have an account, and to `BOOTSTRAP_OWNER_EMAIL` until that owner exists,
-exactly as on Cloudflare. Choose one of:
+exactly as on Cloudflare. The owner security alerts (an integration saved or cleared, setup
+completed, a sign-in linked to an admin) go out through the same SMTP transport, from `SMTP_FROM`
+(`resolveSystemEmailTransport` in `apps/api/src/services/agent-email/system-email.ts`). Choose one
+of:
 
 **A real SMTP relay** (any provider with SMTP submission). In `.env`:
 

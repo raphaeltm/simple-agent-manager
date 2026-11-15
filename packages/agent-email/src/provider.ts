@@ -5,7 +5,8 @@
  * Two transports implement `AgentEmailSender`:
  * - Cloudflare Email Sending (the `AGENT_EMAIL` binding), the only one agent email uses;
  * - SMTP (`SMTP_*`, ./smtp-config.ts) for SAM's own email on installs without the binding, such
- *   as a self-hosted celld box. Today that is sign-in codes only.
+ *   as a self-hosted celld box: sign-in codes and owner security alerts
+ *   (`apps/api/src/services/agent-email/system-email.ts`, `resolveSystemEmailTransport`).
  * `emailTransportKind` is the one place that decides which one an install has. The binding wins
  * whenever it exists, so a Cloudflare deployment behaves exactly as before.
  */
