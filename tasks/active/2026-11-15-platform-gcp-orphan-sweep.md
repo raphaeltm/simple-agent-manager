@@ -15,10 +15,10 @@ The sweep recovers billable provider VMs left without a live D1 claim by create/
 - [x] Support platform workload identity and service-account keys through existing GCP token provider/factory, retaining the platform credential's owner context.
 - [x] Prove foreign/legacy resources never reach DELETE, with owned positive control; prove per-credential failure isolation.
 - [x] Keep static provider configuration and orphan ownership/selection unchanged.
-- [ ] Run lint, typecheck, tests and build; specialist reviews and task-completion validation.
+- [x] Run lint, typecheck, tests and build; specialist reviews and implementation task-completion validation.
 - [ ] Coordinate shared staging, deploy, verify real platform GCP workload identity and safe deletion/preservation; bound test spend to cents and clean up immediately.
 - [ ] Recheck production first-run deletion risk; stop before merge if newly enabled deletion is expected.
-- [ ] PR, green CI, best-effort CodeRabbit wait, coordinator final review, normal merge gates.
+- [ ] PR, green CI, best-effort CodeRabbit wait, normal merge gates.
 - [ ] Monitor production deployment; basic health and next sweep log check only.
 
 ## References
@@ -35,8 +35,24 @@ Both platform GCP WIF/key tests failed before the fix with configuration errors;
 
 ## Review and staging preparation
 
-Local security-auditor, cloudflare-specialist, test-engineer, constitution-validator, implementation task-completion-validator A-F and doc-sync-validator all PASS; no findings. Full lint and typecheck PASS; full tests/build underway.
+Local security-auditor, cloudflare-specialist, test-engineer, constitution-validator, implementation task-completion-validator A-F and doc-sync-validator all PASS; no findings. Full lint, typecheck and build PASS. Root `pnpm test` rerun PASS: 39/39 package tasks; API 1015 files/15180 tests passed, 3 files/4 tests skipped. Initial concurrent run had one unrelated deployment-error-recovery timeout; isolated file 34/34 and full rerun both passed.
 
 Isolated test-project fixtures (cleanup required): sam-vm-control-plane-test, us-central1-a; sam-orphan-jq3vp8-owned (7791020495571601202, created00:16:29Z) and sam-orphan-jq3vp8-foreign (2345179896148739888, created00:16:31Z), two e2-micro/10GB pd-standard/no public IP/no attached SA. Both stopped after creation; age floor reached01:16:32Z. Conservative total budget < $0.10. Own SA orphan-jq3vp8, own compute role membership, own pool orphan-jq3vp8/provider staging; trust initially refuses all tokens. Must remove all own resources after proof. No shared staging credential/pool/deploy change yet, handoff requested.
 
-Fixture cleanup guard: accepted same-session schedule 76a3a75c-a98b-443d-9481-8025cb2138e2, version 1, due November15 01:45 UTC; cleanup deadline is absolute (no indefinite extension). PRShepherd is coordinating staging queue; no slot granted yet. Both fixture VMs confirmed TERMINATED00:20Z, disks autoDelete. Pool issuer is https://api.sammy.party (matches jwt.ts getIssuer); trust remains false until exact staging platform creator is captured. Full tests have one unrelated deployment-error-recovery case failure under load; inspect final failure and rerun narrowly after the suite completes before counting validation complete.
+Fixture cleanup guard: accepted same-session schedule 76a3a75c-a98b-443d-9481-8025cb2138e2, version 1, due November15 01:45 UTC; cleanup deadline is absolute (no indefinite extension). PRShepherd is coordinating staging queue; no slot granted yet. Both fixture VMs confirmed TERMINATED00:20Z, disks autoDelete. Pool issuer is https://api.sammy.party (matches jwt.ts getIssuer); trust remains false until exact staging platform creator is captured. Full validation completed green at00:49Z; no runtime changes after specialist review.
+
+## Inventory details (unchanged)
+
+The five-minute handler calls the isolated sweep; successful scans default to hourly. The selected enabled platform credential is attempted first (`getPlatformCloudCredential` selects one), then a bounded rotating page of active legacy user/project cloud credentials is resolved by exact reference/fingerprint. Each account failure is contained. Missing/failed inventory is a failure/skip, never authority to delete. This sweep inventories VMs, not detached cloud storage or IPs.
+
+| Provider | Existing inventory |
+| --- | --- |
+| Hetzner | Paginated project servers with the exact scope label selector. |
+| GCP | Paginated aggregate instances across project zones, requiring SAM-managed plus exact scope labels; unreachable zones reject the partial result. |
+| Scaleway | Servers in the configured zone plus other supported zones, with scope tags; 404 zones skipped. |
+| Vultr | Account instances, then exact scope labels filtered locally. |
+| DigitalOcean | Account droplets, then exact scope labels filtered locally. |
+| UpCloud | Account servers, then exact scope labels filtered locally. |
+| Infomaniak | Authenticated compute endpoint server detail inventory, then exact scope labels filtered locally. |
+
+Core independently checks managed/environment/installation/node/age, validated D1 claims and final immutable identity/ownership before provider VM deletion. Associated auto-delete disks follow provider semantics; detached resources are outside this inventory. The production zero-orphan observation is specifically for GCP VMs in the inspected production project.
