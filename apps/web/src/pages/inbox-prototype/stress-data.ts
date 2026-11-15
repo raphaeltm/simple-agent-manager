@@ -99,3 +99,33 @@ export const STRESS_ITEMS: InboxItem[] = [
   TWELVE_STEP_TASK,
   ...Array.from({ length: 38 }, (_, i) => makeItem(i + 1)),
 ];
+
+const ACME_CHATS = [
+  'Ship billing',
+  'Invoice PDF export',
+  'Migrate every remaining hand-rolled invoice loader to the new ledger API and prove nothing double-counts refunds across currency conversions',
+  'Dunning emails for failed renewals',
+  'Clean up staging',
+  'Backfill tax IDs for 2,400 EU customers',
+  'Chargeback webhook retries',
+  'Customer portal: download all invoices as a zip',
+];
+
+/** Long enough to wrap three lines on a phone; it is the most urgent row in the busy set. */
+const LONG_PERMISSION_TITLE =
+  'Allow pnpm db:migrate --env staging to apply 0031_invoice_pdf_url.sql, 0032_tax_id_backfill.sql and 0033_dunning_schedule.sql in one run against the shared staging database';
+
+/** The busy project for the Overview: the same 40 asks, all in Acme Billing. */
+export const BUSY_ITEMS: InboxItem[] = STRESS_ITEMS.map((item, i) => {
+  const id = item.id.replace('stress', 'busy');
+  return {
+    ...item,
+    id,
+    title:
+      id === 'busy-6'
+        ? LONG_PERMISSION_TITLE
+        : item.title.replace(/ — (SAM|Kiln website|Field Notes|Acme Billing) #/, ' #'),
+    project: 'Acme Billing',
+    chat: must(ACME_CHATS[i % ACME_CHATS.length]),
+  };
+});

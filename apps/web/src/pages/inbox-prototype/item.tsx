@@ -187,17 +187,15 @@ export function ItemBody({
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {showMeta && (
-        <p className="m-0 flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-fg-muted">
+        // Kind and agent state only: project and chat wrapped this to two lines on a phone,
+        // and both are one tap away (Context, Open chat).
+        <p className="m-0 flex min-w-0 items-center gap-x-1.5 text-xs text-fg-muted">
           <span className="font-medium text-fg-secondary">{kind.label}</span>
-          <span aria-hidden="true">·</span>
-          <span>{item.project}</span>
-          <span aria-hidden="true">·</span>
-          <span className="min-w-0 truncate">{item.chat}</span>
           <span aria-hidden="true">·</span>
           <span className={item.agent === 'paused' ? 'text-warning-fg' : ''}>
             {item.deadlineMin !== undefined
               ? `Expires in ${item.deadlineMin}m`
-              : agentStateText(item)}
+              : agentStateText(item, true)}
           </span>
         </p>
       )}
@@ -221,6 +219,17 @@ export function ItemBody({
             deciding={null}
             onDecide={() => {}}
           />
+        </div>
+      )}
+      {item.kind === 'permission' && item.permission && (
+        // What the agent wants to run lives with the ask; only the buttons are pinned.
+        <div className="sam-well flex flex-col gap-1 rounded-xl px-3 py-2.5">
+          <code className="font-mono text-[13px] break-words text-fg-primary">
+            {item.permission.title}
+          </code>
+          <span className="text-[13px] break-words text-fg-muted">
+            {item.permission.description}
+          </span>
         </div>
       )}
       {item.kind === 'task' && <TaskSteps key={item.id} item={item} />}

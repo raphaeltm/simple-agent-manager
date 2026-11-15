@@ -8,10 +8,15 @@ import { Archive, ArrowLeft, ChevronLeft, ChevronRight, MessageSquare } from 'lu
 import type { Dispatch } from 'react';
 
 import { Filters, ItemPane, ListContent } from './common';
-import { type Action, counts, findItem, queue, type State } from './model';
+import { ReceiptLine } from './item';
+import { type Action, counts, findItem, groupMembers, queue, type State } from './model';
 import { DesktopSidebar, Frame, MobileBar } from './shell';
 
-function Stepper({
+/**
+ * Previous / next. Inside a stack the item shows "2 of 3 from Ship billing", so the global
+ * "4/9" is dropped: two counters on one screen read as a contradiction.
+ */
+export function Stepper({
   state,
   dispatch,
   id,
@@ -22,6 +27,8 @@ function Stepper({
 }) {
   const q = queue(state);
   const i = q.findIndex((it) => it.id === id);
+  const item = findItem(id);
+  const inStack = Boolean(item && groupMembers(state, item).length > 1);
   return (
     <>
       <IconButton
@@ -31,9 +38,11 @@ function Stepper({
         onClick={() => dispatch({ type: 'open', id: q[i - 1]?.id ?? null })}
         showTooltip={false}
       />
-      <span className="font-mono text-xs text-fg-muted">
-        {i >= 0 ? `${i + 1}/${q.length}` : '✓'}
-      </span>
+      {!inStack && (
+        <span className="font-mono text-xs text-fg-muted">
+          {i >= 0 ? `${i + 1}/${q.length}` : '✓'}
+        </span>
+      )}
       <IconButton
         label="Next"
         icon={<ChevronRight size={20} />}
@@ -45,7 +54,7 @@ function Stepper({
   );
 }
 
-function ItemActions({ dispatch, id }: { dispatch: Dispatch<Action>; id: string }) {
+export function ItemActions({ dispatch, id }: { dispatch: Dispatch<Action>; id: string }) {
   return (
     <>
       <IconButton
@@ -57,6 +66,21 @@ function ItemActions({ dispatch, id }: { dispatch: Dispatch<Action>; id: string 
       <IconButton label="Open chat" icon={<MessageSquare size={18} />} showTooltip={false} />
     </>
   );
+}
+
+/**
+ * After an answer the walk moves straight on (B's behaviour): the previous item's receipt is
+ * one line above the next ask instead of a "Next" button.
+ */
+export function AdvanceReceipt({ state, item }: { state: State; item: { id: string } }) {
+  const last = state.lastReceipt;
+  if (!last || last === item.id) return null;
+  const text = state.resolved[last];
+  return text ? (
+    <div className="-mx-4 -mt-3 border-b border-[var(--sam-hairline)] bg-success-tint px-4 py-2">
+      <ReceiptLine text={text} />
+    </div>
+  ) : null;
 }
 
 export function DirectionA({
@@ -90,7 +114,13 @@ export function DirectionA({
             <ItemActions dispatch={dispatch} id={item.id} />
           </Pane>
           <Pane className="flex min-h-0 flex-col rounded-[var(--sam-radius-pane)]">
-            <ItemPane state={state} dispatch={dispatch} item={item} advanceOnAnswer={false} />
+            <ItemPane
+              state={state}
+              dispatch={dispatch}
+              item={item}
+              advanceOnAnswer
+              banner={<AdvanceReceipt state={state} item={item} />}
+            />
           </Pane>
         </Frame>
       );
@@ -145,7 +175,13 @@ export function DirectionA({
                   </span>
                 </div>
                 <div className="mx-auto flex min-h-0 w-full max-w-[680px] flex-1 flex-col">
-                  <ItemPane state={state} dispatch={dispatch} item={item} advanceOnAnswer={false} />
+                  <ItemPane
+                    state={state}
+                    dispatch={dispatch}
+                    item={item}
+                    advanceOnAnswer
+                    banner={<AdvanceReceipt state={state} item={item} />}
+                  />
                 </div>
               </>
             ) : (

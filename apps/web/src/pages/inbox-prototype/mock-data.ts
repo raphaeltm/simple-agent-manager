@@ -12,7 +12,15 @@ export function must<T>(value: T | undefined | null, what = 'mock value'): T {
   return value;
 }
 
-export type Kind = 'question' | 'permission' | 'secret' | 'approval' | 'task' | 'review';
+export type Kind =
+  | 'question'
+  | 'permission'
+  | 'secret'
+  | 'approval'
+  | 'task'
+  | 'review'
+  /** A task started from the Overview that never started (fire-and-forget has no chat open). */
+  | 'failed';
 export type PersonId = 'you' | 'maya' | 'jonas';
 export type LinkKind = 'idea' | 'file' | 'policy' | 'pr' | 'preview' | 'chat' | 'knowledge';
 
@@ -89,10 +97,10 @@ export const BASE_ITEMS: InboxItem[] = [
   {
     id: 'perm-migrate',
     kind: 'permission',
-    title: 'Allow running the database migration on staging',
-    why: 'The fix adds one column. The agent is holding the terminal open until you answer.',
-    project: 'SAM',
-    chat: 'Fix orphan sweep on GCP',
+    title: 'Allow running the invoices migration on staging',
+    why: 'The PDF export needs one new column. The agent is holding the terminal open until you answer.',
+    project: 'Acme Billing',
+    chat: 'Invoice PDF export',
     ageMin: 3,
     deadlineMin: 4,
     agent: 'paused',
@@ -100,7 +108,7 @@ export const BASE_ITEMS: InboxItem[] = [
     permission: {
       title: 'Run pnpm db:migrate --env staging',
       description:
-        'Applies migration 0214_add_sweep_owner.sql to the staging D1 database. Adds a nullable column, no data is rewritten.',
+        'Applies migration 0031_invoice_pdf_url.sql to the staging database. Adds a nullable column, no data is rewritten.',
       options: [
         { id: 'once', kind: 'allow_once', name: 'Allow once' },
         { id: 'always', kind: 'allow_always', name: 'Always allow in this chat' },
@@ -110,17 +118,17 @@ export const BASE_ITEMS: InboxItem[] = [
     before: [
       {
         from: 'you',
-        text: 'The orphan sweep is deleting nothing on GCP. Find out why and fix it.',
+        text: 'Customers want a PDF link on every invoice email. Add it.',
       },
       {
         from: 'agent',
-        text: 'Found it: the sweep never authenticates against GCP, so the list call returns empty. Fix is ready; it needs one migration.',
+        text: 'Renderer and upload are done. Storing the URL needs one migration; running it on staging first.',
       },
     ],
     since: [],
     links: [
-      { kind: 'pr', label: 'PR #2757' },
-      { kind: 'file', label: 'sweep-trace.md' },
+      { kind: 'pr', label: 'PR #91 (draft)' },
+      { kind: 'file', label: 'invoice-pdf.md' },
     ],
   },
   {
@@ -179,9 +187,9 @@ export const BASE_ITEMS: InboxItem[] = [
     id: 'approval-ws',
     kind: 'approval',
     title: 'Approve deleting a stuck staging workspace',
-    why: 'It has held a node for 3 days after its chat ended. Deleting it frees the node; nothing in it is unpushed.',
-    project: 'SAM',
-    chat: 'Clean up staging nodes',
+    why: 'It has held a node for 3 days after its chat ended. Deleting it frees the node for the billing tests; nothing in it is unpushed.',
+    project: 'Acme Billing',
+    chat: 'Clean up staging',
     ageMin: 40,
     agent: 'paused',
     blocking: true,
@@ -196,7 +204,7 @@ export const BASE_ITEMS: InboxItem[] = [
       targetSummary: { owner: 'raphael', status: 'running', node: 'node-hel1-07' },
     },
     before: [
-      { from: 'you', text: 'Staging has run out of nodes again. Clean it up.' },
+      { from: 'you', text: 'The billing test runs keep waiting for a node. Clean staging up.' },
       { from: 'agent', text: 'Two nodes freed. One workspace needs your approval to delete.' },
     ],
     since: [],
@@ -205,25 +213,27 @@ export const BASE_ITEMS: InboxItem[] = [
   {
     id: 'task-key',
     kind: 'task',
-    title: 'Rotate the GitHub App private key',
-    why: 'The advisory fix is merged, but the old key was in a log for 2 hours. Only an org owner can rotate it.',
-    project: 'SAM',
-    chat: 'Security advisory follow-up',
+    title: 'Roll the Stripe restricted API key',
+    why: 'The old key was printed in a CI log for 2 hours. Only a Stripe account owner can roll it.',
+    project: 'Acme Billing',
+    chat: 'Security follow-up',
     ageMin: 125,
-    agent: 'working',
+    agent: 'done',
     blocking: false,
     steps: [
-      { text: 'Open GitHub → Settings → Developer settings → GitHub Apps → SAM', done: true },
-      { text: 'Generate a new private key and download it', done: false },
-      { text: 'Paste it as GH_APP_PRIVATE_KEY in the production environment', done: false },
-      { text: 'Delete the old key in GitHub', done: false },
+      { text: 'Open Stripe → Developers → API keys', done: true },
+      { text: 'Roll the restricted key named acme-billing-ci', done: false },
+      { text: 'Paste the new key as STRIPE_RESTRICTED_KEY in project secrets', done: false },
+      { text: 'Expire the old key now rather than in 12 hours', done: false },
     ],
-    before: [{ from: 'agent', text: 'Advisory fix merged (#2748). One manual step left.' }],
+    before: [
+      { from: 'agent', text: 'CI log scrubbed and the leak closed (#87). One manual step left.' },
+    ],
     since: ['Checked staging still works with the old key', 'Wrote the rotation runbook'],
     links: [
-      { kind: 'pr', label: 'PR #2748' },
+      { kind: 'pr', label: 'PR #87' },
       { kind: 'file', label: 'key-rotation.md' },
-      { kind: 'knowledge', label: 'GH_* vs GITHUB_*' },
+      { kind: 'policy', label: 'Secrets handling' },
     ],
   },
   {
@@ -232,15 +242,15 @@ export const BASE_ITEMS: InboxItem[] = [
     title: 'Please check the new pricing page before I open the PR',
     why: 'Copy and layout are done. I want your eyes on the plan comparison table before Maya reviews the wording.',
     body: 'Three plans, monthly and yearly toggle, VAT shown separately. Mobile layout checked at 375px.',
-    project: 'Kiln website',
+    project: 'Acme Billing',
     chat: 'Pricing page rewrite',
     ageMin: 62,
-    agent: 'paused',
+    agent: 'done',
     blocking: false,
     before: [{ from: 'you', text: 'Rewrite the pricing page around the three plans.' }],
     since: [],
     links: [
-      { kind: 'preview', label: 'Preview: kiln-pr-91' },
+      { kind: 'preview', label: 'Preview: acme-pr-90' },
       { kind: 'file', label: 'pricing-copy.md' },
     ],
   },
@@ -329,7 +339,9 @@ export const ARCHIVED_ITEMS: InboxItem[] = [
   {
     ...must(BASE_ITEMS[7]),
     id: 'arch-1',
-    title: 'Use the green or the dark hero on the landing page?',
+    project: 'Acme Billing',
+    chat: 'Pricing page rewrite',
+    title: 'Use the green or the dark hero on the pricing page?',
     ageMin: 2880,
   },
   {
@@ -344,17 +356,23 @@ export const UPDATES: UpdateItem[] = [
   {
     id: 'u1',
     kind: 'pr',
+    text: 'PR #88 merged: trial logic for Starter',
+    project: 'Acme Billing',
+    ageMin: 50,
+  },
+  {
+    id: 'u2',
+    kind: 'pr',
     text: 'PR #2757 merged: orphan sweep authenticates on GCP',
     project: 'SAM',
     ageMin: 30,
   },
-  { id: 'u2', kind: 'deploy', text: 'Production deploy succeeded', project: 'SAM', ageMin: 28 },
   {
     id: 'u3',
-    kind: 'done',
-    text: 'Task complete: security advisory setup check',
-    project: 'SAM',
-    ageMin: 95,
+    kind: 'deploy',
+    text: 'Staging deploy succeeded',
+    project: 'Acme Billing',
+    ageMin: 28,
   },
   {
     id: 'u4',

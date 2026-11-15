@@ -1,14 +1,12 @@
 /**
  * PROTOTYPE ONLY — answers the few API calls the real answer components make, so
- * AttentionAnswerControls, AcpPermissionCard and SecretRequestForm run unmodified against
+ * AttentionAnswerControls and SecretRequestForm run unmodified against
  * mock data. Installed once, only while the prototype module is loaded in a dev build.
  */
 import { findItem } from './model';
 
 /** Last answer per attention marker, so the receipt can quote it. */
 export const lastAnswers = new Map<string, string>();
-/** ACP interactions answered through the real card. */
-export const answeredInteractions = new Set<string>();
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -33,7 +31,6 @@ export function installMockApi() {
     }
     m = path.match(/\/interactions\/([^/]+)\/answer$/);
     if (m && method === 'POST') {
-      answeredInteractions.add(decodeURIComponent(m[1] ?? ''));
       return later(json({ accepted: true, state: 'answered' }));
     }
     m = path.match(/\/interactions\/([^/]+)$/);

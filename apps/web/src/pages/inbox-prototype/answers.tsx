@@ -1,17 +1,17 @@
 /**
- * PROTOTYPE ONLY — the answer controls for each kind, built from the production components
- * where one exists (AttentionAnswerControls, AcpPermissionCard, SecretRequestForm, and the
- * ApprovalItem decision buttons). Their API calls are answered by mock-api.ts.
+ * PROTOTYPE ONLY — the pinned answer controls for each kind. AttentionAnswerControls and
+ * SecretRequestForm run unmodified; permission and approval pin only their decision buttons
+ * (the production cards bundle a header and description with them). API calls are answered
+ * by mock-api.ts.
  */
 import { Button } from '@simple-agent-manager/ui';
-import { Check, Send } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Check, PencilLine, Send } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 
 import { AttentionAnswerControls } from '../../components/notifications/AttentionAnswerControls';
-import { AcpPermissionCard } from '../../components/project-message-view/AcpPermissionCard';
 import { SecretRequestForm } from '../../components/project-message-view/tool-cards/SecretRequestForm';
-import type { AcpInteractionSnapshotItem } from '../../lib/api/acp-interactions';
-import { answeredInteractions, lastAnswers } from './mock-api';
+import { resolveAttentionAnswer } from '../../lib/api';
+import { lastAnswers } from './mock-api';
 import { type InboxItem, PEOPLE, secretRequestFor } from './mock-data';
 
 const PROJECT = 'proj-proto';
@@ -51,6 +51,9 @@ export function TaskSteps({ item }: { item: InboxItem }) {
   );
 }
 
+/** Above this many options a wrapping button grid is taller than a radio list. */
+const RADIO_LIST_ABOVE = 5;
+
 function QuestionControls({
   item,
   onAnswered,
@@ -59,31 +62,100 @@ function QuestionControls({
   onAnswered: (r: string) => void;
 }) {
   const [typing, setTyping] = useState(false);
+  const options = item.options ?? [];
   const resolved = () => onAnswered(`Sent “${lastAnswers.get(item.id) ?? ''}” · ${woke(item)}`);
+  const typeToggle = options.length ? (
+    <button
+      type="button"
+      onClick={() => setTyping((t) => !t)}
+      className="flex min-h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-[var(--sam-radius-control)] border border-dashed border-[var(--sam-hairline)] bg-transparent px-3 text-[13px] text-fg-secondary"
+    >
+      <PencilLine size={14} aria-hidden="true" />
+      {typing ? 'Pick an option instead' : 'Type a different answer'}
+    </button>
+  ) : null;
+  if (!typing && options.length > RADIO_LIST_ABOVE) {
+    return <RadioAnswer item={item} onResolved={resolved} extra={typeToggle} />;
+  }
   return (
-    <div className="flex flex-col gap-2">
+    // The production controls render their own wrapper; `contents` lets "Type a different
+    // answer" sit in the same row as the option buttons instead of under them.
+    <div className="flex flex-wrap items-start gap-2 [&>div[role=group]]:contents [&>div[role=group]>div.flex]:contents">
       <AttentionAnswerControls
         key={typing ? 'typing' : 'options'}
         projectId={PROJECT}
         sessionId={`chat-${item.id}`}
         markerId={item.id}
-        options={typing ? [] : (item.options ?? [])}
+        options={typing ? [] : options}
         allowCustom
         onResolved={resolved}
       />
-      {item.options?.length ? (
-        <button
-          type="button"
-          onClick={() => setTyping((t) => !t)}
-          className="self-start cursor-pointer border-0 bg-transparent p-0 text-[13px] text-accent"
-        >
-          {typing ? 'Pick an option instead' : 'Type a different answer'}
-        </button>
-      ) : null}
+      {typing ? <div className="w-full">{typeToggle}</div> : typeToggle}
     </div>
   );
 }
 
+/** Long option lists: one radio row each, one Send button. Same answer path. */
+function RadioAnswer({
+  item,
+  onResolved,
+  extra,
+}: {
+  item: InboxItem;
+  onResolved: () => void;
+  extra: ReactNode;
+}) {
+  const [choice, setChoice] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const send = async () => {
+    if (!choice) return;
+    setSending(true);
+    await resolveAttentionAnswer(PROJECT, `chat-${item.id}`, item.id, choice);
+    onResolved();
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {/* The list scrolls on its own so Send stays pinned with it. */}
+      <div
+        role="radiogroup"
+        aria-label="Options"
+        className="relative flex max-h-[min(30vh,240px)] flex-col overflow-y-auto"
+      >
+        {(item.options ?? []).map((option) => (
+          <label
+            key={option}
+            className="flex min-h-11 cursor-pointer items-center gap-3 border-b border-[var(--sam-hairline)] py-1.5 last:border-b-0"
+          >
+            <input
+              type="radio"
+              name={`opt-${item.id}`}
+              checked={choice === option}
+              onChange={() => setChoice(option)}
+              className="h-5 w-5 shrink-0 accent-[var(--sam-status-success-fg)]"
+            />
+            <span className="text-[15px] break-words text-fg-primary">{option}</span>
+          </label>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          className="min-h-11 flex-1"
+          disabled={!choice || sending}
+          onClick={() => void send()}
+        >
+          {sending ? 'Sending…' : 'Send'}
+        </Button>
+        {extra}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Only the decision buttons are pinned. The production AcpPermissionCard bundles its own
+ * title, status, deadline and description with the options; pinned whole it took over half
+ * the phone. Production would export its option row (the command is shown in the body).
+ */
 function PermissionControls({
   item,
   onAnswered,
@@ -91,27 +163,41 @@ function PermissionControls({
   item: InboxItem;
   onAnswered: (r: string) => void;
 }) {
-  const interaction = useMemo<AcpInteractionSnapshotItem>(() => {
-    const now = Date.now();
-    return {
-      interactionId: item.id,
-      kind: 'permission',
-      state: 'pending',
-      createdAt: now - item.ageMin * 60_000,
-      deadlineAt: now + (item.deadlineMin ?? 5) * 60_000,
-    };
-  }, [item]);
+  const options = item.permission?.options ?? [];
+  const allow = options.find((o) => o.kind === 'allow_once');
+  const always = options.find((o) => o.kind === 'allow_always');
+  const deny = options.find((o) => o.kind === 'reject_once');
   return (
-    <AcpPermissionCard
-      interaction={interaction}
-      projectId={PROJECT}
-      sessionId={`chat-${item.id}`}
-      canAnswer
-      onRefresh={async () => {
-        if (answeredInteractions.has(item.id))
-          onAnswered('Answer delivered · the agent carried on');
-      }}
-    />
+    <div className="flex flex-col gap-1.5">
+      <div className="grid grid-cols-2 gap-2">
+        {allow && (
+          <Button
+            className="min-h-11"
+            onClick={() => onAnswered('Allowed once · the agent carried on')}
+          >
+            {allow.name}
+          </Button>
+        )}
+        {deny && (
+          <Button
+            variant="secondary"
+            className="min-h-11"
+            onClick={() => onAnswered('Denied · the agent was told')}
+          >
+            {deny.name}
+          </Button>
+        )}
+      </div>
+      {always && (
+        <button
+          type="button"
+          onClick={() => onAnswered('Allowed for this chat · the agent carried on')}
+          className="min-h-9 cursor-pointer self-center border-0 bg-transparent text-[13px] text-fg-secondary"
+        >
+          {always.name}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -237,5 +323,21 @@ export function AnswerControls({
     }
     case 'review':
       return <ReviewControls item={item} onAnswered={onAnswered} />;
+    case 'failed':
+      return (
+        <div className="grid grid-cols-2 gap-3">
+          <Button
+            className="min-h-11"
+            onClick={() =>
+              onAnswered(`Started: ${item.title.replace(/^Couldn’t start: /, '')} · Open chat`)
+            }
+          >
+            Retry
+          </Button>
+          <Button variant="secondary" className="min-h-11">
+            Edit, then retry
+          </Button>
+        </div>
+      );
   }
 }

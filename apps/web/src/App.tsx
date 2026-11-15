@@ -196,6 +196,10 @@ const LegacyTriggerDetailRedirect = lazyNamed(
 const Sam = lazyNamed(() => import('./pages/Sam'), 'Sam');
 // PROTOTYPE ONLY (dev-only route) — remove before any merge to main.
 const InboxPrototype = lazyNamed(() => import('./pages/inbox-prototype'), 'InboxPrototype');
+const ProjectOverviewPrototype = lazyNamed(
+  () => import('./pages/inbox-prototype/overview'),
+  'ProjectOverviewPrototype'
+);
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
 const ConnectorConsent = lazyNamed(() => import('./pages/ConnectorConsent'), 'ConnectorConsent');
@@ -301,6 +305,10 @@ export default function App() {
                           element={<ErrorBoundaryAuditHarness />}
                         />
                         <Route path="/prototype/inbox" element={page(<InboxPrototype />)} />
+                        <Route
+                          path="/prototype/project-overview"
+                          element={page(<ProjectOverviewPrototype />)}
+                        />
                       </>
                     )}
                     {/* Protected routes with AppShell (persistent navigation) */}

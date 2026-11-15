@@ -1,6 +1,7 @@
 /** PROTOTYPE ONLY — list building blocks for /prototype/inbox. */
 import { PersonAvatar } from '@simple-agent-manager/ui';
 import {
+  Archive,
   CircleCheckBig,
   Eye,
   GitPullRequest,
@@ -8,13 +9,15 @@ import {
   KeyRound,
   ListChecks,
   MessageCircleQuestion,
+  MoreHorizontal,
   Rocket,
   ShieldCheck,
   ShieldQuestion,
   TrendingUp,
+  TriangleAlert,
   Users,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useRef } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { type InboxItem, type Kind, must, PEOPLE, UPDATES } from './mock-data';
 import { type Filter, formatAge, type Row } from './model';
@@ -26,17 +29,23 @@ export const KIND_META: Record<Kind, { label: string; icon: typeof Inbox }> = {
   approval: { label: 'Approval', icon: ShieldCheck },
   task: { label: 'Task', icon: ListChecks },
   review: { label: 'Review', icon: Eye },
+  failed: { label: 'Couldn’t start', icon: TriangleAlert },
 };
 
 /** Amber only when the agent is stopped on this ask: the one exception worth colour. */
 export function KindIcon({ item, size = 32 }: { item: InboxItem; size?: 28 | 32 }) {
   const Icon = KIND_META[item.kind].icon;
   const waiting = item.agent === 'paused' && item.blocking;
+  const failed = item.kind === 'failed';
   return (
     <span
       aria-hidden="true"
       className={`grid shrink-0 place-items-center rounded-full ${size === 32 ? 'h-8 w-8' : 'h-7 w-7'} ${
-        waiting ? 'bg-warning-tint text-warning-fg' : 'sam-well text-fg-muted'
+        failed
+          ? 'bg-danger-tint text-danger-fg'
+          : waiting
+            ? 'bg-warning-tint text-warning-fg'
+            : 'sam-well text-fg-muted'
       }`}
     >
       <Icon size={size === 32 ? 16 : 14} strokeWidth={2} />
@@ -45,6 +54,7 @@ export function KindIcon({ item, size = 32 }: { item: InboxItem; size?: 28 | 32 
 }
 
 export function agentStateText(item: InboxItem, long = false): string {
+  if (item.kind === 'failed') return long ? 'Never started' : 'never started';
   if (item.agent === 'paused') return long ? 'Paused, waiting on this' : 'paused on this';
   if (item.agent === 'working') return long ? 'Still working' : 'still working';
   return 'finished';
@@ -97,8 +107,11 @@ export function InboxRow({
   onOpen,
   children,
   trailing,
+  showProject = true,
 }: {
   row: Row;
+  /** Off inside a project (the project inbox, the Overview): every row is this project. */
+  showProject?: boolean;
   selectedId?: string | null;
   onOpen: (id: string) => void;
   /** Direction C puts quick answers under the row. */
@@ -142,8 +155,12 @@ export function InboxRow({
                     {row.items.length} from
                   </span>
                   <span className="min-w-0 truncate">{first.chat}</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="shrink-0">{first.project}</span>
+                  {showProject && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span className="shrink-0">{first.project}</span>
+                    </>
+                  )}
                   {row.items.some((i) => i.agent === 'paused') && (
                     <>
                       <span aria-hidden="true">·</span>
@@ -153,7 +170,7 @@ export function InboxRow({
                 </span>
               ) : (
                 <span className="mt-0.5 block">
-                  <MetaLine item={first} />
+                  <MetaLine item={first} showProject={showProject} />
                   <TeamLine item={first} />
                 </span>
               )}
@@ -173,12 +190,11 @@ export const FILTERS: { value: Filter; label: string }[] = [
   { value: 'tasks', label: 'Tasks' },
   { value: 'reviews', label: 'Reviews' },
   { value: 'updates', label: 'Updates' },
-  { value: 'archived', label: 'Archived' },
 ];
 
 /**
  * One scrolling chip row carries both levels (Needs you / Updates and the kind filters).
- * Two stacked rows cost ~44px of a 667px phone screen for a control used rarely.
+ * Archived is rare, so it lives in the ⋯ menu at the row's end instead of costing a chip.
  */
 export function FilterBar({
   value,
@@ -190,41 +206,82 @@ export function FilterBar({
   counts: Partial<Record<Filter, number>>;
 }) {
   const currentRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
     currentRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [value]);
   return (
-    <div
-      role="tablist"
-      aria-label="Inbox filters"
-      className="flex min-w-0 gap-1.5 overflow-x-auto [scrollbar-width:none]"
-    >
-      {FILTERS.map((f) => {
-        const current = f.value === value;
-        const count = counts[f.value];
-        return (
+    <div className="relative flex min-w-0 items-center gap-1.5">
+      <div
+        role="tablist"
+        aria-label="Inbox filters"
+        className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto [scrollbar-width:none]"
+      >
+        {FILTERS.map((f) => {
+          const current = f.value === value;
+          const count = counts[f.value];
+          return (
+            <button
+              key={f.value}
+              ref={current ? currentRef : undefined}
+              type="button"
+              role="tab"
+              aria-selected={current}
+              onClick={() => onChange(f.value)}
+              className={`flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] ${
+                current ? 'sam-raised font-medium text-fg-primary' : 'sam-well text-fg-muted'
+              }`}
+            >
+              {f.label}
+              {count !== undefined && count > 0 && (
+                <span
+                  className={`font-mono text-[11px] ${current ? 'text-[var(--sam-status-success-fg)]' : ''}`}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        {value === 'archived' && (
           <button
-            key={f.value}
-            ref={current ? currentRef : undefined}
+            ref={currentRef}
             type="button"
             role="tab"
-            aria-selected={current}
-            onClick={() => onChange(f.value)}
-            className={`flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] ${
-              current ? 'sam-raised font-medium text-fg-primary' : 'sam-well text-fg-muted'
-            }`}
+            aria-selected
+            className="sam-raised flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] font-medium text-fg-primary"
           >
-            {f.label}
-            {count !== undefined && count > 0 && (
-              <span
-                className={`font-mono text-[11px] ${current ? 'text-[var(--sam-status-success-fg)]' : ''}`}
-              >
-                {count}
-              </span>
-            )}
+            <Archive size={13} aria-hidden="true" /> Archived
           </button>
-        );
-      })}
+        )}
+      </div>
+      <button
+        type="button"
+        aria-label="More filters"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((o) => !o)}
+        className="sam-well grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-full border-0 text-fg-muted"
+      >
+        <MoreHorizontal size={16} aria-hidden="true" />
+      </button>
+      {menuOpen && (
+        <div
+          role="menu"
+          className="sam-glass sam-glass-rim sam-glass-live absolute top-10 right-0 z-50 flex w-48 flex-col rounded-[14px] p-1"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              onChange('archived');
+            }}
+            className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[10px] border-0 bg-transparent px-3 text-left text-sm text-fg-primary hover:bg-[var(--sam-glass-v2-raised)]"
+          >
+            <Archive size={15} aria-hidden="true" className="text-fg-muted" /> Archived
+          </button>
+        </div>
+      )}
     </div>
   );
 }

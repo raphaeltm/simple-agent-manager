@@ -1,9 +1,9 @@
 /** PROTOTYPE ONLY — state, ordering, grouping and scenes for /prototype/inbox. */
 import { ARCHIVED_ITEMS, BASE_ITEMS, type InboxItem, must, TEAM_ITEMS } from './mock-data';
-import { STRESS_ITEMS } from './stress-data';
+import { BUSY_ITEMS, STRESS_ITEMS } from './stress-data';
 
 export type Filter = 'all' | 'blocking' | 'tasks' | 'reviews' | 'updates' | 'archived';
-export type Dataset = 'base' | 'stress' | 'empty' | 'team';
+export type Dataset = 'base' | 'stress' | 'empty' | 'team' | 'busy';
 export type Direction = 'a' | 'b' | 'c';
 
 export interface State {
@@ -19,6 +19,10 @@ export interface State {
   /** The item whose receipt is showing now. */
   lastReceipt: string | null;
   archived: string[];
+  /** A project name to scope the inbox to (the project inbox and the Overview); null = all. */
+  scope: string | null;
+  /** Items filed while the prototype runs (a failed start from the Overview's composer). */
+  extra: InboxItem[];
 }
 
 export type Action =
@@ -27,7 +31,9 @@ export type Action =
   | { type: 'context'; open: boolean }
   | { type: 'list'; open: boolean }
   | { type: 'answered'; id: string; receipt: string; advance: boolean }
-  | { type: 'archive'; id: string; advance: boolean };
+  | { type: 'archive'; id: string; advance: boolean }
+  | { type: 'file'; item: InboxItem }
+  | { type: 'scope'; scope: string | null };
 
 export const SCENES: Record<string, Partial<State>> = {
   home: {},
@@ -67,6 +73,8 @@ export function sceneState(scene: string | null): State {
     resolved: {},
     lastReceipt: null,
     archived: [],
+    scope: null,
+    extra: [],
   };
   return { ...base, ...(scene ? SCENES[scene] : {}) };
 }
@@ -74,15 +82,24 @@ export function sceneState(scene: string | null): State {
 function datasetItems(dataset: Dataset): InboxItem[] {
   if (dataset === 'stress') return STRESS_ITEMS;
   if (dataset === 'team') return [...TEAM_ITEMS, ...BASE_ITEMS];
+  if (dataset === 'busy') return BUSY_ITEMS;
   if (dataset === 'empty') return [];
   return BASE_ITEMS;
 }
 
+/** Every item filed at runtime, so lookups by id find it (prototype-only registry). */
+const FILED: InboxItem[] = [];
+
 export function findItem(id: string | null): InboxItem | undefined {
   if (!id) return undefined;
-  return [...STRESS_ITEMS, ...TEAM_ITEMS, ...BASE_ITEMS, ...ARCHIVED_ITEMS].find(
-    (i) => i.id === id
-  );
+  return [
+    ...FILED,
+    ...STRESS_ITEMS,
+    ...BUSY_ITEMS,
+    ...TEAM_ITEMS,
+    ...BASE_ITEMS,
+    ...ARCHIVED_ITEMS,
+  ].find((i) => i.id === id);
 }
 
 /**
@@ -92,8 +109,16 @@ export function findItem(id: string | null): InboxItem | undefined {
  * approval.
  */
 function rank(a: InboxItem, b: InboxItem): number {
+  // A start that failed sits with the live deadlines: the person fired and forgot, and
+  // nothing else will tell them.
   const tier = (i: InboxItem) =>
-    i.team?.claimedBy ? 3 : i.deadlineMin !== undefined ? 0 : i.blocking ? 1 : 2;
+    i.team?.claimedBy
+      ? 3
+      : i.deadlineMin !== undefined || i.kind === 'failed'
+        ? 0
+        : i.blocking
+          ? 1
+          : 2;
   if (tier(a) !== tier(b)) return tier(a) - tier(b);
   if (tier(a) === 0) return (a.deadlineMin ?? 0) - (b.deadlineMin ?? 0);
   return b.ageMin - a.ageMin;
@@ -101,17 +126,26 @@ function rank(a: InboxItem, b: InboxItem): number {
 
 /** Open asks (Needs you), before filtering. */
 export function openItems(state: State): InboxItem[] {
-  return datasetItems(state.dataset)
+  return scoped(state, [...state.extra, ...datasetItems(state.dataset)])
     .filter((i) => !state.archived.includes(i.id) && !state.resolved[i.id])
     .sort(rank);
 }
 
+function scoped(state: State, items: InboxItem[]): InboxItem[] {
+  return state.scope ? items.filter((i) => i.project === state.scope) : items;
+}
+
+/** What the badge and "Needs you" count: open asks you can act on (not a teammate's). */
+export function actionable(state: State): InboxItem[] {
+  return openItems(state).filter((i) => !i.team?.claimedBy);
+}
+
 export function filtered(state: State): InboxItem[] {
   if (state.filter === 'archived') {
-    return [
+    return scoped(state, [
       ...datasetItems(state.dataset).filter((i) => state.archived.includes(i.id)),
       ...(state.dataset === 'empty' ? [] : ARCHIVED_ITEMS),
-    ];
+    ]);
   }
   const open = openItems(state);
   if (state.filter === 'blocking') return open.filter((i) => i.blocking);
@@ -163,7 +197,8 @@ export function groupMembers(state: State, item: InboxItem): InboxItem[] {
 export function counts(state: State) {
   const open = openItems(state);
   return {
-    all: open.length,
+    // A team item a teammate took is listed (last) but not counted: you cannot act on it.
+    all: actionable(state).length,
     blocking: open.filter((i) => i.blocking).length,
     tasks: open.filter((i) => i.kind === 'task').length,
     reviews: open.filter((i) => i.kind === 'review').length,
@@ -190,17 +225,28 @@ export function reducer(state: State, action: Action): State {
         contextOpen: false,
       };
     }
+    case 'scope':
+      return { ...state, scope: action.scope, filter: 'all', openId: null, lastReceipt: null };
+    case 'file':
+      FILED.push(action.item);
+      return { ...state, extra: [action.item, ...state.extra] };
     case 'archive': {
+      // Archive = closed: the item leaves Needs you and the agent is told you will not act
+      // (confirmed by the owner, 2026-11-15, idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9 section 10).
       const next = nextAfter(state, action.id);
       return {
         ...state,
         archived: [...state.archived, action.id],
+        resolved: { ...state.resolved, [action.id]: ARCHIVE_RECEIPT },
+        lastReceipt: action.id,
         openId: action.advance ? (next?.id ?? null) : null,
-        lastReceipt: null,
+        contextOpen: false,
       };
     }
   }
 }
+
+export const ARCHIVE_RECEIPT = 'Archived · the agent was told you won’t act on it';
 
 export function nextAfter(state: State, id: string): InboxItem | undefined {
   const q = queue(state);
@@ -209,6 +255,7 @@ export function nextAfter(state: State, id: string): InboxItem | undefined {
 }
 
 export function formatAge(min: number): string {
+  if (min < 1) return 'now';
   if (min < 60) return `${min}m`;
   if (min < 1440) return `${Math.round(min / 60)}h`;
   return `${Math.round(min / 1440)}d`;

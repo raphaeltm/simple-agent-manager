@@ -8,6 +8,7 @@ import { GroupStepper, ItemBody, ReceiptLine } from './item';
 import type { InboxItem } from './mock-data';
 import {
   type Action,
+  ARCHIVE_RECEIPT,
   counts,
   filtered,
   groupMembers,
@@ -60,6 +61,7 @@ export function ListContent({
           row={row}
           selectedId={selectedId}
           onOpen={onOpen}
+          showProject={!state.scope}
         />
       ))}
     </ul>
@@ -83,8 +85,9 @@ export function ItemPane({
   advanceOnAnswer: boolean;
   banner?: ReactNode;
 }) {
-  const receipt = state.resolved[item.id];
-  const next = receipt ? nextAfter(state, item.id) : undefined;
+  const closed = state.archived.includes(item.id) || item.id.startsWith('arch-');
+  const receipt = state.resolved[item.id] ?? (closed ? ARCHIVE_RECEIPT : undefined);
+  const next = receipt && !closed ? nextAfter(state, item.id) : undefined;
   return (
     <>
       <div className="relative min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-4">
@@ -103,7 +106,11 @@ export function ItemPane({
         {receipt ? (
           <div className="flex flex-col gap-3">
             <ReceiptLine text={receipt} />
-            {next ? (
+            {closed ? (
+              <p className="m-0 text-sm text-fg-muted">
+                Closed. Answering it now would need a new ask from the agent.
+              </p>
+            ) : next ? (
               <Button
                 className="min-h-11 w-full justify-between"
                 onClick={() => dispatch({ type: 'open', id: next.id })}
