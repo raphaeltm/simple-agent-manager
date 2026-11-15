@@ -64,10 +64,17 @@ export function readMessageIngestState(value: unknown): MessageIngestState | nul
 
 /** Seal only a new canonical row; historical transcript rows are never changed. */
 export function sealMessageStream(sql: SqlStorage, sessionId?: string): void {
+  if (sessionId) {
+    sql.exec(
+      `UPDATE chat_sessions SET stream_ingest_state = json_set(stream_ingest_state, '$.open', NULL)
+      WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL AND id = ?`,
+      sessionId
+    );
+    return;
+  }
   sql.exec(
     `UPDATE chat_sessions SET stream_ingest_state = json_set(stream_ingest_state, '$.open', NULL)
-    WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL${sessionId ? ' AND id = ?' : ''}`,
-    ...(sessionId ? [sessionId] : [])
+    WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL`
   );
 }
 
