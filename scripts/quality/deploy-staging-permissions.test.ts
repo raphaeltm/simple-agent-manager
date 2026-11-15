@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -147,14 +147,14 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
     }
   }
 
-  const combinedWorkflows = `${staging.replace(block(staging, /^  lease:\s*$/m, /^  [a-zA-Z0-9_-]+:\s*$/m), '')}\n${reusable}`;
+  const combinedWorkflows = `${staging.replace(block(staging, /^ {2}lease:\s*$/m, /^ {2}[a-zA-Z0-9_-]+:\s*$/m), '')}\n${reusable}`;
   for (const consumer of PR_WRITE_CONSUMERS) {
     if (consumer.test(combinedWorkflows)) {
       errors.push(`pull-request write consumer is present: ${consumer.source}`);
     }
   }
 
-  const deployCall = block(staging, /^  deploy:\s*$/m, /^  [a-zA-Z0-9_-]+:\s*$/m);
+  const deployCall = block(staging, /^ {2}deploy:\s*$/m, /^ {2}[a-zA-Z0-9_-]+:\s*$/m);
   for (const requiredCallLine of [
     'uses: ./.github/workflows/deploy-reusable.yml',
     "environment: ${{ inputs.environment || 'staging' }}",
@@ -167,7 +167,7 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
     }
   }
 
-  const dryRunInput = block(reusable, /^      dry_run:\s*$/m, /^      [a-zA-Z0-9_-]+:\s*$/m);
+  const dryRunInput = block(reusable, /^ {6}dry_run:\s*$/m, /^ {6}[a-zA-Z0-9_-]+:\s*$/m);
   for (const requiredInputLine of ['required: false', 'type: boolean', 'default: false']) {
     if (!dryRunInput.includes(requiredInputLine)) {
       errors.push(`reusable dry-run input lost contract line: ${requiredInputLine}`);
@@ -184,7 +184,7 @@ describe('staging deployment permission contract', () => {
 
   it('rejects the historical workflow-wide pull-request write authority', () => {
     const historicalGrant = stagingWorkflow.replace(
-      /permissions:\n(?:  [a-z-]+: [a-z-]+\n)+/,
+      /permissions:\n(?: {2}[a-z-]+: [a-z-]+\n)+/,
       'permissions:\n  contents: read\n  pull-requests: write\n'
     );
 
@@ -217,7 +217,7 @@ describe('staging deployment permission contract', () => {
       ? permissionLine
       : `    permissions:\n${permissionLine}`;
     const alternateSpelling = stagingWorkflow.replace(
-      /^  smoke-tests:\s*$/m,
+      /^ {2}smoke-tests:\s*$/m,
       (jobHeader) => `${jobHeader}\n${permissionBlock}`
     );
 
@@ -226,7 +226,7 @@ describe('staging deployment permission contract', () => {
 
   it('rejects a reusable job override that silently removes checkout authority', () => {
     const checkoutBreakingOverride = reusableWorkflow.replace(
-      /^  deploy:\s*$/m,
+      /^ {2}deploy:\s*$/m,
       '  deploy:\n    permissions:\n      deployments: none\n      id-token: none'
     );
 
@@ -237,7 +237,7 @@ describe('staging deployment permission contract', () => {
 
   it('accepts the exact root permission map regardless of key order', () => {
     const reorderedRoot = stagingWorkflow.replace(
-      /permissions:\n(?:  [a-z-]+: [a-z-]+\n)+/,
+      /permissions:\n(?: {2}[a-z-]+: [a-z-]+\n)+/,
       'permissions:\n  id-token: none\n  contents: read\n  deployments: none\n'
     );
 
@@ -257,7 +257,7 @@ describe('staging deployment permission contract', () => {
 
   it('rejects broad write-all authority', () => {
     const broadGrant = stagingWorkflow.replace(
-      /permissions:\n(?:  [a-z-]+: [a-z-]+\n)+/,
+      /permissions:\n(?: {2}[a-z-]+: [a-z-]+\n)+/,
       'permissions: write-all\n'
     );
 
