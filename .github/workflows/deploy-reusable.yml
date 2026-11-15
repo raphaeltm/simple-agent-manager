@@ -2028,55 +2028,6 @@ jobs:
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
-      # Secondary installations only (never production; the script re-checks the allowlist):
-      # seed the agent test users, copy a portable cloud credential from the primary
-      # installation and register the smoke token. Idempotent; see the script header.
-      - name: Bootstrap Secondary Installation
-        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) && steps.deploy_resources.outputs.secondary == 'true' && inputs.environment != 'production' }}
-        working-directory: infra
-        run: |
-          read_output() {
-            local value
-            value="$(pulumi stack output --stack "$1" "$2" --show-secrets)"
-            if [ -z "$value" ]; then
-              echo "::error::Pulumi output $2 is empty on stack $1" >&2
-              return 1
-            fi
-            printf '%s' "$value"
-          }
-          TARGET_D1_ID="$(read_output "$TARGET_STACK" d1DatabaseId)"
-          SOURCE_D1_ID="$(read_output "$PRIMARY_STACK" d1DatabaseId)"
-          TARGET_ENCRYPTION_KEY="$(read_output "$TARGET_STACK" encryptionKey)"
-          echo "::add-mask::$TARGET_ENCRYPTION_KEY"
-          if [ -n "$PRIMARY_ENCRYPTION_KEY_OVERRIDE" ]; then
-            SOURCE_ENCRYPTION_KEY="$PRIMARY_ENCRYPTION_KEY_OVERRIDE"
-          else
-            SOURCE_ENCRYPTION_KEY="$(read_output "$PRIMARY_STACK" encryptionKey)"
-            echo "::add-mask::$SOURCE_ENCRYPTION_KEY"
-          fi
-          if [ "$TARGET_D1_ID" = "$SOURCE_D1_ID" ] || [ "$TARGET_STACK" = "$PRIMARY_STACK" ]; then
-            echo "::error::Target and primary installation resolve to the same stack or database."
-            exit 1
-          fi
-          export TARGET_D1_ID SOURCE_D1_ID TARGET_ENCRYPTION_KEY SOURCE_ENCRYPTION_KEY
-          cd .. && pnpm tsx scripts/deploy/bootstrap-staging-installation.ts bootstrap
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          INSTALLATION: ${{ steps.deploy_resources.outputs.installation }}
-          DEPLOY_ENVIRONMENT: ${{ steps.deploy_resources.outputs.credential_environment }}
-          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
-          TARGET_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
-          PRIMARY_STACK: ${{ steps.deploy_resources.outputs.primary_stack }}
-          # The primary Worker's keys: an Environment override wins over Pulumi, as in
-          # configure-secrets.sh. The secondary never receives these overrides.
-          PRIMARY_ENCRYPTION_KEY_OVERRIDE: ${{ secrets.ENCRYPTION_KEY }}
-          SOURCE_CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
-          SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
-
       # Wrangler starts gradual rollouts before returning; both deployment paths
       # must wait for the exact targets to finish before reporting success.
       - name: Wait for container rollout completion
@@ -2144,6 +2095,56 @@ jobs:
           exit 1
         env:
           API_URL: ${{ steps.deploy_resources.outputs.api_url }}
+
+      # Secondary installations only (never production; the script re-checks the allowlist):
+      # seed the agent test users, copy a portable cloud credential from the primary
+      # installation, register the smoke token, then pick the shared pool's machines through
+      # the admin API (so it runs after the health check). Idempotent; see the script header.
+      - name: Bootstrap Secondary Installation
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) && steps.deploy_resources.outputs.secondary == 'true' && inputs.environment != 'production' }}
+        working-directory: infra
+        run: |
+          read_output() {
+            local value
+            value="$(pulumi stack output --stack "$1" "$2" --show-secrets)"
+            if [ -z "$value" ]; then
+              echo "::error::Pulumi output $2 is empty on stack $1" >&2
+              return 1
+            fi
+            printf '%s' "$value"
+          }
+          TARGET_D1_ID="$(read_output "$TARGET_STACK" d1DatabaseId)"
+          SOURCE_D1_ID="$(read_output "$PRIMARY_STACK" d1DatabaseId)"
+          TARGET_ENCRYPTION_KEY="$(read_output "$TARGET_STACK" encryptionKey)"
+          echo "::add-mask::$TARGET_ENCRYPTION_KEY"
+          if [ -n "$PRIMARY_ENCRYPTION_KEY_OVERRIDE" ]; then
+            SOURCE_ENCRYPTION_KEY="$PRIMARY_ENCRYPTION_KEY_OVERRIDE"
+          else
+            SOURCE_ENCRYPTION_KEY="$(read_output "$PRIMARY_STACK" encryptionKey)"
+            echo "::add-mask::$SOURCE_ENCRYPTION_KEY"
+          fi
+          if [ "$TARGET_D1_ID" = "$SOURCE_D1_ID" ] || [ "$TARGET_STACK" = "$PRIMARY_STACK" ]; then
+            echo "::error::Target and primary installation resolve to the same stack or database."
+            exit 1
+          fi
+          export TARGET_D1_ID SOURCE_D1_ID TARGET_ENCRYPTION_KEY SOURCE_ENCRYPTION_KEY
+          cd .. && pnpm tsx scripts/deploy/bootstrap-staging-installation.ts bootstrap
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          INSTALLATION: ${{ steps.deploy_resources.outputs.installation }}
+          DEPLOY_ENVIRONMENT: ${{ steps.deploy_resources.outputs.credential_environment }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
+          TARGET_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
+          PRIMARY_STACK: ${{ steps.deploy_resources.outputs.primary_stack }}
+          # The primary Worker's keys: an Environment override wins over Pulumi, as in
+          # configure-secrets.sh. The secondary never receives these overrides.
+          PRIMARY_ENCRYPTION_KEY_OVERRIDE: ${{ secrets.ENCRYPTION_KEY }}
+          SOURCE_CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
 
       - name: Output Deployment URLs
         id: output

@@ -6,7 +6,8 @@
  *   2. a platform cloud credential so VMs can be provisioned, copied from the primary
  *      installation of the same credential environment (preferring GCP over Hetzner);
  *   3. the staging smoke token, so the deploy's smoke tests also run against this installation;
- *   4. an agent sign-in trust naming the two users (`derive-trust` mode, set as a Worker secret).
+ *   4. an agent sign-in trust naming the two users (`derive-trust` mode, set as a Worker secret);
+ *   5. machines in the shared compute pool (bootstrap-installation-pool.ts), via the admin API.
  *
  * Every write is keyed on a fixed ID and safe to repeat. The script refuses to run unless the
  * installation is a registered secondary installation of the given non-production environment.
@@ -18,6 +19,7 @@
  */
 import { appendFileSync } from 'node:fs';
 
+import { readPrimaryPoolPicks, seedInstallationPool } from './bootstrap-installation-pool';
 import { SECONDARY_INSTALLATIONS } from './staging-installations.mjs';
 
 /** The two statements the bootstrap needs from a D1 database. */
@@ -361,10 +363,16 @@ export async function bootstrapInstallation(input: BootstrapInput): Promise<Boot
     log(`smoke token registered for ${admin.id}`);
   }
 
-  const { plaintext: _plaintext, ...cloudCredential } = selected;
   return {
     users: users.map((user) => user.id),
-    cloudCredential: { ...cloudCredential, targetId: credentialId },
+    // Never the plaintext: the report is printed.
+    cloudCredential: {
+      provider: selected.provider,
+      sourceTable: selected.sourceTable,
+      sourceId: selected.sourceId,
+      authType: selected.authType,
+      targetId: credentialId,
+    },
     smokeToken,
   };
 }
@@ -444,12 +452,13 @@ async function main(): Promise<void> {
     }
     const targetEncryptionKey = requireEnv('TARGET_ENCRYPTION_KEY');
     const sourceEncryptionKey = requireEnv('SOURCE_ENCRYPTION_KEY');
+    const source = cloudflareD1({ accountId, apiToken, databaseId: sourceDatabaseId });
     const report = await bootstrapInstallation({
       installation,
       environment,
       baseDomain,
       target: cloudflareD1({ accountId, apiToken, databaseId: targetDatabaseId }),
-      source: cloudflareD1({ accountId, apiToken, databaseId: sourceDatabaseId }),
+      source,
       targetEncryptionKey,
       targetCredentialKey:
         process.env.TARGET_CREDENTIAL_ENCRYPTION_KEY?.trim() || targetEncryptionKey,
@@ -457,6 +466,22 @@ async function main(): Promise<void> {
         process.env.SOURCE_CREDENTIAL_ENCRYPTION_KEY?.trim() || sourceEncryptionKey,
       smokeTestToken: process.env.SMOKE_TEST_TOKEN,
     });
+    // The pool is seeded through the admin API as the bootstrap admin, which signs in with the
+    // smoke token registered above. Without that token the pool stays empty: VM work cannot run.
+    const smokeTestToken = process.env.SMOKE_TEST_TOKEN?.trim();
+    let pool = 'not seeded (no SMOKE_TEST_TOKEN)';
+    if (smokeTestToken) {
+      const seeded = await seedInstallationPool({
+        apiBaseUrl: `https://api.${baseDomain}`,
+        appOrigin: `https://app.${baseDomain}`,
+        smokeTestToken,
+        primaryPicks: await readPrimaryPoolPicks(source),
+        credentialId: report.cloudCredential.targetId,
+      });
+      pool = `${seeded.activated} activated, ${seeded.alreadyActive} already active`;
+    } else {
+      console.log('::warning::SMOKE_TEST_TOKEN is not set; the installation pool was not seeded.');
+    }
     const summary = process.env.GITHUB_STEP_SUMMARY;
     if (summary) {
       appendFileSync(
@@ -466,6 +491,7 @@ async function main(): Promise<void> {
           `- Users: ${report.users.join(', ')}`,
           `- Platform cloud credential: ${report.cloudCredential.provider} from ${report.cloudCredential.sourceTable} ${report.cloudCredential.sourceId}`,
           `- Smoke token: ${report.smokeToken}`,
+          `- Installation pool: ${pool}`,
           '',
         ].join('\n')
       );
