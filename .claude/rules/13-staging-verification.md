@@ -3,6 +3,7 @@
 Keep this root rule compact. The full procedure is preserved at `.agent-instructions/reference/rules/13-staging-verification-full.md`.
 
 - Code PRs require staging deployment and live verification unless the change is documentation-only, config-only, or task-file-only.
+- There are two staging installations, `staging` (`sammy.party`) and `staging2` (`sammy2.party`), each with its own lease and data. Take whichever is free and pass it as `-f environment=<name>`; staging2 sign-in is workload identity only (full reference, "Two Staging Installations").
 - Read the latest GitHub deployment with task `staging-lease` for your environment before `deploy-staging.yml`; its serialized lease job enforces ownership. Pass `sam_task_id` and optional `lease_hold_minutes`.
 - If a foreign branch holds an unexpired lease, schedule a one-time wake at `expiresAt` instead of polling or coordinating in chat. No active run plus five minutes is not a release.
 - Same-branch redeploys renew; `lease_action=acquire` reserves/renews without deployment; `lease_action=release` frees the holder’s slot after live checks. Confirm release success. Expiry also frees it. Missing records bootstrap free; malformed records/API errors fail closed. Commands and configurable duration defaults/cap: full reference, section 1.

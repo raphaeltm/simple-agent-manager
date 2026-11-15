@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 const CI_WORKFLOW_PATH = new URL('../../.github/workflows/ci.yml', import.meta.url);
