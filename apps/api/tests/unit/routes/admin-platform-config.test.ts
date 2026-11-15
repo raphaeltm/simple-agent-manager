@@ -164,7 +164,7 @@ describe('admin platform config routes', () => {
     await expect(res.json()).resolves.toMatchObject({
       status: {
         integrations: {
-          gitlabOAuth: { configured: true, label: 'set here' },
+          gitlabOAuth: { configured: true, label: 'stored in SAM' },
         },
       },
     });
@@ -284,7 +284,7 @@ describe('admin platform config routes', () => {
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-        body: JSON.stringify({ config: { googleInfrastructure: { remove: true } } }),
+        body: JSON.stringify({ config: { clear: ['googleInfrastructureOAuth'] } }),
       },
       env
     );

@@ -2,13 +2,14 @@ import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { encrypt } from './encryption';
+import { INTEGRATION_GROUP_STORAGE } from './platform-config-groups';
 import {
   INTEGRATION_CREDENTIAL_TYPE,
   SECRET_KINDS,
   SETTING_KEYS,
   trimOptional,
 } from './platform-config-store';
-import type { PlatformIntegrationInput } from './platform-config-types';
+import type { PlatformIntegrationGroup, PlatformIntegrationInput } from './platform-config-types';
 
 export function settingStatement(
   env: Env,
@@ -109,26 +110,17 @@ export async function buildPlatformIntegrationStatements(
       settingStatement(env, SETTING_KEYS.googleClientId, googleClientId, updatedBy, now)
     );
 
-  if (googleInfrastructure.remove) {
+  const infrastructureClientId = trimOptional(googleInfrastructure.clientId);
+  if (infrastructureClientId) {
     statements.push(
-      env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(
-        SETTING_KEYS.googleInfrastructureClientId
-      ),
-      env.DATABASE.prepare(
-        'DELETE FROM platform_credentials WHERE credential_type = ? AND provider = ? AND credential_kind = ?'
-      ).bind(
-        INTEGRATION_CREDENTIAL_TYPE,
-        'google-infrastructure',
-        SECRET_KINDS.googleInfrastructureClientSecret
+      settingStatement(
+        env,
+        SETTING_KEYS.googleInfrastructureClientId,
+        infrastructureClientId,
+        updatedBy,
+        now
       )
     );
-  } else {
-    const clientId = trimOptional(googleInfrastructure.clientId);
-    if (clientId) {
-      statements.push(
-        settingStatement(env, SETTING_KEYS.googleInfrastructureClientId, clientId, updatedBy, now)
-      );
-    }
   }
 
   const gitlabHost = trimOptional(gitlab.host);
@@ -212,21 +204,19 @@ export async function buildPlatformIntegrationStatements(
     );
   }
 
-  if (!googleInfrastructure.remove) {
-    const clientSecret = trimOptional(googleInfrastructure.clientSecret);
-    if (clientSecret) {
-      statements.push(
-        await secretUpsertStatement(
-          env,
-          'google-infrastructure',
-          SECRET_KINDS.googleInfrastructureClientSecret,
-          'Google infrastructure OAuth client secret',
-          clientSecret,
-          updatedBy,
-          now
-        )
-      );
-    }
+  const infrastructureClientSecret = trimOptional(googleInfrastructure.clientSecret);
+  if (infrastructureClientSecret) {
+    statements.push(
+      await secretUpsertStatement(
+        env,
+        'google-infrastructure',
+        SECRET_KINDS.googleInfrastructureClientSecret,
+        'Google infrastructure OAuth client secret',
+        infrastructureClientSecret,
+        updatedBy,
+        now
+      )
+    );
   }
 
   const gitlabClientSecret = trimOptional(gitlab.clientSecret);
@@ -244,5 +234,25 @@ export async function buildPlatformIntegrationStatements(
     );
   }
 
+  for (const group of new Set(input.clear ?? [])) {
+    statements.push(...clearIntegrationGroupStatements(env, group));
+  }
+
   return statements;
+}
+
+/** Deletes every stored row a group owns, so resolution falls back to the environment or unset. */
+function clearIntegrationGroupStatements(
+  env: Env,
+  group: PlatformIntegrationGroup
+): D1PreparedStatement[] {
+  const storage = INTEGRATION_GROUP_STORAGE[group];
+  return [
+    ...storage.settings.map((setting) => deleteSettingStatement(env, setting.key)),
+    ...storage.credentials.map((credential) =>
+      env.DATABASE.prepare(
+        'DELETE FROM platform_credentials WHERE credential_type = ? AND provider = ? AND credential_kind = ?'
+      ).bind(INTEGRATION_CREDENTIAL_TYPE, credential.provider, credential.kind)
+    ),
+  ];
 }

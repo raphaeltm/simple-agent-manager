@@ -25,6 +25,7 @@ import {
   selectGitLabOAuthConfig,
   selectGoogleLoginOAuthConfig,
 } from './services/platform-config';
+import { scheduleAccountLinkedAlert } from './services/security-alerts';
 import { isSignupApprovalRequired } from './services/signup-approval';
 
 export { refreshGitHubAccessToken };
@@ -351,6 +352,15 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       },
     },
     databaseHooks: {
+      // Owner alert when a social sign-in is linked to an admin or superadmin (best-effort).
+      account: {
+        create: {
+          after: (account) => {
+            scheduleAccountLinkedAlert(env, account, options);
+            return Promise.resolve();
+          },
+        },
+      },
       user: {
         create: {
           before: async (incoming) => {

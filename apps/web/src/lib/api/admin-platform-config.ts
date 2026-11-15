@@ -1,20 +1,29 @@
 import { request } from './client';
 
-export type PlatformConfigSource = 'runtime' | 'environment' | 'unset';
+/** `runtime` = stored in this installation's database; `environment` = Worker env fallback. */
+export type PlatformConfigSource = 'runtime' | 'environment' | 'legacy-kv' | 'unset';
 
 export interface PlatformConfigFieldStatus {
   configured: boolean;
   source: PlatformConfigSource;
+  /** Server-provided source wording, e.g. "stored in SAM". */
+  label: string;
   updatedAt?: string | null;
   updatedBy?: string | null;
+  /** Who last wrote a stored value, e.g. "first-run setup (unauthenticated)". */
+  updatedByLabel?: string | null;
 }
 
 export interface PlatformIntegrationStatus {
   configured: boolean;
   source: PlatformConfigSource;
   label: string;
+  /** True when at least one value is stored in SAM, so Clear would change something. */
+  clearable?: boolean;
   fields: Record<string, PlatformConfigFieldStatus>;
 }
+
+export type PlatformIntegrationGroup = keyof PlatformConfigStatus['integrations'];
 
 export type FeedbackProjectState = 'unset' | 'ready' | 'missing' | 'inaccessible';
 
@@ -63,7 +72,6 @@ export interface PlatformIntegrationConfigInput {
   googleInfrastructure?: {
     clientId?: string;
     clientSecret?: string;
-    remove?: boolean;
   };
   gitlab?: {
     host?: string;
@@ -74,6 +82,8 @@ export interface PlatformIntegrationConfigInput {
     projectId?: string;
     remove?: boolean;
   };
+  /** Delete the stored values of these integration groups. */
+  clear?: PlatformIntegrationGroup[];
 }
 
 export interface PlatformConfigStatusResponse {

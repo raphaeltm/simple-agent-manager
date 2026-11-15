@@ -250,7 +250,7 @@ describe('setup routes', () => {
       completed: true,
       status: {
         integrations: {
-          gitlabOAuth: { configured: true, label: 'set here' },
+          gitlabOAuth: { configured: true, label: 'stored in SAM' },
         },
       },
     });

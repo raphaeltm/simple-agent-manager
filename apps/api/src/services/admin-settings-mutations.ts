@@ -24,7 +24,8 @@ import { INTEGRATION_CREDENTIAL_TYPE } from './platform-config-store';
 import type { PlatformIntegrationInput } from './platform-config-types';
 import { validatePlatformIntegrationInput } from './platform-config-validation';
 
-type AuditChange = { name: AdminSettingName; action: 'set' | 'reset' };
+/** Registry names, plus the legacy integration names (GitHub App and webhook) audited on save and clear. */
+type AuditChange = { name: AdminSettingName | `integration.${string}`; action: 'set' | 'reset' };
 function auditStatements(
   env: Env,
   changes: AuditChange[],

@@ -120,6 +120,22 @@ Fresh deployments can keep most platform integration credentials out of GitHub A
 
 Before users connect GCP accounts, follow [Connect Google Cloud](/docs/guides/google-cloud/) to enable the infrastructure OAuth-client project APIs and configure its callback. The guide also explains why disabled APIs can appear as permission errors.
 
+### Check where a value came from, and clear one
+
+Each integration and field on **Admin → Integrations** shows where its value comes from: **stored in SAM** (saved in `/setup`, on this page, or in **Admin → Settings**), **Worker environment fallback** (a `GH_*`, `GOOGLE_*` or `GITLAB_*` variable from your GitHub Environment), or **not configured**. A stored value also shows when it changed and who changed it. A value written by `/setup` reads **first-run setup (unauthenticated)**, because anyone holding the setup token can write it.
+
+To remove a stored integration, select **Clear** on its card and confirm. SAM deletes the stored values, including the encrypted secret, and records a `reset` for each field in the settings audit. The environment fallback takes over if one is set; otherwise the integration is off and its sign-in button disappears. **Clear** appears only on cards that have a stored value.
+
+### Security alerts by email
+
+When the deployment can send email (see the optional email permissions above), SAM emails every active superadmin when:
+
+- an integration value is set or cleared, on this page or in **Admin → Settings**, naming who did it;
+- first-run setup completes;
+- a GitHub, Google or GitLab sign-in is linked to an admin or superadmin account.
+
+The emails come from `security@agents.yourdomain.com` and link to the admin page to review. Before the first superadmin exists, the owner email the installer recorded (`BOOTSTRAP_OWNER_EMAIL`) gets them instead. Sending is best-effort: a failed email is logged (`security_alert.send_failed`) and never blocks the change. Without email, nothing is sent.
+
 ### Set up GitLab sign-in
 
 To let people sign in with GitLab and create projects from GitLab repositories:
