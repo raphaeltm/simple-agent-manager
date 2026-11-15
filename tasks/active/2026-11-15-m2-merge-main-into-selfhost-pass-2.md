@@ -29,6 +29,14 @@ Merge them into the integration branch so landed code resolves to main's version
   owner check, and the branch test control "a token install with an owner stays open"
   contradicted main's #2748 fix (red). Helper removed, control asserts main's 410 (`dd95a017b`).
 
+- Second merge (coordinator request, 2026-11-15 16:07 UTC): main moved to `1e49113c6`
+  (#2743, #2757 orphan sweep on GCP, #2761). Merge commit `105393655` (parents `f24eb53a8` and
+  `1e49113c6`). One conflict, `apps/api/src/scheduled/handler.ts`: the branch's reverse-tunnel
+  lease sweep plus main's orphan block. Every other #2757 file equals main. Box PR #2750 (head
+  `96cc0ec89`) now conflicts with this head in 3 files (handler-kill-switch test, orphan
+  provider-boundary test, configuration.md); it merged cleanly before the second merge.
+- Workspace was recreated mid-task (node_modules, .tmp, .do-state.md lost); all commits were pushed.
+
 ## Checklist
 
 - [x] Merge origin/main with a real merge commit; resolve 18 conflicts
@@ -36,11 +44,12 @@ Merge them into the integration branch so landed code resolves to main's version
 - [x] Fix silent breakages S2, S3, S4 found by the audit and reviews
 - [x] Audit: admin settings registry, wrangler.toml DO bindings/migrations vs main, D1 numbering,
       index.ts hosted-git import, celld-project.ts / celld-config.ts, ci.yml hosted-git job
-- [ ] Checks: build, typecheck, lint (check:fast), full tests, selfhost:test, hosted-git
+- [x] Checks: build, typecheck, lint (check:fast), full tests, selfhost:test, hosted-git
       conformance, quality:wrangler-bindings, DO migration compatibility tests, quality gates
-- [ ] Draft PR (base sam/selfhost-pass-2), CI by hand, SonarCloud
+- [x] Draft PR #2758 (base sam/selfhost-pass-2), CI by hand (43727081209 green on f24eb53a8; 43740194243 on 105393655), SonarCloud OK
 - [x] Reviews: cloudflare-specialist (PASS, MEDIUM/LOW fixed), task-completion-validator (FAIL on e399e0120: HIGH setup test + MEDIUM dead helper, fixed in dd95a017b; LOW task-file gaps fixed; re-run on dd95a017b: one stale README citation, fixed; PASS)
-- [ ] Diff measure after; box-round checklist; PR #2750 conflict check
+- [x] Diff measure after; box-round checklist; PR #2750 conflict check
+- [x] Second merge of main (1e49113c6) with #2757 audit
 
 ## Acceptance criteria
 
