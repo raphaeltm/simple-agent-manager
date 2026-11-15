@@ -4,9 +4,10 @@
 -- exists, no sign-in is promoted, even if that administrator is later deleted.
 --
 -- This migration only inserts the marker. It never updates or deletes user rows:
---   * An installation with more than one superadmin (possible only from the pre-0243 concurrent
---     first sign-up race, or a manual database edit) keeps every one of them. establishFirstSuperadmin
---     logs first-superadmin.multiple_superadmins on each sign-in until an operator resolves it.
+--   * An installation with more than one superadmin (possible only from the concurrent first
+--     sign-up race that predates this election, or a manual database edit) keeps every one of
+--     them. establishFirstSuperadmin logs first-superadmin.multiple_superadmins on each sign-in
+--     until an operator resolves it.
 --   * An installation with no superadmin gets no marker. A fresh installation has only the system
 --     user here, so its first real user still wins the election at sign-in. An existing sole
 --     non-suspended user stays electable, as the login-time self-heal already allowed. An

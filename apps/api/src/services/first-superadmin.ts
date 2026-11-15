@@ -7,7 +7,8 @@ const log = createModuleLogger('first-superadmin');
 
 /**
  * Durable marker: initial administration of an ordinary (no `BOOTSTRAP_OWNER_EMAIL`) install is
- * established. Written by migration 0243 for installs that already had a superadmin, and by
+ * established. Written by the `*_first_superadmin_election.sql` migration for installs that already
+ * had a superadmin, and by
  * {@link establishFirstSuperadmin} when it elects one. While it exists nobody is auto-promoted,
  * even if every superadmin is later deleted.
  */
@@ -62,7 +63,7 @@ LIMIT 1`;
  *
  * The initial read keeps later sign-ins to one query. It also reports an install with more than
  * one real superadmin (`first-superadmin.multiple_superadmins`): superadmin is never granted
- * through the admin API, so a second one can only come from the pre-0243 sign-up race or a manual
+ * through the admin API, so a second one can only come from the sign-up race that predates this election or a manual
  * database edit, and an operator must decide which accounts to keep. Nothing is changed for them.
  */
 export async function establishFirstSuperadmin(

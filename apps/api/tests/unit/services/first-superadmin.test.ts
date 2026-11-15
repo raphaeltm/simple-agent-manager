@@ -5,6 +5,8 @@
  * tables built from the drizzle schema (`.claude/rules/28`): a `.where()`-ignoring mock could not
  * tell a guarded UPDATE from an unguarded one.
  */
+import { readdirSync } from 'node:fs';
+
 import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -17,10 +19,17 @@ import {
 } from '../../../src/services/first-superadmin';
 import { applySqliteMigration, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-const MIGRATION = new URL(
-  '../../../src/db/migrations/0243_first_superadmin_election.sql',
-  import.meta.url
+// Located by name, not number: the migration number is reconciled against main at merge time.
+const MIGRATIONS_DIR = new URL('../../../src/db/migrations/', import.meta.url);
+const MIGRATION_FILES = readdirSync(MIGRATIONS_DIR).filter((name) =>
+  /^\d+_first_superadmin_election\.sql$/.test(name)
 );
+if (MIGRATION_FILES.length !== 1) {
+  throw new Error(
+    `expected one first_superadmin_election migration, found ${MIGRATION_FILES.length}`
+  );
+}
+const MIGRATION = new URL(MIGRATION_FILES[0]!, MIGRATIONS_DIR);
 
 const databases: Database.Database[] = [];
 
@@ -269,7 +278,7 @@ describe('establishFirstSuperadmin — the election', () => {
   });
 });
 
-describe('migration 0243 — marks installs that already have a superadmin', () => {
+describe('first_superadmin_election migration — marks installs that already have a superadmin', () => {
   it('keeps two existing superadmins untouched and records the oldest as the winner', () => {
     const f = fixture();
     f.user('first-admin', 'superadmin', 'active', 3);

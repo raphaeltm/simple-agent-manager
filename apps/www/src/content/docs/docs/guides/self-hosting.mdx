@@ -566,13 +566,13 @@ Without the installer owner binding, the first-superadmin election works like th
 
 - **One atomic write.** The promotion is a single guarded database update, so two sign-ups can never both become superadmin. It promotes the signing-in user only if they are not `suspended`, no other real account exists, and the election has not already happened. It then records the winner in the `platform_settings` row `setup.firstSuperadminEstablished`.
 - **A later sign-up never wins.** If any other real account already exists, whether active, pending or suspended, nobody is promoted. If two people sign up at the same moment on a fresh instance and both accounts exist before either election runs, neither becomes superadmin. Use the recovery steps below.
-- **The election happens once.** After the marker row exists, no sign-in is ever auto-promoted, even if every superadmin is later deleted. Instances that already had a superadmin got the marker when migration `0243_first_superadmin_election.sql` ran. That migration only writes the marker and never changes a user.
+- **The election happens once.** After the marker row exists, no sign-in is ever auto-promoted, even if every superadmin is later deleted. Instances that already had a superadmin got the marker from the `first_superadmin_election` database migration. That migration only writes the marker and never changes a user.
 - **Login always succeeds.** If the database fails during the election, the sign-in still completes without promotion and the error is logged as `auth.first_superadmin_election.failed`. The next sign-in tries again.
 - **Login-time self-heal** (`session.create.after`, `apps/api/src/auth.ts`) applies the same conditions and is a second attempt in the same sign-in. It is a no-op once the marker exists.
 
 #### More than one superadmin
 
-The admin API never grants the superadmin role, so an instance has at most one unless it was hit by the concurrent first-sign-up race that existed before migration 0243, or someone edited the database by hand. SAM does not demote anyone automatically. Each sign-in on such an instance logs the warning `first-superadmin.multiple_superadmins` with the count, visible in the API Worker's logs (Cloudflare dashboard → Workers → your API worker → Logs, or `wrangler tail`). To review the accounts, run this against your D1 database:
+The admin API never grants the superadmin role, so an instance has at most one unless it was hit by the concurrent first-sign-up race that existed before this election, or someone edited the database by hand. SAM does not demote anyone automatically. Each sign-in on such an instance logs the warning `first-superadmin.multiple_superadmins` with the count, visible in the API Worker's logs (Cloudflare dashboard → Workers → your API worker → Logs, or `wrangler tail`). To review the accounts, run this against your D1 database:
 
 ```sql
 SELECT id, email, status, created_at FROM users
