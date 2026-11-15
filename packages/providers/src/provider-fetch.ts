@@ -72,8 +72,9 @@ export async function providerFetch(
  * The body is read once under the abort race and re-wrapped, rather than teed with
  * `response.clone()`: some Workers runtimes (celld, the self-hosted control plane) refuse to
  * clone a streaming response before it is consumed, which failed every provider and STS call
- * on a self-hosted install. The re-wrapped response keeps status, statusText and headers;
- * no caller reads `url`, `redirected` or `type`.
+ * there. Reading once also avoids buffering a second tee branch. The re-wrapped response keeps
+ * status, statusText and headers; no caller reads `url`, `redirected` or `type` (provider
+ * adapters, `fetchGcpWithTimeout`, and the DNS helpers in `dns-core.ts` / `dns-node-backend.ts`).
  */
 export async function completeAbortableResponse(
   response: Response,
@@ -83,10 +84,14 @@ export async function completeAbortableResponse(
   if (!response.body) return response;
   const body = await readResponseBody(response, signal);
   if (signal.aborted) throw signal.reason;
+  // fetch has already decoded the body, so its transfer headers no longer describe these bytes.
+  const headers = new Headers(response.headers);
+  headers.delete('content-encoding');
+  headers.delete('content-length');
   return new Response(NULL_BODY_STATUSES.has(response.status) ? null : body, {
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers,
+    headers,
   });
 }
 

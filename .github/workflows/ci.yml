@@ -466,7 +466,9 @@ jobs:
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.repo-quality == 'true' || needs.changes.outputs.browser-install == 'true')
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
+    # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -519,7 +521,9 @@ jobs:
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.marketing-site == 'true' || needs.changes.outputs.browser-install == 'true')
     # Setup/build takes ~11 minutes; leave time for the browser suite.
     timeout-minutes: 25
-    runs-on: ubuntu-latest
+    # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
+    # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -565,7 +569,9 @@ jobs:
     # Restrict to pull requests so they never run on push to main.
     if: github.event_name == 'pull_request' && (needs.changes.outputs.web-ui == 'true' || needs.changes.outputs.browser-install == 'true')
     timeout-minutes: 45
-    runs-on: ubuntu-latest
+    # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
+    # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

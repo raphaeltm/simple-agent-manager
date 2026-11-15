@@ -19,14 +19,16 @@ import {
   DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
   DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
   DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
+  DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
   DEFAULT_WEBHOOK_QUEUE_MAX_PENDING,
   DEFAULT_WEBHOOK_QUEUE_TTL_SECONDS,
   DEFAULT_WEBHOOK_SIGNATURE_TOLERANCE_SECONDS,
   DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
+  NODE_PROVISIONING_ATTEMPT_DEADLINE_MAX_MS,
+  NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS,
 } from '@simple-agent-manager/shared';
 
-import { DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS } from '../durable-objects/node-lifecycle-provisioning-deadline';
 import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import {
   type AdminSettingDefinition,
@@ -76,6 +78,16 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     { min: 60000, max: 86400000 }
   ),
   integerDefinition(
+    'operations.nodeProvisioningAttemptDeadlineMs',
+    DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
+    'Operations',
+    'Milliseconds one durable node-provisioning attempt may spend before its provider create starts and on the node DNS record afterwards; past it the attempt is cut and the next attempt (NODE_PROVISIONING_RETRY_INTERVAL_MS, 30 s by default) resumes it. A create that has started is never cut or repeated: the next attempt adopts the VM. 5000 restores the behaviour from before this setting.',
+    {
+      min: NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS,
+      max: NODE_PROVISIONING_ATTEMPT_DEADLINE_MAX_MS,
+    }
+  ),
+  integerDefinition(
     'operations.nodeLifetimeForceSleepAfterMs',
     DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
     'Operations',
@@ -111,13 +123,6 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     { min: 0, max: 99 }
   ),
 
-  integerDefinition(
-    'operations.nodeProvisioningAttemptDeadlineMs',
-    DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
-    'Operations',
-    'Milliseconds one durable node-provisioning attempt may run (provider create, its operation wait, and the node DNS record) before it is cut and resumed on the next attempt. A cut create is adopted, never repeated.',
-    { min: 1000, max: 600000 }
-  ),
   integerDefinition(
     'operations.evictionRecoveryRetryBatchSize',
     5,

@@ -28,6 +28,7 @@ import {
   selectGitLabOAuthConfig,
   selectGoogleLoginOAuthConfig,
 } from './services/platform-config';
+import { scheduleAccountLinkedAlert } from './services/security-alerts';
 import { isSignupApprovalRequired } from './services/signup-approval';
 
 export { refreshGitHubAccessToken };
@@ -161,7 +162,7 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
   const platformConfig = await resolveLoginOAuthConfig(env);
   const githubOAuth = selectGitHubOAuthConfig(platformConfig);
   const googleOAuth = selectGoogleLoginOAuthConfig(platformConfig);
-  const gitlabOAuth = selectGitLabOAuthConfig(platformConfig);
+  const gitlabOAuth = selectGitLabOAuthConfig(platformConfig, env.GITLAB_HOST);
   // Typed with better-auth's own provider contract so a library upgrade that changes what a
   // provider hook must return fails `pnpm typecheck` instead of failing sign-in in production.
   const socialProviders: SocialProviders = {};
@@ -279,8 +280,11 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
 
   // Not registered when the admin's GitLab host may not be called (gitlab-login-provider.ts).
   const gitlabProvider = gitlabOAuth ? gitLabLoginProvider(env, gitlabOAuth) : null;
-  if (gitlabProvider) {
-    trustedProviders.push('gitlab');
+  if (gitlabOAuth && gitlabProvider) {
+    // better-auth links a sign-in to the existing user with that email when the provider is
+    // trusted OR the provider says the email is verified, so an untrusted host must lose both
+    // (its `getUserInfo` reports emails unverified and host-scopes its account ids).
+    if (gitlabOAuth.identityTrusted) trustedProviders.push('gitlab');
     socialProviders.gitlab = gitlabProvider;
   }
 
@@ -363,6 +367,15 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       },
     },
     databaseHooks: {
+      // Owner alert when a social sign-in is linked to an admin or superadmin (best-effort).
+      account: {
+        create: {
+          after: (account) => {
+            scheduleAccountLinkedAlert(env, account, options);
+            return Promise.resolve();
+          },
+        },
+      },
       user: {
         create: {
           before: async (incoming) => {

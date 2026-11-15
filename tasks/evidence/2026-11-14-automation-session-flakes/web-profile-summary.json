@@ -1,0 +1,20 @@
+[
+  {
+    "version": "before",
+    "exit": 0,
+    "sourceSha256": "621e44f9234898b3d13c00860379963d315aef56d47c06a4ea507eb7d2e5e67d",
+    "profile": {
+      "elapsedMs": 609.4489970000004,
+      "userEventWaits": 60
+    }
+  },
+  {
+    "version": "after",
+    "exit": 0,
+    "sourceSha256": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+    "profile": {
+      "elapsedMs": 518.5651389999998,
+      "userEventWaits": 27
+    }
+  }
+]

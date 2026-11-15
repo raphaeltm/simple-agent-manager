@@ -8,7 +8,7 @@ user-invocable: false
 
 ## Installer first-owner binding
 
-`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN`, which authorizes provider configuration rather than user login.
+`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN` (a plain-text var masked in deploy logs, accepted only until setup completes or an active superadmin exists), which authorizes provider configuration rather than user login.
 
 ## GitHub Environment Secrets (GitHub Settings -> Environments -> production)
 
@@ -644,7 +644,7 @@ by the read-only cron-liveness check.
 - `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
 - `TASK_LIVENESS_MAX_ACP_SESSIONS` — Maximum task-scoped ACP sessions inspected per liveness probe (default: 5)
 - `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS` — Timeout for stale-VM-node health probes used by ProjectData idle cleanup and stuck-task reconciliation; a timeout is inconclusive and preserves the task/workspace (default: 5000)
-- `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning allocation/reconciliation request budget, also used for background readiness and workspace dispatch (default: 5000).
+- `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning per-request budget for Cloudflare calls during allocation/reconciliation, also used for background readiness and workspace dispatch (default: 5000). The attempt's cancellation budget is the admin setting `operations.nodeProvisioningAttemptDeadlineMs` (default 60000, range 5000–180000, never below this value); it cuts pre-create steps and the node DNS record only, not a started create, its publish, readiness or dispatch.
 - `NODE_PROVISIONING_RETRY_INTERVAL_MS` — Delay between durable direct provisioning attempts (default: 30000).
 - `NODE_PROVISIONING_MAX_AGE_MS` — Maximum age of a durable direct provisioning intent before retries stop (default: 900000 / 15 min).
 - `NODE_PROVISIONING_MAX_ATTEMPTS` — Maximum durable direct provisioning attempts before retries stop (default: 30). Either allocation age or attempt exhaustion starts a separate bounded diagnostic publication phase using the same retry interval and attempt limit. The age limit applies only to allocation/reconciliation; the unresolved intent is retained. Empty provider inventory never authorizes another create or proves cleanup. All four `NODE_PROVISIONING_*` overrides are optional positive integers; invalid or unset values use their defaults.

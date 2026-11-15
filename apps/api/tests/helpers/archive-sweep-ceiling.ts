@@ -40,7 +40,7 @@ export const SHIPPED_SWEEP_SESSIONS = 50;
  * pins in lockstep. Bound to the shipped value for the same fidelity reason as the slot count:
  * the Worker test's `sweepEnv` stands in for the deployed configuration.
  */
-export const SHIPPED_DAILY_WRITE_BUDGET = 2_400_000;
+export const SHIPPED_DAILY_WRITE_BUDGET = 6_000_000;
 
 /**
  * A candidate size beyond the shipped ceiling, run as an experiment rather than as a claim

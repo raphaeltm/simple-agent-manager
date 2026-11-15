@@ -23,6 +23,7 @@ export type {
   PlatformConfigStatus,
   PlatformConfigStatusResponse,
   PlatformIntegrationConfigInput,
+  PlatformIntegrationGroup,
   PlatformIntegrationStatus,
 } from './admin';
 export type {

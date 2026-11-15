@@ -12,6 +12,12 @@
  *   host it may not call (`assertGitLabHostAllowed`); DNS answers are the egress fence's job.
  * - profile (`getUserInfo`): better-auth's default follows redirects with the access token, so
  *   SAM replaces it with a guarded fetch (every hop re-checked, cross-origin hops lose the token).
+ *
+ * Identity trust (`GitLabOAuthConfig.identityTrusted`): a host SAM does not trust (a self-managed
+ * host saved at runtime) cannot vouch for an email and cannot reuse another host's account ids.
+ * Its accounts are stored under a host-scoped key (`untrustedGitLabAccountSubject`), its emails
+ * count as unverified, it gets no profile override, and `auth.ts` leaves it out of
+ * `trustedProviders`.
  */
 import {
   DEFAULT_GITLAB_API_TIMEOUT_MS,
@@ -25,6 +31,7 @@ import { createModuleLogger } from '../lib/logger';
 import { guardedFetch } from '../lib/network-hosts';
 import { readResponseJson } from '../lib/runtime-validation';
 import { getTimeoutMs } from './fetch-timeout';
+import { untrustedGitLabAccountSubject } from './gitlab-sign-in-identity';
 import { keepLinkedAccountEmail } from './linked-account-identity';
 import { resolveOutboundMaxRedirects } from './outbound-fetch-settings';
 import type { GitLabOAuthConfig } from './platform-config-oauth';
@@ -77,6 +84,23 @@ export async function fetchGitLabUserInfo(
   }
   const profile = await readResponseJson(response, gitlabUserSchema, 'gitlab.user');
   if (profile.state !== 'active' || profile.locked) return null;
+  if (!config.identityTrusted) {
+    if (!profile.email) return null;
+    return {
+      user: {
+        name: profile.name ?? profile.username ?? '',
+        email: profile.email,
+        image: profile.avatar_url ?? undefined,
+        emailVerified: false,
+      },
+      // better-auth keys the account on `data.id`; the host-scoped key is a string, which
+      // better-auth stringifies anyway (`resolveOAuthAccountKey`).
+      data: {
+        ...profile,
+        id: untrustedGitLabAccountSubject(config.host, profile.id),
+      } as unknown as GitlabProfile,
+    };
+  }
   // A linked account keeps its own verified SAM email (`keepLinkedAccountEmail`).
   const identity = await keepLinkedAccountEmail(env, 'gitlab', String(profile.id), {
     email: profile.email,
@@ -107,7 +131,7 @@ export function gitLabLoginProvider(env: Env, config: GitLabOAuthConfig): GitLab
     clientSecret: config.clientSecret,
     issuer: config.host,
     scope: GITLAB_SCOPES,
-    overrideUserInfoOnSignIn: true,
+    overrideUserInfoOnSignIn: config.identityTrusted,
     getUserInfo: (token) => fetchGitLabUserInfo(env, config, token.accessToken),
   };
 }

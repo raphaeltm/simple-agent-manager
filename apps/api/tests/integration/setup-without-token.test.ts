@@ -2,7 +2,8 @@
  * `/setup` on an installation with no setup token (a self-hosted celld box, whose owner is made
  * by `pnpm selfhost:create-account`). It used to be a dead end ("This instance has no setup
  * token") forever. Once an active superadmin exists it is recorded as complete, so the page
- * says SAM is set up. Real SQL engine, production route.
+ * says SAM is set up (`isSetupCompleted`, which since main's #2748 closes setup on any install
+ * with an owner, token or not). Real SQL engine, production route.
  */
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
@@ -82,12 +83,12 @@ describe('GET /api/setup/status without a setup token', () => {
     expect(completedSetting()).toBeUndefined();
   });
 
-  it('control: an install with a setup token is unchanged, even with an owner', async () => {
+  it('an install with a setup token also closes once it has an owner (#2748)', async () => {
     addUser('owner', 'superadmin', 'active');
     const result = await status(env({ SETUP_TOKEN: 'installer-token' }));
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ completed: false, tokenConfigured: true });
-    expect(completedSetting()).toBeUndefined();
+    expect(result.status).toBe(410);
+    expect(result.body).toMatchObject({ error: 'SETUP_CLOSED' });
+    expect(completedSetting()).toBe('true');
   });
 
   it('control: SETUP_FORCE keeps setup open', async () => {

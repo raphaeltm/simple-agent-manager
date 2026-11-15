@@ -92,7 +92,7 @@ describe('providerFetch', () => {
   });
 
   it('returns a readable body on a runtime that cannot clone an unconsumed streaming response', async () => {
-    // celld (self-hosted control plane) throws this from Response.clone() on a streaming body.
+    // celld (the self-hosted control plane) throws this from Response.clone() on a streaming body.
     class UncloneableResponse extends Response {
       override clone(): Response {
         throw new TypeError('Cannot clone a streaming response before consumption');
@@ -109,15 +109,24 @@ describe('providerFetch', () => {
       new UncloneableResponse(streamed, {
         status: 201,
         statusText: 'Created',
-        headers: { 'content-type': 'application/json', etag: 'abc' },
+        headers: {
+          'content-type': 'application/json',
+          etag: 'abc',
+          'content-encoding': 'gzip',
+          'content-length': '12',
+        },
       })
     );
 
     const response = await providerFetch('gcp', 'https://sts.googleapis.test/v1/token');
 
     expect(response.status).toBe(201);
+    expect(response.ok).toBe(true);
     expect(response.statusText).toBe('Created');
     expect(response.headers.get('etag')).toBe('abc');
+    // The bytes are already decoded: the original transfer headers no longer describe them.
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(response.headers.get('content-length')).toBeNull();
     expect(response.bodyUsed).toBe(false);
     await expect(response.json()).resolves.toEqual({ access_token: 't', expires_in: 3599 });
   });

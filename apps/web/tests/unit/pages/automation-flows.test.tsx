@@ -552,9 +552,13 @@ describe('create flow', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.selectOptions(screen.getByLabelText('GitHub event'), 'pull_request');
-    await user.type(screen.getByLabelText(/Required labels/), 'needs-review');
+    // Real paste events exercise the controlled fields without one timer and
+    // filter-preview rerender per character on a busy coverage runner.
+    await user.click(screen.getByLabelText(/Required labels/));
+    await user.paste('needs-review');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await user.type(screen.getByLabelText('What should it do?'), 'Review the pull request');
+    await user.click(screen.getByLabelText('What should it do?'));
+    await user.paste('Review the pull request');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await user.click(screen.getByRole('button', { name: 'Create automation' }));
     await waitFor(() => expect(api.createTrigger).toHaveBeenCalledTimes(1));
@@ -567,6 +571,11 @@ describe('create flow', () => {
         filters: expect.objectContaining({ actions: ['opened'], labels: ['needs-review'] }),
       },
     });
+    await waitFor(() =>
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/projects/p1/automation/trigger/trg-gh'
+      )
+    );
   });
 
   it('reminds a chat later with a one-time message to that chat', async () => {

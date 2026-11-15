@@ -24,7 +24,7 @@ vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'admin-1' }, isSuperadmin: true, isLoading: false }),
 }));
 
-import { AiBudgetSettingsSection } from '../../../src/components/ai-usage/AiBudgetSettingsSection';
+import { BudgetSettingsSection } from '../../../src/components/ai-usage/AiBudgetSettingsSection';
 import { AgentStep } from '../../../src/components/onboarding/choose-path/AgentStep';
 import { INITIAL_FORM } from '../../../src/components/onboarding/choose-path/step-actions';
 import { AdminAIProxy } from '../../../src/pages/AdminAIProxy';
@@ -57,7 +57,7 @@ describe('AI budget settings monthly cap', () => {
   async function openEditor(response: UserAiBudgetResponse) {
     mockFetchUserAiBudget.mockResolvedValue(response);
     mockUpdateUserAiBudget.mockResolvedValue({ success: true });
-    render(<AiBudgetSettingsSection />);
+    render(<BudgetSettingsSection />);
     fireEvent.click(await screen.findByRole('button', { name: /configure/i }));
   }
 

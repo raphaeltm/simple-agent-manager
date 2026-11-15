@@ -673,7 +673,7 @@ owner has never signed in, SAM admits only the owner.
 
 **First run after the owner exists.** A box has no `SETUP_TOKEN` (only the Cloudflare installer
 generates one), so `/setup` closes itself once an active superadmin exists and says SAM is set up
-(`closeSetupWithoutToken`, `apps/api/src/routes/setup.ts`). Then, as that administrator:
+(`isSetupCompleted`, `apps/api/src/services/platform-config-core.ts`). Then, as that administrator:
 
 1. **Admin → Integrations → Create GitHub App.** SAM posts a GitHub App manifest (callback, setup
    and webhook URLs for this domain, the usual permissions including **Email addresses: read**),

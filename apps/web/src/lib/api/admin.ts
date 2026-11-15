@@ -409,6 +409,7 @@ export type {
   PlatformConfigStatus,
   PlatformConfigStatusResponse,
   PlatformIntegrationConfigInput,
+  PlatformIntegrationGroup,
   PlatformIntegrationStatus,
 } from './admin-platform-config';
 export type { GitHubAppManifestComplete, GitHubAppManifestStart } from './admin-platform-config';

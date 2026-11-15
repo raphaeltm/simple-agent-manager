@@ -1,5 +1,5 @@
 /** Real SamSession SQLite and Mastra Agent; only model HTTP is stubbed. */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { modelReply } from './support/sam-model-reply';
 import { type SamRuntimeStub, startSamRuntime } from './support/sam-native-runtime';
@@ -22,9 +22,12 @@ const MODEL = '@cf/google/gemma-4-26b-a4b-it';
 const modelRequests: Array<{ url: string; body: Record<string, unknown>; headers: Headers }> = [];
 const http = vi.fn<typeof fetch>();
 let modelDelay: Promise<void> | null = null;
+let releaseModel: (() => void) | undefined;
+const testStubs: SamRuntimeStub[] = [];
 let modelText: string | undefined;
 let requestedTool: { name: string; arguments: Record<string, unknown> } | null = null;
 let env: Awaited<ReturnType<typeof startSamRuntime>>;
+let runtimePoisoned = false;
 beforeAll(async () => {
   env = await startSamRuntime((request) => http(request));
 });
@@ -41,6 +44,7 @@ async function setup(enabled = true) {
     .bind(userId, `${userId}@example.test`, 'SAM Worker Test')
     .run();
   const stub = env.SAM_SESSION.get(env.SAM_SESSION.idFromName(userId)) as SamRuntimeStub;
+  testStubs.push(stub);
   await stub.testEnvironment({
     SAM_RATE_LIMIT_RPM: '30',
     SAM_MODEL: MODEL,
@@ -69,7 +73,34 @@ async function completed(request: Awaited<ReturnType<typeof setup>>['request'], 
 }
 
 describe('SamSession durable operator in workerd', () => {
+  afterEach(async () => {
+    if (runtimePoisoned) return;
+    // Failed assertions must not leave model work using the next test's mock.
+    releaseModel?.();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.all(testStubs.map((stub) => stub.testDrain())),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('Native SAM work did not drain')), 5000);
+        }),
+      ]);
+      await testStubs[0]?.testSetTime(null);
+    } catch (error) {
+      // A timed-out hook keeps executing. Refuse later mock resets even if
+      // disposal itself stalls; no subsequent case may reuse this isolate.
+      runtimePoisoned = true;
+      await env.close();
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      testStubs.length = 0;
+      releaseModel = undefined;
+    }
+  });
+
   beforeEach(() => {
+    if (runtimePoisoned) throw new Error('Native SAM runtime failed teardown; refusing reuse');
     modelRequests.length = 0;
     modelDelay = null;
     modelText = undefined;
@@ -421,6 +452,7 @@ describe('SamSession durable operator in workerd', () => {
     let release!: () => void;
     modelDelay = new Promise<void>((resolve) => {
       release = resolve;
+      releaseModel = resolve;
     });
     const accepted = (await (
       await request('/turns', 'POST', { requestKey: 'cancel', message: 'Wait for cancellation' })
@@ -448,6 +480,7 @@ describe('SamSession durable operator in workerd', () => {
     let release!: () => void;
     modelDelay = new Promise<void>((resolve) => {
       release = resolve;
+      releaseModel = resolve;
     });
     const accepted = (await (
       await request('/turns', 'POST', { requestKey: 'disabled', message: 'Private pending turn' })
@@ -477,6 +510,7 @@ describe('SamSession durable operator in workerd', () => {
     let release!: () => void;
     modelDelay = new Promise<void>((resolve) => {
       release = resolve;
+      releaseModel = resolve;
     });
     try {
       const responses = await Promise.all([
@@ -498,27 +532,52 @@ describe('SamSession durable operator in workerd', () => {
     await completed(request, turns[0]!.id);
   });
 
-  it('enforces a durable rate limit and repairs a malformed legacy rate window', async () => {
-    const { request, stub } = await setup();
-    await stub.testEnvironment({ SAM_RATE_LIMIT_RPM: '1' });
-    await stub.testSql(
-      "INSERT OR REPLACE INTO operator_rate_limit VALUES(1,'not-a-timestamp',999)"
-    );
-    const accepted = (await (
-      await request('/turns', 'POST', { requestKey: 'rate-first', message: 'First turn' })
-    ).json()) as { turn: Turn };
-    await completed(request, accepted.turn.id);
-    const row = (await stub.testSql('SELECT window_start,used FROM operator_rate_limit'))[0]!;
-    expect(typeof row.window_start).toBe('number');
-    expect(row.used).toBe(1);
-    const limited = await request('/turns', 'POST', {
-      requestKey: 'rate-second',
-      message: 'Second turn',
-    });
-    expect(limited.status).toBe(429);
-    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);
-    expect(modelRequests).toHaveLength(1);
-  });
+  it.each([0, 59_999, 60_000, 60_001])(
+    'enforces a durable rate limit and repairs a malformed legacy rate window at offset %i',
+    async (offsetMs) => {
+      const { request, stub } = await setup();
+      // Future, minute-aligned time keeps real DO alarms out of the past. Both
+      // requests stay in the chosen window regardless of CI/HTTP scheduling.
+      const now = Date.parse('2099-01-01T00:00:00.000Z') + offsetMs;
+      const windowStart = Math.floor(now / 60_000) * 60_000;
+      await stub.testSetTime(now);
+      await stub.testEnvironment({ SAM_RATE_LIMIT_RPM: '1' });
+      await stub.testSql(
+        "INSERT OR REPLACE INTO operator_rate_limit VALUES(1,'not-a-timestamp',999)"
+      );
+      const first = await request('/turns', 'POST', {
+        requestKey: 'rate-first',
+        message: 'First turn',
+      });
+      expect(first.status).toBe(202);
+      const accepted = (await first.json()) as { turn: Turn };
+      await completed(request, accepted.turn.id);
+      const row = (await stub.testSql('SELECT window_start,used FROM operator_rate_limit'))[0]!;
+      expect(row).toMatchObject({ window_start: windowStart, used: 1 });
+      const limited = await request('/turns', 'POST', {
+        requestKey: 'rate-second',
+        message: 'Second turn',
+      });
+      expect(limited.status).toBe(429);
+      expect(Number(limited.headers.get('retry-after'))).toBe(
+        Math.ceil((windowStart + 60_000 - now) / 1000)
+      );
+      expect(modelRequests).toHaveLength(1);
+
+      await stub.testSetTime(windowStart + 60_000);
+      const next = await request('/turns', 'POST', {
+        requestKey: 'rate-next-window',
+        message: 'Next window',
+      });
+      expect(next.status).toBe(202);
+      const nextAccepted = (await next.json()) as { turn: Turn };
+      await completed(request, nextAccepted.turn.id);
+      expect(modelRequests).toHaveLength(2);
+      expect(
+        (await stub.testSql('SELECT window_start,used FROM operator_rate_limit'))[0]
+      ).toMatchObject({ window_start: windowStart + 60_000, used: 1 });
+    }
+  );
 
   it('preserves legacy history, typed conversation listing, bounded pagination, and malformed-row isolation after opt-in', async () => {
     const { request, stub } = await setup();

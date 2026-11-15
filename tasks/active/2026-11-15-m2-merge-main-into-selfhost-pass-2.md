@@ -1,0 +1,59 @@
+# M2: merge main into sam/selfhost-pass-2 (draft PR, do not merge)
+
+Task `01M7FSE836S5NQ37DJRR2PR59Z`, coordinator task `01M7FB384QHQ1TQCK95D0SX0TX`.
+Branch `sam/task-m2-merge-latest-2pr59z`, base `sam/selfhost-pass-2`. Model: M1 (#2736).
+
+## Problem
+
+Main gained L7 (#2749), L4 (#2746) and seven unrelated commits since the M1 merge (`84d77aa0f`).
+Merge them into the integration branch so landed code resolves to main's version.
+
+## Research findings
+
+- Merge parents: `c02f82651af78c0366d74daf27c49c695a6d8c04` (integration) and
+  `c616e356ce1b6b17bcfa66afc801c5c39e3d853c` (main). Merge commit `17a464e51`.
+- Diff before (`origin/main...c02f82651`): 872 files, +86,752 / -2,827.
+- 18 files conflicted (see PR table). Silent breakage found during resolution: the admin
+  settings registry auto-merged with `operations.nodeProvisioningAttemptDeadlineMs` defined
+  twice (main 60 s / 5-180 s; branch 45 s / 1-600 s), and admin-settings.md documented both.
+- #2748 GitLab trust (untrusted runtime-saved host: host-scoped ids, emails unverified, no
+  override, not in trustedProviders) and the branch's guarded GitLab provider are combined in
+  `gitlab-login-provider.ts`; main's `untrustedGitLabUserInfo` (unguarded fetch) removed.
+- S2: the branch's GitHub App manifest completion route stored integration credentials without
+  main's (#2747) owner security alert, and returned status without main's actor labels (the
+  admin page writes it into the same query cache). Fixed in `73ebcbfc1`, with a test through
+  the real manifest flow (both halves proven discriminating).
+- S3: `AdminSettingName` listed `operations.nodeProvisioningAttemptDeadlineMs` twice. Fixed in
+  `73ebcbfc1`.
+- S4: the branch's `closeSetupWithoutToken` became unreachable under main's `isSetupCompleted`
+  owner check, and the branch test control "a token install with an owner stays open"
+  contradicted main's #2748 fix (red). Helper removed, control asserts main's 410 (`dd95a017b`).
+
+- Second merge (coordinator request, 2026-11-15 16:07 UTC): main moved to `1e49113c6`
+  (#2743, #2757 orphan sweep on GCP, #2761). Merge commit `105393655` (parents `f24eb53a8` and
+  `1e49113c6`). One conflict, `apps/api/src/scheduled/handler.ts`: the branch's reverse-tunnel
+  lease sweep plus main's orphan block. Every other #2757 file equals main. Box PR #2750 (head
+  `96cc0ec89`) now conflicts with this head in 3 files (handler-kill-switch test, orphan
+  provider-boundary test, configuration.md); it merged cleanly before the second merge.
+- Workspace was recreated mid-task (node_modules, .tmp, .do-state.md lost); all commits were pushed.
+
+## Checklist
+
+- [x] Merge origin/main with a real merge commit; resolve 18 conflicts
+- [x] Remove duplicate registry entry and doc row; delete branch-only deadline module
+- [x] Fix silent breakages S2, S3, S4 found by the audit and reviews
+- [x] Audit: admin settings registry, wrangler.toml DO bindings/migrations vs main, D1 numbering,
+      index.ts hosted-git import, celld-project.ts / celld-config.ts, ci.yml hosted-git job
+- [x] Checks: build, typecheck, lint (check:fast), full tests, selfhost:test, hosted-git
+      conformance, quality:wrangler-bindings, DO migration compatibility tests, quality gates
+- [x] Draft PR #2758 (base sam/selfhost-pass-2), CI by hand (43727081209 green on f24eb53a8; 43740194243 on 105393655), SonarCloud OK
+- [x] Reviews: cloudflare-specialist (PASS, MEDIUM/LOW fixed), task-completion-validator (FAIL on e399e0120: HIGH setup test + MEDIUM dead helper, fixed in dd95a017b; LOW task-file gaps fixed; re-run on dd95a017b: one stale README citation, fixed; PASS)
+- [x] Diff measure after; box-round checklist; PR #2750 conflict check
+- [x] Second merge of main (1e49113c6) with #2757 audit
+
+## Acceptance criteria
+
+- Landed code (L7, L4) equals main's; branch keeps only unlanded behaviour.
+- wrangler.toml DO bindings and migrations byte-identical to origin/main.
+- No duplicate D1 migration numbers introduced by the merge; no duplicate settings.
+- All checks and CI green; draft PR not merged.

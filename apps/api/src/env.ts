@@ -213,9 +213,9 @@ export interface Env
   CREDENTIAL_ENCRYPTION_KEY?: string; // AES-GCM user credential encryption
   GITHUB_WEBHOOK_SECRET?: string; // GitHub webhook HMAC verification
   BOOTSTRAP_OWNER_EMAIL?: string; // Installer-only first-admin binding; must match a verified login email
-  SETUP_TOKEN?: string; // Plaintext first-run setup token, dashboard-readable while setup is incomplete
+  SETUP_TOKEN?: string; // Plaintext first-run setup token, dashboard-readable, masked in deploy logs; accepted until setup completes or an active superadmin exists
   SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
-  SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per identifier/window (default: 10)
+  SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per client IP (CF-Connecting-IP) per window (default: 10)
   SETUP_RATE_LIMIT_WINDOW_SECONDS?: string; // Setup-token attempt window in seconds (default: 900)
   PLATFORM_CONFIG_CACHE_MS?: string; // Per-isolate resolved-platform-config cache TTL in ms; 0 disables (default: 60000)
   // Guided agent credential setup via Cloudflare Sandbox

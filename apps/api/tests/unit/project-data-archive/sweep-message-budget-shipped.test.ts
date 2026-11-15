@@ -27,7 +27,7 @@
  * Environment overrides (`.claude/rules/70`): of the vars these cases read,
  * `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` IS pinned as a `production` GitHub Environment
  * variable, so an edit to `wrangler.toml` alone would NOT ship; the two are changed in lockstep
- * (2400000 since 2026-09-27, when the cadence was tripled). `_SWEEP_MESSAGE_BUDGET`,
+ * (6000000 since 2026-11-14, when the cadence was doubled). `_SWEEP_MESSAGE_BUDGET`,
  * `_WRITE_ESTIMATE_FACTOR`, `_SWEEP_UNIT_OVERHEAD_PERCENT` and `_GLOBAL_SWEEP_INTERVAL_MS` are
  * absent from both the `production` and `staging` Environments, so for those the checked-in
  * value is the deployed value.

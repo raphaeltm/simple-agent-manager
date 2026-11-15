@@ -1,0 +1,902 @@
+[
+  {
+    "run": 1,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 16.516,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 345.8905530000011
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 23.1,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 2,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 19.191,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 402.3853650000001
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 27.75,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 3,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 18.356,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 365.36417000000074
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 26.32,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 4,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 18.833,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 359.425244
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 27.61,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 5,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 15.61,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 340.7252759999992
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 21.54,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 6,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 14.602,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 354.42994799999997
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 19.94,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 7,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 18.013,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 357.607575
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 26.44,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 8,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 18.364,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 405.00932400000056
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 26.52,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 9,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 17.714,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 332.7477309999995
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 25.96,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 10,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 16.407,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 425.3261110000003
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 23.38,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 11,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 15.556,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 405.31589300000087
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 21.76,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 12,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 15.455,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 427.7117990000006
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 21.07,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 13,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 17.46,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 328.021514
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 25.64,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 14,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 15.256,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 331.2317129999992
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 21.03,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 15,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 15.103,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 328.8811340000002
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 20.76,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 16,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 18.914,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 377.98114200000055
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 27.95,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 17,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 15.804,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 321.74372799999946
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 22.26,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 18,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 18.311,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 346.6777229999989
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 27.09,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 19,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 18.215,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 342.6011749999998
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 26.48,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 20,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 15.003,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 339.7699469999998
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 20.58,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 21,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 18.71,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 416.9334859999999
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 27.75,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 22,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 18.311,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 336.9772890000004
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 26.85,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 23,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 15.354,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 328.5788140000004
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 21.26,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 24,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 14.551,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 324.16167699999914
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 20.09,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 25,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 16.206,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 404.7745640000012
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 22.9,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 26,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 19.718,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 525.3372749999999
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 29.49,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 27,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 16.258,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 413.9094179999993
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 23.23,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 28,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 16.41,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 331.25609200000144
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 23.48,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 29,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 14.953,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 336.95263800000066
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 20.62,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 30,
+    "exit": 0,
+    "passed": 39,
+    "failed": 0,
+    "elapsed": 16.361,
+    "target": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "status": "passed",
+        "duration": 367.7670080000007
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "0,1",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 22.88,
+    "total": 39,
+    "pending": 0,
+    "assertionCount": 39,
+    "allAssertionsPassed": true
+  }
+]

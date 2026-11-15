@@ -46,6 +46,7 @@ import {
   MESSAGE_COMMENT_REPLY_COUNT_SQL,
   MESSAGE_COMMENT_THREAD_COUNT_SQL,
 } from './anchored-comment-scope';
+import { insertArchiveSearchDocumentBatch } from './archive-search-writes';
 import * as compactArchive from './compact-archive';
 import { resolveMaterializationPassConfig } from './materialization';
 import * as messages from './messages';
@@ -3064,8 +3065,10 @@ function commitCompactSearchProjectionChunk(
       'Compact archive projection chunk order does not match copy order'
     );
   }
+  // At most one already byte/row-bounded archive chunk; the writer pages SQL binds.
+  const documents: PendingArchiveSearchDocument[] = [];
   const commitDocument = (document: PendingArchiveSearchDocument) => {
-    insertArchiveSearchDocument(sql, input.sessionId, document);
+    documents.push(document);
     chain.update({
       projection_id: document.projectionId,
       document_id: document.documentId,
@@ -3151,6 +3154,9 @@ function commitCompactSearchProjectionChunk(
     nextOrdinal++;
   }
 
+  insertArchiveSearchDocumentBatch(sql, input.sessionId, documents, (document) =>
+    insertArchiveSearchDocument(sql, input.sessionId, document)
+  );
   if (phase === 'grouped' && input.tableName === 'chat_messages_grouped' && !input.hasMore) {
     const documentCount = countRows(
       sql,

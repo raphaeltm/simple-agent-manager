@@ -316,6 +316,26 @@ describe('resumable archive cursor', () => {
     });
   });
 
+  it('reports the session cap when every slot is occupied by an existing migration', async () => {
+    const { projectId, sessionId, source } = await seedCandidate('occupied-slots', LARGE_MESSAGES);
+    const first = await tick({
+      PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150',
+      PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+    });
+    expect(first.yielded).toBe(1);
+    const pending = await source.createSession(null, 'Waiting behind occupied slot');
+    await source.persistMessageBatch(pending, messagesFor('waiting-behind-slot', 20));
+    await source.stopSession(pending);
+    await source.runSummarySyncForTest();
+    const second = await tick({ PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1' });
+    expect(second).toMatchObject({ migrated: 1, failed: 0, stopReason: 'session_limit' });
+    expect((await readLocation(projectId, sessionId))?.location_state).toBe('archive_shard');
+    expect(await readLocation(projectId, pending)).toBeNull();
+    const third = await tick({ PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1' });
+    expect(third.migrated).toBe(1);
+    expect((await readLocation(projectId, pending))?.location_state).toBe('archive_shard');
+  });
+
   it('poisons a migration that cannot advance after the configured number of claims', async () => {
     const { projectId, sessionId, source } = await seedCandidate('permanent', 30);
     const { bucket } = countingR2(env.PROJECT_DATA_ARCHIVE_R2 as R2Bucket, {
@@ -345,6 +365,7 @@ describe('resumable archive cursor', () => {
     // First tick copies part of the session and pauses.
     const first = await tick({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' });
     expect(first.yielded ?? 0).toBe(1);
+    expect(first.stopReason).toBe('wall_time');
     // An alarm raises a marker on the fenced session (no transcript write involved).
     await runInDurableObject(source, async (_instance, state) => {
       state.storage.sql.exec(
@@ -391,6 +412,7 @@ describe('resumable archive cursor', () => {
     const { projectId, sessionId, source } = await seedCandidate('lateedit', LARGE_MESSAGES);
     const first = await tick({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' });
     expect(first.yielded ?? 0).toBe(1);
+    expect(first.stopReason).toBe('wall_time');
     // A late agent-completion callback stamps `agent_completed_at` on the stopped session. That
     // DO path does not check the source intent; the write-generation trigger sees it anyway.
     await source.markAgentCompleted(sessionId);
@@ -750,6 +772,7 @@ describe('resumable archive cursor', () => {
     const before = await source.estimateCallCountForTest();
     const refused = await tick();
     expect(refused.budgetWindowExhausted ?? 0).toBeGreaterThanOrEqual(1);
+    expect(refused.stopReason).toBe('write_budget');
     expect(await source.estimateCallCountForTest()).toBe(before);
     expect(await readJournal(projectId, sessionId)).toBeNull();
 
@@ -846,6 +869,7 @@ describe('resumable archive cursor', () => {
     );
     const first = await tick({ PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '150' });
     expect(first.yielded ?? 0).toBe(1);
+    expect(first.stopReason).toBe('wall_time');
     // What an intent prepared by the previous build looks like: no generation, no components.
     await runInDurableObject(source, async (_instance, state) => {
       state.storage.sql.exec(

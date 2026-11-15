@@ -58,7 +58,7 @@ function BudgetBar({
 // Budget Settings Section
 // ---------------------------------------------------------------------------
 
-export function AiBudgetSettingsSection() {
+export function BudgetSettingsSection() {
   const [budget, setBudget] = useState<UserAiBudgetResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
