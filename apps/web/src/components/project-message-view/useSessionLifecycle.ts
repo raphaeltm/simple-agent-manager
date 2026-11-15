@@ -1,4 +1,4 @@
-import type { PromptDeliveryIntent } from '@simple-agent-manager/shared';
+import type { ChatMessageAppend, PromptDeliveryIntent } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
@@ -43,7 +43,13 @@ export function useSessionLifecycle(
   onCommentEvent?: (event: MessageCommentRealtimeEvent) => void
 ): UseSessionLifecycleResult {
   const transcript = useSessionTranscript(projectId, sessionId);
-  const { appendMessages, catchUpTail, mergeRecentWindow, patchMessageMetadata } = transcript;
+  const {
+    appendMessages,
+    appendMessageContent,
+    catchUpTail,
+    mergeRecentWindow,
+    patchMessageMetadata,
+  } = transcript;
   // Seeded from the cached transcript so a cached chat renders whole on its first
   // render; the server-snapshot effect below keeps both current from then on.
   const [session, setSession] = useState<ChatSessionResponse | null>(
@@ -157,6 +163,18 @@ export function useSessionLifecycle(
     // ordinary sleeping session still connects nothing) is what makes the push
     // half of wake progress actually reach the user.
     enabled: session?.status === 'active' || wake.isWaking,
+    onMessageAppend: useCallback(
+      (append: ChatMessageAppend) => {
+        const applied = appendMessageContent(append);
+        if (applied) {
+          setAgentActivity('responding');
+          setStaleNotice(false);
+          startVerifyDecayTimer();
+        }
+        return applied;
+      },
+      [appendMessageContent, startVerifyDecayTimer]
+    ),
     onSubscribed: useCallback(
       () => catchUpTail(resyncAccessAfterSubscribe),
       [catchUpTail, resyncAccessAfterSubscribe]
@@ -197,7 +215,7 @@ export function useSessionLifecycle(
         state?: SessionStateSnapshot | null
       ) => {
         setSession(catchUpSession);
-        mergeRecentWindow({
+        const merged = mergeRecentWindow({
           session: catchUpSession,
           messages: catchUpMessages,
           // A window's own `hasMore` is used only when no transcript is loaded
@@ -209,6 +227,7 @@ export function useSessionLifecycle(
           // explicit refresh/reconnect will retry from the current cache.
         });
         hydrateState(state);
+        return merged;
       },
       [hydrateState, mergeRecentWindow]
     ),

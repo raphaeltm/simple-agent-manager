@@ -1,10 +1,11 @@
 import { archiveShardProjectDataOwner } from '@simple-agent-manager/project-data/internal/client/project-data-archive-routing';
+import { projectDataPorts } from '@simple-agent-manager/project-data/internal/do/ports';
 import {
   copyBackProjectDataArchiveMigration,
   runScopedProjectDataArchiveCanary,
 } from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
 import { env, runInDurableObject } from 'cloudflare:test';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import * as service from '../../src/services/project-data';
@@ -23,14 +24,23 @@ import {
 } from './helpers/archive-write-profile';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
-async function runProfile(reset: boolean) {
+async function runProfile(reset: boolean, merged = false) {
+  if (merged)
+    vi.spyOn(projectDataPorts().operations, 'messageMergeConfig').mockResolvedValue({
+      enabled: true,
+      maxRowBytes: 65536,
+      recentIds: 200,
+    });
   const projectId = `write-profile-${crypto.randomUUID()}`;
   await seedUser('write-profile-owner');
   await seedInstallation('write-profile-install', 'write-profile-owner');
   await seedProject(projectId, 'write-profile-owner', 'write-profile-install');
   const source = projectDataStub(projectId);
   await source.ensureProjectId(projectId);
-  const sessionId = await source.createSession(null, 'Archive write profile');
+  const sessionId = await source.createSession(
+    merged ? 'archive-merge-workspace' : null,
+    'Archive write profile'
+  );
   // 105 turns: user, 17 streamed assistant chunks, tool call, tool result.
   // Each chunk has its own ID, as the VM reporter emits it. Grouped materialization
   // combines the assistant run; archive must retain the original exact rows too.
@@ -39,7 +49,44 @@ async function runProfile(reset: boolean) {
     toolMetadata: row.toolMetadata ?? null,
   }));
   for (let offset = 0; offset < seeded.length; offset += 50)
-    await source.persistMessageBatch(sessionId, seeded.slice(offset, offset + 50));
+    await source.persistMessageBatch(
+      sessionId,
+      seeded.slice(offset, offset + 50),
+      merged
+        ? {
+            workspaceId: 'archive-merge-workspace',
+            callbackGeneration: null,
+            outboxIncarnation: '9d0a1501-d7dc-4150-bc09-587cb91e5498',
+          }
+        : undefined
+    );
+  if (merged)
+    await source.persistMessageBatch(
+      sessionId,
+      [
+        {
+          messageId: 'archive-tail-first',
+          role: 'assistant',
+          content: 'Final streamed ',
+          toolMetadata: null,
+          timestamp: new Date(1_700_100).toISOString(),
+          sequence: 2101,
+        },
+        {
+          messageId: 'archive-tail-second',
+          role: 'assistant',
+          content: 'reply.',
+          toolMetadata: null,
+          timestamp: new Date(1_700_200).toISOString(),
+          sequence: 2102,
+        },
+      ],
+      {
+        workspaceId: 'archive-merge-workspace',
+        callbackGeneration: null,
+        outboxIncarnation: '9d0a1501-d7dc-4150-bc09-587cb91e5498',
+      }
+    );
   const toolKey = `write-profile-tool/${projectId}`;
   const archivedTool = JSON.parse(seeded[2099].toolMetadata!);
   await env.PROJECT_DATA_ARCHIVE_R2.put(
@@ -172,7 +219,13 @@ async function runProfile(reset: boolean) {
         entry.calls++;
         entry.rowsWritten += sample.rowsWritten;
       }
-      if (!reset) expect({ shape, phases: sumWrites(samples), statements }).toMatchSnapshot();
+      if (!reset && !merged)
+        expect({ shape, phases: sumWrites(samples), statements }).toMatchSnapshot();
+      if (merged) {
+        expect(shape.raw.n).toBe(421);
+        expect((await target.getSession(sessionId))?.lastMessageAt).toBe(1_700_200);
+        expect((await source.getSession(sessionId))?.lastMessageAt).toBe(1_700_200);
+      }
       // A lost response must replay the receipt without reinserting search documents.
       expect(
         samples
@@ -184,7 +237,7 @@ async function runProfile(reset: boolean) {
               )
           )
           .reduce((sum, sample) => sum + sample.rowsWritten, 0)
-      ).toBe(966);
+      ).toBe(merged ? 968 : 966);
       const read = await service.getMessages(
         configured,
         projectId,
@@ -206,7 +259,11 @@ async function runProfile(reset: boolean) {
       expect(tool).toMatchObject({ content: archivedTool.content, source: 'archive' });
       expect(
         read.messages.map((row) => ({ id: row.id, content: row.content, role: row.role }))
-      ).toEqual(seeded.map((row) => ({ id: row.messageId, content: row.content, role: row.role })));
+      ).toEqual(
+        merged
+          ? original.messages.map((row) => ({ id: row.id, content: row.content, role: row.role }))
+          : seeded.map((row) => ({ id: row.messageId, content: row.content, role: row.role }))
+      );
       const search = await service.searchMessagesWithArchiveMetadata(
         configured,
         projectId,
@@ -223,6 +280,7 @@ async function runProfile(reset: boolean) {
         reason: 'profile exact copy-back proof',
       });
       expect(restored.restoredToRoot).toBe(true);
+      if (merged) expect((await source.getSession(sessionId))?.lastMessageAt).toBe(1_700_200);
       expect(
         (
           await service.getMessages(
@@ -241,6 +299,14 @@ async function runProfile(reset: boolean) {
     }
   );
 }
+
+it('archives and restores canonical merged rows through the real coordinator', async () => {
+  try {
+    await runProfile(false, true);
+  } finally {
+    vi.restoreAllMocks();
+  }
+}, 120_000);
 
 it(
   'profiles a full compact archive through the coordinator in real workerd',

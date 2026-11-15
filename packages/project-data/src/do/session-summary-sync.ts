@@ -38,6 +38,7 @@ const SUMMARY_COLUMNS = `id, workspace_id, task_id, created_by_user_id, topic, s
   message_count, started_at, ended_at, created_at, updated_at, agent_completed_at,
   NULLIF(MAX(
     COALESCE(archive_last_message_at, 0),
+                  COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0),
     (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id)
   ), 0) as last_message_at`;
 
@@ -232,6 +233,7 @@ function readBackfillPage(
                          started_at, ended_at, created_at, updated_at, agent_completed_at,
                          NULLIF(MAX(
                            COALESCE(archive_last_message_at, 0),
+                  COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0),
                            (SELECT COALESCE(MAX(created_at), 0)
                             FROM chat_messages WHERE session_id = chat_sessions.id)
                          ), 0) as last_message_at

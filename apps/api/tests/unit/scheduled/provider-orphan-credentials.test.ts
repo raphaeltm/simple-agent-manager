@@ -199,7 +199,9 @@ describe('credential inventory and real SQL orphan claims', () => {
     credential('c');
     vi.mocked(createProviderForUser).mockRejectedValue(new Error('credential unavailable'));
     const result = await reconcileProviderOrphans(env, now, scope);
-    expect(result.errors).toBe(2);
+    // Account-scoped failures: counted per account, not as platform sweep errors.
+    expect(result.accountErrors).toBe(2);
+    expect(result.errors).toBe(0);
     expect(createProviderForUser).toHaveBeenCalledTimes(2);
     expect(await env.KV.get(cursorKey)).toBe('b');
     expect((await listInventoryCredentials(env)).map((c) => c.id)).toEqual(['c']);
@@ -211,7 +213,8 @@ describe('credential inventory and real SQL orphan claims', () => {
     account('a', p);
     expect(await reconcileProviderOrphans(env, now, scope)).toMatchObject({
       destroyed: 0,
-      errors: 1,
+      errors: 0,
+      accountErrors: 1,
     });
     expect(p.deleteVM).not.toHaveBeenCalled();
     expect(await env.KV.get(cursorKey)).toBe('a');
@@ -243,9 +246,12 @@ describe('credential inventory and real SQL orphan claims', () => {
           },
         } as D1PreparedStatement;
       });
+      // A failed D1 claim lookup is shared infrastructure: a failed sweep (`errors`), not an
+      // account failure, even when it happens inside a user account's pass.
       expect(await reconcileProviderOrphans(env, now, scope)).toMatchObject({
         destroyed: 0,
         errors: 1,
+        accountErrors: 0,
         skipReason: 'claim-lookup-failed',
       });
       expect(p.deleteVM).not.toHaveBeenCalled();

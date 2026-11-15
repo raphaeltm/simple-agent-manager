@@ -64,6 +64,11 @@ export { type LinkLimits, type LinkRemove, type LinkWrite, type ResourceLink } f
 export { type LogicalActivity, type LogicalEntry } from './do/logical-transcript';
 export { type LogicalMessage } from './do/logical-transcript-model';
 export {
+  DEFAULT_MESSAGE_MERGE_CONFIG,
+  type MessageIngestSource,
+  type MessageMergeConfig,
+} from './do/message-stream-ingest';
+export {
   configureProjectDataPort,
   configureProjectDataPorts,
   type CredentialsPort,

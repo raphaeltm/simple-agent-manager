@@ -23,6 +23,9 @@ export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' 
 
 export type AdminSettingName =
   | DeploymentPublishJobSettingName
+  | 'chat.messageMergingEnabled'
+  | 'chat.messageMergeMaxRowBytes'
+  | 'chat.messageMergeRecentIds'
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `lifecycleLatency.${LifecycleLatencySettingKey}`
   | `aiModels.${AgentModelSettingKey}`
@@ -68,6 +71,7 @@ export type AdminSettingName =
   | 'operations.nodeCleanupBlockedRetirementMs'
   | 'operations.nodeProviderDeletionRequestTimeoutMs'
   | 'operations.nodeProviderDeletionConfirmMaxMs'
+  | 'operations.nodeProvisioningAttemptDeadlineMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'
   | 'operations.projectDataArchiveMinStorageUsagePercent'

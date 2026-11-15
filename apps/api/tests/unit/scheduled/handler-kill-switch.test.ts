@@ -7,6 +7,8 @@ const {
   logInfoMock,
   sessionSleepLifecycleRepairMock,
   sessionSleepMock,
+  providerOrphanMock,
+  persistErrorMock,
 } = vi.hoisted(() => ({
   capacityPoolReconciliationMock: vi.fn(),
   enabledMock: vi.fn(),
@@ -14,6 +16,8 @@ const {
   logInfoMock: vi.fn(),
   sessionSleepLifecycleRepairMock: vi.fn(),
   sessionSleepMock: vi.fn(),
+  providerOrphanMock: vi.fn(),
+  persistErrorMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../src/services/operational-kill-switch', () => ({
@@ -34,6 +38,13 @@ vi.mock('../../../src/scheduled/session-sleep-lifecycle-repair', () => ({
 }));
 vi.mock('../../../src/scheduled/capacity-pool-reconciliation', () => ({
   runScheduledCapacityPoolReconciliation: capacityPoolReconciliationMock,
+}));
+vi.mock('../../../src/scheduled/provider-orphan-reconciliation', () => ({
+  runProviderOrphanReconciliation: providerOrphanMock,
+}));
+vi.mock('../../../src/services/observability', () => ({ persistError: persistErrorMock }));
+vi.mock('../../../src/scheduled/failed-sweep-notifications', () => ({
+  notifyFailedSweeps: vi.fn().mockResolvedValue({ notifiedSweeps: 0, notificationsSent: 0 }),
 }));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
@@ -168,4 +179,76 @@ describe('scheduled operational sweep kill switch', () => {
       })
     );
   });
+});
+
+describe('provider orphan failure reporting', () => {
+  it.each([
+    { errors: 1, skipped: true, accountErrors: 0 },
+    { errors: 2, skipped: false, accountErrors: 0 },
+    { errors: 0, skipped: true, accountErrors: 0 },
+    // Failures confined to user/project accounts are logged, never a failed platform sweep.
+    { errors: 0, skipped: false, accountErrors: 3 },
+  ])(
+    'reports errors=$errors accountErrors=$accountErrors skipped=$skipped and runs the following sweep',
+    async ({ errors, skipped, accountErrors }) => {
+      const { createSweepIsolator: realCreate } = await vi.importActual<
+        typeof import('../../../src/scheduled/sweep-isolation')
+      >('../../../src/scheduled/sweep-isolation');
+      const { createSweepIsolator } = await import('../../../src/scheduled/sweep-isolation');
+      const real = realCreate(env);
+      const isolate = real.isolate.bind(real);
+      const followingSweep = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(createSweepIsolator).mockReturnValueOnce({
+        ...real,
+        isolate: (name, fn) =>
+          name === 'provider_orphan_reconciliation'
+            ? isolate(name, fn)
+            : name === 'capacity_pool_reconciliation'
+              ? isolate(name, followingSweep)
+              : Promise.resolve(undefined),
+      });
+      enabledMock.mockResolvedValue(true);
+      providerOrphanMock.mockResolvedValue({
+        errors,
+        accountErrors,
+        scanned: 3,
+        destroyed: 1,
+        deletionRequested: 2,
+        skipped,
+        skipReason: skipped ? 'credential-resolution-failed' : null,
+      });
+      persistErrorMock.mockClear();
+
+      await scheduled(controller, env, context);
+
+      expect(providerOrphanMock).toHaveBeenCalledWith(env);
+      expect(followingSweep).toHaveBeenCalledOnce();
+      if (errors > 0) {
+        expect(persistErrorMock).toHaveBeenCalledWith(
+          {},
+          expect.objectContaining({
+            context: {
+              recoveryType: 'cron_sweep_failure',
+              sweep: 'provider_orphan_reconciliation',
+            },
+          }),
+          env
+        );
+      } else {
+        expect(persistErrorMock).not.toHaveBeenCalled();
+      }
+      expect(logInfoMock).toHaveBeenCalledWith(
+        'cron.completed',
+        expect.objectContaining({
+          failedSweeps: errors ? ['provider_orphan_reconciliation'] : [],
+          failedSweepCount: errors ? 1 : 0,
+          providerOrphansScanned: 3,
+          providerOrphansDestroyed: 1,
+          providerOrphansDeletionRequested: 2,
+          providerOrphanErrors: errors,
+          providerOrphanAccountErrors: accountErrors,
+        })
+      );
+    }
+  );
 });

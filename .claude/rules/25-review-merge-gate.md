@@ -48,7 +48,7 @@ gh label create needs-human-review --description "Agent could not complete all r
 
 A CodeRabbit review is **not** a hard merge requirement. The requirement is to **request one and wait to see whether it arrives**. A review that arrives is binding. A review that never arrives is skipped.
 
-1. **Request it once the PR is otherwise ready.** When CI and every other gate are green and the PR is not a draft, apply the label with `gh pr edit <pr-number> --add-label coderabbit-review`. The label invokes `.github/workflows/coderabbit-bot-review.yml`, which posts the CodeRabbit command through the repository's human-scoped `CODERABBIT_REVIEW_PAT`. If the label run did not fire (the label path never fires on a draft PR), dispatch the same trusted workflow directly:
+1. **Request it when you mark the PR ready for review.** Do this with the first complete candidate, at the same time as the full CI run starts, while local reviewers and staging verification run in parallel. Do not hold the request until everything else is green: that serial wait cost a median 40 minutes from label to merge. On the non-draft PR, apply the label with `gh pr edit <pr-number> --add-label coderabbit-review`. The label invokes `.github/workflows/coderabbit-bot-review.yml`, which posts the CodeRabbit command through the repository's human-scoped `CODERABBIT_REVIEW_PAT`. If the label run did not fire (the label path never fires on a draft PR), dispatch the same trusted workflow directly:
 
    ```bash
    gh workflow run coderabbit-bot-review.yml --ref main -f pr_number=<pr-number>
@@ -56,7 +56,7 @@ A CodeRabbit review is **not** a hard merge requirement. The requirement is to *
 
    Always dispatch the workflow from `main`; do not execute a workflow definition from the PR branch. Agents MUST NOT post `@coderabbitai review` directly with their own GitHub App token: CodeRabbit ignores bot-authored review commands. The workflow is the human-identity bridge.
 
-2. **Wait about 15 minutes for a response.** Watch the PR's reviews, review comments, and CodeRabbit's check and status comment. If CodeRabbit has visibly started a review that is still in progress, wait for it to finish, up to about 45 minutes in total. Past that, treat it as no review.
+2. **Wait about 15 minutes from the request for a response.** The wait runs alongside CI, reviewers and staging, so it rarely delays the merge. Watch the PR's reviews, review comments, and CodeRabbit's check and status comment. If CodeRabbit has visibly started a review that is still in progress, wait for it to finish, up to about 45 minutes in total. Past that, treat it as no review. **The wait ends at once** when CodeRabbit replies with a rate-limit, quota or `Review skipped` notice, or the request workflow fails: do not sit out the timer.
 
 3. **If a review arrives, it blocks merge until its feedback is resolved.** Implement valid feedback, push, and re-run the affected checks. For feedback you judge inapplicable, reply with the reason and resolve the thread. Keep the `coderabbit-review` label on the PR so pushed fixes get incremental reviews, and give each one the same wait. The PR is ready when no CodeRabbit feedback is unresolved. CodeRabbit not re-reviewing your fixes within the wait does not block.
 
@@ -68,7 +68,7 @@ A CodeRabbit review is **not** a hard merge requirement. The requirement is to *
 
 ### Why CodeRabbit Is Best-Effort
 
-In mid-September 2026 CodeRabbit's free OSS quota began rate-limiting agent PRs. After 2026-09-21 it stopped reviewing agent-authored PRs altogether, reporting `Review skipped: bot user not eligible for review` or `automatic reviews are disabled`. The old wording treated that silence as "cannot verify, escalate", so agents added `needs-human-review` and waited for per-PR waivers, and finished PRs stalled for hours or days. On 2026-09-29 Raphaël changed the rule: requesting a review and waiting for it is mandatory, receiving one is not.
+In mid-September 2026 CodeRabbit's free OSS quota began rate-limiting agent PRs. After 2026-09-21 it stopped reviewing agent-authored PRs altogether, reporting `Review skipped: bot user not eligible for review` or `automatic reviews are disabled`. The old wording treated that silence as "cannot verify, escalate", so agents added `needs-human-review` and waited for per-PR waivers, and finished PRs stalled for hours or days. On 2026-09-29 Raphaël changed the rule: requesting a review and waiting for it is mandatory, receiving one is not. On 2026-11-15 he moved the request to the moment the PR is marked ready, in parallel with the other gates, and the wait now ends as soon as CodeRabbit says it will not review (project policy `73ed7a68`).
 
 ## Quick Compliance Check
 
@@ -84,7 +84,7 @@ Local reviewers:
 
 CodeRabbit:
 
-- [ ] Requested once the PR was otherwise ready, and the ~15-minute wait completed
+- [ ] Requested when the PR was marked ready, and the ~15-minute wait completed (or ended early on a skip, rate-limit or quota reply)
 - [ ] If it reviewed: every finding is implemented or resolved with a reason, and no CodeRabbit feedback is unresolved
 - [ ] If it did not review: the observed outcome is recorded in "CodeRabbit Review Evidence", with no `needs-human-review` label and no waiver request
 

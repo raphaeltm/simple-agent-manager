@@ -3,6 +3,21 @@ name: Deploy Staging
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Non-production GitHub environment to deploy and lease'
+        type: string
+        default: staging
+      sam_task_id:
+        description: 'SAM task holding the live verification slot (optional)'
+        type: string
+      lease_action:
+        description: 'Deploy and hold, reserve without deploying, or release from the holder branch'
+        type: choice
+        options: [deploy, acquire, release]
+        default: deploy
+      lease_hold_minutes:
+        description: 'Live verification hold in minutes (default/cap from environment variables)'
+        type: string
       performance_audit:
         description: 'Run bounded admin/Runtime browser timings and screenshots with the staging smoke account'
         type: boolean
@@ -65,7 +80,7 @@ on:
 
 # Only one staging deployment at a time; queue (don't cancel) concurrent requests
 concurrency:
-  group: deploy-staging
+  group: deploy-${{ inputs.environment || 'staging' }}
   cancel-in-progress: false
 
 env:
@@ -77,11 +92,36 @@ permissions:
   id-token: none
 
 jobs:
+  lease:
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment || 'staging' }}
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      deployments: write
+      id-token: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read and acquire, renew or release verification lease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          LEASE_ACTION: ${{ inputs.lease_action || 'deploy' }}
+          LEASE_PRIMARY_ONLY_AUDIT: ${{ inputs.activation_only || inputs.agent_email_dns_audit }}
+          SAM_TASK_ID: ${{ inputs.sam_task_id }}
+          LEASE_HOLD_MINUTES: ${{ inputs.lease_hold_minutes }}
+          LEASE_DEFAULT_HOLD_MINUTES: ${{ vars.STAGING_LEASE_DEFAULT_HOLD_MINUTES || '30' }}
+          LEASE_MAX_HOLD_MINUTES: ${{ vars.STAGING_LEASE_MAX_HOLD_MINUTES || '120' }}
+          # Reserve-only checks do not need a deploy-time allowance.
+          LEASE_EXPECTED_DEPLOY_MINUTES: ${{ inputs.lease_action == 'acquire' && '0' || vars.STAGING_LEASE_EXPECTED_DEPLOY_MINUTES || '30' }}
+        run: node scripts/deploy/staging-lease.mjs
+
   deploy:
-    if: ${{ !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
+    needs: lease
+    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
     uses: ./.github/workflows/deploy-reusable.yml
     with:
-      environment: staging
+      environment: ${{ inputs.environment || 'staging' }}
       use_shared_engine: ${{ inputs.use_shared_engine || false }}
       skip_agent: false # Required: staging VMs need the agent binary in R2
       dry_run: ${{ inputs.dry_run || false }}
@@ -91,12 +131,12 @@ jobs:
   # Requires SMOKE_TEST_TOKEN secret in the staging environment.
   # Skipped if the token is not configured (new deployments before token setup).
   smoke-tests:
-    needs: deploy
-    if: ${{ always() && !inputs.activation_only && !inputs.dry_run && (needs.deploy.result == 'success' || (inputs.performance_audit && inputs.performance_audit_only) || (inputs.github_trigger_audit && inputs.github_trigger_audit_send_only)) }}
+    needs: [lease, deploy]
+    if: ${{ always() && needs.lease.result == 'success' && (inputs.lease_action == 'deploy' || inputs.lease_action == '') && !inputs.activation_only && !inputs.dry_run && (needs.deploy.result == 'success' || (inputs.performance_audit && inputs.performance_audit_only) || (inputs.github_trigger_audit && inputs.github_trigger_audit_send_only)) }}
     # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
     # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
     runs-on: ubuntu-24.04
-    environment: staging
+    environment: ${{ inputs.environment || 'staging' }}
     env:
       SMOKE_TEST_TOKEN: ${{ !inputs.github_trigger_audit_send_only && secrets.SMOKE_TEST_TOKEN || '' }}
       SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
@@ -159,9 +199,10 @@ jobs:
         run: node scripts/e2e/github-trigger-staging.mjs --phase=send
 
   storage-activation:
-    if: ${{ inputs.activation_only }}
+    needs: lease
+    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.activation_only }}
     runs-on: ubuntu-latest
-    environment: staging
+    environment: ${{ inputs.environment || 'staging' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -173,7 +214,7 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
-          DEPLOY_ENVIRONMENT: staging
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
           EXPECTED_SHA: ${{ inputs.activation_expected_sha }}
           EXPECTED_VERSION: ${{ inputs.activation_expected_version }}
           CUTOVER_AT: ${{ inputs.activation_cutover_at }}
@@ -189,10 +230,10 @@ jobs:
           if-no-files-found: ignore
 
   agent-email-dns-audit:
-    needs: deploy
-    if: ${{ inputs.agent_email_dns_audit && !inputs.dry_run }}
+    needs: [lease, deploy]
+    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.agent_email_dns_audit && !inputs.dry_run }}
     runs-on: ubuntu-latest
-    environment: staging
+    environment: ${{ inputs.environment || 'staging' }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -204,5 +245,5 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
-          DEPLOY_ENVIRONMENT: staging
+          DEPLOY_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
         run: node scripts/e2e/agent-email-dns-staging.mjs

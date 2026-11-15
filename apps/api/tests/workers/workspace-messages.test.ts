@@ -7,8 +7,9 @@
  *
  * Replaces source-contract tests that only checked string presence in source code.
  */
+import { projectDataPorts } from '@simple-agent-manager/project-data/internal/do/ports';
 import { env, runInDurableObject, SELF } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { signCallbackToken } from '../../src/services/jwt';
 
@@ -28,13 +29,15 @@ const USER_ID = `${TEST_PREFIX}-user`;
 async function postMessages(
   workspaceId: string,
   messages: Record<string, unknown>[],
-  token: string
+  token: string,
+  outboxIncarnation?: string
 ) {
   return SELF.fetch(`https://api.test.example.com/api/workspaces/${workspaceId}/messages`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      ...(outboxIncarnation ? { 'X-SAM-Outbox-Incarnation': outboxIncarnation } : {}),
     },
     body: JSON.stringify({ messages }),
   });
@@ -251,6 +254,68 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   });
 
   describe('input validation', () => {
+    it('passes authenticated callback identity through the real client and DO merge path', async () => {
+      const workspaceId = `${WORKSPACE_ID}-canonical`;
+      const generation = 'canonical-callback-generation';
+      const incarnation = crypto.randomUUID();
+      const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+      const sessionId = await stub.createSession(workspaceId, 'Canonical route');
+      await env.DATABASE.prepare(
+        `INSERT INTO workspaces
+        (id, user_id, node_id, project_id, chat_session_id, name, status, vm_size, vm_location, callback_generation, repository, branch, created_at, updated_at)
+        SELECT ?, user_id, node_id, project_id, ?, 'Canonical route', 'running', vm_size, vm_location, ?, repository, branch, created_at, updated_at
+        FROM workspaces WHERE id = ?`
+      )
+        .bind(workspaceId, sessionId, generation, WORKSPACE_ID)
+        .run();
+      const token = await signCallbackToken(workspaceId, env as any, {
+        callbackGeneration: generation,
+      });
+      const config = vi
+        .spyOn(projectDataPorts().operations, 'messageMergeConfig')
+        .mockResolvedValue({
+          enabled: true,
+          maxRowBytes: 65536,
+          recentIds: 200,
+        });
+      try {
+        const stream = [1, 2, 3].map((sequence) =>
+          makeMessage({
+            messageId: `canonical-route-${sequence}`,
+            sessionId,
+            sequence,
+            content: `fragment-${sequence}`,
+            timestamp: new Date(Date.now() + sequence).toISOString(),
+            callbackGeneration: 'untrusted-body-generation',
+            workspaceId: 'untrusted-body-workspace',
+            outboxIncarnation: 'untrusted-body-incarnation',
+          })
+        );
+        expect((await postMessages(workspaceId, stream, token, incarnation)).status).toBe(200);
+        const stored = await stub.getMessages(sessionId, 10);
+        expect(stored.messages).toHaveLength(1);
+        expect(stored.messages[0]?.content).toBe('fragment-1fragment-2fragment-3');
+        const identity = await runInDurableObject(
+          stub,
+          (_instance, state) =>
+            JSON.parse(
+              String(
+                state.storage.sql
+                  .exec('SELECT stream_ingest_state FROM chat_sessions WHERE id = ?', sessionId)
+                  .toArray()[0]?.stream_ingest_state
+              )
+            ).source
+        );
+        expect(JSON.parse(identity)).toEqual([workspaceId, generation, incarnation]);
+        expect((await postMessages(workspaceId, stream.slice(1), token, incarnation)).status).toBe(
+          200
+        );
+        expect((await stub.getMessages(sessionId, 10)).messages).toEqual(stored.messages);
+      } finally {
+        config.mockRestore();
+      }
+    });
+
     it('rejects oversized payloads before message schema validation', async () => {
       const messages = Array.from({ length: 100 }, (_, index) =>
         makeMessage({

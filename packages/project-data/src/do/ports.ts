@@ -440,6 +440,7 @@ export interface StalledTaskClassifierConfig {
 }
 
 export interface OperationsPort {
+  messageMergeConfig?(env: Env): Promise<import('./message-stream-ingest').MessageMergeConfig>;
   /** Cached admin setting, refreshed only at object initialization and usage-window flush. */
   rowUsageIntervalMs?(env: Env): Promise<number>;
   /** Record an archive circuit-breaker opening and notify operators once; never throws. */

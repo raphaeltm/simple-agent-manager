@@ -44,6 +44,7 @@ export function listSessions(
               COALESCE(
                 NULLIF(MAX(
                   COALESCE(chat_sessions.archive_last_message_at, 0),
+                  COALESCE(json_extract(chat_sessions.stream_ingest_state, '$.lastCreatedAt'), 0),
                   (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id)
                 ), 0),
                 chat_sessions.created_at,
@@ -125,6 +126,7 @@ export function getSessionsByTaskIds(
               COALESCE(
                 NULLIF(MAX(
                   COALESCE(chat_sessions.archive_last_message_at, 0),
+                  COALESCE(json_extract(chat_sessions.stream_ingest_state, '$.lastCreatedAt'), 0),
                   (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id)
                 ), 0),
                 chat_sessions.created_at,
@@ -151,6 +153,7 @@ export function getSession(sql: SqlStorage, sessionId: string): Record<string, u
               COALESCE(
                 NULLIF(MAX(
                   COALESCE(cs.archive_last_message_at, 0),
+                  COALESCE(json_extract(cs.stream_ingest_state, '$.lastCreatedAt'), 0),
                   (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = cs.id)
                 ), 0),
                 cs.created_at,
