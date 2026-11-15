@@ -18,12 +18,27 @@ install, the bundled mail collector (see Email sign-in below).
 | `egress-fence`       | host    | none                            | installs and keeps the celld nftables egress fence       |
 | `gce-metadata-proxy` | host    | `127.0.0.1:7180`                | profile `gce`; access tokens for a gs:// bucket          |
 | `frps`               | host    | `127.0.0.1:7000`                | profile `tunnel`; nodes arrive as frp over wss via Caddy |
-| `objectstore`        | host    | `127.0.0.1:9000`                | profile `local-store`; otherwise use a GCS/S3 bucket     |
+| `objectstore`        | host    | `127.0.0.1:9000`                | profile `local-store`, trials only (see Object store)    |
 | `docker-proxy`       | none    | a unix socket shared with celld | guided login only: filters celld's Docker API calls      |
 | `key-agent`          | host    | `127.0.0.1:7190`                | opens the sealed Worker secrets for celld only           |
 
 Profile `mail-collector` (off by default, test installs only) adds `mail-collector`: Mailpit on
 `127.0.0.1:1025` (SMTP) and `127.0.0.1:8025` (UI, published at `mail.SAM_DOMAIN`). See Email sign-in.
+
+## Object store
+
+celld keeps the install's durable data (every database, Durable Object, stored file and deployed
+Worker version) in one bucket, `CELLD_BUCKET`. Use a cloud bucket: Google Cloud Storage (`gs://`),
+Amazon S3 or Cloudflare R2 (`s3://`), or Azure Blob Storage (`az://`). That is the supported path,
+and the one Create the box sets up. `pnpm selfhost:backup`, `restore` and `teardown` handle only
+`gs://` and `s3://` buckets so far.
+
+The bundled store (compose profile `local-store`, the `objectstore` service: a community build of
+MinIO) is for trials only. celld does not qualify it for production. Nothing turns it on by
+default: `.env.example` starts with a placeholder `gs://` bucket (the deploy fails on it until you
+put your own) and `COMPOSE_PROFILES=tunnel,gce`, and `pnpm selfhost:deploy` stops when
+`CELLD_BUCKET` is empty. You get the bundled store only by adding `local-store` to
+`COMPOSE_PROFILES` and pointing `CELLD_BUCKET` at it yourself.
 
 ## Create the box (Google Cloud)
 
@@ -41,17 +56,25 @@ DOMAIN=sam.example.com                 # SAM_DOMAIN
 DNS_ZONE=sam-example-com               # an existing Cloud DNS managed zone for $DOMAIN
 BUCKET=my-sam-fleet                    # CELLD_BUCKET=gs://$BUCKET/celld
 BOX=sam-box; BOX_SA=sam-box@$PROJECT.iam.gserviceaccount.com
-MY_IP=203.0.113.7                      # where you SSH from
+MY_IP=203.0.113.7                      # where you SSH from: `curl -s https://ifconfig.me` prints it
 
 gcloud config set project "$PROJECT"
-gcloud services enable compute.googleapis.com dns.googleapis.com storage.googleapis.com iam.googleapis.com
+# cloudbilling: Google's public Compute Engine list prices for the machine catalog (read-only, no
+# access to your billing account). Without it Google Cloud machines show "Price unavailable".
+gcloud services enable compute.googleapis.com dns.googleapis.com storage.googleapis.com \
+  iam.googleapis.com cloudbilling.googleapis.com
 
 # The box's own service account: the bucket (objects only) and DNS-01 for the wildcard certificate.
+# A new service account takes a few seconds before IAM accepts grants to it ("does not exist"),
+# so wait for it, then retry each grant (up to a minute each).
+retry() { for i in 1 2 3 4 5 6; do "$@" && return 0
+  [ "$i" -lt 6 ] && { echo "not yet, retrying in 10 s"; sleep 10; }; done; echo "FAILED: $*"; return 1; }
 gcloud iam service-accounts create sam-box --display-name="SAM box"
+retry gcloud iam service-accounts describe "$BOX_SA" --format='value(email)'
 gcloud storage buckets create "gs://$BUCKET" --location="$REGION" --uniform-bucket-level-access
-gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
+retry gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
   --member="serviceAccount:$BOX_SA" --role=roles/storage.objectAdmin
-gcloud projects add-iam-policy-binding "$PROJECT" \
+retry gcloud projects add-iam-policy-binding "$PROJECT" \
   --member="serviceAccount:$BOX_SA" --role=roles/dns.admin --condition=None
 
 # Network, firewall (80/443 for everyone: app, API and the nodes' tunnel; SSH for you), static IP.
@@ -78,9 +101,22 @@ gcloud compute instances create "$BOX" --zone="$ZONE" --machine-type=e2-standard
   --service-account="$BOX_SA" --scopes=cloud-platform
 ```
 
+You should see each resource reported as created. One or two "does not exist" errors followed by
+"not yet, retrying in 10 s" are normal; a line starting with `FAILED:` is not: run that command
+again before you go on, or the box has no rights on the bucket or the DNS zone.
+`gcloud compute instances list` then shows `sam-box` as `RUNNING` with the static address.
+
 Then the sealed-secrets key (Sealed secrets, Cloud key, one-time setup:
-`pnpm selfhost:gcp-bootstrap -- ... --kms-only --box-instance "$BOX" --box-zone "$ZONE"`), and on
-the VM (`gcloud compute ssh "$BOX" --zone "$ZONE"`):
+`pnpm selfhost:gcp-bootstrap -- ... --kms-only --box-instance "$BOX" --box-zone "$ZONE"`). Run the
+bootstrap where you ran the block above (Cloud Shell or your own machine, logged in to `gcloud` as
+a project owner), in a clone of this repository on the self-host branch (the clone and checkout
+lines below). It needs only bash, `gcloud` and Node: `pnpm selfhost:gcp-bootstrap -- <args>` is
+`bash deploy/selfhost/gcp-bootstrap.sh <args>`; use that form where pnpm is not installed.
+
+Then the VM. Log in with `gcloud compute ssh "$BOX" --zone "$ZONE"` from the machine at `MY_IP`: the
+first time, it creates an SSH key and adds it to the project's metadata. Cloud Shell's address
+changes between sessions, and so may yours. When it does, update the rule:
+`gcloud compute firewall-rules update sam-selfhost-allow-ssh --source-ranges=$(curl -s https://ifconfig.me)/32`.
 
 ```bash
 sudo apt-get update && sudo apt-get install -y build-essential git ca-certificates curl
@@ -88,23 +124,56 @@ curl -fsSL https://get.docker.com | sudo sh            # Docker Engine with the 
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs
 sudo corepack enable pnpm
 git clone https://github.com/raphaeltm/simple-agent-manager.git sam && cd sam   # full clone
+git checkout sam/selfhost-pass-2   # until the self-host work is on main (main has no deploy/selfhost yet)
 ```
 
-Add yourself to the `docker` group (`sudo usermod -aG docker "$USER"`, then log in again) only if
-you are trusted with every secret on the box (Install or upgrade says why). In `.env`: `SAM_DOMAIN=$DOMAIN`,
-`SAM_TLS_MODE=dns-googleclouddns`, `GCP_PROJECT=$PROJECT`, `COMPOSE_PROFILES=tunnel,gce` and
-`CELLD_BUCKET=gs://$BUCKET/celld`; then Install or upgrade, below. The node setup
-(`pnpm selfhost:gcp-bootstrap` without `--kms-only`) runs once the install answers.
+`git status` should then say "On branch sam/selfhost-pass-2", and `ls deploy/selfhost` lists
+`docker-compose.yml`.
+
+The install commands that use Docker (`docker compose`, `pnpm selfhost:deploy`,
+`pnpm selfhost:verify-fence`, backup and teardown) need the operator in the `docker` group. That
+membership gives root on the box and every secret on it (Install or upgrade says why), so add
+only the person who operates the box: `sudo usermod -aG docker "$USER"`, then log out and SSH in
+again. `docker ps` (no `sudo`) should then answer. Run every `pnpm selfhost:*` command as that same
+user, never with `sudo`, from the repository root (`cd ~/sam` after you log in again): the deploy
+writes `.state/` as the user who runs it.
+
+Create `.env` and fill in your values for `SAM_DOMAIN`, `SAM_TLS_MODE=dns-googleclouddns`,
+`GCP_PROJECT`, `COMPOSE_PROFILES=tunnel,gce` and `CELLD_BUCKET=gs://<your bucket>/celld`:
+
+```bash
+cd ~/sam
+cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env
+$EDITOR deploy/selfhost/.env
+```
+
+Before the first deploy, set up the first account, or nobody can sign in (a new box has no OAuth
+app; Email sign-in, below, has the details):
+
+1. A way to send the sign-in code: an SMTP relay (`SMTP_HOST` and the other `SMTP_*` lines in
+   `.env`), or on a test box the mail collector (`COMPOSE_PROFILES=tunnel,gce,mail-collector`).
+2. The owner's address, in `.state/secrets.env` (`.state` does not exist before `deploy --init`):
+
+   ```bash
+   cd ~/sam
+   mkdir -p -m 700 deploy/selfhost/.state
+   (umask 077; echo 'BOOTSTRAP_OWNER_EMAIL=you@example.com' >> deploy/selfhost/.state/secrets.env)
+   ```
+
+Then Install or upgrade, below (skip its first two lines: `.env` already exists). After the
+deploy, that address signs in by email code at `https://app.$DOMAIN` and becomes the
+administrator. The node setup (`pnpm selfhost:gcp-bootstrap` without `--kms-only`) runs once the
+install answers.
 
 ## Install or upgrade
 
 Needs Docker with Compose v2.20+, Node 22+ and pnpm, a C/C++ toolchain with `make` (`pnpm install`
 builds `better-sqlite3` from source where no prebuilt binary matches, as on stock Ubuntu 24.04:
-`sudo apt-get install -y build-essential`), and a full clone of this repository. On a new
-Google Cloud machine, Create the box (above) prepares all of it.
+`sudo apt-get install -y build-essential`), a full clone of this repository, and a cloud bucket
+(Object store, above). On a new Google Cloud machine, Create the box (above) prepares all of it.
 
 ```bash
-cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env
+cp deploy/selfhost/.env.example deploy/selfhost/.env && chmod 600 deploy/selfhost/.env   # once
 $EDITOR deploy/selfhost/.env           # SAM_DOMAIN, TLS mode, bucket
 pnpm install
 pnpm selfhost:deploy --init            # key provider, sealed platform keys, gateway.env, fence files
@@ -435,7 +504,14 @@ the bootstrap stops and lists the versions. Run it again with one of:
   (`destroyScheduledDuration`): the version is restored, enabled and kept primary.
 - `--key <another id>`: a new key (then put the printed `SAM_GCP_KMS_KEY=...` line in `.env`).
 
-The box's `deploy --init` refuses such a key the same way rather than falling back to the file key.
+On the box, `pnpm selfhost:deploy --init` also stops on such a key. It does not fall back to a
+key file: it exits with "refusing to seal this box's secrets with a key file on this box", records
+no key choice and seals nothing (no `.state/key-agent/`). What it names depends on the grant. On a new box whose bootstrap
+stopped here, the box account has no grant on the key yet, so Cloud KMS answers "denied" (403) and
+the message lists the possible causes, a destroyed key among them. With the grant in place, it
+names FAILED_PRECONDITION (no enabled primary version). Both print the bootstrap command with
+`--new-key-version`: run it where you run the bootstrap (it also adds the box's grant), then run
+`deploy --init` on the box again.
 
 **AWS** (the box is an EC2 instance with an instance profile; IMDSv2 is enough):
 
@@ -553,8 +629,8 @@ message on loopback and shows it at `https://mail.SAM_DOMAIN` behind basic auth.
 > port `127.0.0.1:8025` needs it too; anyone who can run `docker inspect` on the box can read it.
 
 ```bash
-# .env: add the profile (it is off by default)
-COMPOSE_PROFILES=tunnel,mail-collector
+# .env: add the profile to the ones you have (it is off by default); on a gs:// bucket keep gce
+COMPOSE_PROFILES=tunnel,gce,mail-collector
 pnpm selfhost:deploy --init            # generates the UI password and .state/mail-collector*.env
 (cd deploy/selfhost && docker compose up -d)
 pnpm selfhost:deploy                   # points the Worker at the collector
@@ -649,7 +725,10 @@ pnpm selfhost:gcp-bootstrap -- --project <gcp-project-id> --api-url https://api.
 pnpm selfhost:gcp-bootstrap -- --project <gcp-project-id> --api-url https://api.<SAM_DOMAIN>
 ```
 
-It creates or reuses a workload identity pool for this install alone, an OIDC provider that admits
+It enables the APIs nodes need, including Cloud Billing (`cloudbilling.googleapis.com`: Google's
+public list prices for the machine catalog; it needs no role and reads nothing from your billing
+account; without it Google Cloud machines show "Price unavailable"). It creates or reuses a
+workload identity pool for this install alone, an OIDC provider that admits
 only tokens whose issuer is this install's API origin, and a `sam-nodes` service account with
 `roles/compute.instanceAdmin.v1` and `roles/compute.securityAdmin` that the pool may impersonate.
 It prints the credential to add in **Admin → Credentials → Add Credential**: Type "Cloud
@@ -1065,8 +1144,9 @@ MIT), an SMTP receiver on port 25:
   trigger.
 
 ```bash
-# .env: add the profile (off by default) next to an SMTP relay or the mail collector
-COMPOSE_PROFILES=tunnel,mail-in
+# .env: add the profile to the ones you have (off by default), next to an SMTP relay or the
+# mail collector; on a gs:// bucket keep gce
+COMPOSE_PROFILES=tunnel,gce,mail-in
 pnpm selfhost:deploy                      # sets AGENT_EMAIL_INBOUND_SMTP=true for the Worker
 (cd deploy/selfhost && docker compose up -d --build sam-mx)
 ```

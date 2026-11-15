@@ -181,6 +181,55 @@ describe('Google Cloud', () => {
     expect(init.out).toContain('SAM_KEY_PROVIDER=file');
     expectNothingSealed();
   });
+
+  // Box round R14: on a new box whose bootstrap stopped at a destroyed key, the box account has
+  // no grant, so Cloud KMS answers 403 instead of FAILED_PRECONDITION. The refusal must name the
+  // dead-key cause too, and print the same --new-key-version command.
+  it('denied: names a destroyed key as a likely cause and prints the --new-key-version command', async () => {
+    fake = await startFakeKeyServices({ gcpProject: PROJECT, existingKeys: [GCP_KEY] });
+    fake.setDenied(true);
+    const envFile = writeBox(dir, [
+      ...elsewhere('gce'),
+      `SAM_GCE_METADATA_HOST=${fake.host}`,
+      `SAM_GCP_KMS_ENDPOINT=http://${fake.host}`,
+      dmi('gcp'),
+    ]);
+    const init = await runDeploy(envFile, ['--init']);
+    expect(init.status).not.toBe(0);
+    expect(init.out).toContain('refusing to seal this box');
+    expect(init.out).toContain('denied (403)');
+    expect(init.out).toContain('destroyed or scheduled for destruction');
+    expect(init.out).toContain(
+      `\`pnpm selfhost:gcp-bootstrap -- --project ${PROJECT} --api-url ` +
+        'https://api.sam.example.com --kms-only --box-instance <box VM> --box-zone <zone> ' +
+        '--new-key-version`'
+    );
+    expect(init.out).toContain('--restore-key-version');
+    // Still no fallback: nothing on disk.
+    expect(init.out).not.toContain('key provider: file');
+    expectNothingSealed();
+  });
+
+  it('denied on a key named in .env: the command names that key, ring and location', async () => {
+    const own = `projects/${PROJECT}/locations/europe-west1/keyRings/mine/cryptoKeys/box`;
+    fake = await startFakeKeyServices({ gcpProject: PROJECT, existingKeys: [own] });
+    fake.setDenied(true);
+    const envFile = writeBox(dir, [
+      ...elsewhere('gce'),
+      `SAM_GCE_METADATA_HOST=${fake.host}`,
+      `SAM_GCP_KMS_ENDPOINT=http://${fake.host}`,
+      dmi('gcp'),
+      `SAM_GCP_KMS_KEY=${own}`,
+    ]);
+    const init = await runDeploy(envFile, ['--init']);
+    expect(init.status).not.toBe(0);
+    expect(init.out).toContain('SAM_GCP_KMS_KEY is set in .env');
+    expect(init.out).toContain(
+      '--kms-only --kms-location europe-west1 --key-ring mine --key box --box-instance <box VM>'
+    );
+    expect(init.out).toContain('--new-key-version');
+    expectNothingSealed();
+  });
 });
 
 /**
@@ -317,6 +366,9 @@ describe('AWS', () => {
     expect(init.status).not.toBe(0);
     expect(init.out).toContain('(denied: aws-kms');
     expect(init.out).toContain('SAM_KEY_PROVIDER=file');
+    // The generic denied advice; the Google Cloud bootstrap command is not offered on AWS.
+    expect(init.out).toContain('denied means no key by that name was set up for this install');
+    expect(init.out).not.toContain('selfhost:gcp-bootstrap');
     expectNothingSealed();
   });
 });
