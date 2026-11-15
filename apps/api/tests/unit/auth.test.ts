@@ -262,6 +262,23 @@ describe('BetterAuth configuration', () => {
     );
   });
 
+  it('still creates the session when the election throws, without retrying privilege', async () => {
+    mocks.establishFirstSuperadmin.mockRejectedValueOnce(new Error('D1_ERROR: database unavailable'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const beforeSession = await getSessionBeforeHook(fakeEnv());
+
+    await expect(beforeSession({ userId: newUser.id })).resolves.toEqual({
+      data: { userId: newUser.id },
+    });
+
+    expect(mocks.establishFirstSuperadmin).toHaveBeenCalledOnce();
+    const logged = error.mock.calls
+      .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)
+      .find((entry) => entry.event === 'auth.first_superadmin_election.failed');
+    expect(logged).toMatchObject({ userId: newUser.id, action: 'continued_without_promotion' });
+    error.mockRestore();
+  });
+
   it('uses the migration-seeded system user id', () => {
     expect(SYSTEM_USER_ID).toBe('system_anonymous_trials');
   });
@@ -466,6 +483,7 @@ describe('installer bootstrap owner hooks', () => {
 
 it('does not repeat first-user administration on an installer instance after its elected user rows are deleted', async () => {
   const { createAuth } = await import('../../src/auth');
+  installSignupApprovalQuery();
   await createAuth({
     ...fakeEnv(),
     BOOTSTRAP_OWNER_EMAIL: 'owner@example.com',

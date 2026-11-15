@@ -17,10 +17,7 @@ import {
   bootstrapUserDecision,
 } from './services/bootstrap-owner';
 import { emailSignInPlugins } from './services/email-sign-in';
-import {
-  establishFirstSuperadmin,
-  FIRST_SUPERADMIN_SETTING,
-} from './services/first-superadmin';
+import { establishFirstSuperadmin, FIRST_SUPERADMIN_SETTING } from './services/first-superadmin';
 import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
 import { untrustedGitLabUserInfo } from './services/gitlab-sign-in-identity';
 import {
@@ -414,7 +411,17 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
           before: async (session) => {
             if (!(await bootstrapSessionAllowed(env, session.userId))) return false;
             if (bootstrapOwnerEmail(env) === undefined) {
-              await establishFirstSuperadmin(env, session.userId);
+              // Fail closed for privilege, never for login: a D1 error leaves the user
+              // unpromoted (the batch is atomic) and the next sign-in retries the election.
+              try {
+                await establishFirstSuperadmin(env, session.userId);
+              } catch (err) {
+                log.error('first_superadmin_election.failed', {
+                  userId: session.userId,
+                  error: err instanceof Error ? err.message : String(err),
+                  action: 'continued_without_promotion',
+                });
+              }
             }
             return { data: session };
           },
@@ -445,12 +452,7 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
               const result = await (
                 expectedOwner === undefined
                   ? statement.bind(userId, sentinelId, FIRST_SUPERADMIN_SETTING)
-                  : statement.bind(
-                      userId,
-                      sentinelId,
-                      FIRST_SUPERADMIN_SETTING,
-                      expectedOwner
-                    )
+                  : statement.bind(userId, sentinelId, FIRST_SUPERADMIN_SETTING, expectedOwner)
               ).run();
               if (result.meta.changes > 0) {
                 log.info('login_self_heal.promoted', { userId });
