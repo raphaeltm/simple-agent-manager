@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import * as poolClock from '../../../src/services/capacity-pool-clock';
 import { ensureCandidatesForSource } from '../../../src/services/default-capacity-pool-candidates';
+import { candidateSetDigest } from '../../../src/services/default-capacity-pool-candidates-publication';
 import { CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import {
@@ -136,6 +137,45 @@ async function publish(db: ReturnType<typeof drizzle>, offerings = [offering()],
 }
 
 describe('pool publication real SQL interleavings', () => {
+  it('never gives a staged prefix the same digest as the pre-staging main format', async () => {
+    const semantic = {
+      id: 'rollback-candidate',
+      poolId: 'pool',
+      capacitySourceId: 'source',
+      provider: 'hetzner',
+      location: 'nbg1',
+      workloadRole: 'workspace',
+      runtime: 'vm',
+      providerInstanceType: 'cx23',
+      providerInstancePriceMonthlyCents: 1000,
+      catalogAvailability: 'available',
+      authorityGeneration: 1,
+      status: 'active',
+    } satisfies schema.NewCapacityPoolCandidate;
+    const values = [
+      {
+        ...semantic,
+        createdAt: 'created',
+        updatedAt: 'updated',
+        catalogReturnedAt: 'returned',
+        catalogGeneration: 99,
+        providerInstanceCatalogLastSeenAt: 'seen',
+      },
+    ];
+    // Main 4bdaaf61 serializes [authority, semantic candidates], without the
+    // exhaustive-catalog element. Pin that same-values legacy vector independently
+    // so removing the format distinction cannot let a rollback skip staged rows.
+    const mainFormat = JSON.stringify([7, [semantic]]);
+    const mainHash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(mainFormat));
+    const mainDigest = Array.from(new Uint8Array(mainHash), (byte) =>
+      byte.toString(16).padStart(2, '0')
+    ).join('');
+    expect(mainDigest).toBe('9fce611a46d3b439e581cb3dd788445d51a161d4f40d31d53ea5982114c55cff');
+    for (const complete of [undefined, false, true]) {
+      expect(await candidateSetDigest(values, 7, complete)).not.toBe(mainDigest);
+    }
+  });
+
   it('does not cascade a source attached after anchor discovery and before deletion', async () => {
     const { sqlite, database } = fixture();
     sqlite

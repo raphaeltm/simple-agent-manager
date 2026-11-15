@@ -57,6 +57,7 @@ References: `tasks/backlog/2026-11-09-capacity-pool-readiness-gate-during-republ
 - [x] Real entry-point regressions cover initial versus established pools, interrupted multi-batch/restart, unchanged catalogs, daily-independent retry/lost notification, stale/concurrent publishers, revocation, cancellation/TTL and automatic original inbox delivery without repeated Continue.
 - [x] Production-size 7,200-row indexed promotion, current migration chain and guard-deletion discrimination tests; scoped source/test specialist review.
 - [x] Adopt rollback/redeploy legacy interruption despite a stale completed work row; quarantine unsafe live prefixes through full promotion; indexed minute discovery and write-authorized point adoption preserve leases, cooldowns and prior success.
+- [x] Pin rollback digest incompatibility: same semantic candidate values must differ from the old main-format digest for exhaustive, partial and default catalogs; preserve the format distinction explicitly.
 - [x] Final documentation/constitution review and consolidated native/Workers/full quality pass. Completion remains WARN for open runtime/release gates.
 - [ ] Real coordinated staging retained-publication VM chain, promotion timing and independent provider/control-plane cleanup. R7 is VM-first; focused tests preserve Instant compatibility.
 - [ ] Fresh candidate CI, best-effort CodeRabbit request/wait, final exact-SHA coordinator approval and authorized release/production smoke.
@@ -166,6 +167,12 @@ of adoption eligibility, conflict CAS, quarantine, or sticky provenance each cau
 failures; original bytes are restored afterward. Three real point-conflict cases also assert that
 the winning pending, failed and expired state controls the returned wait/error without spending
 another generation or provider call. Full live wake proof remains UNMET.
+
+Coordinator I2 is now pinned before staging: candidateSetDigest documents that a rollback must
+never resume past a privately staged prefix. The regression fixes the same-values main4bdaaf61
+legacy digest vector and checks default, partial and exhaustive new formats differ. Removing
+the format element produces the intended assertion failure; source bytes are restored. All47
+publication interruption/fencing/digest cases pass. No runtime behavior changes in this follow-up.
 
 R7 stopped before project/profile/candidate/settings/VM/sleep/wake/T0. Its one login was signed out200,
 session200/null and cache gone; complete provider inventories0 repeated after136s and34 managed jobs

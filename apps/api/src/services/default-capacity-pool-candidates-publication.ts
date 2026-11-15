@@ -332,6 +332,10 @@ export async function candidateSetDigest(
   // content bind resumable progress without preventing a large inventory from finishing.
   const serialized = JSON.stringify([
     sourceAuthority ?? 0,
+    // Rollback safety requires incompatibility with the old [authority, candidates]
+    // digest format. Older binaries write live rows and must restart from zero,
+    // never resume past a prefix that this binary wrote only to private staging.
+    // Preserve that separation if the serialization changes.
     // Exhaustive enumeration changes the missing-offering proof even if all returned
     // rows are identical. It must pass through atomic promotion before cleanup.
     catalogComplete !== false,
