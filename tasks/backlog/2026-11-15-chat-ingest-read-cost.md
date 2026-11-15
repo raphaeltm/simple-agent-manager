@@ -1,0 +1,35 @@
+# Bound chat ingest reads in ProjectData
+
+Task: 01M7GB4125DFTECRYYCAHXAWTS. Part 1 of two sequential PRs.
+Ideas: 01M7CX61WVX72T7CFQNRTX0DVM, 01M7FC4NXRWYFKM5YAF90GHY8C.
+
+## Problem and evidence
+Every two-second batch scans a session for MAX(sequence). Real workerd baseline with production migrations and 10,000 synthetic assistant rows: steady assistant batch merging OFF 10,016 reads / 10 writes; ON 10,022 reads / 8 writes. MAX alone reads 10,001 rows after warmup. User dedup already uses migration 014 partial content index (0 reads on miss), so needs no new index. FTS/grouped maintenance is deferred; batch persistence does not maintain them. These are local samples, not production forecasts.
+
+## Writer inventory and proposed contract
+- messages-persist-helpers.insertNewMessage (browser/RPC/prompt-delivery callers): allocate synchronously and advance session watermark in existing counter update.
+- messages.persistMessageBatch: advance for every accepted logical message, including supplied sender sequences; canonical allocation must never collide with browser/system messages. Merged append consumes logical positions even without new raw rows; persist watermark with stream receipts.
+- messages.persistSystemMessage: advance in existing counter update.
+- message-stream-ingest.MessageStreamBatch.flush: called by batch transaction only; canonical inserts covered by batch watermark; appends do not change existing raw row sequences.
+- archive-sharding.insertArchiveRow: dynamic SQL used by archive target import and source copy-back/restore. Advance a known watermark once per chunk, preserve NULL for lazy initialization. Preserve archive hashes/column contracts and all fences.
+- archive deletion, abandon, reclaim and session cascade: never decrease watermark. Restores must not introduce a row above a known watermark.
+- prompt-delivery-steer, session-access-store, project-event-provider-limit-delivery, tool-payload-archive: content/metadata only; never alter session_id or sequence.
+- migration 007 assigns legacy rowid sequences before new nullable watermark migration; new migration performs no backfill or destructive operation.
+No separate nonarchive import path found in apps/ or packages/.
+
+## Checklist
+- [x] Read ideas and applicable rules 31,44,45,47,62,69,73,81; preserve no-production-mutation restrictions.
+- [x] Baseline real workerd per-statement profile with >=10k rows and both merge modes.
+- [ ] Add nullable last_message_sequence using ALTER TABLE ADD COLUMN; lazy MAX fallback once including stream maxSequence.
+- [ ] Initialize fresh sessions at zero; combine watermark with existing writer updates; monotonic canonical allocation for supplied and absent sequences.
+- [ ] Cover archive import/copy-back/restore and every writer in real-workerd regression tests; concurrency, legacy NULL, absorbed chunks, restart, duplicates and rollback.
+- [ ] Attribute archiveSourceReclaimPage scans on realistic fixture; small safe fix or durable finding on reads idea.
+- [ ] Show bounded steady-state reads at 10k and larger fixtures, with production indexes and meter reconciliation; report writes before/after.
+- [ ] Run lint/typecheck/tests/build and migration safety; local specialist reviews including completion validator.
+- [ ] Request shepherd bounded Instant/no-VM staging grant (<USD1), then enforced lease and real flow with merging ON/OFF; cleanup.
+- [ ] Ready PR + CI + CodeRabbit request/wait, merge gates, production deploy monitoring (read-only), coordinator durable progress and idea notes.
+
+## Acceptance
+Reads per warm batch must not grow with session length, with no new per-message sequence index. Assigned canonical sequences stay unique/ordered across every writer, restore, and merged logical chunks. No storage/archive safety weakening. Production merge toggle/default and VM cadence unchanged.
+
+Part 2 bookkeeping writes follows after this PR; track separately, including exact lifecycle flushes and idle/restart safety with typed admin interval.
