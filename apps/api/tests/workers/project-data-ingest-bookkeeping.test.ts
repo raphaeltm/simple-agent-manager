@@ -39,65 +39,152 @@ async function fixture(enabled: boolean) {
     state.storage.sql.exec(
       `INSERT INTO acp_sessions (id,chat_session_id,node_id,status,created_at,updated_at)
        VALUES ('bookkeeping-acp',?,'bookkeeping-node','running',?,?)`,
-      session, base, base
-    );
-    state.storage.sql.exec(
-      `INSERT INTO session_state (session_id,activity,activity_at,work_at)
-       VALUES ('bookkeeping-acp','prompting',?,?)`,
-      base, base
+      session,
+      base,
+      base
     );
   });
+  await stub.reportActivity('bookkeeping-acp', 'prompting', {
+    observedAt: base,
+    promptStartedAt: base,
+  });
   await stub.scheduleIdleCleanup(session, source.workspaceId, null);
-  const batch = (position: number) => [{
-    messageId: `chunk-${position}`,
-    role: 'assistant',
-    content: 'synthetic chunk',
-    toolMetadata: null,
-    timestamp: new Date(base + position).toISOString(),
-    sequence: position,
-  }];
+  const batch = (position: number) => [
+    {
+      messageId: `chunk-${position}`,
+      role: 'assistant',
+      content: 'synthetic chunk',
+      toolMetadata: null,
+      timestamp: new Date(base + position).toISOString(),
+      sequence: position,
+    },
+  ];
   await stub.persistMessageBatch(session, batch(10001), source);
   return { stub, session, batch };
 }
 
 describe('ingest bookkeeping in real workerd', () => {
-  it.each([false, true])('exposes pending counts immediately and flushes them at the real turn-end boundary (merging=%s)', async (enabled) => {
-    const { stub, session, batch } = await fixture(enabled);
-    await stub.persistMessageBatch(session, batch(10002), source);
-    expect((await stub.getSession(session))?.messageCount).toBe(10002);
-    expect((await stub.listSessions()).sessions.find((row) => row.id === session)?.messageCount).toBe(10002);
-    expect(await stub.recordSessionTurnEnd('bookkeeping-acp', {reason:'completed', observedAt:Date.now()})).toBe(true);
-    await runInDurableObject(stub, (_instance, state) => {
-      const row=state.storage.sql.exec('SELECT message_count,pending_message_count,last_message_sequence_count FROM chat_sessions WHERE id=?',session).toArray()[0];
-      expect(row).toMatchObject({message_count:10002,pending_message_count:0,last_message_sequence_count:10002});
-    });
-  });
+  it.each([false, true])(
+    'exposes pending counts immediately and flushes them at the real turn-end boundary (merging=%s)',
+    async (enabled) => {
+      const { stub, session, batch } = await fixture(enabled);
+      await stub.persistMessageBatch(session, batch(10002), source);
+      expect((await stub.getSession(session))?.messageCount).toBe(10002);
+      expect(
+        (await stub.listSessions()).sessions.find((row) => row.id === session)?.messageCount
+      ).toBe(10002);
+      expect(
+        await stub.recordSessionTurnEnd('bookkeeping-acp', {
+          reason: 'completed',
+          observedAt: Date.now(),
+        })
+      ).toBe(true);
+      await runInDurableObject(stub, (_instance, state) => {
+        const row = state.storage.sql
+          .exec(
+            'SELECT message_count,pending_message_count,last_message_sequence_count FROM chat_sessions WHERE id=?',
+            session
+          )
+          .toArray()[0];
+        expect(row).toMatchObject({
+          message_count: 10002,
+          pending_message_count: 0,
+          last_message_sequence_count: 10002,
+        });
+      });
+    }
+  );
 
-  it.each([false, true])('folds pending chunks when the browser writes the next message (merging=%s)', async (enabled) => {
-    const { stub, session, batch } = await fixture(enabled);
-    await stub.persistMessageBatch(session, batch(10002), source);
-    await stub.persistMessage(session,'user','next synthetic turn',null,'browser-next');
-    await runInDurableObject(stub, (_instance, state) => {
-      const row=state.storage.sql.exec('SELECT message_count,pending_message_count,last_message_sequence_count FROM chat_sessions WHERE id=?',session).toArray()[0];
-      expect(row).toMatchObject({message_count:10003,pending_message_count:0,last_message_sequence_count:10003});
-    });
-  });
+  it.each([false, true])(
+    'folds pending chunks when the browser writes the next message (merging=%s)',
+    async (enabled) => {
+      const { stub, session, batch } = await fixture(enabled);
+      await stub.persistMessageBatch(session, batch(10002), source);
+      await stub.persistMessage(session, 'user', 'next synthetic turn', null, 'browser-next');
+      await runInDurableObject(stub, (_instance, state) => {
+        const row = state.storage.sql
+          .exec(
+            'SELECT message_count,pending_message_count,last_message_sequence_count FROM chat_sessions WHERE id=?',
+            session
+          )
+          .toArray()[0];
+        expect(row).toMatchObject({
+          message_count: 10003,
+          pending_message_count: 0,
+          last_message_sequence_count: 10003,
+        });
+      });
+    }
+  );
+
+  it.each([false, true])(
+    'does not certify a stale watermark when folding older-build writes (merging=%s)',
+    async (enabled) => {
+      const { stub, session, batch } = await fixture(enabled);
+      await stub.persistMessageBatch(session, batch(10002), source);
+      await runInDurableObject(stub, (_instance, state) => {
+        state.storage.sql.exec(
+          `INSERT INTO chat_messages(id,session_id,role,content,created_at,sequence)
+        VALUES('older-build-write',?,'assistant','synthetic legacy',?,10003)`,
+          session,
+          Date.now()
+        );
+        // Before migration079, writers incremented count without knowing its version tag.
+        state.storage.sql.exec(
+          'UPDATE chat_sessions SET message_count=message_count+1 WHERE id=?',
+          session
+        );
+      });
+      await stub.persistMessage(
+        session,
+        'user',
+        'synthetic browser after old writer',
+        null,
+        'after-older-build'
+      );
+      await runInDurableObject(stub, (_instance, state) => {
+        const row = state.storage.sql
+          .exec('SELECT sequence FROM chat_messages WHERE id=?', 'after-older-build')
+          .toArray()[0];
+        expect(row?.sequence).toBe(10004);
+      });
+    }
+  );
 
   it('keeps a sparse deadline index out of the steady update write cost', async () => {
     const { stub, session } = await fixture(true);
     await runInDurableObject(stub, (_instance, state) => {
       const sql = state.storage.sql;
       sql.exec('ALTER TABLE chat_sessions ADD COLUMN experiment_due_at INTEGER');
-      sql.exec('ALTER TABLE chat_sessions ADD COLUMN experiment_pending INTEGER NOT NULL DEFAULT 0');
-      sql.exec('CREATE INDEX experiment_pending ON chat_sessions(experiment_due_at) WHERE experiment_due_at IS NOT NULL');
-      const first = sql.exec('UPDATE chat_sessions SET experiment_due_at = ?, experiment_pending = experiment_pending + 1 WHERE id = ?', Date.now(), session);
+      sql.exec(
+        'ALTER TABLE chat_sessions ADD COLUMN experiment_pending INTEGER NOT NULL DEFAULT 0'
+      );
+      sql.exec(
+        'CREATE INDEX experiment_pending ON chat_sessions(experiment_due_at) WHERE experiment_due_at IS NOT NULL'
+      );
+      const first = sql.exec(
+        'UPDATE chat_sessions SET experiment_due_at = ?, experiment_pending = experiment_pending + 1 WHERE id = ?',
+        Date.now(),
+        session
+      );
       expect(first.rowsWritten).toBe(2);
-      const steady = sql.exec('UPDATE chat_sessions SET experiment_pending = experiment_pending + 1 WHERE id = ?', session);
+      const steady = sql.exec(
+        'UPDATE chat_sessions SET experiment_pending = experiment_pending + 1 WHERE id = ?',
+        session
+      );
       expect(steady.rowsWritten).toBe(1);
-      const selection = sql.exec('SELECT id FROM chat_sessions WHERE experiment_due_at IS NOT NULL AND experiment_due_at <= ? ORDER BY experiment_due_at LIMIT 1', Date.now());
+      const selection = sql.exec(
+        'SELECT id FROM chat_sessions WHERE experiment_due_at IS NOT NULL AND experiment_due_at <= ? ORDER BY experiment_due_at LIMIT 1',
+        Date.now()
+      );
       expect(selection.toArray()).toHaveLength(1);
       expect(selection.rowsRead).toBeLessThanOrEqual(2);
-      const plan = sql.exec('EXPLAIN QUERY PLAN SELECT id FROM chat_sessions WHERE experiment_due_at IS NOT NULL AND experiment_due_at <= ? ORDER BY experiment_due_at LIMIT 1', Date.now()).toArray();
+      const plan = sql
+        .exec(
+          'EXPLAIN QUERY PLAN SELECT id FROM chat_sessions WHERE experiment_due_at IS NOT NULL AND experiment_due_at <= ? ORDER BY experiment_due_at LIMIT 1',
+          Date.now()
+        )
+        .toArray();
       expect(JSON.stringify(plan)).toContain('experiment_pending');
     });
   });
@@ -108,7 +195,9 @@ describe('ingest bookkeeping in real workerd', () => {
       const { stub, session, batch } = await fixture(enabled);
       const samples: WriteSample[] = [];
       const collect = await profileObject(stub, 'root', samples);
-      expect(await stub.persistMessageBatch(session, batch(10002), source)).toMatchObject({ persisted: 1 });
+      expect(await stub.persistMessageBatch(session, batch(10002), source)).toMatchObject({
+        persisted: 1,
+      });
       collect();
       const writes = samples.filter((sample) => sample.rowsWritten > 0);
       reports.push({ enabled, writes });

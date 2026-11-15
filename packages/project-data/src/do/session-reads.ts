@@ -40,7 +40,7 @@ export function listSessions(
 
   const rows = sql
     .exec(
-      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at,
+      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count + pending_message_count AS message_count, started_at,
               COALESCE(
                 NULLIF(MAX(
                   COALESCE(chat_sessions.archive_last_message_at, 0),
@@ -122,7 +122,7 @@ export function getSessionsByTaskIds(
   const placeholders = taskIds.map(() => '?').join(', ');
   const rows = sql
     .exec(
-      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at,
+      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count + pending_message_count AS message_count, started_at,
               COALESCE(
                 NULLIF(MAX(
                   COALESCE(chat_sessions.archive_last_message_at, 0),
@@ -148,7 +148,7 @@ export function getSession(sql: SqlStorage, sessionId: string): Record<string, u
   const rows = sql
     .exec(
       `SELECT cs.id, cs.workspace_id, cs.task_id, cs.topic, cs.status,
-              cs.created_by_user_id, cs.message_count, cs.started_at, cs.ended_at, cs.created_at,
+              cs.created_by_user_id, cs.message_count + cs.pending_message_count AS message_count, cs.started_at, cs.ended_at, cs.created_at,
               cs.updated_at, cs.agent_completed_at,
               COALESCE(
                 NULLIF(MAX(

@@ -9,6 +9,7 @@
  */
 import { log } from '@simple-agent-manager/worker-core';
 
+import { flushMessageBookkeeping } from './message-bookkeeping';
 import { readMessageIngestState } from './message-stream-ingest';
 import { parseMaxSeq, parseMessageCount, parseWorkspaceId } from './row-schemas';
 import { boundToolMetadataForStorage } from './tool-metadata-storage';
@@ -153,6 +154,7 @@ export function insertNewMessage(
   toolMetadata: string | null,
   id: string
 ): PersistedMessageResult {
+  flushMessageBookkeeping(sql, sessionId);
   const countRow = sql
     .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
     .toArray()[0];

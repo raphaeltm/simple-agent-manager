@@ -12,7 +12,11 @@ import {
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES } from '@simple-agent-manager/shared';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
-import { flushMessageBookkeeping, messageBookkeepingInterval, BOOKKEEPING_AWAITING_SUMMARY } from './message-bookkeeping';
+import {
+  flushMessageBookkeeping,
+  messageBookkeepingInterval,
+  BOOKKEEPING_AWAITING_SUMMARY,
+} from './message-bookkeeping';
 import { messageBoundsClause } from './message-cursor';
 import {
   type MessageIngestSource,
@@ -238,12 +242,14 @@ export function persistMessageBatch(
                 }
               : null,
           messages.map((message) => message.messageId),
-          parseMessageCount(session, 'messages.batch_stream_count') + Number(session.pending_message_count ?? 0)
+          parseMessageCount(session, 'messages.batch_stream_count') +
+            Number(session.pending_message_count ?? 0)
         )
       : null;
 
   const maxMessages = resolveMaxMessagesPerSession(env);
-  const startingCount = parseMessageCount(session, 'messages.batch_count') + Number(session.pending_message_count ?? 0);
+  const startingCount =
+    parseMessageCount(session, 'messages.batch_count') + Number(session.pending_message_count ?? 0);
   let persisted = 0;
   let duplicates = 0;
   let limitReached = false;
@@ -392,18 +398,32 @@ export function persistMessageBatch(
   let bookkeepingFlushed = false;
 
   if (persisted > 0) {
-    const firstPending = session.message_bookkeeping_due_at == null || session.message_bookkeeping_due_at === BOOKKEEPING_AWAITING_SUMMARY;
+    const firstPending =
+      session.message_bookkeeping_due_at == null ||
+      session.message_bookkeeping_due_at === BOOKKEEPING_AWAITING_SUMMARY;
     const interval = messageBookkeepingInterval(env, context?.config.bookkeepingIntervalMs);
-    const latestAt = persistedMessages.reduce((latest, message) => Math.max(latest, message.createdAt), 0);
-    const idleAfter = now + parsePositiveInt(env.SESSION_IDLE_TIMEOUT_MINUTES, DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES) * 60_000;
+    const latestAt = persistedMessages.reduce(
+      (latest, message) => Math.max(latest, message.createdAt),
+      0
+    );
+    const idleAfter =
+      now +
+      parsePositiveInt(env.SESSION_IDLE_TIMEOUT_MINUTES, DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES) *
+        60_000;
     if (firstPending) {
       sql.exec(
         `UPDATE chat_sessions SET pending_message_count = pending_message_count + ?,
            message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?,
            stream_ingest_state = ?, last_message_sequence = ?,
            last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?`,
-        persisted, now, latestAt, idleAfter, staged?.state ?? session.stream_ingest_state ?? null,
-        maximumSequence, now + interval, sessionId
+        persisted,
+        now,
+        latestAt,
+        idleAfter,
+        staged?.state ?? session.stream_ingest_state ?? null,
+        maximumSequence,
+        now + interval,
+        sessionId
       );
       bookkeepingScheduled = true;
     } else {
@@ -413,8 +433,13 @@ export function persistMessageBatch(
            message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?,
            stream_ingest_state = ?, last_message_sequence = ?,
            last_message_sequence_count = message_count WHERE id = ?`,
-        persisted, now, latestAt, idleAfter, staged?.state ?? session.stream_ingest_state ?? null,
-        maximumSequence, sessionId
+        persisted,
+        now,
+        latestAt,
+        idleAfter,
+        staged?.state ?? session.stream_ingest_state ?? null,
+        maximumSequence,
+        sessionId
       );
     }
     if (stream?.sealed) bookkeepingFlushed = flushMessageBookkeeping(sql, sessionId);
@@ -661,6 +686,7 @@ export function persistSystemMessage(
 ): { id: string; now: number; sequence: number } | null {
   try {
     assertTranscriptWriteAllowed(sql, sessionId, 'persistSystemMessage');
+    flushMessageBookkeeping(sql, sessionId);
     const id = generateId();
     const now = Date.now();
     const sequence = nextSequence(sql, sessionId);

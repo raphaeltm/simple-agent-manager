@@ -2,6 +2,7 @@
  * Chat session creation and state machine. Listing and lookups live in `session-reads.ts`.
  */
 import { clearWorkspaceIdleCheck } from './activity';
+import { flushMessageBookkeeping } from './message-bookkeeping';
 import { parseCountCnt, parseSessionStatus, parseSessionStop } from './row-schemas';
 import type { Env } from './types';
 import { generateId } from './types';
@@ -316,6 +317,7 @@ function terminateSession(
 ): { workspaceId: string | null; messageCount: number; rowsWritten: number } | null {
   const now = Date.now();
   assertSessionIdentityGuard(sql, sessionId, terminalStatus, guard);
+  flushMessageBookkeeping(sql, sessionId);
   // Even an already-stopped ordinary stop is newer terminal intent.
   if (!evictionSource) clearEvictionStopEligibility(sql, sessionId);
   const cursor = sql.exec(
@@ -358,6 +360,7 @@ export function sleepSession(
 ): boolean {
   if (options.guard) assertSessionIdentityGuard(sql, sessionId, 'sleep session', options.guard);
   if (options.stoppedOnly && !hasEvictionStopEligibility(sql, sessionId)) return false;
+  flushMessageBookkeeping(sql, sessionId);
   const now = Date.now();
   let previousStatus = 'active';
   if (options.stoppedOnly) previousStatus = 'stopped';
@@ -384,6 +387,7 @@ export function wakeSession(
   _taskId: string,
   options: WakeSessionOptions = {}
 ): boolean {
+  flushMessageBookkeeping(sql, sessionId);
   const now = Date.now();
   const cursor = sql.exec(
     `UPDATE chat_sessions

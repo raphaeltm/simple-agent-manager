@@ -13,6 +13,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 
+import { flushActivityMessageBookkeeping } from './message-bookkeeping';
 import { WORKING_ACTIVITIES } from './session-state-prompt';
 import {
   type ActivityReportOutcome,
@@ -75,6 +76,7 @@ export function upsertActivityState(
   sessionId: string,
   update: ActivityUpdate
 ): ActivityReportOutcome {
+  if (update.activity === 'idle') flushActivityMessageBookkeeping(sql, sessionId);
   const now = update.now ?? Date.now();
   const activityAt = normalizeActivityObservedAt(update.observedAt, now);
   const promptStartedAt =
@@ -309,6 +311,7 @@ function recordTurnEndFromActivities(
   expectedActivities: readonly string[],
   preserveErrorContext: boolean
 ): boolean {
+  flushActivityMessageBookkeeping(sql, sessionId);
   const now = input.now ?? Date.now();
   // The guard selects a SQL FRAGMENT, so its closedness must be enforced at
   // runtime and not left to the TypeScript union alone (.claude/rules/51). Both
