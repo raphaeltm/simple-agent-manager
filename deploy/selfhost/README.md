@@ -811,8 +811,9 @@ pnpm selfhost:restore --from <backup dir>    # into an EMPTY bucket and .state/ 
 A backup is the fleet bucket (celld's only durable state), `.state/` (without the rebuildable
 vm-agent build cache `.state/go-cache`) and `.env`: a live copy,
 then celld stopped for the delta copy only, then restarted; the downtime is printed and kept in
-`backup-manifest.json`. The live copy may fail on objects celld rewrites while it runs; that is
-logged and the delta copy finishes it. The backup is exactly the bucket as celld left it when it
+`backup-manifest.json`. The live copy may fail on objects celld rewrites while it runs (its node
+lease, often as a 404); that is expected, logged as "live pre-copy incomplete (expected: ...)", and
+the delta copy finishes it. The backup is exactly the bucket as celld left it when it
 stopped, deletions included. The delta copy writes into a different directory than the live copy
 did, so state an aborted `gcloud` pass left behind cannot break it; if the delta copy still
 fails, the whole bucket is copied again into a fresh directory before celld restarts (longer
