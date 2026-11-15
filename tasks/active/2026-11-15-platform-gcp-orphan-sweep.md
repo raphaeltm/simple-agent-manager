@@ -1,6 +1,6 @@
 # Authenticate platform GCP orphan reconciliation
 
-**Current status (November15 02:11UTC): arranging naturally eligible staging sweep proof.** Code and full local validation/reviews pass; staging deployment and browser checks pass. No PR or merge. Documented staging KV writes return401/code10000, so the next hourly inventory was outside the bounded window. Baseline restored and all billable fixtures independently removed; staging released.
+**Final status (November 15, 06:03 UTC): blocked at staging gate.** Classification (b). Narrow fix, behavioral regressions, full local validation and specialist reviews pass. Required live eligible sweep ownership proof remains unexercised. Final fixed reservation was explicitly refused because it overlaps another granted staging window; parent instructed final stop on refusal. No PR, merge or production deploy. All R1/R2/R3 resources independently cleaned; zero R4 resources created. Branch retained for continuation by the coordinator.
 
 ## Problem and findings
 
@@ -168,3 +168,20 @@ Root operationalpre-review438551b7 downloaded finalR4kit exacthash/9saferegularf
 FinalR4kitv2 supersedesv1: root90f15696 found readonlycadence incorrectlyrequiredfixture receipt beforefixturesallowed; removedONLYthatcadencecheck. Ownershipreceipt stillmandatoryforactualpreflight/use/cleanup. No fabricatedreceipt/no resources. SOURCEONLYLibrary01M7EW9Y4AQEEQ3JF36DX0RN0W /task-recovery/p1-orphan-jq3vp8/p1-final-r4-kit-v2-20261115.tar.gz 10738B,SHA256b5391afb6f0f8c81e3956065e7466bca9061e95fa8c6b6f0ec1b8f5ab90e0f7b; other8filesidentical. Python syntaxPASS, actualreadonlycadencesmoke pendingwithoutfixture-ids.json. Usev2ifworkspacepurged.
 
 ActualR4cadencehelper smoke05:54 PASS withoutfixture-ids.json: observedM05:00:44.297/E06:00:44.297,interval1h,minAge1h. ThisishelperverificationONLY, notfreshpost-next-runreservationrequest; stillreadfreshafter06:05.
+
+
+## Final blocked outcome — no further automatic attempts
+
+Fresh read06:01:05 observed M=2026-11-15T06:00:50.690Z, interval3600000, E=07:00:50.690Z, T=07:05:00UTC (first five-minute cron strictly after E). Exact final request15f11ee5: window06:40–07:25, stoptrials07:17, full reviewed-runtime-equivalent head81f4635b0a9127adfdba1129ebb9cea0ee9f9530. Currentworkspace, Python/nativeChromium, credential payload source, corrected cadence and recovery kit ready; no fixture receipt fabricated.
+
+Root exact refusal, event263bd05e-c52f-403d-a67b-6c4a70e604a7: “NO to exact R4 reservation06:40–07:25 (freshM06:00:50.690/E07:00:50.690/T07:05 acknowledged). L7 already received concretehandofffbebb25806:00 with allowedhardALLuntil07:20, overlapping yourfixedstart06:40; stream is next afteractualL7FREE. I cannot guarantee earlyrelease or reserve over that livehandoff.” This is scheduling NO-FIT, not a product/test failure. Independent GH/channel evidence: L7 run43683564808 in progress, head4c3a0d105b93fed2dd20d258d0b9fba7ec596285, granted hard cleanup07:20.
+
+Parent9d57404e/021c80c1 final-refusal stop condition now applies: stop for good, retain exact proof, no PR, complete SAM task with summary “blocked at staging gate.” ZERO R4VMs/disks/SA/pool/provider/IAM/trust/platformcredential/login/stagingdeploy/globalwrites. Unused primaryguard9734f056 cancelledv2 after refusal. R1/R2/R3 cleanup remains closed, independently verified; no further cleanup or provisioning. All execution jobs terminal. Only unavoidable nonbillable remnants: deleted pool names reserved30days. Cumulative fixture spend stayed below estimatedUSD0.10.
+
+Proven: platform GCP WIF and service-account-key regression red before fix/green after; real entry-point, encrypted getter, token/factory/HTTP boundary, owned positive plus foreign/legacy preservation, per-credential isolation. Failed credential runs now persist failed-sweep observability while retaining completed metrics and allowing downstream sweeps. All specialists PASS/ADDRESSED. Latest main merge refresh04:12: lint22/22, typecheck36/36, build18/18, root test39/39; API1021files15237passed and3files4testsskipped; web409files5232passed. Runtime unchanged after that validation; later commits only this task record.
+
+Not proven: live naturally eligible platform-GCP sweep deletes the owned fixture and preserves the foreign fixture. R1 staging deploy43663972851 succeeded and browser checks passed, but only interval-skipped cron runs were observed. R2/R3/R4 did not receive a usable deployment window; no live positive proof is inferred. Therefore staging checklist remains unchecked; no PR/CodeRabbit/merge/production deploy or post-deploy monitoring.
+
+Production finding remains (b), with observation limits: latest read-only credential/inventory check01:43 had one enabled platform Hetzner and no platform GCP; five exact production-scope GCPVMs, all claimed by nonterminal nodes, zero observed orphan candidates. Earlier narrow failure searches found none; incomplete historical queries do not prove absence for all history. No production mutations occurred. Any future merge must repeat the production deletion-risk check and stop if newly enabled deletions would occur.
+
+Coordinator owns next decision: staging KV write capability or an authorized interval override; agent does not ask the owner or bypass the gate. Final source branch and encrypted recovery kits retained; task file intentionally not archived as a completed implementation release.
