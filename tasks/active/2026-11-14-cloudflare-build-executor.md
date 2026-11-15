@@ -9,7 +9,7 @@ Read entire Nov6 implementation plan, phase0 attempt2 report (library01M6SMMAP4E
 
 Data flow: MCP compose-publish-tools → app-deployment job/executor selection → existing source collect route → existing context callback → atomic admission → ComposeBuilderContainer(jobId) → sam-builder → internal/publish → existing artifact/events/release callbacks → existing deployment VM apply. Builder identity never depends on source liveness. Keep node_id source meaning and existing node cascade limitation.
 
-Spike: standard-4 only demonstrated, overlayfs, root dockerd/cgroupfs, /tmp mount, build.network host required. Keep20min deadline and60s readiness. >100MiB real R2 PUT/GET not measured; mandatory here. Root RUN can access builder-local state: no broad credentials, job token scope exactly one job, deny-default egress. No runtime secret values supplied.
+Spike: standard-4 only demonstrated, overlayfs, root dockerd/cgroupfs, /tmp mount, build.network host required. Keep20min deadline and60s readiness. >100MiB real R2 PUT/GET not measured; mandatory here. Root RUN can access builder-local state: no broad credentials, job token scope exactly one job. The original deny-default egress proposal was superseded by Raphaël’s November 15 unrestricted-egress approval. No runtime secret values supplied.
 
 ## Implementation
 
@@ -18,7 +18,7 @@ Spike: standard-4 only demonstrated, overlayfs, root dockerd/cgroupfs, /tmp moun
 - [x] Builder Go supervisor: safe bounded download/hash/extraction, daemon startup/readiness, host network augmentation, existing publish engine, signals/heartbeats.
 - [ ] ComposeBuilderContainer alarm/terminal lifecycle; image, env instance type, max config, v23 SQLite migration and allowlist.
 - [x] Runtime admin executor selection, Instant cloudflare, VM node default, old-agent compatibility.
-- [ ] Guide/config/self-host docs and contract updates.
+- [x] Guide/config/self-host docs and contract updates.
 - [ ] Local meaningful regression/contract/admission tests, lint/type/build gates.
 - [ ] Independent security/domain/completion reviews resolved.
 - [ ] Explicit staging slot;100% rollout plus node AND builder version proof.
@@ -40,3 +40,11 @@ Merged current main `8409636ec` without conflicts; DO migration tag remains v22 
 ## CI regression fixes — 2026-11-14
 
 The complete API test run exposed stale phase-2 shadow fixtures and the central JWT verifier inventory guard. Signature and claim verification now lives in `services/jwt.ts`; `publish-job-token.ts` retains exact live job-row and attempt binding. Generic callback sinks still reject publish-job tokens. The shadow fixture explicitly selects the node default and resets its deferred fetch mock; Instant asserts a real nonshadow Cloudflare job. Focused fixture/JWT tests: 26 passed. Independent security review passed the verifier move with no new trust-boundary blocker. Logged as idea `01M7CAY9AC980PT4AB9DV0B45M`.
+
+## Approved egress and current-main refresh — 2026-11-15
+
+Raphaël approved unrestricted internet access for Cloudflare deployment builds, like VM workspaces, with direct presigned transfers (knowledge `CloudflareDeploymentBuilds`, observation `d00e0407-5a12-431a-aeff-5d35a7694e5e`). Removed the provisional host allowlist, HTTPS interception and CA installer. Security architecture, deployments guide, configuration reference and self-hosting note describe arbitrary root RUN authority, in-memory job token, callback revocation, object-URL expiry and microVM deadline destruction with code paths.
+
+Merged main `fd0be69bd` without conflicts, preserving published history. The merge touches no Deploy Installer trigger paths. Main’s newest D1 migration is 0241; renamed the never-applied builder migration to `0242_cloudflare_build_executor.sql` at the coordinator’s request. Manually checked all ten other open PR migration lists: no 0242 collision. DO tag remains v23 after main’s v22. Migration safety, ordering and DO safety pass.
+
+Fresh security code review passed. Cloudflare review identified an SDK 0.3.7 reconstruction dependency: a running guest requires the Worker’s standard `ContainerProxy` export even without outbound handlers. Added the export and exercised the installed SDK through two reconstructions, including persisted empty config: no HTTP, HTTPS or catch-all interception is registered. This helper is a named internal entrypoint, not an API route. Logged and fixed adjacent idea `01M7FF41HK2PP2311HKJ9N9MB1`. Runtime egress, transfer and isolation proof remain pending an explicit staging slot grant; no staging resources or deployment have been created.

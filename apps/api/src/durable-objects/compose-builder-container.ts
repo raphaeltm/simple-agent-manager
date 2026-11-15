@@ -34,22 +34,10 @@ interface BuildState {
 export class ComposeBuilderContainer extends Container<Env> {
   defaultPort = PORT;
   sleepAfter: string | number = '20m'; // Upper safety bound; set from each admitted job below.
-  enableInternet = false;
-  interceptHttps = true;
-  allowedHosts = [
-    `api.${this.env.BASE_DOMAIN}`,
-    `${this.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-    'registry-1.docker.io',
-    'auth.docker.io',
-    'production.cloudflare.docker.com',
-    'docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com',
-    'registry.npmjs.org',
-    'deb.debian.org',
-    'security.debian.org',
-    'dl-cdn.alpinelinux.org',
-    'pypi.org',
-    'files.pythonhosted.org',
-  ];
+  // Deployment builds have the same unrestricted Internet access as VM workspaces.
+  // Keep transfers direct: no SDK outbound proxy or HTTPS interception. The
+  // one-job microVM and scoped callback token, not an egress filter, are the boundary.
+  enableInternet = true;
   private operation: Promise<unknown> = Promise.resolve();
   private startAbort?: AbortController;
   private kickoff: Promise<unknown> = Promise.resolve();

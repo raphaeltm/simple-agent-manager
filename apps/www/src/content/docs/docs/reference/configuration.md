@@ -2065,3 +2065,5 @@ Deployment topology is configured through GitHub Environment variables:
 | `DEPLOY_BUILDER_MAX_INSTANCES` | 6            | `ComposeBuilderContainer` class capacity; runtime admission never exceeds it |
 
 The deploy generator mirrors actual class capacity into the Worker binding `DEPLOY_BUILDER_CLASS_MAX_INSTANCES`; do not set that binding independently. Builder images contain Docker, Compose and `sam-builder`; no installation or user credentials are baked into them. Each job receives only a job-and-attempt callback token and short-lived presigned URLs for its context and image keys. The control plane checks the builder against `VM_AGENT_REQUIRED_VERSION`, when configured, before accepting a job.
+
+Application builders have unrestricted internet egress. Package installation in Dockerfile `RUN` steps and direct presigned object transfers use normal TLS trust; there is no builder host allowlist, outbound proxy, or interception CA setting. Isolation relies on the dedicated microVM, one-job callback authority, and hard deadline. See the [security architecture](/docs/architecture/security/#application-build-executor).

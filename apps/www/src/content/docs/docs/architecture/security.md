@@ -480,6 +480,21 @@ Escaping a devcontainer reaches only the user's own VM, whether the escape comes
 
 Ways to run nested containers without `privileged`, such as a user-namespaced container runtime, are welcome improvements, provided Docker, Compose and Testcontainers keep working inside workspaces.
 
+## Application Build Executor
+
+Cloudflare application builds run arbitrary Dockerfile `RUN` code as root inside Docker-in-Docker with host build networking. Builds have unrestricted internet access, like VM workspaces; package repositories and presigned R2 transfers are reached directly without an outbound proxy, host allowlist or HTTPS interception CA. This is the deployment-build egress decision approved on November 15, 2026. Network access is not a security boundary for build code.
+
+Each publish job gets its own microVM, identified by `publishJobId`, with no reuse across jobs or projects. SAM delivers no platform cloud credentials, signing keys, workspace callback token, or runtime deployment secret values to that guest. The Go supervisor holds the job callback token in memory; it is not placed in process arguments, environment variables or files. Arbitrary root code shares the guest with that supervisor, so assume it can obtain and use the authority of that one job. It can also use the job's short-lived presigned object URLs. It has no authority over other jobs, projects, credential endpoints or Worker bindings.
+
+The enforcing paths are:
+
+- `apps/api/src/durable-objects/compose-builder-container.ts` enables direct internet access, passes only nonsecret timing budgets through the environment, checks the builder version, and sends a single launch payload through the SDK's private container transport. It never calls the guest control port after launch acceptance, because root build code could bind that port later. Its persisted deadline alarm destroys the microVM before recording the timeout in D1 and retries failed destruction.
+- `packages/vm-agent/cmd/sam-builder/main.go` closes the bootstrap HTTP listener before starting the build. `packages/vm-agent/internal/builder/` keeps the callback token in supervisor memory, verifies context size and SHA-256 before extraction, and rejects HTTP redirects for authenticated control-plane and presigned transfers.
+- `apps/api/src/services/jwt.ts` verifies the publish-job token's signature, issuer, audience, expiration and claims. `apps/api/src/services/publish-job-token.ts` binds it to the current nonterminal job row, project, environment, profile, executor and attempt on every authorized callback. Completion, cancellation or an attempt change revokes callback authority immediately. Generic workspace/node callback sinks reject this scope.
+- The existing publish callback routes fence artifact keys, event updates and release submission to that job and attempt. Presigned URLs carry only the specific context download or image upload authority until their expiry; a terminal job cannot obtain new URLs, but an already-issued URL remains usable until it expires.
+
+The build microVM is the isolation boundary. Root execution and open egress are intentional capabilities; the restrictions protect control-plane and cross-project authority while allowing ordinary Docker builds. Deployment target nodes retain their separate restricted Compose policy described above.
+
 ## Security Best Practices
 
 - **Rotate keys quarterly** — regenerate JWT and encryption keys
