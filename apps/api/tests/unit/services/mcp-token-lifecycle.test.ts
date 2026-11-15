@@ -51,6 +51,21 @@ function seed(workspace: {
     );
 }
 
+function setMembership(change: { status?: string; role?: string }): void {
+  if (change.status) {
+    sqlite
+      .prepare(`UPDATE project_members SET status = ? WHERE user_id = 'user-1'`)
+      .run(change.status);
+  }
+  if (change.role) {
+    sqlite.prepare(`UPDATE project_members SET role = ? WHERE user_id = 'user-1'`).run(change.role);
+  }
+}
+
+function setUserStatus(status: string | null): void {
+  sqlite.prepare(`UPDATE users SET status = ? WHERE id = 'user-1'`).run(status);
+}
+
 function setWorkspaceStatus(status: string): void {
   sqlite.prepare(`UPDATE workspaces SET status = ? WHERE id = 'ws-1'`).run(status);
 }
@@ -63,7 +78,9 @@ beforeEach(async () => {
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema as unknown as Record<string, unknown>);
   sqlite
-    .prepare(`INSERT INTO users (id, email, status) VALUES ('user-1', 'user@example.test', 'active')`)
+    .prepare(
+      `INSERT INTO users (id, email, status) VALUES ('user-1', 'user@example.test', 'active')`
+    )
     .run();
   sqlite
     .prepare(
@@ -87,34 +104,131 @@ describe('validateActiveWorkspaceMcpToken', () => {
   );
 
   it('keeps an active viewer token valid for downstream read-capability checks', async () => {
-    sqlite
-      .prepare(`UPDATE project_members SET role = 'viewer' WHERE user_id = 'user-1'`)
-      .run();
+    setMembership({ role: 'viewer' });
     seed({ status: 'running' });
 
     await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
     expect(await tokenStillStored()).toBe(true);
   });
 
-  it.each(['invited', 'suspended', 'removed'])(
-    'rejects and revokes the token when project membership becomes %s',
-    async (membershipStatus) => {
-      sqlite
-        .prepare(`UPDATE project_members SET status = ? WHERE user_id = 'user-1'`)
-        .run(membershipStatus);
-      seed({ status: 'running' });
+  it('accepts a project owner through their owner membership row', async () => {
+    sqlite
+      .prepare(`INSERT INTO projects (id, user_id, name) VALUES ('project-1', 'user-1', 'p1')`)
+      .run();
+    seed({ status: 'running' });
 
-      await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toBeNull();
-      expect(await tokenStillStored()).toBe(false);
+    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+  });
+
+  it('revokes the token when the member is removed from the project', async () => {
+    seed({ status: 'running' });
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).not.toBeNull();
+
+    setMembership({ status: 'removed' });
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await tokenStillStored()).toBe(false);
+
+    // Re-adding the member cannot resurrect the revoked token.
+    setMembership({ status: 'active' });
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+  });
+
+  it('revokes the token when the member has no membership row at all', async () => {
+    sqlite.prepare(`DELETE FROM project_members WHERE user_id = 'user-1'`).run();
+    seed({ status: 'running' });
+
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await tokenStillStored()).toBe(false);
+  });
+
+  it('revokes the token when the user account row is gone (user deleted)', async () => {
+    sqlite.prepare(`DELETE FROM users WHERE id = 'user-1'`).run();
+    seed({ status: 'running' });
+
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await tokenStillStored()).toBe(false);
+  });
+
+  it('rejects, but keeps, the token while the user is suspended, and accepts it again after unsuspend', async () => {
+    seed({ status: 'running' });
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).not.toBeNull();
+
+    setUserStatus('suspended');
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await tokenStillStored()).toBe(true);
+
+    setUserStatus('active');
+    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+  });
+
+  it.each(['invited', 'suspended'])(
+    'rejects, but keeps, the token while membership is %s, and accepts it again once active',
+    async (membershipStatus) => {
+      seed({ status: 'running' });
+      setMembership({ status: membershipStatus });
+
+      expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+      expect(await tokenStillStored()).toBe(true);
+
+      setMembership({ status: 'active' });
+      await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
     }
   );
 
-  it('rejects and revokes the token when the user account is suspended', async () => {
-    sqlite.prepare(`UPDATE users SET status = 'suspended' WHERE id = 'user-1'`).run();
+  it('rejects, but keeps, the token for an unrecognised account status', async () => {
+    setUserStatus('system');
     seed({ status: 'running' });
 
-    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toBeNull();
-    expect(await tokenStillStored()).toBe(false);
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await tokenStillStored()).toBe(true);
+  });
+
+  it.each([
+    ['pending (only gated by REST while signup approval is required)', 'pending'],
+    ['NULL (the D1 column default is active)', null],
+  ])('accepts the token when the account status is %s', async (_label, status) => {
+    setUserStatus(status);
+    seed({ status: 'running' });
+
+    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+  });
+
+  it('rejects a member of project A acting through a workspace in project B, while project B owner is accepted', async () => {
+    // user-1 is an active owner of project-1 only. user-2 owns project-2.
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, email, status) VALUES ('user-2', 'two@example.test', 'active')`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO project_members (project_id, user_id, role, status)
+         VALUES ('project-2', 'user-2', 'owner', 'active')`
+      )
+      .run();
+    sqlite
+      .prepare(`INSERT INTO nodes (id, user_id, status) VALUES ('node-b', 'user-2', 'running')`)
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces (id, user_id, project_id, node_id, status) VALUES
+           ('ws-attack', 'user-1', 'project-2', 'node-b', 'running'),
+           ('ws-owner', 'user-2', 'project-2', 'node-b', 'running')`
+      )
+      .run();
+    const attack = {
+      taskId: '',
+      projectId: 'project-2',
+      userId: 'user-1',
+      workspaceId: 'ws-attack',
+    };
+    const owner = { taskId: '', projectId: 'project-2', userId: 'user-2', workspaceId: 'ws-owner' };
+    await storeMcpToken(env.KV, 'attack-token', attack);
+    await storeMcpToken(env.KV, 'owner-token', owner);
+
+    expect(await validateActiveWorkspaceMcpToken(env, 'attack-token')).toBeNull();
+    expect(await env.KV.get('mcp:attack-token')).toBeNull();
+    await expect(validateActiveWorkspaceMcpToken(env, 'owner-token')).resolves.toMatchObject(owner);
   });
 
   it.each(['stopping', 'stopped', 'sleeping', 'evicted', 'error', 'pending'])(
@@ -219,12 +333,21 @@ describe('MCP entry points enforce current token lifecycle authority', () => {
     const live = await postMcp('/mcp', toolsList);
     expect(live.status).toBe(200);
 
-    sqlite
-      .prepare(`UPDATE project_members SET status = 'removed' WHERE user_id = 'user-1'`)
-      .run();
+    setMembership({ status: 'removed' });
     const stale = await postMcp('/mcp', toolsList);
     expect(stale.status).toBe(401);
     expect(await tokenStillStored()).toBe(false);
+  });
+
+  it('401s while the account is suspended, then serves the same token again after unsuspend', async () => {
+    seed({ status: 'running' });
+    expect((await postMcp('/mcp', toolsList)).status).toBe(200);
+
+    setUserStatus('suspended');
+    expect((await postMcp('/mcp', toolsList)).status).toBe(401);
+
+    setUserStatus('active');
+    expect((await postMcp('/mcp', toolsList)).status).toBe(200);
   });
 
   it('refuses webhook-claim redemption for a stopped workspace token', async () => {
