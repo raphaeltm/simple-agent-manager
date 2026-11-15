@@ -72,6 +72,7 @@ export type AdminSettingName =
   | 'operations.nodeCleanupBlockedRetirementMs'
   | 'operations.nodeProviderDeletionRequestTimeoutMs'
   | 'operations.nodeProviderDeletionConfirmMaxMs'
+  | 'operations.nodeProvisioningAttemptDeadlineMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'
   | 'operations.projectDataArchiveMinStorageUsagePercent'
