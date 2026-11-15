@@ -29,8 +29,9 @@ Every PR that changes code MUST:
 ## Two Staging Installations
 
 There are two staging installations. Both run with the `staging` GitHub Environment's
-credentials, in the same Cloudflare account, and are fully separate otherwise: own Workers, D1,
-KV, R2, Pages, DNS zone, Pulumi stack and users.
+credentials, in the same Cloudflare account. Each has its own Workers, D1, KV, R2, Pages, DNS
+zone, Pulumi stack, users and data. They share the Pulumi state bucket (separate stacks), the
+account's workers.dev subdomain and the Hetzner account.
 
 | Installation | App                        | API                        | Prefix / stack      |
 | ------------ | -------------------------- | -------------------------- | ------------------- |
@@ -42,10 +43,13 @@ KV, R2, Pages, DNS zone, Pulumi stack and users.
 concurrency group and its own data, so two agents can verify at the same time. Deploy with
 `gh workflow run deploy-staging.yml --ref <branch> -f environment=staging2 -f sam_task_id=<id>`
 (omit `environment` for `staging`). Storage activation and the agent-email DNS audit are
-primary-only. A `staging2` GitHub Environment exists only because lease records are kept per
+primary-only, and so is the signed GitHub-trigger audit (staging2 has no GitHub App). The
+shared deployment engine (`use_shared_engine`) is not supported for staging2. A `staging2` GitHub Environment exists only because lease records are kept per
 installation; it holds no secrets and must not get any (staging2's jobs run with `staging`).
 
-**Signing in to staging2.** Use workload identity; there is no stored token for it. Audience
+**Signing in to staging2.** Use workload identity; no separate token exists for staging2. (The
+staging smoke token is also registered there, as the admin, so the deploy's smoke tests and pool
+seeding can sign in; agents should use workload identity.) Audience
 `https://api.sammy2.party/api/auth/workload-identity-login`; targets `staging2-agent-admin`
 (superadmin) or `staging2-agent-user` (ordinary user). Add the returned cookie for
 `.sammy2.party`. The issuer and allowed source project/user are the same as for `staging`.
@@ -53,10 +57,11 @@ installation; it holds no secrets and must not get any (staging2's jobs run with
 **What a fresh staging2 has.** The deploy bootstraps it on every run
 (`scripts/deploy/bootstrap-staging-installation.ts`, secondary installations only): the two users
 above, a platform cloud credential copied from `staging` (a platform GCP credential, or a GCP
-service-account key owned by one of staging's agent test accounts, otherwise `staging`'s Hetzner
-platform credential; staging's GCP credential today is workload identity, which only trusts
+service-account key owned by one of staging's agent test accounts, otherwise any other enabled
+platform cloud credential, today Hetzner; staging's GCP credential today is workload identity, which only trusts
 `sammy.party`'s issuer, so staging2 uses Hetzner), the staging smoke token registered for
-the admin, and the shared compute pool's machines (the same ones `staging`'s pool has active).
+the admin, and the shared compute pool's machines (the same ones `staging`'s pool has active, or, when the
+providers differ, the two cheapest machines per role with at least 2 vCPU and 8 GB).
 Both users are opted into the SAM AI proxy for each copied agent key
 (`providerMode: sam`), the only way a platform key is used. Today that is Claude Code, so
 start sessions with the Claude Code agent (for example set the project's default agent);

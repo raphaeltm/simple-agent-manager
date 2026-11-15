@@ -162,7 +162,14 @@ describe('teardown workflow', () => {
       "if: ${{ steps.pulumi_stack.outputs.status == 'ok' && inputs.dry_run != true && !inputs.keep_data }}"
     );
     expect(workflow).toContain('BUCKET_NAME: ${{ steps.names.outputs.assets_bucket }}');
-    expect(workflow.match(/workers\/scripts\/\$WORKER_NAME\?force=true/g)).toHaveLength(2);
+    // The tail Worker always (it is only a tail consumer); the API Worker only on a full
+    // teardown, because force also deletes its Durable Object data.
+    expect(workflow.match(/workers\/scripts\/\$WORKER_NAME\?force=true/g)).toHaveLength(1);
+    expect(workflow).toContain(
+      'if [ "$INPUT_KEEP_DATA" != "true" ]; then FORCE_QUERY="?force=true"; fi'
+    );
+    expect(workflow).toContain('workers/scripts/$WORKER_NAME$FORCE_QUERY');
+    expect(workflow).toContain('STACK_BUCKET="$(pulumi stack output r2Name 2>/dev/null || true)"');
   });
 
   it('matches workspace and node DNS records by literal domain suffix', () => {
@@ -170,5 +177,19 @@ describe('teardown workflow', () => {
       `jq -r --arg d ".\${BASE_DOMAIN}" '.result[] | select((.name | endswith($d)) and ((.name | startswith("ws-")) or (.name | endswith(".vm" + $d)))) | .id + " " + .name'`
     );
     expect(workflow).not.toContain('test(\\"^ws-.*');
+  });
+
+  it('names no resource literally: every target comes from the resolved installation', () => {
+    expect(workflow).not.toMatch(/\bsam-[a-z]/);
+    expect(workflow).not.toMatch(/[a-z0-9]-staging\b/);
+    expect(workflow).not.toMatch(/sammy2?\.party/);
+  });
+
+  it('deletes the installation container applications on a full teardown only', () => {
+    expect(workflow).toContain('run: node scripts/deploy/delete-container-applications.mjs');
+    expect(workflow).toMatch(
+      /- name: Delete Container Applications\n\s+id: delete_container_apps\n\s+if: \$\{\{ !inputs.keep_data \}\}/
+    );
+    expect(workflow).toContain('API_WORKER: ${{ steps.names.outputs.api_worker }}');
   });
 });

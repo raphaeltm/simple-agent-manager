@@ -94,7 +94,10 @@ permissions:
 jobs:
   lease:
     runs-on: ubuntu-24.04
-    environment: ${{ inputs.environment || 'staging' }}
+    # Every installation this workflow may target runs with the staging credentials, so the
+    # lease job never enters another Environment (the installation is validated in its first
+    # step against scripts/deploy/staging-installations.mjs).
+    environment: staging
     timeout-minutes: 2
     permissions:
       contents: read
@@ -120,7 +123,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
           LEASE_ACTION: ${{ inputs.lease_action || 'deploy' }}
-          LEASE_PRIMARY_ONLY_AUDIT: ${{ inputs.activation_only || inputs.agent_email_dns_audit }}
+          LEASE_PRIMARY_ONLY_AUDIT: ${{ inputs.activation_only || inputs.agent_email_dns_audit || inputs.github_trigger_audit }}
           SAM_TASK_ID: ${{ inputs.sam_task_id }}
           LEASE_HOLD_MINUTES: ${{ inputs.lease_hold_minutes }}
           LEASE_DEFAULT_HOLD_MINUTES: ${{ vars.STAGING_LEASE_DEFAULT_HOLD_MINUTES || '30' }}
@@ -214,9 +217,10 @@ jobs:
 
   storage-activation:
     needs: lease
-    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.activation_only }}
+    # Primary installation only (also refused in the lease preflight).
+    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.activation_only && needs.lease.outputs.installation == '' }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment || 'staging' }}
+    environment: ${{ needs.lease.outputs.credential_environment }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -245,9 +249,10 @@ jobs:
 
   agent-email-dns-audit:
     needs: [lease, deploy]
-    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.agent_email_dns_audit && !inputs.dry_run }}
+    # Primary installation only (also refused in the lease preflight).
+    if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.agent_email_dns_audit && !inputs.dry_run && needs.lease.outputs.installation == '' }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment || 'staging' }}
+    environment: ${{ needs.lease.outputs.credential_environment }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

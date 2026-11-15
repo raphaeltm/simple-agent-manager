@@ -684,12 +684,25 @@ describe('workflowTargetFor (deploy-staging.yml)', () => {
     });
   });
 
-  it.each(['production', 'prod', 'Production', 'preprod'])('refuses %s', (name) => {
+  it.each(['production', 'prod', 'Production', 'preprod', 'live', 'prd', 'staging9', ''])(
+    'refuses %j (allowlist, not deny-list)',
+    (name) => {
+      expect(() => workflowTargetFor(name, 'example.org')).toThrow(/staging workflows target only/);
+    }
+  );
+
+  it('refuses a primary domain that could inject an output line', () => {
+    expect(() => workflowTargetFor('staging', 'sammy.party\nbase_domain=evil')).toThrow(
+      /valid domain/
+    );
+  });
+
+  it.each(['production', 'prod'])('refuses %s', (name) => {
     expect(() => workflowTargetFor(name, 'example.org')).toThrow();
   });
 
   it('needs a domain for a primary', () => {
-    expect(() => workflowTargetFor('staging', undefined)).toThrow(/No domain/);
+    expect(() => workflowTargetFor('staging', undefined)).toThrow(/valid domain/);
   });
 });
 

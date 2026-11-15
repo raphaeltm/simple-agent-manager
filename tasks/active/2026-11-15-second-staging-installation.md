@@ -74,11 +74,28 @@ credential environment.
 - [x] `teardown.yml`: `staging2` option destroys only that installation
 - [x] `deploy-reusable.yml`: `installation` input, overrides, workers.dev read-only, bootstrap step (after task A merges or by agreement)
 - [x] `deploy-staging.yml`: installation choice, credential environment for jobs (after task C merges)
-- [ ] Docs: staging verification rule + full reference, /do steps, self-hosting/deploy docs
+- [x] Docs: staging verification rule + full reference, /do steps, self-hosting/deploy docs, CLAUDE.md, cf-api-debugging pointer
 - [ ] Live: deploy main to staging2, agent sign-in, VM session, Instant session on Artifacts project
 - [ ] Live: isolation both directions (version + data unchanged on the other installation)
 - [ ] Live: teardown staging2, redeploy from nothing, bootstrap re-runs; VMs cleaned up
 - [ ] Idea note with deploy/sign-in/teardown instructions and remaining owner actions
+
+### Added during implementation (found live or in review)
+
+- [x] Shared compute pool seeding through the admin API (mirrors staging's pool, else cheapest fitting machines; maxNodes 2 on first seeding) — a new platform credential adds no machines on its own
+- [x] Copy API-key platform agent keys and opt test users into the SAM AI proxy (`providerMode: sam`) — found live: sessions failed `model_provider_credential_missing`
+- [x] User GCP credentials copied only from the primary's designated agent test accounts (security review HIGH)
+- [x] Derived trust in a masked 0600 file, no fall-through to the primary trust; admin changes never overridden; D1 name check; positive credential-environment allowlist (security review)
+- [x] deploy-staging target is an allowlist; lease job runs in `staging`; primary-only audits gated (security re-review)
+- [x] Teardown, all installations: Worker deletion with force (API Worker only on full teardown: force also deletes Durable Object data), empty the assets bucket first (cross-checked against the stack's own bucket), delete node DNS records, literal DNS matching, delete the installation's container applications (they outlive the Worker and block a rebuild)
+- [x] An empty `staging2` GitHub Environment exists for lease records only; documented that it must hold no secrets
+
+### Live evidence
+
+- Run 43749577505 (branch, dd482e2): full deploy + 12 smoke tests on sammy2.party; workload-identity sign-in; Artifacts project; Instant "PONG"; VM (Hetzner cx33) "PONG-VM" (project default agent set by hand at that point; fixed since by the AI-proxy opt-in).
+- Isolation both ways via deployment history and D1 counts (PR #2766 body).
+- Teardown runs 43754362452 (gaps found), 43755074175 (full), 43755378489 (idempotent).
+- Rebuild 43755537071 failed: stale container applications; fixed by the new teardown step. Re-run pending.
 
 ## Acceptance criteria
 

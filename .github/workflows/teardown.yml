@@ -224,9 +224,13 @@ jobs:
             exit 0
           fi
 
+          # force=true also deletes the Worker's Durable Object namespaces and their data, so it
+          # is used only on a full teardown; keep_data leaves a Worker with Durable Objects.
+          FORCE_QUERY=""
+          if [ "$INPUT_KEEP_DATA" != "true" ]; then FORCE_QUERY="?force=true"; fi
           echo "Deleting API Worker: $WORKER_NAME"
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            "$API/accounts/$CF_ACCOUNT_ID/workers/scripts/$WORKER_NAME?force=true" \
+            "$API/accounts/$CF_ACCOUNT_ID/workers/scripts/$WORKER_NAME$FORCE_QUERY" \
             -X DELETE \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
@@ -243,8 +247,21 @@ jobs:
             echo "status=failed" >> "$GITHUB_OUTPUT"
           fi
 
+      # Container applications outlive their Worker and stay bound to the deleted Durable
+      # Object namespace; a later deploy of the same installation then fails. Full teardown only.
+      - name: Delete Container Applications
+        id: delete_container_apps
+        if: ${{ !inputs.keep_data }}
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          API_WORKER: ${{ steps.names.outputs.api_worker }}
+          STACK: ${{ steps.names.outputs.stack }}
+        run: node scripts/deploy/delete-container-applications.mjs
+
       # ================================================================
-      # Phase 2: Clean Up Workspace DNS Records (runtime-created ws-*)
+      # Phase 2: Clean Up Workspace and Node DNS Records (runtime-created ws-* and *.vm)
       # Searches all record types (A, AAAA, CNAME) matching ws-*.{domain}
       # ================================================================
       - name: Delete Workspace DNS Records
@@ -597,8 +614,20 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           BUCKET_NAME: ${{ steps.names.outputs.assets_bucket }}
+          STACK: ${{ steps.names.outputs.stack }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           R2_EMPTY_DEADLINE_SECONDS: ${{ vars.TEARDOWN_R2_EMPTY_DEADLINE_SECONDS }}
-        run: node scripts/deploy/empty-r2-bucket.mjs
+        working-directory: infra
+        run: |
+          # Empty only the bucket the selected stack itself owns.
+          STACK_BUCKET="$(pulumi stack output r2Name 2>/dev/null || true)"
+          if [ -z "$STACK_BUCKET" ] || [ "$STACK_BUCKET" != "$BUCKET_NAME" ]; then
+            echo "::warning::Stack $STACK owns bucket '$STACK_BUCKET', not '$BUCKET_NAME'; not emptying."
+            exit 0
+          fi
+          node ../scripts/deploy/empty-r2-bucket.mjs
 
       - name: Unprotect Pulumi Resources
         id: unprotect
@@ -806,7 +835,7 @@ jobs:
           echo "| Workers | API Worker (\`$API_WORKER\`) | $(fmt "$API_WORKER_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
 
           # Workspace DNS
-          echo "| DNS | Workspace records (\`ws-*\`) | $(fmt "$WS_DNS_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| DNS | Workspace and node records (\`ws-*\`, \`*.vm\`) | $(fmt "$WS_DNS_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
 
           # Marketing site
           if [ "$INPUT_INCLUDE_MARKETING" = "true" ]; then

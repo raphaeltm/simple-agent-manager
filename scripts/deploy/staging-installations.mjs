@@ -122,23 +122,28 @@ export function credentialEnvironmentFor(installation) {
  * and the installation's domain (the primary's own BASE_DOMAIN variable for a primary).
  */
 export function workflowTargetFor(installation, primaryBaseDomain) {
-  // Staging workflows never target production, under any name.
-  if (looksLikeProduction(installation ?? '')) {
+  // An allowlist, not a deny-list: a staging credential environment's own installation, or a
+  // registered secondary one. Anything else (production under any name included) is refused.
+  const name = (installation ?? '').trim();
+  const known =
+    SECONDARY_CREDENTIAL_ENVIRONMENTS.includes(name) ||
+    Object.hasOwn(SECONDARY_INSTALLATIONS, name);
+  if (!known || looksLikeProduction(name)) {
+    const allowed = [...SECONDARY_CREDENTIAL_ENVIRONMENTS, ...Object.keys(SECONDARY_INSTALLATIONS)];
     throw new Error(
-      `Refusing installation '${installation}': staging workflows never target production.`
+      `Refusing installation '${name}': staging workflows target only ${allowed.join(', ')}.`
     );
   }
-  const credentialEnvironment = credentialEnvironmentFor(installation);
-  const secondary = Object.hasOwn(SECONDARY_INSTALLATIONS, installation);
-  const baseDomain = secondary
-    ? SECONDARY_INSTALLATIONS[installation].baseDomain
-    : primaryBaseDomain;
-  if (!baseDomain) {
-    throw new Error(`No domain is known for installation '${installation}'.`);
+  const credentialEnvironment = credentialEnvironmentFor(name);
+  const secondary = Object.hasOwn(SECONDARY_INSTALLATIONS, name);
+  const baseDomain = secondary ? SECONDARY_INSTALLATIONS[name].baseDomain : primaryBaseDomain;
+  // Written to GITHUB_OUTPUT: a DNS name only, never anything that could add an output line.
+  if (!baseDomain || !/^[a-z0-9.-]{3,253}$/iu.test(baseDomain)) {
+    throw new Error(`No valid domain is known for installation '${name}'.`);
   }
   return {
     credential_environment: credentialEnvironment,
-    installation: secondary ? installation : '',
+    installation: secondary ? name : '',
     base_domain: baseDomain,
   };
 }
