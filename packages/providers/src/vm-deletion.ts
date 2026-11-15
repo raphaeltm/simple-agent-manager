@@ -42,6 +42,13 @@ export interface VmDeletionRequestOptions {
    * cut off mid-flight can still be confirmed (or proven never to have arrived) later.
    */
   beforeSend?: (ticket: VmDeletionTicket) => Promise<void>;
+  /**
+   * The exact instance the caller already re-read and proved it owns. When set, the provider
+   * refuses (throws, nothing is sent) unless the instance it resolved for the delete has exactly
+   * this id and, when `location` is given, this location. Binds the delete to the caller's
+   * ownership proof instead of to a fresh lookup.
+   */
+  expectedInstance?: { id: string; location?: string };
 }
 
 /** Optional two-phase deletion capability of a `Provider`. */

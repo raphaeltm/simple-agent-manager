@@ -155,6 +155,17 @@ export async function requestGcpInstanceDeletion(
   const instance = await findGcpInstanceByIdOrName(scope, scope.zones, id, context);
   if (!instance) return { state: 'absent' };
   const zone = gcpInstanceZone(instance, scope.defaultZone);
+  const expected = options?.expectedInstance;
+  if (
+    expected &&
+    (instance.id !== expected.id || (expected.location && zone !== expected.location))
+  ) {
+    throw new ProviderError(
+      'gcp',
+      undefined,
+      `GCP instance lookup for ${id} resolved ${instance.id} in ${zone}, not the expected ${expected.id}${expected.location ? ` in ${expected.location}` : ''}; refusing to delete it`
+    );
+  }
   const ticketBody: GcpDeletionTicketBody = {
     v: 1,
     provider: 'gcp',

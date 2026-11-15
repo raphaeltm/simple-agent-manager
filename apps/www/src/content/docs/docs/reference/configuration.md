@@ -834,7 +834,15 @@ control-plane `env` value and the exact Pulumi-generated `installation` marker b
 SAM consults D1. SAM then re-reads and revalidates the same provider resource immediately
 before it calls the provider delete API. Provider-account membership, server
 names, resource prefixes, and absence from this installation's D1 are not ownership
-proof.
+proof. Each provider call (the listing, the re-read, the delete) gets its own
+`NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS`, and no new candidate starts once the sweep budget
+(`NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS`) is spent; the rest wait for the next run.
+
+On Google Cloud, a delete takes tens of seconds to finish, so SAM sends it without waiting,
+bound to the exact instance id and zone of the re-read, and the run reports it as requested
+(`providerOrphansDeletionRequested` in the cron summary) rather than destroyed. The next run
+finds the VM gone, or requests its deletion again if it is still there. This applies to the
+installation's platform Google Cloud credential and to users' Google Cloud credentials alike.
 
 Pulumi generates the non-secret installation identity automatically on first deploy,
 persists it in the stack state, and injects it into the Worker as
@@ -851,7 +859,7 @@ aggregate operator-visible counters.
 | ---------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PROVIDER_ORPHAN_RECONCILIATION_ENABLED` | `true`           | Set to `false` to disable provider-side reconciliation entirely.                                                                                                                  |
 | `PROVIDER_ORPHAN_MIN_AGE_MS`             | `3600000` (1 hr) | Minimum server age before it can be treated as an orphan. Must comfortably exceed provisioning time, since a server's instance ID is recorded only after the provider returns it. |
-| `PROVIDER_ORPHAN_DESTROY_LIMIT`          | `5`              | Max servers destroyed per reconciliation run.                                                                                                                                     |
+| `PROVIDER_ORPHAN_DESTROY_LIMIT`          | `5`              | Max servers deleted (or, on Google Cloud, sent for deletion) per reconciliation run.                                                                                              |
 | `PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS`  | `3600000` (1 hr) | Minimum interval between runs. Invoked by the 5-minute cron but self-throttled to this interval via KV.                                                                           |
 
 ## Project Invites
