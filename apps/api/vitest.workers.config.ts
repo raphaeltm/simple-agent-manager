@@ -14,9 +14,6 @@ import { resolve } from 'node:path';
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
-import { NATIVE_RUNTIME_SUITES } from './tests/workers/support/native-runtime-suites';
-import TimingBalancedSequencer from './tests/workers/support/timing-balanced-sequencer';
-
 const d1Migrations = await readD1Migrations(resolve(__dirname, './src/db/migrations'));
 const observabilityD1Migrations = await readD1Migrations(
   resolve(__dirname, './src/db/migrations/observability')
@@ -145,7 +142,9 @@ export default defineConfig({
     globals: true,
     include: ['tests/workers/**/*.test.ts'],
     // Executed by vitest.sam-runtime.config.ts in the same test:workers command.
-    exclude: NATIVE_RUNTIME_SUITES,
+    // Loaded inline (not as top-of-file imports) so the reviewed test-key lines above keep
+    // their line numbers; scripts/quality/gitleaks-reviewed-baseline.json pins them.
+    exclude: (await import('./tests/workers/support/native-runtime-suites')).NATIVE_RUNTIME_SUITES,
     setupFiles: ['./tests/workers/setup-d1-migrations.ts'],
     provide: {
       D1_MIGRATIONS_JSON: JSON.stringify(d1Migrations),
@@ -162,7 +161,9 @@ export default defineConfig({
     // Files run one at a time, so a shard's wall time is the sum of its files.
     // `--shard=i/n` splits by measured per-file time (tests/workers/shard-timings.json)
     // instead of by path hash. See tests/workers/support/shard-plan.ts.
-    sequence: { sequencer: TimingBalancedSequencer },
+    sequence: {
+      sequencer: (await import('./tests/workers/support/timing-balanced-sequencer')).default,
+    },
   },
   // Test-only producer bridge. This constant is absent from production builds.
   define: {
