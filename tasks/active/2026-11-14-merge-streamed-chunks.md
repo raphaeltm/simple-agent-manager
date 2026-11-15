@@ -53,3 +53,35 @@ Rollout: one coherent server/browser/admin PR with code default OFF, staging ON.
 - [ ] Separate default-ON follow-up PR and final idea/durable report; archive task only when all required work is done.
 
 No deployment or external compute resources have been created yet. Expanded workerd tests pass cleanly. Full quality passes83/83 tasks after adapting existing transcript cursor assertions to overlap the growing tail; all5242 web tests, focused51 consumer tests and62 socket tests pass. The added raw-search granularity regression also passes (47 workerd tests across final runs). Branch rebased onto merged runner fix#2744. Shared staging remains occupied; no claim of task completion.
+
+### 2026-11-15 first live verification: blocked, cleaned up
+
+Candidate `456422a3f2f9ae4491336148cd8aa5be20fa8f0e` passed all 83 local quality tasks, 47 real-workerd tests, migration safety, and Deploy Staging 43671597822. Live verification nevertheless found three defects in the implementation/verification assumptions:
+
+1. The first task was submitted before `agent_ready_at` (submission 04:00:34, ready callback 04:01:30.644), so exact agent compatibility rejected it before workspace creation. One explicitly coordinated same-node retry succeeded. Future tests must wait for the actual ready timestamp and compatible version, not merely node status `running`.
+2. Fresh workspaces deliberately have `callback_generation = NULL` until runtime recreation. The merger required a truthy generation, so it never merged in the real VM. Local fixtures supplied `generation-a`; they tested persistence but failed to cover the real workspace creation and authenticated callback path. Production read-only D1 at 04:24:42 found eight active VM workspaces, all eight NULL, zero non-NULL; no active Instant workspaces were present. That sample gives no Instant generation distribution. The next regression enters the actual TaskRunner workspace reservation writer and real callback authentication without seeding a generation.
+3. Short-lived helper processes each logged in separately and exhausted the 20 token-login requests/IP/clock-hour quota. The preaccepted independent parent performed cleanup using one session. Future verification uses one reused authorized context that remains available for cleanup; no rate-limit changes, bypasses or repeated logins.
+
+Live OFF: 1,875 stored/logical rows, 9,539 assistant characters, 488 batch frames, 1,336 positive DOM growth steps. Live ON: 3,656 cumulative stored/logical rows, 18,575 cumulative assistant characters, zero append frames, 444 batch frames, 1,104 positive DOM growth steps. Full transcript hashes matched after reload in both runs, and the ON anchored comment survived reload; one fenced code block rendered. Visible rendered hashes/anchor sets did **not** match: live accumulated and reload recent-page/virtualized views were unequal. This is not a passing equivalence check or a proven pagination root cause; equal controlled ranges and comparison against main remain required. Instant was not exercised.
+
+Partial telemetry: OFF 44 calls/1,426 writes over 241,093 ms (32.409/call); ON 183 calls/5,950 writes over 60,005 ms (32.514/call). There is no observed saving. `alarmWrites` is already included in `rowsWritten` in the existing wrapper; reports must separate that subset and label the historical total-plus-alarm convention, not silently double-count.
+
+Cleanup: parent stopped both owned sessions, resolved the synthetic comment (retained resolved fixture; no supported DELETE), deleted workspace/node, restored both admin settings to their original **unconfigured** defaults through CAS61→62, and signed out (200, subsequent session NULL). The exact managed node has a strict non-attested provider-termination audit at 04:20:15.767; independent D1 reads at 04:21:31 and 04:23:28 found node and workspace absent. FREE published at 04:24:26 as `d268b740-ac39-4c9e-8c30-a773dee002b6`. Existing project/profiles preserved. Private synthetic evidence: OFF Library `01M7EPPANB4JYAXJAQ4QN9KZZE`, ON `01M7EPXN55M995R1HE0V5QVW2F` (screenshots, counts/hashes only, no auth/raw logs). Idea note `01M7EQ7WVE0GVQDRYMHV38N3BE` records the findings and design correction. No PR/merge.
+
+### Corrected source identity and rollout (parent author decision 7548cd22)
+
+Use `(authenticated workspaceId, callbackGeneration-or-NULL, durable reporter outbox incarnation)`. A random incarnation belongs to the SQLite outbox database and accompanies every batch. A recreated database changes the incarnation, seals the run and resets the frontier, preventing new low-sequence chunks from being mistaken for old replays. Same-incarnation historical retries retain exact byte idempotency. NULL is the valid initial callback generation, distinct from absent authenticated source.
+
+The task author explicitly revised their original requirement for immediate old-fleet savings: agents without an incarnation keep today's per-chunk path with zero savings until their nodes cycle. The author is informing Raphaël; any objection supersedes this direction. Do not implement both incarnation and canonical-row-receipt designs. Document bounded node drain settings and gradual row_usage evidence. Both runtimes share the reporter binary.
+
+Remaining gates before another staging request or PR:
+
+- [ ] Failing real workspace-creation + callback-auth regression on original candidate.
+- [ ] Durable reporter incarnation across reopen/session changes, new incarnation after database recreation.
+- [ ] NULL initial generation merges with incarnation; absent source/incarnation stays plain insert.
+- [ ] Recreated outbox with low sequences retains all new content; same incarnation historical/different-boundary retries stay byte-identical.
+- [ ] NULL→rotated generation seals/resets safely; old agent/new Worker callback and new agent/old Worker rollback compatibility.
+- [ ] Correct equal-range rendered-view comparison, virtualization-aware, and OFF comparison against main.
+- [ ] Reused-login verification/cleanup runner and actual node-ready gating.
+- [ ] Full local validation and specialist review on corrected implementation.
+- [ ] Fresh coordinated live VM and Instant proof, row-usage saving, strict cleanup.
