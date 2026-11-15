@@ -7,6 +7,7 @@
 #     (https://api.<domain>, the `iss` SAM signs with: getIssuer() in apps/api/src/services/jwt.ts),
 #   - a node service account with roles/compute.instanceAdmin.v1 and roles/compute.securityAdmin,
 #   - the binding that lets identities from that pool impersonate the service account,
+#   - the APIs nodes need, including Cloud Billing (read-only list prices for the machine catalog),
 # then prints the platform cloud credential to add in Admin -> Credentials (Cloud Provider, GCP).
 # With --kms, also the key that seals the box's Worker secrets (README, Sealed secrets):
 #   - a Cloud KMS key ring (default sam-selfhost) and a key for this install (default
@@ -228,8 +229,10 @@ PROJECT_NUMBER="$(gcloud projects describe "$PROJECT" --format='value(projectNum
 echo "Project ${PROJECT} (${PROJECT_NUMBER}), issuer ${ISSUER}, pool ${POOL_ID}"
 
 if [ "$NODES" -eq 1 ]; then
+  # cloudbilling: read-only Compute Engine list prices for the node catalog (no IAM role needed;
+  # without it every GCP machine shows "Price unavailable"; box round R14).
   change services enable compute.googleapis.com iam.googleapis.com iamcredentials.googleapis.com \
-    sts.googleapis.com --project="$PROJECT"
+    sts.googleapis.com cloudbilling.googleapis.com --project="$PROJECT"
 
   # A deleted pool still describes (state DELETED) and keeps its id for 30 days: reusing it as
   # "exists" would then try to create a provider in a deleted pool (R13 D5).

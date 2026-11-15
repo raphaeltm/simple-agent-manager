@@ -254,6 +254,30 @@ export function sealingFloorRefusal(
   ].join(' ');
 }
 
+/**
+ * The bootstrap command that gives a Google Cloud key an enabled primary version and grants the
+ * box VM's service account use of it. On a key whose primary version is already enabled,
+ * --new-key-version changes no version (ensure_primary_version in gcp-bootstrap.sh), so the
+ * command only adds the grant.
+ */
+function gcpNewKeyVersionCommand(box: Box, candidate: KeyCandidate): string {
+  const key = candidate.settings.SAM_GCP_KMS_KEY ?? '';
+  const parts =
+    /^projects\/([^/]+)\/locations\/([^/]+)\/keyRings\/([^/]+)\/cryptoKeys\/([^/]+)$/.exec(key);
+  const project = parts?.[1] ?? '<project>';
+  // A key named in .env may not have the bootstrap's default location, ring and name.
+  const named =
+    candidate.configuredBy && parts
+      ? ` --kms-location ${parts[2]} --key-ring ${parts[3]} --key ${parts[4]}`
+      : '';
+  return (
+    `\`pnpm selfhost:gcp-bootstrap -- --project ${project} --api-url ` +
+    `https://api.${box.SAM_DOMAIN ?? '<SAM_DOMAIN>'} --kms-only${named} --box-instance <box VM> ` +
+    '--box-zone <zone> --new-key-version` (or --restore-key-version within 30 days of the ' +
+    'teardown; README, Cloud key, one-time setup)'
+  );
+}
+
 /** What to run for a candidate that exists but cannot be used, when the failure says enough. */
 export function candidateFix(
   box: Box,
@@ -261,23 +285,32 @@ export function candidateFix(
   failure: CandidateFailure
 ): string | undefined {
   if (candidate.provider === 'gcp-kms' && failure.text.includes('FAILED_PRECONDITION')) {
-    const key = candidate.settings.SAM_GCP_KMS_KEY ?? '';
-    const project = /^projects\/([^/]+)\//.exec(key)?.[1] ?? '<project>';
     return (
       'FAILED_PRECONDITION from Cloud KMS means the key has no enabled primary version (after ' +
       '`pnpm selfhost:teardown --destroy-key` its version is scheduled for destruction). Add a ' +
-      'version where you run the bootstrap: `pnpm selfhost:gcp-bootstrap -- --project ' +
-      `${project} --api-url https://api.${box.SAM_DOMAIN ?? '<SAM_DOMAIN>'} --kms-only ` +
-      '--box-instance <box VM> --box-zone <zone> --new-key-version` (or --restore-key-version ' +
-      'within 30 days of the teardown; README, Cloud key, one-time setup).'
+      `version where you run the bootstrap: ${gcpNewKeyVersionCommand(box, candidate)}.`
+    );
+  }
+  // Box round R14: on a new box whose bootstrap stopped at a destroyed key, the box account has
+  // no grant yet, so Cloud KMS answers 403 and never gets to FAILED_PRECONDITION. Name that cause
+  // too, with the same command (it also adds the grant).
+  if (candidate.provider === 'gcp-kms' && failure.kind === 'denied') {
+    return (
+      'Cloud KMS answers denied (403) when the box VM may not see the key, so this can be any of: ' +
+      "the key's versions are destroyed or scheduled for destruction (after " +
+      '`pnpm selfhost:teardown --destroy-key`; the bootstrap then stops before it grants this ' +
+      "box), the box VM's service account has no grant on the key, the VM lacks the " +
+      'cloud-platform access scope, or no key by that name was set up for this install. Where you ' +
+      `run the bootstrap: ${gcpNewKeyVersionCommand(box, candidate)}. It creates or reuses the ` +
+      "key, gives it a new primary version only if it has no enabled one, and grants this box's " +
+      'service account.'
     );
   }
   if (failure.kind === 'denied') {
     return (
-      'denied means no key by that name was set up for this install (Google Cloud and AWS also ' +
-      'answer denied for a key the VM may not see), or the box VM identity may not use it: run ' +
-      'the one-time setup (README, Cloud key, one-time setup), or check the grant on the key and, ' +
-      'on Google Cloud, that the VM has the cloud-platform access scope.'
+      'denied means no key by that name was set up for this install (AWS also answers denied for ' +
+      'a key the VM may not see), or the box VM identity may not use it: run the one-time setup ' +
+      '(README, Cloud key, one-time setup), or check the grant on the key.'
     );
   }
   if (failure.kind === 'config' && !failure.keyMissing) {

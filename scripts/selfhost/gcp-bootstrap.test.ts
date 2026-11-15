@@ -114,6 +114,12 @@ describe('pnpm selfhost:gcp-bootstrap', () => {
       /principalSet:\/\/iam\.googleapis\.com\/projects\/123456789012\/locations\/global\/workloadIdentityPools\/sam-[0-9a-f]{8}\/\*/
     );
 
+    // Cloud Billing: the node catalog's GCP list prices (box round R14).
+    const services = result.calls.find((c) => c.startsWith('services enable'))!;
+    expect(services.split(' ')).toEqual(
+      expect.arrayContaining(['compute.googleapis.com', 'cloudbilling.googleapis.com'])
+    );
+
     expect(result.stdout).toMatch(/Project ID:\s+sam-vm-test/);
     expect(result.stdout).toMatch(/Project number:\s+123456789012/);
     expect(result.stdout).toMatch(/Pool ID:\s+sam-[0-9a-f]{8}/);
@@ -495,6 +501,22 @@ describe('--kms: a key with no enabled primary version (box round R13)', () => {
     expect(again.calls.slice(before).some((c) => c.startsWith('kms keys versions create'))).toBe(
       false
     );
+  });
+
+  // `deploy --init` prints this command for any Cloud KMS denial (key-choice.ts candidateFix,
+  // box round R14), including a live key whose only problem is the box's missing grant.
+  it('--new-key-version on a healthy key without the grant: adds the grant, keeps the version', () => {
+    expect(run(kmsArgs).status).toBe(0);
+    const key = keyName();
+    setGcp((db) => {
+      db.bindings = db.bindings.filter((b) => !b.startsWith('key:'));
+    });
+    const again = run([...kmsArgs, '--new-key-version']);
+    expect(again.status, again.stderr).toBe(0);
+    expect(gcp().keys[KEY_PATH(key)]?.versions).toEqual({ 1: 'ENABLED' });
+    expect(gcp().bindings.filter((b) => b.startsWith('key:'))).toEqual([
+      `key:${KEY_PATH(key)} roles/cloudkms.cryptoKeyEncrypterDecrypter serviceAccount:${BOX_SA}`,
+    ]);
   });
 });
 
