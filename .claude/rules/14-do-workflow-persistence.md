@@ -52,7 +52,7 @@ Phase 1: Research & Task Creation
 
 ## Phase 7: CodeRabbit Review Tracker
 
-<populated when CodeRabbit review is requested — record the request time and method, then either the review's findings, fix commits, and incremental review status, or what you observed when no review arrived (silence after ~15 minutes, `Review skipped`, rate limit)>
+<populated when CodeRabbit review is requested (at the moment the PR is marked ready, end of Phase 4) — record the PR number, the time it was marked ready, the request time and method, then either the review's findings, fix commits, and incremental review status, or what you observed when no review arrived (silence after ~15 minutes, `Review skipped`, rate limit)>
 <If CodeRabbit reviewed, Phase 7 is NOT merge-ready until no CodeRabbit feedback is unresolved. If no review arrived within the wait, record that and continue: a silent CodeRabbit never blocks merge (rule 25)>
 
 ## Implementation Progress

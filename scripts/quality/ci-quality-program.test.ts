@@ -99,12 +99,23 @@ describe('deterministic quality-program CI wiring', () => {
     expect(changes).toContain("- 'apps/www/**'");
     expect(changes).not.toContain("- 'scripts/**'");
 
-    const workflow = jobBlock(ci, 'ci-workflow');
-    expect(workflow).toContain('needs: [changes]');
-    expect(workflow).toContain("needs.changes.outputs.ci-workflow == 'true'");
-    expect(workflow).toContain(
-      'pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts check-runtime-tunables.test.ts ci-workspace-surfaces.test.ts'
-    );
+    // CI-routing changes run the wiring tests inside Code Quality Checks (the
+    // separate CI Workflow job was folded in to save a runner slot).
+    const codeQuality = jobBlock(ci, 'code-quality');
+    expect(codeQuality).toContain("needs.changes.outputs.ci-workflow == 'true'");
+    for (const testFile of [
+      'ci-quality-program.test.ts',
+      'ci-worker-suite.test.ts',
+      'check-runtime-tunables.test.ts',
+      'ci-workspace-surfaces.test.ts',
+      'ci-browser-install.test.ts',
+      'ci-evidence-token-wiring.test.ts',
+      'ci-test-shards.test.ts',
+      'ci-draft-and-gate.test.ts',
+    ]) {
+      expect(codeQuality, `wiring test ${testFile} must run in CI`).toContain(testFile);
+    }
+    expect(ci).not.toMatch(/\n {2}ci-workflow:\n/u);
 
     const marketing = jobBlock(ci, 'marketing-site');
     expect(marketing).toContain('needs: [changes]');
@@ -119,19 +130,23 @@ describe('deterministic quality-program CI wiring', () => {
     for (const jobName of [
       'lint',
       'typecheck',
+      'test-api',
+      'test-web',
+      'test-packages',
       'test',
-      'build',
       'workspace-quality-surfaces',
       'code-quality',
     ]) {
       const job = jobBlock(ci, jobName);
-      expect(job, `${jobName} should be repo-quality gated`).toContain('needs: [changes]');
+      expect(job, `${jobName} should be repo-quality gated`).toMatch(/needs: \[changes[\],]/u);
       expect(job, `${jobName} should not run for marketing-only changes`).toContain(
         "needs.changes.outputs.repo-quality == 'true'"
       );
     }
 
-    expect(jobBlock(ci, 'durable-object-workers')).toContain("needs.changes.outputs.api == 'true'");
+    expect(jobBlock(ci, 'durable-object-worker-shards')).toContain(
+      "needs.changes.outputs.api == 'true'"
+    );
     expect(jobBlock(ci, 'pulumi-infra')).toContain("needs.changes.outputs.infra == 'true'");
     expect(jobBlock(ci, 'deploy-scripts')).toContain(
       "needs.changes.outputs.deploy-scripts == 'true'"
