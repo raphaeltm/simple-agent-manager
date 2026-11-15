@@ -17,6 +17,7 @@ import {
   type PypiTool,
   pypiToolId,
 } from './container-image-inputs';
+import { REVIEWED_NPM_INSTALL_SCRIPTS } from './container-image-reviewed-inputs';
 
 export interface FingerprintIo {
   /** GET a URL and return its body; throws on a non-2xx status. */
@@ -77,7 +78,7 @@ export function aptIndexFingerprint(inRelease: string, source: AptSource): strin
  * isolation; resolving them together would let one package's pins satisfy
  * another's ranges and hide an upstream release.
  */
-export function npmLockFingerprint(lockJson: string): string {
+export function npmLockFingerprint(lockJson: string, scriptsRun = false): string {
   const packages = jsonObject(lockJson, 'npm lock').packages;
   if (!packages || typeof packages !== 'object' || Array.isArray(packages))
     throw new Error('Unreadable npm lock');
@@ -95,13 +96,20 @@ export function npmLockFingerprint(lockJson: string): string {
             ? entry.resolved
             : '';
       if (!identity) throw new Error(`npm lock entry ${path} has no integrity`);
+      const name = path.split('node_modules/').pop() ?? path;
+      if (scriptsRun && entry.hasInstallScript === true && !REVIEWED_NPM_INSTALL_SCRIPTS[name])
+        throw new Error(`${name} has an unreviewed install script (REVIEWED_NPM_INSTALL_SCRIPTS)`);
       return `${path}@${entry.version} ${identity}`;
     });
   if (!entries.length) throw new Error('Empty npm lock');
   return sha256(entries.sort().join('\n'));
 }
 
-async function npmFingerprint(spec: string, io: FingerprintIo): Promise<string> {
+async function npmFingerprint(
+  spec: string,
+  scriptsRun: boolean,
+  io: FingerprintIo
+): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'sam-npm-fingerprint-'));
   try {
     writeFileSync(join(dir, 'package.json'), '{"name":"sam-image-fingerprint","private":true}');
@@ -120,7 +128,7 @@ async function npmFingerprint(spec: string, io: FingerprintIo): Promise<string> 
       ],
       { cwd: dir }
     );
-    return npmLockFingerprint(readFileSync(join(dir, 'package-lock.json'), 'utf8'));
+    return npmLockFingerprint(readFileSync(join(dir, 'package-lock.json'), 'utf8'), scriptsRun);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -140,6 +148,10 @@ async function pypiFingerprint(tool: PypiTool, io: FingerprintIo, uv: string): P
       '--no-header',
       '--no-annotate',
       '--no-cache',
+      // Never build an sdist to read its metadata: that runs upstream code. An
+      // sdist-only dependency then fails the fingerprint, which means rebuild.
+      '--no-build',
+      '--no-config',
       '--quiet',
     ],
     { input: `${[tool.spec, ...tool.with].join('\n')}\n` }
@@ -193,7 +205,7 @@ export async function fingerprintInputs(input: {
     entries(
       inputs.npm,
       (spec) => spec,
-      (spec) => npmFingerprint(spec, io)
+      (spec) => npmFingerprint(spec, inputs.npmScripts.includes(spec), io)
     ),
     entries(inputs.pypi, pypiToolId, (tool) => pypiFingerprint(tool, io, input.uv)),
   ]);

@@ -13,7 +13,11 @@
  */
 import { createHash } from 'node:crypto';
 
-import { BASE_IMAGE_APT_SOURCES, REVIEWED_BUILD_SCRIPTS } from './container-image-reviewed-inputs';
+import {
+  BASE_IMAGE_APT_SOURCES,
+  REVIEWED_BUILD_SCRIPTS,
+  REVIEWED_FETCH_URLS,
+} from './container-image-reviewed-inputs';
 
 /** One apt suite an image stage installs from. */
 export interface AptSource {
@@ -39,6 +43,8 @@ export interface ImageInputs {
   urls: string[];
   /** Exact `name@version` specs installed with `npm install -g`, one global tree each. */
   npm: string[];
+  /** The subset of `npm` installed without `--ignore-scripts`: its install scripts run. */
+  npmScripts: string[];
   pypi: PypiTool[];
   /** Copied build-context files executed during the build (reviewed list). */
   scripts: string[];
@@ -76,6 +82,27 @@ const UNSUPPORTED_COMMANDS = new Set([
   'yum',
 ]);
 const INTERPRETERS = new Set(['sh', 'bash', 'python', 'python3', 'node']);
+/** Every command a RUN may contain. Anything else could fetch unkeyed bytes. */
+const ALLOWED_COMMANDS = new Set([
+  ...INTERPRETERS,
+  'apt',
+  'apt-get',
+  'chmod',
+  'chown',
+  'cp',
+  'curl',
+  'echo',
+  'ln',
+  'mkdir',
+  'mv',
+  'npm',
+  'rm',
+  'set',
+  'touch',
+  'true',
+  'uv',
+  'wget',
+]);
 const ALLOWED_INSTRUCTIONS = new Set([
   'FROM',
   'COPY',
@@ -274,6 +301,7 @@ function analyzeNpm(tokens: string[], state: RunState) {
     }
     if (!NPM_EXACT.test(token)) unsupported(`npm spec ${token} is not an exact version`);
     state.inputs.npm.push(token);
+    if (!rest.includes('--ignore-scripts')) state.inputs.npmScripts.push(token);
   }
 }
 
@@ -313,14 +341,12 @@ function analyzeRun(args: string, state: RunState) {
     unsupported('RUN in exec, flagged or heredoc form');
   const debSources = aptSourcesFromRun(args);
   const withoutDeb = args.replace(DEB_LINE, ' ');
-  for (const url of withoutDeb.match(URL_LITERAL) ?? []) {
-    if (url.includes('$')) unsupported(`fetched URL with a variable: ${url}`);
-    state.inputs.urls.push(url);
-  }
   let installsApt = false;
   for (const tokens of commandsOf(args)) {
     const command = tokens[0].split('/').pop() ?? tokens[0];
     if (UNSUPPORTED_COMMANDS.has(command)) unsupported(`installer ${command} is not fingerprinted`);
+    if (!ALLOWED_COMMANDS.has(command))
+      unsupported(`command ${command} is not in ALLOWED_COMMANDS`);
     if (command === 'apt-get' || command === 'apt') installsApt ||= tokens.includes('install');
     else if (command === 'npm') analyzeNpm(tokens, state);
     else if (command === 'uv') analyzeUv(tokens, state);
@@ -328,6 +354,11 @@ function analyzeRun(args: string, state: RunState) {
       if (!tokens.some((token) => /^https?:\/\//.test(token)))
         unsupported(`${command} without a literal URL`);
     } else if (INTERPRETERS.has(command)) scriptTarget(tokens[1], state);
+  }
+  for (const url of withoutDeb.match(URL_LITERAL) ?? []) {
+    if (url.includes('$')) unsupported(`fetched URL with a variable: ${url}`);
+    if (!REVIEWED_FETCH_URLS[url]) unsupported(`fetched URL ${url} is not in REVIEWED_FETCH_URLS`);
+    state.inputs.urls.push(url);
   }
   state.stage.apt.push(...debSources);
   if (installsApt) {
@@ -352,6 +383,7 @@ export function analyzeDockerfile(text: string): DockerfileAnalysis {
     apt: [],
     urls: [],
     npm: [],
+    npmScripts: [],
     pypi: [],
     scripts: [],
   };
@@ -399,6 +431,7 @@ export function analyzeDockerfile(text: string): DockerfileAnalysis {
       apt: sortedUnique(inputs.apt, aptSourceId),
       urls: sortedUnique(inputs.urls, identity),
       npm: sortedUnique(inputs.npm, identity),
+      npmScripts: sortedUnique(inputs.npmScripts, identity),
       pypi: sortedUnique(inputs.pypi, pypiToolId),
       scripts: sortedUnique(inputs.scripts, identity),
     },
@@ -457,6 +490,7 @@ export function composeImageKey(input: {
     apt: inputs.apt.map((source) => pick(fingerprints.apt, aptSourceId(source))),
     urls: inputs.urls.map((url) => pick(fingerprints.urls, url)),
     npm: inputs.npm.map((spec) => pick(fingerprints.npm, spec)),
+    npmScripts: inputs.npmScripts,
     pypi: inputs.pypi.map((tool) => pick(fingerprints.pypi, pypiToolId(tool))),
   });
   return createHash('sha256').update(canonical).digest('hex');

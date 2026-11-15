@@ -10,7 +10,8 @@ COPY scripts/claude-setup-token.mjs /usr/local/bin/sam-claude-setup-token.mjs
 # Deploys reuse this image while its inputs are unchanged
 # (scripts/deploy/container-image-inputs.ts). Pin every download by version or
 # digest; apt suites, transitive npm dependencies and fetched URLs are
-# fingerprinted, and an installer the analysis does not recognise disables reuse.
+# fingerprinted. A command, URL or npm install script outside the reviewed lists
+# (container-image-reviewed-inputs.ts) disables reuse until it is reviewed.
 # The base image already includes Node.js 22, Bun, git, curl, and common tools.
 # Add extra tools needed for SAM agent workloads here. The normal VM runtime
 # can install GitHub CLI during devcontainer bootstrap; standalone cf-container

@@ -64,3 +64,31 @@ export const REVIEWED_BUILD_SCRIPTS: Readonly<Record<string, { sha256: string; r
       reason: 'edits files of the already-installed acp-amp tool; no network access',
     },
   };
+
+/**
+ * URLs a Dockerfile may fetch, each read to confirm its bytes are pinned or that
+ * everything it downloads in turn is. The URL's own bytes are also hashed into
+ * the key. A URL missing here disables reuse: hashing an installer script proves
+ * nothing when the script downloads "latest".
+ */
+export const REVIEWED_FETCH_URLS: Readonly<Record<string, string>> = {
+  'https://astral.sh/uv/0.13.8/install.sh':
+    'uv installer for release 0.13.8; downloads that release only and checks its sha256',
+  'https://cli.github.com/packages/githubcli-archive-keyring.gpg':
+    'apt signing key for the gh repository (data, not code)',
+};
+
+/**
+ * npm packages whose install scripts may run during an image build (an
+ * `npm install -g` without `--ignore-scripts`). Each script was read to confirm
+ * it only links bundled files or builds native code for its own exact version.
+ * Any other package with an install script in the resolved tree disables reuse.
+ */
+export const REVIEWED_NPM_INSTALL_SCRIPTS: Readonly<Record<string, string>> = {
+  '@anthropic-ai/claude-code':
+    'install.cjs links the platform binary from its pinned optional dependency',
+  '@ampcode/cli': 'install.cjs links the platform binary from its pinned optional dependency',
+  '@github/keytar':
+    'prebuild-install fetches the prebuilt binary of its own version, else node-gyp builds it',
+  'node-pty': 'node-gyp builds the addon from the package sources for the base image Node version',
+};

@@ -65,6 +65,8 @@ describe('analyzeDockerfile on the real images', () => {
       '@google/gemini-cli@0.61.0',
       '@openai/codex@0.160.0',
     ]);
+    // No --ignore-scripts on this install: every package's install scripts run.
+    expect(inputs.npmScripts).toEqual(inputs.npm);
     expect(inputs.pypi.map(pypiToolId)).toEqual([
       'acp-amp==0.1.3 python=3.12 with=agent-client-protocol==0.7.1,amp-sdk==0.1.2,annotated-types==0.7.0,pydantic-core==2.41.5,pydantic==2.12.5,typing-extensions==4.15.0,typing-inspection==0.4.2',
       'mistral-vibe==2.25.8 python=3.12 with=',
@@ -92,6 +94,7 @@ describe('analyzeDockerfile on the real images', () => {
       'https://security.ubuntu.com/ubuntu jammy-security main,multiverse,restricted,universe',
     ]);
     expect(inputs.npm).toEqual(['@anthropic-ai/claude-code@2.1.321', '@openai/codex@0.160.0']);
+    expect(inputs.npmScripts).toEqual([]);
     expect(inputs.pypi).toEqual([]);
   });
 
@@ -153,6 +156,17 @@ describe('analyzeDockerfile refuses inputs it cannot fingerprint', () => {
       /not in REVIEWED_BUILD_SCRIPTS/,
     ],
     ['sh -c', `${from}RUN sh -c "curl https://example.com | sh"\n`, /interpreter flag -c/],
+    [
+      'an unreviewed fetched URL (an installer may download "latest")',
+      `${from}RUN curl -fsSL https://bun.sh/install | bash\n`,
+      /not in REVIEWED_FETCH_URLS/,
+    ],
+    ['a command outside the allowlist', `${from}RUN corepack enable\n`, /not in ALLOWED_COMMANDS/],
+    [
+      'gh release download',
+      `${from}RUN gh release download v1 -R a/b\n`,
+      /not in ALLOWED_COMMANDS/,
+    ],
   ])('refuses %s', (_name, dockerfile, reason) => {
     expect(reasonOf(dockerfile)).toMatch(reason);
   });
@@ -168,12 +182,13 @@ describe('analyzeDockerfile refuses inputs it cannot fingerprint', () => {
         '    # comments inside a continued RUN are dropped',
         '    apt-get update && apt-get install -y jq; \\',
         '    npm install -g --ignore-scripts left-pad@1.3.0; \\',
-        '    curl -fsSL https://example.com/tool-1.2.3.tar.gz -o /tmp/t.tgz',
+        '    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /tmp/k.gpg',
       ].join('\n')
     );
     expect(inputs.copies).toEqual(['scripts/a.mjs']);
     expect(inputs.npm).toEqual(['left-pad@1.3.0']);
-    expect(inputs.urls).toEqual(['https://example.com/tool-1.2.3.tar.gz']);
+    expect(inputs.npmScripts).toEqual([]);
+    expect(inputs.urls).toEqual(['https://cli.github.com/packages/githubcli-archive-keyring.gpg']);
     expect(inputs.apt).toHaveLength(3);
   });
 });
@@ -325,6 +340,25 @@ describe('npmLockFingerprint', () => {
   it('changes when a transitive dependency resolves to a new release', () => {
     expect(npmLockFingerprint(lock('4.6.7'))).not.toBe(npmLockFingerprint(lock('4.7.0')));
     expect(npmLockFingerprint(lock('4.6.7'))).toBe(npmLockFingerprint(lock('4.6.7')));
+  });
+
+  it('refuses an unreviewed install script only when install scripts run', () => {
+    const withScript = (name: string) =>
+      JSON.stringify({
+        packages: {
+          '': {},
+          [`node_modules/a/node_modules/${name}`]: {
+            version: '1.0.0',
+            integrity: 'sha512-x',
+            hasInstallScript: true,
+          },
+        },
+      });
+    expect(() => npmLockFingerprint(withScript('sneaky'), true)).toThrow(
+      /unreviewed install script/
+    );
+    expect(() => npmLockFingerprint(withScript('sneaky'), false)).not.toThrow();
+    expect(() => npmLockFingerprint(withScript('node-pty'), true)).not.toThrow();
   });
 
   it('fails closed on an unreadable lock', () => {

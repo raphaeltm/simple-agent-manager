@@ -10,6 +10,7 @@ import {
   applyImageOverrides,
   type ContainerTarget,
   ImageBuildError,
+  latestRolloutFailedIn,
   type RegistryIo,
   resolveContainerImage,
   type ResolveDeps,
@@ -35,6 +36,8 @@ interface Upstream {
   npm: Record<string, string>;
   pypi: string;
   failing: Set<string>;
+  /** Package in every resolved tree that declares an install script. */
+  installScriptPackage?: string;
 }
 
 function inRelease(hash: string, components: string[]): string {
@@ -70,6 +73,15 @@ function fakeNetwork(upstream: Upstream): FingerprintIo & { npmCalls: string[] }
               '': {},
               [`node_modules/${spec}`]: { version: '1.0.0', integrity: `sha512-${spec}` },
               'node_modules/zod': { version: upstream.npm.zod ?? '4.6.7', integrity: 'sha512-zod' },
+              ...(upstream.installScriptPackage
+                ? {
+                    [`node_modules/${upstream.installScriptPackage}`]: {
+                      version: '1.0.0',
+                      integrity: 'sha512-script',
+                      hasInstallScript: true,
+                    },
+                  }
+                : {}),
             },
           })
         );
@@ -89,6 +101,7 @@ describe('resolveContainerImage through the real analysis and fingerprints', () 
   };
   let published: Map<string, string>;
   let network: ReturnType<typeof fakeNetwork>;
+  let rolloutState: 'completed' | 'failed' | 'unreadable';
 
   beforeEach(() => {
     context = mkdtempSync(join(tmpdir(), 'sam-image-context-'));
@@ -122,6 +135,7 @@ describe('resolveContainerImage through the real analysis and fingerprints', () 
       failing: new Set(),
     };
     network = fakeNetwork(upstream);
+    rolloutState = 'completed';
     // A registry that remembers what was pushed, like the account registry does.
     published = new Map();
     registry = {
@@ -141,6 +155,11 @@ describe('resolveContainerImage through the real analysis and fingerprints', () 
     accountId: ACCOUNT,
     contextDir: context,
     registry,
+    latestRolloutFailed: async (name) => {
+      expect(name).toBe(REPOSITORY);
+      if (rolloutState === 'unreadable') throw new Error('Container rollout API HTTP 503');
+      return rolloutState === 'failed';
+    },
     readFile: (path) => readFileSync(path, 'utf8'),
     now: () => 0,
     fingerprint: async (dockerfile) => {
@@ -174,6 +193,37 @@ describe('resolveContainerImage through the real analysis and fingerprints', () 
       reference: `${REGISTRY_REPOSITORY}@${DIGEST}`,
     });
     expect(registry.buildAndPush).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['failed', /latest rollout failed/],
+    ['unreadable', /rollout state unreadable/],
+  ] as const)(
+    'builds a fresh digest instead of reusing when the latest rollout is %s',
+    async (state, reason) => {
+      const first = await resolveContainerImage(target, deps());
+      rolloutState = state;
+      const next = await resolveContainerImage(target, deps());
+      // Same inputs, so the same key, but a new digest: Wrangler sees a changed
+      // image and starts a new rollout for the gate to wait on.
+      expect(next).toMatchObject({ outcome: 'built', key: first.key });
+      expect(next.reason).toMatch(reason);
+      expect(next.reference).toBe(`${REGISTRY_REPOSITORY}@${NEW_DIGEST}`);
+      expect(registry.lookup).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('never reuses when a resolved npm tree runs an unreviewed install script', async () => {
+    await resolveContainerImage(target, deps());
+    upstream.installScriptPackage = 'sneaky-postinstall';
+    const decision = await resolveContainerImage(target, deps());
+    expect(decision.outcome).toBe('rebuild-by-wrangler');
+    expect(decision.reason).toMatch(/sneaky-postinstall has an unreviewed install script/);
+  });
+
+  it('accepts a reviewed install script (control)', async () => {
+    upstream.installScriptPackage = 'node-pty';
+    expect((await resolveContainerImage(target, deps())).outcome).toBe('built');
   });
 
   it('resolves each global npm package in its own tree', async () => {
@@ -312,6 +362,7 @@ describe('resolveContainerImage for the sandbox image', () => {
         accountId: ACCOUNT,
         contextDir: context,
         registry,
+        latestRolloutFailed: async () => false,
         readFile: (path) => readFileSync(path, 'utf8'),
         now: () => 0,
         fingerprint: async (dockerfile) => {
@@ -386,6 +437,26 @@ describe('applyImageOverrides', () => {
   });
 });
 
+describe('latestRolloutFailedIn', () => {
+  it('reads the highest-target rollout only', () => {
+    expect(latestRolloutFailedIn([])).toBe(false);
+    expect(
+      latestRolloutFailedIn([
+        { status: 'failed', target_version: 3 },
+        { status: 'completed', target_version: 4 },
+      ])
+    ).toBe(false);
+    for (const status of ['failed', 'cancelled', 'canceled'])
+      expect(
+        latestRolloutFailedIn([
+          { status: 'completed', target_version: 3 },
+          { status, target_version: 4 },
+        ])
+      ).toBe(true);
+    expect(latestRolloutFailedIn([{ status: 'progressing', target_version: 4 }])).toBe(false);
+  });
+});
+
 describe('summaryMarkdown', () => {
   it('lists the outcome, reason and short key per class', () => {
     const summary = summaryMarkdown([
@@ -410,7 +481,7 @@ describe('summaryMarkdown', () => {
       '| SandboxDO | reused | inputs unchanged | kkkkkkkkkkkkkkkk | sha256:dddddddddddd | 3s |'
     );
     expect(summary).toContain(
-      '| VmAgentContainer | rebuild-by-wrangler | fingerprint failed: a/b | - | - | 1s |'
+      '| VmAgentContainer | rebuild-by-wrangler | fingerprint failed: a b | - | - | 1s |'
     );
   });
 });

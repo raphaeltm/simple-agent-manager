@@ -19,7 +19,8 @@ LABEL org.opencontainers.image.title="SAM vm-agent instant runtime" \
 # Deploys reuse this image while its inputs are unchanged
 # (scripts/deploy/container-image-inputs.ts). Pin every download by version or
 # digest; apt suites, transitive npm/PyPI dependencies and fetched URLs are
-# fingerprinted, and an installer the analysis does not recognise disables reuse.
+# fingerprinted. A command, URL or npm install script outside the reviewed lists
+# (container-image-reviewed-inputs.ts) disables reuse until it is reviewed.
 # uv is pinned because its version also selects the managed Python build.
 RUN set -eux; \
     apt-get update; \

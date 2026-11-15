@@ -572,10 +572,19 @@ account's container registry records an image built from those inputs.
 - **Inputs changed** (including an upstream security update or dependency
   release): the image is built and pushed under the new key, and the rollout
   gate waits for the rollout as usual.
-- **Any doubt** (a Dockerfile instruction the analysis does not recognise, a
-  failed fingerprint, a registry error): the Dockerfile is left in place and
-  Wrangler builds the image as it would without this step. A failed image build
-  fails the deployment.
+- **Latest rollout failed or cancelled** (or its state cannot be read): the image
+  is rebuilt to a fresh digest even when its inputs are unchanged, so the deploy
+  starts a new rollout instead of re-pointing at the one that failed.
+- **Any doubt** (a Dockerfile command, fetched URL or npm install script outside
+  the reviewed lists in `container-image-reviewed-inputs.ts`, a failed
+  fingerprint, a registry error): the Dockerfile is left in place and Wrangler
+  builds the image as it would without this step. A failed image build fails the
+  deployment.
+
+Anyone who can push to a repository in your account's container registry can
+replace the image a tag points at, so registry write access is deploy access. That
+was already true of the deploy token, which can publish Workers too; keep
+production in a Cloudflare account, or behind a token, that staging cannot use.
 
 The step's job summary lists each image's outcome and reason. A clean install
 has no recorded images, so its first deploy builds them. To always build with
