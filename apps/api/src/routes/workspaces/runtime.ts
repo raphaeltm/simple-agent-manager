@@ -1605,7 +1605,8 @@ runtimeRoutes.post('/:id/messages', async (c) => {
       c.env,
       currentWorkspace.projectId,
       sessionId,
-      toProjectDataMessages(body)
+      toProjectDataMessages(body),
+      { workspaceId, callbackGeneration: currentWorkspace.callbackGeneration ?? null }
     );
   } catch (err) {
     return handleMessagePersistenceError(c, context, err);

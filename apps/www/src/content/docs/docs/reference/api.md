@@ -5,6 +5,27 @@ description: SAM REST API endpoints for managing workspaces, nodes, and credenti
 
 The SAM API runs on a Cloudflare Worker at `api.{domain}`. All authenticated endpoints require a valid BetterAuth session cookie.
 
+## Incremental chat message appends
+
+Chat clients connecting to `GET /api/projects/:projectId/sessions/ws` can add
+`messageAppend=message-append-v1` to advertise canonical message append support. The existing
+optional `sessionId` still limits the subscription. Clients without this capability keep the
+individual-row stream and disable merging for the sessions their connection watches.
+
+With merging enabled, `messages.batch` introduces a canonical row under its first chunk's ID.
+Later `message.append` events carry `{ id, sessionId, content, offset, revision }`: `content` is
+only the new suffix, `offset` is its starting UTF-16 string offset, and `revision` equals
+`offset + content.length`. The row's ID, timestamp and sequence remain fixed. Tool/card metadata
+continues through the existing message events.
+
+Apply an append only when its base content reaches `offset`. Ignore a duplicate when its exact
+suffix is already present. A missing base or conflicting/gapped suffix requires an authoritative
+read before displaying it; the base may be behind the newest page. Reconnect catch-up must include
+the cached tail row, which can grow without changing its cursor, then drain all newer pages.
+Keep the longer matching prefix when an older REST snapshot races with live appends. REST reads
+return the complete canonical row, and comments reference its stable ID. Existing historical IDs
+remain valid.
+
 :::note
 This reference covers the most commonly used endpoints. For the complete list of all API routes, see the [source code](https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/api/src/routes).
 :::

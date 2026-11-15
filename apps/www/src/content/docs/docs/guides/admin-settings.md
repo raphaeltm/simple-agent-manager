@@ -64,6 +64,31 @@ because the change may already have been saved. The same message appears when SA
 for example a client secret that doesn't belong to its client ID. If the setting still shows its old
 value and **Source** after the reload, nothing was saved: check the value and try again.
 
+## Streamed message storage
+
+The **Operations** category includes these chat storage settings:
+
+| Setting                        | Code default | Effect                                                                                                                                     |
+| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                          |
+| `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also bounds the retry receipt; a batch whose receipt does not fit keeps individual rows. |
+| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                   |
+
+Existing message rows and their comment anchors remain unchanged. Tool, user, system, thinking,
+plan and typed-card rows keep their existing storage format. A connected browser that does not
+advertise incremental append support disables merging for the sessions it watches; a legacy
+project-wide connection disables it for the project. Refresh old tabs to restore eligibility.
+
+To roll back, save `false` for `chat.messageMergingEnabled`. The next batch seals any open merged
+row and stores new chunks individually; retry receipts remain available. Previously merged rows
+remain readable and commentable. Settings use the normal admin cache refresh interval.
+
+Initial rollout keeps the code default off. Production activation requires explicit acceptance of
+the storage contract: very long replies can have different grouped-row splits, raw search can match
+words formerly split between chunks, and a late timestamped row can appear at a merged reply's
+boundary instead of splitting that reply. Text bytes are preserved. The late-timestamp boundary
+change preserves the text as one item. Genuine in-order tool calls and the grouping size limit can still split Markdown across items.
+
 ## Undo a change
 
 **Reset override** removes the value saved in the app. The setting then goes back to its GitHub

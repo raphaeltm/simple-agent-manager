@@ -3,6 +3,7 @@ import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import * as activity from './activity';
 import * as attention from './attention';
 import * as idleCleanup from './idle-cleanup';
+import type { MessageIngestSource, MessageMergeConfig } from './message-stream-ingest';
 import * as messages from './messages';
 import { observeReconciliationMessage } from './reconciliation-episode';
 import * as sessionState from './session-state';
@@ -22,6 +23,7 @@ export type BatchMessageInput = {
 };
 
 export type MessagePersistenceHooks = {
+  transactionSync?: <T>(fn: () => T) => T;
   recalculateAlarm: () => Promise<void>;
   scheduleSummarySync: () => void;
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
@@ -129,9 +131,11 @@ export async function persistMessageBatchWithSideEffects(
   env: Env,
   hooks: MessagePersistenceHooks,
   sessionId: string,
-  batchMessages: BatchMessageInput[]
+  batchMessages: BatchMessageInput[],
+  merge?: { source?: MessageIngestSource; config: MessageMergeConfig }
 ): Promise<MessageBatchPersistenceResult> {
-  const result = messages.persistMessageBatch(sql, env, sessionId, batchMessages);
+  const persist = () => messages.persistMessageBatch(sql, env, sessionId, batchMessages, merge);
+  const result = hooks.transactionSync ? hooks.transactionSync(persist) : persist();
   if (result.persisted === 0) {
     return {
       persisted: result.persisted,
@@ -178,9 +182,11 @@ export async function persistMessageBatchWithSideEffects(
   hooks.scheduleSummarySync();
   hooks.broadcastEvent(
     'messages.batch',
-    { sessionId, messages: result.persistedMessages, count: result.persisted },
+    { sessionId, messages: result.broadcastMessages, count: result.persisted },
     sessionId
   );
+  for (const append of result.appends)
+    hooks.broadcastEvent('message.append', { ...append }, sessionId);
   return {
     persisted: result.persisted,
     duplicates: result.duplicates,

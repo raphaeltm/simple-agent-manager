@@ -1,65 +1,55 @@
 # Merge streamed agent chunks into fewer Durable Object rows
 
-Task: 01M7E19YHSJ73896Q84ASSGFDN
-Output branch: sam/store-streamed-agent-replies-ssgfdn
-Research base: current main 4bdaaf61f6cecb83b6a3bab30e011257ea019710 (#2740).
+Task: 01M7E19YHSJ73896Q84ASSGFDN. Branch: sam/store-streamed-agent-replies-ssgfdn.
+Research base: main 4bdaaf61f (#2740). Primary checkout only; preserve unrelated .codex/config.toml.
 
-## Problem
+## Approved design and release gates
 
-Streamed replies insert one raw row per chunk, paid again during archive reclaim.
-Reduce physical writes without changing content, IDs, ordering, cards, limits, search or archive correctness.
+Canonical first ID for newly merged assistant text rows; existing rows/IDs stay untouched. No packed constituents and no Go rollout dependency. Both VM and Instant keep using the current reporter. Part 1 was posted on idea01M7CX61WVX72T7CFQNRTX0DVM and sent durably before building; the 20-minute window elapsed. Raphaël's approval was independently verified in parent session94875719-4462-4a74-93d4-15b8babb533e, user message01M7E70T17JMHDSVKXKVSXQCAQ, 2026-11-14T23:41:56.647Z.
 
-## State: Part 1 identity decision gate; no implementation
+Approved differences: very long grouped replies can split differently; raw search can match formerly split words. A third accepted difference is: a later timestamped row that belongs inside an already merged time span appears at the merged row boundary. The discriminating workerd ON/OFF test has identical text bytes but 3 versus 2 groups. Acceptance verified in primary user message01M7EB9DX5D5TPTZQAXNB64XGG (1794704193445). Production ON remains a separate human Admin UI action. Frequency not measured; no production raw sampling route is being built or requested.
 
-- Session credential name and session limits reported through SAM before research.
-- Read idea 01M7CX61WVX72T7CFQNRTX0DVM, requested profile notes, and Library archive-decisions.html.
-- `sessions_read messages` groups raw chunks even with all roles. Original raw-sampling premise is false: `packages/operations/src/chat-core.ts:112`.
-- Parent acknowledged premise and suggested production D1 archive checkpoint counts (peer event 91ed29fa-8af4-48ce-ad2d-6fccc43c4f38).
-- Read-only production query at 2026-11-14T22:19:39Z: 2,776 published complete raw/grouped pairs. Exclude 1,013 with zero grouped inventory. Remaining 1,763 have 4,588,980 raw / 332,614 grouped rows. Ratios are representation density, NOT proven safe merge savings.
-- 25-example sample (10 Claude Code, 10 Codex, 5 OpenCode inferred from retained workspace harness): 414,898 raw / 13,427 grouped rows. OpenCode examples are older; attribution can be ambiguous. Counts-only report in Library /engineering/cost/part1.md.
-- Existing Go Reporter synthetic fixture independently counted: assistant 1,785 / 105 runs of 17; user 105; tools 210; thinking/plan/system 0. Assistant-only packing yields 420 physical rows. At unchanged 42 batches: model 6,594 -> 1,575 SQL writes, -76.11%, not workerd-measured candidate.
-- **Later-chunk IDs are intentionally referenced.** `apps/web/src/components/project-message-view/message-aliases.ts:1-15` documents MCP and page-boundary comments on later chunks. `types.ts:253` chooses first loaded ID; `comments.ts:95` validates every raw ID; `message-context.ts:186` locates them.
-- Keeping only the first ID breaks supported references; stop and ask per explicit task constraint.
-- Recommended option to evaluate: server-packed constituents preserving every original ID, timestamp, sequence, metadata and boundary, with expansion through all raw readers. Cross-cutting format/lookup design needs approval before selection. Alias rows add writes and erase source-delete savings; an added alias index makes fixture ingest savings only 25.16%.
-- Server path is required for old agents. No Go rollout-dependent solution. Preserve wire streaming and original chunk broadcasts.
-- Full compatibility matrix and options are in Library report. No production/app code or wrangler changes made; no staging resources created. Unrelated baseline .codex/config.toml modification preserved.
+Rollout: one coherent server/browser/admin PR with code default OFF, staging ON. After successful production deploy, verify OFF unchanged. Raphaël flips the production admin setting ON after accepting all behavior differences. Observe two hours, then a separate small default-ON PR. Follow-up tracked as idea01M7EACZ8W7KMPXMHXQB8F22NV. No Cloudflare Worker settings API writes. Another task owns the archive cadence/budget wrangler lines; do not touch them.
 
-## Implementation checklist (pending approval and final Part 1 + 20 minutes)
+## Measurement and durable research
 
-- [ ] Choose approved identity-preserving design; resolve bounded exact-ID lookup and billed read cost.
-- [ ] Confirm >=40% safe real-data reduction with appropriate production/staging evidence; do not substitute grouped density.
-- [ ] Server merge, admin kill switch and configurable envelope byte cap; unchanged old ingest path when disabled.
-- [ ] Original chunk retry identity across arbitrary outbox batch boundaries, ordering and conservative run boundaries.
-- [ ] Preserve original chunk message_count/session limits; separate physical archive inventories where required.
-- [ ] Preserve incremental WebSocket messages and attention/activity/idle cleanup/summary hooks.
-- [ ] Expand constituents before materialization watermark/page/cap logic, search and exact read/comment lookup.
-- [ ] Additive versioned format, no old-row rewrite; generation triggers and archive hashes support mixed old/new sessions.
-- [ ] Real workerd fixture writes regression guard; discriminating duplicate/rebatched replay tests.
-- [ ] Exact grouped/search/rendered equivalence; mixed fleet, cap, tool boundary, many batches/pages.
-- [ ] Full real coordinator archive round trip, exact read/search/copyback and reset/fence behavior.
-- [ ] Relevant lint/typecheck/test/build and migration safety.
-- [ ] Local task completion / domain specialist reviews; archive task only after validation.
-- [ ] Coordinated staging deploy, real VM and Instant streaming/reload/write measurements; cleanup.
-- [ ] PR, CI, CodeRabbit request/wait/findings, trusted-main deploy coordination, merge.
-- [ ] Successful production deployment containing commit, two-hour read-only row_usage observation, idea + durable message.
+- Production read-only inventories: 2,776 distinct published complete checkpoint pairs; exclude 1,013 zero-group inventories. Remaining 1,763 sessions: 4,588,980 raw /332,614 grouped rows. Sample25 (10Claude,10Codex,5olderOpenCode inferred harness):414,898/13,427. These are density proxies, not safe merge savings. The sessions_read raw-row premise was false: it returns grouped chunks even with all roles. Parent acknowledged this.
+- Library reports: /engineering/cost/part1.md (01M7E2FX23S46F4Q7JWGTT04CS), /engineering/cost/option-c.md (01M7E31DZB2Z0AQAANT61MN0NV). Idea notes01M7E2HJ64XC4PY2A8HY7J71MK,01M7E35G3PSF9RWW9D3MF92N0C,01M7EANF1QWMGR80JEXV1EXK83.
+- Actual workerd Go reporter fixture:2,100 chunks in42batches,1,785 assistant chunks in105runs,105user,210tool, no thinking/plan/system. Physical rows2,100→420(-80%). Source persistMessageBatch cursor.rowsWritten6,615→1,596(-75.87%;3.15→0.76/chunk). Initial all-source ON1,610 included14background writes; regression guard attributes the RPC phase explicitly.
+- Reporter timestamp assignment precedes its mutex, so sequence/timestamp inversion exists before this change. Separate follow-up idea01M7EA05Y3K2JKR59P8C4Z9WHS; no reporter fix in this task.
 
-## Acceptance criteria
+## Implementation map
 
-No content, identity, search, rendering or archive approximation. Kill switch works without deploy. Existing rows remain unchanged and archivable. Measured write reduction is protected by real-runtime tests and staged flows. User-required design and measurement gates must pass before shipping.
+| Concern               | Implementation / contract                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Merge and identity    | do/message-stream-ingest.ts stages inserts and one append per open canonical row/batch. Only assistant text with null metadata merges. First ID/createdAt/sequence remain fixed; absorbed IDs stay internal. Old rows cannot become open.                                                                                                                                                                    |
+| Retry                 | Authenticated workspace/callbackGeneration source via API runtime.ts→client→DO. Positive ordered durable outbox sequence frontier plus bounded complete recent-batch IDs, atomically committed with rows and logical counters. Duplicate IDs refresh receipts to cover failed local DELETE. Invalid/unsequenced legacy inputs insert ordinarily without erasing frontier.                                    |
+| Source invariant      | Reporter DB is per-workspace host DB; restart retains it, recreated runtime generations rotate. Snapshot capture excludes host reporter DB and restore primes the reporter. No supported same-generation DB replacement was found. Arbitrary same-generation DB rollback/reset is not proven by this protocol; do not claim it is.                                                                           |
+| Boundaries            | Role/kind/metadata/tool/origin/prompt epoch/sequence gap/cap/source change; materialized watermark seals indexed rows. Logical message-count snapshot seals on any intervening writer, including a row with older timestamp. New rows open only at sorted session tail.                                                                                                                                      |
+| Runtime settings      | Admin registry chat.messageMergingEnabled=false; maxRowBytes65536 (1KiB–256KiB); recentIds200 (50–2000). Receipt overflow stores individual rows. OFF seals open rows but retains dedup state.                                                                                                                                                                                                               |
+| Live stream           | message-append-v1 capability; messages.batch introduces canonical rows, message.append carries suffix/UTF16offset/revision. Legacy scoped/global sockets seal/suppress merging. Browser handles duplicate deltas, stale snapshots, overlapping-tail catch-up and authoritative backward lookup for missing bases.                                                                                            |
+| Counters and hooks    | message_count remains accepted logical input count, so caps, D1 summaries, storage-pressure counts and archive estimates keep prior semantics (estimates conservative). Actual archive inventories count physical rows. Attention/reconciliation receive canonical IDs; activity/idle cleanup/summary refresh still run for each accepted batch.                                                             |
+| Grouping/search/cards | Existing materializer/FTS consumes canonical content; indexed rows never append later. Ordinary fixture grouped315 and indexed search match. Typed metadata/cards/tools for every harness are unchanged. Long-group/raw-split-word and approved late-timestamp differences above are explicit.                                                                                                               |
+| Schema/archive        | Additive078 nullable chat_sessions.stream_ingest_state only; no raw column change or old-row rewrite. Optional ingest metadata travels archive session envelope only when present, preserving final logical activity time without changing frozen hash columns. Raw update triggers continue advancing generation. Existing/mixed sessions remain archivable and exact reads return complete canonical rows. |
+| Comments/exact reads  | Existing raw aliases remain valid; newly absorbed IDs never appear in broadcasts/API/hooks. Canonical comment/quote prefix remains stable as content grows. REST/MCP use complete canonical raw rows and existing grouped output.                                                                                                                                                                            |
 
-## Follow-up: canonical-only IDs for new rows (read-only)
+## Checklist
 
-Parent requested evaluation of a narrower option (event d625bc38-d98d-4d7a-ac06-ad5d903fc742), not implementation. Full report: Library /engineering/cost/option-c.md, file 01M7E31DZB2Z0AQAANT61MN0NV.
+- [x] Credential name/limits first, read idea/notes/library, Part1 report + durable message + approval.
+- [x] Research current main and existing reporter/raw-reader/archive contracts.
+- [x] Implement server merge, admin OFF switch/cap, source receipts, atomic persistence, old-row isolation.
+- [x] Incremental browser stream, capability fallback, tail/gap/stale snapshot handling.
+- [x] Preserve logical counters, attention/activity/idle hooks, typed metadata and existing references.
+- [x] Real workerd billed-write guard, replay/rebatch/rotation/failed-DELETE, cap and materializer tests.
+- [x] Real archive coordinator exact read/search/copyback with final logical timestamp.
+- [x] Browser unit tests and true WebSocket visual audit375/1280 with settled long text, duplicates, reload and stable DOM anchor.
+- [ ] Expanded callback→client→DO, pre078 upgrade/hash/generation, mixed sender, kill-switch replay and1260physical-row pagination tests green.
+- [ ] Full lint/typecheck/test/build and migration safety; mutation checks discriminate retry guards.
+- [ ] Local specialists all findings addressed; task-completion review updated.
+- [ ] Coordinated staging VM+Instant incremental stream/reload/comments/row_usage, then resource cleanup.
+- [ ] PR/CI/CodeRabbit findings, trusted-main deploy coordination, merge and successful production receipt.
+- [x] Human approval of third difference.
+- [ ] Production admin ON, two-hour read-only metrics/stream/comment/error observation.
+- [ ] Separate default-ON follow-up PR and final idea/durable report; archive task only when all required work is done.
 
-Correction to the first report: existing chunk IDs must remain valid, but it is possible to preserve them by leaving old rows untouched and never exposing absorbed IDs for NEW rows. The existing alias cases do not alone require preserving every future UUID. Canonical-only new storage is smaller than packed constituents if its changed technical contract is approved.
-
-- Audited REST/session detail, DO WebSocket, direct VM ACP, MCP/comment/context, search, archive export/exact/copyback, attention references, notifications, activity/resource links and tool payload reads. Raw persistence UUIDs are generated after ordinary ACP broadcast, so that stream does not hand them to the browser.
-- Canonicalize before broadcast AND attention hooks (resolved_by_message_id); seal old pre-activation rows. Keep alias support for old data and cap rollover rows.
-- Reporter outbox AUTOINCREMENT sequence survives retries/rebatching (sender.go:43, schema.go:15). It is per-workspace DB, not globally per-chat. Bind a durable frontier to authenticated workspace/runtime callback generation, propagate that identity through the API→DO boundary, fence current ownership, atomically commit data/counters/frontier. Ambiguous legacy/reset sequences fall back.
-- Old tabs cannot handle canonical updates: mergeAppend skips duplicate IDs; connected active tabs do not poll. Catch-up after immutable row cursor also misses changed content; fallback fingerprint omits row revision. C requires UI update and server-enforced mixed-client compatibility.
-- Current literal equivalence has concrete counterexamples: materialization cap is checked at page boundaries (materialization.ts:461-501), so physical compaction changes grouped row boundaries; raw LIKE search matches formerly split words after concatenation. Need explicit contract decision or retained boundaries/IDs. No approximation is approved.
-- Fixture arithmetic: C 1,575 writes if frontier folded into existing update, or 1,617 with separate checkpoint per batch, versus baseline 6,594. Packed physical write model 1,575; aliases 3,255 or 4,935 with extra index. These are not runtime measurements.
-- Compact JSON size model: C 255,491 bytes versus packed 317,023; 811.08 vs 1,006.42 per fixture grouped message. Excludes actual SQLite/index/source-epoch bytes; not a storage measurement.
-- Read-only production uniqueness audit 22:32Z: 2,776 published inventories = 2,776 distinct sessions; 1,763 nonzero inventories = 1,763 distinct sessions; all rows_written=0. Earlier density counts did not double-count migrations.
-
-Recommendation: prefer canonical-only storage if future canonical-row semantics are approved and browser/source/equivalence proofs pass; under unchanged strict grouped/search/raw-chunk exact semantics, packed constituents (or equivalent boundary/ID data) remain necessary. Holding at the human decision gate; no implementation or objection timer.
+No deployment or external compute resources have been created yet. Full quality and expanded tests are running; no claim of task completion.
