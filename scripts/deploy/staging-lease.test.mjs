@@ -184,3 +184,48 @@ test('production aliases and inconsistent environment casing fail before API acc
     );
   }
 });
+
+test('incomplete or impossible UTC expiry dates fail closed', () => {
+  for (const expiresAt of [
+    '2026',
+    '2026-11',
+    '2026-11-15',
+    '2026-11-15T19:00:00',
+    '2026-02-30T19:00:00Z',
+    '2026-02-29T19:00:00.000Z',
+    '2026-11-15T24:00:00Z',
+    '2026-13-01T19:00:00Z',
+  ]) {
+    assert.throws(() => readLease(record({ ...held, expiresAt }), 'staging'), /Malformed/);
+  }
+  assert.equal(
+    readLease(record({ ...held, expiresAt: '2028-02-29T19:00:00Z' }), 'staging').state,
+    'held'
+  );
+});
+
+test('unsupported legacy audits reject before acquiring a secondary slot', async () => {
+  await assert.rejects(
+    runLease({
+      ...options,
+      environment: 'staging-second',
+      primaryOnlyAudit: true,
+      api: async () => assert.fail('no lease mutation'),
+    }),
+    /support only the staging environment/
+  );
+  const db = store();
+  assert.equal((await runLease({ ...options, primaryOnlyAudit: true, api: db.api })).state, 'held');
+  assert.equal(
+    (
+      await runLease({
+        ...options,
+        environment: 'staging-second',
+        primaryOnlyAudit: true,
+        action: 'acquire',
+        api: db.api,
+      })
+    ).state,
+    'held'
+  );
+});

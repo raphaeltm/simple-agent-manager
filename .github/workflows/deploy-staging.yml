@@ -107,6 +107,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
           LEASE_ACTION: ${{ inputs.lease_action || 'deploy' }}
+          LEASE_PRIMARY_ONLY_AUDIT: ${{ inputs.activation_only || inputs.agent_email_dns_audit }}
           SAM_TASK_ID: ${{ inputs.sam_task_id }}
           LEASE_HOLD_MINUTES: ${{ inputs.lease_hold_minutes }}
           LEASE_DEFAULT_HOLD_MINUTES: ${{ vars.STAGING_LEASE_DEFAULT_HOLD_MINUTES || '30' }}

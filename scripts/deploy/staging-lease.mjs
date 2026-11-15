@@ -32,6 +32,17 @@ export function leaseTiming(env) {
   return { hold, deploy };
 }
 
+function validUtcExpiry(value) {
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)
+  )
+    return false;
+  const parsed = Date.parse(value);
+  const canonical = value.length === 20 ? value.replace('Z', '.000Z') : value;
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === canonical;
+}
+
 export function readLease(record, environment) {
   if (record === undefined) return null; // No history: bootstrap a new environment.
   let lease = record.payload;
@@ -52,8 +63,7 @@ export function readLease(record, environment) {
     !lease.branch ||
     !/^[a-f0-9]{40}$/i.test(lease.sha) ||
     typeof lease.taskId !== 'string' ||
-    typeof lease.expiresAt !== 'string' ||
-    !Number.isFinite(Date.parse(lease.expiresAt))
+    !validUtcExpiry(lease.expiresAt)
   ) {
     throw new Error(
       'Malformed lease record; refusing to overwrite live verification. Inspect the latest deployment payload.'
@@ -86,6 +96,7 @@ export async function runLease({
   sha,
   taskId = '',
   action = 'deploy',
+  primaryOnlyAudit = false,
   timing,
   now = Date.now(),
 }) {
@@ -93,6 +104,10 @@ export async function runLease({
     throw new Error('A lowercase, non-production environment is required');
   if (!branch || !/^[a-f0-9]{40}$/i.test(sha))
     throw new Error('Branch and full commit SHA are required');
+  if (action === 'deploy' && primaryOnlyAudit && environment !== 'staging')
+    throw new Error(
+      'Storage activation and agent-email DNS audit support only the staging environment'
+    );
   const query = new URLSearchParams({ environment, task: LEASE_TASK, per_page: '1' });
   const records = await api('GET', `/deployments?${query}`);
   if (!Array.isArray(records))
@@ -142,6 +157,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       environment: process.env.LEASE_ENVIRONMENT,
       branch: process.env.GITHUB_REF_NAME,
       sha: process.env.GITHUB_SHA,
+      primaryOnlyAudit: process.env.LEASE_PRIMARY_ONLY_AUDIT === 'true',
       taskId: process.env.SAM_TASK_ID || '',
       action: process.env.LEASE_ACTION || 'deploy',
       timing: leaseTiming(process.env),

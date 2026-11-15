@@ -118,7 +118,7 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
       ) {
         errors.push('lease job must have only deployment write and checkout read authority');
       }
-    } else if (permissions) {
+    } else if (Object.hasOwn(asRecord(job) || {}, 'permissions')) {
       errors.push('nested or reusable permission overrides are forbidden');
     }
     if (permissions && 'pull-requests' in permissions)
@@ -327,4 +327,22 @@ it('executes the lease lifecycle and failure-path tests in CI', () => {
       { stdio: 'pipe' }
     )
   ).not.toThrow();
+});
+
+describe('job-level broad permission overrides', () => {
+  it.each(['write-all', 'read-all', '{}', 'null'])('rejects non-lease permissions: %s', (value) => {
+    const changed = stagingWorkflow.replace(
+      /^ {2}smoke-tests:\s*$/m,
+      `  smoke-tests:\n    permissions: ${value}`
+    );
+    expect(stagingPermissionContractErrors(changed, reusableWorkflow)).toContain(
+      'nested or reusable permission overrides are forbidden'
+    );
+  });
+  it('wires the legacy audit compatibility check into the lease preflight', () => {
+    const workflow = parse(stagingWorkflow);
+    expect(workflow.jobs.lease.steps[1].env.LEASE_PRIMARY_ONLY_AUDIT).toBe(
+      '${{ inputs.activation_only || inputs.agent_email_dns_audit }}'
+    );
+  });
 });

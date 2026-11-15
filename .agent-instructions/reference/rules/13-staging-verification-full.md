@@ -86,7 +86,9 @@ Staging deployment is **manual** — it does NOT run automatically on PRs. You m
    To reserve or renew without deploying, use `-f lease_action=acquire`. This
    holds for just the requested live-check duration (no deploy allowance), and
    also permits bounded lease lifecycle verification without full redeploys.
-   Audit-only runs acquire/renew through the same gate. Lease writes must go
+   Audit-only runs acquire/renew through the same gate. Storage activation and
+   the agent-email DNS audit currently support only the primary `staging` slot;
+   unsupported combinations are rejected before lease acquisition. Lease writes must go
    through this workflow; direct `gh api` writes bypass serialization.
 
 3. **Watch the run and verify live**, then **release early** from the holder branch:
@@ -197,19 +199,17 @@ After staging deployment succeeds, use Playwright to test the live app:
    for `.sammy.party` and open the app:
 
    ```js
-   await page
-     .context()
-     .addCookies([
-       {
-         name: '__Secure-better-auth.session_token',
-         value: 'VALUE',
-         domain: '.sammy.party',
-         path: '/',
-         httpOnly: true,
-         secure: true,
-         sameSite: 'Lax',
-       },
-     ]);
+   await page.context().addCookies([
+     {
+       name: '__Secure-better-auth.session_token',
+       value: 'VALUE',
+       domain: '.sammy.party',
+       path: '/',
+       httpOnly: true,
+       secure: true,
+       sameSite: 'Lax',
+     },
+   ]);
    await page.goto('https://app.sammy.party');
    ```
 

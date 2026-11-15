@@ -13,8 +13,21 @@ Staging live checks outlive deployment jobs; no active run plus five minutes is 
 - [x] Same-workflow holder-only release and acquire-only path for bounded checks without full redeploys.
 - [x] Unit and integration tests; permission/gating verification.
 - [x] Update staging docs, Codex skill summary, and full reference: read/acquire/release, expiry wake rather than chat/poll.
-- [ ] Local specialist reviews and affected checks; full CI green.
-- [ ] Live workflow-token/gh read proof, acquisition, refusal, renewal, release, expired takeover; one full staging deploy plus bounded lease-only checks; release after verification.
+- [x] Local specialist reviews and affected checks; full CI green.
+- [x] Live workflow-token/gh read proof, acquisition, refusal, renewal, release, expired takeover; one full staging deploy plus bounded lease-only checks; release after verification.
 - [ ] PR and CodeRabbit gate, rebase shared docs, merge; add usage note to idea 01M7FYGMEESYH3AJZJ0CT3NKCZ and channel evidence.
 
 References: .claude/rules/13-staging-verification.md and full reference; GitHub REST deployments documentation; idea notes read 2026-11-15. Existing isolated SAM branch used without a redundant worktree. Task tracked on this branch to avoid a separate main commit triggering unrelated pipelines.
+
+## Verification evidence
+
+- Local full lint/typecheck/test/build PASS (39 Turbo tasks; API 15263 tests, web 410 files); focused final review fixes: 24 workflow tests including 11 lease tests and ESLint PASS.
+- Local security/constitution/completion review PASS after production-case, pinned CLI, and CodeRabbit fixes; docs/test specialist PASS.
+- Workflow-token create/readback and agent gh read: run43744989265, deployment7807631106.
+- Foreign actual deploy refused in4.3s: run43745142319, exact holder/task/expiry reported; no deploy job ran.
+- Same-holder deployment renewal and full deploy: run43745189203 SUCCESS, lease expiry19:10:25Z;12Playwright smoke tests PASS,1opt-in skipped.
+- Early release: run43746687498 SUCCESS, deployment7807959480 released18:32:54Z.
+- One-minute reservation43747421498 expiry18:34:45.875Z; wake6d4992e0 accepted/admitted but delivery deferred while turn active. One post-expiry read in active turn then foreign takeover43747655208 SUCCESS, deployment7808002286.
+- Final contender release43747780656 SUCCESS, deployment7808019196 released18:37:33.669Z. No second full deployment; no VM/resource fixtures created. Free-slot evidence sent to both channels and waiting owners/coordinators.
+- Idea usage note01M7G6NP18SB64A00XNZDJTGGE added. Final merge evidence will be posted there and in the coordination channel.
+- CodeRabbit review5912203347 returned4 valid findings. Fixed secondary legacy-audit preflight, strict UTC/calendar expiry, and permission guard string/null overrides. Regression tests and independent review PASS. Final incremental review/CI and authorized merge remain release gates, tracked in PR2762 and local .do-state.md.
