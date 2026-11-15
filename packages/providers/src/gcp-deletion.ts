@@ -152,10 +152,14 @@ export async function requestGcpInstanceDeletion(
   options?: VmDeletionRequestOptions
 ): Promise<VmDeletionRequestResult> {
   throwIfProviderRequestAborted(context);
-  const instance = await findGcpInstanceByIdOrName(scope, scope.zones, id, context);
+  const expected = options?.expectedInstance;
+  // A caller that already proved the instance's zone reads it there directly (one GET) rather
+  // than walking every labelled zone again.
+  const instance = expected?.location
+    ? await getGcpInstanceInZone(scope, expected.location, id, context)
+    : await findGcpInstanceByIdOrName(scope, scope.zones, id, context);
   if (!instance) return { state: 'absent' };
   const zone = gcpInstanceZone(instance, scope.defaultZone);
-  const expected = options?.expectedInstance;
   if (
     expected &&
     (instance.id !== expected.id || (expected.location && zone !== expected.location))
@@ -205,6 +209,16 @@ export async function requestGcpInstanceDeletion(
       undefined,
       `GCP instance ${instance.id} in ${zone} changed identity (name ${instance.name} -> ${current.name}); refusing to delete it`,
       { category: 'invalid_config' }
+    );
+  }
+  const changedLabel = Object.entries(expected?.labels ?? {}).find(
+    ([key, value]) => current.labels?.[key] !== value
+  );
+  if (changedLabel) {
+    throw new ProviderError(
+      'gcp',
+      undefined,
+      `GCP instance ${instance.id} in ${zone} no longer carries the expected ${changedLabel[0]} label; refusing to delete it`
     );
   }
   throwIfProviderRequestAborted(context);

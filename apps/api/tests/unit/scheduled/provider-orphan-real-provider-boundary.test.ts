@@ -192,6 +192,7 @@ describe('provider orphan reconciliation — real provider delete boundaries', (
       name: `vm-${id}`,
       status: 'RUNNING',
       machineType: `zones/${zone}/machineTypes/e2-medium`,
+      zone: `https://www.googleapis.com/compute/v1/projects/project/zones/${zone}`,
       creationTimestamp: CREATED,
       networkInterfaces: [{ accessConfigs: [{ natIP: '192.0.2.10' }] }],
       labels: installation

@@ -222,6 +222,13 @@ async function destroyCandidate(
   result: ProviderOrphanResult,
   context: ProviderRequestContext
 ): Promise<void> {
+  // The two-phase binding needs both halves. A re-read without a location cannot bind the
+  // zone, so refuse rather than fall back to an id-only binding.
+  if (provider.requestVMDeletion && !proven.location) {
+    result.skippedAmbiguousOwnership++;
+    finalOwnershipSkip('provider re-read reported no location to bind the deletion to');
+    return;
+  }
   try {
     log.warn('provider_orphan.destroying', {
       serverId: candidate.serverId,
@@ -232,7 +239,18 @@ async function destroyCandidate(
     });
     if (provider.requestVMDeletion) {
       const request = await provider.requestVMDeletion(candidate.serverId, context, {
-        expectedInstance: { id: proven.id, location: proven.location },
+        expectedInstance: {
+          id: proven.id,
+          location: proven.location,
+          // The ownership scope the re-read proved, re-checked on the provider's last read
+          // before the DELETE (rule 56).
+          labels: {
+            [SAM_MANAGED_LABEL_KEY]: SAM_MANAGED_LABEL_VALUE,
+            [SAM_ENVIRONMENT_LABEL_KEY]: scope.environmentLabel,
+            [SAM_INSTALLATION_LABEL_KEY]: scope.installationId,
+            [SAM_NODE_LABEL_KEY]: candidate.nodeId,
+          },
+        },
       });
       if (request.state === 'absent') {
         log.info('provider_orphan.already_absent', {

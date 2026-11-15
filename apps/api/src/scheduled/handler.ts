@@ -170,8 +170,9 @@ export async function scheduled(
   await sweeps.isolate('provider_orphan_reconciliation', async () => {
     const result = await runProviderOrphanReconciliation(env);
     providerOrphans = result;
-    // Account failures are contained inside the sweep so every credential is attempted.
-    // Keep partial-success counters and report failures through the durable path.
+    // Platform-account and infrastructure failures fail the sweep through the durable path,
+    // keeping partial-success counters. Failures confined to one user/project account are
+    // `accountErrors`: logged per account, they do not fail the platform sweep.
     if (result.errors > 0) {
       throw new Error(`Provider orphan reconciliation encountered ${result.errors} errors`);
     }
@@ -331,6 +332,7 @@ export async function scheduled(
     providerOrphansSkippedAmbiguousClaim: providerOrphans?.skippedAmbiguousClaim,
     providerOrphanSkipReason: providerOrphans?.skipReason,
     providerOrphanErrors: providerOrphans?.errors,
+    providerOrphanAccountErrors: providerOrphans?.accountErrors,
     capacityPoolInstallationEnsured: capacityPools?.installationEnsured,
     capacityPoolUsersEnsured: capacityPools?.usersEnsured,
     capacityPoolProjectsEnsured: capacityPools?.projectsEnsured,

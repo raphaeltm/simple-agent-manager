@@ -45,10 +45,11 @@ export interface VmDeletionRequestOptions {
   /**
    * The exact instance the caller already re-read and proved it owns. When set, the provider
    * refuses (throws, nothing is sent) unless the instance it resolved for the delete has exactly
-   * this id and, when `location` is given, this location. Binds the delete to the caller's
-   * ownership proof instead of to a fresh lookup.
+   * this id, this location when given (and then looks it up only there), and every label in
+   * `labels` on its last read before the delete. Binds the delete to the caller's ownership
+   * proof instead of to a fresh lookup.
    */
-  expectedInstance?: { id: string; location?: string };
+  expectedInstance?: { id: string; location?: string; labels?: Record<string, string> };
 }
 
 /** Optional two-phase deletion capability of a `Provider`. */
