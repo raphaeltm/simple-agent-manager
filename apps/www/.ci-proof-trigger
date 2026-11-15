@@ -1,0 +1,2 @@
+Temporary file: makes PR CI for the CI-speed change run the repo-quality jobs.
+Removed before merge. See tasks/active/2026-11-15-ci-pr-speed-and-runner-budget.md.
