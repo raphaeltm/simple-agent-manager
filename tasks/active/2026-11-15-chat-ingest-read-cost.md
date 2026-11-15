@@ -20,11 +20,11 @@ No separate nonarchive import path found in apps/ or packages/.
 ## Checklist
 - [x] Read ideas and applicable rules 31,44,45,47,62,69,73,81; preserve no-production-mutation restrictions.
 - [x] Baseline real workerd per-statement profile with >=10k rows and both merge modes.
-- [ ] Add nullable last_message_sequence using ALTER TABLE ADD COLUMN; lazy MAX fallback once including stream maxSequence.
-- [ ] Initialize fresh sessions at zero; combine watermark with existing writer updates; monotonic canonical allocation for supplied and absent sequences.
-- [ ] Cover archive import/copy-back/restore and every writer in real-workerd regression tests; concurrency, legacy NULL, absorbed chunks, restart, duplicates and rollback.
-- [ ] Attribute archiveSourceReclaimPage scans on realistic fixture; small safe fix or durable finding on reads idea.
-- [ ] Show bounded steady-state reads at 10k and larger fixtures, with production indexes and meter reconciliation; report writes before/after.
+- [x] Add nullable last_message_sequence and last_message_sequence_count synchronization tag using ALTER TABLE ADD COLUMN; lazy MAX fallback once including stream maxSequence.
+- [x] Initialize fresh sessions at zero; combine watermark with existing writer updates; monotonic canonical allocation for supplied and absent sequences.
+- [x] Cover archive import/copy-back/restore and every writer in real-workerd regression tests; concurrency, legacy NULL, absorbed chunks, restart, duplicates and rollback.
+- [x] Attribute archiveSourceReclaimPage scans: DELETE checks scan both comment FK children. Local25-message page100127r→127r with indexes, writes25 unchanged. Deferred index deployment to SAM idea01M7GD0KT5D1FERR205E61DYXR: current production category telemetry absent; latest non-null breakdown stale/coarse (unattributed4.87GB), so constructor build safety cannot be proven. User explicitly permits finding-only deferral. No archive reclaim/index change ships; raw import watermark repair does ship.
+- [x] Show bounded steady-state reads at 10k and larger fixtures, with production indexes and meter reconciliation; report writes before/after.
 - [ ] Run lint/typecheck/tests/build and migration safety; local specialist reviews including completion validator.
 - [ ] Request shepherd bounded Instant/no-VM staging grant (<USD1), then enforced lease and real flow with merging ON/OFF; cleanup.
 - [ ] Ready PR + CI + CodeRabbit request/wait, merge gates, production deploy monitoring (read-only), coordinator durable progress and idea notes.
@@ -33,3 +33,5 @@ No separate nonarchive import path found in apps/ or packages/.
 Reads per warm batch must not grow with session length, with no new per-message sequence index. Assigned canonical sequences stay unique/ordered across every writer, restore, and merged logical chunks. No storage/archive safety weakening. Production merge toggle/default and VM cadence unchanged.
 
 Part 2 bookkeeping writes follows after this PR; track separately, including exact lifecycle flushes and idle/restart safety with typed admin interval.
+
+Count-tag contract for part2: tag records persisted message_count, not logical live count. Throttled batches leave both count/tag unchanged while watermark and receipts advance durably. Count flushes update count/tag together. Older builds update count without tag, triggering one MAX repair even after restart. Archive raw imports only advance watermark, never certify a stale count tag.

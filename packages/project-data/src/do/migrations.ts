@@ -2737,18 +2737,8 @@ export const MIGRATIONS: Migration[] = [
       // NULL means the pre-migration transcript has not been measured yet.
       // Lazy initialization avoids scanning every historical session on deploy.
       sql.exec('ALTER TABLE chat_sessions ADD COLUMN last_message_sequence INTEGER');
-    },
-  },
-  {
-    name: '080-message-comment-foreign-key-indexes',
-    run(sql) {
-      // A message delete checks these FKs using message_id alone. Existing
-      // session/scope-leading indexes scan every comment for every deleted row.
-      sql.exec(
-        'CREATE INDEX IF NOT EXISTS idx_comment_threads_message_fk ON comment_threads(message_id)'
-      );
-      sql.exec(`CREATE INDEX IF NOT EXISTS idx_anchored_comment_threads_message_fk
-        ON anchored_comment_threads(message_id) WHERE message_id IS NOT NULL`);
+      // Detect writes from an older build after a rollback/rolling upgrade.
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN last_message_sequence_count INTEGER');
     },
   },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to

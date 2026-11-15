@@ -41,16 +41,20 @@ export function nextSequence(
     session ??
     sql
       .exec(
-        'SELECT last_message_sequence, stream_ingest_state FROM chat_sessions WHERE id = ?',
+        'SELECT last_message_sequence, last_message_sequence_count, message_count, stream_ingest_state FROM chat_sessions WHERE id = ?',
         sessionId
       )
       .toArray()[0];
   if (!current) throw new Error(`Session ${sessionId} not found`);
+  // This tag tracks the persisted counter version, not the live logical count.
+  // Deferred bookkeeping must leave count/tag unchanged together; a flush writes
+  // both together. Older builds only change count, forcing one recovery scan.
   const stored = current.last_message_sequence;
-  if (stored != null) {
+  if (stored != null && current.last_message_sequence_count === current.message_count) {
     if (typeof stored !== 'number' || !Number.isSafeInteger(stored) || stored < 0)
       throw new Error('Invalid session sequence watermark');
-    return stored + 1;
+    const stream = readMessageIngestState(current.stream_ingest_state);
+    return checkedNextSequence(Math.max(stored, stream?.maxSequence ?? 0));
   }
   const row = sql
     .exec(
@@ -61,11 +65,35 @@ export function nextSequence(
   // Absorbed chunks reserve logical positions beyond the last physical row.
   const state = readMessageIngestState(current.stream_ingest_state);
   const maximum = Math.max(
+    typeof stored === 'number' && Number.isSafeInteger(stored) ? stored : 0,
     row ? parseMaxSeq(row, 'messages.next_sequence') : 0,
     state?.maxSequence ?? 0
   );
-  sql.exec('UPDATE chat_sessions SET last_message_sequence = ? WHERE id = ?', maximum, sessionId);
+  sql.exec(
+    'UPDATE chat_sessions SET last_message_sequence = ?, last_message_sequence_count = message_count WHERE id = ?',
+    maximum,
+    sessionId
+  );
+  return checkedNextSequence(maximum);
+}
+
+function checkedNextSequence(maximum: number): number {
+  if (!Number.isSafeInteger(maximum) || maximum < 0 || maximum >= Number.MAX_SAFE_INTEGER)
+    throw new Error('Session message sequence exhausted or invalid');
   return maximum + 1;
+}
+
+/** Reporter sequence is optional. Unsupported positions must never poison the durable allocator. */
+export function canonicalMessageSequence(next: number, supplied?: number): number {
+  const candidate =
+    supplied !== undefined &&
+    Number.isSafeInteger(supplied) &&
+    supplied > 0 &&
+    supplied < Number.MAX_SAFE_INTEGER
+      ? Math.max(next, supplied)
+      : next;
+  checkedNextSequence(candidate);
+  return candidate;
 }
 
 /** Archive imports preserve canonical positions; never lower a known watermark.
@@ -82,7 +110,7 @@ export function advanceImportedMessageSequence(
     0
   );
   sql.exec(
-    `UPDATE chat_sessions SET last_message_sequence = ?
+    `UPDATE chat_sessions SET last_message_sequence = MAX(last_message_sequence, ?)
     WHERE id = ? AND last_message_sequence IS NOT NULL AND last_message_sequence < ?`,
     maximum,
     sessionId,
@@ -179,7 +207,7 @@ export function insertNewMessage(
     sequence
   );
   sql.exec(
-    `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ?, last_message_sequence = ? WHERE id = ?`,
+    `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + 1 WHERE id = ?`,
     now,
     sequence,
     sessionId

@@ -1,10 +1,16 @@
 import { persistSystemMessage } from '@simple-agent-manager/project-data/internal/do/messages';
 import { nextSequence } from '@simple-agent-manager/project-data/internal/do/messages-persist-helpers';
 import { projectDataPorts } from '@simple-agent-manager/project-data/internal/do/ports';
-import { runInDurableObject } from 'cloudflare:test';
+import {
+  copyBackProjectDataArchiveMigration,
+  runScopedProjectDataArchiveCanary,
+} from '@simple-agent-manager/project-data/internal/scheduled/project-data-archive-sharding';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { projectDataStub } from './helpers/archive-fixtures';
+import type { Env as WorkerEnv } from '../../src/env';
+import { projectDataStub, readLocation, withArchiveEnv } from './helpers/archive-fixtures';
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 afterEach(() => vi.restoreAllMocks());
 const source = {
@@ -22,6 +28,139 @@ const message = (id: string, sequence?: number) => ({
 });
 
 describe('durable per-session sequence watermark', () => {
+  it('restores a genuinely merged transcript and allocates above its absorbed positions', async () => {
+    vi.spyOn(projectDataPorts().operations, 'messageMergeConfig').mockResolvedValue({
+      enabled: true,
+      maxRowBytes: 65536,
+      recentIds: 200,
+    });
+    const projectId = `sequence-copyback-${crypto.randomUUID()}`;
+    const owner = `sequence-owner-${crypto.randomUUID()}`;
+    const installation = `sequence-install-${crypto.randomUUID()}`;
+    await seedUser(owner);
+    await seedInstallation(installation, owner);
+    await seedProject(projectId, owner, installation);
+    const stub = projectDataStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const session = await stub.createSession(source.workspaceId, 'Merged restore fixture');
+    for (let position = 1; position <= 12; position++)
+      await stub.persistMessageBatch(session, [message(`merged-${position}`, position)], source);
+    await stub.stopSession(session);
+    await stub.runSummarySyncForTest();
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec(
+            'SELECT COUNT(*) AS n,MAX(sequence) AS last FROM chat_messages WHERE session_id=?',
+            session
+          )
+          .toArray()[0]
+      ).toMatchObject({ n: 1, last: 1 });
+    });
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+      },
+      async () => {
+        const workerEnv = env as unknown as WorkerEnv;
+        const migrated = await runScopedProjectDataArchiveCanary(workerEnv, {
+          projectId,
+          sessionId: session,
+          dryRun: false,
+          reason: 'Synthetic merged watermark restore regression',
+          nowDate: new Date(Date.now() + 60000),
+        });
+        expect(migrated.stats).toMatchObject({ migrated: 1, failed: 0 });
+        const location = await readLocation(projectId, session);
+        await runInDurableObject(stub, (_instance, state) => {
+          // Exercise restore's known-but-behind case; the real ingest built the stream frontier.
+          state.storage.sql.exec(
+            'UPDATE chat_sessions SET last_message_sequence=0 WHERE id=?',
+            session
+          );
+        });
+        await copyBackProjectDataArchiveMigration(workerEnv, {
+          projectId,
+          migrationId: location!.migration_id!,
+          reason: 'Synthetic merged watermark restore regression',
+        });
+      }
+    );
+    // A restored terminal transcript is made writable by the existing sleep/wake lifecycle.
+    await runInDurableObject(stub, (_instance,state)=>{state.storage.sql.exec("UPDATE chat_sessions SET status='sleeping' WHERE id=?",session);});
+    expect(await stub.wakeSession(session, source.workspaceId, 'synthetic-task')).toBe(true);
+    await stub.persistMessageBatch(session, [message('after-copyback')]);
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec('SELECT sequence FROM chat_messages WHERE id=?', 'after-copyback')
+          .toArray()[0]?.sequence
+      ).toBe(13);
+    });
+  });
+  it('advances a known watermark during raw archive target import', async () => {
+    const projectId = `sequence-archive-${crypto.randomUUID()}`;
+    const stub = projectDataStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const session = await stub.createSession(null, 'Archive sequence fixture');
+    await stub.persistMessageBatch(session, [
+      message('archive-first', 10),
+      message('archive-last', 50),
+    ]);
+    await stub.stopSession(session);
+    const base = {
+      projectId,
+      sessionId: session,
+      migrationId: crypto.randomUUID(),
+      sourceOwnerName: projectId,
+      targetOwnerName: `${projectId}:archive:g1:s0`,
+      targetGeneration: 1,
+      sourceIntentToken: crypto.randomUUID(),
+      now: Date.now() + 60000,
+      minTerminalAgeMs: 0,
+    };
+    const prepared = await stub.archiveSourcePrepareIntent(base);
+    if ('refused' in prepared) throw new Error('Synthetic terminal archive fixture refused');
+    const target = projectDataStub(base.targetOwnerName);
+    await target.archiveTargetPrepare({
+      ...base,
+      terminalVersionSha256: prepared.terminalVersionSha256,
+      expectedMessageCount: prepared.messageCount,
+      sessionRow: prepared.sessionRow,
+    });
+    // New archive anchors omit derived cache columns and start unknown.
+    await runInDurableObject(target, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec('SELECT last_message_sequence FROM chat_sessions WHERE id=?', session)
+          .toArray()[0]?.last_message_sequence
+      ).toBeNull();
+      state.storage.sql.exec(
+        'UPDATE chat_sessions SET last_message_sequence=0 WHERE id=?',
+        session
+      );
+    });
+    const chunk = await stub.archiveSourceExportChunk({
+      ...base,
+      tableName: 'chat_messages',
+      ordinal: 0,
+      maxRows: 100,
+    });
+    await target.archiveTargetCommitChunk({ ...chunk, now: base.now });
+    await runInDurableObject(target, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec('SELECT last_message_sequence FROM chat_sessions WHERE id=?', session)
+          .toArray()[0]?.last_message_sequence
+      ).toBe(50);
+      expect(nextSequence(state.storage.sql, session)).toBe(51);
+    });
+    expect((await target.archiveTargetCommitChunk({ ...chunk, now: base.now })).idempotent).toBe(
+      true
+    );
+  });
   for (const enabled of [false, true]) {
     it(`serializes mixed writers and outbox resets with merging ${enabled}`, async () => {
       vi.spyOn(projectDataPorts().operations, 'messageMergeConfig').mockResolvedValue({
@@ -76,6 +215,53 @@ describe('durable per-session sequence watermark', () => {
       });
     });
   }
+
+  it('recovers a stale watermark after an older build writes messages', async () => {
+    const stub = projectDataStub(`rolling-sequence-${crypto.randomUUID()}`);
+    const session = await stub.createSession(null, 'Rolling build fixture');
+    await stub.persistMessage(session, 'user', 'synthetic first', null, 'before-old-build');
+    // Old code knows neither derived column but updates the existing logical count.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages (id,session_id,role,content,created_at,sequence)
+        VALUES ('old-build-message',?,'assistant','synthetic older build',?,10)`,
+        session,
+        Date.now()
+      );
+      state.storage.sql.exec(
+        'UPDATE chat_sessions SET message_count=message_count+1 WHERE id=?',
+        session
+      );
+    });
+    await stub.persistMessageBatch(session, [message('after-old-build')]);
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec('SELECT sequence FROM chat_messages WHERE id=?', 'after-old-build')
+          .toArray()[0]?.sequence
+      ).toBe(11);
+      expect(nextSequence(state.storage.sql, session)).toBe(12);
+    });
+  });
+
+  it('ignores unusable optional reporter positions without poisoning later writers', async () => {
+    const stub = projectDataStub(`invalid-sequence-${crypto.randomUUID()}`);
+    const session = await stub.createSession(null, 'Invalid reporter fixture');
+    await stub.persistMessageBatch(session, [
+      message('fraction', 10000.5),
+      message('huge', Number.MAX_SAFE_INTEGER),
+      message('negative', -1),
+    ]);
+    await stub.persistMessage(session, 'user', 'synthetic followup', null, 'valid-after-invalid');
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(
+        state.storage.sql
+          .exec('SELECT sequence FROM chat_messages WHERE session_id=? ORDER BY sequence', session)
+          .toArray()
+          .map((row) => row.sequence)
+      ).toEqual([1, 2, 3, 4]);
+    });
+  });
 
   it('initializes a legacy NULL only once and honors absorbed logical positions', async () => {
     const stub = projectDataStub(`legacy-sequence-${crypto.randomUUID()}`);

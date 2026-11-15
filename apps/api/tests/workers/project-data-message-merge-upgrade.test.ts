@@ -42,7 +42,13 @@ it('upgrades a pre-078 SQLite object without rewriting legacy rows, generation o
     expect(
       sql.exec('SELECT stream_ingest_state FROM chat_sessions').toArray()[0]?.stream_ingest_state
     ).toBeNull();
+    expect(
+      sql.exec('SELECT last_message_sequence FROM chat_sessions').toArray()[0]
+        ?.last_message_sequence
+    ).toBeNull();
     const legacy = await computeTerminalVersion(sql, 'legacy-session');
+    sql.exec('UPDATE chat_sessions SET last_message_sequence = 1 WHERE id = ?', 'legacy-session');
+    expect((await computeTerminalVersion(sql, 'legacy-session')).sha256).toBe(legacy.sha256);
     sql.exec(
       'UPDATE chat_sessions SET stream_ingest_state = ? WHERE id = ?',
       JSON.stringify({

@@ -1,5 +1,4 @@
 // FILE SIZE EXCEPTION: ProjectData terminal archive migration state machine — keeping source intent, target copy/seal, canonical hash, exact-read guards, and final source-delete invariants in one module avoids cross-file transaction coupling during Fable review. See .claude/rules/18-file-size-limits.md
-import { advanceImportedMessageSequence } from './messages-persist-helpers';
 import type { MessageCursor } from '@simple-agent-manager/shared';
 import { D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
 import {
@@ -51,6 +50,7 @@ import { insertArchiveSearchDocumentBatch } from './archive-search-writes';
 import * as compactArchive from './compact-archive';
 import { resolveMaterializationPassConfig } from './materialization';
 import * as messages from './messages';
+import { advanceImportedMessageSequence } from './messages-persist-helpers';
 import type {
   ArchivedToolPayloadListResult,
   MessageToolContentResult,

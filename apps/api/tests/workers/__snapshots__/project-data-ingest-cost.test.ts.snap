@@ -13,7 +13,7 @@ exports[`message ingest row cost in real workerd > attributes archive reclaim re
     "written": 0,
   },
   {
-    "read": 125,
+    "read": 100125,
     "statement": "DELETE FROM chat_messages WHERE rowid IN ( SELECT rowid FROM chat_messages WHERE session_id = ? LIMIT ?)",
     "written": 25,
   },
@@ -39,7 +39,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 1,
-        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
         "written": 0,
       },
       {
@@ -54,7 +54,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 1,
-        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ? WHERE id = ?",
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
         "written": 4,
       },
       {
@@ -102,7 +102,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 1,
-        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
         "written": 0,
       },
       {
@@ -122,7 +122,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 1,
-        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ? WHERE id = ?",
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
         "written": 4,
       },
       {
@@ -170,7 +170,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 1,
-        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
         "written": 0,
       },
       {
@@ -195,7 +195,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 1,
-        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ? WHERE id = ?",
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
         "written": 4,
       },
       {
@@ -243,7 +243,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 1,
-        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
         "written": 0,
       },
       {
@@ -273,7 +273,7 @@ exports[`message ingest row cost in real workerd > profiles long-session batches
       },
       {
         "read": 1,
-        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ? WHERE id = ?",
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
         "written": 4,
       },
       {
