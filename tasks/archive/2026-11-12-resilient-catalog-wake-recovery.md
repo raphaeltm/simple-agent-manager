@@ -5,7 +5,48 @@ Agent: Sol (`01KSSMJCG4EE1XS153GNZX5B09`), openai-codex.
 Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2693.
 Current coordinator: `01M7CVSBR1SDZFDZNY3TD863RQ`; original coordinator `01M77NV1B621TKTV79272F7YX3` is unreachable.
 
-## Current state — November 14 review revision
+## Release state — November 15
+
+Staged and coordinator-approved source: `aeace2bea5b0ca440ab19ac748c868df249aaa35`.
+Current release branch incorporates main `ef7d3af4d` with no runtime-source delta from the staged SHA.
+Exact-SHA approval: [coordinator decision](https://github.com/raphaeltm/simple-agent-manager/pull/2693#issuecomment-6902429829).
+Raphaël authorized shipping in chat `838d94fb-9439-4369-b7e6-f73b95c3d145` at 17:48:17Z on November 15,
+message `01M7G55Z67DR47F8M0F5213C8F`: “Yes please. Let's get it shipped.”
+The original `needs-human-review` label was the delegated internal coordinator gate, not an outstanding
+local reviewer failure. Release still requires current-head CI and the normal production deployment checks.
+
+R8 base Bash, strict sleep, original accepted wake during unfinished publication, same-node recovery,
+and independent pre/post file preservation passed. Both raw-file reads returned HTTP 200 with the same
+36 bytes and SHA-256 `efbdd5cbabc8453179700e30822a18d7250b03d67706e60a90c638471633128d`.
+The original delivery reached terminal `acked` with a delivered timestamp and a completed Bash turn on
+the recovered workspace; no follow-up prompt was used. Node pool revision 96 remained reusable while
+current pool revision advanced to 98, with current source/credential/candidate authority revalidated.
+
+**R8 promotion time bound missed by 82.291 s.** Promotion completed at 22:20:35.222Z through the
+cleanup membership PATCH, which reached the API at 22:20:20.947Z. This trial does not prove cron-only
+completion. The separate untouched legacy adoption completed automatically at 21:45:45–21:46:02Z.
+Actual GCP 3,418-row promotion was 449 ms wall time / 105.7523 ms summed D1 duration (not CPU).
+The conservative GLOBAL-zero request interval was 92.206 s; the reviewer accepted this target deviation
+because the binding restoration cutoff was met. No full R8 pass is claimed. Screenshots were skipped
+after the publication deadline miss. Slow continuation follow-up: Idea `01M7GN7PK7QVN6ZSV0CP1ZAXWZ`.
+
+Safe evidence packet: Library `01M7GN519MFCMREMBM7QWN3ZJ3`, SHA-256
+`872936f54fb74451148698a4865b13b612c33685f6c335ebccaa6bf44803e99b`.
+Strict first/delayed cleanup and independent two-pass D1/GCP FREE succeeded. All owned resources,
+including terminal node tombstones, are absent; exact VM/disk GETs returned 404; complete aggregate
+inventories were empty. Memberships and the complete admin-settings baseline were restored. One WIF
+login was used; sign-out 200, session null, and auth-cache removal were verified. All finite jobs terminated.
+Snapshot D1 rows were removed by normal cleanup; independent R2 object absence is not claimed.
+Release workflow [43769494662](https://github.com/raphaeltm/simple-agent-manager/actions/runs/43769494662)
+succeeded; authoritative lease deployment `7811031962` is released and supersedes both prior holds.
+The staging window is CLOSED. Production verification remains basic health/version smoke only;
+the protected production task/chat/snapshot remain untouched.
+
+Final completion review: checks A–F PASS with no blocking implementation findings. The release-head CI,
+merge and production smoke remain explicit release gates; this archive records completed implementation
+and accepted verification evidence rather than claiming deployment has already happened.
+
+## Historical state — November 14 review revision
 
 Main `4bdaaf61f6cecb83b6a3bab30e011257ea019710` is incorporated with a history-preserving merge, including2739 test stabilization and2740 bounded archive writes. The handler changes merge without conflict; archive metering and wake exact-write fencing are retained.
 Pushed head `281da79d7407ee04f0fc1a630993ee6a04ca8b52` is being revised after the
@@ -59,8 +100,9 @@ References: `tasks/backlog/2026-11-09-capacity-pool-readiness-gate-during-republ
 - [x] Adopt rollback/redeploy legacy interruption despite a stale completed work row; quarantine unsafe live prefixes through full promotion; indexed minute discovery and write-authorized point adoption preserve leases, cooldowns and prior success.
 - [x] Pin rollback digest incompatibility: same semantic candidate values must differ from the old main-format digest for exhaustive, partial and default catalogs; preserve the format distinction explicitly.
 - [x] Final documentation/constitution review and consolidated native/Workers/full quality pass. Completion remains WARN for open runtime/release gates.
-- [ ] Real coordinated staging retained-publication VM chain, promotion timing and independent provider/control-plane cleanup. R7 is VM-first; focused tests preserve Instant compatibility.
-- [ ] Fresh candidate CI, best-effort CodeRabbit request/wait, final exact-SHA coordinator approval and authorized release/production smoke.
+- [x] Coordinated R8 retained-publication VM wake/file chain, actual promotion timing and independent provider/control-plane cleanup; deadline deviation accepted and documented above. Earlier untouched legacy adoption supplies cron-only completion evidence. Focused tests retain Instant compatibility.
+- [x] Staged exact-head functional CI, required CodeRabbit request/wait and final exact-SHA coordinator approval.
+- [ ] Final release-head CI, authorized merge and production deployment/basic health smoke: intentionally pending release gates, tracked in the PR and `.do-state.md`; no implementation work is deferred.
 
 ## Review changes and discriminating evidence
 
