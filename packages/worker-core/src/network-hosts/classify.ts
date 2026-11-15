@@ -74,7 +74,7 @@ const IPV4_RANGES: ReadonlyArray<readonly [number, number, Exclude<HostClass, 'p
   [ipv4(198, 18, 0, 0), 15, 'private'], // benchmarking
 ];
 
-export function classifyIpv4(address: number): HostClass {
+function classifyIpv4(address: number): HostClass {
   for (const [start, prefix, hostClass] of IPV4_RANGES) {
     const mask = prefix === 0 ? 0 : (IPV4_MAX << (32 - prefix)) >>> 0;
     if ((address & mask) >>> 0 === start) return hostClass;
@@ -104,7 +104,7 @@ function parseIpv4Component(part: string): number | null {
  * An IPv4 literal in any `inet_aton` / WHATWG spelling (`127.0.0.1`, `2130706433`,
  * `0x7f.1`, `0177.0.0.1`, `127.1`), as a 32-bit number. Null for anything else.
  */
-export function parseIpv4Literal(host: string): number | null {
+function parseIpv4Literal(host: string): number | null {
   const parts = host.split('.');
   if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
   if (parts.length === 0 || parts.length > 4) return null;
@@ -140,7 +140,7 @@ function parseIpv6Groups(part: string): number[] | null {
 }
 
 /** An IPv6 literal (no brackets, no zone) as eight 16-bit groups. Null for anything else. */
-export function parseIpv6Literal(host: string): number[] | null {
+function parseIpv6Literal(host: string): number[] | null {
   if (!host.includes(':')) return null;
   const halves = host.split('::');
   if (halves.length > 2) return null;
@@ -206,7 +206,7 @@ function embeddedIpv4Of(groups: number[]): number | null {
   return g0 === 0x2002 ? embeddedIpv4(g1, g2) : null; // 6to4
 }
 
-export function classifyIpv6(groups: number[]): HostClass {
+function classifyIpv6(groups: number[]): HostClass {
   const value = groups.reduce((acc, group) => (acc << 16n) | BigInt(group), 0n);
   const exact = matchIpv6(value, IPV6_EXACT);
   if (exact) return exact;

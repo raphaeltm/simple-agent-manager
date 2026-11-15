@@ -74,7 +74,7 @@ The full row was ~45 source files, above the ~30-file cap. Split approved:
 
 - [x] worker-core `network-hosts`: classify.ts, guarded-fetch.ts, index; exported from worker-core
 - [x] Trim branch-only exports (isAcceptableOperatorEndpoint etc.: consumers are L12/L20)
-- [x] Comments describe Cloudflare behaviour, not celld
+- [x] Comments describe Cloudflare behaviour; no self-host-only code ships (comments may mention self-hosted runtimes as context)
 - [x] `outbound.maxRedirects` admin setting + `outbound-fetch-settings.ts`, registered
 - [x] Web push: schema + `validateEndpoint` public-host check; delivery `assertOutboundUrl`
 - [x] Composable credentials: save-time refusal; `resolveProxyUpstream` skip + log
@@ -84,11 +84,44 @@ The full row was ~45 source files, above the ~30-file cap. Split approved:
 - [x] Tests through real callers + discrimination checks (passthrough 9 red; resolver 7 red)
 - [x] F6: `sam/no-unguarded-outbound-fetch`, ratchet baseline (44 sites / 32 files), RuleTester tests
 - [x] Docs: configuration.md section, notifications.md, agent-sign-in.md, quality README, rule doc
-- [ ] Note on idea `01M72M9AEB933ZY8269D376DKC` for L12 (passthrough per-hop gap)
+- [x] Note on idea `01M72M9AEB933ZY8269D376DKC` for L12 (passthrough per-hop gap): note `01M7FEE8XED8RSW9TG1E0ZX4NY`
 - [ ] Full quality suite
 - [ ] Reviewers: security-auditor, cloudflare-specialist, architecture-reviewer, performance-reviewer, test-engineer, task-completion-validator
 - [ ] Staging (window from PR Shepherd, channel `feature.pr-shepherd-deps-20261111`): push subscribe + receive; agent sign-in via workload identity; deployment-release image resolve (public image + one refused registry); `check_dns_status`; credential with custom public base URL saved and used + one refused private host; cleanup
 - [ ] PR ready (not merged), CodeRabbit requested and waited
+
+## Evidence log
+
+- Lint probe (2026-11-15): a throwaway `apps/api/src/zz-probe.ts` with `fetch(u)`, `(0, fetch)(u)`,
+  `Reflect.apply(fetch, …)`, `globalThis.fetch(u)` and `{ fetchFn: fetch }` gave 5
+  `sam/no-unguarded-outbound-fetch` errors (run from `apps/api`, as turbo does); `typeof fetch`
+  gave none. Appending one `fetch` to `apps/api/src/auth.ts` (baseline 2) gave 3 errors.
+- Discrimination: passthrough refusals 9 red against main's `isHttpsUrl`; multi-candidate skip red
+  with `continue` → `return null`; image resolver 7 red against main's blocklist; push DO save red
+  without the `classifyHost` check; push DO stored-row test red without the delivery
+  `assertOutboundUrl` (the VAPID signer also rejects the host, but only after retries and without
+  `web_push.endpoint_refused`); lint acknowledged-line and type-query guards red when removed.
+- Full API unit suite (before review fixes): 15,440 / 15,446 passed, 4 skipped; the 2 failures were
+  tests added mid-run for code not yet saved, green on rerun.
+
+## Review outcomes
+
+- architecture-reviewer: no HIGH. Fixed: stale comment, setting description, unneeded exports.
+  Kept the custom baseline over ESLint bulk suppressions (turbo runs ESLint per workspace with a
+  different cwd, and the suppressions file is cwd-relative; one repo-wide JSON is reviewable).
+  Kept `outbound.maxRedirects` (the row and the brief ask for the admin setting).
+- performance-reviewer: no HIGH. check_dns_status may wait up to 5 s on a D1 stall before the
+  settings fallback (accepted: agent tool call, rare). Refusal log per request on a refused
+  credential (accepted: 0 such credentials in production).
+- cloudflare-specialist: no HIGH. Fixed: docs state the passthrough gap; `httpStatus` kept on
+  `redirect_refused`; unused `deadlineMs` removed; admin-settings guide mention.
+- security-auditor: no CRITICAL/HIGH/MEDIUM; passthrough gap rated LOW on Cloudflare. Fixed: lint
+  directive matching by rule id; destructuring/`Reflect.get` aliases; unreadable setting falls
+  back to 0 hops. Not done here: `global_fetch_strictly_public` (changes every Worker fetch,
+  including own-zone hosts; needs its own change and staging check).
+- test-engineer: no HIGH. Added: push DO save refusal, stored private row through the DO fan-out,
+  PATCH configuration base URL, multi-candidate skip, message assertions.
+- task-completion-validator: no CRITICAL/HIGH. Fixed: idea note, probe evidence, wording.
 
 ## I/O per request (rules 59/60)
 

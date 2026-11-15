@@ -55,12 +55,6 @@ export interface OutboundPolicy {
   allowPrivateNetwork?: boolean;
   /** Redirect hops to follow; 0 refuses every redirect. Default DEFAULT_OUTBOUND_MAX_REDIRECTS. */
   maxRedirects?: number;
-  /**
-   * One deadline in milliseconds for the whole operation: every hop, until the final response's
-   * headers arrive. It never cuts the final body (a stream keeps going). A caller's own
-   * `init.signal` also spans every hop. Omitted: no deadline beyond the caller's signal.
-   */
-  deadlineMs?: number;
   /** Fetch implementation (a budgeted wrapper); the global fetch by default. */
   fetchFn?: (url: string, init: RequestInit) => Promise<Response>;
   /** An extra per-hop check, applied after the host check. Throw to refuse the URL. */
@@ -74,10 +68,9 @@ export type OutboundRefusalReason =
   | 'host'
   | 'redirect_limit'
   | 'redirect_unreplayable'
-  | 'redirect_cross_origin_body'
-  | 'deadline';
+  | 'redirect_cross_origin_body';
 
-/** The request was refused before it was sent, or its deadline passed between hops. */
+/** The request (or a redirect hop) was refused before it was sent. */
 export class OutboundRequestRefusedError extends Error {
   constructor(
     readonly reason: OutboundRefusalReason,
@@ -221,39 +214,11 @@ async function nextHopUrl(
   });
 }
 
-interface OperationSignal {
-  signal: AbortSignal | undefined;
-  /** Stops the deadline once the final response is in hand, so the body is never cut by it. */
-  settle: () => void;
-  expired: () => boolean;
-}
-
-/** A signal that aborts on the caller's signal or when `deadlineMs` passes. */
-function operationSignal(
-  callerSignal: AbortSignal | null | undefined,
-  deadlineMs: number | undefined
-): OperationSignal {
-  if (deadlineMs === undefined) {
-    return { signal: callerSignal ?? undefined, settle: () => undefined, expired: () => false };
-  }
-  const controller = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort(new DOMException('Outbound request deadline exceeded', 'TimeoutError'));
-  }, deadlineMs);
-  const forward = () => controller.abort(callerSignal?.reason);
-  if (callerSignal?.aborted) forward();
-  else callerSignal?.addEventListener('abort', forward, { once: true });
-  // The caller's signal stays linked after settle: it may still cancel the final body.
-  return { signal: controller.signal, settle: () => clearTimeout(timer), expired: () => timedOut };
-}
-
 /**
  * Fetches `input` under `policy`: the host is checked before the request, redirects are never
  * followed by the runtime, and each `Location` is checked like the original URL before the next
- * hop. Throws `OutboundRequestRefusedError` for a refused URL or hop, or when `deadlineMs` passes
- * before the final response; other network errors propagate.
+ * hop. Throws `OutboundRequestRefusedError` for a refused URL or hop; other network errors
+ * propagate. A caller's `init.signal` spans every hop.
  */
 export async function guardedFetch(
   input: string | URL,
@@ -262,29 +227,15 @@ export async function guardedFetch(
 ): Promise<Response> {
   let url = assertOutboundUrl(input, policy);
   const origin = url.origin;
-  const operation = operationSignal(init.signal, policy.deadlineMs);
-  let request: RequestInit = { ...init, signal: operation.signal, redirect: 'manual' };
-  try {
-    for (let hop = 0; ; hop += 1) {
-      const response = policy.fetchFn
-        ? await policy.fetchFn(url.toString(), request)
-        : // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- the guard itself: url passed assertOutboundUrl above or in nextHopUrl
-          await fetch(url.toString(), request);
-      const next = await nextHopUrl(response, url, hop, policy, origin);
-      if (!next) return response;
-      request = nextHopInit(request, response.status, url, next);
-      url = next;
-    }
-  } catch (err) {
-    if (operation.expired() && !(err instanceof OutboundRequestRefusedError)) {
-      throw new OutboundRequestRefusedError(
-        'deadline',
-        url.hostname,
-        `Outbound request did not complete within ${policy.deadlineMs} ms`
-      );
-    }
-    throw err;
-  } finally {
-    operation.settle();
+  let request: RequestInit = { ...init, redirect: 'manual' };
+  for (let hop = 0; ; hop += 1) {
+    const response = policy.fetchFn
+      ? await policy.fetchFn(url.toString(), request)
+      : // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- the guard itself: url passed assertOutboundUrl above or in nextHopUrl
+        await fetch(url.toString(), request);
+    const next = await nextHopUrl(response, url, hop, policy, origin);
+    if (!next) return response;
+    request = nextHopInit(request, response.status, url, next);
+    url = next;
   }
 }

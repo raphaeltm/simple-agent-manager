@@ -41,10 +41,31 @@ function isGlobalObjectFetch(node, sourceCode) {
   if (member?.type !== 'MemberExpression') return false;
   if (getPropertyName(member.property) !== 'fetch') return false;
   if (member.computed && member.property.type !== 'Literal') return false;
-  const object = member.object;
-  if (object.type !== 'Identifier' || !GLOBAL_OBJECTS.has(object.name)) return false;
-  const variable = findVariable(sourceCode.getScope(member), object.name);
+  return isGlobalObject(member.object, sourceCode);
+}
+
+function isGlobalObject(node, sourceCode) {
+  if (node?.type !== 'Identifier' || !GLOBAL_OBJECTS.has(node.name)) return false;
+  const variable = findVariable(sourceCode.getScope(node), node.name);
   return !variable || variable.defs.length === 0;
+}
+
+/** `const { fetch } = globalThis` and `const { fetch: f } = self`. */
+function isGlobalFetchDestructure(node, sourceCode) {
+  if (node.id.type !== 'ObjectPattern' || !isGlobalObject(node.init, sourceCode)) return false;
+  return node.id.properties.some(
+    (property) => property.type === 'Property' && getPropertyName(property.key) === 'fetch'
+  );
+}
+
+/** `Reflect.get(globalThis, 'fetch')`. */
+function isReflectGetFetch(node, sourceCode) {
+  const callee = unwrapChainExpression(node.callee);
+  if (callee?.type !== 'MemberExpression') return false;
+  if (callee.object.type !== 'Identifier' || callee.object.name !== 'Reflect') return false;
+  if (getPropertyName(callee.property) !== 'get') return false;
+  const [target, key] = node.arguments;
+  return isGlobalObject(target, sourceCode) && key?.type === 'Literal' && key.value === 'fetch';
 }
 
 function findVariable(scope, name) {
@@ -57,6 +78,9 @@ function findVariable(scope, name) {
 
 const RULE_NAME = 'sam/no-unguarded-outbound-fetch';
 
+/** `eslint-disable-line a, b -- why` / `eslint-disable-next-line a -- why`: the rule list only. */
+const DISABLE_DIRECTIVE = /^eslint-disable-(line|next-line)\s+(.+?)(?:\s+--.*)?$/s;
+
 /**
  * Lines covered by an `eslint-disable-line` / `eslint-disable-next-line` comment for this rule.
  * Those sites are acknowledged (the comment says who chooses the URL), so they count against no
@@ -65,10 +89,11 @@ const RULE_NAME = 'sam/no-unguarded-outbound-fetch';
 function acknowledgedLines(sourceCode) {
   const lines = new Set();
   for (const comment of sourceCode.getAllComments()) {
-    const text = comment.value.trim();
-    if (!text.includes(RULE_NAME)) continue;
-    if (text.startsWith('eslint-disable-next-line')) lines.add(comment.loc.end.line + 1);
-    else if (text.startsWith('eslint-disable-line')) lines.add(comment.loc.start.line);
+    const match = DISABLE_DIRECTIVE.exec(comment.value.trim());
+    if (!match) continue;
+    const ruleIds = match[2].split(',').map((id) => id.trim());
+    if (!ruleIds.includes(RULE_NAME)) continue;
+    lines.add(match[1] === 'next-line' ? comment.loc.end.line + 1 : comment.loc.start.line);
   }
   return lines;
 }
@@ -120,6 +145,12 @@ const rule = {
     return {
       MemberExpression(node) {
         if (isGlobalObjectFetch(node, sourceCode)) sites.push(node);
+      },
+      VariableDeclarator(node) {
+        if (isGlobalFetchDestructure(node, sourceCode)) sites.push(node);
+      },
+      CallExpression(node) {
+        if (isReflectGetFetch(node, sourceCode)) sites.push(node);
       },
       ImportDeclaration(node) {
         if (typeof node.source.value === 'string' && SOCKET_MODULES.has(node.source.value)) {

@@ -81,6 +81,7 @@ function failureResult(
       ...base,
       dnsResolved: true,
       tlsValid: true,
+      httpStatus: redirectStatus,
       status: 'redirect_refused',
       refusal: error.reason,
       note: 'The workspace answered with a redirect SAM does not follow (a refused address, or too many hops).',

@@ -2,7 +2,6 @@
  * Redirect policy of the guarded fetch (self-host T5 follow-up, item 9):
  * - a hop that leaves the origin keeps only an explicit safe list of headers, so a credential
  *   under a name nobody listed (GitLab's PRIVATE-TOKEN) cannot follow the redirect;
- * - one deadline bounds the whole operation (every hop), and never cuts the final body;
  * - the hop limit is the admin setting `outbound.maxRedirects`.
  *
  * Deadline cases use a real HTTP server and the real fetch, so the abort travels through undici,
@@ -24,7 +23,7 @@ import {
 import { findAdminSetting } from '../../../src/services/admin-settings-registry';
 import { resolveOutboundMaxRedirects } from '../../../src/services/outbound-fetch-settings';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
-import { type HeldHttpServer, settled, startHeldHttpServer } from '../../helpers/held-http-server';
+import { type HeldHttpServer, startHeldHttpServer } from '../../helpers/held-http-server';
 
 function redirect(status: number, location: string): Response {
   return new Response(null, { status, headers: { location } });
@@ -151,70 +150,6 @@ describe('a cross-origin 307/308 never carries the request body to the new origi
   );
 });
 
-describe('one deadline bounds the whole operation', () => {
-  // The server holds every hop until the test answers it, and only setTimeout/clearTimeout are
-  // faked, so the deadline fires exactly where the test moves the clock, whatever the load.
-  let server: HeldHttpServer;
-  beforeEach(async () => {
-    server = await startHeldHttpServer();
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-  });
-  afterEach(async () => {
-    vi.useRealTimers();
-    await server.close();
-  });
-
-  it('refuses with reason deadline once the hops together outlast it', async () => {
-    // Each hop takes 400 ms of a 1000 ms deadline: no single hop outlasts it, the chain does.
-    const call = guardedFetch(
-      `${server.base}/hop0`,
-      {},
-      { allowPrivateNetwork: true, deadlineMs: 1_000 }
-    ).catch((err: unknown) => err);
-    const first = await server.nextRequest();
-    vi.advanceTimersByTime(400);
-    first.respond(302, { location: '/hop1' });
-    const second = await server.nextRequest();
-    vi.advanceTimersByTime(400);
-    second.respond(302, { location: '/hop2' });
-    await server.nextRequest();
-    expect(await settled(call)).toBe(false);
-    vi.advanceTimersByTime(400); // 1200 ms in all; the third hop alone has taken 400 ms
-    expect(await settled(call)).toBe(true);
-    const error = await call;
-    expect(error).toBeInstanceOf(OutboundRequestRefusedError);
-    expect((error as OutboundRequestRefusedError).reason).toBe('deadline');
-    expect(server.count()).toBe(3);
-  });
-
-  it('control: with a deadline the hops fit in, the final body is read in full', async () => {
-    const call = guardedFetch(
-      `${server.base}/hop0`,
-      {},
-      { allowPrivateNetwork: true, deadlineMs: 400 }
-    );
-    (await server.nextRequest()).respond(302, { location: '/final' });
-    const end = (await server.nextRequest()).respondHoldingBody(200, 'head-');
-    const res = await call;
-    // Far past the deadline while the body is still open: the deadline stopped with the headers.
-    vi.advanceTimersByTime(5_000);
-    end('tail');
-    expect(await res.text()).toBe('head-tail');
-  });
-
-  it("the caller's own signal still aborts", async () => {
-    const controller = new AbortController();
-    const call = guardedFetch(
-      `${server.base}/hop0`,
-      { signal: controller.signal },
-      { allowPrivateNetwork: true, deadlineMs: 5_000 }
-    );
-    await server.nextRequest();
-    controller.abort(new Error('caller gave up'));
-    await expect(call).rejects.toThrow('caller gave up');
-  });
-});
-
 describe('outbound.maxRedirects admin setting', () => {
   let sqlite: Database.Database;
   let env: Env;
@@ -248,10 +183,8 @@ describe('outbound.maxRedirects admin setting', () => {
     await expect(resolveOutboundMaxRedirects(env)).resolves.toBe(1);
   });
 
-  it('falls back to the default when settings cannot be read', async () => {
+  it('refuses every redirect (0) when settings cannot be read, never loosening an admin value', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    await expect(resolveOutboundMaxRedirects({} as Env)).resolves.toBe(
-      DEFAULT_OUTBOUND_MAX_REDIRECTS
-    );
+    await expect(resolveOutboundMaxRedirects({} as Env)).resolves.toBe(0);
   });
 });

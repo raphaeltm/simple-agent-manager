@@ -163,6 +163,10 @@ outboundRuleTester.run('no-unguarded-outbound-fetch', noUnguardedOutboundFetch, 
     outboundCase('export function f(fetch: (u: string) => string) { return fetch("x"); }'),
     // Type positions send nothing.
     outboundCase('export type F = typeof fetch; export interface O { fetchFn: typeof fetch }'),
+    // A local object with a fetch member is not the global.
+    outboundCase(
+      'const api = { fetch: (u: string) => u }; const { fetch: f } = api; export const r = f("x");'
+    ),
     // The guard's own spelling is fine.
     outboundCase(
       'import { guardedFetch } from "@simple-agent-manager/worker-core"; export const r = guardedFetch("https://x");'
@@ -206,6 +210,21 @@ outboundRuleTester.run('no-unguarded-outbound-fetch', noUnguardedOutboundFetch, 
     { ...outboundCase('export const r = globalThis.fetch(userUrl);'), errors: outboundErrors(1) },
     { ...outboundCase('export const r = self["fetch"](userUrl);'), errors: outboundErrors(1) },
     { ...outboundCase('export const r = globalThis?.fetch(userUrl);'), errors: outboundErrors(1) },
+    {
+      ...outboundCase('const { fetch: f } = globalThis; export const r = f(userUrl);'),
+      errors: outboundErrors(1),
+    },
+    { ...outboundCase("export const f = Reflect.get(self, 'fetch');"), errors: outboundErrors(1) },
+    // A directive for another rule that merely mentions this rule's name acknowledges nothing.
+    {
+      ...outboundCase(
+        [
+          '// eslint-disable-next-line no-console -- not sam/no-unguarded-outbound-fetch',
+          'export const a = fetch(userUrl);',
+        ].join('\n')
+      ),
+      errors: outboundErrors(1),
+    },
     {
       ...outboundCase('import { connect } from "cloudflare:sockets"; export { connect };'),
       errors: outboundErrors(1),

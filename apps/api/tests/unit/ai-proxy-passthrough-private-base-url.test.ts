@@ -263,6 +263,56 @@ describe('stored credential with a refused base URL (OpenAI passthrough)', () =>
   });
 });
 
+describe('a refused credential is skipped, not fatal: the next candidate serves the request', () => {
+  it('with no agent type, a private codex credential is skipped and the opencode one is used', async () => {
+    // Unknown agent type: every harness that speaks the dialect is a candidate (openai-codex,
+    // then opencode), so the skip must move on to the next one rather than stop.
+    mockVerifyAIProxyAuth.mockResolvedValueOnce({
+      userId: 'user1',
+      workspaceId: 'ws1',
+      projectId: 'proj1',
+      agentType: null,
+    });
+    mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+    mockCheckTokenBudget.mockResolvedValue({ allowed: true });
+    mockResolveForConsumer.mockImplementation((_db, _userId, _key, consumer) => {
+      const agentType = (consumer as { agentType?: string }).agentType;
+      const baseUrl =
+        agentType === 'openai-codex' ? 'https://10.0.0.5/v1' : 'https://llm.example.com/v1';
+      return Promise.resolve({
+        consumer,
+        configuration: { settings: {} },
+        credential: {
+          id: `cred-${agentType}`,
+          secret: { kind: 'openai-compatible', apiKey: `sk-${agentType}`, baseUrl },
+        },
+        source: 'user-attachment',
+      });
+    });
+    mockFetch.mockResolvedValueOnce(
+      new Response('{"id":"chatcmpl-1"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const res = await postJson(OPENAI_CHAT_COMPLETIONS_PATH, chatBody('gpt-4o'));
+
+    expect(res.status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch.mock.calls[0]?.[0]).toBe('https://llm.example.com/v1/chat/completions');
+    const refusals = mockLogWarn.mock.calls.filter(
+      ([event]) => event === 'ai_proxy_passthrough.upstream_refused'
+    );
+    expect(refusals).toEqual([
+      [
+        'ai_proxy_passthrough.upstream_refused',
+        { credentialId: 'cred-openai-codex', reason: 'host' },
+      ],
+    ]);
+  });
+});
+
 describe('stored configuration with a refused base URL (Anthropic passthrough)', () => {
   it('a metadata base URL on the configuration is never called', async () => {
     allowRequest('claude-code');

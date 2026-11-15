@@ -1653,13 +1653,16 @@ accepts (decimal, hex, octal, IPv4-mapped and other IPv6 embeddings).
 | Deployment-release registry lookups   | Registry, token realm and every redirect must be HTTPS on a public host.                                                                                                                                                                                                              | `packages/app-deployment/src/image-resolver-outbound.ts`                              |
 | `check_dns_status`                    | Follows only redirects that stay on the workspace's own origin, each re-checked; reports any other redirect with its status without requesting it, and reports failures as fixed categories, never raw error text. A private-domain install may reach its own private workspace host. | `routes/mcp/check-dns-status.ts`                                                      |
 
-`guardedFetch` never lets the runtime follow a redirect. It checks every hop, keeps only `Accept`,
+Until a later change moves them, the AI proxy's own calls to a credential's base URL still let the
+runtime follow a redirect: the base URL itself is checked, but a public base URL that redirects
+is not re-checked per hop. `guardedFetch`, used everywhere else above, never lets the runtime
+follow a redirect. It checks every hop, keeps only `Accept`,
 `Accept-Language`, `Content-Type`, `Content-Language` and `User-Agent` on a hop to another origin,
 and refuses a 307 or 308 that would carry a request body to another origin.
 
 | Admin setting           | Default | Meaning                                                                                                                                              |
 | ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `outbound.maxRedirects` | `3`     | Redirect hops a guarded fetch follows, each re-checked, range 0–10. `0` refuses every redirect. Used by `check_dns_status`. Category **Operations**. |
+| `outbound.maxRedirects` | `3`     | Redirect hops a guarded fetch follows, each re-checked, range 0–10. `0` refuses every redirect. Used by `check_dns_status`. If settings cannot be read, no redirect is followed. Category **Operations**. |
 
 The check reads names, not DNS answers: a public name that resolves to a private address passes.
 On Cloudflare the Worker's request leaves from Cloudflare's network, not from the installation's
