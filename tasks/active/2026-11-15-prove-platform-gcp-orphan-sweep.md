@@ -97,7 +97,7 @@ approved the extension (event 44439269) with conditions recorded in the checklis
       15254 tests passed, 4 skipped; providers 48/892) on 73f570618; later commits test/task-only
 - [x] task-completion-validator (PASS on `3dd0d5891` and on `f5fce2813`)
 - [x] Deferred MEDIUM/LOW review items: `tasks/backlog/2026-11-15-provider-orphan-sweep-followups.md`
-- [ ] Staging no-regression: one natural sweep tick with unchanged platform Hetzner credential,
+- [x] Staging no-regression: one natural sweep tick with unchanged platform Hetzner credential,
       zero errors, zero destroyed (no fixtures, swaps or KV/D1 writes)
 - [x] Production first-run deletion-risk read (12:01 UTC; repeat right before the approval request)
 - [ ] PR, CI, CodeRabbit request and wait, merge
@@ -175,3 +175,17 @@ PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS=240000, PROVIDER_ORPHAN_MIN_AGE_MS=900000 
   `accountErrors`, not a failed sweep. User Hetzner
   accounts cannot be read from here; their path keeps `deleteVM` and is unchanged except that
   each call now has its own timeout.
+
+### Staging no-regression (PR Shepherd grant 819fe5ec, window 13:35-14:35 UTC)
+
+- ONE deploy: run 43719777727 on `445e00e85245c4d02baf0c41ccc6f8b03b8ba4d5`, dispatched 13:35:17,
+  success incl. smoke tests 14:01:22. Worker: single version 80ca2674 at 100%, annotated
+  `commit:445e00e85245c4d02baf0c41ccc6f8b03b8ba4d5` (14:01:31, rechecked after the cron).
+- ONE Playwright session (smoke user): token-login 200; /dashboard, /projects, /settings 200 with
+  0 page errors; sign-out 200 and get-session literal null; no state left (14:01:48-14:02:18).
+- Natural 14:15 orphan sweep with the unchanged platform Hetzner credential: exactly one
+  non-skipped `cron.completed` summary (14:16:17): scanned 0, destroyed 0, deletionRequested 0,
+  errors 0, accountErrors 0, failedSweepCount 0; interval marker restamped 14:15:54. The two new
+  counters are present, so the PR code ran. Platform credential unchanged, 0 live nodes.
+- No fixtures, VMs, credential swaps, settings or KV/D1 writes. Root strict FREE 43e51341;
+  staging FREE 1a4dfea3. Kit: Library 01M7FPB23AJQBGRTVJD08KE62X; ledger 01M7FPFQ7778B2NTTD9A5XSVV4.
