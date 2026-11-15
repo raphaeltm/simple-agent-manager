@@ -25,7 +25,7 @@ No separate nonarchive import path found in apps/ or packages/.
 - [x] Cover archive import/copy-back/restore and every writer in real-workerd regression tests; concurrency, legacy NULL, absorbed chunks, restart, duplicates and rollback.
 - [x] Attribute archiveSourceReclaimPage scans: DELETE checks scan both comment FK children. Local25-message page100127r→127r with indexes, writes25 unchanged. Deferred index deployment to SAM idea01M7GD0KT5D1FERR205E61DYXR: current production category telemetry absent; latest non-null breakdown stale/coarse (unattributed4.87GB), so constructor build safety cannot be proven. User explicitly permits finding-only deferral. No archive reclaim/index change ships; raw import watermark repair does ship.
 - [x] Show bounded steady-state reads at 10k and larger fixtures, with production indexes and meter reconciliation; report writes before/after.
-- [ ] Run lint/typecheck/tests/build and migration safety; local specialist reviews including completion validator.
+- [x] Run lint/typecheck/tests/build and migration safety; all local specialists complete (Cloudflare addressed fractional inputs then PASS; test engineer PASS; constitution/doc sync PASS; completion implementation A–F PASS). Root lint22tasks/typecheck36tasks/test39tasks/build18tasks passed;75impacted workerdtests passed. First root web teardown flake did not repeat, tracked in idea01M7GE20TDY6BYHRGE38KA097F.
 - [ ] Request shepherd bounded Instant/no-VM staging grant (<USD1), then enforced lease and real flow with merging ON/OFF; cleanup.
 - [ ] Ready PR + CI + CodeRabbit request/wait, merge gates, production deploy monitoring (read-only), coordinator durable progress and idea notes.
 
@@ -35,3 +35,6 @@ Reads per warm batch must not grow with session length, with no new per-message 
 Part 2 bookkeeping writes follows after this PR; track separately, including exact lifecycle flushes and idle/restart safety with typed admin interval.
 
 Count-tag contract for part2: tag records persisted message_count, not logical live count. Throttled batches leave both count/tag unchanged while watermark and receipts advance durably. Count flushes update count/tag together. Older builds update count without tag, triggering one MAX repair even after restart. Archive raw imports only advance watermark, never certify a stale count tag.
+
+## Local verification completed 2026-11-15
+Root API:1023files/15263tests passed (3files/4tests skipped); root web410files/5246tests passed. ProjectData50files/528tests passed. Real-workerd final75tests/8files passed. Full baseline statement counts archived at /engineering/cost/ingest/ingest-before.snap, library01M7GDSGFS6QMFF434H05C7C2R. Task implementation archived after completion validation; release gates below remain explicitly pending and are tracked in PR2765 and local .do-state.md until live verification/merge.
