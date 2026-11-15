@@ -320,9 +320,11 @@ describe('lease workflow gating', () => {
 });
 
 it('executes the lease lifecycle and failure-path tests in CI', () => {
-  execFileSync(
-    process.execPath,
-    ['--test', fileURLToPath(new URL('../deploy/staging-lease.test.mjs', import.meta.url))],
-    { stdio: 'pipe' }
-  );
+  expect(() =>
+    execFileSync(
+      process.execPath,
+      ['--test', fileURLToPath(new URL('../deploy/staging-lease.test.mjs', import.meta.url))],
+      { stdio: 'pipe' }
+    )
+  ).not.toThrow();
 });

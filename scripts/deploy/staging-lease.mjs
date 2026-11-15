@@ -45,8 +45,7 @@ export function readLease(record, environment) {
   if (
     record.environment !== environment ||
     record.task !== LEASE_TASK ||
-    !lease ||
-    lease.version !== 1 ||
+    lease?.version !== 1 ||
     lease.environment !== environment ||
     !['held', 'released'].includes(lease.state) ||
     typeof lease.branch !== 'string' ||
@@ -127,7 +126,10 @@ function githubApi(method, endpoint, body) {
   const args = ['api', '--method', method, `repos/${process.env.GITHUB_REPOSITORY}${endpoint}`];
   if (body) args.push('--input', '-');
   return JSON.parse(
-    execFileSync('gh', args, { encoding: 'utf8', input: body ? JSON.stringify(body) : undefined })
+    execFileSync('/usr/bin/gh', args, {
+      encoding: 'utf8',
+      input: body ? JSON.stringify(body) : undefined,
+    })
   );
 }
 
