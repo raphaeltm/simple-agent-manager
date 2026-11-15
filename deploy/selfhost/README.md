@@ -195,6 +195,13 @@ uses (`agents/releases/<release>/vm-agent-linux-<arch>`, immutable), then pins t
 `--skip-vm-agent` skips this for a control-plane-only box. The release is resolved from git
 history, so the checkout must be a full clone (not `--depth 1`).
 
+After `celld deploy` the deploy asks celld to switch to the new version at once (`POST /reload` on
+its internal listener; on its own celld reads the deploy pointer only every 30 s,
+`CELLD_DEPLOY_POLL_S`), then checks `/health`, and with `AGENT_SIGN_IN_TRUST` set also checks that
+the agent sign-in route answers. So "deployed" means the new version serves. A version that does
+not build stops the deploy with celld's error, and the previous version keeps serving
+(`scripts/selfhost/celld-adopt.ts`).
+
 Worker secrets that are yours to supply (GitHub App, OAuth clients) go in
 `deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). The deploy seals them, with the
 platform keys it generates once, into a bundle only the box's key agent can open (Sealed secrets,
@@ -712,6 +719,10 @@ guarded outbound fetch (public HTTPS only, no redirects), and the egress fence a
 public internet, so a public issuer needs no fence entry. Agents request the audience
 `https://api.SAM_DOMAIN/api/auth/workload-identity-login`. The box needs an administrator account
 first. Choose targets that are not administrators and not linked to real GitHub organizations.
+
+The deploy checks the route on the new version before it prints "deployed"; if the value does not
+parse, the Worker logs `agent_sign_in.config_invalid`, the route answers 404 and the deploy stops
+saying so.
 
 ## Machines for workspaces
 

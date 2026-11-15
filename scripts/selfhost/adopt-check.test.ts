@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { adoptAndCheck } from './secrets-box-deps';
+import { adoptAndCheck } from './celld-adopt';
 
 let internal: Server;
 let api: Server;
