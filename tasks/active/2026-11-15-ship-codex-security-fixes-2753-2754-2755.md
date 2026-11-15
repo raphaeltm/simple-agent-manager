@@ -46,6 +46,7 @@ from its own `sam/` branch, closing the bot PR with a link.
 ## Implementation Checklist
 
 ### #2755
+
 - [x] Whole `go test ./internal/server` and `./internal/bootstrap` pass
 - [x] Token stable for the workspace lifetime (reuse on reprovision) AND in-container reinstall when the container's helper bearer is not accepted
 - [x] Failed PrepareWorkspace does not delete digest under a running container (only removes a bearer it minted, and only with no running container)
@@ -67,6 +68,7 @@ from its own `sam/` branch, closing the bot PR with a link.
 - [ ] Staging: fresh agent binary, clone/fetch/push, after restart/rebuild, Instant session, cross-workspace refusal, cleanup
 
 ### #2754
+
 - [ ] Fix 7 broken tests (fixtures, expectations), reconsider `userStatus === null`
 - [ ] `suspended`/`invited` reject without revoke; `removed`/deleted user revoke
 - [ ] Drop per-tool capability map and dispatcher hook
@@ -76,6 +78,7 @@ from its own `sam/` branch, closing the bot PR with a link.
 - [ ] Staging: remove member B, B's agent MCP fails; active member's still works
 
 ### #2753
+
 - [ ] Fix 2 failing tests
 - [ ] Migration 0242: no demotion; marker only; duplicates surfaced; test second superadmin survives
 - [ ] "Only real user" guard + tests (sole user suspended, sole user non-admin)

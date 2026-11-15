@@ -701,13 +701,17 @@ async function runGitCredentialSmoke(controlPlane) {
     headers: { Authorization: `Bearer ${CALLBACK_TOKEN}` },
   });
   if (unscoped.status !== 401) {
-    throw new Error(`/git-credential without a workspace id returned HTTP ${unscoped.status}, want 401`);
+    throw new Error(
+      `/git-credential without a workspace id returned HTTP ${unscoped.status}, want 401`
+    );
   }
   const bearerless = await fetch(
     `http://127.0.0.1:${VM_AGENT_PORT}/git-credential?workspaceId=${WORKSPACE_ID}`
   );
   if (bearerless.status !== 401) {
-    throw new Error(`/git-credential without a bearer returned HTTP ${bearerless.status}, want 401`);
+    throw new Error(
+      `/git-credential without a bearer returned HTTP ${bearerless.status}, want 401`
+    );
   }
 
   const response = await fetch(
