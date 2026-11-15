@@ -279,6 +279,67 @@ describe('resolveContainerImage through the real analysis and fingerprints', () 
   });
 });
 
+describe('resolveContainerImage for the sandbox image', () => {
+  it('builds once, then reuses, and rebuilds after an Ubuntu security update', async () => {
+    const context = mkdtempSync(join(tmpdir(), 'sam-sandbox-context-'));
+    try {
+      cpSync(join(root, 'apps/api/Dockerfile.sandbox'), join(context, 'Dockerfile.sandbox'));
+      mkdirSync(join(context, 'scripts'));
+      for (const name of [
+        'codex-device-auth.mjs',
+        'claude-setup-protocol.mjs',
+        'claude-setup-token.mjs',
+      ])
+        cpSync(join(root, 'apps/api/scripts', name), join(context, 'scripts', name));
+      const upstream: Upstream = { aptIndex: {}, urls: {}, npm: {}, pypi: '', failing: new Set() };
+      const network = fakeNetwork(upstream);
+      const published = new Map<string, string>();
+      let pushes = 0;
+      const registry: RegistryIo = {
+        lookup: async (repository, tag) => published.get(`${repository}:${tag}`) ?? null,
+        buildAndPush: async (_target, repository, tag) => {
+          const digest = pushes++ ? NEW_DIGEST : DIGEST;
+          published.set(`${repository}:${tag}`, digest);
+          return digest;
+        },
+      };
+      const sandbox: ContainerTarget = {
+        className: 'SandboxDO',
+        dockerfile: 'Dockerfile.sandbox',
+        repository: 'sam-api-staging-sandboxdo-staging',
+      };
+      const deps: ResolveDeps = {
+        accountId: ACCOUNT,
+        contextDir: context,
+        registry,
+        readFile: (path) => readFileSync(path, 'utf8'),
+        now: () => 0,
+        fingerprint: async (dockerfile) => {
+          const analysis = analyzeDockerfile(dockerfile);
+          if (!analysis.ok) throw new Error(analysis.reason);
+          return fingerprintInputs({
+            contextDir: context,
+            inputs: analysis.inputs,
+            io: network,
+            uv: 'uv',
+          });
+        },
+      };
+      expect((await resolveContainerImage(sandbox, deps)).outcome).toBe('built');
+      expect((await resolveContainerImage(sandbox, deps)).outcome).toBe('reused');
+      expect(network.npmCalls).toHaveLength(4); // two packages, two runs, one tree each
+      upstream.aptIndex['jammy-security'] = '7'.repeat(64);
+      const next = await resolveContainerImage(sandbox, deps);
+      expect(next).toMatchObject({
+        outcome: 'built',
+        reference: `registry.cloudflare.com/${ACCOUNT}/sam-api-staging-sandboxdo-staging@${NEW_DIGEST}`,
+      });
+    } finally {
+      rmSync(context, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('applyImageOverrides', () => {
   const generated = [
     '[[containers]]',

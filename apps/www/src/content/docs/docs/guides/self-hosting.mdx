@@ -580,8 +580,8 @@ account's container registry records an image built from those inputs.
 The step's job summary lists each image's outcome and reason. A clean install
 has no recorded images, so its first deploy builds them. To always build with
 Wrangler, set the GitHub Environment variable `CONTAINER_IMAGE_REUSE_ENABLED` to
-`false`. Optional `CONTAINER_IMAGE_FINGERPRINT_TIMEOUT_MS` (default `180000`)
-bounds the fingerprint lookups, and `CONTAINER_REGISTRY_CREDENTIAL_MINUTES`
+exactly `false`. Optional `CONTAINER_IMAGE_FINGERPRINT_TIMEOUT_MS` (default
+`180000`) bounds each fingerprint request and all of an image's lookups together, and `CONTAINER_REGISTRY_CREDENTIAL_MINUTES`
 (default `30`) sets the lifetime of each short-lived registry credential.
 
 ## First Login & Admin Access

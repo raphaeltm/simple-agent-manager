@@ -61,16 +61,16 @@ Absent: build with Wrangler's flags, push, use the new digest. Overrides go to `
 
 ## Implementation checklist
 
-- [ ] Pin the uv installer URL in `Dockerfile.vm-agent-container` (0.13.8, current latest)
-- [ ] `scripts/deploy/container-image-inputs.ts`: Dockerfile analysis + key composition (pure)
-- [ ] `scripts/deploy/container-image-fingerprints.ts`: apt / URL / npm / PyPI fingerprints, injectable IO
-- [ ] `scripts/deploy/container-image-reuse.ts`: registry lookup, build/push, overrides, toml patch, summary
-- [ ] Tests: analysis (every supported/unsupported shape, both real Dockerfiles), fingerprints, decision
+- [x] Pin the uv installer URL in `Dockerfile.vm-agent-container` (0.13.8, current latest)
+- [x] `scripts/deploy/container-image-inputs.ts`: Dockerfile analysis + key composition (pure)
+- [x] `scripts/deploy/container-image-fingerprints.ts`: apt / URL / npm / PyPI fingerprints, injectable IO
+- [x] `scripts/deploy/container-image-reuse.ts`: registry lookup, build/push, overrides, toml patch, summary
+- [x] Tests: analysis (every supported/unsupported shape, both real Dockerfiles), fingerprints, decision
       logic incl. degraded inputs (fingerprint failure, registry lookup failure, push failure)
-- [ ] Add tests to `scripts/deploy/installer-engine.vitest.config.ts`
-- [ ] Workflow: install pinned uv, run resolve step, keep rollout snapshot/wait untouched
-- [ ] Workflow: build only linux vm-agent binaries
-- [ ] Docs: deploy docs / self-hosting mention of image reuse and how to force a rebuild
+- [x] Add tests to `scripts/deploy/installer-engine.vitest.config.ts`
+- [x] Workflow: install pinned uv, run resolve step, keep rollout snapshot/wait untouched
+- [x] Workflow: build only linux vm-agent binaries
+- [x] Docs: deploy docs / self-hosting mention of image reuse and how to force a rebuild
 - [ ] Staging: two deploys without image change (second skips push and rollout), one with a change
 - [ ] Instant (cf-container) session + VM session on staging
 - [ ] Idea note with before/after durations
@@ -85,3 +85,4 @@ Absent: build with Wrangler's flags, push, use the new digest. Overrides go to `
 ## Open items
 
 - `installer-engine-prebuilt.ts` `imageContextKey` ignores floating inputs (prebuilt images can be stale).
+  Deferred to `tasks/backlog/2026-11-15-installer-prebuilt-image-key-floating-inputs.md`.
