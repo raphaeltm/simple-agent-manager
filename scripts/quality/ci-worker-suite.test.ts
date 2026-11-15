@@ -60,9 +60,9 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
   expect(step).toContain('run: pnpm --filter @simple-agent-manager/api test:workers');
   expect(step).not.toContain('continue-on-error');
   expect(job).toContain('fail-fast: false');
-  expect(job).toContain('shard: [1, 2, 3, 4, 5, 6]');
+  expect(job).toContain('shard: [1, 2, 3, 4, 5, 6, 7]');
   expect(step).toContain('WORKERS_SHARD: ${{ matrix.shard }}');
-  expect(step).toContain('--shard="${WORKERS_SHARD}/6"');
+  expect(step).toContain('--shard="${WORKERS_SHARD}/7"');
   expect(step).toContain('--reporter=./tests/workers/timing-reporter.ts');
   // The required check now gates the whole suite (scripts/quality/ci-draft-and-gate.test.ts);
   // for API changes it must still demand that every Workers shard succeeded.
@@ -112,10 +112,10 @@ describe('Workers shard gate discrimination', () => {
     for (const weakened of [
       // Anchor on the Workers matrix: the API unit-test matrix also lists [1, 2, 3].
       readCiWorkflow().replace(
-        'shard: [1, 2, 3, 4, 5, 6]\n    timeout-minutes: 30',
-        'shard: [1, 2, 3, 4, 5]\n    timeout-minutes: 30'
+        'shard: [1, 2, 3, 4, 5, 6, 7]\n    timeout-minutes: 30',
+        'shard: [1, 2, 3, 4, 5, 6]\n    timeout-minutes: 30'
       ),
-      readCiWorkflow().replace('--shard="${WORKERS_SHARD}/6"', ''),
+      readCiWorkflow().replace('--shard="${WORKERS_SHARD}/7"', ''),
       readCiWorkflow().replace('WORKERS_SHARD: ${{ matrix.shard }}', ''),
     ])
       expect(() => expectRequiredWorkerSuiteWiring(weakened)).toThrow();
@@ -176,7 +176,7 @@ describe('time-balanced Workers shards', () => {
     .filter((file) => !NATIVE_RUNTIME_SUITES.includes(file))
     .sort();
   const timings = loadShardTimings();
-  const SHARDS = 6;
+  const SHARDS = 7;
 
   function sequencerFor(shard?: { index: number; count: number }) {
     const ctx = { config: { root: apiRoot.replace(/\/$/u, ''), shard } } as unknown as Vitest;

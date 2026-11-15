@@ -626,10 +626,10 @@ describe('runner budget (jobs a ready PR starts)', () => {
     jobCount(simulate({ eventName: 'pull_request', filters: filtersFor(paths) }));
 
   it.each([
-    ['API only', ['apps/api/src/index.ts'], 18],
+    ['API only', ['apps/api/src/index.ts'], 19],
     ['web only', ['apps/web/src/App.tsx'], 11],
-    ['shared package', ['packages/shared/src/index.ts'], 21],
-    ['lockfile', ['pnpm-lock.yaml'], 21],
+    ['shared package', ['packages/shared/src/index.ts'], 22],
+    ['lockfile', ['pnpm-lock.yaml'], 22],
     ['public site or docs', ['apps/www/src/content/docs/docs/index.mdx'], 7],
   ])('a ready %s PR starts the recorded number of jobs', (_, paths, expected) => {
     expect(count(paths)).toBe(expected);
@@ -639,8 +639,11 @@ describe('runner budget (jobs a ready PR starts)', () => {
     for (const [, paths] of TABLE) expect(count(paths)).toBeLessThanOrEqual(26);
   });
 
+  // Realistic multi-area PRs, with their limits. The four-area shape of baseline run
+  // 43734352275 is the one case above 26: 23 before, 27 now. The seventh Workers shard
+  // is what brings an API PR to about 10 min, since the Workers shards run alongside the
+  // 8.4 min Test api shards.
   it.each([
-    // The shape of baseline run 43734352275.
     [
       'API, web, VM agent and docs',
       [
@@ -649,20 +652,26 @@ describe('runner budget (jobs a ready PR starts)', () => {
         'packages/vm-agent/main.go',
         'apps/www/src/content/docs/docs/index.mdx',
       ],
+      27,
     ],
-    ['shared package and VM agent', ['packages/shared/src/index.ts', 'packages/vm-agent/main.go']],
+    [
+      'shared package and VM agent',
+      ['packages/shared/src/index.ts', 'packages/vm-agent/main.go'],
+      25,
+    ],
     [
       'lockfile, VM agent and Go modules',
       ['pnpm-lock.yaml', 'packages/vm-agent/main.go', 'packages/vm-agent/go.mod'],
+      26,
     ],
-  ])('a ready %s PR starts at most 26 jobs', (_, paths) => {
-    expect(count(paths)).toBeLessThanOrEqual(26);
+  ])('a ready %s PR starts at most the recorded number of jobs', (_, paths, limit) => {
+    expect(count(paths)).toBeLessThanOrEqual(limit);
   });
 
-  it('a PR that matches every filter starts at most 30 jobs (27 before: three more Workers shards)', () => {
+  it('a PR that matches every filter starts at most 31 jobs (27 before: four more Workers shards)', () => {
     expect(
       jobCount(simulate({ eventName: 'pull_request', filters: allFilters() }))
-    ).toBeLessThanOrEqual(30);
+    ).toBeLessThanOrEqual(31);
   });
 
   it('a draft PR starts 6 jobs', () => {

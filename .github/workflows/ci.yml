@@ -926,17 +926,20 @@ jobs:
         run: pnpm quality:govulncheck-diff
 
   durable-object-worker-shards:
-    name: Durable Object Workers shard (${{ matrix.shard }}/6)
+    name: Durable Object Workers shard (${{ matrix.shard }}/7)
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.api == 'true'
     # Keep per-file storage isolation and serial workerd execution within each
-    # runner. Six shards balanced by measured per-file time (about 8.5 min of tests
-    # each; apps/api/tests/workers/shard-timings.json). Refresh the timings from the
-    # uploaded workers-timings-* artifacts with tests/workers/support/update-shard-timings.ts.
+    # runner. Seven shards balanced by measured per-file time (about 7 min of tests each
+    # on the slower runner class, which the timings reflect; about 4.5 on the faster one;
+    # apps/api/tests/workers/shard-timings.json). Seven keeps a Workers shard under the
+    # Test api shards plus the Test merge, so an API PR finishes in about 10 min. Refresh
+    # the timings from the workers-timings-* artifacts with
+    # tests/workers/support/update-shard-timings.ts.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7]
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -961,7 +964,7 @@ jobs:
       - name: Run Worker and Durable Object suites
         env:
           WORKERS_SHARD: ${{ matrix.shard }}
-        run: pnpm --filter @simple-agent-manager/api test:workers --shard="${WORKERS_SHARD}/6" --reporter=default --reporter=./tests/workers/timing-reporter.ts
+        run: pnpm --filter @simple-agent-manager/api test:workers --shard="${WORKERS_SHARD}/7" --reporter=default --reporter=./tests/workers/timing-reporter.ts
 
       - name: Upload per-file Workers timings
         if: always()
