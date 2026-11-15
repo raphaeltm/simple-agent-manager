@@ -5,8 +5,9 @@
  * - A Cloudflare Artifacts binding is present: that binding (unchanged on Cloudflare).
  * - Otherwise, `HOSTED_GIT_BACKEND === 'durable-object'` with the `HOSTED_GIT` Durable Object
  *   bound: the local backend below, which implements the same four methods against SAM's own
- *   git server (`durable-objects/hosted-git-repo.ts`). The self-host deploy sets both vars
- *   (`scripts/selfhost/celld-config.ts`); Cloudflare deploys set neither.
+ *   git server (`durable-objects/hosted-git-repo.ts`). Only the self-host build sets the var and
+ *   binds the class (`scripts/selfhost/celld-config.ts`, `selfhost-durable-objects.ts`); the
+ *   Cloudflare Worker has neither, and this module never imports the class, only its binding.
  *
  * Every caller that used `env.ARTIFACTS` goes through `resolveArtifactsBackend`, so the
  * capability, project creation, browsing, git tokens and deletion cannot disagree.

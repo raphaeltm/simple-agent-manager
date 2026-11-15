@@ -859,6 +859,35 @@ jobs:
           SHARD_RESULT: ${{ needs.durable-object-worker-shards.result }}
         run: test "$SHARD_RESULT" = success
 
+  # SAM-hosted git exists only in the self-host build: the real git CLI against the HostedGitRepo
+  # Durable Object in Miniflare (apps/api/vitest.hosted-git.config.ts). Gated on the whole API
+  # filter because the route's auth path reaches shared modules (project auth, workspace callback
+  # identity, node callback auth), not only the hosted-git files.
+  hosted-git:
+    name: Hosted git conformance (self-host)
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the API Worker's workspace dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
+
+      - name: Run hosted git conformance tests
+        run: pnpm --filter @simple-agent-manager/api test:hosted-git
+
   pulumi-infra:
     name: Pulumi Infrastructure Tests
     needs: [changes]

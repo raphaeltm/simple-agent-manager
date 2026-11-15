@@ -17,7 +17,6 @@ export { CredentialSetupSession } from './durable-objects/credential-setup-sessi
 export { DiagnosisRunner } from './durable-objects/diagnosis-runner';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
 export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
-export { HostedGitRepo } from './durable-objects/hosted-git-repo';
 export { InteractionStore } from './durable-objects/interaction-store';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
@@ -34,9 +33,9 @@ export { SandboxDO } from './durable-objects/sandbox-do';
 export { VmAgentContainer } from './durable-objects/vm-agent-container';
 export type { Env } from './env';
 
-import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
+import { app } from './app';
 import type { Env } from './env';
 import { applyCacheHeaders } from './lib/cache-headers';
 import { withRequestScopedD1Bindings } from './lib/d1-session';
@@ -179,13 +178,9 @@ import { scheduled } from './scheduled/handler';
 import { handleInboundAgentEmail } from './services/agent-email/inbound';
 import { agentEmailConfig } from './services/agent-email/setup-state';
 import { isAgentSignInEnabled } from './services/agent-sign-in/config';
-import { isLocalHostedGitActive } from './services/hosted-git/backend';
-import { handleHostedGitRequest, HOSTED_GIT_PATH_PREFIX } from './services/hosted-git/http';
 import { isArtifactsAvailable } from './services/platform-capabilities';
 import { resolvePublicPlatformCapabilities } from './services/speech-endpoints';
 import { isInstantRuntimeAvailable } from './services/vm-agent-container';
-
-const app = new Hono<{ Bindings: Env }>();
 
 // Global error handler — catches errors from all routes including subrouters.
 // Must use app.onError() instead of middleware try/catch because Hono's
@@ -255,15 +250,6 @@ app.use('*', requestLoggingMiddleware());
 app.use('*', analyticsMiddleware());
 
 app.use('*', apiCors);
-
-// Git smart HTTP for SAM-hosted repositories (self-host). Authenticated per request with a
-// repository token, not a session cookie, so it sits before every session-auth router. Inactive
-// (falls through to 404) unless this install uses the local hosted git backend.
-app.all(`${HOSTED_GIT_PATH_PREFIX}*`, async (c, next) => {
-  if (!isLocalHostedGitActive(c.env)) return next();
-  const response = await handleHostedGitRequest(c.req.raw, c.env);
-  return response ?? next();
-});
 
 // Health check — public endpoint returns minimal info only
 app.get('/health', (c) => {

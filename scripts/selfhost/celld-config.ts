@@ -19,6 +19,7 @@ import {
   type GuidedLoginSettings,
   SANDBOX_IMAGE_DIR,
 } from './guided-login.js';
+import { appendSelfhostDurableObjects } from './selfhost-durable-objects.js';
 
 /** Worker vars set for every celld deployment, overriding wrangler.toml [vars]. */
 export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
@@ -26,9 +27,8 @@ export const SELFHOST_VAR_OVERRIDES: Readonly<Record<string, string>> = {
   // blocks container -> host traffic on a one-box install (idea 01M72M9AEB933ZY8269D376DKC).
   CF_CONTAINER_ENABLED: 'false',
   SANDBOX_ENABLED: 'false',
-  // SAM-native git repos: the Cloudflare Artifacts binding is dropped below, and the local
-  // Durable Object git server (HostedGitRepo, apps/api/src/services/hosted-git/) serves them
-  // at https://api.<SAM_DOMAIN>/git/<repo>.git instead.
+  // SAM-native git repos: Artifacts is dropped below; the HostedGitRepo Durable Object (declared
+  // for this build only, selfhost-durable-objects.ts) serves https://api.<SAM_DOMAIN>/git/<repo>.git.
   ARTIFACTS_ENABLED: 'true',
   HOSTED_GIT_BACKEND: 'durable-object',
   // Managed devcontainer cache uses the Cloudflare container registry API.
@@ -465,6 +465,7 @@ export function buildCelldConfig(
 
   const out = ctx.out as CelldWranglerConfig;
   out.compatibility_flags ??= [];
+  appendSelfhostDurableObjects(out, ctx.plan.report);
   const r2 = out.r2_buckets.find((bucket) => bucket.binding === 'R2');
   out.vars = {
     ...out.vars,

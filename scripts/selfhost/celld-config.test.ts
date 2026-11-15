@@ -10,6 +10,7 @@ import {
   buildCelldConfig,
   SELFHOST_VAR_OVERRIDES,
 } from './celld-config.js';
+import { SELFHOST_DURABLE_OBJECTS } from './selfhost-durable-objects.js';
 
 const WRANGLER_TOML = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
 
@@ -75,7 +76,11 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
       new_sqlite_classes?: string[];
     }>;
     expect(sourceMigrations.some((m) => m.new_classes?.length)).toBe(true);
-    expect(config.migrations.map((m) => m.tag)).toEqual(sourceMigrations.map((m) => m.tag));
+    // wrangler.toml's tags in order, then the self-host-only classes' own tags.
+    expect(config.migrations.map((m) => m.tag)).toEqual([
+      ...sourceMigrations.map((m) => m.tag),
+      ...SELFHOST_DURABLE_OBJECTS.map((object) => object.migrationTag),
+    ]);
     for (const migration of config.migrations) {
       expect(Object.keys(migration).sort()).toEqual(['new_sqlite_classes', 'tag']);
     }
@@ -84,7 +89,28 @@ describe('buildCelldConfig against the real apps/api/wrangler.toml', () => {
       ...(m.new_sqlite_classes ?? []),
       ...(m.new_classes ?? []),
     ]);
-    expect(new Set(created)).toEqual(new Set(expected));
+    expect(new Set(created)).toEqual(
+      new Set([...expected, ...SELFHOST_DURABLE_OBJECTS.map((object) => object.className)])
+    );
+  });
+
+  it('declares the self-host-only Durable Objects that wrangler.toml does not', () => {
+    const sourceClasses = (
+      source.durable_objects as { bindings: Array<{ class_name: string }> }
+    ).bindings.map((b) => b.class_name);
+    expect(sourceClasses).not.toContain('HostedGitRepo');
+    expect(config.durable_objects.bindings).toContainEqual({
+      name: 'HOSTED_GIT',
+      class_name: 'HostedGitRepo',
+    });
+    expect(config.migrations.at(-1)).toEqual({
+      tag: 'selfhost-hosted-git-v1',
+      new_sqlite_classes: ['HostedGitRepo'],
+    });
+    expect(config.vars.HOSTED_GIT_BACKEND).toBe('durable-object');
+    expect(plan.report).toContain(
+      'self-host Durable Object HOSTED_GIT (HostedGitRepo), migration selfhost-hosted-git-v1'
+    );
   });
 
   it('keeps container DO bindings (the classes stay exported) but not their containers', () => {
@@ -198,7 +224,24 @@ describe('buildCelldConfig failure modes', () => {
       new_sqlite_classes: ['X'],
     });
     const plan = buildCelldConfig(source, options);
-    expect(plan.config.migrations.at(-1)).toEqual({ tag: 'v999', new_sqlite_classes: ['X'] });
+    expect(plan.config.migrations.find((m) => m.tag === 'v999')).toEqual({
+      tag: 'v999',
+      new_sqlite_classes: ['X'],
+    });
+  });
+
+  it.each([
+    ['binding name', { name: 'HOSTED_GIT', class_name: 'Other' }, undefined],
+    ['class', { name: 'OTHER', class_name: 'HostedGitRepo' }, undefined],
+    ['migration tag', undefined, { tag: 'selfhost-hosted-git-v1', new_sqlite_classes: ['Y'] }],
+    ['migrated class', undefined, { tag: 'v998', new_sqlite_classes: ['HostedGitRepo'] }],
+  ])('refuses a wrangler.toml that declares the self-host-only %s', (_what, binding, migration) => {
+    const source = base();
+    if (binding) {
+      (source.durable_objects as { bindings: unknown[] }).bindings.push(binding);
+    }
+    if (migration) (source.migrations as unknown[]).push(migration);
+    expect(() => buildCelldConfig(source, options)).toThrow(/only the self-host build may declare/);
   });
 
   it('fails on a Durable Object migration celld cannot apply', () => {
