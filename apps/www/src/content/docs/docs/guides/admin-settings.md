@@ -64,6 +64,50 @@ because the change may already have been saved. The same message appears when SA
 for example a client secret that doesn't belong to its client ID. If the setting still shows its old
 value and **Source** after the reload, nothing was saved: check the value and try again.
 
+## Streamed message storage
+
+The **Operations** category includes these chat storage settings:
+
+| Setting                        | Code default | Effect                                                                                                                                     |
+| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                          |
+| `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows. |
+| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                   |
+
+Merging requires an updated reporter that sends its durable outbox incarnation. Older reporters,
+and requests with a missing or malformed incarnation, keep individual inserts and provide **zero
+merge savings** until the runtime is replaced. Both VM and Instant use the same reporter binary.
+A new reporter remains compatible with an older Worker: the extra header is ignored and the JSON
+body is unchanged.
+
+The row cap applies to newly merged message rows, not oversized individual messages. Retry-state
+admission uses the same value as a soft budget: existing replay frontiers are retained when the
+budget is lowered, and later descriptor growth can exceed it. It is not a hard cap on the whole
+session metadata row.
+
+Managed VM replacement is gradual. Code defaults start lifetime drain at 24 hours
+(`NODE_ABSOLUTE_MAX_LIFETIME_MS`), force-sleep a still-running turn after another 30 minutes
+(`operations.nodeLifetimeForceSleepAfterMs`), and retain an empty warm node for 30 minutes
+(`NODE_WARM_TIMEOUT_MS`). These are defaults, not measured deployment values or a strict rollout
+deadline: configured overrides, sweep scheduling and cleanup failures affect completion. Check the
+effective settings and actual reporter versions before forecasting fleet savings. Measure the
+rollout through successive row-usage windows.
+
+Existing message rows and their comment anchors remain unchanged. Tool, user, system, thinking,
+plan and typed-card rows keep their existing storage format. A connected browser that does not
+advertise incremental append support disables merging for the sessions it watches; a legacy
+project-wide connection disables it for the project. Refresh old tabs to restore eligibility.
+
+To roll back, save `false` for `chat.messageMergingEnabled`. The next batch seals any open merged
+row and stores new chunks individually; retry receipts remain available. Previously merged rows
+remain readable and commentable. Settings use the normal admin cache refresh interval.
+
+Initial rollout keeps the code default off. Production activation requires explicit acceptance of
+the storage contract: very long replies can have different grouped-row splits, raw search can match
+words formerly split between chunks. Before indexing, raw fallback uses one hit and snippet per canonical row, so repeated matches in absorbed chunks consolidate. A late timestamped row can appear at a merged reply's
+boundary instead of splitting that reply. Text bytes are preserved. The late-timestamp boundary
+change preserves the text as one item. Genuine in-order tool calls and the grouping size limit can still split Markdown across items.
+
 ## Undo a change
 
 **Reset override** removes the value saved in the app. The setting then goes back to its GitHub
@@ -208,6 +252,18 @@ where it says so and the app continues from there.
 | `secrets.purgeBudgetSeconds`     | 20                  | 1–120         | Seconds the daily purge may run                                                                                                                                                                                         |
 | `secrets.expirySweepBatchSize`   | 10                  | 1–25          | Expired or unnotified requests one five-minute sweep handles (each one notifies its agent)                                                                                                                              |
 | `secrets.notifyRetryMinutes`     | 60                  | 15–1,440      | Minutes during which the sweep retries telling an agent about its request's outcome if the first notice could not be queued                                                                                             |
+
+## Node provisioning
+
+This **Operations** setting bounds one durable node-provisioning attempt
+(`resolveNodeProvisioningAttemptDeadlineMs()`, armed by `NodeLifecycleProvisioning.run()`). It cuts
+the work before the provider create starts and the node's DNS record afterwards. A create that has
+started is never cut or repeated: if it outlives the attempt, the next attempt (after
+`NODE_PROVISIONING_RETRY_INTERVAL_MS`, 30 seconds by default) adopts the VM by its labels.
+
+| Setting                                        | Default | Range         | What it controls                                                                                                                                                   |
+| ---------------------------------------------- | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `operations.nodeProvisioningAttemptDeadlineMs` | 60,000  | 5,000–180,000 | Milliseconds one attempt may run before it is cut and resumed. A Google Cloud create takes 9–12 seconds and a Hetzner create 1–2. 5,000 restores the old behaviour |
 
 ## Eviction recovery
 

@@ -260,7 +260,7 @@ describe('ProjectData DO session validation behavior', () => {
 
   it('rejects batch persistence to stopped sessions', async () => {
     const { projectData } = createProjectData((query) => {
-      if (query.includes('SELECT id, message_count, topic, status FROM chat_sessions')) {
+      if (query.includes('message_count') && query.includes('FROM chat_sessions')) {
         return [{ id: 'session-a', message_count: 0, topic: null, status: 'stopped' }];
       }
       return [];

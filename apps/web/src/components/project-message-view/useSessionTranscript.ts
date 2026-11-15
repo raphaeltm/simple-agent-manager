@@ -1,10 +1,11 @@
+import type { ChatMessageAppend } from '@simple-agent-manager/shared';
 import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import type { ChatMessageResponse, ChatSessionDetailResponse } from '../../lib/api';
 import { getChatSession } from '../../lib/api';
-import { mergeMessages } from '../../lib/merge-messages';
+import { applyMessageAppend, mergeMessages } from '../../lib/merge-messages';
 import {
   fetchHistoryUntil,
   historyReaches,
@@ -40,6 +41,8 @@ export interface SessionTranscript {
   firstItemIndex: number;
   /** Adds live rows (socket deliveries, optimistic sends) in transcript order. */
   appendMessages: (incoming: ChatMessageResponse[]) => void;
+  /** False asks the socket to recover a missing base or revision gap through REST. */
+  appendMessageContent: (append: ChatMessageAppend) => boolean;
   /** Merges server-reported fields into one loaded row's tool metadata (delivery state). */
   patchMessageMetadata: (messageId: string, patch: Record<string, unknown>) => void;
   /**
@@ -144,6 +147,21 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     [queryClient, queryKey]
   );
 
+  const appendMessageContent = useCallback(
+    (append: ChatMessageAppend): boolean => {
+      const current = readDetail();
+      if (!current) return false;
+      const result = applyMessageAppend(current.messages, append);
+      if (result.needsCatchUp) return false;
+      queryClient.setQueryData<ChatSessionDetailResponse>(queryKey, {
+        ...current,
+        messages: result.messages,
+      });
+      return true;
+    },
+    [queryClient, queryKey, readDetail]
+  );
+
   /**
    * For a socket that just subscribed: reads the rows persisted after the transcript's last
    * read and before the subscription. They reached no socket, and once a newer live row lands,
@@ -217,10 +235,11 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
         return {
           ...(latest ?? merged),
           ...(overtaken ? { hasMore: merged.hasMore } : merged),
-          messages:
-            arrived.length > 0
-              ? mergeMessages(merged.messages, arrived, 'append')
-              : merged.messages,
+          messages: mergeMessages(
+            merged.messages,
+            [...(latest?.messages ?? []), ...arrived],
+            'append'
+          ),
           // A window that carries no state snapshot must not erase the last known one.
           state: overtaken ? (latest?.state ?? null) : (merged.state ?? latest?.state ?? null),
         };
@@ -304,6 +323,7 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     loadingMore: olderLoadsInFlight > 0,
     firstItemIndex,
     appendMessages,
+    appendMessageContent,
     patchMessageMetadata,
     catchUpTail,
     mergeRecentWindow,
