@@ -148,3 +148,36 @@ not live provider-crash or abrupt isolate proof. The operational recipe uses nor
 cleanup, and conservativeUSD0.85 underUSD1 estimate. Fresh quote/authority, all-in cost/headroom,
 exact admin/candidate CAS restoration, actual lane handoff and independent provider absence plus
 late control-plane cleanup are required. No SQL fixture mutation, fake callback or production trial.
+
+
+## Deployment runner prerequisite and final reviewed boundaries (2026-11-15)
+
+The preaccepted touch-only successor `fab996fec01b9816a3aeefa9a43089b9c5d4d585`
+passed every functional CI job, including 735 visual tests (76 skipped), native tests and all
+Workers shards. Its one-line `clear.tap()` change followed the same visual failure on both earlier
+candidates. Local runs passed before and after, so they do not establish causality; the pinned CI
+result is the observed validation. The draft/coordinator marker still blocks release.
+
+GitHub's Ubuntu 26.04 runner migration then blocked deployment independently of this feature:
+immutable cgo VM-agent bytes differed and Playwright could not install Chromium. Exact upstream
+PR [#2744](https://github.com/raphaeltm/simple-agent-manager/pull/2744) pins the deploy and browser
+jobs to Ubuntu 24.04. Its commits `b39c0a33e2098728b304d1466f38f82e07888352`,
+`a0f07c6ebc7a57032501db0bc6b052d7468ee21a` and `74877d405f4bd7ea217a18dd14b648757085b9bf`
+are incorporated with cherry-pick provenance. Its exact staging run
+[43659373700](https://github.com/raphaeltm/simple-agent-manager/actions/runs/43659373700)
+passed deployment and all 12 smokes; this validates the runner prerequisite, not this feature's
+required live catalog/wake lifecycle. Focused workflow validation passes 167 tests in four suites.
+All API, package and script bytes remain identical to the functional-CI-green predecessor.
+
+A completed publication that changes offering metadata (price or disk) still invalidates a new
+allocation already in flight under the existing revision/authority fences. The coordinator accepted
+that pre-existing boundary outside this PR; retained committed catalogs and authorized existing-node
+reuse are protected here. Two separate ideas retain the self-host R14 evidence without claiming
+main/staging reproduction: `01M7EB64WBBRSZJJ0M08M8APNM` (price versus allocation authority) and
+`01M7EB88QA1P81MFT9T389BZFB` (node stuck destroying after compensation). No extra source change or
+live fixture was requested for them.
+
+The successor still requires its own full-head CI and coordinator source acceptance, a later actual
+Shepherd staging handoff, the bounded catalog/wake/Instant run and strict provider cleanup, and final
+coordinator release approval for that SHA. Keep the PR draft until that approval. Preserve the chosen
+Sol/openai-codex identity. Production verification remains basic health/version smoke only.
