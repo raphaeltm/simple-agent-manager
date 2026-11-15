@@ -59,7 +59,8 @@ Default 60 s (not 45 s), configurable as an admin setting (Raphaël, 2026-11-14)
   - F16 reverted (raw message in wrapper) -> `logs each failed attempt ... keeps raw provider text out of lastError` red
   - attempt log removed -> both log-asserting worker tests red
 - [x] Existing tests updated: tunnel-transport deadline test re-timed to the 5 s minimum; metering deadline cases pin a 200 ms budget through a passthrough settings mock; two node-tunnel-hardening tests now assert the safe wrapper message plus `cause`
-- [ ] Staging: real Hetzner + GCP node to heartbeat, one forced failure, admin setting takes effect, cleanup
+- [x] Staging (2026-11-15, T0 06:23:01, freed 06:32:20, deploy run 43683564808): real Hetzner (cx23 fsn1) and GCP (e2-medium europe-west1-b) nodes to heartbeat in one attempt each; setting written/read/restored through the admin API; GCP candidate temporarily enabled and restored; both nodes deleted with strict proof
+- [ ] GAP (reported, not closed): forced failure did not materialize on staging. Staging uses Cloudflare Tunnel transport (no DNS step, started create never cut), so the 5 s setting cut nothing; the cut-after-create/adopt path is proven only by the worker test
 
 ## Acceptance criteria
 
