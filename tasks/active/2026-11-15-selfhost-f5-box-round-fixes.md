@@ -63,20 +63,20 @@ Out of scope (tracked elsewhere): Admin Settings 503 on one invalid stored value
       test-engineer (HIGH: deploy wiring and dry-run; addressed with `verifyNewVersionServes`
       ordering tests, dry-run deploy test, contract fake, branch tests, account-link via the real
       better-auth hook), task-completion-validator (WARN: stale checklist, fixed here).
-- [ ] CI dispatched by hand and green; SonarCloud checked.
-- [ ] Box verification per item.
+- [x] CI dispatched by hand: run 43769639876 green on d5f9991c8; run 43771933518 on 4809b097b (Sonar refactor). SonarCloud quality gate OK; issues in touched code fixed in 4809b097b.
+- [x] Box verification per item (PR #2764 body, Staging Verification Evidence). Box left on 4809b097b, bundle e46cd268, health 200.
 
 ## Acceptance criteria
 
-- [ ] On the box, saving and clearing an integration delivers an alert mail to the collector, no
+- [x] On the box, saving and clearing an integration delivers an alert mail to the collector, no
       `security_alert.no_sender`.
-- [ ] Cloudflare behaviour identical (binding path tests); wrangler.toml byte-identical to main;
+- [x] Cloudflare behaviour identical except the GitLab authorize URL (D4, same granted scopes; coordinator told) (binding path tests); wrangler.toml byte-identical to main;
       selfhost-only-modules guard passes.
-- [ ] G3 cause identified with evidence; deploy health waits for the route when trust is set.
-- [ ] Teardown never deletes or changes a resource SAM did not create.
-- [ ] Refusal message names `pnpm selfhost:deploy --init` and where to run it.
-- [ ] A sealed value can be removed through a supported path.
-- [ ] GitLab scope string has each scope once.
+- [x] G3 cause identified with evidence; deploy health waits for the route when trust is set.
+- [x] Teardown never deletes or changes a resource SAM did not create.
+- [x] Refusal message names `pnpm selfhost:deploy --init` and where to run it.
+- [x] A sealed value can be removed through a supported path.
+- [x] GitLab scope string has each scope once.
 
 ## Notes
 
