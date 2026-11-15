@@ -49,7 +49,7 @@ this moves, nothing that touches hosted git can land on main (landing plan part 
 - Docs: `deploy/selfhost/README.md` "SAM-hosted repositories" says the route is "the existing
   catch-all route"; `tokens-and-limits.test.ts` comment says the binding exists on every deploy.
 - Bundle before (top-level config, `wrangler deploy --dry-run --containers-rollout=none --outdir`):
-  index.js 32,960,087 bytes, 6,149,156 gzip -9.
+  index.js 32,960,087 bytes, 6,149,666 gzip -9.
 
 ## Implementation checklist
 
@@ -95,6 +95,20 @@ this moves, nothing that touches hosted git can land on main (landing plan part 
   on the base too (fake forge forwarded `content-length`; Node fetch: "invalid content-length
   header", surfaced as HTTP 500 to isomorphic-git). Fixed in the harness; 18/18 now.
 
+## Review outcomes
+
+- cloudflare-specialist: 0 CRITICAL/HIGH. MEDIUM: bucket-mode `celld deploy` over a box that ran
+  `v23` is unverified (only `celld dev`) -> box-round check, README/comment no longer assert it.
+  LOW: guard against mounting on a second app instance -> `mountHostedGitRoute` refuses an empty app.
+- architecture-reviewer: 0 CRITICAL/HIGH. Conformance suite moved to its own job gated on the api
+  filter; exports test for `SELFHOST_ENTRY_MODULE`; prefix match; doc fixes. Kept moving the route
+  (the assignment requires index.ts free of hosted-git imports); kept the walker (an ESLint boundary
+  rule only sees direct imports per file; the walker also proves liveness).
+- security-auditor: 0 CRITICAL/HIGH. MEDIUM "v23 may be deployed": verified `03015f0ab` is not an
+  ancestor of origin/main and none of the last 200 staging deploys ran it.
+- task-completion-validator: PASS. MEDIUM "generated entry never exercised" ->
+  `apps/api/tests/hosted-git/celld-entry-bundle.test.ts` (celld --dry-run, both modes, proved red).
+
 ## Evidence
 
 - Bundle (`wrangler deploy --dry-run --containers-rollout=none --outdir`, top-level config):
@@ -106,6 +120,8 @@ this moves, nothing that touches hosted git can land on main (landing plan part 
   `env.HOSTED_GIT (HostedGitRepo) Durable Object (SQLite)`; esbuild metafile of the sealed entry
   includes the 3 DO files, 12 dgit files, pako 2.2.0 and a single `app.ts` module.
 - `pnpm quality:wrangler-bindings`: 20 DOs, 22 migrations. DO migration compatibility 20/20.
+  `pnpm typecheck` and `pnpm lint` exit 0. API unit suite 1091 files / 16,312 tests passed.
+  `test:hosted-git` 20/20 after the celld entry bundle test was added.
   `pnpm selfhost:test` 538 passed, 5 skipped. `test:hosted-git` 18/18. scripts/quality 919/919.
 - Guard proved red (index.ts re-exporting HostedGitRepo; wrangler.toml re-declaring it). Route-order
   test proved red (a late `app.use('*')` in index.ts).
