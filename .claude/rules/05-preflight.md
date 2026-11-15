@@ -47,4 +47,4 @@ Statements like "it probably won't work," "credentials seem unavailable," or "th
 
 All AI-authored PRs MUST include preflight evidence using the block in `.github/pull_request_template.md`. CI validates this evidence on pull requests.
 
-A failed Preflight Evidence check means the PR evidence is incomplete, malformed, or unsupported by the work performed. It is not an informational nuisance. Fix the PR body or complete the missing preflight work before merge, unless a human explicitly approves the exception in the PR.
+A failed preflight step in the PR Evidence check means the PR evidence is incomplete, malformed, or unsupported by the work performed. It is not an informational nuisance. Fix the PR body or complete the missing preflight work before merge, unless a human explicitly approves the exception in the PR.

@@ -60,7 +60,7 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
   // The required check now gates the whole suite (scripts/quality/ci-draft-and-gate.test.ts);
   // for API changes it must still demand that every Workers shard succeeded.
   const gate = jobBlock(workflow, 'durable-object-workers');
-  expect(gate).toContain("|| 'Durable Object Workers' }}");
+  expect(gate).toContain("&& 'Durable Object Workers' ||");
   expect(gate).toContain('      - durable-object-worker-shards\n');
   expect(gate).toContain('if: always()');
   expect(gate).not.toContain('continue-on-error');

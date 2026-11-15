@@ -11,7 +11,8 @@
  * small package, so the blob/coverage mechanics are exercised, not just described.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
@@ -39,6 +40,8 @@ interface Job {
 }
 
 const REPO_ROOT = join(__dirname, '..', '..');
+// eslint-disable-next-line no-control-regex
+const ANSI = /\x1b\[[0-9;]*m/gu;
 
 function jobs(source = workflowSource('ci.yml')): Record<string, Job> {
   return (parse(source) as { jobs: Record<string, Job> }).jobs;
@@ -96,6 +99,16 @@ function expectShardWiring(source?: string): void {
     );
     expect(upload?.with?.path).toBe(`${suite.dir}/.vitest-reports/`);
     expect(upload?.with?.['if-no-files-found']).toBe('error');
+    // Each shard uploads under its own name, and the Test job downloads exactly that set.
+    const suiteName = suite.job.replace('test-', '');
+    expect(upload?.with?.name).toBe(`test-blob-${suiteName}-\${{ matrix.shard }}`);
+    const download = test.steps?.find(
+      (candidate) =>
+        candidate.uses?.startsWith('actions/download-artifact@') &&
+        candidate.with?.path === `${suite.dir}/.vitest-reports/`
+    );
+    expect(download?.with?.pattern).toBe(`test-blob-${suiteName}-*`);
+    expect(download?.with?.['merge-multiple']).toBe(true);
 
     const merge = step(test, suite.merge);
     expect(merge['working-directory']).toBe(suite.dir);
@@ -110,7 +123,8 @@ function expectShardWiring(source?: string): void {
 
   expect(test.name).toBe('Test');
   expect(test.needs).toEqual(['changes', 'test-api', 'test-web', 'test-packages']);
-  expect(test.if).toMatch(/^always\(\) && /u);
+  // Runs after a failed shard (to report it), but not in a cancelled run.
+  expect(test.if).toMatch(/^\$\{\{ !cancelled\(\) && /u);
   expect(test['timeout-minutes']).toBeLessThanOrEqual(15);
 
   const packages = step(all['test-packages']!, 'Run package tests with coverage');
@@ -142,6 +156,21 @@ describe('sharded unit test wiring', () => {
       "-name 'blob-*.json' | wc -l)\" -ge 1",
     ],
     ['a shard that keeps a per-shard threshold', '--coverage.thresholds.lines=0', ''],
+    [
+      'web thresholds zeroed in the merge',
+      '-eq 2\n          pnpm exec vitest run --merge-reports --coverage\n',
+      '-eq 2\n          pnpm exec vitest run --merge-reports --coverage --coverage.thresholds.lines=0\n',
+    ],
+    [
+      'an upload name shared by every API shard',
+      'name: test-blob-api-${{ matrix.shard }}',
+      'name: test-blob-api',
+    ],
+    [
+      'a download pattern that misses the web blobs',
+      'pattern: test-blob-web-*',
+      'pattern: test-blob-webs-*',
+    ],
   ])('rejects %s', (_, from, to) => {
     const source = workflowSource('ci.yml');
     const weakened = source.replace(from, to);
@@ -172,31 +201,36 @@ describe('sharded unit test wiring', () => {
 describe('shard and merge commands against a real package', () => {
   const packageDir = join(REPO_ROOT, 'packages/shared');
   const reports = join(packageDir, '.vitest-reports');
-  const coverage = join(packageDir, 'coverage');
-  const coverageExisted = existsSync(coverage);
   const all = jobs();
   const shardCommand = step(all['test-api']!, 'Run API unit test shard with coverage').run!;
   const mergeCommand = step(all.test!, 'Merge API shards and enforce API coverage thresholds').run!;
 
-  const exec = (command: string, extra: Record<string, string> = {}) =>
-    spawnSync('bash', ['-c', command], {
-      cwd: packageDir,
-      env: { ...process.env, ...extra },
-      encoding: 'utf8',
-      timeout: 120_000,
-    });
+  // Reports go to a temporary directory, so a developer's packages/shared/coverage is
+  // never touched. NO_COLOR keeps the summary lines matchable in CI, and `bash -e` is
+  // how Actions runs a `run:` block.
+  const reportsDirectory = mkdtempSync(join(tmpdir(), 'ci-shard-coverage-'));
+  const exec = (command: string, extra: Record<string, string> = {}) => {
+    const env: Record<string, string | undefined> = { ...process.env, ...extra, NO_COLOR: '1' };
+    for (const key of Object.keys(env)) if (key.startsWith('VITEST')) delete env[key];
+    delete env.FORCE_COLOR;
+    const result = spawnSync(
+      'bash',
+      ['-e', '-c', `${command.trimEnd()} --coverage.reportsDirectory=${reportsDirectory}`],
+      { cwd: packageDir, env, encoding: 'utf8', timeout: 120_000 }
+    );
+    return { ...result, output: `${result.stdout}${result.stderr}`.replace(ANSI, '') };
+  };
 
   afterAll(() => {
     rmSync(reports, { recursive: true, force: true });
-    // coverage/ is gitignored; remove it only if this test created it.
-    if (!coverageExisted) rmSync(coverage, { recursive: true, force: true });
+    rmSync(reportsDirectory, { recursive: true, force: true });
   });
 
   it('each shard passes despite covering only part of the package', () => {
     rmSync(reports, { recursive: true, force: true });
     for (const shard of ['1', '2', '3']) {
       const result = exec(shardCommand, { TEST_SHARD: shard });
-      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.status, result.output).toBe(0);
     }
     expect(readdirSync(reports).sort()).toEqual([
       'blob-1-3.json',
@@ -207,18 +241,19 @@ describe('shard and merge commands against a real package', () => {
 
   it('the merge step passes with every shard and enforces the thresholds', () => {
     const result = exec(mergeCommand);
-    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-    expect(result.stdout).toMatch(/Test Files\s+\d+ passed/u);
+    expect(result.status, result.output).toBe(0);
+    expect(result.output).toMatch(/Test Files\s+\d+ passed/u);
   }, 120_000);
 
   it('the merge step fails when a shard report is missing', () => {
     unlinkSync(join(reports, 'blob-3-3.json'));
-    expect(exec(mergeCommand).status).not.toBe(0);
-    // Without the count check, the thresholds alone still reject a partial merge.
+    // The blob-count guard stops the step before Vitest runs.
+    const guarded = exec(mergeCommand);
+    expect(guarded.status).not.toBe(0);
+    expect(guarded.output).not.toMatch(/Test Files/u);
+    // Without the guard, the thresholds alone still reject a partial merge.
     const thresholdsOnly = exec('pnpm exec vitest run --merge-reports --coverage');
     expect(thresholdsOnly.status).not.toBe(0);
-    expect(thresholdsOnly.stdout + thresholdsOnly.stderr).toMatch(
-      /does not meet global threshold/u
-    );
+    expect(thresholdsOnly.output).toMatch(/does not meet global threshold/u);
   }, 120_000);
 });

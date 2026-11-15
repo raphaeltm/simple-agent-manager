@@ -115,7 +115,7 @@ fallback bounded and record it in the workflow state file.
 | Losing track of implementation items                  | "Implementation Progress" mirrors the task file                                                              |
 | Forgetting the branch/worktree path                   | Recorded at creation time                                                                                    |
 | Repeating already-done work                           | Checked items + notes show what's been accomplished                                                          |
-| Jumping to PR creation early                          | Phase checklist enforces ordering                                                                            |
+| Merging before Phases 5 and 6 complete                | Phase checklist enforces ordering                                                                            |
 | Merging before reviewers finish                       | Review Tracker blocks Phase 5 completion until all reviewers report back                                     |
 | Forgetting unresolved CodeRabbit feedback             | Phase 7 CodeRabbit Review Tracker records the request, the wait outcome, and any findings with fix commits   |
 | Silently failing production deploy                    | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
@@ -167,7 +167,7 @@ When the reviewer finds issues deferred to backlog:
 
 `.do-state.md` is local-only and snapshot-visible. A successful snapshot can preserve it, but failed capture or workspace deletion can still lose it. The PR description, by contrast, is durable — it lives on GitHub and is visible to humans.
 
-**When you create the PR in Phase 7, you MUST copy the Review Tracker into the PR description's "Specialist Review Evidence" table and maintain the PR template's "CodeRabbit Review Evidence" section.** This is the authoritative record. If `.do-state.md` is lost (workspace killed, worktree removed), the PR description is what humans will use to verify whether reviews were actually completed.
+**Before merging (the PR exists as a draft from Phase 3), you MUST copy the Review Tracker into the PR description's "Specialist Review Evidence" table and maintain the PR template's "CodeRabbit Review Evidence" section.** This is the authoritative record. If `.do-state.md` is lost (workspace killed, worktree removed), the PR description is what humans will use to verify whether reviews were actually completed.
 
 If you cannot populate the PR's review table because you've lost track of reviewer state (context compaction, workspace killed), you MUST add the `needs-human-review` label and stop. See `.claude/rules/25-review-merge-gate.md`.
 

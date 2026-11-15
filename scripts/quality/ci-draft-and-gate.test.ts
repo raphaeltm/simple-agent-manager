@@ -199,15 +199,27 @@ function simulate(
       ])
     );
     const condition = job.if ?? 'success()';
-    const usesAlways = /\balways\(\)/u.test(condition);
+    // Actions adds an implicit success() unless the expression calls a status function.
+    const usesStatusFunction = /\b(?:always|cancelled|failure|success)\(\)/u.test(condition);
     const needsSucceeded = needsOf(job).every((need) => results.get(need) === 'success');
     const allowed = evaluate(
       condition,
       { github: githubContext(scenario), needs },
-      { always: () => true, success: () => needsSucceeded, cancelled: () => false }
+      {
+        always: () => true,
+        success: () => needsSucceeded,
+        failure: () => !needsSucceeded,
+        cancelled: () => false,
+      }
     );
-    const runs = Boolean(allowed) && (usesAlways || needsSucceeded);
-    results.set(id, runs ? (failing.includes(id) ? 'failure' : 'success') : 'skipped');
+    const runs = Boolean(allowed) && (usesStatusFunction || needsSucceeded);
+    // A job that runs after a failed need (via a status function) reports that failure,
+    // as the Test job's first step does. The gate is judged by its real steps instead.
+    const inheritsFailure = !needsSucceeded && id !== 'durable-object-workers';
+    results.set(
+      id,
+      runs ? (failing.includes(id) || inheritsFailure ? 'failure' : 'success') : 'skipped'
+    );
   }
   return results;
 }
@@ -259,6 +271,35 @@ describe('draft pull requests run only the quick checks', () => {
     expect(started(results).sort()).toEqual(expected.sort());
   });
 
+  it.each([
+    ['marketing-only', ['marketing-site'], ['changes', 'pr-evidence', 'secret-scan']],
+    ['CI-routing-only', ['ci-workflow'], ['changes', 'pr-evidence', 'secret-scan', 'code-quality']],
+    [
+      'browser helper and marketing',
+      ['browser-install', 'marketing-site'],
+      ['changes', 'pr-evidence', 'secret-scan'],
+    ],
+  ])('a draft %s PR starts only its quick jobs', (_, filters, expected) => {
+    const results = simulate({ eventName: 'pull_request', draft: true, filters });
+    expect(started(results).sort()).toEqual([...expected].sort());
+  });
+
+  it.each([
+    [
+      'marketing-only',
+      ['marketing-site'],
+      ['changes', 'pr-evidence', 'secret-scan', 'marketing-site', 'durable-object-workers'],
+    ],
+    [
+      'CI-routing-only',
+      ['ci-workflow'],
+      ['changes', 'pr-evidence', 'secret-scan', 'code-quality', 'durable-object-workers'],
+    ],
+  ])('a ready %s PR starts exactly its jobs', (_, filters, expected) => {
+    const results = simulate({ eventName: 'pull_request', filters });
+    expect(started(results).sort()).toEqual([...expected].sort());
+  });
+
   it('every quick job is also a job the ready run starts (liveness control)', () => {
     const results = simulate({ eventName: 'pull_request', draft: false, filters: ALL_FILTERS });
     for (const id of QUICK_JOBS) expect(results.get(id), id).toBe('success');
@@ -290,6 +331,14 @@ describe('the required "Durable Object Workers" check', () => {
     }
   });
 
+  it('is not reported under the required name on a manual dispatch run of a branch', () => {
+    // A dispatch run skips the PR-only jobs, so it must not satisfy the required check.
+    const gate = loadWorkflow().jobs[gateId]!;
+    const dispatch = { eventName: 'workflow_dispatch', filters: ALL_FILTERS } as const;
+    expect(evaluateName(gate, dispatch)).not.toBe(REQUIRED_CHECK);
+    expect(simulate(dispatch).get('playwright-visual')).toBe('skipped');
+  });
+
   it('is reported under the required name on ready PR runs and main pushes', () => {
     const gate = loadWorkflow().jobs[gateId]!;
     for (const scenario of [
@@ -316,16 +365,6 @@ describe('the required "Durable Object Workers" check', () => {
     expect(needsOf(workflow.jobs[gateId]!).sort()).toEqual(expected.sort());
   });
 
-  it('still runs, and so can fail, when a full-suite job fails', () => {
-    const results = simulate(
-      { eventName: 'pull_request', filters: ['repo-quality'] },
-      loadWorkflow(),
-      ['test-api']
-    );
-    expect(results.get('test')).toBe('success'); // runs (always()) and then fails its own check
-    expect(results.get(gateId)).toBe('success'); // started; its step decides the verdict
-  });
-
   it('is not started on fork main pushes (fork bypass)', () => {
     const results = simulate({
       eventName: 'push',
@@ -333,6 +372,83 @@ describe('the required "Durable Object Workers" check', () => {
       filters: ALL_FILTERS,
     });
     expect(started(results)).toEqual([]);
+  });
+});
+
+/**
+ * Runs the gate job's real steps (honouring each step's `if:`) against a `needs`
+ * context built from the simulated job graph, the way Actions would. Returns null
+ * when the gate job itself did not start.
+ */
+function gateVerdict(
+  scenario: Scenario,
+  failing: string[] = [],
+  workflow = loadWorkflow()
+): 'pass' | 'fail' | null {
+  const results = simulate(scenario, workflow, failing);
+  const gate = workflow.jobs['durable-object-workers']!;
+  if (results.get('durable-object-workers') === 'skipped') return null;
+  const outputs = Object.fromEntries(
+    ALL_FILTERS.map((filter) => [filter, scenario.filters.includes(filter) ? 'true' : 'false'])
+  );
+  const needs = Object.fromEntries(
+    needsOf(gate).map((need) => [
+      need,
+      { result: results.get(need), outputs: need === 'changes' ? outputs : {} },
+    ])
+  );
+  for (const step of gate.steps ?? []) {
+    if (step.if && !evaluate(step.if, { github: githubContext(scenario), needs })) continue;
+    const env: Record<string, string> = { ...process.env } as Record<string, string>;
+    env.NEEDS_JSON = JSON.stringify(needs);
+    env.SHARD_RESULT = String(results.get('durable-object-worker-shards'));
+    // Actions runs `run:` blocks with `bash -e`.
+    if (spawnSync('bash', ['-e', '-c', step.run ?? 'false'], { env }).status !== 0) return 'fail';
+  }
+  return 'pass';
+}
+
+describe('gate verdicts through the simulated job graph', () => {
+  const pr = (filters: string[]): Scenario => ({ eventName: 'pull_request', filters });
+
+  it('passes a non-API PR whose suite passed, with the Workers shards skipped', () => {
+    expect(gateVerdict(pr(['repo-quality']))).toBe('pass');
+  });
+
+  it('passes an API PR whose suite passed', () => {
+    expect(gateVerdict(pr(['api', 'repo-quality']))).toBe('pass');
+  });
+
+  it('fails an API PR with a failing Workers shard', () => {
+    expect(gateVerdict(pr(['api', 'repo-quality']), ['durable-object-worker-shards'])).toBe('fail');
+  });
+
+  it('fails an API PR whose Workers shards were skipped (a skipped job reads as green)', () => {
+    const source = workflowSource('ci.yml').replace(
+      "&& !github.event.pull_request.draft && needs.changes.outputs.api == 'true'\n    # Keep per-file",
+      "&& needs.changes.outputs.api == 'never'\n    # Keep per-file"
+    );
+    expect(source).not.toBe(workflowSource('ci.yml'));
+    expect(gateVerdict(pr(['api', 'repo-quality']), [], loadWorkflow(source))).toBe('fail');
+  });
+
+  it('fails a non-API PR whose API unit shard failed (Test runs, fails, and fails the gate)', () => {
+    expect(gateVerdict(pr(['repo-quality']), ['test-api'])).toBe('fail');
+  });
+
+  it('fails when Detect Changes fails, although every other job is then skipped', () => {
+    expect(gateVerdict(pr(['repo-quality']), ['changes'])).toBe('fail');
+  });
+
+  it('fails a PR that only changes CI routing when its wiring tests fail', () => {
+    expect(gateVerdict(pr(['ci-workflow']), ['code-quality'])).toBe('fail');
+    expect(gateVerdict(pr(['ci-workflow']))).toBe('pass');
+  });
+
+  it('does not start on draft PRs', () => {
+    expect(gateVerdict({ eventName: 'pull_request', draft: true, filters: ALL_FILTERS })).toBe(
+      null
+    );
   });
 });
 
@@ -403,6 +519,7 @@ describe('public-site browser tests run once per run', () => {
     ['repo-quality only', ['repo-quality']],
     ['marketing-only', ['marketing-site']],
     ['browser-install helper only', ['browser-install', 'ci-workflow']],
+    ['browser-install helper and marketing', ['browser-install', 'marketing-site']],
     ['main push with everything', ALL_FILTERS],
   ])('exactly one job runs them for %s', (_, filters) => {
     const eventName = filters === ALL_FILTERS ? 'push' : 'pull_request';
@@ -424,15 +541,38 @@ describe('public-site browser tests run once per run', () => {
 });
 
 describe('runner budget', () => {
-  it('a ready PR that changes everything starts at most 28 jobs (29 before the split)', () => {
+  function jobCount(filters: string[]): number {
     const workflow = loadWorkflow();
-    const results = simulate({ eventName: 'pull_request', filters: ALL_FILTERS });
+    const results = simulate({ eventName: 'pull_request', filters });
     const matrixSize = (id: string) =>
       (
         (workflow.jobs[id] as { strategy?: { matrix?: { shard?: unknown[] } } }).strategy?.matrix
           ?.shard ?? [1]
       ).length;
-    const jobs = started(results).reduce((sum, id) => sum + matrixSize(id), 0);
-    expect(jobs).toBeLessThanOrEqual(28);
+    return started(results).reduce((sum, id) => sum + matrixSize(id), 0);
+  }
+
+  it('a ready PR changing API, web, VM agent and docs starts at most 24 jobs (22 before)', () => {
+    // The shape of baseline run 43734352275, which started 22 jobs before this change.
+    expect(
+      jobCount([
+        'api',
+        'cli',
+        'vm-agent',
+        'devcontainer-volume-mount',
+        'repo-quality',
+        'web-ui',
+        'marketing-site',
+      ])
+    ).toBeLessThanOrEqual(24);
+  });
+
+  it('a ready PR that triggers every filter starts at most 27 jobs (27 before)', () => {
+    expect(jobCount(ALL_FILTERS)).toBeLessThanOrEqual(27);
+  });
+
+  it('a draft PR starts 6 jobs', () => {
+    const results = simulate({ eventName: 'pull_request', draft: true, filters: ALL_FILTERS });
+    expect(started(results)).toHaveLength(6);
   });
 });

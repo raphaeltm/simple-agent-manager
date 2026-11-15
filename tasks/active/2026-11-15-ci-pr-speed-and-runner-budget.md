@@ -52,30 +52,38 @@ when every gate passes. No paid plan.
 
 ## Implementation checklist
 
-- [ ] `ci.yml`: `pull_request` types include `ready_for_review`
-- [ ] `ci.yml`: draft PRs run only quick checks (Detect Changes, PR Evidence, Lint, Build and Type
+- [x] `ci.yml`: `pull_request` types include `ready_for_review`
+- [x] `ci.yml`: draft PRs run only quick checks (Detect Changes, PR Evidence, Lint, Build and Type
       Check, Code Quality Checks, Secret Scan); every other job is skipped on drafts
-- [ ] `ci.yml`: required check `Durable Object Workers` becomes the full-suite gate: never reported
+- [x] `ci.yml`: required check `Durable Object Workers` becomes the full-suite gate: never reported
       under that name on a draft run, waits for every non-evidence job, fails on any failure or
       cancellation, still requires every Workers shard when the API changed
-- [ ] `ci.yml`: split `Test` into `test-api` (3 shards), `test-web` (2 shards), `test-packages`, and a
+- [x] `ci.yml`: split `Test` into `test-api` (3 shards), `test-web` (2 shards), `test-packages`, and a
       final `Test` job that merges the blob reports and enforces each package's coverage thresholds;
       lower the job limits
-- [ ] `ci.yml`: public-site browser tests run once per run (`Marketing Site` only when
+- [x] `ci.yml`: public-site browser tests run once per run (`Marketing Site` only when
       `Workspace Quality Surfaces` does not run); `pnpm quality:browser-evidence` unchanged
-- [ ] `ci.yml`: merge `Preflight Evidence`, `Specialist Review Evidence`, `UI Compliance` into one
+- [x] `ci.yml`: merge `Preflight Evidence`, `Specialist Review Evidence`, `UI Compliance` into one
       `PR Evidence` job; fold `CI Workflow` into `Code Quality Checks`; drop the duplicate `Build`
       job; fold `VM Agent E2E` into `VM Agent Integration`
-- [ ] `ci.yml`: concurrency group per commit for non-PR events; PR runs still cancel superseded runs
-- [ ] Wiring tests in `scripts/quality/ci-*.test.ts` updated and extended (draft gating, gate
+- [x] `ci.yml`: concurrency group per commit for non-PR events; PR runs still cancel superseded runs
+- [x] Wiring tests in `scripts/quality/ci-*.test.ts` updated and extended (draft gating, gate
       discrimination, shard/merge consistency, browser tests once, concurrency)
-- [ ] `scripts/quality/pr-evidence-source.ts` trigger comment updated
-- [ ] `.gitignore`: `.vitest-reports/`
-- [ ] Agent docs: `.claude/commands/do.md` (open a draft PR early, mark ready when the candidate is
+- [x] `scripts/quality/pr-evidence-source.ts` trigger comment updated
+- [x] `.gitignore`: `.vitest-reports/`
+- [x] Agent docs: `.claude/commands/do.md` (open a draft PR early, mark ready when the candidate is
       complete, CodeRabbit at mark-ready), `.agents/skills/do/SKILL.md`,
       `.claude/rules/25-review-merge-gate.md`, `.claude/rules/14-do-workflow-persistence.md` if it
       conflicts, `.github/pull_request_template.md` CodeRabbit section, `docs/guides/ci-wait-recovery.md`
       if it states when CI runs
+- [x] Review fixes: a manual `workflow_dispatch` run never reports the required name; Test job uses
+      `!cancelled()`; gate keeps `always()`; `persist-credentials: false` on PR Evidence; documented
+      the main-overlap deploy-displacement limit (ci.yml comment, /do Phase 7b recovery) because
+      `deploy.yml` is out of scope; stale PR-timing wording in rules 09, 14, 22, AGENTS.md, CLAUDE.md,
+      contributing docs
+- [ ] Revert the temporary trigger commit `8a2e5e7d7` (`packages/providers/.ci-proof-trigger`,
+      `apps/www/.ci-proof-trigger`) after the real CI proof run, before merge; confirm the final diff
+      has no `.ci-proof-trigger`
 - [ ] Real CI proof on this PR: draft run shows only the quick set; ready run executes every suite
       with test counts equal to the baseline; full run about 12 min or less
 - [ ] Idea `01M7FYGMEESYH3AJZJ0CT3NKCZ` note with before/after durations and job counts, plus next
@@ -92,6 +100,18 @@ when every gate passes. No paid plan.
 - [ ] Coverage thresholds are enforced on the whole of `apps/api` and `apps/web`
 - [ ] Full PR run job count stays at or under about 24
 - [ ] After merge, overlapping main pushes both get CI immediately and production deploys the tip
+
+## Notes
+
+- Draft run 43746251484 (head 8a2e5e7d7): started exactly the 6 quick jobs. GitHub does not
+  evaluate a skipped job's `name:` expression; the gate's check run was named with the raw
+  expression text, which is not `Durable Object Workers`, so the required check was not reported.
+- Base main run 43740879496 (7bea824b9): `Test` 32.7 min; per-package counts recorded for comparison
+  (api 1026 files / 15267 tests, web 410 / 5246, 19 other packages).
+- Security review (MEDIUM, accepted and documented): with per-commit main groups, an older run's
+  deploy can replace a newer pending deploy in `deploy-production`; the older one fails closed and the
+  tip waits for the next merge or a manual dispatch. Fixing it needs a `deploy.yml` change, outside
+  this task. Also MEDIUM, pre-existing: any PR can edit the gate job itself (no CODEOWNERS).
 
 ## Out of scope
 

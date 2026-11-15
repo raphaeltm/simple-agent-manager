@@ -118,7 +118,7 @@ Execute the checklist from the task file. Follow these rules:
    gh pr create --draft --title "<short title>" --body-file <filled-in .github/pull_request_template.md>
    ```
 
-   CI on a draft PR runs only the quick checks: Detect Changes, PR Evidence, Lint, Build and Type Check, Code Quality Checks and Secret Scan. The test suites, browser audits, deploy-script, VM, CLI and Workers jobs start only when the PR is marked ready (Phase 4, step 5), and the required `Durable Object Workers` check is not reported for a draft run, so a draft can never be merged on quick checks. Push as often as you like while it is a draft.
+   CI on a draft PR runs only the quick checks: Detect Changes, PR Evidence, Lint, Build and Type Check, Code Quality Checks and Secret Scan. The test suites, browser audits, deploy-script, VM, CLI and Workers jobs start only when the PR is marked ready (Phase 4, step 5), and the required `Durable Object Workers` check is not reported for a draft run, so a draft can never be merged on quick checks. Push as often as you like while it is a draft. PR Evidence is expected to fail until the Specialist Review Evidence table is filled in; after the final body edit, re-run it with `gh run rerun <run-id> --failed` (body edits alone do not start CI, and the check reads the live body).
 
 4. **Run quality checks regularly** during implementation:
    - `pnpm typecheck` after type-related changes
@@ -165,7 +165,7 @@ Before marking the PR ready for review, ensure everything is solid:
 
    `ready_for_review` starts the full CI suite on the current commit. Every later push to the ready PR re-runs the full suite and cancels the superseded run, so batch review and staging fixes into as few pushes as practical. If the label run did not fire, dispatch `gh workflow run coderabbit-bot-review.yml --ref main -f pr_number=<pr-number>` once (see Phase 7, steps 4 and 5, for the wait rules).
 
-   If the user asked for a draft PR or "do not merge", do not mark it ready. Get the full suite with `gh workflow run ci.yml --ref <branch-name>` instead (it runs every job except the PR-only Playwright visual audit and PR Evidence), and stop at the draft PR.
+   If the user asked for a draft PR or "do not merge", do not mark it ready. Get the full suite with `gh workflow run ci.yml --ref <branch-name>` instead (it runs the path-filtered jobs your change triggers, minus the PR-only Playwright visual audit and PR Evidence, and does not report the required merge check), and stop at the draft PR.
 
 ---
 
@@ -265,7 +265,7 @@ If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, `scr
 5. **Clean up** — delete the test workspace and node.
 6. **Record evidence** — report to the user: "VM provisioned, heartbeat received at [time], workspace accessible at [URL]" or "FAILED: [specific failure]".
 
-**If infrastructure verification fails, DO NOT create the PR. DO NOT merge. Fix the issue first.**
+**If infrastructure verification fails, DO NOT merge. Fix the issue first.**
 
 > **Why this is mandatory**: The TLS YAML indentation bug (the retained incident lesson in this rule) shipped to production because staging verification only checked UI rendering and API responses. Nobody provisioned a VM. The result: all workspace provisioning broke for ~2.5 hours in production.
 
@@ -356,6 +356,7 @@ After merging to main, you MUST monitor the production deployment to completion.
      - Whether this is something the agent can fix (code issue) or requires human intervention (missing secrets, infrastructure config)
    - If it's a code issue you introduced: fix it, push to main, and monitor the next deploy
    - If it requires human intervention (missing secrets, permissions, external config): **tell the user explicitly what action they need to take** and do NOT silently move on
+   - **Exception: a fail-closed "does not match the current trusted main tip" at "Re-verify current main after deployment queue"** means a newer commit reached `main` first; your change ships with the tip. Main CI runs overlap, so this deploy run can also have displaced the tip's pending deploy. Check that a Deploy Production run for the current tip succeeded or is queued or running (`gh run list --workflow=deploy.yml --limit=5 --json headSha,status,conclusion,displayTitle` and `git ls-remote origin main`). If none exists and CI on the tip succeeded, start one with `gh workflow run deploy.yml --ref main` (it defaults to the tip and re-checks CI on that exact SHA) and monitor it. Report what you did.
 
 5. **Check for pre-existing deploy failures**: Before monitoring your own deploy, check if recent deploys have been failing:
    ```bash
