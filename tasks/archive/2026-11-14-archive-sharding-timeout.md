@@ -12,9 +12,9 @@ The 1,205-row lifecycle case intermittently exceeds Vitest's five-second limit. 
 - [x] Remove the bound/index once, demonstrate intended red test, restore and pass.
 - [x] Run complete sharding file at least 30 times normally and 30 under bounded CPU load; report counts and timing distributions.
 - [x] Relevant lint/typecheck/tests/build and migration safety checks; specialist and task-completion reviews.
-- [ ] Production change requires coordinator-granted staging slot; test-only skips staging explicitly.
-- [ ] Draft PR, needs-human-review, green CI, CodeRabbit request/wait, exact-SHA coordinator handoff. No merge before approval of that SHA.
-- [ ] After approval, merge with --match-head-commit and monitor main CI / Deploy Production before completing SAM task.
+- [x] Production change requires coordinator-granted staging slot; test-only skips staging explicitly.
+- [x] Draft PR, needs-human-review, green CI, CodeRabbit request/wait, exact-SHA coordinator handoff. No merge before approval of that SHA.
+- [x] After approval, merge with --match-head-commit and monitor main CI / Deploy Production before completing SAM task.
 
 ## References
 Rules 31 (migration safety), 62 (real trigger), 81 (work-bound throughput); /do workflow. Related worker resumable-cursor test must remain untouched. Use supplied SAM output branch/workspace; task record stays on this branch to preserve the coordinated main merge hold.
@@ -45,3 +45,16 @@ All three mutations repeated after the10s adjustment: removing unique seek fails
 Task-completion-validator at80316bfa0: implementation PASS (A–C/F pass, D/E N/A); evidence hashes/counts/mutations independently checked. Release completion pending; task remains active.
 
 CodeRabbit review: one minor harness reproducibility finding (missing .tmp directory on fresh checkout), fixed with recursive mkdir and verified using empty temporary working directory. Production/test input hashes unchanged; final60run evidence remains applicable. Staging recipe under coordinator discussion; all technical CI passed at e4439205c.
+
+
+## Release and watch completion — 2026-11-15
+
+PR [2724](https://github.com/raphaeltm/simple-agent-manager/pull/2724) merged after coordinator approval of exact head `bb22bfa5d2ef251a40199bf258cb24b12240d31a`; matched merge `6ce953a11775905fa0fdf08a2148ab023e52d2fc`. Specialist reviews and CodeRabbit findings were resolved before approval. Exact-head staging deployment43578609385 passed; authenticated smoke and 39.9minutes of observation passed. Staging did not select a new multi-page archive migration, so it did not demonstrate a fresh seal/flip/reclaim; real-workerd coverage and the coordinator-required production watch compensate without claiming staging exercised that path.
+
+Main CI43585850934 attempt2 succeeded (the one authorized retry); whole production deployment43592048272 succeeded at inclusive head `a7f8f665c5346d9be00a7d4bb82edb3c1d7fdc32`. Reconciled these receipts again at closeout.
+
+The original 24-hour watch ran from November14 11:59:39.619UTC through November15 11:59:39.619UTC; deployments did not reset it. The final scheduled check completed at12:05:54.616UTC. Final API health200; failed0, poisoned0, identityMismatch0 among nonpublished migrations including frozen, and budgetStalls0. Cadence4100 succeeded with no error/lease. Final two indexed queries read218D1rows and wrote0; published rows were deliberately not rescanned after the coordinator narrowed scope.
+
+Eight migrations experienced a transient Cloudflare R2 internal10001 burst during the watch; normal automatic recovery published and reclaimed all eight by01:26:05.873UTC November15, without manual retries or production writes. Last full throughput snapshot at10:13UTC recorded3870published/allreclaimed and40newpublications since watch start. No new failed migration was observed after the separate PR2740 production boundary22:23:39.929UTC November14. Source preservation was established by the reclaim guard, not physical source sampling. Hour19 has an explicitly accepted monitoring gap: the managed execution call returned no receipt; its same-key replay returned fresh hour20 evidence and did not backfill hour19. Two transient SAM metadata write errors at hour22 recovered once. Their relation to a brief D1 overload was investigated separately; no causal claim is made.
+
+Final task-completion validation: A/B/C/F PASS; D/E N/A. Release checklist omissions above are now reconciled against merged PR/CI/deploy/staging receipts. Full closeout: `tasks/evidence/2026-11-14-archive-sharding-timeout/watch-completion.md`. No remaining implementation or release gate.
