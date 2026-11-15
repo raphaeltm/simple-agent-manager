@@ -189,3 +189,15 @@ PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS=240000, PROVIDER_ORPHAN_MIN_AGE_MS=900000 
   counters are present, so the PR code ran. Platform credential unchanged, 0 live nodes.
 - No fixtures, VMs, credential swaps, settings or KV/D1 writes. Root strict FREE 43e51341;
   staging FREE 1a4dfea3. Kit: Library 01M7FPB23AJQBGRTVJD08KE62X; ledger 01M7FPFQ7778B2NTTD9A5XSVV4.
+
+### CodeRabbit (requested 14:21 after staging; review 14:32, CHANGES_REQUESTED)
+
+- Major: per-account `finally` moved D1 claim-lookup failures into `accountErrors`. Fixed in
+  `1a72dc4c2`: errors classified at the source (`ProviderErrorKey`); provider-attributable failures
+  per account, claim lookup always `errors`. SQL-failure tests updated; restoring the old transfer
+  turns exactly those two tests red. security-auditor delta review: PASS.
+- Minor: backlog item 7 wording on the audit write. Fixed in `1a72dc4c2`.
+- Both threads replied to and resolved. Box PR #2750 carries the same runtime (`96cc0ec89`).
+- Note: this runtime change is after the staging run (`445e00e85`) and the box proof; it only
+  changes how a failed D1 claim lookup inside a user account is counted (failed sweep instead of
+  account error). No deletion-path code changed.
