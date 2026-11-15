@@ -89,6 +89,8 @@ async function recoverEvictedWorkspace(
       nodeId: body.nodeId,
       reason: recovery.reason,
     });
+    // A pre-claim refusal without an accepted inbox intent still depends on this VM callback
+    // retry; durable bare-eviction continuation is deferred to Idea 01M7E0QC19VCAHN64XQCFCTMW1.
     if (evictionRecoveryReasonIsRetryable(recovery.reason)) {
       throw errors.conflict(`Evicted workspace recovery is not ready: ${recovery.reason}`);
     }

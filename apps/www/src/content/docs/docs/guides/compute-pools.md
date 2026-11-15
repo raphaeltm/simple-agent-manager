@@ -363,16 +363,57 @@ your decisions:
   machine that fits.
 - A provider API failure during refresh is reported as a refresh error; SAM does not invent
   availability it could not confirm.
-- When a source's catalog changed, SAM writes the whole new catalog during that refresh, in batches,
-  for up to `operations.capacityPoolPublishBudgetMs` (20 seconds by default). Until it finishes the
-  pool shows as pending and cannot place new machines. A catalog too large for one refresh carries on
-  from where it stopped on the next one (`ensureCandidatesForSource()`).
-- **Starting work never refreshes the catalog.** Placement reads the pool as it stands, so a
-  submission is never delayed by a provider API call and a deliberately emptied pool is never
-  quietly repopulated. Refreshing happens when you press **Refresh** or change a credential — not
-  as a side effect of running a task. (The one exception is an installation upgraded from the old size presets, whose
-  pool gets its native offerings listed once. Like any new row they start out of the pool, so a pool
-  whose only machines were size presets is empty until you add machines.)
+- A pool with a previously validated, published catalog keeps using that catalog while a replacement
+  is unfinished, interrupted or failing. Each source's replacement is published together after it
+  is validated and fully written. A new pool stays pending until its first validated catalog is
+  published. A successful, explicitly validated bundled catalog can supply known offerings even
+  without a complete live inventory. Failed fallbacks and partial provider responses stay private;
+  they cannot start VMs. Missing machines are marked unavailable only after a complete provider
+  inventory has been published.
+- Interrupted refreshes resume automatically, including after a restart. A dedicated check runs
+  every minute, independently of the daily catalog discovery. Work becomes eligible after a
+  backoff that starts at 15 seconds and rises to five minutes by default; the next check picks it up.
+  A claimed pass that crashes can be retried after its lease expires (3 minutes by default).
+  Upgrade adoption queues at most the configured scope batch size (25 by default) per pass;
+  previously tracked failures do not prevent later scopes from being adopted.
+- After a rollback to a version that wrote catalog batches directly into live rows, an interrupted
+  publication cannot safely use its earlier catalog proof. SAM reports that unfinished legacy
+  publication and blocks placement until a fresh publication completes. The minute check adopts
+  pending pools even if a previous build left a completed refresh record. If a settings edit has
+  already marked the pool complete, the next normal placement queues that one pool for automatic
+  continuation; read-only catalog views do not trigger a refresh. Existing failed episodes keep
+  their error and cooldown rather than restarting on every request.
+- By default, SAM spends up to 20 seconds per source publishing a changed catalog, within a shared
+  20-second budget across sources and scopes for each pass. Its two-hour recovery deadline starts
+  with the first claim, after discovery queue time. If it runs out, the pool summary and Admin Errors
+  report the failure and operators are notified; the last committed catalog is retained. Daily
+  discovery may retry after a six-hour cooldown. Check the cloud account and use **Refresh** to retry sooner.
+  Superadmins can adjust these [refresh settings](/docs/guides/admin-settings/#compute-pool-refresh).
+  Live provider lookup and its fallback share the remaining pass deadline, including credential
+  preparation; a slow fallback cannot start a fresh timeout after that deadline.
+- Switching an account off, revoking a credential, removing a machine or losing project access
+  takes effect immediately, even while an older catalog is retained.
+- A running machine can still be reused after a harmless catalog revision. SAM checks today's
+  permissions, allowed offering, credentials, agent compatibility and free resources before adding
+  work. A plan to rent a new machine must still match the current catalog and settings.
+- **Starting work uses an established pool without refreshing its catalog.** Placement reads the
+  pool as it stands, so a submission avoids provider catalog calls and a deliberately emptied pool is never
+  quietly repopulated. Refreshing happens in the background, when you press **Refresh**, or when
+  you change a credential. Initial setup can list offerings once for a missing pool or one upgraded
+  from the old size presets. Like any new row they start out of the pool, so a pool whose only
+  machines were size presets is empty until you add machines.
+
+A sleeping session with an accepted message or event waiting in its durable inbox resumes
+automatically when a temporary catalog problem clears and placement becomes available. The original message or event remains the request;
+you do not need to send **Continue** again. Cancellation, archive, lost permissions and the existing
+request and snapshot expirations still stop recovery. Missing credentials, an empty pool or
+requirements no allowed machine can meet remain actionable failures. Disabled sources and revoked
+accounts also require action; SAM reports an actionable failure instead of waiting for the request
+to expire. Unavailable catalog offerings, including those in a previously published pool,
+wait automatically only while a refresh is pending within its recovery budget.
+
+An eviction blocked before its first recovery claim, without an accepted inbox message or event,
+is a separate recovery path and is not covered by this automatic continuation.
 
 :::note
 Adding a machine adds it for **both** workspace machines and

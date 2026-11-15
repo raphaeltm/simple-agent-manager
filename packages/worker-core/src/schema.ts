@@ -3879,6 +3879,8 @@ export const capacityPools = sqliteTable(
      * invalidates prior placement authority. NULL = not yet computed.
      */
     selectionDigest: text('selection_digest'),
+    /** Last complete validated publication; unfinished refreshes do not revoke this proof. */
+    catalogPublishedAt: text('catalog_published_at'),
     /**
      * Provider order: JSON array of capacity source ids, most preferred first. NULL = all
      * sources equal (the behaviour before ordering existed). Rank governs new VMs only;
@@ -3912,6 +3914,10 @@ export const capacityPools = sqliteTable(
       .on(table.ownerProjectId)
       .where(sql`scope = 'project' AND is_default = 1`),
     scopeStatusIdx: index('idx_capacity_pools_scope_status').on(table.scope, table.status),
+    migrationStateIdx: index('idx_capacity_pools_migration_state').on(
+      table.migrationState,
+      table.isDefault
+    ),
     configurationStateIdx: index('idx_capacity_pools_configuration_state').on(
       table.configurationState
     ),
@@ -3989,6 +3995,91 @@ export const capacityPoolCandidates = sqliteTable(
   })
 );
 
+/** Durable replacement rows; placement reads only capacityPoolCandidates. */
+export const capacityPoolCandidateStaging = sqliteTable(
+  'capacity_pool_candidate_staging',
+  {
+    id: text('id').primaryKey(),
+    poolId: text('pool_id')
+      .notNull()
+      .references(() => capacityPools.id, { onDelete: 'cascade' }),
+    capacitySourceId: text('capacity_source_id')
+      .notNull()
+      .references(() => capacitySources.id, { onDelete: 'cascade' }),
+    digest: text('digest').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    generation: integer('generation').notNull(),
+    primaryId: text('primary_id').notNull(),
+    provider: text('provider'),
+    location: text('location'),
+    workloadRole: text('workload_role').notNull().default('workspace'),
+    runtime: text('runtime'),
+    machineClass: text('machine_class'),
+    machineSize: text('machine_size'),
+    /** Provider-native instance type/SKU selected by this candidate. */
+    providerInstanceType: text('provider_instance_type'),
+    providerInstanceSku: text('provider_instance_sku'),
+    providerInstanceDisplayName: text('provider_instance_display_name'),
+    /** Normalized concrete offering capacity and price metadata. */
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+    providerInstanceImage: text('provider_instance_image'),
+    providerInstanceArchitecture: text('provider_instance_architecture'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
+    providerInstanceCatalogSource: text('provider_instance_catalog_source'),
+    providerInstanceCatalogLastSeenAt: text('provider_instance_catalog_last_seen_at'),
+    catalogAvailability: text('catalog_availability').notNull().default('available'),
+    catalogUnavailableAt: text('catalog_unavailable_at'),
+    catalogReturnedAt: text('catalog_returned_at'),
+    catalogGeneration: integer('catalog_generation').notNull().default(0),
+    authorityGeneration: integer('authority_generation').notNull().default(0),
+    priority: integer('priority').notNull().default(0),
+    candidateOrder: integer('candidate_order').notNull().default(0),
+    status: text('status').notNull().default('active'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    publicationIdx: index('idx_capacity_candidate_staging_publication').on(
+      table.poolId,
+      table.capacitySourceId,
+      table.digest,
+      table.ordinal
+    ),
+  })
+);
+
+/** Durable catalog continuation, independent of the daily credential enumeration sweep. */
+export const capacityPoolRefreshes = sqliteTable(
+  'capacity_pool_refreshes',
+  {
+    poolId: text('pool_id').primaryKey(),
+    scope: text('scope').notNull(),
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    ownerProjectId: text('owner_project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    state: text('state').notNull().default('pending'),
+    generation: integer('generation').notNull().default(0),
+    attempts: integer('attempts').notNull().default(0),
+    startedAt: integer('started_at').notNull(),
+    deadlineAt: integer('deadline_at').notNull(),
+    nextAttemptAt: integer('next_attempt_at').notNull(),
+    lastSuccessAt: integer('last_success_at'),
+    lastError: text('last_error'),
+  },
+  (table) => ({
+    dueIdx: index('idx_capacity_pool_refreshes_due').on(table.state, table.nextAttemptAt),
+  })
+);
+
 /** Future fallback-chain edges between pools. No current scheduler behavior reads this table. */
 export const capacityPoolFallbacks = sqliteTable(
   'capacity_pool_fallbacks',
@@ -4014,6 +4105,7 @@ export const capacityPoolFallbacks = sqliteTable(
   })
 );
 
+export type CapacityPoolRefresh = typeof capacityPoolRefreshes.$inferSelect;
 export type CapacitySource = typeof capacitySources.$inferSelect;
 export type NewCapacitySource = typeof capacitySources.$inferInsert;
 export type CapacityPool = typeof capacityPools.$inferSelect;

@@ -13,6 +13,10 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import {
+  legacyPublicationAdoptionSql,
+  unfinishedLegacyPublicationSql,
+} from './capacity-pool-legacy-publication';
+import {
   parseCapacityPoolExcludedSources,
   toCapacityPool,
   toCapacityPoolCandidate,
@@ -34,6 +38,11 @@ import {
   type ScopeIdentity,
 } from './default-capacity-pool-types';
 import { listManagedGcpCredentialMirrors } from './gcp-credential-mirrors';
+import {
+  listInstallationProviderCatalogSeeds,
+  listProjectProviderCatalogSeeds,
+  listUserProviderCatalogSeeds,
+} from './provider-catalogs-seeds';
 
 export async function findDefaultPool(
   db: Db,
@@ -191,6 +200,9 @@ export async function reconcileDefaultPoolStatus(
       // plans authorized against the old ordering.
       ...(selectionChanged ? { revision: sql`${schema.capacityPools.revision} + 1` } : {}),
       migrationState: options.publicationComplete === false ? 'pending' : 'complete',
+      ...(options.publicationComplete === false
+        ? {}
+        : { catalogPublishedAt: nextCapacityPoolTimestamp() }),
       lastReconciledAt: nextCapacityPoolTimestamp(),
       updatedAt: nextCapacityPoolTimestamp(),
     })
@@ -204,7 +216,7 @@ export async function reconcileDefaultPoolStatus(
  * this covers the SET — membership, availability, source status and relative composition — so
  * a change that only reorders ranking is still detected.
  */
-function capacityPoolSelectionDigest(
+export function capacityPoolSelectionDigest(
   rows: readonly {
     candidateId: string;
     sourceStatus: string;
@@ -245,9 +257,17 @@ export async function readDefaultPoolSummary(
       ? inArray(schema.capacityPools.status, [ACTIVE_STATUS, DISABLED_STATUS])
       : eq(schema.capacityPools.status, ACTIVE_STATUS);
 
-  const [pool] = await db
-    .select()
+  const [result] = await db
+    .select({
+      pool: schema.capacityPools,
+      refresh: schema.capacityPoolRefreshes,
+      legacyPublicationUnfinished: unfinishedLegacyPublicationSql().mapWith(Boolean),
+    })
     .from(schema.capacityPools)
+    .leftJoin(
+      schema.capacityPoolRefreshes,
+      eq(schema.capacityPoolRefreshes.poolId, schema.capacityPools.id)
+    )
     .where(
       and(
         ...poolScopePredicates(scope),
@@ -256,8 +276,45 @@ export async function readDefaultPoolSummary(
       )
     )
     .limit(1);
-  if (!pool) return null;
-
+  if (!result) return null;
+  const { pool, legacyPublicationUnfinished } = result;
+  type RefreshStatus = Pick<
+    schema.CapacityPoolRefresh,
+    'state' | 'attempts' | 'deadlineAt' | 'lastError'
+  >;
+  let refresh: RefreshStatus | null = result.refresh;
+  if (
+    options.adoptLegacyPublication &&
+    pool.status === ACTIVE_STATUS &&
+    legacyPublicationUnfinished &&
+    !(refresh?.state === 'pending' && (refresh.attempts === 0 || Date.now() < refresh.deadlineAt))
+  ) {
+    // An operator edit can complete the migration mirror while an older writer's live
+    // prefix is unfinished. Queue this selected pool, without provider I/O or a full scan.
+    // RETURNING acknowledges the fenced write; a no-op reads only the winning owner's
+    // state. Reuse all authority/candidate reads below instead of repeating the summary.
+    const [queued] =
+      await db.all<RefreshStatus>(sql`${legacyPublicationAdoptionSql(Date.now(), 1, pool.id)}
+      RETURNING state, attempts, deadline_at AS deadlineAt, last_error AS lastError`);
+    refresh =
+      queued ??
+      (
+        await db
+          .select({
+            state: schema.capacityPoolRefreshes.state,
+            attempts: schema.capacityPoolRefreshes.attempts,
+            deadlineAt: schema.capacityPoolRefreshes.deadlineAt,
+            lastError: schema.capacityPoolRefreshes.lastError,
+          })
+          .from(schema.capacityPoolRefreshes)
+          .where(eq(schema.capacityPoolRefreshes.poolId, pool.id))
+          .limit(1)
+      )[0] ??
+      null;
+  }
+  const catalogPublished =
+    !legacyPublicationUnfinished &&
+    (pool.migrationState === 'complete' || Boolean(pool.catalogPublishedAt));
   const rows = await db
     .select({
       source: schema.capacitySources,
@@ -347,23 +404,101 @@ export async function readDefaultPoolSummary(
     }
     candidates.push(candidate);
   }
-  const effectiveState = defaultPoolEffectiveState(pool, {
-    sourceCount: sourcesById.size,
-    candidateCount: candidates.filter((candidate) =>
-      isEditorVisibleCapacityCandidateRole(candidate.workloadRole)
-    ).length,
-    activeCandidateCount,
-    availableCandidateCount,
-  });
+  // A bootstrap has no committed catalog to fall back to. Reuse the catalog seed
+  // readers' scoped credential/attachment authority instead of treating a stale
+  // source row (or an unfinished migration flag) as evidence that refresh can run.
+  let authoritySources = [...sourcesById.values()];
+  let bootstrapCredentialAvailable = true;
+  if (!catalogPublished) {
+    const [sourceRows, seeds] = await Promise.all([
+      db
+        .select()
+        .from(schema.capacitySources)
+        .where(
+          and(
+            eq(schema.capacitySources.sourceKind, SOURCE_KIND_CLOUD_PROVIDER),
+            ...sourceScopePredicates(scope)
+          )
+        ),
+      scope.scope === 'installation'
+        ? listInstallationProviderCatalogSeeds(db, { activeOnly: true })
+        : scope.scope === 'project'
+          ? listProjectProviderCatalogSeeds(db, {
+              projectId: scope.ownerProjectId ?? '',
+              activeOnly: true,
+            })
+          : listUserProviderCatalogSeeds(db, { userId: scope.ownerUserId ?? '', activeOnly: true }),
+    ]);
+    authoritySources = sourceRows.map(toCapacitySourceIdentity);
+    const selectedSourceIds = new Set(
+      candidates
+        .filter((candidate) => candidate.status === ACTIVE_STATUS)
+        .map((candidate) => candidate.capacitySourceId)
+    );
+    bootstrapCredentialAvailable = seeds.some(
+      (seed) =>
+        sourceRows.length === 0 ||
+        sourceRows.some(
+          (source) =>
+            (selectedSourceIds.size === 0 || selectedSourceIds.has(source.id)) &&
+            source.status === ACTIVE_STATUS &&
+            !excludedSources.has(source.id) &&
+            source.provider === seed.provider &&
+            source.credentialSource === seed.credentialSource &&
+            source.credentialReference === seed.credentialReference &&
+            source.credentialVersion === seed.credentialVersion &&
+            source.externalSourceRef === seed.externalSourceRef
+        )
+    );
+  }
+  // Queue time is outside the execution budget; the first claim starts the deadline.
+  const catalogRefreshPending =
+    refresh?.state === 'pending' && (refresh.attempts === 0 || Date.now() < refresh.deadlineAt);
+  const effectiveState = defaultPoolEffectiveState(
+    pool,
+    {
+      sourceCount: authoritySources.length,
+      activeSourceCount: authoritySources.filter((source) => source.status === ACTIVE_STATUS)
+        .length,
+      candidateCount: candidates.filter((candidate) =>
+        isEditorVisibleCapacityCandidateRole(candidate.workloadRole)
+      ).length,
+      activeCandidateCount,
+      availableCandidateCount,
+    },
+    { catalogPublished, catalogRefreshPending, bootstrapCredentialAvailable }
+  );
 
   return {
     pool: toCapacityPool(pool),
+    catalogRefreshPending,
+    catalogPublished,
     sources: [...sourcesById.values()],
     candidates,
     activeCandidateCount,
     availableCandidateCount,
     effectiveState,
-    diagnostics: defaultPoolDiagnostics(effectiveState),
+    diagnostics: [
+      ...defaultPoolDiagnostics(effectiveState),
+      ...(legacyPublicationUnfinished
+        ? [
+            'legacy-catalog-publication-unfinished',
+            'An older catalog publication is unfinished. A complete fresh publication is required before this catalog can be used.',
+          ]
+        : []),
+      ...(!catalogPublished && !catalogRefreshPending && refresh?.state !== 'failed'
+        ? [
+            'catalog-refresh-not-pending',
+            'Catalog has not been published; check the account and use Infrastructure Refresh.',
+          ]
+        : []),
+      ...(refresh?.state === 'failed'
+        ? [
+            'catalog-refresh-failed',
+            refresh.lastError ?? 'Catalog refresh failed; use Infrastructure Refresh to retry.',
+          ]
+        : []),
+    ],
   };
 }
 
@@ -371,15 +506,24 @@ function defaultPoolEffectiveState(
   pool: schema.CapacityPool,
   counts: {
     sourceCount: number;
+    activeSourceCount: number;
     candidateCount: number;
     activeCandidateCount: number;
     availableCandidateCount: number;
+  },
+  publication: {
+    catalogPublished: boolean;
+    catalogRefreshPending: boolean;
+    bootstrapCredentialAvailable: boolean;
   }
 ): CapacityPoolConfigurationState {
-  if (pool.migrationState !== 'complete') return 'migration-pending';
+  if (counts.sourceCount > 0 && counts.activeSourceCount === 0) return 'source-disabled';
   if (pool.configurationState === 'source-disabled') return 'source-disabled';
-  if (pool.configurationState === 'migration-pending') return 'migration-pending';
   if (pool.status !== ACTIVE_STATUS) return 'source-disabled';
+  if (!publication.catalogPublished) {
+    if (!publication.bootstrapCredentialAvailable) return 'source-disabled';
+    return publication.catalogRefreshPending ? 'migration-pending' : 'catalog-unavailable';
+  }
   if (
     counts.sourceCount === 0 ||
     counts.candidateCount === 0 ||

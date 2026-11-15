@@ -31,6 +31,10 @@ import { DurableObject } from 'cloudflare:workers';
 
 import { measureArchiveSql } from '../archive/sql-metrics';
 import { estimateArchiveWrites } from '../archive/write-budget';
+import {
+  assertExactWriteAllowed,
+  isProjectDataArchiveExactRoutingEnabled,
+} from '../client/project-data-archive-routing';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import * as agentMessageChannels from './agent-message-channels';
@@ -667,7 +671,12 @@ export class ProjectData extends DurableObject<Env> {
       this.scheduleSummarySync();
       this.broadcastEvent(
         'session.updated',
-        { sessionId, workspaceId, taskId, status: 'active' },
+        {
+          sessionId,
+          workspaceId,
+          taskId,
+          status: sessionReads.getSession(this.sql, sessionId)?.status,
+        },
         sessionId
       );
     }
@@ -694,16 +703,68 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async signalSessionWakeReady(input: sessionWakeReady.SessionWakeReadyInput): Promise<number> {
+  /** null rejects authority; a nonnegative count (including a duplicate zero) acknowledges it. */
+  async signalSessionWakeReady(
+    input: sessionWakeReady.SessionWakeReadyInput
+  ): Promise<number | null> {
     // Authority reads must be serialized with dedup writes: an older RPC suspended in D1
     // cannot overwrite a newer fence and make its duplicate appear novel.
     const run = this.wakeReadyLock.then(async () => {
       this.ensureProjectId(input.projectId);
-      if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return 0;
-      const now = Date.now();
-      const released = this.meteredStorage.transactionSync(() =>
-        sessionWakeReady.applySessionWakeReady(this.sql, input, now)
+      if (isProjectDataArchiveExactRoutingEnabled(this.env))
+        await assertExactWriteAllowed(
+          this.env,
+          input.projectId,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
+      messages.assertTranscriptWriteAllowed(
+        this.sql,
+        input.chatSessionId,
+        'signalSessionWakeReady'
       );
+      const activationGuard = sessionWakeReady.captureSessionWakeActivation(this.sql, input);
+      if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return null;
+      const now = Date.now();
+      const { activated, released } = this.meteredStorage.transactionSync(() => {
+        // A source intent may have been prepared while the D1 authority read awaited.
+        messages.assertTranscriptWriteAllowed(
+          this.sql,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
+        const activated = sessionWakeReady.activateSessionWakeReady(
+          this.sql,
+          input,
+          activationGuard,
+          now
+        );
+        return {
+          activated,
+          released: sessionWakeReady.isSessionWakeReadyLocallyAccepted(this.sql, input)
+            ? sessionWakeReady.applySessionWakeReady(this.sql, input, now)
+            : null,
+        };
+      });
+      if (activated) {
+        this.ctx.waitUntil(
+          sessionWakeReady.recordSessionWakeActivation(input, now, (event) =>
+            this.admitProjectEvent(event)
+          )
+        );
+        this.scheduleSummarySync();
+        this.broadcastEvent(
+          'session.updated',
+          {
+            sessionId: input.chatSessionId,
+            workspaceId: input.workspaceId,
+            taskId: input.fence.runtime === 'vm' ? input.fence.taskId : undefined,
+            status: 'active',
+          },
+          input.chatSessionId
+        );
+      }
+      if (released === null) return null;
       // Re-arm even on duplicate: a previous RPC may have committed SQLite before alarm I/O failed.
       await this.recalculateAlarm();
       return released;
