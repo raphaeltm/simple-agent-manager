@@ -1021,6 +1021,22 @@ describe('sync wrangler config', () => {
     expect(String(envConfig.vars?.SETUP_TOKEN).length).toBeGreaterThan(20);
   });
 
+  it('masks the setup token in GitHub Actions before wrangler can print it', () => {
+    // wrangler deploy prints every plain-text var, and the deploy job echoes that output into a
+    // public log. On 2026-11-12 a token read from that log took over production's /setup.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    });
+
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false, null);
+
+    expect(written).toContain(`::add-mask::${String(envConfig.vars?.SETUP_TOKEN)}\n`);
+  });
+
   it('includes SETUP_FORCE only when explicitly requested', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 

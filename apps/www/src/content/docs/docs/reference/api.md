@@ -309,7 +309,7 @@ the instance has no machines of its own.
 ### First-run setup (`/api/setup/*`)
 
 The `POST` routes require `SETUP_TOKEN`; `GET /api/setup/status` is public. Every route returns
-`410 SETUP_CLOSED` once setup is complete.
+`410 SETUP_CLOSED` once setup is complete, which includes any install with an active superadmin.
 
 - `GET /api/setup/status` — public. `{ completed, open, forced, tokenConfigured }`.
 - `POST /api/setup/verify` — body `{ token }`. Returns the integration `status` and

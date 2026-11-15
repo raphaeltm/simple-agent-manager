@@ -1,5 +1,8 @@
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
+import { log } from '../lib/logger';
 import {
   commitAdminSettingsStatements,
   resolveAdminSettingDetailsMany,
@@ -427,11 +430,37 @@ async function readPlatformConfigFromStore(env: Env): Promise<ResolvedPlatformCo
   };
 }
 
+/**
+ * First-run setup is over once it was completed, or once the install has an owner.
+ *
+ * Installs that predate the setup wizard (#1528) already had a superadmin but never wrote
+ * `setup.completed`, so `/setup` stayed open behind `SETUP_TOKEN` and was used on 2026-11-12 to
+ * take over production. An active superadmin can change every integration in Admin, so setup has
+ * nothing left to do; the row is written then, so a later role change cannot reopen it.
+ * `SETUP_FORCE` stays the explicit lockout-recovery override.
+ */
 export async function isSetupCompleted(env: Env): Promise<boolean> {
   const forced = env.SETUP_FORCE === 'true';
   if (forced) return false;
   const row = await readSetting(env, SETUP_COMPLETED_SETTING_KEY);
-  return row.value === 'true';
+  if (row.value === 'true') return true;
+  const owner = await env.DATABASE.prepare(
+    `SELECT id FROM users WHERE role = 'superadmin' AND status = 'active' AND id != ?
+     ORDER BY created_at, id LIMIT 1`
+  )
+    .bind(SYSTEM_USER_ID)
+    .first<{ id: string }>();
+  if (!owner) return false;
+  try {
+    await setSetupCompleted(env, owner.id);
+  } catch (err) {
+    // Setup is closed either way; a failed write only means the next check writes again.
+    log.error('platform-config.setup_completed_write_failed', {
+      ownerId: owner.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return true;
 }
 
 export async function setSetupCompleted(env: Env, updatedBy?: string): Promise<void> {
