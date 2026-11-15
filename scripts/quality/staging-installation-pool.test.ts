@@ -193,8 +193,29 @@ describe('seedInstallationPool', () => {
     expect(result).toEqual({ activated: 1, alreadyActive: 1, mirrored: true });
     expect(calls.filter((c) => c.url.endsWith('/reconcile'))).toHaveLength(3);
     const patch = calls.find((c) => c.method === 'PATCH');
+    // One machine was already active, so this is not the first seeding: no node cap is written.
     expect(patch?.body).toEqual({ candidates: [{ id: 'a', status: 'active' }] });
     expect(patch?.cookie).toBe('__Secure-better-auth.session_token=abc');
+  });
+
+  it('caps the node count on the first seeding only', async () => {
+    const { calls, fetchImpl } = fakeApi(1, [
+      candidate({ id: 'a' }),
+      candidate({
+        id: 'b',
+        location: 'nbg1',
+        providerInstanceType: 'cx43',
+        workloadRole: 'deployment',
+      }),
+    ]);
+    await seedInstallationPool({ ...base, fetchImpl });
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+      policy: { maxNodes: 2 },
+      candidates: [
+        { id: 'a', status: 'active' },
+        { id: 'b', status: 'active' },
+      ],
+    });
   });
 
   it('does not write when everything chosen is already active', async () => {

@@ -27,6 +27,12 @@ export const SECONDARY_INSTALLATIONS = Object.freeze({
   }),
 });
 
+/**
+ * The only GitHub Environments whose credentials a secondary installation may borrow. A positive
+ * list, so a future registry entry cannot name production under another spelling.
+ */
+export const SECONDARY_CREDENTIAL_ENVIRONMENTS = Object.freeze(['staging']);
+
 const INSTALLATION_NAME = /^[a-z][a-z0-9-]{0,30}[a-z0-9]$/u;
 
 /** Production in any spelling: an exact name, a stack alias, or a substring like `prod2`. */
@@ -64,6 +70,11 @@ export function resolveInstallation({ environment, installation, primary }) {
   }
 
   const entry = SECONDARY_INSTALLATIONS[requested];
+  if (!SECONDARY_CREDENTIAL_ENVIRONMENTS.includes(entry.credentialEnvironment)) {
+    throw new Error(
+      `Installation '${requested}' names '${entry.credentialEnvironment}', which secondary installations may not use.`
+    );
+  }
   if (entry.credentialEnvironment !== environment) {
     throw new Error(
       `Installation '${requested}' uses the '${entry.credentialEnvironment}' environment's credentials, not '${environment}'.`

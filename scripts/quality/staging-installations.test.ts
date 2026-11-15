@@ -15,11 +15,13 @@ import {
   bootstrapUsers,
   type D1Like,
   deriveAgentSignInTrust,
+  primaryTestAccountIds,
 } from '../deploy/bootstrap-staging-installation';
 import { resolveInstallationZone } from '../deploy/resolve-installation-zone.mjs';
 import {
   credentialEnvironmentFor,
   resolveInstallation,
+  SECONDARY_CREDENTIAL_ENVIRONMENTS,
   SECONDARY_INSTALLATIONS,
   workflowTargetFor,
 } from '../deploy/staging-installations.mjs';
@@ -107,7 +109,9 @@ describe('resolveInstallation', () => {
 
   it('registers no installation that could reach production', () => {
     const domains = new Set<string>();
+    expect(SECONDARY_CREDENTIAL_ENVIRONMENTS).toEqual(['staging']);
     for (const [name, entry] of Object.entries(SECONDARY_INSTALLATIONS)) {
+      expect(SECONDARY_CREDENTIAL_ENVIRONMENTS).toContain(entry.credentialEnvironment);
       for (const value of [name, entry.credentialEnvironment, entry.stack, entry.resourcePrefix]) {
         expect(value).not.toMatch(/prod/i);
       }
@@ -260,6 +264,7 @@ describe('bootstrapInstallation on the real migration chain', () => {
       targetEncryptionKey: TARGET_KEY,
       sourceCredentialKey: SOURCE_KEY,
       smokeTestToken: 'sam_smoke_token_value',
+      primaryTestAccountIds: ['owner'],
       now: new Date('2026-11-15T20:00:00.000Z'),
       log: (message) => logs.push(message),
       ...overrides,
@@ -398,6 +403,13 @@ describe('bootstrapInstallation on the real migration chain', () => {
     await add('claude-old', 'claude-code', 'OLD-KEY', SOURCE_KEY, '2026-01-01');
     await add('claude-new', 'claude-code', 'NEW-KEY', SOURCE_KEY, '2026-11-10');
     await add('codex-bad', 'openai-codex', 'X', key(9));
+    const oauth = await encryptToken('ROTATING', SOURCE_KEY);
+    source.db
+      .prepare(
+        `INSERT INTO platform_credentials (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by)
+         VALUES ('codex-oauth', 'agent-api-key', NULL, 'openai-codex', 'oauth-token', 'k', ?, ?, 1, 'owner')`
+      )
+      .run(oauth.ciphertext, oauth.iv);
 
     const report = await run();
 
@@ -416,6 +428,7 @@ describe('bootstrapInstallation on the real migration chain', () => {
     expect(row).toMatchObject({ agent_type: 'claude-code', credential_type: 'agent-api-key' });
     expect(await decryptToken(row.encrypted_token, row.iv, TARGET_KEY)).toBe('NEW-KEY');
     expect(logs.join('\n')).toMatch(/skip agent key codex-bad \(openai-codex\): cannot decrypt/);
+    expect(logs.join('\n')).not.toContain('codex-oauth');
 
     await run();
     expect(
@@ -427,7 +440,7 @@ describe('bootstrapInstallation on the real migration chain', () => {
     ).toEqual({ n: 1 });
   });
 
-  it('is idempotent and repairs drift on a second run', async () => {
+  it('is idempotent and keeps changes an admin made on the installation', async () => {
     await seedSourceCredential({
       table: 'platform_credentials',
       id: 'hz',
@@ -445,6 +458,8 @@ describe('bootstrapInstallation on the real migration chain', () => {
     const before = ['users', 'platform_credentials', 'smoke_test_tokens'].map((t) =>
       count(target.db, t)
     );
+    const oldIv = (target.db.prepare('SELECT iv FROM platform_credentials').get() as { iv: string })
+      .iv;
 
     await run();
 
@@ -453,19 +468,54 @@ describe('bootstrapInstallation on the real migration chain', () => {
     ).toEqual(before);
     expect(
       target.db.prepare(`SELECT role, status FROM users WHERE id = 'staging2-agent-admin'`).get()
-    ).toEqual({
-      role: 'superadmin',
-      status: 'active',
-    });
+    ).toEqual({ role: 'user', status: 'suspended' });
     expect(target.db.prepare('SELECT revoked_at FROM smoke_test_tokens').get()).toEqual({
-      revoked_at: null,
+      revoked_at: 5,
     });
+    const credential = target.db
+      .prepare('SELECT is_enabled, iv, encrypted_token FROM platform_credentials')
+      .get() as { is_enabled: number; iv: string; encrypted_token: string };
+    expect(credential.is_enabled).toBe(0);
+    // The ciphertext still follows the primary's credential.
+    expect(credential.iv).not.toBe(oldIv);
+    expect(await decryptToken(credential.encrypted_token, credential.iv, TARGET_KEY)).toBe(
+      'hetzner-token'
+    );
+  });
+
+  it("never copies the GCP credential of an account that is not one of the primary's test accounts", async () => {
+    await seedSourceCredential({
+      table: 'platform_credentials',
+      id: 'hz',
+      provider: 'hetzner',
+      plaintext: 'hetzner-token',
+    });
+    await seedSourceCredential({
+      table: 'credentials',
+      id: 'gcp-sa',
+      provider: 'gcp',
+      plaintext: gcpKey,
+    });
+
     expect(
-      target.db.prepare('SELECT is_enabled, provider FROM platform_credentials').get()
-    ).toEqual({
-      is_enabled: 1,
+      (await run({ primaryTestAccountIds: ['someone-else-123'] })).cloudCredential
+    ).toMatchObject({ provider: 'hetzner', sourceId: 'hz' });
+    expect((await run({ primaryTestAccountIds: [] })).cloudCredential).toMatchObject({
       provider: 'hetzner',
     });
+    // Control: the same row is chosen when its owner is a designated test account.
+    expect((await run()).cloudCredential).toMatchObject({ provider: 'gcp', sourceId: 'gcp-sa' });
+  });
+
+  it('reads test account IDs from the primary trust, ignoring emails and the wildcard', () => {
+    expect(
+      primaryTestAccountIds(
+        JSON.stringify({ allowedTargets: ['toWzGjNW3IyUkCVItRQv3qSn0wI8c22y', 'a@b.c', '*', 7] })
+      )
+    ).toEqual(['toWzGjNW3IyUkCVItRQv3qSn0wI8c22y']);
+    expect(primaryTestAccountIds(JSON.stringify({ allowedTargets: '*' }))).toEqual([]);
+    expect(primaryTestAccountIds('{')).toEqual([]);
+    expect(primaryTestAccountIds(undefined)).toEqual([]);
   });
 
   it('leaves credentials an admin added by hand alone', async () => {
@@ -742,7 +792,12 @@ describe('deploy-reusable.yml secondary installation wiring', () => {
     expect(configure).toContain(
       "SECRET_ENCRYPTION_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.ENCRYPTION_KEY || '' }}"
     );
-    expect(configure).toContain('steps.installation_trust.outputs.value');
+    // The primary's trust can never reach a secondary, and the derived trust travels in a file.
+    expect(configure).toContain(
+      "AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.AGENT_SIGN_IN_TRUST || '' }}"
+    );
+    expect(configure).toContain("format('{0}/agent-sign-in-trust.json', runner.temp)");
+    expect(workflow).not.toMatch(/installation_trust\.outputs/);
   });
 
   it('bootstraps secondary installations only and never production', () => {

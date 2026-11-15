@@ -5,6 +5,8 @@ export interface SecondaryInstallation {
   stack: string;
 }
 
+export const SECONDARY_CREDENTIAL_ENVIRONMENTS: readonly string[];
+
 export const SECONDARY_INSTALLATIONS: Readonly<Record<string, Readonly<SecondaryInstallation>>>;
 
 export function resolveInstallation(input: {

@@ -34,6 +34,16 @@ interface PoolResponse {
   effective?: { candidates?: PoolCandidate[]; activeCandidateCount?: number } | null;
 }
 
+/** Remote text must never form a GitHub workflow command: drop control characters and `::`. */
+export function safeForWorkflowLog(text: string): string {
+  return Array.from(text, (ch) => {
+    const code = ch.charCodeAt(0);
+    return code < 32 || code === 127 ? ' ' : ch;
+  })
+    .join('')
+    .replaceAll('::', ': :');
+}
+
 export interface PrimaryPick {
   provider: string;
   location: string;
@@ -51,6 +61,7 @@ export interface PoolSeedOptions {
   minMemoryMb?: number;
   minVcpu?: number;
   fallbackPerRole?: number;
+  maxNodes?: number;
   catalogWaitAttempts?: number;
   catalogWaitMs?: number;
   fetchImpl?: typeof fetch;
@@ -63,6 +74,8 @@ export const DEFAULT_POOL_SEED_MIN_MEMORY_MB = 8192;
 export const DEFAULT_POOL_SEED_MIN_VCPU = 2;
 export const DEFAULT_POOL_SEED_FALLBACK_PER_ROLE = 2;
 export const DEFAULT_POOL_SEED_CATALOG_WAIT_ATTEMPTS = 12;
+/** Node cap written on the first seeding; the staging account's VM quota is shared. */
+export const DEFAULT_POOL_SEED_MAX_NODES = 2;
 export const DEFAULT_POOL_SEED_CATALOG_WAIT_MS = 5000;
 
 export async function readPrimaryPoolPicks(source: D1Like): Promise<PrimaryPick[]> {
@@ -167,7 +180,8 @@ export async function seedInstallationPool(options: PoolSeedOptions): Promise<{
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!response.ok) {
-      const text = (await response.text().catch(() => '')).slice(0, 300);
+      // Response text comes from the deployed branch's Worker: keep it out of workflow commands.
+      const text = safeForWorkflowLog((await response.text().catch(() => '')).slice(0, 300));
       throw new Error(`${method} capacity-pools${path} failed: HTTP ${response.status} ${text}`);
     }
     return (await response.json()) as PoolResponse;
@@ -196,8 +210,17 @@ export async function seedInstallationPool(options: PoolSeedOptions): Promise<{
     (c) => c.providerInstanceType && wanted.has(c.providerInstanceType)
   );
   const toActivate = chosen.filter((c) => c.status !== 'active');
+  // On the first seeding only, cap the pool's node count: the provider account (for example
+  // Hetzner's 10-server limit) is shared with the primary installation and production. Later
+  // runs leave whatever an admin set.
+  const firstSeeding = !candidates.some(
+    (c) => c.capacitySourceId === sourceId && c.status === 'active'
+  );
   if (toActivate.length > 0) {
     await call('PATCH', '/defaults', {
+      ...(firstSeeding
+        ? { policy: { maxNodes: options.maxNodes ?? DEFAULT_POOL_SEED_MAX_NODES } }
+        : {}),
       candidates: toActivate.map((c) => ({ id: c.id, status: 'active' })),
     });
   }

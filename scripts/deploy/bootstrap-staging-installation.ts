@@ -18,17 +18,24 @@
  *   pnpm tsx scripts/deploy/bootstrap-staging-installation.ts derive-trust
  *   pnpm tsx scripts/deploy/bootstrap-staging-installation.ts bootstrap
  */
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 
 import {
-  decryptToken,
+  copyPlatformAgentKeys,
   encryptToken,
   hmacApiToken,
   type SelectedCloudCredential,
   selectSourceCloudCredential,
 } from './bootstrap-installation-credentials';
-import { readPrimaryPoolPicks, seedInstallationPool } from './bootstrap-installation-pool';
-import { SECONDARY_INSTALLATIONS } from './staging-installations.mjs';
+import {
+  readPrimaryPoolPicks,
+  safeForWorkflowLog,
+  seedInstallationPool,
+} from './bootstrap-installation-pool';
+import {
+  SECONDARY_CREDENTIAL_ENVIRONMENTS,
+  SECONDARY_INSTALLATIONS,
+} from './staging-installations.mjs';
 
 /** The two statements the bootstrap needs from a D1 database. */
 export interface D1Like {
@@ -70,7 +77,11 @@ export function assertSecondaryInstallation(input: {
   baseDomain: string;
 }): void {
   const { installation, environment, baseDomain } = input;
-  if (/prod/iu.test(environment) || /prod/iu.test(installation)) {
+  if (
+    /prod/iu.test(environment) ||
+    /prod/iu.test(installation) ||
+    !SECONDARY_CREDENTIAL_ENVIRONMENTS.includes(environment)
+  ) {
     throw new Error('The staging bootstrap never runs against production.');
   }
   if (!Object.hasOwn(SECONDARY_INSTALLATIONS, installation)) {
@@ -113,6 +124,22 @@ export function deriveAgentSignInTrust(
   return JSON.stringify({ ...(parsed as Record<string, unknown>), allowedTargets: targetUserIds });
 }
 
+/** Account IDs (not emails, not "*") named as targets by the primary's agent sign-in trust. */
+export function primaryTestAccountIds(sourceJson: string | undefined): string[] {
+  const raw = (sourceJson ?? '').trim();
+  if (raw === '') return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const targets = (parsed as { allowedTargets?: unknown }).allowedTargets;
+    if (!Array.isArray(targets)) return [];
+    return targets.filter(
+      (t): t is string => typeof t === 'string' && /^[A-Za-z0-9_-]{8,128}$/u.test(t)
+    );
+  } catch {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
@@ -130,6 +157,8 @@ export interface BootstrapInput {
   /** The key the primary installation's Worker decrypts credentials with. */
   sourceCredentialKey: string;
   smokeTestToken?: string;
+  /** Account IDs the primary's agent sign-in trust names; only their own credentials may be copied. */
+  primaryTestAccountIds?: string[];
   now?: Date;
   log?: (message: string) => void;
 }
@@ -146,78 +175,6 @@ export function bootstrapCloudCredentialId(installation: string): string {
   return `${installation}-bootstrap-cloud`;
 }
 
-export function bootstrapAgentKeyId(installation: string, agentType: string): string {
-  return `${installation}-bootstrap-agent-${agentType}`;
-}
-
-/**
- * Copy every enabled platform agent key of the primary (one per agent type, newest first), so
- * sessions on this installation have an agent to talk to. A row that cannot be decrypted is
- * skipped and logged (rule 41); no key at all is not fatal, agents then need their own key.
- */
-async function copyPlatformAgentKeys(
-  input: BootstrapInput,
-  adminId: string,
-  nowIso: string,
-  log: (message: string) => void
-): Promise<string[]> {
-  const rows = await input.source.all<{
-    id: string;
-    agent_type: string | null;
-    credential_kind: string;
-    encrypted_token: string;
-    iv: string;
-  }>(
-    `SELECT id, agent_type, credential_kind, encrypted_token, iv FROM platform_credentials
-     WHERE credential_type = 'agent-api-key' AND is_enabled = 1 AND agent_type IS NOT NULL
-     ORDER BY agent_type, updated_at DESC, id`
-  );
-  const copied: string[] = [];
-  for (const row of rows) {
-    const agentType = row.agent_type as string;
-    if (copied.includes(agentType)) continue;
-    if (!/^[a-z0-9-]{1,40}$/u.test(agentType)) {
-      log(`skip agent key ${row.id}: unexpected agent type`);
-      continue;
-    }
-    let plaintext: string;
-    try {
-      plaintext = await decryptToken(row.encrypted_token, row.iv, input.sourceCredentialKey);
-    } catch (error) {
-      log(
-        `skip agent key ${row.id} (${agentType}): cannot decrypt (${error instanceof Error ? error.name : 'error'})`
-      );
-      continue;
-    }
-    const sealed = await encryptToken(plaintext, input.targetCredentialKey);
-    await input.target.run(
-      `INSERT INTO platform_credentials
-         (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv,
-          is_enabled, created_by, created_at, updated_by, updated_at)
-       VALUES (?, 'agent-api-key', NULL, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         credential_kind = excluded.credential_kind, encrypted_token = excluded.encrypted_token,
-         iv = excluded.iv, is_enabled = 1, updated_by = excluded.updated_by,
-         updated_at = excluded.updated_at`,
-      [
-        bootstrapAgentKeyId(input.installation, agentType),
-        agentType,
-        row.credential_kind,
-        `Copied from ${input.environment} by bootstrap (${agentType})`,
-        sealed.ciphertext,
-        sealed.iv,
-        adminId,
-        nowIso,
-        adminId,
-        nowIso,
-      ]
-    );
-    copied.push(agentType);
-    log(`platform agent key for ${agentType} copied from ${row.id}`);
-  }
-  return copied;
-}
-
 export function bootstrapSmokeTokenId(installation: string): string {
   return `${installation}-bootstrap-smoke-token`;
 }
@@ -230,19 +187,23 @@ export async function bootstrapInstallation(input: BootstrapInput): Promise<Boot
   const users = bootstrapUsers(input.installation, input.baseDomain);
   const admin = users[0];
 
+  // Created once; an admin who later demotes or suspends one of them is not overridden.
   for (const user of users) {
     await input.target.run(
       `INSERT INTO users (id, email, email_verified, name, role, status, created_at, updated_at)
        VALUES (?, ?, 1, ?, ?, 'active', ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         email = excluded.email, name = excluded.name, role = excluded.role,
-         status = 'active', updated_at = excluded.updated_at`,
+       ON CONFLICT(id) DO NOTHING`,
       [user.id, user.email, user.name, user.role, nowMs, nowMs]
     );
-    log(`user ${user.id} (${user.role}) ready`);
+    log(`user ${user.id} (${user.role}) present`);
   }
 
-  const selected = await selectSourceCloudCredential(input.source, input.sourceCredentialKey, log);
+  const selected = await selectSourceCloudCredential(
+    input.source,
+    input.sourceCredentialKey,
+    log,
+    input.primaryTestAccountIds ?? []
+  );
   if (!selected) {
     throw new Error(
       'No portable cloud credential found on the primary installation: VMs could not be provisioned.'
@@ -250,8 +211,8 @@ export async function bootstrapInstallation(input: BootstrapInput): Promise<Boot
   }
   const encrypted = await encryptToken(selected.plaintext, input.targetCredentialKey);
   const credentialId = bootstrapCloudCredentialId(input.installation);
-  // One bootstrap-owned row, rewritten on every run so it follows the primary's credential.
-  // Rows an admin adds by hand are left alone.
+  // One bootstrap-owned row whose ciphertext follows the primary's credential on every run. An
+  // admin who disables it keeps it disabled; rows an admin adds by hand are left alone.
   await input.target.run(
     `INSERT INTO platform_credentials
        (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv,
@@ -259,7 +220,7 @@ export async function bootstrapInstallation(input: BootstrapInput): Promise<Boot
      VALUES (?, 'cloud-provider', ?, NULL, 'api-key', ?, ?, ?, 1, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        provider = excluded.provider, label = excluded.label,
-       encrypted_token = excluded.encrypted_token, iv = excluded.iv, is_enabled = 1,
+       encrypted_token = excluded.encrypted_token, iv = excluded.iv,
        updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
     [
       credentialId,
@@ -284,10 +245,12 @@ export async function bootstrapInstallation(input: BootstrapInput): Promise<Boot
     await input.target.run(
       `INSERT INTO smoke_test_tokens (id, user_id, token_hash, name, created_at)
        VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         user_id = excluded.user_id, token_hash = excluded.token_hash, revoked_at = NULL`,
+       ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, token_hash = excluded.token_hash`,
       [bootstrapSmokeTokenId(input.installation), admin.id, tokenHash, 'Staging smoke tests', nowMs]
     );
+    // The staging smoke token belongs to staging's superadmin test account, so mapping it to this
+    // installation's admin grants its holders nothing they do not already have on staging. A
+    // revocation here survives later deploys (revoked_at is never cleared).
     smokeToken = 'registered';
     log(`smoke token registered for ${admin.id}`);
   }
@@ -346,6 +309,26 @@ export function cloudflareD1(input: {
   };
 }
 
+/** Refuse to write to a database that is not the installation's own (by its registered name). */
+async function assertDatabaseName(
+  accountId: string,
+  apiToken: string,
+  databaseId: string,
+  expectedName: string
+): Promise<void> {
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/d1/database/${encodeURIComponent(databaseId)}`,
+    { headers: { Authorization: `Bearer ${apiToken}` } }
+  );
+  const body = (await response.json().catch(() => null)) as {
+    success?: boolean;
+    result?: { name?: string };
+  } | null;
+  if (!response.ok || !body?.success || body.result?.name !== expectedName) {
+    throw new Error(`Target D1 database is not ${expectedName}; refusing to bootstrap.`);
+  }
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
@@ -368,8 +351,10 @@ async function main(): Promise<void> {
       );
       return;
     }
-    const outputPath = requireEnv('GITHUB_OUTPUT');
-    appendFileSync(outputPath, `value=${trust}\n`);
+    // A file, not a step output: the value never reaches the log or the run's outputs, and an
+    // empty derivation cannot fall back to the primary's trust in the workflow expression.
+    console.log(`::add-mask::${trust}`);
+    writeFileSync(requireEnv('AGENT_SIGN_IN_TRUST_FILE'), trust, { mode: 0o600 });
     console.log(`Agent sign-in trust targets: ${ids.join(', ')}`);
     return;
   }
@@ -382,6 +367,13 @@ async function main(): Promise<void> {
     if (targetDatabaseId === sourceDatabaseId) {
       throw new Error('Target and source D1 databases are the same; refusing to bootstrap.');
     }
+    const entry = SECONDARY_INSTALLATIONS[installation];
+    await assertDatabaseName(
+      accountId,
+      apiToken,
+      targetDatabaseId,
+      `${entry.resourcePrefix}-${entry.stack}`
+    );
     const targetEncryptionKey = requireEnv('TARGET_ENCRYPTION_KEY');
     const sourceEncryptionKey = requireEnv('SOURCE_ENCRYPTION_KEY');
     const source = cloudflareD1({ accountId, apiToken, databaseId: sourceDatabaseId });
@@ -397,6 +389,7 @@ async function main(): Promise<void> {
       sourceCredentialKey:
         process.env.SOURCE_CREDENTIAL_ENCRYPTION_KEY?.trim() || sourceEncryptionKey,
       smokeTestToken: process.env.SMOKE_TEST_TOKEN,
+      primaryTestAccountIds: primaryTestAccountIds(process.env.SOURCE_AGENT_SIGN_IN_TRUST),
     });
     // The pool is seeded through the admin API as the bootstrap admin, which signs in with the
     // smoke token registered above. Without that token the pool stays empty: VM work cannot run.
@@ -437,7 +430,9 @@ async function main(): Promise<void> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((error: unknown) => {
-    console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
+    // Messages can carry text from remote responses; never let it form a workflow command.
+    const message = safeForWorkflowLog(error instanceof Error ? error.message : String(error));
+    console.error(`::error::${message}`);
     process.exit(1);
   });
 }
