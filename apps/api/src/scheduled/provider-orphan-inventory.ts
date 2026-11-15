@@ -1,6 +1,7 @@
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 
 export const PROVIDER_ORPHAN_NODE_ID_PATTERN = /^[0-9a-hjkmnp-tv-z]{26}$/i;
 
@@ -14,6 +15,19 @@ export interface ClaimingNode {
  * are not authoritative absence and fail cardinality validation.
  */
 export async function loadClaimingNodeStatuses(
+  env: Env,
+  nodeIds: string[]
+): Promise<Map<string, ClaimingNode>> {
+  // One bound parameter per node id: D1 rejects a statement with more than 100, so a backlog of
+  // orphans is looked up in batches. Each batch keeps its own cardinality check.
+  const statuses = new Map<string, ClaimingNode>();
+  for (const batch of chunk(nodeIds, D1_MAX_BOUND_PARAMETERS)) {
+    for (const [id, node] of await loadClaimingNodeBatch(env, batch)) statuses.set(id, node);
+  }
+  return statuses;
+}
+
+async function loadClaimingNodeBatch(
   env: Env,
   nodeIds: string[]
 ): Promise<Map<string, ClaimingNode>> {
