@@ -2731,6 +2731,26 @@ export const MIGRATIONS: Migration[] = [
       sql.exec('ALTER TABLE chat_sessions ADD COLUMN stream_ingest_state TEXT');
     },
   },
+  {
+    name: '079-chat-session-sequence-watermark',
+    run(sql) {
+      // NULL means the pre-migration transcript has not been measured yet.
+      // Lazy initialization avoids scanning every historical session on deploy.
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN last_message_sequence INTEGER');
+    },
+  },
+  {
+    name: '080-message-comment-foreign-key-indexes',
+    run(sql) {
+      // A message delete checks these FKs using message_id alone. Existing
+      // session/scope-leading indexes scan every comment for every deleted row.
+      sql.exec(
+        'CREATE INDEX IF NOT EXISTS idx_comment_threads_message_fk ON comment_threads(message_id)'
+      );
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_anchored_comment_threads_message_fk
+        ON anchored_comment_threads(message_id) WHERE message_id IS NOT NULL`);
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

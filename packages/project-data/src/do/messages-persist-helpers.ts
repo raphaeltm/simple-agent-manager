@@ -32,19 +32,61 @@ export class SessionMessageLimitExceededError extends Error {
 /**
  * Returns the next monotonic sequence number for a session's messages.
  */
-export function nextSequence(sql: SqlStorage, sessionId: string): number {
+export function nextSequence(
+  sql: SqlStorage,
+  sessionId: string,
+  session?: Record<string, unknown>
+): number {
+  const current =
+    session ??
+    sql
+      .exec(
+        'SELECT last_message_sequence, stream_ingest_state FROM chat_sessions WHERE id = ?',
+        sessionId
+      )
+      .toArray()[0];
+  if (!current) throw new Error(`Session ${sessionId} not found`);
+  const stored = current.last_message_sequence;
+  if (stored != null) {
+    if (typeof stored !== 'number' || !Number.isSafeInteger(stored) || stored < 0)
+      throw new Error('Invalid session sequence watermark');
+    return stored + 1;
+  }
   const row = sql
     .exec(
       'SELECT COALESCE(MAX(sequence), 0) AS max_seq FROM chat_messages WHERE session_id = ?',
       sessionId
     )
     .toArray()[0];
-  const session = sql
-    .exec('SELECT stream_ingest_state FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
-  const state = readMessageIngestState(session?.stream_ingest_state);
-  return (
-    Math.max(row ? parseMaxSeq(row, 'messages.next_sequence') : 0, state?.maxSequence ?? 0) + 1
+  // Absorbed chunks reserve logical positions beyond the last physical row.
+  const state = readMessageIngestState(current.stream_ingest_state);
+  const maximum = Math.max(
+    row ? parseMaxSeq(row, 'messages.next_sequence') : 0,
+    state?.maxSequence ?? 0
+  );
+  sql.exec('UPDATE chat_sessions SET last_message_sequence = ? WHERE id = ?', maximum, sessionId);
+  return maximum + 1;
+}
+
+/** Archive imports preserve canonical positions; never lower a known watermark.
+ * NULL is left unknown so the first live writer measures the complete restored transcript.
+ * Called synchronously after each imported chunk, before any subsequent await.
+ */
+export function advanceImportedMessageSequence(
+  sql: SqlStorage,
+  sessionId: string,
+  rows: readonly Record<string, unknown>[]
+): void {
+  const maximum = rows.reduce(
+    (max, row) => Math.max(max, parseMaxSeq({ max_seq: row.sequence }, 'messages.import_sequence')),
+    0
+  );
+  sql.exec(
+    `UPDATE chat_sessions SET last_message_sequence = ?
+    WHERE id = ? AND last_message_sequence IS NOT NULL AND last_message_sequence < ?`,
+    maximum,
+    sessionId,
+    maximum
   );
 }
 
@@ -137,8 +179,9 @@ export function insertNewMessage(
     sequence
   );
   sql.exec(
-    `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
+    `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ?, last_message_sequence = ? WHERE id = ?`,
     now,
+    sequence,
     sessionId
   );
 

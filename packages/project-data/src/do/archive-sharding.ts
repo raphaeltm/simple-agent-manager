@@ -1,4 +1,5 @@
 // FILE SIZE EXCEPTION: ProjectData terminal archive migration state machine — keeping source intent, target copy/seal, canonical hash, exact-read guards, and final source-delete invariants in one module avoids cross-file transaction coupling during Fable review. See .claude/rules/18-file-size-limits.md
+import { advanceImportedMessageSequence } from './messages-persist-helpers';
 import type { MessageCursor } from '@simple-agent-manager/shared';
 import { D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
 import {
@@ -1817,6 +1818,8 @@ export async function commitArchiveTargetChunk(
     committedHash = input.sha256;
   } else {
     for (const row of input.rows) insertArchiveRow(sql, input.tableName, row);
+    if (input.tableName === 'chat_messages')
+      advanceImportedMessageSequence(sql, input.sessionId, input.rows);
     committedHash = await canonicalRowsSha256(
       spec.columns,
       readCommittedRowsForChunk(sql, input.tableName, input.rowIds)
@@ -3875,6 +3878,8 @@ export async function restoreSourceArchiveChunk(
     );
     if (after > before) inserted++;
   }
+  if (input.tableName === 'chat_messages')
+    advanceImportedMessageSequence(sql, input.sessionId, input.rows);
   const committedRows = readCommittedRowsForChunk(sql, input.tableName, input.rowIds);
   const committedHash = await canonicalRowsSha256(spec.columns, committedRows);
   if (committedHash !== input.sha256) {

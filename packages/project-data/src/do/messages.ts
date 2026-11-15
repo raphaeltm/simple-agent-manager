@@ -174,7 +174,7 @@ export function persistMessageBatch(
   assertTranscriptWriteAllowed(sql, sessionId, 'persistMessageBatch');
   const session = sql
     .exec(
-      `SELECT id, workspace_id, message_count, topic, status, stream_ingest_state,
+      `SELECT id, workspace_id, message_count, topic, status, last_message_sequence, stream_ingest_state,
       materialized_at, materialized_through_created_at, materialized_through_sequence,
       (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch
       FROM chat_sessions WHERE id = ?`,
@@ -242,7 +242,7 @@ export function persistMessageBatch(
   let duplicates = 0;
   let limitReached = false;
   const now = Date.now();
-  let nextSeq = nextSequence(sql, sessionId);
+  let nextSeq = nextSequence(sql, sessionId, session);
   const persistedMessages: Array<{
     id: string;
     role: string;
@@ -316,7 +316,10 @@ export function persistMessageBatch(
     // Rows without a usable timestamp share `now`; reads page on (created_at, sequence, id),
     // so ties are safe (see message-cursor.ts).
     const createdAt = new Date(msg.timestamp).getTime() || now;
-    const sequence = msg.sequence ?? nextSeq++;
+    // Reporter positions belong to its outbox; browser/system messages and a
+    // recreated outbox may already have used them in the canonical transcript.
+    const sequence = Math.max(nextSeq, msg.sequence ?? nextSeq);
+    nextSeq = sequence + 1;
     const boundedToolMetadata = boundToolMetadataForStorage(
       withoutSamNotice(msg.toolMetadata, sessionId, msg.messageId),
       env
@@ -383,17 +386,19 @@ export function persistMessageBatch(
     if (staged)
       sql.exec(
         `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?,
-       stream_ingest_state = ? WHERE id = ?`,
+       stream_ingest_state = ?, last_message_sequence = ? WHERE id = ?`,
         persisted,
         now,
         staged.state,
+        nextSeq - 1,
         sessionId
       );
     else
       sql.exec(
-        `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ? WHERE id = ?`,
+        `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ? WHERE id = ?`,
         persisted,
         now,
+        nextSeq - 1,
         sessionId
       );
 
@@ -650,8 +655,9 @@ export function persistSystemMessage(
       sequence
     );
     sql.exec(
-      `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
+      `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ?, last_message_sequence = ? WHERE id = ?`,
       now,
+      sequence,
       sessionId
     );
     return { id, now, sequence };
