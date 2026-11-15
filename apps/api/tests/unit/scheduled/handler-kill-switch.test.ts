@@ -183,12 +183,14 @@ describe('scheduled operational sweep kill switch', () => {
 
 describe('provider orphan failure reporting', () => {
   it.each([
-    { errors: 1, skipped: true },
-    { errors: 2, skipped: false },
-    { errors: 0, skipped: true },
+    { errors: 1, skipped: true, accountErrors: 0 },
+    { errors: 2, skipped: false, accountErrors: 0 },
+    { errors: 0, skipped: true, accountErrors: 0 },
+    // Failures confined to user/project accounts are logged, never a failed platform sweep.
+    { errors: 0, skipped: false, accountErrors: 3 },
   ])(
-    'reports errors=$errors skipped=$skipped durably and runs the following sweep',
-    async ({ errors, skipped }) => {
+    'reports errors=$errors accountErrors=$accountErrors skipped=$skipped and runs the following sweep',
+    async ({ errors, skipped, accountErrors }) => {
       const { createSweepIsolator: realCreate } = await vi.importActual<
         typeof import('../../../src/scheduled/sweep-isolation')
       >('../../../src/scheduled/sweep-isolation');
@@ -208,8 +210,10 @@ describe('provider orphan failure reporting', () => {
       enabledMock.mockResolvedValue(true);
       providerOrphanMock.mockResolvedValue({
         errors,
+        accountErrors,
         scanned: 3,
         destroyed: 1,
+        deletionRequested: 2,
         skipped,
         skipReason: skipped ? 'credential-resolution-failed' : null,
       });
@@ -240,7 +244,9 @@ describe('provider orphan failure reporting', () => {
           failedSweepCount: errors ? 1 : 0,
           providerOrphansScanned: 3,
           providerOrphansDestroyed: 1,
+          providerOrphansDeletionRequested: 2,
           providerOrphanErrors: errors,
+          providerOrphanAccountErrors: accountErrors,
         })
       );
     }

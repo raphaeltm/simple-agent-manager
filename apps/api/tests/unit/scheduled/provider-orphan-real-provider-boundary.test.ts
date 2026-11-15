@@ -141,6 +141,12 @@ describe('provider orphan reconciliation — real provider delete boundaries', (
 
     expect(result.destroyed, JSON.stringify({ result, calls: methods(fetchMock) })).toBe(1);
     expect(result.deletionRequested).toBe(0);
+    const { persistError } = await import('../../../src/services/observability');
+    expect(vi.mocked(persistError)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(persistError).mock.calls[0]?.[1]).toMatchObject({
+      message: 'Destroyed provider server that no live node row claimed',
+      context: { deletion: 'completed', providerInstanceId: '101', claimStatus: 'no-row' },
+    });
     expect(methods(fetchMock).filter(([method]) => method === 'DELETE')).toEqual([
       ['DELETE', 'https://api.hetzner.cloud/v1/servers/101'],
     ]);

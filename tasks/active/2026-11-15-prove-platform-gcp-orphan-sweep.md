@@ -21,8 +21,10 @@ inside the sweep.
   credential's creator, no project scope) + `createGcpProviderForEnv`. Ownership and selection
   logic unchanged.
 - `services/platform-credentials.ts`: `getPlatformCloudCredential` also returns `createdBy`.
-- `scheduled/handler.ts`: a sweep run with `errors > 0` is reported through `sweeps.isolate`'s
-  durable failed-sweep path while keeping its counters.
+- `scheduled/handler.ts`: a sweep run with platform-account or infrastructure errors
+  (`result.errors > 0`) is reported through `sweeps.isolate`'s durable failed-sweep path while
+  keeping its counters; failures confined to one user/project account are `accountErrors`,
+  logged (`providerOrphanAccountErrors`) and never fail the sweep (commit 73f570618).
 - Tests: `tests/unit/scheduled/provider-orphan-platform-gcp.test.ts` (platform WIF and key through
   the real entry point, token exchange and provider HTTP boundary; owned positive control plus
   foreign/legacy preservation; per-credential isolation), `handler-kill-switch.test.ts` (failed-only,
@@ -44,18 +46,28 @@ approved the extension (event 44439269) with conditions recorded in the checklis
   never `destroyed`, and counted toward `PROVIDER_ORPHAN_DESTROY_LIMIT`. Others keep `deleteVM`.
 - `253e6662d`: drops unrelated prettier reformatting from the docs change.
 
-### Bounds (rule 81, rule 47), defaults
+### Bounds (rule 81, rule 47), defaults (corrected per cloudflare-specialist round 2)
 
-- Request timeout T = 5 s per provider call; sweep budget B = 20 s; destroy limit L = 5.
-- Per account: list <= T; per candidate re-read <= T + delete <= T = 2T = 10 s.
-- No candidate starts after B, so one pass is at most about B + 2T + T = 35 s of provider I/O
-  per account loop (platform account first, then user accounts until B or L is reached).
-- Candidates per pass: at most L = 5 deletions; at GCP latency (each lookup up to 9 zonal GETs
-  plus one aggregated list, about 100-300 ms each) a candidate costs about 1-4 s, so all 5 fit
-  in B. The rest are not touched (nothing sent) and are selected again on the next eligible pass
-  (hourly by default). Worst-case drain of N orphans: ceil(N/5) passes, e.g. 20 orphans in 4 h.
-- Next pass after a request: VM gone -> not listed; still present (deleting or delete failed)
-  -> requested again (idempotent).
+- T = `NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS` (5 s) bounds one PHASE (all its sequential
+  requests): the list, the ownership re-read, or the delete. B = sweep budget (20 s). L = destroy
+  limit (5), shared by the platform account and the user/project accounts in one pass.
+- A candidate may only start before B and costs at most re-read T + delete T, so a whole pass
+  ends by B + 2T = 30 s; a list that ends after B starts nothing (at most B + T = 25 s).
+- GCP requests per candidate (current code): re-read `GcpProvider.getVM` walks the 8 labelled
+  zones (`GCP_LOCATIONS`) until found (k GETs, k = 1..8; europe-west1-b is k = 4), plus the
+  aggregated list only if no labelled zone matches; the delete reads only the proven zone:
+  zone GET + GET by id + DELETE = 3. So k + 3 fetches (4-11; 12 outside the labelled zones) plus
+  4-5 KV token reads and 1 D1 audit write: about 9-18 subrequests, about 90 per pass at L = 5.
+  A cold WIF token exchange adds 2-3 fetches once per token lifetime.
+- Typical wall time per candidate 0.7-3.6 s, so all L = 5 fit in B. Candidates refused at the
+  re-read do not count toward L; they are bounded only by B (about 6 per pass).
+- D1 claim lookup is batched at 100 ids per statement (D1 bind limit), so a backlog of any size is
+  classified; tested with 105 candidates.
+- Drain: ceil((N_platform + N_user) / 5) hourly passes, platform account first; with 5 platform
+  deletions in a pass the user accounts are not reached that pass. Outer probable limit: a 100-VM
+  leak drains in about 20 h. A requested but still-present VM is requested again and spends L
+  again (backlog item 2).
+- Not bounded by T: D1 and KV calls, credential resolution, the cold WIF exchange (all small).
 
 ## Research findings
 
@@ -85,7 +97,7 @@ approved the extension (event 44439269) with conditions recorded in the checklis
 - [ ] task-completion-validator
 - [ ] Staging no-regression: one natural sweep tick with unchanged platform Hetzner credential,
       zero errors, zero destroyed (no fixtures, swaps or KV/D1 writes)
-- [ ] Production first-run deletion-risk read before merge
+- [x] Production first-run deletion-risk read (12:01 UTC; repeat right before the approval request)
 - [ ] PR, CI, CodeRabbit request and wait, merge
 - [ ] Deploy Production monitored; health check; one look at the next production sweep run
 
@@ -117,4 +129,36 @@ PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS=240000, PROVIDER_ORPHAN_MIN_AGE_MS=900000 
   sam-nodes (GCP ops 11:20:05 owned, 11:25:04 young, each ~6 s), then the poll aborted:
   reported destroy_failed, errors 1-2, failedSweeps [provider_orphan_reconciliation], no
   deletion record, second candidate dropped. Deletion happened but was reported as failure.
-- Extended build (deploy 11:36:36, box branch 7df2551d5): in progress.
+- Interim extended build (deploy 11:36:36, box branch 7df2551d5, before review fixes): fixtures
+  owned2 5063697356165490589 (11:37:22), young2 9223337014421890235 (11:41:08). 11:40/11:45/11:50
+  young skips, errors 0. 11:55: `provider_orphan.destroying` + `deletion_requested` for exactly
+  owned2; young2 skipped young; foreign not listed; errors 0, failedSweeps []. GCP: owned2 gone,
+  foreign + young2 present. 12:00: young2 (eligible since 11:56) requested, errors 0.
+- Final build (box branch 6265923f3 = main 73f570618 runtime, deploy 12:00:13, version
+  746831d13a0c99a6): owned3 766231454351106104 (12:00:23); 12:05 tick scanned 1, young 1,
+  errors 0, accountErrors 0. Proof tick 12:20, clean run 12:25: in progress.
+
+### Discrimination (each guard reverted alone; exactly these went red)
+- shared pass signal (list/re-read/delete on one signal): INCIDENT test only.
+- limit counts `destroyed` only: limit-per-pass test only.
+- force `deleteVM` on GCP: the 9 GCP request-path tests; Hetzner control stays green.
+- provider `expectedInstance` id/zone guard off: the two refusal tests (provider package).
+- provider label check off: label-change test (provider package).
+- claim lookup not batched: 105-candidate backlog test only.
+- sweep does not pass labels: delete-boundary label-change test only.
+- no-zone refusal off: no-zone test only.
+- account scoping off: the 5 account-failure tests.
+
+### Production first-run risk (read-only, 12:01 UTC, P1's `production_read.py`)
+- Enabled platform cloud credential: 1 Hetzner. Active user cloud credentials: 1 GCP, 3 Hetzner;
+  no project credentials.
+- `sam-prod-infra` (exact production installation + env labels): 3 VMs, all claimed by
+  non-terminal nodes; 0 unclaimed, 0 eligible, 0 young, 0 ambiguous. The GCP delete path would
+  delete nothing on its first production run.
+- Production logs (24 h): no `provider_orphan.destroying`/`destroy_failed`; one
+  `provider_orphan.list_failed` roughly every 2 h (one account failing its list when the cursor
+  reaches it; with 4 user credentials in one cursor page, a pass attempts all four and the next pass
+  gets an empty page, so a failing account shows every other hour). With this change that is
+  `accountErrors`, not a failed sweep. User Hetzner
+  accounts cannot be read from here; their path keeps `deleteVM` and is unchanged except that
+  each call now has its own timeout.

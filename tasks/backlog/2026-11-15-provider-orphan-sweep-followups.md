@@ -32,6 +32,14 @@ reach a provider delete.
    labelled zones plus an aggregated list. `listVMs` already returns the zone; passing it to the
    re-read would cut that to one GET.
 
+7. **`accountErrors` also absorbs infrastructure failures inside an account pass** (security LOW,
+   round 2). A D1 claim-lookup or audit-write failure, or a platform-wide GCP token/WIF
+   misconfiguration hitting every user GCP account, lands in `accountErrors`, so the sweep
+   reports green. Nothing is deleted in those cases (all abort before DELETE).
+8. **Account failure logs carry no credential id or provider** (cloudflare LOW, round 2).
+   `provider_orphan.list_failed`, `account_inventory_failed` and `destroy_failed` cannot tell
+   operators which tenant account fails, and they are now the only signal for it.
+
 ## Acceptance criteria
 
 - [ ] Platform-inventory completion is tracked separately from user accounts; the marker is stamped
@@ -44,3 +52,6 @@ reach a provider delete.
 - [ ] A failing platform credential backs off (bounded, configurable) instead of retrying every tick.
 - [ ] Dedicated `PROVIDER_ORPHAN_*` timeout/budget tunables (or documented aliases).
 - [ ] The ownership re-read uses the listed zone when known.
+- [ ] Infrastructure failures inside an account pass count as `errors`, or a pass where every
+      attempted account failed raises an error-level signal.
+- [ ] Account-scoped failure logs carry the non-secret credential id and provider.
