@@ -93,6 +93,7 @@ async function targetChoice(
       floors: [
         { provider: current.provider, why: `this box is sealed with ${current.provider} now` },
       ],
+      rerun: '`pnpm selfhost:secrets switch --to auto`',
     });
     return {
       ...choice,
