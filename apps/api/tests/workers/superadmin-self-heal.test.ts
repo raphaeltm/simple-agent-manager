@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { createAuth } from '../../src/auth';
 import migrationSql from '../../src/db/migrations/0062_login_time_superadmin_self_heal.sql?raw';
+import { FIRST_SUPERADMIN_SETTING } from '../../src/services/first-superadmin';
 
 /**
  * Miniflare's D1 `exec()` splits its input on newlines and runs each line as a
@@ -45,6 +46,9 @@ interface UserRow {
  * we clear any real users left over from prior tests and re-assert the sentinel.
  */
 async function resetUsers(): Promise<void> {
+  await env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
+    .bind(FIRST_SUPERADMIN_SETTING)
+    .run();
   await env.DATABASE.prepare(`DELETE FROM users WHERE status != 'system'`).run();
   await env.DATABASE.prepare(
     `INSERT INTO users (id, email, email_verified, role, status)
@@ -208,6 +212,21 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     await hook({ userId: 'real-1' });
 
     expect(await getUser('real-1')).toMatchObject({ role: 'user' });
+  });
+
+  it('does not reopen administration after the one-time election has completed', async () => {
+    await insertUser('later-user', { role: 'user', status: 'pending' });
+    await env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_by)
+       VALUES (?, json_object('version', 1, 'ownerId', 'deleted-owner'), NULL)`,
+    )
+      .bind(FIRST_SUPERADMIN_SETTING)
+      .run();
+    const hook = await getSessionAfterHook();
+
+    await hook({ userId: 'later-user' });
+
+    expect(await getUser('later-user')).toMatchObject({ role: 'user', status: 'pending' });
   });
 
   it('never promotes a suspended user, even as sole operator', async () => {
