@@ -554,6 +554,36 @@ Optional GitHub Environment variables `CONTAINER_ROLLOUT_TIMEOUT_MS` (default
 accept positive integer milliseconds. These are deployment runner settings, not
 Worker runtime settings. Timeout errors include the rollout ID and last status.
 
+### Container image reuse
+
+Before the API Worker is deployed, the **Resolve container images** step
+(`scripts/deploy/container-image-reuse.ts`) gives each Instant container image a
+content key. The key covers the Dockerfile, every file it copies, and a
+fingerprint of every input installed from the network: the apt package indexes
+of each suite the image installs from, every URL the build fetches, the resolved
+dependency tree of each `npm install -g` package, and the resolved PyPI
+dependencies of each `uv tool install` (`container-image-inputs.ts`,
+`container-image-fingerprints.ts`). The registry tag `inputs-<key>` in your
+account's container registry records an image built from those inputs.
+
+- **Inputs unchanged:** the deploy uses that image's digest. Nothing is built or
+  pushed, and when it is the running image Wrangler reports no change and starts
+  no rollout, so the rollout gate returns at once.
+- **Inputs changed** (including an upstream security update or dependency
+  release): the image is built and pushed under the new key, and the rollout
+  gate waits for the rollout as usual.
+- **Any doubt** (a Dockerfile instruction the analysis does not recognise, a
+  failed fingerprint, a registry error): the Dockerfile is left in place and
+  Wrangler builds the image as it would without this step. A failed image build
+  fails the deployment.
+
+The step's job summary lists each image's outcome and reason. A clean install
+has no recorded images, so its first deploy builds them. To always build with
+Wrangler, set the GitHub Environment variable `CONTAINER_IMAGE_REUSE_ENABLED` to
+`false`. Optional `CONTAINER_IMAGE_FINGERPRINT_TIMEOUT_MS` (default `180000`)
+bounds the fingerprint lookups, and `CONTAINER_REGISTRY_CREDENTIAL_MINUTES`
+(default `30`) sets the lifetime of each short-lived registry credential.
+
 ## First Login & Admin Access
 
 On ordinary deployments without an installer owner binding, the first genuine human to sign in becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.

@@ -7,6 +7,10 @@ COPY scripts/codex-device-auth.mjs /usr/local/bin/sam-codex-device-auth.mjs
 COPY scripts/claude-setup-protocol.mjs /usr/local/bin/claude-setup-protocol.mjs
 COPY scripts/claude-setup-token.mjs /usr/local/bin/sam-claude-setup-token.mjs
 
+# Deploys reuse this image while its inputs are unchanged
+# (scripts/deploy/container-image-inputs.ts). Pin every download by version or
+# digest; apt suites, transitive npm dependencies and fetched URLs are
+# fingerprinted, and an installer the analysis does not recognise disables reuse.
 # The base image already includes Node.js 22, Bun, git, curl, and common tools.
 # Add extra tools needed for SAM agent workloads here. The normal VM runtime
 # can install GitHub CLI during devcontainer bootstrap; standalone cf-container
