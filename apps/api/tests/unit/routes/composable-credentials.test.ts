@@ -127,4 +127,96 @@ describe('composable credentials routes', () => {
     expect(whereCalls).toContain(rawId);
     expect(whereCalls).toContain('test-user-id');
   });
+
+  describe('openai-compatible baseUrl (self-host SSRF, T5)', () => {
+    function postCredential(baseUrl: string) {
+      return app.request(
+        '/api/cc/credentials',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'My endpoint',
+            kind: 'openai-compatible',
+            secret: { apiKey: 'placeholder-provider-key', baseUrl, dialect: 'openai-compatible' },
+          }),
+        },
+        { ...env, ENCRYPTION_KEY: btoa('k'.repeat(32)) } as Env
+      );
+    }
+
+    it.each([
+      'https://127.0.0.1/v1',
+      'https://localhost:8080/v1',
+      'https://169.254.169.254/latest',
+      'https://metadata.google.internal/v1',
+      'https://10.0.0.5/v1',
+      'https://[::1]/v1',
+      'https://2130706433/v1',
+      'https://minio/v1',
+      'https://user:pass@llm.example.com/v1',
+    ])('refuses %s before storing anything', async (baseUrl) => {
+      const insert = vi.fn();
+      (mockDB as unknown as { insert: typeof insert }).insert = insert;
+
+      const res = await postCredential(baseUrl);
+
+      expect(res.status).toBe(400);
+      expect(insert).not.toHaveBeenCalled();
+    });
+
+    function postConfiguration(baseUrl: string) {
+      return app.request(
+        '/api/cc/configurations',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'Override',
+            consumerKind: 'agent',
+            consumerTarget: 'claude-code',
+            settings: { baseUrl, dialect: 'anthropic' },
+          }),
+        },
+        env
+      );
+    }
+
+    it.each(['https://10.0.0.5/anthropic', 'https://169.254.169.254/', 'https://localhost/x'])(
+      'refuses a configuration baseUrl override on %s before storing anything',
+      async (baseUrl) => {
+        const insert = vi.fn();
+        (mockDB as unknown as { insert: typeof insert }).insert = insert;
+
+        const res = await postConfiguration(baseUrl);
+
+        expect(res.status).toBe(400);
+        expect(insert).not.toHaveBeenCalled();
+      }
+    );
+
+    it('control: stores a configuration override on a public HTTPS host', async () => {
+      const values = vi.fn().mockResolvedValue(undefined);
+      (mockDB as unknown as { insert: ReturnType<typeof vi.fn> }).insert = vi
+        .fn()
+        .mockReturnValue({ values });
+
+      const res = await postConfiguration('https://anthropic-alt.example.com/anthropic');
+
+      expect(res.status).toBe(201);
+      expect(values).toHaveBeenCalledOnce();
+    });
+
+    it('control: stores an HTTPS endpoint on a public host', async () => {
+      const values = vi.fn().mockResolvedValue(undefined);
+      (mockDB as unknown as { insert: ReturnType<typeof vi.fn> }).insert = vi
+        .fn()
+        .mockReturnValue({ values });
+
+      const res = await postCredential('https://llm.example.com/v1');
+
+      expect(res.status).toBe(201);
+      expect(values).toHaveBeenCalledOnce();
+    });
+  });
 });

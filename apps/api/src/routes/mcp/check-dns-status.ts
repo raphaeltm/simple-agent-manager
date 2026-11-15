@@ -15,8 +15,13 @@
  * - Errors are reported as fixed categories, never as raw error text, which could otherwise tell
  *   a caller which ports and addresses answer.
  */
+import {
+  classifyHost,
+  guardedFetch,
+  OutboundRequestRefusedError,
+} from '@simple-agent-manager/worker-core';
+
 import type { Env } from '../../env';
-import { classifyHost, guardedFetch, OutboundRequestRefusedError } from '@simple-agent-manager/worker-core';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { resolveOutboundMaxRedirects } from '../../services/outbound-fetch-settings';
 import { type JsonRpcResponse, jsonRpcSuccess, type McpTokenData } from './_helpers';
