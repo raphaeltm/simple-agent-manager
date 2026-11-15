@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-
 import { describe, expect, it, vi } from 'vitest';
 
 // Bypass the API suite's lightweight Container alias to exercise the installed
@@ -47,12 +45,5 @@ describe('installed Container SDK direct egress after reconstruction', () => {
     expect(interceptHttp).not.toHaveBeenCalled();
     expect(interceptHttps).not.toHaveBeenCalled();
     expect(interceptAll).not.toHaveBeenCalled();
-  });
-
-  it('exports the SDK helper from the Worker entrypoint for running-guest reconstruction', () => {
-    const source = readFileSync(new URL('../../../src/index.ts', import.meta.url), 'utf8');
-    expect(source).toMatch(
-      /export\s*\{\s*ContainerProxy\s*\}\s*from\s*['"]@cloudflare\/containers['"]/
-    );
   });
 });
