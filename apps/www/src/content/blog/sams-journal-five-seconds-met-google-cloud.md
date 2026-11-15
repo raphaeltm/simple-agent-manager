@@ -28,7 +28,7 @@ When SAM needs a machine, it makes a **provisioning attempt**: resolve the crede
 
 The whole attempt used to share the 5-second limit meant for a single HTTP request. On Google Cloud, the create finished after the attempt's time was already up, so the DNS step always started on a cancelled signal and failed. The machine existed, and the next attempt 30 seconds later found it and carried on. Every Google Cloud node lost half a minute that way.
 
-Now the attempt has its own deadline: 60 seconds by default, which admins can change in the Operations section of SAM's admin settings. The per-request limit is unchanged.
+Now the attempt has its own time budget: 60 seconds by default, which admins can change in the Operations section of SAM's admin settings. The per-request limit is unchanged. The budget covers the steps before the create request is sent and the DNS step after it, but not the create itself, as the next paragraph explains.
 
 One detail mattered more than the number. Once the create request has been sent, SAM never cancels it, even past the deadline. Cancelling halfway through can leave a VM running that SAM has lost track of. So a create that runs over is left to finish, and the next attempt adopts the machine by its labels instead of creating a second one (see `apps/api/src/durable-objects/node-lifecycle-provisioning-attempt.ts`).
 
@@ -56,7 +56,7 @@ sequenceDiagram
     G-->>S: Not listed, so it is gone
 ```
 
-Not waiting creates a new risk: what if the instance changes between the check and the delete? So the delete is tied to exactly the instance the check proved. SAM passes the expected ID, zone and labels to the provider, which reads the instance one last time and refuses to send anything if one of them differs:
+Not waiting creates a new risk: what if the instance changes between the check and the delete? SAM passes the expected ID, zone and labels to the provider, which reads the instance by its ID one last time, right before sending, and refuses to send anything if the ID, name or labels differ:
 
 ```typescript title="packages/providers/src/gcp-deletion.ts"
 const changedLabel = Object.entries(expected?.labels ?? {}).find(
@@ -71,11 +71,13 @@ if (changedLabel) {
 }
 ```
 
+This narrows the window rather than closing it. Google's delete call addresses an instance by name and has no "only if it is still this one" condition, so a replacement that took the same name in the moment between that last read and the delete could still be hit. The sweep only ever sees machines that are over an hour old and labelled for this installation, which makes that unlikely, but it is a narrow race, not a guarantee.
+
 Hetzner and the other providers keep their old delete call: it returns as soon as the provider accepts the request, so it already fits the time limit.
 
 ## A quota covers one bucket, not the whole cloud
 
-The third fix is about errors rather than time. Google Cloud limits how much you can run with **quotas**, and each quota is one metric in one region. When you hit one, the error says exactly which:
+The third fix is about errors rather than time. Google Cloud limits how much you can run with **quotas**. Most of them are one metric in one region, and when you hit one, the error says exactly which:
 
 ```text
 Quota 'T2D_CPUS' exceeded.  Limit: 24.0 in region europe-west1.
@@ -92,7 +94,7 @@ const GCP_REGIONAL_QUOTA_MESSAGE =
   /quota '([A-Z0-9_]+)' exceeded\.?\s+limit:\s*[\d.]+\s+in region ([a-z0-9-]+)/i;
 ```
 
-For a CPU quota like this one, it then skips only the machine options that the same bucket rules out: the same family in the same region with at least as many vCPUs. Smaller machines of that family, other families and other regions are still tried. SAM moves to the next cloud only when no Google Cloud option is left. A quota that names no region, such as `CPUS_ALL_REGIONS`, still moves on right away.
+For a CPU quota like this one, it then skips only the machine options that the same bucket rules out: the same family in the same region with at least as many vCPUs. Smaller machines of that family, other families and other regions are still tried. SAM moves to the next cloud once it has used up the Google Cloud options in its attempt list (see the limit below). A quota that names no region, such as `CPUS_ALL_REGIONS`, still moves on right away.
 
 One more detail. With the pool's `fallback-chain` policy, SAM tries up to eight options per cloud by default before moving on. If all eight came from the exhausted bucket, the smaller machine that would fit never got a turn, so the eight slots are now spread across buckets (region plus machine family). The [compute pools guide](/docs/guides/compute-pools/) has the full rules, and an [earlier entry](/blog/cloud-compute-pools-provider-fallback/) explains how pools rank clouds in the first place.
 
@@ -101,7 +103,7 @@ One more detail. With the pool's `fallback-chain` policy, SAM tries up to eight 
 Each of these fixes works outside SAM too:
 
 - **Give each request its own time limit, and the whole job a separate one.** A shared timer lets slow early steps use up the time of the step that matters.
-- **"Accepted" and "done" are different states.** If you do not wait for "done", record "requested" and check again later, and tie the request to exactly what you checked.
+- **"Accepted" and "done" are different states.** If you do not wait for "done", record "requested" and check again later, and re-check the target right before you send the request.
 - **Read the scope of an error before you react to it.** A quota error that names a region is a statement about that region, not about the cloud.
 
 The orphan sweep has a short follow-up list of smaller items, such as not spending the hourly delete limit on a machine whose deletion is already in progress. Those are tracked for a later change.
