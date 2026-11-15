@@ -13,18 +13,21 @@
 import { readFileSync } from 'node:fs';
 
 import Database from 'better-sqlite3';
-import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { handleAppError } from '../../src/middleware/app-error-handler';
-import { authRoutes } from '../../src/routes/auth';
 import { generateEncryptionKey } from '../../src/services/encryption';
 import {
   __resetPlatformConfigCacheForTest,
   completeSetupWithConfig,
 } from '../../src/services/platform-config';
+import {
+  buildAuthApp,
+  type CookieJar,
+  createCookieJar,
+  startSocialSignIn,
+} from '../helpers/oauth-sign-in';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const API_ORIGIN = 'https://api.example.com';
@@ -99,34 +102,10 @@ function profileClaiming(email: string) {
   };
 }
 
-function createCookieJar() {
-  const cookies = new Map<string, string>();
-  return {
-    store(response: Response) {
-      for (const setCookie of response.headers.getSetCookie()) {
-        const pair = setCookie.split(';', 1)[0] ?? '';
-        const separator = pair.indexOf('=');
-        const name = pair.slice(0, separator).trim();
-        const value = pair.slice(separator + 1).trim();
-        if (value === '' || /max-age=0/i.test(setCookie)) cookies.delete(name);
-        else cookies.set(name, value);
-      }
-    },
-    header: () => [...cookies].map(([name, value]) => `${name}=${value}`).join('; '),
-  };
-}
-
-function buildApp() {
-  const app = new Hono<{ Bindings: Env }>();
-  app.onError(handleAppError);
-  app.route('/api/auth', authRoutes);
-  return app;
-}
-
 describe('GitLab sign-in trust by identity host (vertical slice)', () => {
   let sqlite: Database.Database;
-  let jar: ReturnType<typeof createCookieJar>;
-  const app = buildApp();
+  let jar: CookieJar;
+  const app = buildAuthApp();
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
@@ -182,19 +161,12 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
 
   /** Browser: click "Sign in with GitLab", approve on the host, land back on the callback. */
   async function signInWithGitLab(env: Env, host: string): Promise<Response> {
-    const start = await app.request(
-      `${API_ORIGIN}/api/auth/sign-in/social`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: APP_ORIGIN, cookie: jar.header() },
-        body: JSON.stringify({ provider: 'gitlab', callbackURL: CALLBACK_URL }),
-      },
-      env
-    );
-    expect(start.status).toBe(200);
-    jar.store(start);
-    const { url } = (await start.json()) as { url: string };
-    const authorizeUrl = new URL(url);
+    const authorizeUrl = await startSocialSignIn(app, env, jar, {
+      apiOrigin: API_ORIGIN,
+      appOrigin: APP_ORIGIN,
+      provider: 'gitlab',
+      callbackURL: CALLBACK_URL,
+    });
     expect(authorizeUrl.origin + authorizeUrl.pathname).toBe(`${host}/oauth/authorize`);
 
     const callback = new URL(GITLAB_REDIRECT_URI);
