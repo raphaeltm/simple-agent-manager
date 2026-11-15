@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -95,7 +97,6 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
   }
 
   const nestedPermissionValues = [
-    ...jobPermissionValues(stagingConfig),
     ...(reusableConfig && Object.hasOwn(reusableConfig, 'permissions')
       ? [reusableConfig.permissions]
       : []),
@@ -105,6 +106,26 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
     errors.push('nested or reusable permission overrides are forbidden');
   }
 
+  const stagingJobs = asRecord(stagingConfig?.jobs) || {};
+  for (const [name, job] of Object.entries(stagingJobs)) {
+    const permissions = permissionMap(asRecord(job)?.permissions);
+    if (name === 'lease') {
+      if (
+        !isExactPermissionMap(permissions, {
+          ...REQUIRED_STAGING_PERMISSIONS,
+          deployments: 'write',
+        })
+      ) {
+        errors.push('lease job must have only deployment write and checkout read authority');
+      }
+    } else if (permissions) {
+      errors.push('nested or reusable permission overrides are forbidden');
+    }
+    if (permissions && 'pull-requests' in permissions)
+      errors.push(`unexpected permission grant: pull-requests: ${permissions['pull-requests']}`);
+  }
+  // Only the serialized lease job receives a GitHub token. The reusable
+  // deployment and all audit jobs retain the root read-only permissions.
   const permissionValues = [stagingConfig?.permissions, ...nestedPermissionValues];
   for (const value of permissionValues) {
     const permissions = permissionMap(value);
@@ -126,7 +147,7 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
     }
   }
 
-  const combinedWorkflows = `${staging}\n${reusable}`;
+  const combinedWorkflows = `${staging.replace(block(staging, /^  lease:\s*$/m, /^  [a-zA-Z0-9_-]+:\s*$/m), '')}\n${reusable}`;
   for (const consumer of PR_WRITE_CONSUMERS) {
     if (consumer.test(combinedWorkflows)) {
       errors.push(`pull-request write consumer is present: ${consumer.source}`);
@@ -136,7 +157,7 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
   const deployCall = block(staging, /^  deploy:\s*$/m, /^  [a-zA-Z0-9_-]+:\s*$/m);
   for (const requiredCallLine of [
     'uses: ./.github/workflows/deploy-reusable.yml',
-    'environment: staging',
+    "environment: ${{ inputs.environment || 'staging' }}",
     'skip_agent: false',
     'dry_run: ${{ inputs.dry_run || false }}',
     'secrets: inherit',
@@ -277,4 +298,31 @@ describe('staging deployment permission contract', () => {
       'pull-request write consumer is present: \\b(?:pull-request-comment|comment-on-pr)\\b'
     );
   });
+});
+
+describe('lease workflow gating', () => {
+  it('serializes acquire, deploy and release per environment, and gates all consumers', () => {
+    const workflow = parse(stagingWorkflow);
+    expect(workflow.concurrency.group).toBe("deploy-${{ inputs.environment || 'staging' }}");
+    expect(workflow.concurrency['cancel-in-progress']).toBe(false);
+    expect(workflow.jobs.lease.permissions.deployments).toBe('write');
+    for (const [name, job] of Object.entries(workflow.jobs) as [
+      string,
+      Record<string, unknown>,
+    ][]) {
+      if (name === 'lease') continue;
+      expect([job.needs].flat()).toContain('lease');
+      expect(job.if).toContain('inputs.lease_action');
+      if (String(job.if).includes('always()'))
+        expect(job.if).toContain("needs.lease.result == 'success'");
+    }
+  });
+});
+
+it('executes the lease lifecycle and failure-path tests in CI', () => {
+  execFileSync(
+    process.execPath,
+    ['--test', fileURLToPath(new URL('../deploy/staging-lease.test.mjs', import.meta.url))],
+    { stdio: 'pipe' }
+  );
 });
