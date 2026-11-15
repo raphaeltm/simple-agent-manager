@@ -32,6 +32,8 @@ type Reporter struct {
 	cfg    Config
 	db     *sql.DB
 	client *http.Client
+	// Immutable after construction; shared across HTTP retries and session changes.
+	outboxIncarnation string
 
 	mu          sync.Mutex
 	authToken   string
@@ -118,21 +120,26 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 	if err := migrateOutbox(db); err != nil {
 		return nil, fmt.Errorf("messagereport: migrate outbox: %w", err)
 	}
+	incarnation, err := loadOutboxIncarnation(db)
+	if err != nil {
+		return nil, fmt.Errorf("messagereport: initialize outbox incarnation: %w", err)
+	}
 
 	stopCtx, stopCancel := context.WithCancel(context.Background())
 
 	r := &Reporter{
-		cfg:           cfg,
-		db:            db,
-		client:        config.NewControlPlaneClient(cfg.HTTPTimeout),
-		workspaceID:   cfg.WorkspaceID,
-		sessionID:     cfg.SessionID,
-		terminalWakeC: make(chan struct{}, 1),
-		now:           time.Now,
-		stopC:         make(chan struct{}),
-		stopCtx:       stopCtx,
-		stopCancel:    stopCancel,
-		doneC:         make(chan struct{}),
+		cfg:               cfg,
+		db:                db,
+		client:            config.NewControlPlaneClient(cfg.HTTPTimeout),
+		outboxIncarnation: incarnation,
+		workspaceID:       cfg.WorkspaceID,
+		sessionID:         cfg.SessionID,
+		terminalWakeC:     make(chan struct{}, 1),
+		now:               time.Now,
+		stopC:             make(chan struct{}),
+		stopCtx:           stopCtx,
+		stopCancel:        stopCancel,
+		doneC:             make(chan struct{}),
 	}
 
 	go r.flushLoop()

@@ -2723,6 +2723,14 @@ export const MIGRATIONS: Migration[] = [
         ON project_event_matches(event_id)`);
     },
   },
+  {
+    name: '078-message-stream-ingest-state',
+    run(sql) {
+      // NULL is the grandfathered representation: every old row remains readable,
+      // commentable and archivable. Only newly created canonical rows may grow.
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN stream_ingest_state TEXT');
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

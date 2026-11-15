@@ -4,6 +4,7 @@ import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
 import { GCP_CATALOG_SETTINGS } from './admin-settings-gcp-catalog-definitions';
 import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
+import { MESSAGE_MERGE_SETTINGS } from './admin-settings-message-merge-definitions';
 import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
@@ -23,6 +24,7 @@ export {
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
 const definitions = [
+  ...MESSAGE_MERGE_SETTINGS,
   ...DEPLOYMENT_PUBLISH_SETTINGS,
   ...CORE_SETTINGS,
   ...NODE_TUNNEL_SETTINGS,

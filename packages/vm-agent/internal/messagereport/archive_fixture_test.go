@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // TestArchiveReporterFixture is the Go half of the archive profile vertical
@@ -50,10 +52,17 @@ func (capture *archiveFixtureCapture) serveHTTP(w http.ResponseWriter, req *http
 	if req.Header.Get("Authorization") != "Bearer archive-profile-test-token" {
 		capture.t.Error("missing reporter authorization")
 	}
+	if _, err := uuid.Parse(req.Header.Get(outboxIncarnationHeader)); err != nil {
+		capture.t.Error("missing durable reporter outbox incarnation")
+	}
 	var payload struct {
 		Messages []apiMessage `json:"messages"`
 	}
-	if err := json.NewDecoder(req.Body).Decode(&payload); err != nil {
+	decoder := json.NewDecoder(req.Body)
+	// A pre-incarnation Worker accepts this same body; identity travels only
+	// in an additive HTTP header, not a new required payload field.
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
 		capture.t.Error(err)
 		w.WriteHeader(400)
 		return
