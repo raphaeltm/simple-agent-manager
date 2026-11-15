@@ -38,6 +38,7 @@ import {
   resolveSealedSecrets,
 } from './key-service.js';
 import { ensurePlatformKeys, PLATFORM_KEY_NAMES } from './platform-keys.js';
+import { SELFHOST_DURABLE_OBJECTS } from './selfhost-durable-objects.js';
 
 const uid = String(process.getuid?.() ?? 0);
 let state: string;
@@ -400,11 +401,32 @@ describe('the celld entry and the egress fence', () => {
       plan.config.durable_objects.bindings.map((b) => b.class_name)
     );
     expect(plan.config.durable_objects.bindings.length).toBeGreaterThan(10);
+    const selfhostOnly = new Set(SELFHOST_DURABLE_OBJECTS.map((object) => object.className));
     for (const binding of plan.config.durable_objects.bindings) {
+      // Self-host-only classes come from the self-host module; index.ts no longer exports them.
+      const source = selfhostOnly.has(binding.class_name) ? 'selfhost' : 'api';
       expect(main).toContain(
-        `export const ${binding.class_name} = wrapDurableObject(api.${binding.class_name});`
+        `export const ${binding.class_name} = wrapDurableObject(${source}.${binding.class_name});`
       );
     }
+    expect(main).toContain(
+      'export const HostedGitRepo = wrapDurableObject(selfhost.HostedGitRepo);'
+    );
+  });
+
+  it('mounts the self-host-only routes and exports their classes in both key modes', () => {
+    for (const main of [renderRuntimeSecretsMain(['HostedGitRepo']), renderPlainMain()]) {
+      expect(main).toContain("import { app } from './src/app.ts';");
+      expect(main).toContain("import * as selfhost from './src/selfhost/hosted-git.ts';");
+      expect(main.match(/^selfhost\.mountHostedGitRoute\(app\);$/gm)).toHaveLength(1);
+      // Mounted after index.ts has registered every shared route (its import runs first).
+      expect(main.indexOf("from './src/index.ts';")).toBeLessThan(
+        main.indexOf('selfhost.mountHostedGitRoute(app);')
+      );
+    }
+    expect(renderPlainMain()).toContain(
+      "export { HostedGitRepo } from './src/selfhost/hosted-git.ts';"
+    );
   });
 
   it('opens exactly the agent port for celld, only when the key service is on', () => {

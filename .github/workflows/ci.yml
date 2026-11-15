@@ -121,6 +121,16 @@ jobs:
               # Self-hosted (celld) packaging: generator, deploy script, one-box stack.
               - 'scripts/selfhost/**'
               - 'deploy/selfhost/**'
+              # SAM-hosted git (self-host build only): the hosted git conformance suite.
+              - 'apps/api/src/app.ts'
+              - 'apps/api/src/selfhost/**'
+              - 'apps/api/src/durable-objects/hosted-git-*.ts'
+              - 'apps/api/src/services/hosted-git/**'
+              - 'apps/api/src/vendor/dgit/**'
+              - 'apps/api/src/routes/projects/hosted-git-token.ts'
+              - 'apps/api/src/routes/projects/project-create.ts'
+              - 'apps/api/tests/hosted-git/**'
+              - 'apps/api/vitest.hosted-git.config.ts'
               # The live self-host suite runs the frpc.toml cloud-init renders.
               - 'packages/cloud-init/src/**'
               # The generated Worker config is built from wrangler.toml, so its text-binding
@@ -673,6 +683,11 @@ jobs:
       # celld wrangler.json generator, root-only secret files, pinned versions.
       - name: Run self-host packaging tests
         run: pnpm selfhost:test
+
+      # SAM-hosted git exists only in the self-host build: the real git CLI against the
+      # HostedGitRepo Durable Object in Miniflare (apps/api/vitest.hosted-git.config.ts).
+      - name: Run hosted git conformance tests
+        run: pnpm --filter @simple-agent-manager/api test:hosted-git
 
       # Real Caddy (pinned image, Docker host network) running the box's Caddyfile and sam.d
       # fragments against stub upstreams, and the pinned frpc/frps 0.72.0 (checksum-verified)

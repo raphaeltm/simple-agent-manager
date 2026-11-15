@@ -83,9 +83,10 @@ export interface Env
   AGENT_EMAIL_INBOUND_SMTP?: string;
   // Cloudflare Artifacts for SAM-native Git repos (optional — absent when ARTIFACTS_ENABLED is falsy)
   ARTIFACTS?: ArtifactsBinding;
-  // SAM-hosted git repositories (self-host): the Durable Object git server behind the local
-  // ARTIFACTS backend (services/hosted-git/backend.ts). Used only when HOSTED_GIT_BACKEND is
-  // "durable-object" and no Cloudflare Artifacts binding exists.
+  // SAM-hosted git repositories (self-host build only): the Durable Object git server behind the
+  // local ARTIFACTS backend (services/hosted-git/backend.ts). Bound only by the celld config
+  // (scripts/selfhost/selfhost-durable-objects.ts), never by wrangler.toml, and used only when
+  // HOSTED_GIT_BACKEND is "durable-object" and no Cloudflare Artifacts binding exists.
   HOSTED_GIT?: DurableObjectNamespace;
   HOSTED_GIT_BACKEND?: string;
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)

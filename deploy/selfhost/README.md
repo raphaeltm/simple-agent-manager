@@ -1194,7 +1194,15 @@ core (`apps/api/src/vendor/dgit/`). The deploy turns it on (`ARTIFACTS_ENABLED=t
 `HOSTED_GIT_BACKEND=durable-object` in `scripts/selfhost/celld-config.ts`); repositories live in the
 fleet bucket like every other Durable Object, so the bucket backup covers them.
 
-- Remote: `https://api.SAM_DOMAIN/git/<repo>.git`, served by the existing catch-all route (no Caddy
+Only the box's build has this git server. The Cloudflare Worker's `apps/api/wrangler.toml` and
+entry (`apps/api/src/index.ts`) do not mention it: the celld config adds the `HOSTED_GIT` binding
+and its own migration tag `selfhost-hosted-git-v1` (`scripts/selfhost/selfhost-durable-objects.ts`),
+and the generated entry exports the class and mounts the `/git/*` route from
+`apps/api/src/selfhost/hosted-git.ts`. A box first deployed when the class was wrangler.toml's
+migration `v23` keeps its repositories: celld keys an object's storage by Worker, class and id,
+not by migration tag.
+
+- Remote: `https://api.SAM_DOMAIN/git/<repo>.git`, served by the Worker's `/git/*` route (no Caddy
   fragment). Every request needs a SAM repository token as the HTTP Basic password (any username).
 - Workspaces get a token bound to their workspace from `POST /api/workspaces/:id/git-token`; it stops
   working when the workspace stops. Only nodes created after this deploy attach it (VM agent change).

@@ -15,6 +15,9 @@ carry a `// FILE SIZE EXCEPTION` line. Nothing else differs from upstream.
 used (`blame.ts`, `diff.ts`, `snapshot.ts`). Upstream's Worker router (`mod.ts`), registry
 Durable Object (`registry.ts`), cgit-style UI (`ui/`) and its `RepoCell` class are not vendored.
 
+Only the self-host build contains this code; the Cloudflare Worker's entry never imports it (see
+`apps/api/src/selfhost/hosted-git.ts`).
+
 SAM's Durable Object, `apps/api/src/durable-objects/hosted-git-repo.ts`, is adapted from
 upstream `src/repo.ts` (`RepoCell`): it keeps the smart-HTTP protocol paths (`info/refs`,
 `git-upload-pack`, `git-receive-pack`), delete and the GC alarm, and adds SAM's push and

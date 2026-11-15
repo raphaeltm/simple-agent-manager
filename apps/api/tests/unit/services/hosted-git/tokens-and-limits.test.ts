@@ -129,8 +129,8 @@ describe('backend resolution', () => {
   });
 
   it('is unavailable on Cloudflare installs without the binding or the backend switch', () => {
-    // The HostedGitRepo binding exists on every deploy (top-level wrangler.toml); the switch
-    // alone selects it.
+    // Defense in depth: even with a HOSTED_GIT namespace present (only the self-host build binds
+    // it), the switch and ARTIFACTS_ENABLED must both select it.
     expect(
       isArtifactsAvailable({
         ARTIFACTS_ENABLED: 'true',

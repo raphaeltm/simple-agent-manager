@@ -173,6 +173,10 @@ beforeAll(async () => {
     if (!source) return new Response('not found', { status: 404 });
     const headers = new Headers(request.headers);
     headers.set('authorization', `Basic ${btoa(`x:${source.token}`)}`);
+    // Node's fetch sets these itself and refuses a forwarded content-length
+    // ("invalid content-length header") on the POST git sends for protocol v2 ls-refs.
+    headers.delete('content-length');
+    headers.delete('host');
     return fetch(`${runtime.origin}/git/${source.repo}.git${match![2]}${url.search}`, {
       method: request.method,
       headers,
