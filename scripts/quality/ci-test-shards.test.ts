@@ -99,6 +99,8 @@ function expectShardWiring(source?: string): void {
     );
     expect(upload?.with?.path).toBe(`${suite.dir}/.vitest-reports/`);
     expect(upload?.with?.['if-no-files-found']).toBe('error');
+    // `.vitest-reports` is hidden; without this the upload finds nothing (seen on run 43747089896).
+    expect(upload?.with?.['include-hidden-files']).toBe(true);
     // Each shard uploads under its own name, and the Test job downloads exactly that set.
     const suiteName = suite.job.replace('test-', '');
     expect(upload?.with?.name).toBe(`test-blob-${suiteName}-\${{ matrix.shard }}`);

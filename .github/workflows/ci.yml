@@ -409,6 +409,8 @@ jobs:
         with:
           name: test-blob-api-${{ matrix.shard }}
           path: apps/api/.vitest-reports/
+          # The blob directory is a dot-directory, which upload-artifact skips by default.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
 
@@ -454,6 +456,8 @@ jobs:
         with:
           name: test-blob-web-${{ matrix.shard }}
           path: apps/web/.vitest-reports/
+          # The blob directory is a dot-directory, which upload-artifact skips by default.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
 
