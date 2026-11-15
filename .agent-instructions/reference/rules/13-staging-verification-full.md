@@ -42,7 +42,8 @@ KV, R2, Pages, DNS zone, Pulumi stack and users.
 concurrency group and its own data, so two agents can verify at the same time. Deploy with
 `gh workflow run deploy-staging.yml --ref <branch> -f environment=staging2 -f sam_task_id=<id>`
 (omit `environment` for `staging`). Storage activation and the agent-email DNS audit are
-primary-only.
+primary-only. A `staging2` GitHub Environment exists only because lease records are kept per
+installation; it holds no secrets and must not get any (staging2's jobs run with `staging`).
 
 **Signing in to staging2.** Use workload identity; there is no stored token for it. Audience
 `https://api.sammy2.party/api/auth/workload-identity-login`; targets `staging2-agent-admin`
