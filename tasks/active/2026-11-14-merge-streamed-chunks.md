@@ -20,18 +20,18 @@ Rollout: one coherent server/browser/admin PR with code default OFF, staging ON.
 
 ## Implementation map
 
-| Concern               | Implementation / contract                                                                                                                                                                                                                                                                                                                                                                                    |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Merge and identity    | do/message-stream-ingest.ts stages inserts and one append per open canonical row/batch. Only assistant text with null metadata merges. First ID/createdAt/sequence remain fixed; absorbed IDs stay internal. Old rows cannot become open.                                                                                                                                                                    |
-| Retry                 | Authenticated workspace/callbackGeneration-or-NULL plus durable outbox UUID via API runtime.ts→client→DO. Positive ordered durable outbox sequence frontier plus bounded complete recent-batch IDs, atomically committed with rows and logical counters. Duplicate IDs refresh receipts to cover failed local DELETE. Invalid/unsequenced legacy inputs insert ordinarily without erasing frontier.                                    |
-| Source invariant      | Reporter SQLite DB stores one random durable incarnation UUID. Reopen/session changes retain it; database recreation replaces it even with the same callback generation and resets sequences safely. Retired source frontiers remain available for delayed retries. Snapshot capture excludes the host reporter DB. Arbitrary rollback of the same database and incarnation is not proven; do not claim it is.                                                                           |
-| Boundaries            | Role/kind/metadata/tool/origin/prompt epoch/sequence gap/cap/source change; materialized watermark seals indexed rows. Logical message-count snapshot seals on any intervening writer, including a row with older timestamp. New rows open only at sorted session tail.                                                                                                                                      |
-| Runtime settings      | Admin registry chat.messageMergingEnabled=false; maxRowBytes65536 (1KiB–256KiB); recentIds200 (50–2000). Merged-row cap is strict; retry-state admission uses it as a soft budget, not a hard whole-state cap (retained frontiers/descriptor growth may exceed it). Unknown sources or batches exceeding admission budget store individual rows. OFF seals open rows but retains dedup state.                                                                                                                                                                                                               |
-| Live stream           | message-append-v1 capability; messages.batch introduces canonical rows, message.append carries suffix/UTF16offset/revision. Legacy scoped/global sockets seal/suppress merging. Browser handles duplicate deltas, stale snapshots, overlapping-tail catch-up and authoritative backward lookup for missing bases.                                                                                            |
-| Counters and hooks    | message_count remains accepted logical input count, so caps, D1 summaries, storage-pressure counts and archive estimates keep prior semantics (estimates conservative). Actual archive inventories count physical rows. Attention/reconciliation receive canonical IDs; activity/idle cleanup/summary refresh still run for each accepted batch.                                                             |
-| Grouping/search/cards | Existing materializer/FTS consumes canonical content; indexed rows never append later. Ordinary fixture grouped315 and indexed search match. Typed metadata/cards/tools for every harness are unchanged. Long-group/raw-split-word and approved late-timestamp differences above are explicit.                                                                                                               |
-| Schema/archive        | Additive078 nullable chat_sessions.stream_ingest_state only; no raw column change or old-row rewrite. Optional ingest metadata travels archive session envelope only when present, preserving final logical activity time without changing frozen hash columns. Raw update triggers continue advancing generation. Existing/mixed sessions remain archivable and exact reads return complete canonical rows. |
-| Comments/exact reads  | Existing raw aliases remain valid; newly absorbed IDs never appear in broadcasts/API/hooks. Canonical comment/quote prefix remains stable as content grows. REST/MCP use complete canonical raw rows and existing grouped output.                                                                                                                                                                            |
+| Concern               | Implementation / contract                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Merge and identity    | do/message-stream-ingest.ts stages inserts and one append per open canonical row/batch. Only assistant text with null metadata merges. First ID/createdAt/sequence remain fixed; absorbed IDs stay internal. Old rows cannot become open.                                                                                                                                                                      |
+| Retry                 | Authenticated workspace/callbackGeneration-or-NULL plus durable outbox UUID via API runtime.ts→client→DO. Positive ordered durable outbox sequence frontier plus bounded complete recent-batch IDs, atomically committed with rows and logical counters. Duplicate IDs refresh receipts to cover failed local DELETE. Invalid/unsequenced legacy inputs insert ordinarily without erasing frontier.            |
+| Source invariant      | Reporter SQLite DB stores one random durable incarnation UUID. Reopen/session changes retain it; database recreation replaces it even with the same callback generation and resets sequences safely. Retired source frontiers remain available for delayed retries. Snapshot capture excludes the host reporter DB. Arbitrary rollback of the same database and incarnation is not proven; do not claim it is. |
+| Boundaries            | Role/kind/metadata/tool/origin/prompt epoch/sequence gap/cap/source change; materialized watermark seals indexed rows. Logical message-count snapshot seals on any intervening writer, including a row with older timestamp. New rows open only at sorted session tail.                                                                                                                                        |
+| Runtime settings      | Admin registry chat.messageMergingEnabled=false; maxRowBytes65536 (1KiB–256KiB); recentIds200 (50–2000). Merged-row cap is strict; retry-state admission uses it as a soft budget, not a hard whole-state cap (retained frontiers/descriptor growth may exceed it). Unknown sources or batches exceeding admission budget store individual rows. OFF seals open rows but retains dedup state.                  |
+| Live stream           | message-append-v1 capability; messages.batch introduces canonical rows, message.append carries suffix/UTF16offset/revision. Legacy scoped/global sockets seal/suppress merging. Browser handles duplicate deltas, stale snapshots, overlapping-tail catch-up and authoritative backward lookup for missing bases.                                                                                              |
+| Counters and hooks    | message_count remains accepted logical input count, so caps, D1 summaries, storage-pressure counts and archive estimates keep prior semantics (estimates conservative). Actual archive inventories count physical rows. Attention/reconciliation receive canonical IDs; activity/idle cleanup/summary refresh still run for each accepted batch.                                                               |
+| Grouping/search/cards | Existing materializer/FTS consumes canonical content; indexed rows never append later. Ordinary fixture grouped315 and indexed search match. Typed metadata/cards/tools for every harness are unchanged. Long-group/raw-split-word and approved late-timestamp differences above are explicit.                                                                                                                 |
+| Schema/archive        | Additive078 nullable chat_sessions.stream_ingest_state only; no raw column change or old-row rewrite. Optional ingest metadata travels archive session envelope only when present, preserving final logical activity time without changing frozen hash columns. Raw update triggers continue advancing generation. Existing/mixed sessions remain archivable and exact reads return complete canonical rows.   |
+| Comments/exact reads  | Existing raw aliases remain valid; newly absorbed IDs never appear in broadcasts/API/hooks. Canonical comment/quote prefix remains stable as content grows. REST/MCP use complete canonical raw rows and existing grouped output.                                                                                                                                                                              |
 
 ## Checklist
 
@@ -46,7 +46,7 @@ Rollout: one coherent server/browser/admin PR with code default OFF, staging ON.
 - [x] Expanded callback→client→DO, pre078 upgrade/hash/generation, mixed sender, kill-switch replay and1260physical-row pagination tests green (46 real workerd tests total).
 - [x] Full lint/typecheck/test/build (83/83 tasks), migration safety, and discriminating retry mutation checks.
 - [x] Local specialists all findings addressed; task-completion implementation review updated, with release gates still outstanding.
-- [ ] Coordinated staging VM+Instant incremental stream/reload/comments/row_usage, then resource cleanup.
+- [x] Coordinated staging VM+Instant incremental stream/reload/comments/row_usage and strict resource cleanup; final separate phase-I evidence below.
 - [ ] PR/CI/CodeRabbit findings, trusted-main deploy coordination, merge and successful production receipt.
 - [x] Human approval of third difference.
 - [ ] Production admin ON, two-hour read-only metrics/stream/comment/error observation.
@@ -84,7 +84,7 @@ Correction gates and remaining release work:
 - [x] Correct equal-range rendered-view comparison, virtualization-aware, and OFF comparison against main.
 - [x] Reused-login verification/cleanup runner and actual node-ready gating.
 - [x] Full local validation and specialist review on corrected implementation.
-- [ ] Fresh coordinated live VM and Instant proof, row-usage saving, strict cleanup.
+- [x] Fresh coordinated live VM and Instant proof, row-usage saving and strict cleanup; completed across the fourth window and separate phase I below.
 
 ### Incarnation correction review and gradual fleet rollout
 
@@ -135,7 +135,6 @@ Remaining narrower verification, per task author:
 
 The task author corrected the narrower plan: Instant OFF remains required because production first runs the new build with merging OFF. Current modes: VM OFF stored reload/streaming/baseline met (window three; full-list harness failures remain recorded); VM ON storage/append/saving met, full UI NOT MET; Instant ON merging observed, complete verification NOT MET; Instant OFF unrun. No new slot request until all three future live runs and their measured tail budgets fit the fixed40-minute allocation window.
 
-
 ### Full UI gate correction and local capture reproduction
 
 All four modes still require full long-reply UI proof. VM OFF storage/prose/stream/baseline passed, but its full UI remains NOT MET; VM ON storage/append/saving passed, full UI NOT MET; Instant ON merging observed, complete verification NOT MET; Instant OFF unrun. This supersedes the preceding three-run proposal and its claim that VM OFF need not repeat.
@@ -144,13 +143,11 @@ A local actual-app synthetic reproduction uses18,100 assistant characters/4,525 
 
 Before requesting another slot, measure full observer tail and propose either one all-four-mode window with margin or two paired windows (VM ON+OFF, then Instant ON+OFF), with strict cleanup and fresh grant(s). Do not squeeze the final verification tail into the old40-minute limit.
 
-
 The local capture correction and native regression are now independently reviewed PASS. The actual fixture contains4,525 separate assistant chunk rows,40 grouped tool calls, a typed human-input card and system notice. Independent native execution passed in36.8 seconds total, with captures6.704/6.125/7.075/6.171 seconds at375/1280/live/reload. It checks the exact3,600 source paragraphs, code/language/link, expected6 ordered display IDs/3 anchors, two independent complete identical sweeps, Unicode and overflow; deliberate removal of one paragraph is rejected. This changes audit traversal only, with no product renderer or storage change. Web typecheck, formatting and diff checks passed. Historical live failures remain unclassified.
 
 The ignored observer now returns a short-ended reply as NOT MET promptly after explicit idle plus6 seconds of stable nonempty plain assistant content following the current user prompt. It recommends an ordinary follow-up without sending one automatically; missing state and historical replies cannot complete the new turn. Removing that current-user boundary makes the stale-reply regression fail. Long replies still require25 seconds of stability. The observer reserves90 seconds for full UI/readback; prompt submission requires8 minutes plus the5.5-minute cleanup reserve. Independent actual runner/observer tests passed24/24, including zero prompt POSTs with13 minutes left and one correct POST with14 minutes left.
 
 Proposed next grant, not yet authorized: one55-minute allocation-to-cleanup window, after one fresh green deployment. Measure VM ON then OFF, prove strict VM deletion, then Instant ON (prompt ordinary follow-up immediately after an ended short reply) then OFF. Budget7 minutes for VM readiness,8 per complete trial including25-second stability and90-second capture tail, three61-second settings waits,3 minutes strict VM release,2 minutes Instant startup,1 minute short-first-reply handling and5.5 minutes cleanup; total53.55 minutes. Earlier failures stop/clean rather than extend. Last prompt must start byT0+41.5 minutes; otherwise its mode stays NOT MET. Auth job starts close toT0 so its60-minute execution cap covers the55-minute window. A fresh grant and three accepted cleanup guards remain mandatory. No resources/auth are active.
-
 
 ### Reviewed two-phase recipe supersedes the55-minute proposal
 
@@ -160,26 +157,25 @@ The ignored operational helpers and13 initial phase tests were extended with fur
 
 Next: publish the exact reviewed kit/hash and pushed full head, wait for Catalog's actual strict FREE and a new direct staging grant, prepare three newly accepted cleanup guards, run one fresh green deploy, then the four-mode live recipe. Earlier sampled savings and NOT MET results stay recorded. All live release gates remain open; no PR or merge yet.
 
-
 ### Fourth staging window: VM ON full PASS; OFF desktop reload capture unresolved
 
 Frozen head `83705cb4ecc1e238f1510e76e9debefc839419d1`, Deploy Staging run43705116232: whole workflow and smoke SUCCESS. Direct Cloudflare read confirmed one100% Worker version23908861-02be-435c-8f2b-c756ec9ccc62 at that exact head. Source T0 before allocation11:00:33.945Z;65-minute hard end12:05:33.945Z. Only one cx23/fsn1 VM was created.
 
-| Mode | Long reply | Stored reload | Desktop live | Mobile live | Desktop reload | Mobile reload | Overall |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| VM ON |9,428 characters in one assistant row | Identical all-field hash | PASS | PASS | PASS | PASS | PASS |
-| VM OFF |9,442 characters in1,801 new assistant rows | Identical all-field hash | PASS | PASS | NOT MET | PASS | NOT MET |
-| Instant ON | Not run | Not measured | Not measured | Not measured | Not measured | Not measured | NOT MET |
-| Instant OFF | Not run | Not measured | Not measured | Not measured | Not measured | Not measured | NOT MET |
+| Mode        | Long reply                                  | Stored reload            | Desktop live | Mobile live  | Desktop reload | Mobile reload | Overall |
+| ----------- | ------------------------------------------- | ------------------------ | ------------ | ------------ | -------------- | ------------- | ------- |
+| VM ON       | 9,428 characters in one assistant row       | Identical all-field hash | PASS         | PASS         | PASS           | PASS          | PASS    |
+| VM OFF      | 9,442 characters in1,801 new assistant rows | Identical all-field hash | PASS         | PASS         | NOT MET        | PASS          | NOT MET |
+| Instant ON  | Not run                                     | Not measured             | Not measured | Not measured | Not measured   | Not measured  | NOT MET |
+| Instant OFF | Not run                                     | Not measured             | Not measured | Not measured | Not measured   | Not measured  | NOT MET |
 
 VM initial startup reply ended short at216 characters and reported MCP unavailable (boolean only); that NOT MET record remains. One ordinary same-session ON follow-up produced the long PASS. ON whole session had8 raw rows/1,849 logical messages. All four captures verified exact ordered inventory and anchors, two independent stable complete sweeps, equal rendered/prose hashes, code, Unicode and no overflow. The comment anchor survived reload. The browser received297 `message.append` events to one canonical row and297 batches, with9 positive DOM growth steps and zero page errors.
 
 OFF whole mixed session had1,810 raw rows/3,651 logical messages. Its full stored hash was identical before and after reload, including every role/metadata field. Three full captures passed with two independent complete sweeps, matching rendered/prose hashes and no overflow. Desktop reload failed with `TimeoutError`/`full-ui-capture-failed`, diagnostic stage `history-pagination`, step0, sweeps0, captured0, expected9; no full result exists for that view. The observer recorded241 batches,2 positive DOM growth steps and zero page errors. Per-view elapsed times were not persisted by the frozen helper and are unknown. The timeout's cause (baseline behavior, branch regression, or audit race) remains unproven.
 
-| Partial contained row_usage | Covered time | Calls | rowsWritten | alarmWrites | Writes/call |
-| --- | --- | --- | --- | --- | --- |
-| VM ON |60.151 seconds /1 window |157 |1,407 |0 |8.96178 |
-| VM OFF |60.612 seconds /1 window |153 |6,620 |0 |43.26797 |
+| Partial contained row_usage | Covered time             | Calls | rowsWritten | alarmWrites | Writes/call |
+| --------------------------- | ------------------------ | ----- | ----------- | ----------- | ----------- |
+| VM ON                       | 60.151 seconds /1 window | 157   | 1,407       | 0           | 8.96178     |
+| VM OFF                      | 60.612 seconds /1 window | 153   | 6,620       | 0           | 43.26797    |
 
 This is about79.29% fewer writes per call in incomplete logged windows from different real replies, not a full-session or production saving. The alarm count is already a subset of rowsWritten and must not be added again.
 
@@ -188,7 +184,6 @@ The frozen reviewed phase handoff and phase B prelogin require both VM modes to 
 Cleanup restored BOTH original unconfigured settings FIRST viaCAS74→75, verified11:14:43.692Z; resolved the anchored comment; stopped the session; deleted the workspace and VM through normal owner APIs by11:15:06.403Z. ROOT independently accepted strict owner-deletion audit plus repeated late D1 absence. A signed out200/sessionNULL/browser closed11:19:47.891Z; its managed job completed exit0 at11:19:47.939Z, and every source managed job is terminal. Repeated post-logout independent D1 checks passed all9 checks at11:20:47.978/50.279Z; strict FREE accepted event `cbb6a919-8c59-4b65-ad36-5ed0b5d43275`. Canonical ledger/window are CLOSED; source guard cancelledv3. No Instant or residual paid test resource remains. Counts-only cost-idea note `01M7FESCWP1CYBK22Y6KPXCKAQ` records the results.
 
 Next offline work: reproduce an1,810-raw-row unmerged transcript with realistic paginated API latency on the branch and pinned main; capture elapsed time/stage for each view and identify the exact timeout. Keep release equality strict. Any later Instant-only ON/OFF or VM OFF verification needs a new coordinated grant; this closed window provides no retry authority.
-
 
 ### Offline classification of fourth-window pagination failure
 
@@ -199,3 +194,41 @@ The synthetic Playwright error identifies the audit race: scrolling starts autom
 The capture helper now inspects and activates the enabled fallback button atomically in the stable scroller; it does not wait for a loading button that can disappear. Exact ordered inventory/anchors/content/structure/Unicode and two independent complete sweeps are unchanged. Fixed branch views passed at3,566/945/3,506/944ms; fixed pinned main at3,635/988/3,544/954ms with identical synthetic rendered hashes. The new tracked native regression asserts500-row pagination with latency, all10 expected display IDs/7 anchors, two complete sweeps, both code blocks, Unicode, equal captures and at least3 older-page requests for cold/reload views. A stable restored-branch run passed that regression in18.013 seconds (3,564/968/3,540/956ms per view) and the existing4,525-chunk/tall-Markdown/card/tool/system regression in36.106 seconds (6,663/6,134/6,984/6,168ms). No renderer/storage code changed. The ignored live observer additionally records start/end/elapsed metadata per capture so a future timeout has exact duration evidence.
 
 The new tracked test itself failed with only the helper reverted to HEAD (exit1, history-pagination,7,002ms), proving discrimination; the fixed helper was restored byte-identically. Independent review passed with no findings and an independent paginated native run in18.637 seconds (3,606/981/3,560/969ms). Targeted web typecheck and diff checks passed. No new staging time or live effects have been requested. Proposed next verification is a separately bounded Instant-only ON/OFF run, plus a read-only full UI recapture of the stored stopped VM OFF transcript, using fresh reviewed auth/cleanup rules and new direct coordinator grant(s). Neither the failed mode nor any remaining release gate is waived.
+
+### Final separate phase I: historical VM OFF recapture and Instant ON/OFF PASS
+
+Frozen staging head `09ce1a0b7847eee94457189c96d953d1006677b9`, Deploy Staging [43725591242](https://github.com/raphaeltm/simple-agent-manager/actions/runs/43725591242): whole workflow and smoke tests SUCCESS. Post-green direct Cloudflare verification confirmed one100% Worker version at that exact commit. This was one separately authorized Instant session, with no VM allocation and one reused memory-only authentication context. Historical unchecked proposals above describe their point-in-time state; this final evidence supplements the fourth-window VM ON PASS without changing earlier failed records.
+
+The first action after login was a GET-only recapture of the stopped VM OFF transcript:1,810 raw rows, identical full all-field stored hash before/after, complete ordered inventory and anchors, two independent full sweeps and matching rendered/prose hashes in all four375/1280 live/reload views. Code, Unicode and overflow checks passed. View elapsed times were8,382/1,449/4,084/4,196ms. Three automatic analytics requests were blocked; zero browser mutations were forwarded and zero unexpected mutations were observed. This is new passing evidence, not a retrospective promotion of the fourth-window desktop-reload failure.
+
+| Mode        | Long reply                                | Physical storage                                                          | Full desktop/mobile live/reload                    | Incremental app evidence                                                            |
+| ----------- | ----------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Instant ON  | 9,285 characters in the planned follow-up | One new assistant row; whole session5 physical/1,917 logical              | PASS in all four views; full stored hash unchanged | 321 appends to one canonical row;165 positive DOM growth steps; zero page errors    |
+| Instant OFF | 9,541 characters                          | 1,852 new assistant rows; whole mixed session1,858 physical/3,770 logical | PASS in all four views; full stored hash unchanged | 359 message batches;2 positive DOM growth steps; zero append events and page errors |
+
+The initial Instant ON prompt ended idle with285 characters and an MCP-unavailable flag. It remains recorded as NOT MET. The long ON pass came from the explicitly planned single ordinary follow-up in the same session; no restart, healing operation, additional resource or authentication retry was used. Both long replies passed exact full inventory/anchors, two stable complete sweeps, rendered/prose/reload, code, Unicode and overflow checks. The ON full result was reported before changing the switch OFF, and the OFF full result before cleanup.
+
+| Partial contained row_usage | Covered time               | Calls | rowsWritten | alarmWrites | Writes/call |
+| --------------------------- | -------------------------- | ----- | ----------- | ----------- | ----------- |
+| Instant ON                  | 60.002 seconds /1 window   | 242   | 2,172       | 0           | 8.97521     |
+| Instant OFF                 | 122.653 seconds /2 windows | 187   | 7,045       | 0           | 37.67380    |
+
+This is76.18% fewer writes per call in short logged staging samples from different real replies. It is not a production forecast, full-session total or two-hour production receipt. Alarm writes are already included in rowsWritten.
+
+Cleanup restored BOTH original unconfigured settings FIRST viaCAS77→78, verified15:18:19.094Z. Normal owned-session stop/workspace/node deletion completed15:18:31.066Z with no failures; sign-out200/session literalNULL/browser closed15:18:31.850Z, and the only auth job completed exit0 at15:18:31.901Z. Independent ROOT late D1 reads at15:25:27,15:26:33 and15:29:31 confirmed node deleted, exact/by-node workspaces absent, task cancelled/workspaceNULL, both setting keys absent at revision78, zero active smoke-user nodes, and existing project/profile preserved. Normal runtime termination was confirmed15:18:24.597Z with attestationNULL. Direct Cloudflare exact-instance read15:29:33 confirmed INACTIVE and placementNULL; the logical tombstone remains, so object metadata deletion is not claimed.
+
+Actual ROOT strict FREE event `10632430-eb1e-4450-9a34-18132d4c7406` was bound before canonical CLOSED/effectsfalse/evidence-only records and global FREE event `332e91a3-65e8-4677-a9d9-dd4612eafe05`. Source and parent guards were cancelled at version4; ROOT owns its remaining guard receipt; that reminder was later admitted after CLOSED and conveys no cleanup authority. No live effects, auth or future cleanup/replay authority remain. Counts-only idea note `01M7FWPG2BFAZ101CD1AFBF9PT` records the measurements. Canonical evidence: ledger `01M7FSFC2E44CN6PW0ZRH79KFW`, window `01M7FSFDQFJC5DDGY8H7B62RCX`, recovery `01M7FSJ6B0Z3F10NBNAW083WAN`.
+
+Current main `edcafa4a4d012167a73e4597e100121f8f4b7632` was merged normally as `bcef62565402068e57b98508d80c782ea0e1c3b2` after staging closure. Final independent Cloudflare/Go/security, browser/documentation and A–F completion reviews returned PASS with no blocking implementation findings. Completion remains conditional on the release work below; production has not been activated.
+
+- [x] All four approved VM/Instant modes have full long-reply and rendered/reload proof, with historical failures retained separately.
+- [x] Strict restore-first cleanup, logout, normal provider/container termination and actual independent staging FREE.
+- [x] Final independent implementation/specialist reviews; no outstanding findings.
+- [x] Final integrated-head local lint/typecheck/test/build83/83, real-workerd54/54, targeted test lint, migration safety and fresh synthetic375/1280 Playwright2/2.
+- [ ] PR/CI, trusted CodeRabbit request/wait and resolution of arriving findings.
+- [ ] Trusted-main production deployment receipt containing the merged commit and read-only default-OFF smoke.
+- [ ] Raphaël's separate Admin UI activation, followed by at least two hours of read-only SAM-root row-usage observations and durable numbers.
+
+The separate default-ON follow-up remains idea01M7EACZ8W7KMPXMHXQB8F22NV. This task stays active until its required release/observation work is complete.
+
+The expanded final five-file workerd selection first reported53 passes and one stale callback fixture failure: that test omitted the new outbox-incarnation header and expected the old two-part identity, so the server correctly retained three legacy rows. The test-only correction sends one stable UUID for original/rebatched delivery, checks the three-part identity and verifies spoofed body identity is ignored. The rerun passed54/54; focused storage/completion re-review and targeted ESLint passed. No runtime code changed. Full local integration validation passed83/83 tasks (API15,240 passed/4 skipped; web5,246 passed). Fresh synthetic append/replay/reload Playwright screenshots at375x667 and1280x800 passed2/2 and were visually inspected: wrapping/Unicode/anchors/readability/layout passed without overflow or clipping. Only mock data appears in the posted screenshots.
