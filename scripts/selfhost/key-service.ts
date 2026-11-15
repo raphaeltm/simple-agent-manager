@@ -288,6 +288,45 @@ export function assertUnsettable(name: string, operatorSecrets: Record<string, s
 }
 
 /**
+ * Checks `--unset` names against secrets.env without sealing anything, logging `say(name)` for
+ * each: an unsealed box (nothing sealed to remove) and `deploy --dry-run` (applying it would seal
+ * a bundle without the value and prune old bundles, security review).
+ */
+export function checkUnsetNames(
+  names: readonly string[],
+  secretsPath: string,
+  log: (message: string) => void,
+  say: (name: string) => string
+): void {
+  if (names.length === 0) return;
+  const operatorSecrets = readSecretsFile(secretsPath);
+  for (const name of names) {
+    assertUnsettable(name, operatorSecrets);
+    log(say(name));
+  }
+}
+
+/**
+ * The `--unset` names this deploy applies. Under `--dry-run` none: the names are only checked and
+ * the removal is described, because applying it would seal (security review).
+ */
+export function unsetForThisRun(
+  names: readonly string[] | undefined,
+  dryRun: boolean | undefined,
+  secretsPath: string,
+  log: (message: string) => void
+): readonly string[] {
+  if (!dryRun) return names ?? [];
+  checkUnsetNames(
+    names ?? [],
+    secretsPath,
+    log,
+    (name) => `dry run: would remove ${name} from the sealed secrets (run again without --dry-run)`
+  );
+  return [];
+}
+
+/**
  * The secrets this deploy runs with, and the bundle that holds them. Opens the newest bundle,
  * lays the plaintext migration files over it, generates any platform key still missing, and seals
  * a new bundle only when the result differs. A platform key whose file value disagrees with the
@@ -426,11 +465,13 @@ export async function resolveDeployKeys(input: {
     }
     // Not sealed: every secret is rebuilt from secrets.env on each deploy, so deleting the line
     // already removes it. --unset only checks it was deleted.
-    const operatorSecrets = readSecretsFile(input.secretsPath);
-    for (const name of input.unset ?? []) {
-      assertUnsettable(name, operatorSecrets);
-      log(`${name}: this box is not sealed, so deleting its secrets.env line already removed it`);
-    }
+    checkUnsetNames(
+      input.unset ?? [],
+      input.secretsPath,
+      log,
+      (name) =>
+        `${name}: this box is not sealed, so deleting its secrets.env line already removed it`
+    );
     return { keyService, keys: ensured.keys, sealed: null };
   }
   for (const path of ensureKeyServiceFiles(keyService)) {

@@ -83,10 +83,10 @@ import { detectKeyCandidates } from './key-platforms.js';
 import {
   agentVerifyKey,
   assertKeyAgentUp,
-  assertUnsettable,
   celldDeployConfig,
   keyAgentUrl,
   resolveDeployKeys,
+  unsetForThisRun,
 } from './key-service.js';
 import {
   ensureMailCollectorPassword,
@@ -227,22 +227,12 @@ async function main(): Promise<void> {
 
   // Sealed secrets (key-service.ts): the platform keys and secrets.env go into a bundle only the
   // key agent can open, and no secret is passed to celld. Off: every secret is a Worker var.
-  // A dry run only checks the names: applying --unset seals a bundle without the value, and the
-  // seal prunes old bundles, so a "dry run" would really remove it (security review).
-  const unset = values.unset ?? [];
-  if (values['dry-run']) {
-    const current = readSecretsFile(secretsPath);
-    for (const name of unset) {
-      assertUnsettable(name, current);
-      log(`dry run: would remove ${name} from the sealed secrets (run again without --dry-run)`);
-    }
-  }
   const { keyService, keys, sealed } = await resolveDeployKeys({
     box,
     stateDir,
     secretsPath,
     log,
-    unset: values['dry-run'] ? [] : unset,
+    unset: unsetForThisRun(values.unset, values['dry-run'], secretsPath, log),
   });
   // What this install is, for `pnpm selfhost:teardown` (install-record.ts). No secrets.
   if (!values['dry-run']) recordInstall(stateDir, envFile, box, keys.SAM_INSTALLATION_ID);

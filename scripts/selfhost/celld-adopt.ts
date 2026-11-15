@@ -96,24 +96,37 @@ export async function requestAdoption(box: Box): Promise<AdoptionResult> {
 }
 
 /**
+ * Runs `attempt` until `done` accepts its result or the window would end, then returns the last
+ * result. Attempts are sequential on purpose: each is a retry of the one before.
+ */
+async function pollWithinWindow<T>(
+  attempt: () => Promise<T>,
+  done: (result: T) => boolean,
+  deadline: number
+): Promise<T> {
+  const result = await attempt();
+  if (done(result) || Date.now() + pollInterval() >= deadline) return result;
+  await sleep(pollInterval());
+  return pollWithinWindow(attempt, done, deadline);
+}
+
+/**
  * Asks celld to adopt the newest deployment now, retrying a refused or failed request within the
  * window. Throws when the version did not build (celld keeps the previous one serving) or when
  * celld never answered, so a deploy cannot report success while the old version serves.
  */
 export async function adoptNewDeployment(box: Box): Promise<string> {
-  const deadline = windowDeadline();
-  for (;;) {
-    const result = await requestAdoption(box);
-    if (result.adopted) return result.detail;
-    if (result.buildFailed) throw new Error(`${result.detail}.`);
-    if (Date.now() + pollInterval() >= deadline) {
-      throw new Error(
-        `${result.detail}. celld adopts it by itself within CELLD_DEPLOY_POLL_S (default 30 s); ` +
-          'check docker compose ps and the celld log, then run pnpm selfhost:deploy again.'
-      );
-    }
-    await sleep(pollInterval());
-  }
+  const result = await pollWithinWindow(
+    () => requestAdoption(box),
+    (r) => r.adopted || r.buildFailed,
+    windowDeadline()
+  );
+  if (result.adopted) return result.detail;
+  if (result.buildFailed) throw new Error(`${result.detail}.`);
+  throw new Error(
+    `${result.detail}. celld adopts it by itself within CELLD_DEPLOY_POLL_S (default 30 s); ` +
+      'check docker compose ps and the celld log, then run pnpm selfhost:deploy again.'
+  );
 }
 
 /**
@@ -122,12 +135,12 @@ export async function adoptNewDeployment(box: Box): Promise<string> {
  * safe), as `pnpm selfhost:deploy`'s own health wait does (waitForHealth in deploy-steps.ts).
  */
 export async function adoptAndCheck(box: Box): Promise<{ healthy: boolean; detail: string }> {
-  const deadline = windowDeadline();
-  for (;;) {
-    const { final, ...result } = await adoptAndCheckOnce(box);
-    if (result.healthy || final || Date.now() + pollInterval() >= deadline) return result;
-    await sleep(pollInterval());
-  }
+  const result = await pollWithinWindow(
+    () => adoptAndCheckOnce(box),
+    (r) => r.healthy || Boolean(r.final),
+    windowDeadline()
+  );
+  return { healthy: result.healthy, detail: result.detail };
 }
 
 /** `final`: a version that did not build; retrying cannot change the answer. */
@@ -146,7 +159,25 @@ async function adoptAndCheckOnce(
   if (health.ok) return { healthy: true, detail: 'HTTP 200' };
   const body = (await health.text()).slice(0, MAX_DETAIL_CHARS);
   const code = /"code"\s*:\s*"([A-Z_]+)"/.exec(body)?.[1];
-  return { healthy: false, detail: `HTTP ${health.status}${code ? ` ${code}` : ''}` };
+  const suffix = code ? ` ${code}` : '';
+  return { healthy: false, detail: `HTTP ${health.status}${suffix}` };
+}
+
+/** One POST of an empty body to the agent sign-in route: present, or what answered instead. */
+async function probeAgentSignInRoute(box: Box): Promise<{ present: boolean; answer: string }> {
+  const url = `http://127.0.0.1:${box.CELLD_PORT || '8080'}${AGENT_SIGN_IN_PATH}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { ...apiHeaders(box), 'content-type': 'application/json' },
+    body: '{}',
+    signal: AbortSignal.timeout(DEFAULT_ROUTE_REQUEST_TIMEOUT_MS),
+  }).catch((error: unknown) => error);
+  if (!(response instanceof Response)) return { present: false, answer: String(response) };
+  await response.arrayBuffer().catch(() => undefined);
+  return {
+    present: response.status !== 404 && response.status < 500,
+    answer: `HTTP ${response.status}`,
+  };
 }
 
 /**
@@ -156,30 +187,14 @@ async function adoptAndCheckOnce(
  * `agent_sign_in.config_invalid`). Retried within the window, then throws.
  */
 export async function checkAgentSignInRoute(box: Box): Promise<void> {
-  const deadline = windowDeadline();
-  let last = 'no response';
-  for (;;) {
-    const response = await fetch(
-      `http://127.0.0.1:${box.CELLD_PORT || '8080'}${AGENT_SIGN_IN_PATH}`,
-      {
-        method: 'POST',
-        headers: { ...apiHeaders(box), 'content-type': 'application/json' },
-        body: '{}',
-        signal: AbortSignal.timeout(DEFAULT_ROUTE_REQUEST_TIMEOUT_MS),
-      }
-    ).catch((error: unknown) => error);
-    if (response instanceof Response) {
-      await response.arrayBuffer().catch(() => undefined);
-      if (response.status !== 404 && response.status < 500) return;
-      last = `HTTP ${response.status}`;
-    } else {
-      last = String(response);
-    }
-    if (Date.now() + pollInterval() >= deadline) break;
-    await sleep(pollInterval());
-  }
+  const probe = await pollWithinWindow(
+    () => probeAgentSignInRoute(box),
+    (r) => r.present,
+    windowDeadline()
+  );
+  if (probe.present) return;
   throw new Error(
-    `AGENT_SIGN_IN_TRUST is set in secrets.env but POST ${AGENT_SIGN_IN_PATH} answers ${last}: ` +
+    `AGENT_SIGN_IN_TRUST is set in secrets.env but POST ${AGENT_SIGN_IN_PATH} answers ${probe.answer}: ` +
       'the Worker has no usable trust. Look for agent_sign_in.config_invalid in the celld log ' +
       '(docker compose logs celld), fix the value and deploy again.'
   );
