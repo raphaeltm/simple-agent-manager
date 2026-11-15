@@ -218,6 +218,12 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
      --jq '.[0] | {id, payload}'
    ```
 
+   There are two staging installations, `staging` (`sammy.party`) and `staging2`
+   (`sammy2.party`). Read both leases and take whichever is free; use that name in
+   every command below. They share the `staging` credentials but nothing else, so
+   your checks cannot disturb an agent on the other one. staging2 sign-in is
+   workload identity only; see "Two Staging Installations" in the full reference.
+
    Use your selected environment name in every command. The latest `staging-lease`
    deployment payload is authoritative; ordinary deployment statuses and a quiet
    Actions queue do not release the slot. A held foreign branch with a future
@@ -276,7 +282,7 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    `deployments: write`; agents can inspect records with their existing `gh api`
    read access. Leases are keyed by environment name for future staging slots.
 
-4. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
+4. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging) or `app.sammy2.party` (staging2).
 
 5. **Authenticate** using the smoke test token via token-login API:
 

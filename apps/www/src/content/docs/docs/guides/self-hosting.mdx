@@ -624,6 +624,11 @@ resolve stuck archive migrations through **Admin → Storage** before writes sto
 
 To remove all resources: Actions → Teardown → Run workflow → type `DELETE` to confirm.
 
+A full teardown empties the installation's assets bucket first, then deletes it with the rest of
+the stack. VMs are not deleted by teardown: delete workspaces and nodes in the app first.
+(SAM's own repository also lists `staging2`, a second staging installation defined in
+`scripts/deploy/staging-installations.mjs`; forks can ignore it.)
+
 ## Cost Estimation
 
 ### Platform Costs

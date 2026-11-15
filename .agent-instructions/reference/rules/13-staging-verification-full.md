@@ -21,9 +21,57 @@ Every PR that changes code MUST:
 | Environment    | Base Domain                | App URL                                | API URL                                |
 | -------------- | -------------------------- | -------------------------------------- | -------------------------------------- |
 | **Staging**    | `sammy.party`              | `https://app.sammy.party`              | `https://api.sammy.party`              |
+| **Staging 2**  | `sammy2.party`             | `https://app.sammy2.party`             | `https://api.sammy2.party`             |
 | **Production** | `simple-agent-manager.org` | `https://app.simple-agent-manager.org` | `https://api.simple-agent-manager.org` |
 
 **Staging is `sammy.party`, NOT `simple-agent-manager.org`.** When verifying PRs, always test against the staging domain.
+
+## Two Staging Installations
+
+There are two staging installations. Both run with the `staging` GitHub Environment's
+credentials, in the same Cloudflare account, and are fully separate otherwise: own Workers, D1,
+KV, R2, Pages, DNS zone, Pulumi stack and users.
+
+| Installation | App                        | API                        | Prefix / stack      |
+| ------------ | -------------------------- | -------------------------- | ------------------- |
+| `staging`    | `https://app.sammy.party`  | `https://api.sammy.party`  | `sam` / `staging`   |
+| `staging2`   | `https://app.sammy2.party` | `https://api.sammy2.party` | `sam2` / `staging2` |
+
+**Choosing one.** Read the lease of both (`task=staging-lease`, environments `staging` and
+`staging2`) and take whichever is free. Each installation has its own lease, its own deploy
+concurrency group and its own data, so two agents can verify at the same time. Deploy with
+`gh workflow run deploy-staging.yml --ref <branch> -f environment=staging2 -f sam_task_id=<id>`
+(omit `environment` for `staging`). Storage activation and the agent-email DNS audit are
+primary-only.
+
+**Signing in to staging2.** Use workload identity; there is no stored token for it. Audience
+`https://api.sammy2.party/api/auth/workload-identity-login`; targets `staging2-agent-admin`
+(superadmin) or `staging2-agent-user` (ordinary user). Add the returned cookie for
+`.sammy2.party`. The issuer and allowed source project/user are the same as for `staging`.
+
+**What a fresh staging2 has.** The deploy bootstraps it on every run
+(`scripts/deploy/bootstrap-staging-installation.ts`, secondary installations only): the two users
+above, a platform cloud credential copied from `staging` (a platform GCP credential, or a GCP
+service-account key owned by one of staging's agent test accounts, otherwise `staging`'s Hetzner
+platform credential; staging's GCP credential today is workload identity, which only trusts
+`sammy.party`'s issuer, so staging2 uses Hetzner), the staging smoke token registered for
+the admin, and the shared compute pool's machines (the same ones `staging`'s pool has active).
+Both users are opted into the SAM AI proxy for each copied agent key
+(`providerMode: sam`), the only way a platform key is used. Today that is Claude Code, so
+start sessions with the Claude Code agent (for example set the project's default agent);
+the installation default agent has no key. There is no GitHub App: use Artifacts-backed
+projects. The shared pool is capped at 2 nodes on first seeding, because the Hetzner account
+is shared with staging and production.
+
+**Querying staging2 directly.** Same account and `$CF_TOKEN` as staging. Look the D1 id up by
+name (`sam2-staging2`): `GET /accounts/$CF_ACCOUNT_ID/d1/database?name=sam2-staging2`.
+
+**Teardown.** Actions → Teardown → `staging2` → `DELETE`. It touches only `sam2-*` resources,
+the `staging2` Pulumi stack and the `sammy2.party` zone's workspace and node records. Delete test workspaces and
+nodes first; teardown does not delete VMs. The next deploy rebuilds staging2 from nothing.
+
+Adding a third: one entry in `scripts/deploy/staging-installations.mjs` plus a zone in the
+staging Cloudflare account that the staging deploy token can edit.
 
 ## Why This Exists
 
