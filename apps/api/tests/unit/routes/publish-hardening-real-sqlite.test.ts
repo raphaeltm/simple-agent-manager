@@ -145,7 +145,8 @@ beforeEach(() => {
     "INSERT INTO deployment_environments(id,project_id,node_id,status) VALUES('environment','project','node','running')"
   );
   sqlite.exec(
-    "INSERT INTO deployment_publish_jobs(id,project_id,workspace_id,environment_id,node_id,requested_by,status,attempt) VALUES('job','project','workspace','environment','node','user','building',1)"
+    // The SQLite helper omits defaults; seed the real legacy-node defaults explicitly.
+    "INSERT INTO deployment_publish_jobs(id,project_id,workspace_id,environment_id,node_id,requested_by,status,attempt,executor,context_shadow) VALUES('job','project','workspace','environment','node','user','building',1,'node',0)"
   );
   lifecycle.mockClear();
   provisionVolumes.mockClear();
