@@ -46,7 +46,7 @@ test('OFF and ON streaming preserve ordered messages, cards, links and code over
       endedAt: null,
       cleanupAt: null,
       isIdle: false,
-      agentCompletedAt: null,
+      agentCompletedAt: null as number | null,
       agentSessionId: null,
       viewerAccess: 'owner',
       agentType: 'openai-codex',
@@ -225,9 +225,45 @@ test('OFF and ON streaming preserve ordered messages, cards, links and code over
       })
     );
     expected.itemIds.push(cardId);
-    await expect(page.getByTestId('human-input-card')).toContainText(
-      'Answered: Save the high tide forecast.'
+    // End the synthetic turn before auditing: live followOutput and pending
+    // virtual measurements must not compete with our history traversal.
+    session.agentCompletedAt = 201;
+    session.isIdle = true;
+    socket!.send(
+      JSON.stringify({
+        type: 'session.agent_completed',
+        payload: { sessionId, agentCompletedAt: 201 },
+      })
     );
+    socket!.send(
+      JSON.stringify({ type: 'session.activity', payload: { sessionId, activity: 'idle' } })
+    );
+    const settleTail = async () => {
+      const scroller = page.locator('[data-sam-conversation-scroller="true"]');
+      await expect
+        .poll(async () => {
+          const invoked = await page.evaluate(() => {
+            const button = document.querySelector<HTMLButtonElement>(
+              'button[aria-label="Scroll to bottom"]'
+            );
+            button?.click();
+            return Boolean(button);
+          });
+          if (!invoked) {
+            await scroller.evaluate((element) =>
+              element.scrollTo({ top: element.scrollHeight, behavior: 'instant' })
+            );
+          }
+          await page.waitForTimeout(100);
+          const card = page.getByTestId('human-input-card');
+          return (
+            (await card.count()) === 1 &&
+            (await card.innerText()).includes('Answered: Save the high tide forecast.')
+          );
+        })
+        .toBe(true);
+    };
+    await settleTail();
     const live = await captureFullConversation(page, expected);
     expect(live.itemIds).toHaveLength(62);
     expect(live.renderedChars).toBeGreaterThan(8000);
@@ -235,9 +271,7 @@ test('OFF and ON streaming preserve ordered messages, cards, links and code over
     expect(live.typedCards).toBeGreaterThan(0);
     await assertNoOverflow(page);
     await page.reload();
-    await expect(page.getByTestId('human-input-card')).toContainText(
-      'Answered: Save the high tide forecast.'
-    );
+    await settleTail();
     const reloaded = await captureFullConversation(page, expected);
     expect(reloaded).toEqual(live);
     if (!enabled) expect(historyReads).toBeGreaterThan(0);
@@ -251,7 +285,11 @@ test('OFF and ON streaming preserve ordered messages, cards, links and code over
         renderedItems: live.itemIds.length,
         anchors: live.anchorIds.length,
         inventoryVerified: live.inventoryVerified,
+        stableSweeps: live.stableSweeps,
         renderedChars: live.renderedChars,
+        unicodeScalarCount: live.unicodeScalarCount,
+        unpairedSurrogates: live.unpairedSurrogates,
+        replacementChars: live.replacementChars,
         codeBlocks: live.codeBlocks,
         typedCards: live.typedCards,
       })

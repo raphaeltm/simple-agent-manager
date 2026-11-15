@@ -74,16 +74,16 @@ Use `(authenticated workspaceId, callbackGeneration-or-NULL, durable reporter ou
 
 The task author explicitly revised their original requirement for immediate old-fleet savings: agents without an incarnation keep today's per-chunk path with zero savings until their nodes cycle. The author is informing Raphaël; any objection supersedes this direction. Do not implement both incarnation and canonical-row-receipt designs. Document bounded node drain settings and gradual row_usage evidence. Both runtimes share the reporter binary.
 
-Remaining gates before another staging request or PR:
+Correction gates and remaining release work:
 
-- [ ] Failing real workspace-creation + callback-auth regression on original candidate.
-- [ ] Durable reporter incarnation across reopen/session changes, new incarnation after database recreation.
-- [ ] NULL initial generation merges with incarnation; absent source/incarnation stays plain insert.
-- [ ] Recreated outbox with low sequences retains all new content; same incarnation historical/different-boundary retries stay byte-identical.
-- [ ] NULL→rotated generation seals/resets safely; old agent/new Worker callback and new agent/old Worker rollback compatibility.
-- [ ] Correct equal-range rendered-view comparison, virtualization-aware, and OFF comparison against main.
-- [ ] Reused-login verification/cleanup runner and actual node-ready gating.
-- [ ] Full local validation and specialist review on corrected implementation.
+- [x] Failing real workspace-creation + callback-auth regression on original candidate.
+- [x] Durable reporter incarnation across reopen/session changes, new incarnation after database recreation.
+- [x] NULL initial generation merges with incarnation; absent source/incarnation stays plain insert.
+- [x] Recreated outbox with low sequences retains all new content; same incarnation historical/different-boundary retries stay byte-identical.
+- [x] NULL→rotated generation seals/resets safely; old agent/new Worker callback and new agent/old Worker rollback compatibility.
+- [x] Correct equal-range rendered-view comparison, virtualization-aware, and OFF comparison against main.
+- [x] Reused-login verification/cleanup runner and actual node-ready gating.
+- [x] Full local validation and specialist review on corrected implementation.
 - [ ] Fresh coordinated live VM and Instant proof, row-usage saving, strict cleanup.
 
 ### Incarnation correction review and gradual fleet rollout
@@ -92,4 +92,12 @@ The optional `X-SAM-Outbox-Incarnation` header is UUID-validated before entering
 
 Node replacement defaults are documented from `packages/shared/src/constants/node-pooling.ts`: lifetime drain24h (`NODE_ABSOLUTE_MAX_LIFETIME_MS`), running-turn force-sleep grace30min (`operations.nodeLifetimeForceSleepAfterMs`), empty-node warm retention30min (`NODE_WARM_TIMEOUT_MS`). Actual cleanup reads the lifetime override in `apps/api/src/scheduled/node-cleanup/config.ts`; warm retention resolves its override in `apps/api/src/durable-objects/node-lifecycle.ts`. These are code defaults, **not verified configured production values or a guaranteed 25-hour deadline**. Sweep scheduling, effective overrides and cleanup/provider failures can extend replacement. Before reporting fleet savings, record effective deployed settings, reporter version/incarnation adoption and successive row-usage windows. Old reporters have zero merge savings until replaced.
 
-Correction tests/reviews are in progress; earlier green quality counts describe the prior candidate, not the uncommitted incarnation correction. Retain the outstanding correction checklist above until current results are recorded.
+Current correction is committed in `aa6ab7bff27d0a0d1b0cf29a57c05f669c70cc95`, with current main `fd0be69bd4c50e1299d114724f27f857901a1b45` merged normally as `d4f4d8744a83eab870338dff7036c6146cc343fc`. Post-merge full lint/typecheck/test/build passed83/83 tasks (web5246 tests, API15231 passed/4 skipped), and all46 real-workerd regression tests passed. Go reporter race tests and vet, migration safety, formatting and specialist implementation review passed. The real startup regression first failed on the original production code and passed after the correction.
+
+The stronger browser audit independently inventories62 ordered items across tools, a plan, a typed card, links, code and multiple turns. Its869 chunks require911 rows OFF and62 ON; the rendered hash matches OFF/ON and reload. Comparison against pinned main `fd0be69bd4c50e1299d114724f27f857901a1b45` passed at375/1280; six temporarily replaced browser source files were restored byte-identically. Repeated branch trials exposed an audit-only physical-scroll correction cycle after every expected item was already rendered. The final helper keeps requested progress independent of virtualizer corrections and accepts semantic completion only when the independently expected inventory is complete and its final item is mounted; exact ordered inventory and content/structure hashes remain mandatory. The final audit requires two independently complete identical sweeps within the original300-step budget. Plain messages hash their scoped content node, excluding comment/action controls; tool groups and typed cards retain semantic content. Branch OFF/ON/live/reload and pinned-main comparison passed at375/1280:62 items,40 anchors,10128 content characters,10028 Unicode scalars, one code block and one typed card, zero invalid Unicode. The common content hash is `c42de31ef8b8b603035decce13d9e3f5d31a12e797e4b1656aeff7edcd50f4bc`.
+
+A read-only staging dry run used one memory-only authenticated context for two actions and then verified sign-out200/sessionNULL. The new runner retains that context through verification and cleanup, gates submissions on fresh `agent_ready_at` and compatible version, records mutation attempts before requests, and waits past the60-second admin-settings cache ceiling after setting edits. No live resource is currently allocated. A fresh full staging window has been requested; no PR or merge is authorized until the remaining release gates pass.
+
+The earlier one-character audit discrepancy was reproduced with merging OFF: LIVE captured the first historical user prompt directly adjacent to the Comment control; reload captured one separator between the same prompt and control. The exact bad hash was reproduced, all message-content characters and the other61 display items matched, and neither Unicode corruption nor an append-path change was involved. Content-only capture removes that UI-chrome dependency while preserving exact content/structure equality. No production UI fix was required.
+
+The staging harness specialist review passed after serializing ledger mutations, persisting creation/comment attempts before requests, refusing clean status for lost creation receipts, requiring VM deletion receipts and read-back before Instant creation, asserting incremental frames/DOM growth/code, and enforcing request/observation deadlines before the five-minute cleanup reserve. Cleanup uses the earlier lease or40-minute allocation deadline and reserves30 seconds for sign-out. Zero-live checks preserved100 concurrent ledger writes and proved lost-receipt/Instant-release guards. L7 received the shared staging window first; this task must await its actual strict cleanup receipt and a new direct grant before deployment or mutation.
