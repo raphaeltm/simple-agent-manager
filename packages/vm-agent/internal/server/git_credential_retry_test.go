@@ -111,7 +111,7 @@ func TestGitCredentialHelperScriptRetriesSlowResponse(t *testing.T) {
 	s.config.GitTokenTimeout = 10 * time.Second
 	local := httptest.NewServer(http.HandlerFunc(s.handleGitCredential))
 	defer local.Close()
-	script, err := renderStandaloneGitCredentialHelperScript(config.DefaultGitCredentialTimeout)
+	script, err := renderStandaloneGitCredentialHelperScript(config.DefaultGitCredentialTimeout, testStandaloneGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestGitTokenTransportRetryAndLogRedaction(t *testing.T) {
 	}
 }
 func TestStandaloneHelperDefaultBudget(t *testing.T) {
-	script, err := renderStandaloneGitCredentialHelperScript(config.DefaultGitCredentialTimeout)
+	script, err := renderStandaloneGitCredentialHelperScript(config.DefaultGitCredentialTimeout, testStandaloneGitCredentialExchangeToken)
 	if err != nil || !strings.Contains(script, "--max-time 30") || config.DefaultGitCredentialTimeout <= config.DefaultGitTokenTimeout {
 		t.Fatalf("helper budget: %v", err)
 	}
@@ -292,7 +292,7 @@ func runHelperFailureCase(t *testing.T, tc helperFailureCase) {
 	if tc.cancel {
 		helperTimeout = 50 * time.Millisecond
 	}
-	script, err := renderStandaloneGitCredentialHelperScript(helperTimeout)
+	script, err := renderStandaloneGitCredentialHelperScript(helperTimeout, testStandaloneGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatal(err)
 	}

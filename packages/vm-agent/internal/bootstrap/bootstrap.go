@@ -2139,7 +2139,12 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		return nil
 	}
 
-	script, err := renderGitCredentialHelperScript(cfg)
+	exchangeToken, err := NewGitCredentialExchangeToken()
+	if err != nil {
+		return fmt.Errorf("failed to prepare git credential exchange: %w", err)
+	}
+
+	script, err := renderGitCredentialHelperScript(cfg, exchangeToken)
 	if err != nil {
 		return fmt.Errorf("failed to render git credential helper script: %w", err)
 	}
@@ -2193,6 +2198,9 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 		}
 	}
 
+	if err := InstallGitCredentialExchange(cfg.WorkspaceID, exchangeToken); err != nil {
+		return fmt.Errorf("failed to install git credential exchange: %w", err)
+	}
 	return nil
 }
 
@@ -2249,7 +2257,7 @@ exec "%s" "$@"
 	return nil
 }
 
-func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
+func renderGitCredentialHelperScript(cfg *config.Config, exchangeToken string) (string, error) {
 	if cfg == nil {
 		return "", errors.New("nil config")
 	}
@@ -2258,6 +2266,10 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	}
 	if cfg.Port <= 0 {
 		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
+	}
+	exchangeToken = strings.TrimSpace(exchangeToken)
+	if exchangeToken == "" {
+		return "", errors.New("git credential exchange token is empty")
 	}
 	credentialTimeout := cfg.GitCredentialTimeout
 	if credentialTimeout == 0 {
@@ -2279,9 +2291,9 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	// When TLS is enabled on the VM agent, the credential helper must use https://
 	// with -k (skip cert verification) because the TLS cert is issued for the
 	// external domain (e.g. ws-*.example.com), not for internal Docker addresses
-	// like host.docker.internal or 172.17.0.1. The helper deliberately does not
-	// carry the durable workspace callback token; it asks the VM agent to perform
-	// the control-plane token exchange using its in-memory workspace callback.
+	// like host.docker.internal or 172.17.0.1. The helper carries only a dedicated
+	// exchange bearer; the VM agent keeps the broader workspace callback token in
+	// memory and uses it for the control-plane token exchange.
 	scheme := "http"
 	curlTLSFlag := ""
 	if cfg.TLSEnabled {
@@ -2319,6 +2331,7 @@ case "$requested_host" in
 esac
 
 credential_query="%s"
+exchange_token=%s
 url_encode_query_value() {
   printf '%%s' "$1" | sed 's/%%/%%25/g; s/&/%%26/g; s/=/%%3D/g; s/?/%%3F/g; s/#/%%23/g; s/+/%%2B/g; s/ /%%20/g'
 }
@@ -2346,6 +2359,7 @@ resolve_gateway() {
 request_credentials() {
   target="$1"
   curl -fsS --max-time %s%s \
+	-H "Authorization: Bearer ${exchange_token}" \
     "%s://${target}:%d/git-credential${credential_query}"
 }
 
@@ -2358,7 +2372,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, shellSingleQuote(allowedGitLabHost), query, credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
+`, shellSingleQuote(allowedGitLabHost), query, shellSingleQuote(exchangeToken), credentialTimeoutSeconds, curlTLSFlag, scheme, cfg.Port), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
@@ -2402,7 +2416,12 @@ func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
 		return "", fmt.Errorf("invalid VM agent port: %d", cfg.Port)
 	}
 
-	script, err := renderGitCredentialHelperScript(cfg)
+	exchangeToken, err := NewGitCredentialExchangeToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare git credential exchange: %w", err)
+	}
+
+	script, err := renderGitCredentialHelperScript(cfg, exchangeToken)
 	if err != nil {
 		return "", fmt.Errorf("failed to render credential helper script: %w", err)
 	}
@@ -2410,6 +2429,10 @@ func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
 	hostPath := credentialHelperHostPath(cfg.WorkspaceID)
 	if err := writeCredentialHelperScriptAtomically(hostPath, script); err != nil {
 		return "", err
+	}
+	if err := InstallGitCredentialExchange(cfg.WorkspaceID, exchangeToken); err != nil {
+		_ = os.Remove(hostPath)
+		return "", fmt.Errorf("failed to install git credential exchange: %w", err)
 	}
 
 	slog.Info("Wrote credential helper to host", "path", hostPath, "workspaceID", cfg.WorkspaceID)
@@ -2459,10 +2482,14 @@ func writeCredentialHelperScriptAtomically(hostPath, script string) error {
 // This is called during workspace deletion to clean up.
 func RemoveCredentialHelperFromHost(workspaceID string) error {
 	hostPath := credentialHelperHostPath(workspaceID)
+	var removeErrors []error
 	if err := os.Remove(hostPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove workspace credential helper: %w", err)
+		removeErrors = append(removeErrors, fmt.Errorf("failed to remove workspace credential helper: %w", err))
 	}
-	return nil
+	if err := removeGitCredentialExchange(workspaceID); err != nil {
+		removeErrors = append(removeErrors, err)
+	}
+	return errors.Join(removeErrors...)
 }
 
 // credentialHelperMountEntry returns the Docker bind mount string for mounting

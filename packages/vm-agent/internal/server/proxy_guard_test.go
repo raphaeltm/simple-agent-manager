@@ -15,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/workspace/vm-agent/internal/auth"
+	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -298,14 +299,25 @@ func TestGitCredentialRefusesBearerlessRelayedRequest(t *testing.T) {
 	}
 }
 
-// Controls: the in-workspace helper's direct loopback call still works, and a
-// relayed request that carries a valid callback bearer is still authorized.
-func TestGitCredentialLoopbackHelperAndBearerRelayStillAuthorized(t *testing.T) {
+// Controls: the in-workspace helper's dedicated bearer still works, and a
+// relayed request carrying a valid callback bearer remains authorized.
+func TestGitCredentialHelperAndBearerRelayStillAuthorized(t *testing.T) {
+	exchangeToken, err := bootstrap.NewGitCredentialExchangeToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.InstallGitCredentialExchange(relayTestWorkspaceID, exchangeToken); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bootstrap.RemoveCredentialHelperFromHost(relayTestWorkspaceID) })
+
 	cases := []struct {
 		name    string
 		headers map[string]string
 	}{
-		{name: "direct loopback helper, no bearer"},
+		{name: "direct helper exchange bearer", headers: map[string]string{
+			"Authorization": "Bearer " + exchangeToken,
+		}},
 		{name: "relayed with callback bearer", headers: map[string]string{
 			"Authorization":      "Bearer callback-token",
 			"X-Forwarded-Host":   "ws-x.workspaces.example.com",
@@ -315,7 +327,7 @@ func TestGitCredentialLoopbackHelperAndBearerRelayStillAuthorized(t *testing.T) 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newRelayHarness(t)
-			req := httptest.NewRequest(http.MethodGet, "/git-credential?host=github.com", nil)
+			req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId="+relayTestWorkspaceID+"&host=github.com", nil)
 			req.RemoteAddr = "127.0.0.1:41000"
 			for k, v := range tc.headers {
 				req.Header.Set(k, v)

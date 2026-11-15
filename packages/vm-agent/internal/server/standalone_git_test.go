@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const testStandaloneGitCredentialExchangeToken = "test-standalone-git-credential-exchange-token"
+
 // runStandaloneCredScript writes the helper script to a temp file and runs it
 // with the given argv[1] and stdin, returning trimmed stdout.
 func runStandaloneCredScript(t *testing.T, arg, stdin, ghToken string) string {
@@ -20,7 +22,7 @@ func runStandaloneCredScript(t *testing.T, arg, stdin, ghToken string) string {
 
 func runStandaloneCredScriptWithEnv(t *testing.T, arg, stdin string, env map[string]string) string {
 	t.Helper()
-	script, err := renderStandaloneGitCredentialHelperScript(5 * time.Second)
+	script, err := renderStandaloneGitCredentialHelperScript(5*time.Second, testStandaloneGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatalf("render script: %v", err)
 	}
@@ -46,12 +48,15 @@ func runStandaloneCredScriptWithEnv(t *testing.T, arg, stdin string, env map[str
 func TestRenderStandaloneGitCredentialHelperScriptUsesConfiguredTimeout(t *testing.T) {
 	t.Parallel()
 
-	script, err := renderStandaloneGitCredentialHelperScript(1750 * time.Millisecond)
+	script, err := renderStandaloneGitCredentialHelperScript(1750*time.Millisecond, testStandaloneGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatalf("render script: %v", err)
 	}
 	if !strings.Contains(script, "--max-time 1.75") {
 		t.Fatalf("configured timeout missing from helper script: %q", script)
+	}
+	if !strings.Contains(script, "Authorization: Bearer ${exchange_token}") || !strings.Contains(script, testStandaloneGitCredentialExchangeToken) {
+		t.Fatalf("dedicated exchange authorization missing from helper script: %q", script)
 	}
 }
 
@@ -91,7 +96,7 @@ func TestStandaloneGitCredentialFillExchangesInsteadOfServingSessionGHToken(t *t
 		t.Fatalf("control plane token mints = %d, want 1", got)
 	}
 	query := exchange.lastRequestQuery()
-	if query.Get("workspaceId") != "ws-instant" || query.Get("host") != "github.com" || query.Get("path") != "octo/repo.git" {
+	if query.Get("workspaceId") != exchange.workspaceID || query.Get("host") != "github.com" || query.Get("path") != "octo/repo.git" {
 		t.Fatalf("exchange query = %v, want the workspace, host, and repository path", query)
 	}
 }
@@ -104,7 +109,7 @@ func TestWriteStandaloneGitCredentialHelperRestoresOwnerOnlyExecutableMode(t *te
 		t.Fatalf("seed helper: %v", err)
 	}
 
-	if err := writeStandaloneGitCredentialHelper(path, 5*time.Second); err != nil {
+	if err := writeStandaloneGitCredentialHelper(path, 5*time.Second, testStandaloneGitCredentialExchangeToken); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
 
@@ -146,6 +151,9 @@ func TestStandaloneGitCredentialHelperDelegatesGitLabToLocalExchange(t *testing.
 		gotWorkspaceID = r.URL.Query().Get("workspaceId")
 		gotHost = r.URL.Query().Get("host")
 		gotPath = r.URL.Query().Get("path")
+		if got := r.Header.Get("Authorization"); got != "Bearer "+testStandaloneGitCredentialExchangeToken {
+			t.Fatalf("Authorization = %q, want dedicated exchange bearer", got)
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("username=oauth2\npassword=gl_token\n"))
 	}))

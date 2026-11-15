@@ -479,7 +479,7 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 		Port:          9999,
 		CallbackToken: "test-cred-token-abc",
 	}
-	script, err := renderGitCredentialHelperScript(testCfg)
+	script, err := renderGitCredentialHelperScript(testCfg, "test-git-credential-exchange-token")
 	if err != nil {
 		t.Fatalf("renderGitCredentialHelperScript: %v", err)
 	}
@@ -514,10 +514,8 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 		t.Fatalf("script not executable: %v\n%s", err, string(out))
 	}
 
-	// Verify: hardened script uses the local /git-credential exchange and does
-	// NOT embed the durable callback token (the helper asks the VM agent to
-	// perform the control-plane token exchange via its in-memory workspace
-	// callback instead of carrying a reusable bearer in the on-disk script).
+	// Verify: hardened script uses the local /git-credential exchange with its
+	// dedicated bearer and does NOT embed the broader callback token.
 	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "cat", installPath).CombinedOutput()
 	if err != nil {
 		t.Fatalf("cat script: %v\n%s", err, string(out))
@@ -528,6 +526,9 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 	}
 	if !strings.Contains(scriptContent, "/git-credential") {
 		t.Fatal("script missing /git-credential local exchange endpoint")
+	}
+	if !strings.Contains(scriptContent, "Authorization: Bearer ${exchange_token}") {
+		t.Fatal("script missing dedicated credential exchange authorization")
 	}
 	if !strings.Contains(scriptContent, "9999") {
 		t.Fatal("script missing port")
