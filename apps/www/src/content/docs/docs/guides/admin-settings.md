@@ -21,7 +21,7 @@ titled **Runtime settings**. An account must be an approved, active superadmin t
 can't.
 
 On an ordinary self-hosted instance, the first account to sign in while it is the only account
-becomes the superadmin, once. SAM never promotes anyone automatically after that, even if that
+becomes the superadmin, once. That first-sign-in election never runs again, even if that
 superadmin is deleted. If no account can open **Admin**, follow
 [Recovering when no account can administer the instance](/docs/guides/self-hosting/#recovering-when-no-account-can-administer-the-instance).
 
@@ -73,11 +73,11 @@ value and **Source** after the reload, nothing was saved: check the value and tr
 
 The **Operations** category includes these chat storage settings:
 
-| Setting                        | Code default | Effect                                                                                                                                     |
-| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                          |
+| Setting                        | Code default | Effect                                                                                                                                              |
+| ------------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                                   |
 | `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows. |
-| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                   |
+| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                            |
 
 Merging requires an updated reporter that sends its durable outbox incarnation. Older reporters,
 and requests with a missing or malformed incarnation, keep individual inserts and provide **zero
