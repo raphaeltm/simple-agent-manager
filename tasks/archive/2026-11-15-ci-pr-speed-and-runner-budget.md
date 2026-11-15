@@ -81,10 +81,10 @@ when every gate passes. No paid plan.
       the main-overlap deploy-displacement limit (ci.yml comment, /do Phase 7b recovery) because
       `deploy.yml` is out of scope; stale PR-timing wording in rules 09, 14, 22, AGENTS.md, CLAUDE.md,
       contributing docs
-- [ ] Revert the temporary trigger commit `8a2e5e7d7` (`packages/providers/.ci-proof-trigger`,
+- [x] Revert the temporary trigger commit `8a2e5e7d7` (`packages/providers/.ci-proof-trigger`,
       `apps/www/.ci-proof-trigger`) after the real CI proof run, before merge; confirm the final diff
       has no `.ci-proof-trigger`
-- [ ] Real CI proof on this PR: draft run shows only the quick set; ready run executes every suite
+- [x] Real CI proof on this PR: draft run shows only the quick set; ready run executes every suite
       with test counts equal to the baseline; full run about 12 min or less
 - [ ] Idea `01M7FYGMEESYH3AJZJ0CT3NKCZ` note with before/after durations and job counts, plus next
       steps for the out-of-scope items
@@ -92,13 +92,13 @@ when every gate passes. No paid plan.
 
 ## Acceptance criteria
 
-- [ ] A full run on the PR finishes in about 12 min or less (excluding the out-of-scope DO Workers
+- [x] A full run on the PR finishes in about 12 min or less (excluding the out-of-scope DO Workers
       and Playwright visual jobs, which this PR does not trigger) with all suites executed and
       test counts matching the baseline
-- [ ] A draft push runs only the quick set
-- [ ] A PR cannot be merged on the quick checks alone
-- [ ] Coverage thresholds are enforced on the whole of `apps/api` and `apps/web`
-- [ ] Full PR run job count stays at or under about 24
+- [x] A draft push runs only the quick set
+- [x] A PR cannot be merged on the quick checks alone
+- [x] Coverage thresholds are enforced on the whole of `apps/api` and `apps/web`
+- [x] Full PR run job count stays at or under about 24
 - [ ] After merge, overlapping main pushes both get CI immediately and production deploys the tip
 
 ## Notes
@@ -112,6 +112,18 @@ when every gate passes. No paid plan.
   deploy can replace a newer pending deploy in `deploy-production`; the older one fails closed and the
   tip waits for the next merge or a manual dispatch. Fixing it needs a `deploy.yml` change, outside
   this task. Also MEDIUM, pre-existing: any PR can edit the gate job itself (no CODEOWNERS).
+
+- Ready run 43747089896 (2009009aa): every test passed but the shard uploads found nothing:
+  upload-artifact skips hidden paths, and `.vitest-reports` is one. Test and the gate went red as
+  designed. Fixed with `include-hidden-files: true` (b74e32027).
+- Ready run 43748233985 (b74e32027, all jobs green): 10.4 min wall (18:42:13 to 18:52:35Z).
+  Test api shards 5.1 / 5.5 / 8.5 min, web 2.7 / 3.7 min, other packages 3.0 min, merge job
+  1.0 min (Test done at 9.8 min), Workspace Quality Surfaces 10.0 min (now the longest job).
+  Counts identical to base run 43740879496: api 1026 files / 15267 tests (3 files, 4 tests
+  skipped), web 410 / 5246, 19 other packages unchanged. Merged coverage within 0.05 points of the
+  base unsharded run (api 79.01/72.19/82.79/80.43, web 71.77/67.16/67.24/73.09).
+- CodeRabbit: requested at mark-ready 18:29:57Z; replied "Review rate limited" at 18:30:21Z, so
+  no review.
 
 ## Out of scope
 
