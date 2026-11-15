@@ -444,6 +444,9 @@ func (r *Reporter) doPostWithContext(ctx context.Context, url, token string, bod
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	if r.outboxIncarnation != "" {
+		req.Header.Set(outboxIncarnationHeader, r.outboxIncarnation)
+	}
 
 	resp, err := r.client.Do(req)
 	if err != nil {

@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # Draft pull requests run only the quick checks (see `github.event.pull_request.draft`
+    # in the job conditions). Marking a PR ready for review starts the full suite on the
+    # same commit, so `ready_for_review` must trigger a run. `edited` and `labeled` are
+    # deliberately absent: see scripts/quality/pr-evidence-source.ts.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 env:
@@ -16,9 +21,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Pull requests share one group per PR and cancel superseded commits. Every other
+  # event (main pushes, manual runs) gets one group per commit, so a second main merge
+  # does not wait for the previous main run to finish. An older main run that finishes
+  # late cannot deploy over a newer one: deploy.yml serializes production runs and
+  # scripts/deploy/validate-production-dispatch.ts only accepts the current main tip.
+  # Known limit: if the older run's deploy is queued while the newer one is still
+  # pending, GitHub replaces the pending newer deploy, the older one then fails closed,
+  # and the tip waits for the next merge or a manual Deploy Production dispatch
+  # (/do Phase 7b covers the recovery).
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   # Keep main CI runs alive so every successful main merge can trigger production deploy.
-  # Pull request runs still cancel superseded commits for faster feedback.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -170,21 +183,26 @@ jobs:
               - '**/go.sum'
               - 'scripts/quality/check-go-vulnerability-diff.ts'
 
-  preflight-evidence:
-    name: Preflight Evidence
+  # One job for the PR-body and PR-content checks. They used to be three jobs that each
+  # spent a runner slot on checkout and install for a few seconds of work. Each check
+  # still runs when an earlier one fails, so a single run reports every evidence gap.
+  pr-evidence:
+    name: PR Evidence
     if: github.event_name == 'pull_request'
     timeout-minutes: 15
     runs-on: ubuntu-latest
-    # `pull-requests: read` + GITHUB_TOKEN let the check read the PR's CURRENT
+    # `pull-requests: read` + GITHUB_TOKEN let the checks read the PR's CURRENT
     # body/labels instead of the frozen event payload. Job-level `permissions`
     # REPLACES the top-level block, so `contents: read` must be restated for
-    # actions/checkout. Without both of these the check silently degrades to the
+    # actions/checkout. Without both of these the checks silently degrade to the
     # stale payload — see scripts/quality/ci-evidence-token-wiring.test.ts.
     permissions:
       contents: read
       pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
@@ -215,76 +233,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Validate no stale binary artifacts are tracked
+        if: ${{ !cancelled() }}
         run: pnpm quality:no-tracked-stale-binaries
 
-  specialist-review-evidence:
-    name: Specialist Review Evidence
-    if: github.event_name == 'pull_request'
-    timeout-minutes: 15
-    # See preflight-evidence above: required for live PR body/label reads.
-    permissions:
-      contents: read
-      pull-requests: read
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Validate specialist review evidence
+        if: ${{ !cancelled() }}
         run: pnpm quality:specialist-review
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-  ci-workflow:
-    name: CI Workflow
-    needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.ci-workflow == 'true'
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Validate CI workflow wiring
-        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts check-runtime-tunables.test.ts ci-workspace-surfaces.test.ts ci-browser-install.test.ts
-
-  ui-compliance:
-    name: UI Compliance
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Validate UI checklist evidence
+        if: ${{ !cancelled() }}
         run: node scripts/ci/check-ui-compliance.mjs
 
   lint:
@@ -374,8 +333,10 @@ jobs:
           SAM_GITLEAKS_BIN: ${{ runner.temp }}/gitleaks/gitleaks
         run: pnpm quality:gitleaks:pr
 
+  # Quick check (also runs on draft PRs). `pnpm build` is this job's first step, so a
+  # separate Build job would only repeat it on another runner.
   typecheck:
-    name: Type Check
+    name: Build and Type Check
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
@@ -399,17 +360,22 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
-  test:
-    name: Test
+  # The unit suites run in shards. One job used to run every package and took 20 to
+  # 30 min (apps/api alone ~23 min, apps/web ~11 min). Each shard writes a Vitest blob
+  # report that carries its coverage. A shard sees only part of its package, so its
+  # coverage thresholds are zeroed here; the `test` job merges the blobs and enforces
+  # the thresholds from the package's vitest.config.ts over the whole package.
+  # Shard counts are repeated in the matrix, the --shard flag and the `test` job's
+  # blob-count check; scripts/quality/ci-test-shards.test.ts keeps them in step.
+  test-api:
+    name: Test api (${{ matrix.shard }}/3)
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
-    # Normal runs took 12-20 min; on slower runners 3 runs on 2026-11-08 were
-    # cancelled at the old 20-min limit with no failing suite. After the worker
-    # was split into packages (2026-11-12) the same suites run as eight more
-    # turbo tasks and took 27 min, then hit the 30-min limit with no failing
-    # suite (run 43273493049). 45 is a stopgap until PR runs test only what
-    # changed (idea 01M77GBTAM775FAKY72RT4HMDV).
-    timeout-minutes: 45
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.repo-quality == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -424,23 +390,122 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build packages
-        run: pnpm build
+      - name: Build API dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
 
-      - name: Run tests with coverage
-        # Bound both package scheduling and each Vitest pool. On the measured
-        # four-CPU runner this allows two pools of at most three workers.
+      - name: Run API unit test shard with coverage
+        working-directory: apps/api
+        env:
+          TEST_SHARD: ${{ matrix.shard }}
+        run: >-
+          pnpm exec vitest run --shard="${TEST_SHARD}/3"
+          --reporter=blob --reporter=default
+          --coverage --coverage.reporter=text-summary
+          --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
+          --coverage.thresholds.functions=0 --coverage.thresholds.lines=0
+
+      - name: Upload API blob report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-blob-api-${{ matrix.shard }}
+          path: apps/api/.vitest-reports/
+          # The blob directory is a dot-directory, which upload-artifact skips by default.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  test-web:
+    name: Test web (${{ matrix.shard }}/2)
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.repo-quality == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/web^...
+
+      - name: Run web unit test shard with coverage
+        working-directory: apps/web
+        env:
+          TEST_SHARD: ${{ matrix.shard }}
+        run: >-
+          pnpm exec vitest run --shard="${TEST_SHARD}/2"
+          --reporter=blob --reporter=default
+          --coverage --coverage.reporter=text-summary
+          --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
+          --coverage.thresholds.functions=0 --coverage.thresholds.lines=0
+
+      - name: Upload web blob report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-blob-web-${{ matrix.shard }}
+          path: apps/web/.vitest-reports/
+          # The blob directory is a dot-directory, which upload-artifact skips by default.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  # Every other package is small (about 3 min together) and enforces its own
+  # thresholds in its own unsharded run. turbo builds what each package needs.
+  test-packages:
+    name: Test other packages
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.repo-quality == 'true'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run package tests with coverage
         run: |
           node -e "console.log('Available test CPUs:', require('node:os').availableParallelism())"
-          pnpm test:coverage --concurrency=2 -- --maxWorkers=75%
+          pnpm test:coverage --filter='!@simple-agent-manager/api' --filter='!@simple-agent-manager/web' --concurrency=2 -- --maxWorkers=75%
 
-  build:
-    name: Build
-    needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
+  # Keeps the `Test` check name. Fails unless every shard passed, then enforces the
+  # coverage thresholds on the merged API and web reports. `!cancelled()` runs it after
+  # a failed shard (so the failure is reported here) but not in a cancelled run.
+  test:
+    name: Test
+    needs: [changes, test-api, test-web, test-packages]
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.repo-quality == 'true' }}
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
+      - name: Require every test shard to pass
+        env:
+          API_RESULT: ${{ needs.test-api.result }}
+          WEB_RESULT: ${{ needs.test-web.result }}
+          PACKAGES_RESULT: ${{ needs.test-packages.result }}
+        run: |
+          echo "test-api=$API_RESULT test-web=$WEB_RESULT test-packages=$PACKAGES_RESULT"
+          test "$API_RESULT" = success && test "$WEB_RESULT" = success && test "$PACKAGES_RESULT" = success
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -453,13 +518,41 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build all packages
-        run: pnpm build
+      - name: Download API blob reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: test-blob-api-*
+          path: apps/api/.vitest-reports/
+          merge-multiple: true
 
+      - name: Download web blob reports
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: test-blob-web-*
+          path: apps/web/.vitest-reports/
+          merge-multiple: true
+
+      # A missing blob would only lower coverage, so require the exact count first.
+      - name: Merge API shards and enforce API coverage thresholds
+        working-directory: apps/api
+        run: |
+          test "$(find .vitest-reports -name 'blob-*.json' | wc -l)" -eq 3
+          pnpm exec vitest run --merge-reports --coverage
+
+      - name: Merge web shards and enforce web coverage thresholds
+        if: ${{ !cancelled() }}
+        working-directory: apps/web
+        run: |
+          test "$(find .vitest-reports -name 'blob-*.json' | wc -l)" -eq 2
+          pnpm exec vitest run --merge-reports --coverage
+
+  # The only job that runs the public-site browser tests when it runs; Marketing Site
+  # runs them only for changes this job does not cover. One copy per run keeps the
+  # public-site evidence for `pnpm quality:browser-evidence` without paying twice.
   workspace-quality-surfaces:
     name: Workspace Quality Surfaces
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.repo-quality == 'true' || needs.changes.outputs.browser-install == 'true')
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && (needs.changes.outputs.repo-quality == 'true' || needs.changes.outputs.browser-install == 'true')
     timeout-minutes: 30
     # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
     # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
@@ -510,10 +603,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Runs only when Workspace Quality Surfaces does not. That job already builds the
+  # public docs, checks their links and runs the public-site browser tests, and the
+  # root Lint and Build and Type Check jobs already lint and type-check apps/www, so
+  # running this job as well repeated about 8 min of browser tests on a second runner.
   marketing-site:
     name: Marketing Site
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.marketing-site == 'true' || needs.changes.outputs.browser-install == 'true')
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.marketing-site == 'true' && needs.changes.outputs.repo-quality != 'true' && needs.changes.outputs.browser-install != 'true'
     # Setup/build takes ~11 minutes; leave time for the browser suite.
     timeout-minutes: 25
     # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
@@ -560,9 +657,9 @@ jobs:
   playwright-visual:
     name: Playwright Visual Tests
     needs: [changes]
-    # Visual audits are informational and only relevant to reviewing a change.
-    # Restrict to pull requests so they never run on push to main.
-    if: github.event_name == 'pull_request' && (needs.changes.outputs.web-ui == 'true' || needs.changes.outputs.browser-install == 'true')
+    # Blocking: a failure here fails the Durable Object Workers merge gate. Visual
+    # audits only matter for reviewing a change, so they never run on push to main.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft && (needs.changes.outputs.web-ui == 'true' || needs.changes.outputs.browser-install == 'true')
     timeout-minutes: 45
     # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
     # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
@@ -621,7 +718,7 @@ jobs:
   deploy-scripts:
     name: Validate Deploy Scripts
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.deploy-scripts == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.deploy-scripts == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -666,10 +763,12 @@ jobs:
       - name: Validate agent install manifest consistency
         run: pnpm quality:agent-install-manifest
 
+  # Quick check (also runs on draft PRs). It also runs the CI wiring tests, which had
+  # their own CI Workflow job, so it runs for CI-routing changes as well.
   code-quality:
     name: Code Quality Checks
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.repo-quality == 'true' || needs.changes.outputs.ci-workflow == 'true')
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -730,12 +829,12 @@ jobs:
         run: pnpm quality:node-pool-boundary
 
       - name: CI workflow wiring tests
-        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts check-runtime-tunables.test.ts
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts check-runtime-tunables.test.ts ci-workspace-surfaces.test.ts ci-browser-install.test.ts ci-evidence-token-wiring.test.ts ci-test-shards.test.ts ci-draft-and-gate.test.ts
 
   go-vulnerability-diff:
     name: Go Vulnerability Diff
     needs: [changes]
-    if: needs.changes.outputs.go-modules == 'true'
+    if: needs.changes.outputs.go-modules == 'true' && !github.event.pull_request.draft
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -775,7 +874,7 @@ jobs:
   durable-object-worker-shards:
     name: Durable Object Workers shard (${{ matrix.shard }}/3)
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.api == 'true'
     # Keep per-file storage isolation and serial workerd execution within each
     # runner. Shard the complete suite to bound wall time as the suite grows.
     strategy:
@@ -815,24 +914,85 @@ jobs:
           name: workers-timings-${{ matrix.shard }}
           path: apps/api/test-results/workers-timing.json
 
-  # Preserve the existing branch-protection check name. Skipped, cancelled or
-  # failed shards must never turn this required check green for API changes.
+  # The merge gate. Ruleset "Main" requires exactly one check, named
+  # "Durable Object Workers", and the agent token cannot edit the ruleset, so this job
+  # keeps that name and now gates the whole suite instead of only the Workers shards.
+  #
+  # Two holes it closes:
+  # - A skipped job reports success. Before, this check was skipped (green) on every PR
+  #   that did not touch the API, so a red Test never blocked a merge.
+  # - Draft PRs skip the full suite. On a draft run this job carries a different name,
+  #   so the draft run never reports a "Durable Object Workers" result for the commit.
+  #   After the PR is marked ready the check stays "expected" (merge blocked) until the
+  #   ready run finishes every job, instead of inheriting the draft run's skipped jobs.
+  #
+  # PR Evidence is deliberately not a dependency: it validates PR-body text, which a
+  # human may waive, and it is not a property of the code being merged.
+  #
+  # `always()`, not `!cancelled()`: in a cancelled run this job still runs and fails.
+  # A skipped job would read as green to the ruleset.
   durable-object-workers:
-    name: Durable Object Workers
-    needs: [changes, durable-object-worker-shards]
-    if: always() && (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
+    # Only ready-PR runs and main pushes report the required name. A manual dispatch on a
+    # branch skips the PR-only jobs (Playwright Visual Tests, PR Evidence), so it must not
+    # satisfy the required check for that commit either.
+    name: ${{ (github.event_name == 'push' || (github.event_name == 'pull_request' && !github.event.pull_request.draft)) && 'Durable Object Workers' || 'Full suite gate (not a merge check for this run)' }}
+    needs:
+      - changes
+      - lint
+      - secret-scan
+      - typecheck
+      - test-api
+      - test-web
+      - test-packages
+      - test
+      - workspace-quality-surfaces
+      - marketing-site
+      - playwright-visual
+      - deploy-scripts
+      - code-quality
+      - go-vulnerability-diff
+      - durable-object-worker-shards
+      - pulumi-infra
+      - vm-agent-test
+      - cli-test
+      - vm-agent-integration
+      - devcontainer
+      - devcontainer-volume-mount
+    if: always() && (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
+      # Skipped, cancelled or failed shards must never turn this check green for API changes.
       - name: Require every Workers shard to pass
+        if: needs.changes.outputs.api == 'true'
         env:
           SHARD_RESULT: ${{ needs.durable-object-worker-shards.result }}
         run: test "$SHARD_RESULT" = success
 
+      # A job skipped by its own path filter is fine; a failed or cancelled one is not.
+      # A job skipped because something it needs failed is caught through that need,
+      # which is listed here too.
+      - name: Require every other CI job to pass
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          # Compare the printed value: `jq -e` exits 0 on empty input in some jq versions.
+          if [ "$(jq -r '.changes.result' <<<"$NEEDS_JSON")" != success ]; then
+            echo "::error::Detect Changes did not succeed"
+            exit 1
+          fi
+          failed=$(jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key)=\(.value.result)"' <<<"$NEEDS_JSON")
+          if [ -n "$failed" ]; then
+            printf '::error::CI jobs did not pass: %s\n' "$(tr '\n' ' ' <<<"$failed")"
+            exit 1
+          fi
+          echo "Every CI job passed or was skipped by its path filter."
+
   pulumi-infra:
     name: Pulumi Infrastructure Tests
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.infra == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.infra == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -859,7 +1019,7 @@ jobs:
   vm-agent-test:
     name: VM Agent Test
     needs: [changes]
-    if: needs.changes.outputs.vm-agent == 'true'
+    if: needs.changes.outputs.vm-agent == 'true' && !github.event.pull_request.draft
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -885,7 +1045,7 @@ jobs:
   cli-test:
     name: CLI Test
     needs: [changes]
-    if: needs.changes.outputs.cli == 'true'
+    if: needs.changes.outputs.cli == 'true' && !github.event.pull_request.draft
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -946,12 +1106,14 @@ jobs:
           path: packages/cli/coverage.out
           retention-days: 7
 
+  # Also runs the VM Agent E2E tests: both need the devcontainer CLI and the same
+  # fixture images, and E2E alone took about a minute on its own runner.
   vm-agent-integration:
     name: VM Agent Integration
     needs: [changes]
-    if: needs.changes.outputs.vm-agent == 'true'
+    if: needs.changes.outputs.vm-agent == 'true' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -977,30 +1139,6 @@ jobs:
         working-directory: packages/vm-agent
         run: go test -race -v -tags integration -timeout 15m ./internal/bootstrap/ ./internal/acp/
 
-  vm-agent-e2e:
-    name: VM Agent E2E
-    needs: [changes]
-    if: needs.changes.outputs.vm-agent == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: packages/vm-agent/go.sum
-
-      - name: Assert Go version
-        run: go version | grep -E '^go version go1\.26\.11 '
-
-      - name: Install devcontainers CLI
-        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
-
-      - name: Prepare devcontainer fixture images
-        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
-
       - name: Run VM Agent E2E tests
         working-directory: packages/vm-agent
         run: go test -race -v -tags e2e -timeout 15m ./internal/e2e/
@@ -1008,7 +1146,7 @@ jobs:
   devcontainer:
     name: Devcontainer Validation
     needs: [changes]
-    if: needs.changes.outputs.devcontainer == 'true'
+    if: needs.changes.outputs.devcontainer == 'true' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -1219,7 +1357,7 @@ jobs:
   devcontainer-volume-mount:
     name: Devcontainer Volume Mount
     needs: [changes]
-    if: needs.changes.outputs.devcontainer-volume-mount == 'true'
+    if: needs.changes.outputs.devcontainer-volume-mount == 'true' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

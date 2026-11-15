@@ -17,6 +17,12 @@ never copy an abbreviated SHA from a log. A CI completion filter looks like:
 Replace the example SHA with the current PR's full 40-character head SHA. Bare
 `check_run`, `check_suite`, and `workflow_run` do not match completion events.
 
+Draft pull requests run only the quick CI checks (`.github/workflows/ci.yml`: every
+full-suite job is skipped when `github.event.pull_request.draft` is true). A green
+draft run says nothing about the test suites, and the required `Durable Object
+Workers` check is not reported for it. Mark the PR ready (`gh pr ready <PR>`) to start
+the full run, then wait on that run's head SHA.
+
 ## Owner: check, subscribe, reconcile
 
 1. Read current PR state/head and checks (`gh pr view`, `gh pr checks`); record
