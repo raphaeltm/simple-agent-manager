@@ -61,6 +61,8 @@ import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
 import * as idleCleanup from './idle-cleanup';
 import {
+  computeMessageBookkeepingAlarmTime,
+  computeBookkeepingSummaryAlarmTime,
   flushDueMessageBookkeeping,
   DEFAULT_MESSAGE_BOOKKEEPING,
   flushMessageBookkeeping,
@@ -3335,6 +3337,8 @@ export class ProjectData extends DurableObject<Env> {
       await tick.run('storage_safety', () => this.runStorageSafetyAlarmLocked());
 
       await tick.run('message_bookkeeping', async () => {
+        const dueAt = computeMessageBookkeepingAlarmTime(this.sql);
+        if (dueAt === null || dueAt > Date.now()) return;
         const config = await projectDataPorts().operations.messageMergeConfig?.(this.env);
         this.ctx.storage.transactionSync(() =>
           flushDueMessageBookkeeping(
@@ -3343,7 +3347,6 @@ export class ProjectData extends DurableObject<Env> {
           )
         );
       });
-      await tick.run('bookkeeping_summary', () => this.runSummarySyncLocked());
 
       await tick.run('workspace_idle_timeouts', () =>
         workspaceIdleTimeouts.checkWorkspaceIdleTimeouts(
@@ -3463,6 +3466,10 @@ export class ProjectData extends DurableObject<Env> {
         () => this.runProjectEventRetentionAlarm(),
         (err) => this.recordProjectEventSchedulerFailure('retention', err)
       );
+      await tick.run('bookkeeping_summary', async () => {
+        if (computeBookkeepingSummaryAlarmTime(this.sql, this.env) === null) return;
+        await this.runSummarySyncLocked();
+      });
     } finally {
       try {
         tick.complete(this.getProjectId());
