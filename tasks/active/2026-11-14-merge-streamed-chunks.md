@@ -130,5 +130,7 @@ Remaining narrower verification, per task author:
 
 - [ ] Identify the full-list capture failure step and reproduce locally with at least3500 logical chunks/~18k assistant characters plus a tool group, card and system row; fix and review without weakening equality. Measure375/1280 capture duration.
 - [ ] Budget25-second reply stability plus measured UI phase before work stop; begin the last prompt early enough. An ended short Instant first reply should lead promptly to an ordinary long-reply user follow-up while ON.
-- [ ] New coordinated window: VM ON long/full verification, strict VM deletion, Instant ON long/full verification. The paired OFF VM baseline need not be repeated.
+- [ ] New coordinated window: VM ON long/full verification, strict VM deletion, Instant ON long/full verification through an immediate ordinary follow-up when needed, then Instant OFF long/stored reload and UI regression proof for the default-OFF path. Only VM OFF need not be repeated; account for the25-second stability wait and measured full UI phase for all three runs before requesting a slot.
 - [ ] After those gates pass, open the PR with merging defaultOFF, complete CI/review/release and read-only production usage monitoring.
+
+The task author corrected the narrower plan: Instant OFF remains required because production first runs the new build with merging OFF. Current modes: VM OFF stored reload/streaming/baseline met (window three; full-list harness failures remain recorded); VM ON storage/append/saving met, full UI NOT MET; Instant ON merging observed, complete verification NOT MET; Instant OFF unrun. No new slot request until all three future live runs and their measured tail budgets fit the fixed40-minute allocation window.
