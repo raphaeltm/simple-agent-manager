@@ -81,7 +81,7 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'operations.nodeProvisioningAttemptDeadlineMs',
     DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
     'Operations',
-    'Milliseconds one durable node-provisioning attempt may spend before its provider create starts and on the node DNS record afterwards; past it the attempt is cut and the next one (30 s later) resumes it. A create that has started is never cut or repeated: the next attempt adopts the VM.',
+    'Milliseconds one durable node-provisioning attempt may spend before its provider create starts and on the node DNS record afterwards; past it the attempt is cut and the next attempt (NODE_PROVISIONING_RETRY_INTERVAL_MS, 30 s by default) resumes it. A create that has started is never cut or repeated: the next attempt adopts the VM. 5000 restores the behaviour from before this setting.',
     {
       min: NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS,
       max: NODE_PROVISIONING_ATTEMPT_DEADLINE_MAX_MS,

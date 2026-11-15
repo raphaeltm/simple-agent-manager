@@ -84,10 +84,14 @@ export async function completeAbortableResponse(
   if (!response.body) return response;
   const body = await readResponseBody(response, signal);
   if (signal.aborted) throw signal.reason;
+  // fetch has already decoded the body, so its transfer headers no longer describe these bytes.
+  const headers = new Headers(response.headers);
+  headers.delete('content-encoding');
+  headers.delete('content-length');
   return new Response(NULL_BODY_STATUSES.has(response.status) ? null : body, {
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers,
+    headers,
   });
 }
 

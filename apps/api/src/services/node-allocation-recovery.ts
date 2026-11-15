@@ -8,7 +8,7 @@ import {
 
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
-import { GcpApiError, sanitizeGcpError } from './gcp-errors';
+import { GcpApiError, gcpApiErrorHint } from './gcp-errors';
 import {
   buildNodeProviderLabels,
   resolveEnvironmentLabel,
@@ -28,8 +28,12 @@ export class NodeAllocationUncertainError extends Error {
 
 /** Cap for the one error message we author ourselves and know is free of external detail. */
 const ATTEMPT_ERROR_MESSAGE_MAX_CHARS = 200;
-/** A provider error code is kept only when it looks like a code, not free text from a body. */
-const PROVIDER_CODE_SHAPE = /^[A-Za-z0-9_.:-]{1,64}$/;
+/**
+ * A provider error code is kept only when it looks like a vocabulary code (`placement_error`,
+ * `RESOURCE_EXHAUSTED`): letters and underscores. Digits, dots, colons and hyphens are refused
+ * because project ids, resource names and URLs are made of them.
+ */
+const PROVIDER_CODE_SHAPE = /^[A-Za-z_]{2,64}$/;
 
 interface SafeFailureFields {
   name: string;
@@ -48,7 +52,7 @@ interface SafeFailureFields {
  * `ProviderError` whose `message` embeds the provider's raw response body (resource paths, zone
  * URLs, service-account emails of the credential's project, which can be the platform's), and a
  * generic error can carry SQL or bound parameters. So:
- * - `GcpApiError` -> the sanitizer's operator hint (the raw body stays in a server-side log);
+ * - `GcpApiError` -> the sanitizer's user-facing hint (no raw body);
  * - `ProviderError` -> its structured fields, message dropped;
  * - `NodeAllocationUncertainError` -> its own authored message, capped;
  * - any other `Error` -> its name only.
@@ -59,7 +63,7 @@ function safeFailureFields(value: unknown): SafeFailureFields {
       name: value.name,
       step: value.step,
       statusCode: value.statusCode,
-      message: sanitizeGcpError(value, 'node-provisioning-attempt'),
+      message: gcpApiErrorHint(value),
     };
   }
   if (value instanceof ProviderError) {

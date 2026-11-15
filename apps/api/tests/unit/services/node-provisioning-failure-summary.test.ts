@@ -74,6 +74,12 @@ describe('summarizeProvisioningFailure', () => {
     expect(summarizeProvisioningFailure(error)).toBe(
       'ProviderError (hetzner, HTTP 412, transient_capacity)'
     );
+    // A code shaped like an identifier (project id, resource name) is refused too.
+    for (const providerCode of ['platform-project-123', 'zones/europe-west1-b', 'a.b']) {
+      expect(
+        summarizeProvisioningFailure(new ProviderError('gcp', 400, 'raw', { providerCode }))
+      ).toBe('ProviderError (gcp, HTTP 400)');
+    }
   });
 
   it('uses the GCP sanitizer hint, never the raw body', () => {
@@ -87,6 +93,14 @@ describe('summarizeProvisioningFailure', () => {
     expect(summary).toMatch(/^GcpApiError \(create_instance, HTTP 403\): /);
     expect(summary).not.toContain(SA_EMAIL);
     expect(summary).not.toContain(RESOURCE_PATH);
+  });
+
+  it('names a GCP error without a status code', () => {
+    const summary = summarizeProvisioningFailure(
+      new GcpApiError({ step: 'sts_exchange', message: `timeout ${SA_EMAIL}` })
+    );
+    expect(summary).toMatch(/^GcpApiError \(sts_exchange\): /);
+    expect(summary).not.toContain(SA_EMAIL);
   });
 
   it('reduces any other error to its name', () => {
@@ -120,6 +134,16 @@ describe('describeProvisioningAttemptFailure', () => {
       },
     });
     expect(JSON.stringify(fields)).not.toContain(SA_EMAIL);
+  });
+
+  it('describes a non-Error cause by its type only', () => {
+    const fields = describeProvisioningAttemptFailure(
+      new NodeAllocationUncertainError('wrapped', { cause: `raw ${SA_EMAIL}` })
+    );
+    expect(fields).toEqual({
+      error: { name: 'NodeAllocationUncertainError', message: 'wrapped' },
+      cause: { name: 'string' },
+    });
   });
 
   it('caps the authored wrapper message and omits cause when there is none', () => {

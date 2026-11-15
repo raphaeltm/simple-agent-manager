@@ -33,6 +33,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 // cannot go below 5 s (`NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS`), so those cases pin the
 // setting's resolved value to the 200 ms request timeout; every other setting resolves for real.
 let attemptBudgetOverrideMs: number | undefined;
+let attemptBudgetOverrideReads = 0;
 vi.mock('../../../src/services/admin-settings-resolution', async (load) => {
   const actual = await load<typeof import('../../../src/services/admin-settings-resolution')>();
   return {
@@ -40,7 +41,7 @@ vi.mock('../../../src/services/admin-settings-resolution', async (load) => {
     resolveAdminSetting: (env: Env, name: Parameters<typeof actual.resolveAdminSetting>[1]) =>
       name === 'operations.nodeProvisioningAttemptDeadlineMs' &&
       attemptBudgetOverrideMs !== undefined
-        ? Promise.resolve(attemptBudgetOverrideMs)
+        ? (attemptBudgetOverrideReads++, Promise.resolve(attemptBudgetOverrideMs))
         : actual.resolveAdminSetting(env, name),
   };
 });
@@ -64,6 +65,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   clearCapacityCatalogCache();
   attemptBudgetOverrideMs = undefined;
+  attemptBudgetOverrideReads = 0;
 });
 
 async function createMeteringFixture(
@@ -624,6 +626,8 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
 
   it('lets a slow create outlive the attempt deadline, records it, and finishes on a later tick', async () => {
     const f = await createMeteringFixture({ hangProvider: true });
+    // The pinned budget really reached the attempt (an import change would bypass the mock).
+    expect(attemptBudgetOverrideReads).toBeGreaterThan(0);
     // The 200 ms attempt deadline did not cancel the marked create (staging: GCP's create was
     // cut that way inside its token exchange, leaving nothing to reconcile). The VM identity
     // is recorded in the same attempt; the public-IP DNS step keeps the deadline and finishes
@@ -730,6 +734,8 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
 
   it('bounds a lost successful DNS response body and adopts the exact record on replay', async () => {
     const f = await createMeteringFixture({ hangDnsBody: true });
+    // The pinned budget really reached the attempt (an import change would bypass the mock).
+    expect(attemptBudgetOverrideReads).toBeGreaterThan(0);
     expect(f.dnsPosts).toHaveLength(1);
     expect(
       [...f.durable.instances.values()][0]!.values.get('direct-provisioning:v1')

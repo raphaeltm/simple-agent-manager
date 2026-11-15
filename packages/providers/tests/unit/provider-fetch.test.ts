@@ -109,7 +109,12 @@ describe('providerFetch', () => {
       new UncloneableResponse(streamed, {
         status: 201,
         statusText: 'Created',
-        headers: { 'content-type': 'application/json', etag: 'abc' },
+        headers: {
+          'content-type': 'application/json',
+          etag: 'abc',
+          'content-encoding': 'gzip',
+          'content-length': '12',
+        },
       })
     );
 
@@ -119,6 +124,9 @@ describe('providerFetch', () => {
     expect(response.ok).toBe(true);
     expect(response.statusText).toBe('Created');
     expect(response.headers.get('etag')).toBe('abc');
+    // The bytes are already decoded: the original transfer headers no longer describe them.
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(response.headers.get('content-length')).toBeNull();
     expect(response.bodyUsed).toBe(false);
     await expect(response.json()).resolves.toEqual({ access_token: 't', expires_in: 3599 });
   });

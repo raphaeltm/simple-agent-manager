@@ -42,7 +42,7 @@ Default 60 s (not 45 s), configurable as an admin setting (Raphaël, 2026-11-14)
 
 ## Checklist
 
-- [x] Shared constants: default 60 s, bounds 5 s - 300 s
+- [x] Shared constants: default 60 s, bounds 5 s - 180 s (max lowered from 300 s after cloudflare-specialist review)
 - [x] Admin setting `operations.nodeProvisioningAttemptDeadlineMs` (registry + union)
 - [x] `attemptDeadlineMs()` used by `run()`; never below the request timeout
 - [x] Per-attempt log `node_provisioning.durable_attempt_failed` with safe fields + cause
@@ -66,5 +66,50 @@ Default 60 s (not 45 s), configurable as an admin setting (Raphaël, 2026-11-14)
 - A create slower than the request timeout completes in one attempt at the default.
 - With the setting at its minimum, a slow create is cut after the create, recorded, and adopted
   on the next attempt with exactly one provider create.
-- No raw provider message reaches `lastError` / user-visible error columns.
+- No raw provider text reaches `lastError` through the two `NodeAllocationUncertainError`
+  wrappers (F16). Other writers of the same class are explicitly kept out: idea
+  `01M7ET89S5653S0WV0N1B0MV12`.
 - `providerFetch` works on a runtime that refuses `clone()`; status/headers preserved.
+
+## Worst-case arithmetic (rule 81)
+
+R = retry interval 30 s (`NODE_PROVISIONING_RETRY_INTERVAL_MS`), B = attempt budget, T = tunnel
+budget (20 s default, tunnel transport only), A = intent max age 15 min, N = 30 attempts.
+`alarm()` re-arms every R while an attempt is in flight, so the next attempt starts at the first R
+tick after the previous one ends: cycle = R * max(1, ceil(d / R)) for an attempt of duration d.
+
+| B | First failure noticed (hung pre-create or DNS step) | Cycle if every attempt hangs | Attempts before A | Exhaustion reported |
+|---|---|---|---|---|
+| 5 s (min, = old behaviour) | 5 s (+T) | 30 s | 30 (N) | ~15 min |
+| 60 s (default) | 60 s (+T) | 90 s (120 s on tunnel) | 10 (8) | ~15 min, at most ~16.5 min |
+| 180 s (max) | 180 s (+T) | 210 s (240 s on tunnel) | 5 (4) | at most ~18.5 min |
+
+- A fast failure (HTTP error, auth, quota) is noticed immediately at every setting; the budget
+  only bounds hangs. Each failed attempt is logged at once (`node_provisioning.durable_attempt_failed`).
+- The age check runs only between attempts, so exhaustion can be reported up to one cycle after A.
+- A started create is not bounded by B (unchanged since #2646): Hetzner 30 s per request, GCP up
+  to ~10-13 min (token exchange + firewall ensure + insert + 5 min operation poll). Tracked in
+  `tasks/backlog/2026-11-11-durable-provisioning-attempt-ceiling.md`.
+- GCP success path before: create ~12 s, DNS cut, next tick at 30 s, recovery + DNS -> running at
+  ~35-45 s over 2 attempts. After: ~12-15 s in one attempt.
+
+## I/O (rule 60)
+
++1 `resolveAdminSetting` per attempt, served by the per-isolate admin settings cache (TTL <= 60 s)
+that `vmTunnels.provisioningBudgetMs` already fills: 0 D1 round-trips warm, 1 batched read cold.
+Logging adds none; provider-fetch removes a tee branch.
+
+## Review outcomes
+
+- security-auditor: 0 CRITICAL/HIGH. MEDIUM (raw text via other writers) kept out -> idea
+  `01M7ET89S5653S0WV0N1B0MV12`. LOWs fixed: provider-code shape tightened to letters/underscore,
+  non-logging GCP hint (`gcpApiErrorHint`), transfer headers dropped on re-wrap, stale doc ref.
+- cloudflare-specialist: 0 CRITICAL/HIGH. MEDIUM fixed: max 300 s -> 180 s. LOWs fixed: redundant
+  try/catch removed, retry-interval wording, GCP log duplication, doc ref.
+- test-engineer: no blockers. Fixed: tunnel test margins (per-call timeout 4.5 s), tunnel-budget
+  addition test, resolved default asserted, next-attempt time asserted, writer-path bound
+  rejection, spies restored, metering mock consulted-counter, extra summary cases.
+- task-completion-validator: WARN, 0 CRITICAL/HIGH. M1 handled by keep-out + idea, M2 by this
+  section, L1/L2 fixed.
+- Extra discrimination: tunnel-budget addition removed -> `adds the tunnel-setup budget...` red;
+  `NULL_BODY_STATUSES` removed -> `keeps a null-body status bodiless...` red.

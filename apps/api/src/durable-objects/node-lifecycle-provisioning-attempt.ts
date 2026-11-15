@@ -9,7 +9,7 @@ import { durableAttemptTunnelBudgetMs } from '../services/node-tunnel-config';
 /**
  * The wall-clock budget of one durable node-provisioning attempt (admin setting
  * `operations.nodeProvisioningAttemptDeadlineMs`, default
- * `DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS` = 60 s, range 5 s - 5 min).
+ * `DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS` = 60 s, range 5 s - 3 min).
  *
  * What it cuts (`NodeLifecycleProvisioning.run()` -> `provisionNode()`, through the attempt's
  * `ProviderRequestContext` signal): everything before the durable create mark (credential
@@ -32,15 +32,14 @@ export async function resolveNodeProvisioningAttemptDeadlineMs(
   env: Env,
   requestTimeoutMs: number
 ): Promise<number> {
-  let configured = DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS;
-  try {
-    const value = Number(
-      await resolveAdminSetting(env, 'operations.nodeProvisioningAttemptDeadlineMs')
-    );
-    if (Number.isSafeInteger(value) && value > 0) configured = value;
-  } catch {
-    // Settings unavailable: keep the default rather than failing the attempt.
-  }
+  // resolveAdminSetting falls back to the registry default when settings cannot be read.
+  const value = Number(
+    await resolveAdminSetting(env, 'operations.nodeProvisioningAttemptDeadlineMs')
+  );
+  const configured =
+    Number.isSafeInteger(value) && value > 0
+      ? value
+      : DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS;
   return Math.max(configured, requestTimeoutMs);
 }
 

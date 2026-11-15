@@ -212,12 +212,12 @@ where it says so and the app continues from there.
 This **Operations** setting bounds one durable node-provisioning attempt
 (`resolveNodeProvisioningAttemptDeadlineMs()`, armed by `NodeLifecycleProvisioning.run()`). It cuts
 the work before the provider create starts and the node's DNS record afterwards. A create that has
-started is never cut or repeated: if it outlives the attempt, the next attempt (30 seconds later)
-adopts the VM by its labels.
+started is never cut or repeated: if it outlives the attempt, the next attempt (after
+`NODE_PROVISIONING_RETRY_INTERVAL_MS`, 30 seconds by default) adopts the VM by its labels.
 
 | Setting                                        | Default | Range         | What it controls                                                                                                                                                   |
 | ---------------------------------------------- | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `operations.nodeProvisioningAttemptDeadlineMs` | 60,000  | 5,000–300,000 | Milliseconds one attempt may run before it is cut and resumed. A Google Cloud create takes 9–12 seconds and a Hetzner create 1–2. 5,000 restores the old behaviour |
+| `operations.nodeProvisioningAttemptDeadlineMs` | 60,000  | 5,000–180,000 | Milliseconds one attempt may run before it is cut and resumed. A Google Cloud create takes 9–12 seconds and a Hetzner create 1–2. 5,000 restores the old behaviour |
 
 ## Eviction recovery
 
