@@ -111,7 +111,15 @@ else if (cmd.startsWith('iam service-accounts')) {
 } else if (cmd.startsWith('projects add-iam-policy-binding')) binding(true);
 else if (cmd.startsWith('projects remove-iam-policy-binding')) binding(false);
 else if (cmd.startsWith('compute instances list')) {
-  out(JSON.stringify(db.instances.filter((i) => i.labels?.managed === 'simple-agent-manager')));
+  // Only the label filter teardown uses is modelled; without --filter every VM is listed.
+  const filter = flag('filter');
+  out(
+    JSON.stringify(
+      filter
+        ? db.instances.filter((i) => i.labels?.managed === 'simple-agent-manager')
+        : db.instances
+    )
+  );
 } else if (cmd.startsWith('compute instances describe') && format === 'json') {
   const hit = db.instances.find((i) => i.name === words[3] && i.zone.endsWith(`/${flag('zone')}`));
   if (!hit) fail(`The resource '${words[3]}' was not found`);
@@ -137,7 +145,7 @@ else if (cmd.startsWith('compute instances list')) {
   save();
 } else if (cmd.startsWith('compute firewall-rules describe')) {
   if (!db.firewalls[words[3]]) fail('not found');
-  out(words[3]);
+  out(format === 'json' ? JSON.stringify({ name: words[3], ...db.firewalls[words[3]] }) : words[3]);
 } else if (cmd.startsWith('compute firewall-rules delete')) {
   delete db.firewalls[words[3]];
   save();
