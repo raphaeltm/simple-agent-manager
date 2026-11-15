@@ -76,7 +76,13 @@ export function collectImportGraph(entry: string): ImportGraph {
       }
     }
   }
-  return { files: [...seen].map((file) => relative(REPO_ROOT, file)).sort(), packages };
+  const files = [...seen]
+    .map((file) => relative(REPO_ROOT, file))
+    .sort((a, b) => {
+      if (a < b) return -1;
+      return a > b ? 1 : 0;
+    });
+  return { files, packages };
 }
 
 /** Every self-host-only file and package `graph` reaches, as human-readable findings. */

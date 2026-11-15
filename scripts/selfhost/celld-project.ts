@@ -59,6 +59,12 @@ const SELFHOST_CLASS_NAMES = new Set(SELFHOST_DURABLE_OBJECTS.map((object) => ob
 
 const CLASS_NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
+/** Locale-independent order, so the generated entry is identical on every machine. */
+function byCodeUnit(a: string, b: string): number {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
 /**
  * The celld entry when secrets come from the key agent: the API's own entry with the default
  * handlers and every Durable Object class wrapped so each runs with the runtime secrets or not at
@@ -105,7 +111,7 @@ export function renderPlainMain(): string {
     CELLD_RUNTIME_CALL,
     SELFHOST_MOUNT_CALL,
     `export * from './${SOURCE_LINK}/index.ts';`,
-    `export { ${[...SELFHOST_CLASS_NAMES].sort().join(', ')} } from './${SOURCE_LINK}/${SELFHOST_ENTRY_MODULE}';`,
+    `export { ${[...SELFHOST_CLASS_NAMES].sort(byCodeUnit).join(', ')} } from './${SOURCE_LINK}/${SELFHOST_ENTRY_MODULE}';`,
     'export default worker;',
     '',
   ].join('\n');
