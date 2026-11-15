@@ -38,7 +38,13 @@ import type { GitLabOAuthConfig } from './platform-config-oauth';
 
 const log = createModuleLogger('gitlab-login');
 
-const GITLAB_SCOPES = ['read_user', 'api', 'read_repository', 'write_repository'];
+/**
+ * Every scope SAM asks GitLab for, once each. better-auth's GitLab provider prepends its own
+ * default `read_user` unless `disableDefaultScope` is set, which made the authorize URL ask for
+ * `read_user` twice (box round R17, D4); the provider below disables that default so this list
+ * is the whole request.
+ */
+export const GITLAB_SCOPES = ['read_user', 'api', 'read_repository', 'write_repository'];
 
 const gitlabUserSchema = v.object({
   id: v.number(),
@@ -131,6 +137,7 @@ export function gitLabLoginProvider(env: Env, config: GitLabOAuthConfig): GitLab
     clientSecret: config.clientSecret,
     issuer: config.host,
     scope: GITLAB_SCOPES,
+    disableDefaultScope: true,
     overrideUserInfoOnSignIn: config.identityTrusted,
     getUserInfo: (token) => fetchGitLabUserInfo(env, config, token.accessToken),
   };
