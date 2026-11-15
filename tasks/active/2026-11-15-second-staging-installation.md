@@ -68,12 +68,12 @@ credential environment.
 
 ## Checklist
 
-- [ ] Registry + resolver (`staging-installations.mjs`) with fail-closed validation and tests
-- [ ] `workflow-resource-names.mjs` resolves installations; tests
-- [ ] Bootstrap script + trust derivation; tests on a real SQL engine
-- [ ] `teardown.yml`: `staging2` option destroys only that installation
-- [ ] `deploy-reusable.yml`: `installation` input, overrides, workers.dev read-only, bootstrap step (after task A merges or by agreement)
-- [ ] `deploy-staging.yml`: installation choice, credential environment for jobs (after task C merges)
+- [x] Registry + resolver (`staging-installations.mjs`) with fail-closed validation and tests
+- [x] `workflow-resource-names.mjs` resolves installations; tests
+- [x] Bootstrap script + trust derivation; tests on a real SQL engine
+- [x] `teardown.yml`: `staging2` option destroys only that installation
+- [x] `deploy-reusable.yml`: `installation` input, overrides, workers.dev read-only, bootstrap step (after task A merges or by agreement)
+- [x] `deploy-staging.yml`: installation choice, credential environment for jobs (after task C merges)
 - [ ] Docs: staging verification rule + full reference, /do steps, self-hosting/deploy docs
 - [ ] Live: deploy main to staging2, agent sign-in, VM session, Instant session on Artifacts project
 - [ ] Live: isolation both directions (version + data unchanged on the other installation)
