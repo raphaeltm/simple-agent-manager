@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import type { Env as WorkerEnv } from '../../src/env';
 import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
 import { runSessionSnapshotPurge } from '../../src/scheduled/session-snapshot-purge';
+import { SHIPPED_DAILY_WRITE_BUDGET } from '../helpers/archive-sweep-ceiling';
 import {
   isolateSweepFixture,
   projectDataStub,
@@ -50,7 +51,7 @@ function sweepEnv(overrides: Record<string, string> = {}) {
     PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
     PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '50',
     PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '60000',
-    PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '2400000',
+    PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(SHIPPED_DAILY_WRITE_BUDGET),
     ...overrides,
   };
 }

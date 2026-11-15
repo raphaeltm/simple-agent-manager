@@ -40,7 +40,6 @@ const PROJECT = {
   githubInstallationId: 'inst-docs',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: null,
   defaultWorkspaceProfile: 'full',
   defaultDevcontainerConfigName: '',
   workspaceIdleTimeoutMs: null,

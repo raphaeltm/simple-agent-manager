@@ -480,7 +480,12 @@ export const projects = sqliteTable(
     defaultWorkspaceProfile: text('default_workspace_profile'),
     /** Default devcontainer config name for new workspaces. null = auto-discover default. */
     defaultDevcontainerConfigName: text('default_devcontainer_config_name'),
+    /**
+     * Retired 2026-11-14. The effective compute pool decides VM provider and location; this
+     * column is kept for history only and is neither read nor written.
+     */
     defaultProvider: text('default_provider'),
+    /** Retired 2026-11-14 with `defaultProvider`. Neither read nor written. */
     defaultLocation: text('default_location'),
     /** Per-agent-type model + permission mode overrides.
      *  JSON: Record<AgentType, { model?: string | null, permissionMode?: string | null }>
@@ -1844,6 +1849,14 @@ export const nodes = sqliteTable(
     cleanupBlockedReason: text('cleanup_blocked_reason'),
     cleanupBlockedAlertedAt: text('cleanup_blocked_alerted_at'),
     cleanupRetirementSourcesJson: text('cleanup_retirement_sources_json'),
+    /**
+     * Write-ahead record of a provider deletion started without waiting for it (two-phase
+     * deletion). Set before the DELETE is sent; never re-stamped while set; cleared with the
+     * termination proof or when the provider shows the delete never arrived or failed.
+     */
+    providerDeletionRequestedAt: text('provider_deletion_requested_at'),
+    /** `{ ticket, providerInstanceId, runtimeIncarnationId }`; see `node-provider-deletion.ts`. */
+    providerDeletionJson: text('provider_deletion_json'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2532,7 +2545,9 @@ export const agentProfiles = sqliteTable(
     timeoutMinutes: integer('timeout_minutes'),
     vmSizeOverride: text('vm_size_override'),
     resourceRequirementsJson: text('resource_requirements_json'),
+    /** Retired 2026-11-14: the compute pool decides provider and location. Neither read nor written. */
     provider: text('provider'),
+    /** Retired 2026-11-14 with `provider`. Neither read nor written. */
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
     /** Runtime preference: null = automatic, 'vm' = cloud VM, 'cf-container' = Cloudflare Container. */
@@ -2616,7 +2631,9 @@ export const skills = sqliteTable(
     maxTurns: integer('max_turns'),
     timeoutMinutes: integer('timeout_minutes'),
     vmSizeOverride: text('vm_size_override'),
+    /** Retired 2026-11-14: the compute pool decides provider and location. Neither read nor written. */
     provider: text('provider'),
+    /** Retired 2026-11-14 with `provider`. Neither read nor written. */
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
     runtime: text('runtime'),

@@ -186,7 +186,7 @@ describe('accounts switched on and off', () => {
       taskId: 'task-1',
       projectId: 'project-1',
       userId: 'user-1',
-      project: { id: 'project-1', defaultProvider: null, defaultVmSize: 'small' },
+      project: { id: 'project-1', defaultVmSize: 'small' },
       credentialProjectPolicy: 'current-project-unless-inherited',
       taskModeDefault: 'task',
       resourceRequirements: {},

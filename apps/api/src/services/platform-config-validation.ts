@@ -6,6 +6,7 @@ import { createModuleLogger } from '../lib/logger';
 import { parseWithSchema } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import type { PlatformIntegrationInput, ResolvedPlatformConfig } from './platform-config';
+import { INTEGRATION_GROUP_TITLES, integrationGroupHasValues } from './platform-config-groups';
 
 const log = createModuleLogger('platform-config-validation');
 
@@ -183,13 +184,13 @@ export async function validatePlatformIntegrationInput(
     : null;
   const hasInfrastructureClientId = infrastructureClientId !== null;
   const hasInfrastructureClientSecret = infrastructureClientSecret !== null;
-  if (googleInfrastructure.remove && (hasInfrastructureClientId || hasInfrastructureClientSecret)) {
-    errors.push('Google infrastructure OAuth removal cannot include replacement values');
-  } else if (
-    !googleInfrastructure.remove &&
-    hasInfrastructureClientId !== hasInfrastructureClientSecret
-  ) {
+  if (hasInfrastructureClientId !== hasInfrastructureClientSecret) {
     errors.push('Google infrastructure OAuth client id and secret must be provided together');
+  }
+  for (const group of input.clear ?? []) {
+    if (integrationGroupHasValues(input, group)) {
+      errors.push(`${INTEGRATION_GROUP_TITLES[group]} cannot be cleared and set in the same save`);
+    }
   }
   if (infrastructureClientId !== null) {
     validateOAuthClientId(infrastructureClientId, 'Google infrastructure', errors);

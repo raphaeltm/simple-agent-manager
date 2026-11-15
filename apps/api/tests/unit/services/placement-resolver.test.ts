@@ -111,8 +111,6 @@ function capacitySelection(
 const PROJECT: PlacementProjectDefaults = {
   id: 'project-1',
   defaultVmSize: 'medium',
-  defaultProvider: 'hetzner',
-  defaultLocation: 'hel1',
   defaultWorkspaceProfile: 'full',
   defaultDevcontainerConfigName: 'web',
   defaultAgentType: 'openai-codex',
@@ -123,8 +121,6 @@ const PROFILE: PlacementProfileDefaults = {
   skillId: 'skill-1',
   agentType: 'claude-code',
   vmSizeOverride: 'large',
-  provider: 'digitalocean',
-  vmLocation: 'nyc1',
   workspaceProfile: 'lightweight',
   runtime: null,
   devcontainerConfigName: 'profile-devcontainer',
@@ -278,8 +274,6 @@ describe('placement resolver parity', () => {
       project: PROJECT,
       profile: {
         ...PROFILE,
-        provider: 'hetzner',
-        vmLocation: 'nyc1',
         runtime: 'cf-container',
       },
       explicit: {
@@ -304,8 +298,8 @@ describe('placement resolver parity', () => {
     expect(placement).toMatchObject({
       vmSize: 'large',
       vmSizeSource: 'agent-profile',
-      provider: 'hetzner',
-      vmLocation: 'nyc1',
+      provider: null,
+      vmLocation: 'nbg1',
       workspaceProfile: 'lightweight',
       devcontainerConfigName: null,
       taskMode: 'task',
@@ -313,7 +307,7 @@ describe('placement resolver parity', () => {
       credentialLookup: {
         userId: 'dispatching-user',
         projectId: null,
-        provider: 'hetzner',
+        provider: undefined,
       },
       runtime: {
         requestedRuntime: 'cf-container',
@@ -394,11 +388,7 @@ describe('placement resolver parity', () => {
       taskId: 'sam-dispatch-1',
       projectId: PROJECT.id,
       userId: 'sam-user',
-      project: {
-        ...PROJECT,
-        defaultProvider: 'scaleway',
-        defaultLocation: 'fr-par-2',
-      },
+      project: PROJECT,
       profile: null,
       explicit: {
         workspaceProfile: 'lightweight',
@@ -411,8 +401,8 @@ describe('placement resolver parity', () => {
     expect(placement).toMatchObject({
       vmSize: 'medium',
       vmSizeSource: 'project',
-      provider: 'scaleway',
-      vmLocation: 'fr-par-2',
+      provider: null,
+      vmLocation: 'nbg1',
       workspaceProfile: 'lightweight',
       devcontainerConfigName: null,
       taskMode: 'task',
@@ -420,7 +410,7 @@ describe('placement resolver parity', () => {
       credentialLookup: {
         userId: 'sam-user',
         projectId: PROJECT.id,
-        provider: 'scaleway',
+        provider: undefined,
       },
     });
 
@@ -447,8 +437,6 @@ describe('placement resolver parity', () => {
       project: PROJECT,
       profile: {
         ...PROFILE,
-        provider: 'gcp',
-        vmLocation: 'us-east1-b',
         workspaceProfile: 'full',
         taskMode: 'task',
         devcontainerConfigName: 'profile-devcontainer',
@@ -469,8 +457,8 @@ describe('placement resolver parity', () => {
     expect(placement).toMatchObject({
       vmSize: 'small',
       vmSizeSource: 'trigger',
-      provider: 'gcp',
-      vmLocation: 'us-east1-b',
+      provider: null,
+      vmLocation: 'nbg1',
       workspaceProfile: 'full',
       devcontainerConfigName: 'profile-devcontainer',
       taskMode: 'conversation',
@@ -478,7 +466,7 @@ describe('placement resolver parity', () => {
       credentialLookup: {
         userId: 'trigger-owner',
         projectId: PROJECT.id,
-        provider: 'gcp',
+        provider: undefined,
       },
     });
     expect(placement.resolvedReservation).toMatchObject({
@@ -498,11 +486,10 @@ describe('placement resolver parity', () => {
       project: {
         ...PROJECT,
         defaultVmSize: null,
-        defaultProvider: 'hetzner',
-        defaultLocation: 'hel1',
       },
       explicit: {
         vmSize: 'small',
+        provider: 'hetzner',
         vmSizeSource: 'task',
         vmLocation: 'nbg1',
         workspaceProfile: 'lightweight',
@@ -550,8 +537,6 @@ describe('placement resolver parity', () => {
       project: {
         ...PROJECT,
         defaultVmSize: 'small',
-        defaultProvider: 'hetzner',
-        defaultLocation: 'hel1',
         defaultWorkspaceProfile: 'full',
       },
       inheritedCredentialAttribution: {
@@ -567,15 +552,15 @@ describe('placement resolver parity', () => {
     expect(placement).toMatchObject({
       vmSize: 'small',
       vmSizeSource: 'project',
-      provider: 'hetzner',
-      vmLocation: 'hel1',
+      provider: null,
+      vmLocation: 'nbg1',
       workspaceProfile: 'full',
       taskMode: 'task',
       agentType: 'openai-codex',
       credentialLookup: {
         userId: 'parent-agent-user',
         projectId: PROJECT.id,
-        provider: 'hetzner',
+        provider: undefined,
       },
     });
 
@@ -654,12 +639,12 @@ describe('preferred (not explicit) location', () => {
   }
 
   it('becomes the resolved location without making it explicit', () => {
-    const placement = resolveWith({ preferredVmLocation: 'fsn1' });
+    const placement = resolveWith({ preferredVmLocation: 'hel1' });
 
-    // Outranks the project default (hel1): it is where this work last ran.
-    expect(placement.vmLocation).toBe('fsn1');
+    // Outranks the provider default (fsn1): it is where this work last ran.
+    expect(placement.vmLocation).toBe('hel1');
     expect(placement.explicitVmLocation).toBe(false);
-    expect(placement.preferredVmLocation).toBe('fsn1');
+    expect(placement.preferredVmLocation).toBe('hel1');
   });
 
   it('never outranks an explicit location, and is not reported when unused', () => {
@@ -675,7 +660,7 @@ describe('preferred (not explicit) location', () => {
     // stale one must never turn into a validation error.
     const placement = resolveWith({ preferredVmLocation: 'fr-par-1' });
 
-    expect(placement.vmLocation).toBe('hel1');
+    expect(placement.vmLocation).toBe('fsn1');
     expect(placement.explicitVmLocation).toBe(false);
     expect(placement.preferredVmLocation).toBeUndefined();
   });
@@ -683,7 +668,7 @@ describe('preferred (not explicit) location', () => {
   it('leaves ordinary starts exactly as before', () => {
     const placement = resolveWith({});
 
-    expect(placement.vmLocation).toBe('hel1');
+    expect(placement.vmLocation).toBe('fsn1');
     expect(placement).not.toHaveProperty('preferredVmLocation');
   });
 });

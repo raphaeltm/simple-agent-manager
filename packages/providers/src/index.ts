@@ -79,6 +79,13 @@ export {
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
 } from './provider-fetch';
+export type {
+  ProviderVmDeletionRequests,
+  VmDeletionRequestOptions,
+  VmDeletionRequestResult,
+  VmDeletionStatus,
+  VmDeletionTicket,
+} from './vm-deletion';
 
 // Re-export providers and classification functions
 export type { DigitalOceanProviderRuntimeOptions } from './digitalocean';
@@ -110,6 +117,17 @@ export {
   GCP_LOCATIONS,
   GcpProvider,
 } from './gcp';
+export {
+  applyGcpBootDiskPolicy,
+  DEFAULT_GCP_BOOT_DISK_GB_PER_VCPU,
+  DEFAULT_GCP_BOOT_DISK_MIN_GB,
+  DEFAULT_GCP_BOOT_DISK_POLICY,
+  GCP_BOOT_DISK_FLOOR_GB,
+  GCP_BOOT_DISK_MAX_GB,
+  type GcpBootDiskPolicy,
+  gcpBootDiskSizeGb,
+  normalizeGcpBootDiskPolicy,
+} from './gcp-boot-disk';
 export { GCP_MACHINE_TYPE_NAME_PATTERN } from './gcp-catalog';
 export { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
 export {
@@ -118,6 +136,16 @@ export {
   parseStoredGcpPriceTable,
   probeGcpBillingAccess,
 } from './gcp-pricing';
+export {
+  classifyGcpQuotaBucket,
+  describeGcpQuotaBucket,
+  gcpMachineSeries,
+  gcpOfferingQuotaBucketKey,
+  type GcpQuotaBucket,
+  gcpQuotaBucketCovers,
+  type GcpQuotaOffering,
+  type GcpQuotaResource,
+} from './gcp-quota-buckets';
 export { type GoogleErrorInfo, googleErrorInfoOf } from './google-error-info';
 export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
@@ -293,13 +321,14 @@ export function createProvider(config: ProviderConfig): Provider {
         config.defaultZone,
         config.imageFamily,
         config.imageProject,
-        config.diskSizeGb,
+        config.bootDiskPolicy,
         config.timeoutMs,
         config.operationPollTimeoutMs,
         config.firewallSourceRanges,
         config.agentPorts,
         config.appRouteSourceRanges,
-        config.appRoutePorts
+        config.appRoutePorts,
+        config.catalog
       );
     default: {
       const _exhaustive: never = config;

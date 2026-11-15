@@ -110,8 +110,6 @@ export async function retrySubtask(
       projectInstallationId: schema.projects.installationId,
       projectDefaultBranch: schema.projects.defaultBranch,
       projectDefaultVmSize: schema.projects.defaultVmSize,
-      projectDefaultProvider: schema.projects.defaultProvider,
-      projectDefaultLocation: schema.projects.defaultLocation,
       projectDefaultWorkspaceProfile: schema.projects.defaultWorkspaceProfile,
       projectDefaultDevcontainerConfigName: schema.projects.defaultDevcontainerConfigName,
       projectDefaultAgentType: schema.projects.defaultAgentType,
@@ -188,8 +186,6 @@ export async function retrySubtask(
       project: {
         id: original.projectId,
         defaultVmSize: original.projectDefaultVmSize,
-        defaultProvider: original.projectDefaultProvider,
-        defaultLocation: original.projectDefaultLocation,
         defaultWorkspaceProfile: original.projectDefaultWorkspaceProfile,
         defaultDevcontainerConfigName: original.projectDefaultDevcontainerConfigName,
         defaultAgentType: original.projectDefaultAgentType,

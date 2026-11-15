@@ -40,9 +40,8 @@
  * as before. Within one rank value only the first source is used: same-rank
  * sources do not fall back to each other.
  */
-import {
-  DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
-} from '@simple-agent-manager/scheduler-core';
+import { gcpOfferingQuotaBucketKey } from '@simple-agent-manager/providers';
+import { DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER } from '@simple-agent-manager/scheduler-core';
 import type { VMSize } from '@simple-agent-manager/shared';
 
 import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
@@ -133,15 +132,10 @@ export function buildProvisioningExhaustionPlan(
         diagnostics.push(`${candidate.id}: ${exclusion}`);
         continue;
       }
-      // `fail` and `queue` try one offering per tier; `fallback-chain` tries the best-ranked
-      // `maxAttemptsPerTier` of them, so a large catalog cannot hold the chain on one source.
+      // `fail` and `queue` try one offering per tier; `fallback-chain` tries up to
+      // `maxAttemptsPerTier` of them (capped below), so a large catalog cannot hold the chain on
+      // one source.
       if (policy !== 'fallback-chain') continue;
-      if (tier.length >= maxAttemptsPerTier) {
-        diagnostics.push(
-          `${candidate.id}: beyond the ${maxAttemptsPerTier} offerings tried per provider source`
-        );
-        continue;
-      }
       tier.push(attemptFor(candidate, requestedVmSize, tierIndex));
       continue;
     }
@@ -154,7 +148,81 @@ export function buildProvisioningExhaustionPlan(
     tierAttempts.push([attemptFor(candidate, requestedVmSize, tierHeads.length - 1)]);
   }
 
-  return { attempts: tierAttempts.flat(), policy, diagnostics };
+  const capped = tierAttempts.map((tier) => {
+    const kept = selectAcrossQuotaBuckets(tier, maxAttemptsPerTier);
+    for (const attempt of tier) {
+      if (!kept.includes(attempt) && attempt.candidate) {
+        diagnostics.push(
+          `${attempt.candidate.id}: beyond the ${maxAttemptsPerTier} offerings tried per provider source`
+        );
+      }
+    }
+    return kept;
+  });
+  return { attempts: capped.flat(), policy, diagnostics };
+}
+
+/**
+ * The quota bucket an attempt most likely draws on. A GCP quota is one metric in one region
+ * (`gcpOfferingQuotaBucketKey`: region plus machine series); other providers' quotas are
+ * account-wide, so a whole source is one bucket.
+ */
+function quotaBucketKey(attempt: ProvisioningAttempt): string {
+  if (attempt.provider === 'gcp' && attempt.providerInstanceType && attempt.location) {
+    return gcpOfferingQuotaBucketKey(attempt.providerInstanceType, attempt.location);
+  }
+  return attempt.provider ?? '';
+}
+
+/**
+ * Keep at most `max` attempts of one tier, spread across quota buckets, in their ranked order.
+ *
+ * Taking the best-ranked `max` let one bucket fill every slot: under `pack`, GCP's eight best
+ * were all t2d in europe-west1 and europe-west4, so after `T2D_CPUS` ran out in europe-west1 the
+ * chain had nothing from another family left to try. Slots are dealt round-robin, one per bucket
+ * at a time in the order each bucket first appears, so every bucket keeps its best offering
+ * before any bucket gets a second. A source with one bucket keeps exactly its best-ranked `max`.
+ */
+function selectAcrossQuotaBuckets(
+  attempts: readonly ProvisioningAttempt[],
+  max: number
+): ProvisioningAttempt[] {
+  if (attempts.length <= max) return attempts.slice();
+  const buckets = new Map<string, ProvisioningAttempt[]>();
+  for (const attempt of attempts) {
+    const key = quotaBucketKey(attempt);
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(attempt);
+    else buckets.set(key, [attempt]);
+  }
+  const kept = new Set<ProvisioningAttempt>();
+  // Within a bucket, each distinct size comes before a repeat of a size already queued: the same
+  // type in another zone of the region draws on the same quota, so once one is refused the other
+  // is skipped, while a smaller type could still fit.
+  const queues = [...buckets.values()].map(distinctSizesFirst);
+  while (kept.size < max && queues.some((queue) => queue.length > 0)) {
+    for (const queue of queues) {
+      const next = queue.shift();
+      if (next) kept.add(next);
+      if (kept.size >= max) break;
+    }
+  }
+  return attempts.filter((attempt) => kept.has(attempt));
+}
+
+function distinctSizesFirst(bucket: ProvisioningAttempt[]): ProvisioningAttempt[] {
+  const seen = new Set<string>();
+  const first: ProvisioningAttempt[] = [];
+  const repeats: ProvisioningAttempt[] = [];
+  for (const attempt of bucket) {
+    const size = `${attempt.providerInstanceType ?? ''}|${attempt.candidate?.providerInstanceVcpuCount ?? ''}`;
+    if (seen.has(size)) repeats.push(attempt);
+    else {
+      seen.add(size);
+      first.push(attempt);
+    }
+  }
+  return [...first, ...repeats];
 }
 
 /** Rank as a sortable key: unranked sources share the last rank. */

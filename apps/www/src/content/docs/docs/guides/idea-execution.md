@@ -21,13 +21,13 @@ You can also start work from an idea you filed earlier, with **Start work** on i
 
 Before you send, you can optionally choose:
 
-| Option                    | Description                                                         | Default                  |
-| ------------------------- | ------------------------------------------------------------------- | ------------------------ |
-| **Agent profile**         | Which agent, model, and settings run                                | Project default profile  |
-| **Skill**                 | A profile-override layer for the run                                | None                     |
-| **Workspace profile**     | `full` or `lightweight` environment                                 | `full`                   |
-| **Workload requirements** | Minimum vCPU, memory, disk, and optional exclusive node             | Inherited defaults       |
-| **Provider**              | Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP | Project default provider |
+| Option                    | Description                                                         | Default                    |
+| ------------------------- | ------------------------------------------------------------------- | -------------------------- |
+| **Agent profile**         | Which agent, model, and settings run                                | Project default profile    |
+| **Skill**                 | A profile-override layer for the run                                | None                       |
+| **Workspace profile**     | `full` or `lightweight` environment                                 | `full`                     |
+| **Workload requirements** | Minimum vCPU, memory, disk, and optional exclusive node             | Inherited defaults         |
+| **Provider**              | Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP | Chosen by the compute pool |
 
 For VM runs, blank resource fields inherit defaults from the selected skill,
 agent profile, project, and platform. The effective

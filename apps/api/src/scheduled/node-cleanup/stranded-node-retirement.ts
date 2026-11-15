@@ -14,7 +14,7 @@ import {
   diagnoseCleanupRefusal,
   recordCleanupRefusal,
 } from './cleanup-refusal';
-import type { CleanupConfig } from './config';
+import { type CleanupConfig, minimumTeardownAttemptMs } from './config';
 import {
   type CleanupDb,
   destroyNodeForCleanup,
@@ -137,6 +137,8 @@ export async function sweepStrandedNodes(
   const candidates = await env.DATABASE.prepare(
     `SELECT id,user_id,status,cleanup_blocked_since FROM nodes
     WHERE node_class='managed' AND runtime='vm' AND status IN ('stopped','destroying')
+      -- A started provider deletion belongs to the confirm phase, which bounds and alerts it.
+      AND provider_deletion_requested_at IS NULL
       AND (cleanup_blocked_since IS NULL OR cleanup_backoff_until IS NULL OR cleanup_backoff_until <= ?
         OR (cleanup_blocked_since <= ? AND (cleanup_blocked_alerted_at IS NULL OR cleanup_blocked_alerted_at <= ?)))
     ORDER BY CASE WHEN cleanup_blocked_since <= ? THEN 0 ELSE 1 END,
@@ -151,7 +153,7 @@ export async function sweepStrandedNodes(
     )
     .all<CleanupRefusalNode>();
   for (const node of candidates.results) {
-    if (Date.now() >= sweepDeadline) break;
+    if (sweepDeadline - Date.now() < minimumTeardownAttemptMs(config)) break;
     try {
       const refusal = await diagnoseCleanupRefusal(env, node, nowIso, idleThreshold);
       if (!refusal) continue;
@@ -231,8 +233,11 @@ export async function sweepStrandedNodes(
         workspaceIdleThresholdIso: idleThreshold,
         requestDeadlineMs: Math.min(
           sweepDeadline,
-          Date.now() + config.stoppedHandoffRequestTimeoutMs
+          Date.now() + config.providerDeletionRequestTimeoutMs
         ),
+        providerDeletion: 'request',
+        providerDeletionConfirmMaxMs: config.providerDeletionConfirmMaxMs,
+        providerDeletionSendGraceMs: config.providerDeletionRequestTimeoutMs,
         logEvent: 'node_cleanup.stranded_node_force_retiring',
         failureLogEvent: 'node_cleanup.stranded_node_force_retirement_failed',
         successMessage: 'Automatically retired stranded VM after cleanup refusal deadline',
@@ -247,7 +252,10 @@ export async function sweepStrandedNodes(
           unpreservedSources: JSON.stringify(lost),
         },
       });
-      if (destroyed === 'destroyed') {
+      if (destroyed === 'pending') {
+        // The DELETE is out; the confirm phase writes proof once the provider records it done.
+        result.providerDeletionsRequested++;
+      } else if (destroyed === 'destroyed') {
         result.lifetimeDestroyed++;
         log.warn('node_cleanup.stranded_node_force_retired', {
           nodeId: node.id,

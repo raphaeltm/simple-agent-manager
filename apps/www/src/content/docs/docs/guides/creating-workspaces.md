@@ -61,7 +61,7 @@ SAM supports seven providers:
 
 To change your default cloud account later, connect the new one the same way (or select **Replace your … default** under the provider's accounts). **Make default** and **Use in projects…** are for agent accounts only; to give one project its own cloud account, open the project's **Settings → Accounts** and select **Use a cloud account only this project bills to**.
 
-Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
+Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one; which provider and region a workspace lands on is decided by the [compute pool](/docs/guides/compute-pools/) and the work's resource requirements. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
 
 :::note
 Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential from the project's **Accounts** tab (**Use a cloud account only this project bills to**) so shared work doesn't run on someone's personal account.

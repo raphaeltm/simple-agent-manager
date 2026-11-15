@@ -114,8 +114,6 @@ export async function handleGetSkill(
               maxTurns: skill.maxTurns,
               timeoutMinutes: skill.timeoutMinutes,
               vmSizeOverride: skill.vmSizeOverride,
-              provider: skill.provider,
-              vmLocation: skill.vmLocation,
               workspaceProfile: skill.workspaceProfile,
               devcontainerConfigName: skill.devcontainerConfigName,
               taskMode: skill.taskMode,

@@ -61,7 +61,8 @@ describe('cf-container runtime spike contracts', () => {
   });
 
   it('routes cf-container workspace hostnames through the raw Container binding behind the kill switch', () => {
-    const index = read('index.ts');
+    // The ws-* proxy moved out of index.ts (rule 18).
+    const index = read('routes/workspace-subdomain-proxy.ts');
     const containerService = read('services/vm-agent-container.ts');
 
     expect(index).toContain("nodeRuntime === 'cf-container'");

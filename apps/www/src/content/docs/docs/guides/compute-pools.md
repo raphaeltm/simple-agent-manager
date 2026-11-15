@@ -112,25 +112,22 @@ is which:
 | **Default Resources**      | How much machine work asks for, when nothing more specific says otherwise                                  |
 | **Workspace Idle Timeout** | How long a quiet workspace is kept (see [Warm reuse](#warm-reuse) for how it differs from warm machines)   |
 | **Project compute pool**   | Which concrete machines SAM may rent, and how it chooses between them — for workspaces and for deployments |
-| **Scaling & Scheduling**   | The default provider and region, plus how densely nodes are packed and how long they stay warm             |
+| **Scaling & Scheduling**   | Task limits, how densely nodes are packed, and how long they stay warm                                     |
 
 **Default Resources** and **Scaling & Scheduling** feed the pool decisions described below, so they
 are covered here too.
 
-### Default provider and region
+### Provider and region come from the pool
 
-**Scaling & Scheduling → Provider & Location** sets a project's default provider and region. They
-are not part of the pool, but they narrow what the pool may choose from:
+Projects, agent profiles, and skills have no provider or region setting. Where a VM runs is decided
+by the effective compute pool and the work's resource requirements: any offering in the pool that
+fits the requirements is eligible, whatever its cloud or region. To keep a project on a particular
+cloud or region, give the project its own pool containing only those offerings.
 
-- The **provider** is a hard filter. Once a provider is resolved — from an explicit request, then
-  the agent profile, then the project default — offerings from every other provider are dropped,
-  even if the pool allows them. If your pool spans two clouds and everything lands on one of them,
-  this setting is usually why.
-- The **region** is only a preference. A project default region influences which offering is picked
-  but does not exclude the others; only a region requested explicitly for that piece of work pins
-  placement to it.
-
-Leave both blank and SAM uses whatever the pool and the resolved credentials allow.
+Only a provider or region requested explicitly for one piece of work (for example the `provider` and
+`vmLocation` options of `dispatch_task` or task submission) narrows placement, and only for that
+work. (`resolveProvider()` and `resolveVmLocation()` in
+`packages/scheduler-core/src/placement-field-resolution.ts`)
 
 **Waking a sleeping session** keeps the resources the session originally resolved, not its machine
 type or region. The region it slept in is a preference: a running machine there is reused first,
@@ -240,8 +237,7 @@ strategy or price would otherwise prefer. Within one source, the strategy still 
 order does not list come after every listed one.
 
 Every account you want in the order must already be connected as one of the pool's
-[sources](#sources) and have machines in the pool, and a project or agent profile that sets a
-default provider still limits the pool to that provider. To choose which cloud account SAM tries
+[sources](#sources) and have machines in the pool. To choose which cloud account SAM tries
 first:
 
 1. Open the pool: **Project → Settings → Infrastructure** for a project's pool, or the
@@ -271,15 +267,15 @@ The same order can be set through the pool update API (`sourceOrder`, a list of 
 - **No order (the default) means every source is equal**, which is how pools behaved before ordering
   existed.
 - **Changing the order does not disturb running machines.** It applies to the next new machine.
-- A project or agent profile that sets a default provider still limits the pool to that provider.
 
 **Falling back to the next provider.** When the first source cannot create a machine, SAM moves on
 to the next source in the order and tries there. That happens when the provider:
 
 - has no capacity for the machine (for example Google Cloud's `ZONE_RESOURCE_POOL_EXHAUSTED`, or
   Hetzner's "error during placement"),
-- refuses because an account quota is used up (a Google Cloud `QUOTA_EXCEEDED`, a Hetzner core or
-  server limit), or
+- refuses because an account quota is used up and no offering of this source escapes it (a Hetzner
+  core or server limit; a Google Cloud `QUOTA_EXCEEDED` once every remaining Google Cloud offering
+  is ruled out, see below), or
 - is cooling down after an account limit (SAM records one for a Hetzner core or server limit and
   holds new machines off that account for a while; a Google Cloud quota covers one region, so it
   is not recorded), or has no usable credential, or
@@ -291,7 +287,24 @@ These checks apply to the first source too, so a first source that is cooling do
 is skipped rather than waited on. A pool with a single source waits or fails as before.
 
 With the `fallback-chain` exhaustion policy SAM tries the best-ranked allowed offerings of a source
-(up to `operations.provisioningAttemptsPerProviderTier`, 8 by default) before moving on. With `fail` or `queue` it tries one offering per source. `queue` waits only after every
+(up to `operations.provisioningAttemptsPerProviderTier`, 8 by default) before moving on. Those slots
+are spread across quota buckets (on Google Cloud, region plus machine family), so one exhausted
+bucket cannot fill all eight (`selectAcrossQuotaBuckets()` in
+`apps/api/src/durable-objects/task-runner/node-provisioning-exhaustion.ts`).
+
+**A Google Cloud quota covers one bucket, not the whole provider.** Google reports a quota as one
+metric in one region, for example `Quota 'T2D_CPUS' exceeded. Limit: 24.0 in region europe-west1.`
+SAM then skips only the offerings that quota also rules out (the same family in that region needing
+at least as many vCPUs; for `SSD_TOTAL_GB`, disks at least as large; for other regional metrics, the
+region) and keeps trying the rest of Google Cloud: smaller types of that family, other families and
+other regions. It moves to the next provider only when no Google Cloud offering is left. Each skipped
+attempt in the placement record names the quota and region (`classifyGcpQuotaBucket()` in
+`packages/providers/src/gcp-quota-buckets.ts`, `quotaExclusionReason()` in
+`node-provisioning-quota-descent.ts`). A quota that names no region, such as `CPUS_ALL_REGIONS`, still
+moves straight to the next provider. Each refused attempt costs one create request, so with the
+default limit at most 8 refusals happen before the next provider is tried.
+
+With `fail` or `queue` SAM tries one offering per source, so there is no descent within a source. `queue` waits only after every
 source is exhausted, and the retry starts again from the first source.
 
 SAM does **not** move to another provider after an error that could mean a machine was created
@@ -392,8 +405,7 @@ A few things worth knowing:
   every workspace still being set up there. Among existing machines that already fit, the one with fewer workspaces waiting goes
   first; strategy breaks ties. A machine that is busy setting up is still used when it is the only
   one that fits: SAM queues the work there and does not start a new machine just to avoid the
-  wait. A location you asked for explicitly still comes before the queue; a default location does
-  not. (`compareReusableHosts()` in `apps/api/src/durable-objects/task-runner/task-placement-strategy.ts`)
+  wait. A location you asked for explicitly still comes before the queue. (`compareReusableHosts()` in `apps/api/src/durable-objects/task-runner/task-placement-strategy.ts`)
 
 The session's infrastructure panel spells the applied ordering out in plain language — for
 example, _"Why this node: lowest projected utilization first"_.
@@ -496,8 +508,8 @@ So **Fail** is not a guarantee of an immediate error in every capacity situation
 machine type and location. On Google Cloud, a zone that "does not have enough resources available"
 (`ZONE_RESOURCE_POOL_EXHAUSTED`). Some failures are not sold out and stop the work at once whatever
 the policy: a rejected credential or missing permission, an invalid request, and on Google Cloud a
-project quota (for example regional CPUs), unless the pool's provider order has a source ranked
-after this one, in which case SAM moves to it. A Google Cloud create request that fails with a plain
+project quota (for example regional CPUs) once no Google Cloud offering outside that quota remains,
+unless the pool's provider order has a source ranked after this one, in which case SAM moves to it. A Google Cloud create request that fails with a plain
 "service unavailable" also stops the work, because SAM cannot tell whether the machine was created
 anyway, and trying another one could leave you paying for two.
 
@@ -723,7 +735,6 @@ remove it so a lower scope applies.
 | A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                                                                                                                                                        |
 | The pool cannot be edited                                              | The project has no pool of its own and shows the one it falls back to, read-only: follow **Edit your pool** (or **Edit the shared pool**), or connect a cloud account to the project to give it its own. Otherwise, editing a project's pool takes the project's owner or admin role (everyone who joins through an invitation is an admin), and the installation pool takes a superadmin.              |
 | The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                                                                                                                                                         |
-| Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                                                                                                                                           |
 | Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and **Machine limit**. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                                                                                                                                           |
 | Work waits for capacity even though the policy is **Fail**             | The provider reported an account limit (server or vCPU core limit, the latter after trying smaller offerings under Fallback chain), or the pool's [Machine limit](#machine-limit) is reached. Both always wait.                                                                                                                                                                                         |
 

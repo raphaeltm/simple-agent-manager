@@ -94,14 +94,6 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
     description:
       'Compatibility JSON string for workload requirements. Prefer resourceRequirements; only supported modern fields are persisted.',
   }),
-  provider: {
-    type: 'string',
-    description: 'Cloud provider: hetzner, scaleway, gcp, vultr, infomaniak, digitalocean, upcloud',
-  },
-  vmLocation: {
-    type: 'string',
-    description: 'VM location/region for the provider',
-  },
   workspaceProfile: {
     type: 'string',
     description: 'Workspace profile: full, lightweight',

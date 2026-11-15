@@ -13,7 +13,12 @@ import { createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 function createEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
-    CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      role TEXT NOT NULL DEFAULT 'user',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL DEFAULT 0
+    );
     INSERT INTO users (id) VALUES ('system_anonymous_trials');
     CREATE TABLE platform_settings (
       key TEXT PRIMARY KEY NOT NULL,
@@ -250,7 +255,7 @@ describe('setup routes', () => {
       completed: true,
       status: {
         integrations: {
-          gitlabOAuth: { configured: true, label: 'set here' },
+          gitlabOAuth: { configured: true, label: 'stored in SAM' },
         },
       },
     });

@@ -20,6 +20,8 @@ export type SamRuntimeStub = DurableObjectStub & {
   testSql(query: string, values?: SqlStorageValue[]): Promise<Record<string, SqlStorageValue>[]>;
   testEnvironment(values: Record<string, string>): Promise<void>;
   testAlarm(): Promise<void>;
+  testSetTime(now: number | null): Promise<void>;
+  testDrain(): Promise<void>;
 };
 
 /** Native modules avoid the Workers Vitest dynamic-loader recursion with Mastra. */

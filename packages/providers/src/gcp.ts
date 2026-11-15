@@ -1,8 +1,22 @@
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 
 import { markProviderCreateNotDispatched } from './create-dispatch';
-import { type GcpApiScope, pollGcpOperation } from './gcp-api';
+import { pollGcpOperation } from './gcp-api';
+import {
+  applyGcpBootDiskPolicy,
+  DEFAULT_GCP_BOOT_DISK_POLICY,
+  type GcpBootDiskPolicy,
+  gcpBootDiskSizeGb,
+  gcpMachineTypeNamedVcpus,
+} from './gcp-boot-disk';
 import { fetchGcpMachineTypes, gcpOfferingsFromMachineTypes } from './gcp-catalog';
+import {
+  deleteGcpInstance,
+  type GcpDeletionScope,
+  gcpInstanceZone,
+  getGcpInstanceDeletionStatus,
+  requestGcpInstanceDeletion,
+} from './gcp-deletion';
 import { ensureGcpFirewallRules } from './gcp-firewall';
 import {
   findGcpInstanceByIdOrName,
@@ -32,13 +46,17 @@ import {
 } from './gcp-native-instance';
 import type { GcpPriceTable } from './gcp-pricing';
 import { getProviderCatalogOfferings } from './instance-offerings';
-import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
+import {
+  type NativeVMConfigSource,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
 import {
   providerFetch,
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
 } from './provider-fetch';
 import type {
+  NativeVMConfig,
   Provider,
   ProviderOfferingListOptions,
   ProviderRequestContext,
@@ -55,6 +73,12 @@ import type {
 import { ProviderError } from './types';
 import { parseProviderJson } from './validation';
 import { type GcpInstancePayload, validateGcpOperation } from './validation-gcp';
+import type {
+  VmDeletionRequestOptions,
+  VmDeletionRequestResult,
+  VmDeletionStatus,
+  VmDeletionTicket,
+} from './vm-deletion';
 
 export type { GcpTokenProvider } from './gcp-metadata';
 export {
@@ -96,7 +120,7 @@ export class GcpProvider implements Provider {
     defaultZone?: string,
     private readonly imageFamily: string = 'ubuntu-2404-lts-amd64',
     private readonly imageProject: string = 'ubuntu-os-cloud',
-    private readonly diskSizeGb: number = 50,
+    private readonly bootDiskPolicy: GcpBootDiskPolicy = DEFAULT_GCP_BOOT_DISK_POLICY,
     private readonly timeoutMs: number = 30_000,
     private readonly operationPollTimeoutMs: number = 5 * 60 * 1000,
     private readonly firewallSourceRanges: readonly string[] = DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
@@ -126,9 +150,12 @@ export class GcpProvider implements Provider {
     return `${COMPUTE_API_BASE}/projects/${this.projectId}`;
   }
 
-  /** Request scope for the shared helpers in `gcp-api.ts` / `gcp-firewall.ts`. */
-  private get api(): GcpApiScope {
+  /** Request scope for the shared helpers in `gcp-api.ts`, `gcp-firewall.ts` and `gcp-deletion.ts`. */
+  private get api(): GcpDeletionScope {
     return {
+      projectId: this.projectId,
+      zones: this.locations,
+      defaultZone: this.defaultLocation,
       projectUrl: this.projectUrl(),
       timeoutMs: this.timeoutMs,
       operationPollTimeoutMs: this.operationPollTimeoutMs,
@@ -175,7 +202,7 @@ export class GcpProvider implements Provider {
       defaultLocation: this.defaultLocation,
       legacySizes: this.sizes,
       defaultImage: this.imageFamily,
-      defaultBootDiskSizeGb: this.diskSizeGb,
+      defaultBootDiskSizeGb: (resolved, source) => this.defaultBootDiskSizeGb(resolved, source),
       minBootDiskSizeGb: 10,
       legacyBootDiskSizeAuthority: 'provider-default',
     });
@@ -215,7 +242,9 @@ export class GcpProvider implements Provider {
           zone,
           nativeConfig.instanceType,
           resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
-          nativeConfig.bootDiskSizeGb ?? this.diskSizeGb
+          // Resolution always sets bootDiskSizeGb (the default above is a function that returns
+          // a number); the fallback only narrows the optional type.
+          nativeConfig.bootDiskSizeGb ?? this.defaultBootDiskSizeGb(nativeConfig, 'native')
         ),
       ],
       networkInterfaces: [
@@ -276,35 +305,22 @@ export class GcpProvider implements Provider {
   }
 
   async deleteVM(id: string, context?: ProviderRequestContext): Promise<void> {
-    throwIfProviderRequestAborted(context);
-    // GCP uses name-based lookups, so we need to find the zone
-    const instance = await this.findInstanceByIdOrName(id, context);
-    if (!instance) return; // Idempotent — already deleted
+    await deleteGcpInstance(this.api, id, context);
+  }
 
-    const zone = this.extractZone(instance.machineType);
-    const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}`;
+  async requestVMDeletion(
+    id: string,
+    context?: ProviderRequestContext,
+    options?: VmDeletionRequestOptions
+  ): Promise<VmDeletionRequestResult> {
+    return await requestGcpInstanceDeletion(this.api, id, context, options);
+  }
 
-    try {
-      const res = await providerFetch(
-        'gcp',
-        url,
-        { method: 'DELETE', headers },
-        this.timeoutMs,
-        undefined,
-        context
-      );
-      throwIfProviderRequestAborted(context);
-      const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'deleteVM'), 'deleteVM', {
-        requireName: true,
-      });
-      throwIfProviderRequestAborted(context);
-      await this.pollOperation(zone, op.name, context);
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      if (err instanceof ProviderError && err.statusCode === 404) return;
-      throw err;
-    }
+  async getVMDeletionStatus(
+    ticket: VmDeletionTicket,
+    context?: ProviderRequestContext
+  ): Promise<VmDeletionStatus> {
+    return await getGcpInstanceDeletionStatus(this.api, ticket, context);
   }
 
   async getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
@@ -333,37 +349,27 @@ export class GcpProvider implements Provider {
   }
 
   async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
-    throwIfProviderRequestAborted(context);
-    const instance = await this.findInstanceByIdOrName(id, context);
-    if (!instance) throw new ProviderError('gcp', 404, `VM ${id} not found`);
-
-    const zone = this.extractZone(instance.machineType);
-    const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/stop`;
-    const res = await providerFetch(
-      'gcp',
-      url,
-      { method: 'POST', headers },
-      this.timeoutMs,
-      undefined,
-      context
-    );
-    throwIfProviderRequestAborted(context);
-    const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'powerOff'), 'powerOff', {
-      requireName: true,
-    });
-    throwIfProviderRequestAborted(context);
-    await this.pollOperation(zone, op.name, context);
+    await this.runInstanceAction(id, 'stop', 'powerOff', context);
   }
 
   async powerOn(id: string, context?: ProviderRequestContext): Promise<void> {
+    await this.runInstanceAction(id, 'start', 'powerOn', context);
+  }
+
+  /** POST `stop`/`start` on the instance and wait for the operation. */
+  private async runInstanceAction(
+    id: string,
+    action: 'stop' | 'start',
+    validationContext: 'powerOff' | 'powerOn',
+    context?: ProviderRequestContext
+  ): Promise<void> {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) throw new ProviderError('gcp', 404, `VM ${id} not found`);
 
-    const zone = this.extractZone(instance.machineType);
+    const zone = gcpInstanceZone(instance, this.defaultLocation);
     const headers = await this.authHeaders(context);
-    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/start`;
+    const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/${action}`;
     const res = await providerFetch(
       'gcp',
       url,
@@ -373,9 +379,11 @@ export class GcpProvider implements Provider {
       context
     );
     throwIfProviderRequestAborted(context);
-    const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'powerOn'), 'powerOn', {
-      requireName: true,
-    });
+    const op = validateGcpOperation(
+      await parseProviderJson(res, 'gcp', validationContext),
+      validationContext,
+      { requireName: true }
+    );
     throwIfProviderRequestAborted(context);
     await this.pollOperation(zone, op.name, context);
   }
@@ -403,7 +411,7 @@ export class GcpProvider implements Provider {
       ]);
       throwIfProviderRequestAborted(context);
       return gcpOfferingsFromMachineTypes(types, priceTable, {
-        bootDiskGb: this.diskSizeGb,
+        bootDiskPolicy: this.bootDiskPolicy,
         lastSeenAt: new Date().toISOString(),
       });
     } catch (err) {
@@ -414,11 +422,38 @@ export class GcpProvider implements Provider {
   }
 
   private staticOfferings() {
-    return getProviderCatalogOfferings(
-      this.name as CredentialProvider,
-      this.locations,
-      this.locationMetadata
+    return applyGcpBootDiskPolicy(
+      getProviderCatalogOfferings(
+        this.name as CredentialProvider,
+        this.locations,
+        this.locationMetadata
+      ),
+      this.bootDiskPolicy
     );
+  }
+
+  /**
+   * Boot disk for a VM whose request names no `bootDiskSizeGb`. A pool plan is a native request
+   * carrying the candidate's disk as `resources.diskGb`; that is what the catalog advertised and
+   * what the node row records, so the VM is created at exactly that size. Any other request gets
+   * the policy size for the machine's vCPUs (`gcp-boot-disk.ts`), the same size the catalog
+   * advertises for that machine type.
+   */
+  private defaultBootDiskSizeGb(
+    resolved: Pick<NativeVMConfig, 'instanceType' | 'resources'>,
+    source: NativeVMConfigSource
+  ): number {
+    const plannedDiskGb = resolved.resources?.diskGb;
+    if (
+      source === 'native' &&
+      typeof plannedDiskGb === 'number' &&
+      Number.isInteger(plannedDiskGb) &&
+      plannedDiskGb > 0
+    ) {
+      return plannedDiskGb;
+    }
+    const vcpus = resolved.resources?.vcpuCount ?? gcpMachineTypeNamedVcpus(resolved.instanceType);
+    return gcpBootDiskSizeGb(vcpus, this.bootDiskPolicy);
   }
 
   /** Prices are optional: an unavailable table leaves offerings unpriced, never fails them. */
@@ -501,11 +536,5 @@ export class GcpProvider implements Provider {
       `GCP provider does not support volume operation ${operation}`,
       { category: 'invalid_config' }
     );
-  }
-
-  /** Extract zone from a machineType URL like zones/us-central1-a/machineTypes/e2-standard-2 */
-  private extractZone(machineType: string): string {
-    const match = machineType.match(/zones\/([^/]+)/);
-    return match?.[1] || this.defaultLocation;
   }
 }

@@ -8,7 +8,7 @@ user-invocable: false
 
 ## Installer first-owner binding
 
-`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN`, which authorizes provider configuration rather than user login.
+`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN` (a plain-text var masked in deploy logs, accepted only until setup completes or an active superadmin exists), which authorizes provider configuration rather than user login.
 
 ## GitHub Environment Secrets (GitHub Settings -> Environments -> production)
 
@@ -532,7 +532,7 @@ by the read-only cron-liveness check.
 - `GCP_WIF_POOL_ID`, `GCP_WIF_PROVIDER_ID`, `GCP_SERVICE_ACCOUNT_ID` — Default identifiers used by WIF setup.
 - `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` — Maximum UTF-8 service-account JSON upload/paste size (default: `65536`).
 - `GCP_DEFAULT_ZONE` — Default Compute zone (default: `us-central1-a`).
-- `GCP_IMAGE_FAMILY`, `GCP_IMAGE_PROJECT`, `GCP_DISK_SIZE_GB` — Compute VM image and disk defaults.
+- `GCP_IMAGE_FAMILY`, `GCP_IMAGE_PROJECT` — Compute VM image defaults. Boot disk size is not an env var: it is the admin settings `gcpCatalog.bootDiskGbPerVcpu` (default 20) and `gcpCatalog.bootDiskMinGb` (default 50).
 - `GCP_TOKEN_CACHE_TTL_SECONDS` — Maximum short-lived access-token cache TTL (default: `3300`; capped by the provider-returned expiry).
 - `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS` — WIF SAM identity-token lifetime (default: `600`).
 - `GCP_OPERATION_POLL_TIMEOUT_MS` — GCP asynchronous operation timeout (default: `300000`).

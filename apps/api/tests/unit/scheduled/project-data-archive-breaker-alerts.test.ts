@@ -91,6 +91,7 @@ function createHarness(overrides: Partial<Env> = {}): Harness {
     schema.projectDataArchiveMigrations,
     schema.projectDataArchiveCopyCheckpoints,
     schema.projectDataSessionLocations,
+    schema.projectDataStorageTelemetry,
   ]);
   createSchemaTables(observability, [observabilitySchema.platformErrors]);
   main.prepare('INSERT INTO projects (id, name) VALUES (?, ?)').run(PROJECT_ID, PROJECT_NAME);

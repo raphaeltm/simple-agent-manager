@@ -52,8 +52,6 @@ const PROJECT = {
   defaultVmSize: null,
   defaultAgentType: null,
   defaultWorkspaceProfile: null,
-  defaultProvider: null,
-  defaultLocation: null,
   agentDefaults: null,
   createdAt: '2026-01-05T00:00:00Z',
   updatedAt: '2026-09-14T00:00:00Z',

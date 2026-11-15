@@ -34,6 +34,7 @@ export type AdminSettingName =
   | NodeTunnelSettingName
   | GcpCatalogSettingName
   | OperationsTelemetrySettingName
+  | 'operations.projectDataRowUsageIntervalMs'
   | 'chat.profileUsageWindowDays'
   | 'nodes.usageWindowMinutes'
   | 'nodes.usageChunkLookbackMinutes'
@@ -65,8 +66,12 @@ export type AdminSettingName =
   | 'operations.workspacePlacementBacklogConflictRetries'
   | 'operations.workspaceBuildQueueTimeoutMinutes'
   | 'operations.nodeCleanupBlockedRetirementMs'
+  | 'operations.nodeProviderDeletionRequestTimeoutMs'
+  | 'operations.nodeProviderDeletionConfirmMaxMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'
+  | 'operations.projectDataArchiveMinStorageUsagePercent'
+  | 'operations.projectDataArchiveStorageTelemetryMaxAgeHours'
   | 'operations.providerLimitResetWindowToleranceMs'
   | 'operations.nodeLifetimeAdmissionCutoffPercent'
   | 'operations.nodeCleanupRefusalWarnAfterMs'

@@ -15,7 +15,7 @@ Handoff removes hosted OAuth and deployment-credential copies while retaining th
 
 Experimental full installation is disabled by default and has not completed authenticated end-to-end validation. Its design separates temporary bootstrap OAuth, user-owned maintenance deployment authority, storage access, and narrower normal SAM runtime authority. Credential values pass through hosted bootstrap before transfer. Continued operation after OAuth revocation must be verified before claiming independence. Updates select an explicit immutable source version; they are not a promise of automatic conflict merging, transactional deployment, or database rollback.
 
-For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial administration to the matching verified email (verified by an OAuth provider or by an emailed sign-in code). Other initial identities are denied; an atomic election handles concurrent callbacks and durably records completion. Later changes to the elected owner's email, role or status do not reopen that election or lock out other authorized users; normal suspension checks still apply. The separate `SETUP_TOKEN` authorizes first-run setup, not user login. The installer's setup link carries it in the URL fragment, which browsers never send to a server; the setup page removes it from the address bar on load. Ordinary installations without this optional binding retain their existing first-user policy.
+For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial administration to the matching verified email (verified by an OAuth provider or by an emailed sign-in code). Other initial identities are denied; an atomic election handles concurrent callbacks and durably records completion. Later changes to the elected owner's email, role or status do not reopen that election or lock out other authorized users; normal suspension checks still apply. The separate `SETUP_TOKEN` authorizes first-run setup, not user login. Setup closes once it completes or once the instance has an active superadmin (`isSetupCompleted`, `apps/api/src/services/platform-config-core.ts`), and the deploy job masks the token in its log (`scripts/deploy/setup-token.ts`), because the log of a public repository is public. A GitLab login provider can link a sign-in to an existing account by email, and refresh that account's profile, only when its host is `https://gitlab.com` or comes from the `GITLAB_HOST` Worker variable (`selectGitLabOAuthConfig`, `apps/api/src/services/platform-config-oauth.ts`): a self-managed host saved at runtime reports whatever its operator wants, so its email claims are treated as unverified and its accounts are stored under host-scoped ids (`untrustedGitLabUserInfo`, `apps/api/src/services/gitlab-sign-in-identity.ts`), because GitLab user ids are public and an account is otherwise matched on provider and id alone. Repository access then uses only a GitLab login the configured host issued (`gitlabAccountScope`, `getBetterAuthAccessTokenForProvider`), so one host's token is never refreshed against or sent to another; better-auth's HTTP token endpoints (`/api/auth/get-access-token`, `/refresh-token`, `/account-info`) are closed for the same reason (`routes/auth.ts`). A host saved at runtime that equals the `GITLAB_HOST` pin is trusted like the pin. GitHub and Google have fixed identity hosts and keep automatic linking. The installer's setup link carries it in the URL fragment, which browsers never send to a server; the setup page removes it from the address bar on load. Ordinary installations without this optional binding retain their existing first-user policy.
 
 ## Cloud Credential Model (BYOC + Platform Fallback)
 
@@ -211,7 +211,8 @@ VMs (`resolveStrictNodeTeardownAuthority()` in
   node stays `destroying` with a named `cleanup_blocked_reason`
   (`teardown_credential_unavailable`, `teardown_instance_not_visible`,
   `teardown_instance_ownership_mismatch`,
-  `teardown_ownership_scope_unavailable` or `teardown_delete_refused`) and SAM raises its operator alert
+  `teardown_ownership_scope_unavailable`, `teardown_delete_refused` or
+  `teardown_deletion_unconfirmed`) and SAM raises its operator alert
   (`recordNodeTeardownBlocked()` in `node-teardown-blocked.ts`), instead of
   retrying silently. A credential that could not be read at all (a transient
   storage or decryption failure) is an ordinary failure and is retried on the
@@ -219,6 +220,36 @@ VMs (`resolveStrictNodeTeardownAuthority()` in
   is refused permission to delete it is skipped, and the next credential has to
   prove ownership again before its own delete
   (`deleteWithCurrentOwnerCredential()`).
+
+The cleanup cron does not wait for a provider's long-running delete. GCP deletes
+an instance through an operation that runs from about 20 seconds to a few
+minutes, longer than one cron attempt may take. For a provider that supports it
+(GCP today), the cron starts the deletion and returns
+(`sendProviderDeletion()` in `apps/api/src/services/node-provider-deletion.ts`):
+
+- The ownership proof and incarnation fence above run first, unchanged.
+- Before the DELETE is sent, SAM writes a record of it on the node row
+  (`nodes.provider_deletion_requested_at`, `nodes.provider_deletion_json`),
+  bound to the node's provider instance ID and runtime incarnation. A delete cut
+  off mid-flight can still be confirmed, or shown never to have arrived.
+- Sending the DELETE is not proof. On a later tick the
+  `provider_deletion_confirm` phase reads the provider's own record of that
+  deletion (`confirmPendingProviderDeletion()`): for GCP, the zone's delete
+  operations whose `targetId` is the instance's numeric ID
+  (`getGcpInstanceDeletionStatus()` in `packages/providers/src/gcp-deletion.ts`).
+  Termination proof is written only when that record shows a completed,
+  error-free deletion of that exact instance. "Not found" through a current
+  credential is still never proof.
+- If the provider has no record of the delete, or the delete failed, the record
+  is cleared and the next attempt runs the guarded teardown again. A deletion
+  still unconfirmed after `operations.nodeProviderDeletionConfirmMaxMs` (30
+  minutes by default) is reported as `teardown_deletion_unconfirmed` with the
+  operator alert, and is checked again only after the one-hour failure backoff.
+
+Providers whose delete call already returns once the provider accepts it
+(Hetzner, DigitalOcean, Vultr, Infomaniak, Scaleway) keep the single-step path.
+Interactive deletes (owner **Delete Node**, NodeLifecycle stop) still wait for
+the provider.
 
 ## Credential Encryption
 

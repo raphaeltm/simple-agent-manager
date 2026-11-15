@@ -267,7 +267,8 @@ export async function submitTaskImplementation(
     body.agentProfileId || body.skillId
       ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, env)
       : null;
-  const preferredProvider = resolvedProfile?.provider ?? project.defaultProvider;
+  // Only an explicit task provider narrows the credential; otherwise the compute pool decides.
+  const preferredProvider = body.provider;
   // REST preserves its explicit-Instant-only contract; automatic Connector/SAM starts
   // may use runtime selection, but VM-only fields always request VM placement.
   const connectorStart = via === 'connector' || via === 'pat' || via === 'sam';

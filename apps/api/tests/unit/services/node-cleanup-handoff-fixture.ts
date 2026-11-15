@@ -4,7 +4,11 @@ import {
   sweepDestroyingHandoffNodes,
   sweepStoppedHandoffNodes,
 } from '../../../src/scheduled/node-cleanup/node-phases';
-import { emptyResult, resolveCleanupConfig } from '../../../src/scheduled/node-cleanup/shared';
+import {
+  type CleanupConfig,
+  emptyResult,
+  resolveCleanupConfig,
+} from '../../../src/scheduled/node-cleanup/shared';
 import { clearCapacityCatalogCache } from '../../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../../src/services/encryption';
 import { fingerprintEncryptedProviderCredential } from '../../../src/services/provider-credential-exact';
@@ -247,10 +251,12 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
     { auto_provisioned_node_id: null },
   ]);
   const result = emptyResult();
-  const sweep = (now = NOW) =>
-    sweepStoppedHandoffNodes(f.db, f.env, now, resolveCleanupConfig(f.env), result);
+  // Admin-setting-backed fields (`runNodeCleanupSweep` resolves them) that a test may pin.
+  const configOverrides: Partial<CleanupConfig> = {};
+  const config = () => ({ ...resolveCleanupConfig(f.env), ...configOverrides });
+  const sweep = (now = NOW) => sweepStoppedHandoffNodes(f.db, f.env, now, config(), result);
   const sweepDestroying = (now = NOW) =>
-    sweepDestroyingHandoffNodes(f.db, f.env, now, resolveCleanupConfig(f.env), result);
+    sweepDestroyingHandoffNodes(f.db, f.env, now, config(), result);
   return {
     ...f,
     hangingProviderIds,
@@ -277,5 +283,6 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
     result,
     sweep,
     sweepDestroying,
+    configOverrides,
   };
 }

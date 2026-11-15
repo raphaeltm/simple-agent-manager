@@ -1,3 +1,4 @@
+import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
@@ -558,6 +559,77 @@ describe('GitHub ProjectData event producer', () => {
       reason: 'unsupported_event_type:deployment_status',
     });
     const status = await projectDataService.getProjectEventRecentStatus(testEnv, projectId);
+    expect(status.events).toHaveLength(0);
+  });
+
+  // Production, 2026-11-13: a leftover anonymous-trial project owned by the system sentinel
+  // user was bound to a busy repository and took ~10,000 webhook events a day, each costing
+  // billed Durable Object row writes, with nobody able to read them.
+  it('does not admit webhooks into a project owned by the system sentinel user', async () => {
+    const repository = `${TEST_PREFIX}/shared-with-trial-leftover`;
+    const human = await seedProjectGraph('human-owned', { repository });
+    const systemProjectId = `${TEST_PREFIX}-system-owned-project`;
+    const systemInstallationId = `${TEST_PREFIX}-system-owned-installation`;
+    await seedInstallation(systemInstallationId, SYSTEM_USER_ID, {
+      installationIdValue: `${TEST_PREFIX}-system-owned-external-installation`,
+      accountName: `${TEST_PREFIX}-system-owned-account`,
+    });
+    await seedProject(systemProjectId, SYSTEM_USER_ID, systemInstallationId, {
+      name: `${TEST_PREFIX} system-owned Project`,
+      repository,
+    });
+    // Fixture precondition: both projects really are bound to the repository.
+    const bound = await env.DATABASE.prepare(
+      'SELECT id, user_id FROM projects WHERE repository = ? ORDER BY id'
+    )
+      .bind(repository)
+      .all<{ id: string; user_id: string }>();
+    expect(bound.results.map((row) => row.user_id).sort()).toEqual(
+      [human.userId, SYSTEM_USER_ID].sort()
+    );
+
+    const result = await admitGitHubWebhookProjectEvents(testEnv, {
+      deliveryId: 'delivery-system-owned-shared',
+      eventType: 'pull_request',
+      payload: pullRequestPayload({ repositoryFullName: repository, repositoryId: 990101 }),
+    });
+
+    // Owner control: the person's project on the same repository still gets the event.
+    expect(result.processed).toBe(true);
+    expect(result.admittedEvents.map((event) => event.projectId)).toEqual([human.projectId]);
+    const humanStatus = await projectDataService.getProjectEventRecentStatus(
+      testEnv,
+      human.projectId
+    );
+    expect(humanStatus.events).toHaveLength(1);
+    const systemStatus = await projectDataService.getProjectEventRecentStatus(
+      testEnv,
+      systemProjectId
+    );
+    expect(systemStatus.events).toHaveLength(0);
+  });
+
+  it('reports no project when only a system-owned project is bound to the repository', async () => {
+    const repository = `${TEST_PREFIX}/trial-leftover-only`;
+    const systemProjectId = `${TEST_PREFIX}-system-only-project`;
+    const systemInstallationId = `${TEST_PREFIX}-system-only-installation`;
+    await seedInstallation(systemInstallationId, SYSTEM_USER_ID, {
+      installationIdValue: `${TEST_PREFIX}-system-only-external-installation`,
+      accountName: `${TEST_PREFIX}-system-only-account`,
+    });
+    await seedProject(systemProjectId, SYSTEM_USER_ID, systemInstallationId, {
+      name: `${TEST_PREFIX} system-only Project`,
+      repository,
+    });
+
+    const result = await admitGitHubWebhookProjectEvents(testEnv, {
+      deliveryId: 'delivery-system-owned-only',
+      eventType: 'pull_request',
+      payload: pullRequestPayload({ repositoryFullName: repository, repositoryId: 990102 }),
+    });
+
+    expect(result).toMatchObject({ processed: false, reason: 'no_project', admittedEvents: [] });
+    const status = await projectDataService.getProjectEventRecentStatus(testEnv, systemProjectId);
     expect(status.events).toHaveLength(0);
   });
 });

@@ -1,20 +1,8 @@
-import type {
-  CredentialProvider,
-  Project,
-  UpdateProjectRequest,
-} from '@simple-agent-manager/shared';
-import {
-  PROVIDER_DEFAULT_LOCATIONS,
-  PROVIDER_LABELS,
-  PROVIDER_LOCATIONS,
-  SCALING_PARAMS,
-  type ScalingParamMeta,
-} from '@simple-agent-manager/shared';
+import type { Project, UpdateProjectRequest } from '@simple-agent-manager/shared';
+import { SCALING_PARAMS, type ScalingParamMeta } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 
-import { useCredentials } from '../hooks/useCredentials';
-import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { updateProject } from '../lib/api';
 
@@ -104,23 +92,6 @@ export function ScalingSettings({
 }) {
   const toast = useToast();
 
-  // Provider & Location state
-  const [selectedProvider, setSelectedProvider] = useState<CredentialProvider | null>(
-    project.defaultProvider ?? null
-  );
-  const [selectedLocation, setSelectedLocation] = useState<string | null>(
-    project.defaultLocation ?? null
-  );
-  // Derived from the shared credentials query rather than a local mount fetch — this
-  // is the same list the settings pages and workspace creation already load.
-  const queryScope = useQueryScope();
-  const { credentials } = useCredentials(queryScope);
-  const configuredProviders = useMemo<CredentialProvider[]>(
-    () => [...new Set(credentials.filter((c) => c.connected).map((c) => c.provider))],
-    [credentials]
-  );
-  const [savingLocation, setSavingLocation] = useState(false);
-
   // Scaling params state
   const [scalingValues, setScalingValues] = useState<Record<string, number | null>>(() => {
     const initial: Record<string, number | null> = {};
@@ -133,31 +104,12 @@ export function ScalingSettings({
 
   // Sync from project prop
   useEffect(() => {
-    setSelectedProvider(project.defaultProvider ?? null);
-    setSelectedLocation(project.defaultLocation ?? null);
     const updated: Record<string, number | null> = {};
     for (const p of SCALING_PARAMS) {
       updated[p.key] = (project[p.key as keyof Project] as number | null) ?? null;
     }
     setScalingValues(updated);
   }, [project]);
-
-  const handleSaveProviderLocation = useCallback(async () => {
-    setSavingLocation(true);
-    try {
-      await updateProject(projectId, {
-        defaultProvider: selectedProvider,
-        defaultLocation: selectedLocation,
-      });
-      await reload();
-      toast.success('Provider & location saved');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save');
-    } finally {
-      setSavingLocation(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
-  }, [projectId, selectedProvider, selectedLocation, reload]);
 
   const handleSaveScaling = useCallback(async () => {
     setSavingScaling(true);
@@ -173,8 +125,6 @@ export function ScalingSettings({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
   }, [projectId, scalingValues, reload]);
-
-  const locations = selectedProvider ? (PROVIDER_LOCATIONS[selectedProvider] ?? []) : [];
 
   // Task limit params
   const taskParams = SCALING_PARAMS.filter((p) =>
@@ -199,67 +149,6 @@ export function ScalingSettings({
           Override platform defaults for this project. Empty fields use the platform default shown
           as placeholder.
         </p>
-      </div>
-
-      {/* Provider & Location */}
-      <div className="grid gap-3">
-        <h3 className="sam-type-card-title m-0 text-fg-primary">Provider & Location</h3>
-        <div className="flex gap-3 flex-wrap">
-          <div className="flex-1 min-w-[140px]">
-            <label htmlFor="scaling-provider" className="block text-xs text-fg-muted mb-0.5">
-              Default Provider
-            </label>
-            <select
-              id="scaling-provider"
-              value={selectedProvider ?? ''}
-              onChange={(e) => {
-                const p = (e.target.value || null) as CredentialProvider | null;
-                setSelectedProvider(p);
-                // Reset location when provider changes
-                if (p) {
-                  setSelectedLocation(PROVIDER_DEFAULT_LOCATIONS[p] ?? null);
-                } else {
-                  setSelectedLocation(null);
-                }
-              }}
-              className="w-full py-1.5 px-2 border border-border-default rounded-sm bg-inset text-fg-primary text-xs"
-            >
-              <option value="">System picks</option>
-              {configuredProviders.map((p) => (
-                <option key={p} value={p}>
-                  {PROVIDER_LABELS[p] ?? p}
-                </option>
-              ))}
-            </select>
-          </div>
-          {selectedProvider && locations.length > 0 && (
-            <div className="flex-1 min-w-[140px]">
-              <label htmlFor="scaling-location" className="block text-xs text-fg-muted mb-0.5">
-                Default Location
-              </label>
-              <select
-                id="scaling-location"
-                value={selectedLocation ?? ''}
-                onChange={(e) => setSelectedLocation(e.target.value || null)}
-                className="w-full py-1.5 px-2 border border-border-default rounded-sm bg-inset text-fg-primary text-xs"
-              >
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}, {loc.country}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={handleSaveProviderLocation}
-          disabled={savingLocation}
-        >
-          {savingLocation ? 'Saving...' : 'Save Provider & Location'}
-        </Button>
       </div>
 
       {/* Task Limits */}

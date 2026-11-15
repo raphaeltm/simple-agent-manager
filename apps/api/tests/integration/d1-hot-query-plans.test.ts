@@ -27,6 +27,7 @@ describe('incident hot queries on representative SQLite cardinality', () => {
       schema.projectDataArchiveMigrations,
       schema.projectDataSessionLocations,
       schema.projectDataArchiveCircuitBreakers,
+      schema.projectDataStorageTelemetry,
       schema.agentSessions,
       schema.agentProfiles,
       schema.skills,
@@ -145,10 +146,15 @@ describe('incident hot queries on representative SQLite cardinality', () => {
 
   it('probes archive refusals by session while retaining eligibility, ranking and preservation exclusions', () => {
     const sql = projectDataArchiveCandidateSql(true);
-    const params = [10000, 100, '2026-10-29', 'precopy_refused', 100, 5];
+    // ..., then the storage-pressure gate (minimum ratio, telemetry freshness cutoff, minimum
+    // ratio), then the LIMIT.
+    const params = [10000, 100, '2026-10-29', 'precopy_refused', 100, 0.5, 0, 0.5, 5];
     expect(plan(sqlite, sql, params)).toContain('TEMP B-TREE');
     sqlite.exec(migration);
     const optimized = plan(sqlite, sql, params);
+    // The gate reads one telemetry row per candidate by primary key; it must not scan.
+    expect(optimized).toMatch(/SEARCH tel USING (INDEX sqlite_autoindex\S+|PRIMARY KEY)/);
+    expect(optimized).not.toContain('SCAN tel');
     expect(optimized).toContain('idx_archive_migrations_session_refusal');
     expect(optimized).toContain('idx_session_summaries_archive_rank');
     expect(optimized).not.toContain('TEMP B-TREE');
