@@ -2741,6 +2741,19 @@ export const MIGRATIONS: Migration[] = [
       sql.exec('ALTER TABLE chat_sessions ADD COLUMN last_message_sequence_count INTEGER');
     },
   },
+  {
+    name: '080-chat-ingest-bookkeeping',
+    run(sql) {
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN pending_message_count INTEGER NOT NULL DEFAULT 0');
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN message_ingested_at INTEGER');
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN message_activity_at INTEGER');
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN message_idle_after INTEGER');
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN message_bookkeeping_due_at INTEGER');
+      // Existing sessions are NULL: there are no historical entries to build or retain.
+      sql.exec(`CREATE INDEX idx_chat_sessions_message_bookkeeping_due
+        ON chat_sessions(message_bookkeeping_due_at) WHERE message_bookkeeping_due_at IS NOT NULL`);
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

@@ -5,15 +5,21 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { DEFAULT_MESSAGE_BOOKKEEPING } from './message-bookkeeping';
+
 export const DEFAULT_MESSAGE_MERGE_CONFIG = {
   enabled: false,
   maxRowBytes: 64 * 1024,
   recentIds: 200,
+  bookkeepingIntervalMs: DEFAULT_MESSAGE_BOOKKEEPING.intervalMs,
+  bookkeepingFlushBatchSize: DEFAULT_MESSAGE_BOOKKEEPING.flushBatchSize,
 } as const;
 export interface MessageMergeConfig {
   enabled: boolean;
   maxRowBytes: number;
   recentIds: number;
+  bookkeepingIntervalMs?: number;
+  bookkeepingFlushBatchSize?: number;
 }
 /** Supplied by the authenticated callback adapter, never by the message body. */
 export interface MessageIngestSource {
@@ -85,6 +91,7 @@ export function sealMessageStream(sql: SqlStorage, sessionId?: string): void {
  */
 export class MessageStreamBatch {
   readonly state: MessageIngestState;
+  sealed = false;
   private readonly initialThrough: number;
   private readonly priorRecent: Set<string>;
   private readonly seen = new Set<string>();
@@ -182,6 +189,7 @@ export class MessageStreamBatch {
           (open.createdAt === materializedThrough.createdAt &&
             open.sequence <= materializedThrough.sequence)))
     ) {
+      this.sealed = previous?.open != null;
       this.state.open = null;
     }
   }
@@ -209,7 +217,10 @@ export class MessageStreamBatch {
 
   /** Role/metadata/origin/gaps/cap/turn boundaries end a run, even on duplicate user echoes. */
   boundary(role: string, toolMetadata: string | null): void {
-    if (role !== 'assistant' || toolMetadata !== null) this.state.open = null;
+    if (role !== 'assistant' || toolMetadata !== null) {
+      this.sealed ||= this.state.open != null;
+      this.state.open = null;
+    }
   }
 
   stage(
@@ -254,6 +265,7 @@ export class MessageStreamBatch {
       open.messageCount = this.messageCount;
       return open.id;
     }
+    this.sealed ||= this.state.open != null;
     this.inserts.set(message.id, { ...message });
     this.metadata.set(message.id, storedToolMetadata);
     const bytes = new TextEncoder().encode(

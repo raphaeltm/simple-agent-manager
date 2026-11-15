@@ -9,6 +9,10 @@ import {
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   type ProjectDataArchiveSourceIntentState,
 } from '../archive/contract';
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES } from '@simple-agent-manager/shared';
+import { parsePositiveInt } from '@simple-agent-manager/worker-core';
+
+import { flushMessageBookkeeping, messageBookkeepingInterval, BOOKKEEPING_AWAITING_SUMMARY } from './message-bookkeeping';
 import { messageBoundsClause } from './message-cursor';
 import {
   type MessageIngestSource,
@@ -169,12 +173,14 @@ export function persistMessageBatch(
   maxMessages: number;
   remainingCapacity: number;
   broadcastMessages: Array<import('./message-stream-ingest').StoredBatchMessage>;
+  bookkeepingScheduled: boolean;
+  bookkeepingFlushed: boolean;
   appends: Array<import('@simple-agent-manager/shared').ChatMessageAppend>;
 } {
   assertTranscriptWriteAllowed(sql, sessionId, 'persistMessageBatch');
   const session = sql
     .exec(
-      `SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state,
+      `SELECT id, workspace_id, message_count, topic, status, pending_message_count, message_bookkeeping_due_at, last_message_sequence, last_message_sequence_count, stream_ingest_state,
       materialized_at, materialized_through_created_at, materialized_through_sequence,
       (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch
       FROM chat_sessions WHERE id = ?`,
@@ -232,12 +238,12 @@ export function persistMessageBatch(
                 }
               : null,
           messages.map((message) => message.messageId),
-          parseMessageCount(session, 'messages.batch_stream_count')
+          parseMessageCount(session, 'messages.batch_stream_count') + Number(session.pending_message_count ?? 0)
         )
       : null;
 
   const maxMessages = resolveMaxMessagesPerSession(env);
-  const startingCount = parseMessageCount(session, 'messages.batch_count');
+  const startingCount = parseMessageCount(session, 'messages.batch_count') + Number(session.pending_message_count ?? 0);
   let persisted = 0;
   let duplicates = 0;
   let limitReached = false;
@@ -382,28 +388,36 @@ export function persistMessageBatch(
   let firstUserContent: string | null = null;
   const hadTopic = !!session.topic;
   const staged = stream?.flush(sql);
+  let bookkeepingScheduled = false;
+  let bookkeepingFlushed = false;
 
   if (persisted > 0) {
-    if (staged)
+    const firstPending = session.message_bookkeeping_due_at == null || session.message_bookkeeping_due_at === BOOKKEEPING_AWAITING_SUMMARY;
+    const interval = messageBookkeepingInterval(env, context?.config.bookkeepingIntervalMs);
+    const latestAt = persistedMessages.reduce((latest, message) => Math.max(latest, message.createdAt), 0);
+    const idleAfter = now + parsePositiveInt(env.SESSION_IDLE_TIMEOUT_MINUTES, DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES) * 60_000;
+    if (firstPending) {
       sql.exec(
-        `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?,
-       stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?`,
-        persisted,
-        now,
-        staged.state,
-        maximumSequence,
-        persisted,
-        sessionId
+        `UPDATE chat_sessions SET pending_message_count = pending_message_count + ?,
+           message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?,
+           stream_ingest_state = ?, last_message_sequence = ?,
+           last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?`,
+        persisted, now, latestAt, idleAfter, staged?.state ?? session.stream_ingest_state ?? null,
+        maximumSequence, now + interval, sessionId
       );
-    else
+      bookkeepingScheduled = true;
+    } else {
+      // Omit the indexed deadline AND indexed canonical metadata entirely on the hot path.
       sql.exec(
-        `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?`,
-        persisted,
-        now,
-        maximumSequence,
-        persisted,
-        sessionId
+        `UPDATE chat_sessions SET pending_message_count = pending_message_count + ?,
+           message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?,
+           stream_ingest_state = ?, last_message_sequence = ?,
+           last_message_sequence_count = message_count WHERE id = ?`,
+        persisted, now, latestAt, idleAfter, staged?.state ?? session.stream_ingest_state ?? null,
+        maximumSequence, sessionId
       );
+    }
+    if (stream?.sealed) bookkeepingFlushed = flushMessageBookkeeping(sql, sessionId);
 
     if (!session.topic) {
       const firstUserMsg = messages.find(
@@ -451,6 +465,8 @@ export function persistMessageBatch(
     limitReached,
     maxMessages,
     remainingCapacity,
+    bookkeepingScheduled,
+    bookkeepingFlushed,
     broadcastMessages: staged?.broadcastMessages ?? persistedMessages,
     appends: staged?.appends ?? [],
   };
