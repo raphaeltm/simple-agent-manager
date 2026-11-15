@@ -168,6 +168,7 @@ export async function deliverWebPushSubscription(
     throw new Error(`Web Push payload exceeds ${maximumPayloadBytes} bytes`);
   }
 
+  // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- endpoint checked by assertOutboundUrl below; redirect: 'manual'
   const fetcher = dependencies.fetcher ?? fetch;
   const encrypt = dependencies.encrypt ?? encryptWebPushPayload;
   const authorize = dependencies.authorize ?? createVapidAuthorization;

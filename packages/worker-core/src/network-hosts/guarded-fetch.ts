@@ -268,7 +268,8 @@ export async function guardedFetch(
     for (let hop = 0; ; hop += 1) {
       const response = policy.fetchFn
         ? await policy.fetchFn(url.toString(), request)
-        : await fetch(url.toString(), request);
+        : // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- the guard itself: url passed assertOutboundUrl above or in nextHopUrl
+          await fetch(url.toString(), request);
       const next = await nextHopUrl(response, url, hop, policy, origin);
       if (!next) return response;
       request = nextHopInit(request, response.status, url, next);

@@ -125,6 +125,7 @@ export async function handleCheckDnsStatus(
         // Records each hop's status so a refused cross-origin redirect reports its 3xx. Every
         // URL reaching it has passed guardedFetch's host, scheme and origin checks.
         fetchFn: async (url, init) => {
+          // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- guardedFetch's own fetchFn: url already checked
           const hop = await fetch(url, init);
           lastStatus = hop.status;
           return hop;
