@@ -38,6 +38,42 @@ async function rows(stub: DurableObjectStub<ProjectData>, session: string) {
 }
 
 describe('canonical streamed chunks through real ProjectData persistence', () => {
+  it('pins canonical raw-search granularity before indexing and identical results after indexing', async () => {
+    const rawCounts: number[] = [];
+    const indexed: unknown[] = [];
+    const now = Date.now();
+    const stream = [
+      {
+        ...batch[1]!,
+        messageId: 'raw-search-first',
+        sequence: 1,
+        content: 'needle start; ',
+        timestamp: new Date(now).toISOString(),
+      },
+      {
+        ...batch[2]!,
+        messageId: 'raw-search-second',
+        sequence: 2,
+        content: 'needle end.',
+        timestamp: new Date(now + 1).toISOString(),
+      },
+    ];
+    for (const enabled of [false, true]) {
+      const { stub, session } = await fixture(enabled);
+      await stub.persistMessageBatch(session, stream, source);
+      const beforeIndex = await stub.searchMessagesWithCoverage('needle', session);
+      rawCounts.push(beforeIndex.results.length);
+      expect(beforeIndex.coverage.keywordFallbackRan).toBe(true);
+      await stub.materializeSession(session);
+      const afterIndex = await stub.searchMessagesWithCoverage('needle', session);
+      indexed.push(afterIndex.results.map(({ id, role, snippet }) => ({ id, role, snippet })));
+    }
+    // Canonical raw-row storage uses one result/snippet per canonical run;
+    // once materialized, the existing grouped FTS contract remains identical.
+    expect(rawCounts).toEqual([2, 1]);
+    expect(indexed[1]).toEqual(indexed[0]);
+  });
+
   it('discriminates a missing frontier: real persistence duplicates an old absorbed chunk', async () => {
     const { stub, session } = await fixture(true);
     await stub.persistMessageBatch(session, batch.slice(0, 600), source);

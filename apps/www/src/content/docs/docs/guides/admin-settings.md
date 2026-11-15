@@ -85,7 +85,7 @@ remain readable and commentable. Settings use the normal admin cache refresh int
 
 Initial rollout keeps the code default off. Production activation requires explicit acceptance of
 the storage contract: very long replies can have different grouped-row splits, raw search can match
-words formerly split between chunks, and a late timestamped row can appear at a merged reply's
+words formerly split between chunks. Before indexing, raw fallback uses one hit and snippet per canonical row, so repeated matches in absorbed chunks consolidate. A late timestamped row can appear at a merged reply's
 boundary instead of splitting that reply. Text bytes are preserved. The late-timestamp boundary
 change preserves the text as one item. Genuine in-order tool calls and the grouping size limit can still split Markdown across items.
 

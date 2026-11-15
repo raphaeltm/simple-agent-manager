@@ -7,7 +7,7 @@ Research base: main 4bdaaf61f (#2740). Primary checkout only; preserve unrelated
 
 Canonical first ID for newly merged assistant text rows; existing rows/IDs stay untouched. No packed constituents and no Go rollout dependency. Both VM and Instant keep using the current reporter. Part 1 was posted on idea01M7CX61WVX72T7CFQNRTX0DVM and sent durably before building; the 20-minute window elapsed. Raphaël's approval was independently verified in parent session94875719-4462-4a74-93d4-15b8babb533e, user message01M7E70T17JMHDSVKXKVSXQCAQ, 2026-11-14T23:41:56.647Z.
 
-Approved differences: very long grouped replies can split differently; raw search can match formerly split words. A third accepted difference is: a later timestamped row that belongs inside an already merged time span appears at the merged row boundary. The discriminating workerd ON/OFF test has identical text bytes but 3 versus 2 groups. Acceptance verified in primary user message01M7EB9DX5D5TPTZQAXNB64XGG (1794704193445). Production ON remains a separate human Admin UI action. Frequency not measured; no production raw sampling route is being built or requested.
+Approved differences: very long grouped replies can split differently; raw search can match formerly split words. A third accepted difference is: a later timestamped row that belongs inside an already merged time span appears at the merged row boundary. The discriminating workerd ON/OFF test has identical text bytes but 3 versus 2 groups. Acceptance verified in primary user message01M7EB9DX5D5TPTZQAXNB64XGG (1794704193445). Production ON remains a separate human Admin UI action. Frequency not measured; no production raw sampling route is being built or requested. Parent clarified the already-approved raw-search contract (event a6e2cf55-6100-42a9-898b-2b40c0918ec1): before indexing, repeated-term raw hits consolidate (workerd2→1), using the canonical ID/snippet; indexed FTS stays identical. This is difference2 stated fully, not a new release hold. No universal raw-search equivalence claim; the full detail will accompany the human activation request.
 
 Rollout: one coherent server/browser/admin PR with code default OFF, staging ON. After successful production deploy, verify OFF unchanged. Raphaël flips the production admin setting ON after accepting all behavior differences. Observe two hours, then a separate small default-ON PR. Follow-up tracked as idea01M7EACZ8W7KMPXMHXQB8F22NV. No Cloudflare Worker settings API writes. Another task owns the archive cadence/budget wrangler lines; do not touch them.
 
@@ -43,13 +43,13 @@ Rollout: one coherent server/browser/admin PR with code default OFF, staging ON.
 - [x] Real workerd billed-write guard, replay/rebatch/rotation/failed-DELETE, cap and materializer tests.
 - [x] Real archive coordinator exact read/search/copyback with final logical timestamp.
 - [x] Browser unit tests and true WebSocket visual audit375/1280 with settled long text, duplicates, reload and stable DOM anchor.
-- [ ] Expanded callback→client→DO, pre078 upgrade/hash/generation, mixed sender, kill-switch replay and1260physical-row pagination tests green.
-- [ ] Full lint/typecheck/test/build and migration safety; mutation checks discriminate retry guards.
-- [ ] Local specialists all findings addressed; task-completion review updated.
+- [x] Expanded callback→client→DO, pre078 upgrade/hash/generation, mixed sender, kill-switch replay and1260physical-row pagination tests green (46 real workerd tests total).
+- [x] Full lint/typecheck/test/build (83/83 tasks), migration safety, and discriminating retry mutation checks.
+- [x] Local specialists all findings addressed; task-completion implementation review updated, with release gates still outstanding.
 - [ ] Coordinated staging VM+Instant incremental stream/reload/comments/row_usage, then resource cleanup.
 - [ ] PR/CI/CodeRabbit findings, trusted-main deploy coordination, merge and successful production receipt.
 - [x] Human approval of third difference.
 - [ ] Production admin ON, two-hour read-only metrics/stream/comment/error observation.
 - [ ] Separate default-ON follow-up PR and final idea/durable report; archive task only when all required work is done.
 
-No deployment or external compute resources have been created yet. Full quality and expanded tests are running; no claim of task completion.
+No deployment or external compute resources have been created yet. Expanded workerd tests pass cleanly. Full quality passes83/83 tasks after adapting existing transcript cursor assertions to overlap the growing tail; all5242 web tests, focused51 consumer tests and62 socket tests pass. The added raw-search granularity regression also passes (47 workerd tests across final runs). Branch rebased onto merged runner fix#2744. Shared staging remains occupied; no claim of task completion.
