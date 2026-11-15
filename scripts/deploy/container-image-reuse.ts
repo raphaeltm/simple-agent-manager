@@ -314,7 +314,7 @@ function dockerRegistry(input: {
         }
       );
       if (result.code !== 0) {
-        if (/no such manifest|manifest unknown|not found/i.test(result.stderr)) return null;
+        if (/no such manifest|manifest unknown|name unknown|not found/i.test(result.stderr)) return null;
         throw new Error(
           `docker manifest inspect exited ${result.code}: ${result.stderr.trim().slice(-300)}`
         );
