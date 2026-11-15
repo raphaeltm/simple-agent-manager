@@ -1,6 +1,6 @@
 # Authenticate platform GCP orphan reconciliation
 
-**Current status (November 15, 06:04 UTC): waiting for L7 actual FREE under explicit parent amendment.** Classification (b). Fix, behavioral regressions, full local validation and specialist reviews pass; required live eligible sweep proof remains unexercised. Parent amended the refusal stop before SAM task closure: remain open, no resources/writes/cost, then one final fresh-marker fixed request after L7 actual release. All R1/R2/R3 resources independently cleaned; zero R4 resources created. No PR, merge or production deploy.
+**Final disposition (November 15, 07:09 UTC): blocked at staging gate.** Classification (b). Fix, behavioral regressions, full local checks and specialist reviews pass. Required live eligible sweep ownership proof remains unexercised. The final post-L7 request was explicitly refused because the unchanged one-hour fixture age cutoff had passed before the delayed readiness wake. Parent final stop rule applies. No PR, merge or production deploy. All R1/R2/R3 resources independently cleaned; zero R4 resources or writes. Branch retained; coordinator owns any further environment decision.
 
 ## Problem and findings
 
@@ -192,3 +192,18 @@ Coordinator owns next decision: staging KV write capability or an authorized int
 Parent event34c380e6-c430-4675-84f0-26e59fec28b1 arrived BEFORE complete_task was called. Explicit once-only amendment: do not close yet; L7 queue overlap is coordinated by parent. Wait with NO fixtures/stagingwrites/cost until L7 publishes actualFREE. After07:05naturalrun readfreshM/E/T (notpredict), requestonlyonceactualFREEonchannel, for FIRSTnaturalTwhosewhole45minwindowstartsafterFREE; fixturesONLYafterrootYES+guards. Any refusalorTmiss ofthatrequest thenendsforgood/completeblockedatstaginggate/noPR. No other automatic shift. Earlier rootNO263bd05e remains valid for06:40–07:25 and guard9734iscancelledv2.
 
 Additional immutable age constraint remains binding: rootYES and actual BOTH VM creations must precedeT-1h. If L7FREE/request acceptance is later than that cutoff, do not provision invalid/youngfixtures or inferproof; report preciseNO-FIT. Existing R4 preparation/recovery source retained, but no R4 resources/admission/guard/currentgrant. SAM task has NOT been completed; earlier finalblocked record is preserved as superseded history, not current closure.
+
+
+## Final disposition after the last parent amendment
+
+L7 actualFREE source eventd717cc8a at06:32:20 was read and acknowledged. The accepted P1 readiness schedule4dc554a1 was due07:00, admitted07:05:34, read07:06:04. Workspace had been recreated again; fresh instructions confirmed workspace01M7F0396596K6FKJ4HSDQADGK. Frozen427ba98114a753b107f6499bb5fa6da871bfa8a1 worktree and R4v2 Library helpers recovered; bootstrap terminalPASS07:07 (Python syntax/nativeChromium/frozeninstall). No auth session or cloud resources were created during recovery.
+
+Fresh07:06:42 read M=2026-11-15T07:01:00.106Z, interval3600000, E=08:01:00.106Z. First strictly later five-minute tick T=08:05:00UTC; exact whole window07:40–08:25, stoptrials08:17. Final request16e970d5 stated all values plus the binding age constraint: both VMs needed actualcreationTimestamp<=07:05 for the unchanged one-hour age floor, already passed before wake/read/request. No valid positive fixture proof could fit.
+
+Root exact final answer, event8bfb8e22-a80f-4521-8b14-c9666a3bf1b9: “NO-FIT for this final exact R4 window, 07:40–08:25 UTC / tick08:05.” Root confirmed M/E/T and age cutoff; directed no young fixtures, age/interval override, auth/staging/guards, another hour or PR. This is an unexercised staging gate, not evidence that the product fix failed. Parent34c380e6 final refusal/miss disposition applies; no subsequent automatic attempt.
+
+ZERO R4VM/disk/SA/pool/provider/IAM/trust/platformcredential/login/stagingdeploy/globalwrites. No R4 guard was created for this final request; the earlier unused9734 guard was already cancelledv2. No new provisioning admission/prepare-attempt/fixture receipt exists. All local bootstrap and mediated read jobs terminal. Prior R1/R2/R3 strict cleanup receipts remain final (root independently all9proofsPASS05:46:07); never repeat closed cleanup. Only unavoidable remnants: nonbillable deleted pool-name reservations30days. Total fixture estimate remained belowUSD0.10.
+
+Final proven/unproven scope is unchanged from the earlier outcome section: reviewed auth/reporting fix and meaningful real-boundary regression tests/full local checks pass; live naturally eligible owned-delete/foreign-preservation proof does not exist. Therefore no PR, CodeRabbit request, merge, production deployment or post-deploy monitoring. No production mutation. Latest production orphan observation remains01:43 fiveexactscopeGCPVMs/allclaimed/zeroorphans, enabledplatformHetzneronly; any future merge requires a fresh deletion-risk read.
+
+SAM task is closed at the parent's explicit direction with summary “blocked at staging gate,” not as a shipped fix. Source remains on sam/task-p1-find-out-jq3vp8 with the complete task/recovery evidence. The parent takes staging KV write access or an interval override to the owner; this agent does not ask the owner or waive any gate.
