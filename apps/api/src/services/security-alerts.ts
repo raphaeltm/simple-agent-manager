@@ -77,7 +77,7 @@ export function scheduleSecurityAlert(env: Env, waitUntil: WaitUntil, alert: Sec
 export function scheduleAccountLinkedAlert(
   env: Env,
   account: { userId?: string | null; providerId?: string | null },
-  options: { waitUntil?: WaitUntil }
+  options: { waitUntil?: (promise: Promise<unknown>) => void }
 ): void {
   if (!account.userId || !account.providerId) return;
   scheduleSecurityAlert(env, options.waitUntil, {

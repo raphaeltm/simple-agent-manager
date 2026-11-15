@@ -10,7 +10,7 @@ export function TextField({
   onChange,
   type = 'text',
   showAudit = true,
-}: {
+}: Readonly<{
   name: string;
   label: string;
   value: string;
@@ -18,7 +18,7 @@ export function TextField({
   onChange: (name: string, value: string) => void;
   type?: 'text' | 'password';
   showAudit?: boolean;
-}) {
+}>) {
   const auditId =
     showAudit && field?.source === 'runtime' && field.updatedAt ? `${name}-audit` : undefined;
   return (
@@ -49,14 +49,14 @@ export function TextAreaField({
   field,
   onChange,
   showAudit = true,
-}: {
+}: Readonly<{
   name: string;
   label: string;
   value: string;
   field?: PlatformConfigFieldStatus;
   onChange: (name: string, value: string) => void;
   showAudit?: boolean;
-}) {
+}>) {
   const auditId =
     showAudit && field?.source === 'runtime' && field.updatedAt ? `${name}-audit` : undefined;
   return (
@@ -84,11 +84,11 @@ export function FieldAudit({
   field,
   testId = 'platform-field-audit',
   id,
-}: {
+}: Readonly<{
   field?: PlatformConfigFieldStatus;
   testId?: string;
   id?: string;
-}) {
+}>) {
   if (field?.source !== 'runtime' || !field.updatedAt) return null;
   const who = field.updatedByLabel ?? field.updatedBy;
   return (
@@ -101,7 +101,7 @@ export function FieldAudit({
 
 function formatChangedAt(value: string): string {
   // D1 CURRENT_TIMESTAMP rows have no zone marker; they are UTC.
-  const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${value.replace(' ', 'T')}Z`;
+  const iso = /(?:[zZ]|[+-]\d\d:?\d\d)$/.test(value) ? value : `${value.replace(' ', 'T')}Z`;
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
     ? value
@@ -115,7 +115,10 @@ function formatChangedAt(value: string): string {
       });
 }
 
-export function FieldLabel({ label, field }: { label: string; field?: PlatformConfigFieldStatus }) {
+export function FieldLabel({
+  label,
+  field,
+}: Readonly<{ label: string; field?: PlatformConfigFieldStatus }>) {
   return (
     <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg-primary">
       {label}
@@ -132,11 +135,11 @@ export function SourceBadge({
   label,
   configured,
   compact = false,
-}: {
+}: Readonly<{
   label: string;
   configured: boolean;
   compact?: boolean;
-}) {
+}>) {
   const className = configured
     ? 'border-success/30 bg-success-tint text-success-fg'
     : 'border-border-default bg-surface-secondary text-fg-muted';

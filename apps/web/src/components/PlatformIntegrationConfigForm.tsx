@@ -481,7 +481,10 @@ const SIGN_IN_GROUPS = new Set<PlatformIntegrationGroup>([
   'gitlabOAuth',
 ]);
 
-function ClearMessage({ group, failed }: { group: PlatformIntegrationGroup; failed: boolean }) {
+function ClearMessage({
+  group,
+  failed,
+}: Readonly<{ group: PlatformIntegrationGroup; failed: boolean }>) {
   return (
     <div className="space-y-2">
       <p>
