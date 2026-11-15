@@ -4,11 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to tear down'
+        description: 'Installation to tear down (staging2 uses the staging credentials; see scripts/deploy/staging-installations.mjs)'
         required: true
         type: choice
         options:
           - staging
+          - staging2
           - production
       confirm:
         description: 'Type DELETE to confirm teardown'
@@ -43,10 +44,29 @@ env:
   INPUT_ENVIRONMENT: ${{ inputs.environment }}
 
 jobs:
+  # Maps the requested installation to the GitHub Environment that holds its credentials.
+  # A secondary installation (staging2) runs with another environment's secrets and differs
+  # only in target; the checked-in allowlist refuses anything else. No secrets in this job.
+  resolve:
+    name: Resolve Installation
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm == 'DELETE' }}
+    outputs:
+      credential_environment: ${{ steps.resolve.outputs.credential_environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve credential environment
+        id: resolve
+        env:
+          INSTALLATION: ${{ inputs.environment }}
+        run: node scripts/deploy/staging-installations.mjs credential-environment
+
   teardown:
     name: Teardown Cloudflare Resources (${{ inputs.environment }}${{ inputs.dry_run && ' — DRY RUN' || '' }})
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    needs: resolve
+    environment: ${{ needs.resolve.outputs.credential_environment }}
     if: ${{ github.event.inputs.confirm == 'DELETE' }}
 
     steps:
@@ -68,12 +88,30 @@ jobs:
       - name: Resolve Resource Names
         id: names
         env:
-          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          INPUT_ENVIRONMENT: ${{ needs.resolve.outputs.credential_environment }}
+          INSTALLATION: ${{ inputs.environment }}
           RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           AI_GATEWAY_ID: ${{ vars.AI_GATEWAY_ID }}
           PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET }}
         run: node scripts/deploy/workflow-resource-names.mjs teardown
+
+      # A secondary installation has its own zone, found by name with the environment's token.
+      # The step fails closed; nothing falls back to the primary's CF_ZONE_ID.
+      - name: Resolve Installation Zone
+        id: zone
+        if: ${{ steps.names.outputs.secondary == 'true' }}
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          ZONE_NAME: ${{ steps.names.outputs.zone_name }}
+        run: node scripts/deploy/resolve-installation-zone.mjs
+
+      - name: Refuse shared marketing teardown for a secondary installation
+        if: ${{ steps.names.outputs.secondary == 'true' && inputs.include_marketing }}
+        run: |
+          echo "::error::include_marketing is shared across installations and cannot be used with a secondary installation."
+          exit 1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -214,7 +252,7 @@ jobs:
         continue-on-error: true
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.names.outputs.secondary == 'true' && (steps.zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
           API="https://api.cloudflare.com/client/v4"
@@ -294,7 +332,7 @@ jobs:
         continue-on-error: true
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.names.outputs.secondary == 'true' && (steps.zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
           API="https://api.cloudflare.com/client/v4"
@@ -386,7 +424,7 @@ jobs:
         continue-on-error: true
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.names.outputs.secondary == 'true' && (steps.zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
           API="https://api.cloudflare.com/client/v4"
@@ -552,6 +590,11 @@ jobs:
         continue-on-error: true
         working-directory: infra
         run: |
+          # The Pulumi backend can hold several installations' stacks; act only on this one.
+          if [ "$(pulumi stack --show-name)" != "$STACK" ]; then
+            echo "::error::Selected Pulumi stack is not $STACK; refusing."
+            exit 1
+          fi
           echo "Scanning for protected Pulumi resources..."
 
           # Use structured JSON export for robust URN parsing
@@ -584,6 +627,7 @@ jobs:
           echo "status=ok" >> "$GITHUB_OUTPUT"
           echo "count=$UNPROTECTED" >> "$GITHUB_OUTPUT"
         env:
+          STACK: ${{ steps.names.outputs.stack }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
@@ -594,6 +638,11 @@ jobs:
         continue-on-error: true
         working-directory: infra
         run: |
+          # The Pulumi backend can hold several installations' stacks; act only on this one.
+          if [ "$(pulumi stack --show-name)" != "$STACK" ]; then
+            echo "::error::Selected Pulumi stack is not $STACK; refusing."
+            exit 1
+          fi
           if [ "$INPUT_DRY_RUN" = "true" ]; then
             echo "DRY RUN: Listing Pulumi-managed resources..."
             echo ""
@@ -645,6 +694,7 @@ jobs:
             echo "status=deleted" >> "$GITHUB_OUTPUT"
           fi
         env:
+          STACK: ${{ steps.names.outputs.stack }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}

@@ -14,7 +14,12 @@ import {
   encryptToken,
   hmacApiToken,
 } from '../deploy/bootstrap-staging-installation';
-import { resolveInstallation, SECONDARY_INSTALLATIONS } from '../deploy/staging-installations.mjs';
+import { resolveInstallationZone } from '../deploy/resolve-installation-zone.mjs';
+import {
+  credentialEnvironmentFor,
+  resolveInstallation,
+  SECONDARY_INSTALLATIONS,
+} from '../deploy/staging-installations.mjs';
 import { resolveResourceNames } from '../deploy/workflow-resource-names.mjs';
 
 const MIGRATIONS_DIR = new URL('../../apps/api/src/db/migrations/', import.meta.url);
@@ -517,5 +522,88 @@ describe('bootstrapInstallation on the real migration chain', () => {
       'staging2-agent-admin',
       'staging2-agent-user',
     ]);
+  });
+});
+
+describe('credentialEnvironmentFor', () => {
+  it('maps staging2 to the staging credentials and leaves primaries alone', () => {
+    expect(credentialEnvironmentFor('staging2')).toBe('staging');
+    expect(credentialEnvironmentFor('staging')).toBe('staging');
+    expect(credentialEnvironmentFor('production')).toBe('production');
+  });
+
+  it.each(['', 'Staging2', 'staging2\nx=y', '../staging'])('rejects %j', (value) => {
+    expect(() => credentialEnvironmentFor(value)).toThrow();
+  });
+});
+
+describe('resolveInstallationZone', () => {
+  const accountId = 'acct';
+  function fakeCloudflare(zones: unknown[], subdomain: unknown = { subdomain: 'account-sub' }) {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      calls.push(url);
+      const result = url.includes('/workers/subdomain') ? subdomain : zones;
+      return new Response(JSON.stringify({ success: true, result }), { status: 200 });
+    }) as unknown as typeof fetch;
+    return { calls, fetchImpl };
+  }
+
+  it('returns the one active zone with that exact name in this account', async () => {
+    const { fetchImpl, calls } = fakeCloudflare([
+      { id: 'z-other', name: 'sammy2.party.example', status: 'active', account: { id: accountId } },
+      { id: 'z1', name: 'sammy2.party', status: 'active', account: { id: accountId } },
+    ]);
+    await expect(
+      resolveInstallationZone({
+        zoneName: 'sammy2.party',
+        accountId,
+        token: 't',
+        withWorkersSubdomain: true,
+        fetchImpl,
+      })
+    ).resolves.toEqual({ zone_id: 'z1', workers_dev_subdomain: 'account-sub' });
+    expect(calls[0]).toContain('name=sammy2.party');
+    expect(calls.every((url) => !url.includes('method=PUT'))).toBe(true);
+  });
+
+  it.each([
+    ['no zone', []],
+    [
+      'a zone in another account',
+      [{ id: 'z', name: 'sammy2.party', status: 'active', account: { id: 'x' } }],
+    ],
+    [
+      'a pending zone',
+      [{ id: 'z', name: 'sammy2.party', status: 'pending', account: { id: accountId } }],
+    ],
+    [
+      'two zones',
+      [
+        { id: 'a', name: 'sammy2.party', status: 'active', account: { id: accountId } },
+        { id: 'b', name: 'sammy2.party', status: 'active', account: { id: accountId } },
+      ],
+    ],
+  ])('fails closed on %s', async (_label, zones) => {
+    const { fetchImpl } = fakeCloudflare(zones);
+    await expect(
+      resolveInstallationZone({ zoneName: 'sammy2.party', accountId, token: 't', fetchImpl })
+    ).rejects.toThrow();
+  });
+
+  it('fails when the account has no workers.dev subdomain to share', async () => {
+    const { fetchImpl } = fakeCloudflare(
+      [{ id: 'z1', name: 'sammy2.party', status: 'active', account: { id: accountId } }],
+      { subdomain: '' }
+    );
+    await expect(
+      resolveInstallationZone({
+        zoneName: 'sammy2.party',
+        accountId,
+        token: 't',
+        withWorkersSubdomain: true,
+        fetchImpl,
+      })
+    ).rejects.toThrow(/workers.dev/);
   });
 });

@@ -90,3 +90,40 @@ export function resolveInstallation({ environment, installation, primary }) {
 
   return { installation: requested, secondary: true, entry };
 }
+
+/**
+ * The GitHub Environment whose secrets a requested installation runs with: the registered
+ * environment for a secondary installation, otherwise the installation's own name.
+ */
+export function credentialEnvironmentFor(installation) {
+  const requested = (installation ?? '').trim();
+  if (!INSTALLATION_NAME.test(requested)) {
+    throw new Error('installation must be a lowercase name of letters, numbers and hyphens.');
+  }
+  return Object.hasOwn(SECONDARY_INSTALLATIONS, requested)
+    ? SECONDARY_INSTALLATIONS[requested].credentialEnvironment
+    : requested;
+}
+
+async function main() {
+  const mode = process.argv[2];
+  if (mode !== 'credential-environment') {
+    throw new Error('Usage: staging-installations.mjs credential-environment');
+  }
+  const { appendFileSync } = await import('node:fs');
+  const credentialEnvironment = credentialEnvironmentFor(process.env.INSTALLATION);
+  const line = `credential_environment=${credentialEnvironment}\n`;
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, line);
+  }
+  console.log(
+    `Installation ${process.env.INSTALLATION} runs with the '${credentialEnvironment}' environment's credentials.`
+  );
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(`::error::${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

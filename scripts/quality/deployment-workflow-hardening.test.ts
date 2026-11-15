@@ -287,7 +287,8 @@ describe('deployment workflow hardening', () => {
     expect(teardownValidation).toMatchObject({
       run: 'node scripts/deploy/workflow-resource-names.mjs teardown',
       env: {
-        INPUT_ENVIRONMENT: '${{ inputs.environment }}',
+        INPUT_ENVIRONMENT: '${{ needs.resolve.outputs.credential_environment }}',
+        INSTALLATION: '${{ inputs.environment }}',
         RESOURCE_PREFIX: '${{ vars.RESOURCE_PREFIX }}',
         BASE_DOMAIN: '${{ vars.BASE_DOMAIN }}',
         AI_GATEWAY_ID: '${{ vars.AI_GATEWAY_ID }}',

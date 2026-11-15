@@ -121,4 +121,34 @@ describe('teardown workflow', () => {
     expect(destroy).toContain("grep -qE 'RandomId|PrivateKey'");
     expect(destroy).toContain('pulumi destroy --yes');
   });
+
+  it('tears down a secondary installation with its credential environment and its own zone only', () => {
+    expect(workflow).toMatch(/options:\n\s+- staging\n\s+- staging2\n\s+- production/);
+    expect(workflow).toContain(
+      'node scripts/deploy/staging-installations.mjs credential-environment'
+    );
+    expect(workflow).toContain('environment: ${{ needs.resolve.outputs.credential_environment }}');
+    expect(workflow).toContain('run: node scripts/deploy/resolve-installation-zone.mjs');
+
+    // Every zone-scoped step uses the looked-up zone for a secondary installation and can never
+    // fall back to the primary's CF_ZONE_ID when the lookup produced nothing.
+    const zoneLines = workflow.match(/CF_ZONE_ID: .*/g) ?? [];
+    expect(zoneLines.length).toBeGreaterThanOrEqual(3);
+    for (const line of zoneLines) {
+      expect(line).toBe(
+        "CF_ZONE_ID: ${{ steps.names.outputs.secondary == 'true' && (steps.zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}"
+      );
+    }
+
+    expect(workflow).toContain(
+      "if: ${{ steps.names.outputs.secondary == 'true' && inputs.include_marketing }}"
+    );
+    for (const stepName of ['Unprotect Pulumi Resources', 'Pulumi Destroy']) {
+      const step = workflow.match(
+        new RegExp(String.raw`- name: ${stepName}\n[\s\S]*?(?=\n      - name:|\n      # =)`)
+      )?.[0];
+      expect(step, stepName).toContain('if [ "$(pulumi stack --show-name)" != "$STACK" ]; then');
+      expect(step, stepName).toContain('STACK: ${{ steps.names.outputs.stack }}');
+    }
+  });
 });
