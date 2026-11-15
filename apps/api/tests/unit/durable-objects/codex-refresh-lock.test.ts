@@ -4,14 +4,14 @@
  *
  * Covers:
  *  - Method + payload validation
- *  - CRITICAL #1: stale-token branch does not return `refresh_token`
+ *  - Nonmatching tokens return 401 without any credential fields
  *  - Which credential: only the run's candidates, chosen by possession; inactive
  *    candidates are never replaced; several candidates without proof get nothing
  *  - Write-back: compare-and-set on the ciphertext read; mirrors only copies of the
  *    same credential generation; a default switch mid-refresh is left intact
  *  - Grace entries are bound to the credential they were rotated out of
  *  - MEDIUM #5: rate-limit state held in `ctx.storage` (atomic, keyed per-credential),
- *    429 with Retry-After on exceed; cached/grace/stale responses do not consume budget
+ *    429 with Retry-After on exceed; grace/rejected responses do not consume budget
  *  - MEDIUM #6: upstream scope validation (block by default; empty allowlist is explicit opt-out)
  *  - Decrypt/parse failure handling
  *  - Upstream error paths (timeout, network, filtered error body)
@@ -365,10 +365,10 @@ describe('CodexRefreshLock', () => {
   });
 
   // -----------------------------------------------------------------------
-  // CRITICAL #1 — stale-token branch MUST NOT return refresh_token
+  // Nonmatching tokens must not return any credential fields
   // -----------------------------------------------------------------------
 
-  it('stale-token branch returns access_token + id_token but NOT refresh_token (CRITICAL #1)', async () => {
+  it('returns 401 without credential fields for an unknown refresh token', async () => {
     const { do: doInstance, env } = createDO();
     await setupCredentialFound(env);
 
@@ -378,15 +378,10 @@ describe('CodexRefreshLock', () => {
         userId: 'user-1',
       })
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
     const json = await res.json();
 
-    // CRITICAL #1 lock: refresh_token MUST NOT appear in the stale response.
-    expect(json.refresh_token).toBeUndefined();
-    // Short-lived tokens may still be returned so a legit concurrent caller can continue.
-    expect(json.access_token).toBe('stored-access');
-    expect(json.id_token).toBe('stored-id');
-    expect(json.stale).toBe(true);
+    expect(json).toEqual({ error: 'refresh_token_invalidated' });
 
     // No upstream fetch should have been made (no valid refresh token to spend).
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
@@ -446,7 +441,7 @@ describe('CodexRefreshLock', () => {
           }),
         refreshToken: 'recently-rotated',
       },
-    ])('returns stale tokens when $name', async ({ setup, refreshToken }) => {
+    ])('returns 401 without credentials when $name', async ({ setup, refreshToken }) => {
       const { do: doInstance } = await setup();
 
       const res = await doInstance.fetch(
@@ -455,13 +450,10 @@ describe('CodexRefreshLock', () => {
           userId: 'user-1',
         })
       );
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
       const json = await res.json();
 
-      expect(json.refresh_token).toBeUndefined();
-      expect(json.access_token).toBe('stored-access');
-      expect(json.id_token).toBe('stored-id');
-      expect(json.stale).toBe(true);
+      expect(json).toEqual({ error: 'refresh_token_invalidated' });
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
 
@@ -594,7 +586,7 @@ describe('CodexRefreshLock', () => {
       await expectNoCredentialUpdate();
     });
 
-    it('answers a stale token on a pinned run with the pinned account only, and no refresh_token', async () => {
+    it('rejects an unknown token on a pinned run without exposing that account', async () => {
       const { do: doInstance } = createDO();
       await setupCredentialFound();
       await seedCc('cred-pinned', pinnedAuth);
@@ -604,7 +596,8 @@ describe('CodexRefreshLock', () => {
       );
 
       const json = await res.json();
-      expect(json).toEqual({ access_token: 'pinned-access', id_token: 'pinned-id', stale: true });
+      expect(res.status).toBe(401);
+      expect(json).toEqual({ error: 'refresh_token_invalidated' });
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
 
@@ -1009,9 +1002,16 @@ describe('CodexRefreshLock', () => {
       );
 
       const json = await res.json();
-      expect(json.access_token).toBe('pinned-access');
-      expect(json.refresh_token).toBe(full ? 'pinned-refresh' : undefined);
-      expect(json.stale).toBe(full ? undefined : true);
+      expect(res.status).toBe(full ? 200 : 401);
+      expect(json).toEqual(
+        full
+          ? {
+              access_token: 'pinned-access',
+              refresh_token: 'pinned-refresh',
+              id_token: 'pinned-id',
+            }
+          : { error: 'refresh_token_invalidated' }
+      );
     });
 
     it('a row replaced with another account after rotation no longer honours the grace entry', async () => {
@@ -1306,7 +1306,7 @@ describe('CodexRefreshLock', () => {
       expect(otherCred.count).toBe(3);
     });
 
-    it('stale-token branch does NOT consume rate-limit budget', async () => {
+    it('rejected-token branch does NOT consume rate-limit budget', async () => {
       const {
         do: doInstance,
         env,
@@ -1320,11 +1320,11 @@ describe('CodexRefreshLock', () => {
         makeRequest({ refreshToken: 'rt_stale_token', userId: 'user-1' })
       );
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(401);
       const json = await res.json();
-      expect(json.stale).toBe(true);
+      expect(json).toEqual({ error: 'refresh_token_invalidated' });
 
-      // Cached/stale responses must not touch the rate-limit bucket.
+      // Rejected responses must not touch the rate-limit bucket.
       expect(ctx.storage.put).not.toHaveBeenCalledWith(
         'rate-limit:cc_credentials:cred-1',
         expect.anything()

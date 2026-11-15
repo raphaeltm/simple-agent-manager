@@ -12,13 +12,13 @@
  * userId — it does not re-verify auth.
  *
  * Security notes:
- *  - Stale-refresh branch (CRITICAL #1) with grace window: When a caller submits a non-matching
- *    refresh token, we check if it was recently rotated (within CODEX_REFRESH_GRACE_WINDOW_MS,
- *    default 5 min). If so, the caller is a legitimate concurrent session that started before
- *    the rotation — we return the full token set including the current refresh_token. Outside
- *    the grace window, we return only short-lived tokens (access_token, id_token) without the
- *    refresh_token, forcing re-auth. This balances security (don't hand out rotating credentials
- *    to truly old/stolen tokens) with operational correctness (don't break concurrent sessions).
+ *  - Stale-refresh branch with grace window: When a caller submits a non-matching refresh token,
+ *    we check if it was recently rotated (within CODEX_REFRESH_GRACE_WINDOW_MS, default 5 min).
+ *    If so, the caller is a legitimate concurrent session that started before the rotation — we
+ *    return the full token set including the current refresh_token. Otherwise the request gets
+ *    401 with no credential fields: only the current token or its exact unexpired predecessor
+ *    proves possession. This preserves concurrent-session handoff without disclosing credentials
+ *    to a caller that holds only the workspace callback token.
  *  - Which credential (HIGH #2, and pinned accounts): the route resolves the credentials the
  *    calling workspace's runs were seeded with (`resolveRunAgentCredentialReferences`: the
  *    recorded agent-key choice, else the same cc resolver), so a project or profile pin is
@@ -169,7 +169,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
   /**
    * The serialized critical section. Reads the candidate credentials, decides
-   * match/grace/stale, optionally refreshes against OpenAI, and persists the
+   * match/grace/rejection outcome, optionally refreshes against OpenAI, and persists the
    * rotated tokens. MUST run under `withRefreshLock` — reading the credentials
    * here (rather than before acquiring the lock) is what lets a queued
    * concurrent request observe the rotated token and take the grace-window path
@@ -179,8 +179,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
    * with (`resolveRunAgentCredentialReferences`). The one to serve is chosen by
    * possession: the credential whose stored refresh_token the caller presented,
    * else the credential that token was recently rotated out of. With no proof of
-   * possession, a single candidate gets short-lived tokens and several get none,
-   * because nothing says which account the caller is on.
+   * possession, no credential fields are returned.
    */
   private async runRefresh(
     refreshToken: string,
@@ -246,44 +245,18 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         });
       }
 
-      // Short-lived tokens without proof of possession only when the run recorded
-      // exactly one credential and it is still readable: if a second recorded one
-      // was dropped (inactive, unreadable), the caller may be on that account.
-      // And only for a cc credential: a legacy row can be rewritten in place with
-      // another account's secret (Replace, Make default), so its current tokens
-      // may not belong to the account this run started with.
-      const [only] = candidates;
-      if (
-        credentialReferences.length !== 1 ||
-        candidates.length !== 1 ||
-        !only ||
-        only.credential.table !== 'cc_credentials'
-      ) {
-        log.warn('codex_refresh.stale_token_no_tokens', {
-          userId,
-          candidateCount: candidates.length,
-          referenceCount: credentialReferences.length,
-        });
-        return new Response(JSON.stringify({ error: 'refresh_token_invalidated' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Outside grace window — CRITICAL #1 still applies.
-      // The caller did NOT prove possession of the current refresh token AND
-      // the token is too old to be from a legitimate concurrent session. Do NOT
-      // return the refresh_token. Return short-lived tokens only, of the one
-      // credential this workspace's run was seeded with.
+      // The caller proved possession of neither the current token nor its exact
+      // unexpired predecessor. A callback token alone must never disclose the
+      // credential's access, ID, or refresh token.
       log.warn('codex_refresh.stale_token_rejected', {
         userId,
-        credentialReference: only.credential.reference,
+        candidateCount: candidates.length,
+        referenceCount: credentialReferences.length,
         graceWindowMs,
       });
-      return this.createTokenResponse({
-        accessToken: only.identity.accessToken ?? null,
-        idToken: only.identity.idToken ?? null,
-        stale: true,
+      return new Response(JSON.stringify({ error: 'refresh_token_invalidated' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
       });
     }
 
@@ -293,10 +266,9 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
     // Atomic per-credential rate limit (MEDIUM #5) — DO state is strongly
     // consistent, so increments cannot race the way KV read-modify-write can.
-    // Enforced HERE (only on the real-refresh path) so cached grace-window and
-    // stale-credential responses above do NOT consume budget — those never hit
-    // OpenAI and must not contribute to the rate limit that guards real upstream
-    // refreshes.
+    // Enforced HERE (only on the real-refresh path) so grace-window handoffs do
+    // not consume budget. Rejected nonmatching tokens return before this point,
+    // and neither outcome hits OpenAI.
     const rateLimitResult = await this.enforceRateLimit(credential.reference);
     if (!rateLimitResult.allowed) {
       const retryAfter = Math.max(1, rateLimitResult.resetAt - Math.floor(Date.now() / 1000));
@@ -615,19 +587,16 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     accessToken,
     refreshToken,
     idToken,
-    stale,
   }: {
     accessToken: string | null;
     refreshToken?: string | null;
     idToken: string | null;
-    stale?: boolean;
   }): Response {
     return new Response(
       JSON.stringify({
         access_token: accessToken,
         ...(refreshToken !== undefined ? { refresh_token: refreshToken } : {}),
         id_token: idToken,
-        ...(stale ? { stale: true } : {}),
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
