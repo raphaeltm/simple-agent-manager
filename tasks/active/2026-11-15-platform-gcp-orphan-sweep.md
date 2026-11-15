@@ -56,3 +56,10 @@ The five-minute handler calls the isolated sweep; successful scans default to ho
 | Infomaniak | Authenticated compute endpoint server detail inventory, then exact scope labels filtered locally. |
 
 Core independently checks managed/environment/installation/node/age, validated D1 claims and final immutable identity/ownership before provider VM deletion. Associated auto-delete disks follow provider semantics; detached resources are outside this inventory. The production zero-orphan observation is specifically for GCP VMs in the inspected production project.
+
+
+## Durable failure reporting follow-up
+
+Coordinator observation e7898474-108f-4d92-b2fc-6ec06c065811 confirmed that contained credential failures previously appeared only in log counters, not durable failed-sweep records. After all credential attempts complete, the scheduled handler now passes a count-only failure through its existing isolator when errors are nonzero. Completed metrics remain available even after partial success, and downstream sweeps continue. No ownership, selection, credential isolation or deletion logic changed.
+
+Two reporting regressions failed before this addition; final real-handler/real-isolator tests cover failed-only, partial-success and zero-error controls, persisted observability context, preserved metrics and downstream continuation. Focused three-file run:16/16 PASS. Follow-up security/Cloudflare review PASS; test-engineer and constitution follow-up PASS after preserving metrics and adding the clean control. Broad validation is being refreshed for the handler delta.
