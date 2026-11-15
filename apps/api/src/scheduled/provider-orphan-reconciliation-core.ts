@@ -14,6 +14,8 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { createGcpProviderForEnv } from '../services/gcp-provider-factory';
+import { createGcpTokenProvider } from '../services/gcp-token-provider';
 import {
   SAM_ENVIRONMENT_LABEL_KEY,
   SAM_INSTALLATION_LABEL_KEY,
@@ -23,7 +25,7 @@ import {
 } from '../services/node-provider-labels';
 import { persistError } from '../services/observability';
 import { getPlatformCloudCredential } from '../services/platform-credentials';
-import { buildProviderConfig } from '../services/provider-credentials';
+import { buildProviderConfig, parseGcpCredential } from '../services/provider-credential-codecs';
 import { parseMs, parsePositiveInt, resolveCleanupConfig } from './node-cleanup/shared';
 import {
   listInventoryCredentials,
@@ -203,6 +205,21 @@ async function resolveProvider(env: Env): Promise<ProviderResolution> {
           skipReason: 'no-platform-credential',
         }),
       };
+    }
+    if (credential.provider === 'gcp') {
+      const gcpCredential = parseGcpCredential(credential.decryptedToken);
+      // Match installation catalog reads: platform credentials act as their creator,
+      // without a SAM project scope. The token provider handles WIF and key credentials.
+      const tokenProvider = createGcpTokenProvider(
+        gcpCredential,
+        {
+          credentialSource: 'platform',
+          userId: credential.createdBy ?? 'installation',
+          projectId: null,
+        },
+        env
+      );
+      return { provider: await createGcpProviderForEnv(env, gcpCredential, tokenProvider) };
     }
     return {
       provider: createProvider(

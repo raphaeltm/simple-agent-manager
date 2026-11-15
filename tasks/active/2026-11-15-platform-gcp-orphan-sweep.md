@@ -11,10 +11,10 @@ The sweep recovers billable provider VMs left without a live D1 claim by create/
 ## Checklist and acceptance
 
 - [x] Investigate main, production credential shapes, logs and read-only cloud inventory; report before fix.
-- [ ] Add behavioral regression through real `runProviderOrphanReconciliation`, real GCP config/token path and provider HTTP boundary; demonstrate red before fix.
-- [ ] Support platform workload identity and service-account keys through existing GCP token provider/factory, retaining the platform credential's owner context.
-- [ ] Prove foreign/legacy resources never reach DELETE, with owned positive control; prove per-credential failure isolation.
-- [ ] Keep static provider configuration and orphan ownership/selection unchanged.
+- [x] Add behavioral regression through real `runProviderOrphanReconciliation`, real GCP config/token path and provider HTTP boundary; demonstrate red before fix.
+- [x] Support platform workload identity and service-account keys through existing GCP token provider/factory, retaining the platform credential's owner context.
+- [x] Prove foreign/legacy resources never reach DELETE, with owned positive control; prove per-credential failure isolation.
+- [x] Keep static provider configuration and orphan ownership/selection unchanged.
 - [ ] Run lint, typecheck, tests and build; specialist reviews and task-completion validation.
 - [ ] Coordinate shared staging, deploy, verify real platform GCP workload identity and safe deletion/preservation; bound test spend to cents and clean up immediately.
 - [ ] Recheck production first-run deletion risk; stop before merge if newly enabled deletion is expected.
@@ -28,3 +28,7 @@ The sweep recovers billable provider VMs left without a live D1 claim by create/
 - `packages/providers/.claude/rules/56-destructive-provider-ownership-proof.md`.
 - API scheduled isolation rule 53; shared predicate rule 67; root proxy-signal rule 74.
 - Existing provider orphan real-boundary tests; GCP token owner/factory and catalog seed conventions.
+
+## Implementation evidence
+
+Both platform GCP WIF/key tests failed before the fix with configuration errors; after the fix all 74 orphan tests passed. Tests use real encrypted platform credential lookup, parser, token exchange and provider HTTP/delete implementation; foreign and legacy resources are returned beside the owned positive control. Baseline repository lint/typecheck passed. Main task-only push rejected GH013 (required Durable Object Workers); keeping task commits in the feature PR.

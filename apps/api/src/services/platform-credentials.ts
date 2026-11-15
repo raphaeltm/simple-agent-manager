@@ -18,6 +18,7 @@ export async function getPlatformCloudCredential(
   decryptedToken: string;
   provider: CredentialProvider;
   credentialId?: string;
+  createdBy?: string | null;
   credentialVersion: number | null;
   credentialFingerprint: string;
 } | null> {
@@ -51,6 +52,7 @@ export async function getPlatformCloudCredential(
     decryptedToken,
     provider: row.provider as CredentialProvider,
     credentialId: row.id,
+    createdBy: row.createdBy,
     credentialVersion: Number.isFinite(parsedVersion) ? parsedVersion : null,
     credentialFingerprint,
   };
