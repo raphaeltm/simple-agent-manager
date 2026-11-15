@@ -4,6 +4,7 @@
  *
  *   pnpm selfhost:deploy [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
  *                        [--secrets <state-dir>/secrets.env] [--web-dist DIR] [--dry-run] [--init]
+ *                        [--unset NAME ...]
  *                        [--skip-vm-agent] [--key-provider NAME]
  *
  * `--init` chooses the key provider that seals the Worker secrets when none is recorded
@@ -194,6 +195,8 @@ async function main(): Promise<void> {
       init: { type: 'boolean', default: false },
       'skip-vm-agent': { type: 'boolean', default: false },
       'key-provider': { type: 'string' },
+      // Remove a sealed value whose secrets.env line was deleted (key-service.ts assertUnsettable).
+      unset: { type: 'string', multiple: true },
     },
   });
   const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
@@ -224,7 +227,13 @@ async function main(): Promise<void> {
 
   // Sealed secrets (key-service.ts): the platform keys and secrets.env go into a bundle only the
   // key agent can open, and no secret is passed to celld. Off: every secret is a Worker var.
-  const { keyService, keys, sealed } = await resolveDeployKeys({ box, stateDir, secretsPath, log });
+  const { keyService, keys, sealed } = await resolveDeployKeys({
+    box,
+    stateDir,
+    secretsPath,
+    log,
+    unset: values.unset ?? [],
+  });
   // What this install is, for `pnpm selfhost:teardown` (install-record.ts). No secrets.
   if (!values['dry-run']) recordInstall(stateDir, envFile, box, keys.SAM_INSTALLATION_ID);
   // docker compose passes this file to frps and Caddy (env_file); rewritten only on change.

@@ -249,6 +249,12 @@ export interface ResolveSecretsInput {
   platformKeysFile: Record<string, string> | null;
   /** `.state/secrets.env`, merged last as today: the operator's edits win. */
   operatorSecrets: Record<string, string>;
+  /**
+   * Names to drop from the sealed secrets (`pnpm selfhost:deploy --unset NAME`). Bundles merge
+   * secrets.env over the newest bundle, so deleting a line never removed a sealed value (box
+   * round R16). See assertUnsettable for what may be removed.
+   */
+  unset?: readonly string[];
   keep?: number;
   log?: (message: string) => void;
 }
@@ -258,6 +264,27 @@ export interface ResolvedSecrets {
   secrets: Secrets;
   sealed: boolean;
   generated: string[];
+}
+
+/**
+ * A sealed value the operator may remove: one of theirs, already deleted from secrets.env. SAM's
+ * own keys are refused: removing one would make the next deploy generate a new one, which loses
+ * every credential stored under ENCRYPTION_KEY or signs every session out (rotate them instead).
+ */
+export function assertUnsettable(name: string, operatorSecrets: Record<string, string>): void {
+  if (!/^[A-Z][A-Z0-9_]*$/.test(name)) throw new Error(`--unset ${name}: not a secret name`);
+  if ((PLATFORM_KEY_NAMES as readonly string[]).includes(name) || name === SIGNING_KEY_NAME) {
+    throw new Error(
+      `--unset ${name}: SAM generates this key and the install depends on it; it cannot be ` +
+        'removed. Rotate it instead: pnpm selfhost:secrets rotate --dry-run'
+    );
+  }
+  if (name in operatorSecrets) {
+    throw new Error(
+      `--unset ${name}: it is still in secrets.env, which wins over the sealed bundle. Delete ` +
+        'its line first, then deploy with --unset again.'
+    );
+  }
 }
 
 /**
@@ -288,6 +315,18 @@ export async function resolveSealedSecrets(input: ResolveSecretsInput): Promise<
   const keys = completed.keys;
   const generated: string[] = [...completed.generated];
   const secrets: Secrets = { ...current, ...keys, ...input.operatorSecrets };
+  for (const name of input.unset ?? []) {
+    assertUnsettable(name, input.operatorSecrets);
+    if (name in secrets) {
+      delete secrets[name];
+      log(
+        `removing ${name} from the sealed secrets (the older bundles kept for rollback and any ` +
+          'backup still hold it until they are replaced or deleted)'
+      );
+    } else {
+      log(`${name} is not in the sealed secrets; nothing to remove`);
+    }
+  }
   // The agent signs every answer with this key (server.ts); the Worker holds the public half.
   if (!secrets[SIGNING_KEY_NAME]) {
     secrets[SIGNING_KEY_NAME] = generateAgentSigningKey();
@@ -356,6 +395,8 @@ export async function resolveDeployKeys(input: {
   stateDir: string;
   secretsPath: string;
   log: (message: string) => void;
+  /** `pnpm selfhost:deploy --unset NAME`: see ResolveSecretsInput.unset. */
+  unset?: readonly string[];
 }): Promise<{
   keyService: KeyServiceSettings | null;
   keys: PlatformKeys;
@@ -383,6 +424,13 @@ export async function resolveDeployKeys(input: {
     if (ensured.generated.length > 0) {
       log(`generated platform keys: ${ensured.generated.join(', ')} (back up ${stateDir})`);
     }
+    // Not sealed: every secret is rebuilt from secrets.env on each deploy, so deleting the line
+    // already removes it. --unset only checks it was deleted.
+    const operatorSecrets = readSecretsFile(input.secretsPath);
+    for (const name of input.unset ?? []) {
+      assertUnsettable(name, operatorSecrets);
+      log(`${name}: this box is not sealed, so deleting its secrets.env line already removed it`);
+    }
     return { keyService, keys: ensured.keys, sealed: null };
   }
   for (const path of ensureKeyServiceFiles(keyService)) {
@@ -394,6 +442,7 @@ export async function resolveDeployKeys(input: {
     settings: keyService,
     platformKeysFile: existsSync(platformKeysPath) ? readPrivateJson(platformKeysPath) : null,
     operatorSecrets: readSecretsFile(input.secretsPath),
+    unset: input.unset,
     log,
   });
   if (sealed.generated.length > 0) {

@@ -242,6 +242,21 @@ key service that refuses (`denied`) drops that copy. Measured on Google Cloud: o
 through Cloud KMS takes about 190-235 ms the first time (metadata token included), about 115-135 ms
 on a later reopen.
 
+**Removing a sealed value.** Each deploy lays `secrets.env` over the newest bundle, so deleting a
+line from `secrets.env` does not remove a value that was sealed before: the next bundle keeps it.
+Delete the line, then deploy once with `--unset`:
+
+```bash
+pnpm selfhost:deploy --unset PROVIDER_ORPHAN_MIN_AGE_MS     # repeat --unset for more names
+```
+
+It seals a new bundle without that name and deploys it; later deploys keep it removed. It refuses
+a name still in `secrets.env` (that line would win again) and SAM's own generated keys
+(`ENCRYPTION_KEY` and the other platform keys: rotate those instead). The two older bundles kept for
+rollback, and any backup, still hold the value until later seals replace them or you delete them
+(`scripts/selfhost/key-service.ts`, `assertUnsettable`). On a `legacy-plaintext` box every deploy
+rebuilds the secrets from `secrets.env`, so deleting the line is enough.
+
 **Which key provider.** `pnpm selfhost:deploy --init` chooses once, records the choice and why
 in `.state/key-agent/choice.json`, and every deploy prints it (`key provider: file (...)`);
 `pnpm selfhost:secrets status` shows it later with the key reference and the bundles (never key
