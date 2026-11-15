@@ -68,7 +68,7 @@ fi
 
 exchange_token={{ git_credential_exchange_token }}
 curl -fsS --max-time {{ credential_timeout_seconds }} \
-	-H "Authorization: Bearer ${exchange_token}" \
+  -H "Authorization: Bearer ${exchange_token}" \
   "${endpoint}?${credential_query}" 2>/dev/null || true
 `
 
@@ -95,19 +95,18 @@ func renderStandaloneGitCredentialHelperScript(timeout time.Duration, exchangeTo
 // commands (clone, ls-remote, fetch, push) and `gh` calls authenticate in
 // standalone mode for the whole session, not just the first token lifetime.
 // Failures are non-fatal — the agent can still run without git access.
+//
+// The helper's exchange bearer is keyed to the container's single workspace
+// (cfg.WorkspaceID); the standalone server serves no other workspace
+// (newPTYManagerForWorkspace and isKnownWorkspaceGitCredentialRequest refuse
+// other IDs). An in-container agent restart reuses the existing helper's bearer
+// while it validates, so a git command in flight keeps authenticating.
 func ConfigureStandaloneGitCredentialHelper(workspaceID string, timeout time.Duration) {
-	exchangeToken, err := bootstrap.NewGitCredentialExchangeToken()
-	if err != nil {
-		slog.Warn("standalone git: failed to prepare credential exchange; agent git auth unavailable", "error", err)
-		return
-	}
-	if err := writeStandaloneGitCredentialHelper(standaloneGitCredentialHelperPath, timeout, exchangeToken); err != nil {
-		slog.Warn("standalone git: failed to write credential helper; agent git auth unavailable", "error", err)
-		return
-	}
-	if err := bootstrap.InstallGitCredentialExchange(workspaceID, exchangeToken); err != nil {
-		_ = os.Remove(standaloneGitCredentialHelperPath)
-		slog.Warn("standalone git: failed to install credential exchange; agent git auth unavailable", "error", err)
+	if err := installStandaloneGitCredentialExchange(standaloneGitCredentialHelperPath, workspaceID, timeout); err != nil {
+		// Fail closed and visibly: without an installed bearer the local
+		// exchange refuses every request, so git auth is unavailable.
+		slog.Error("standalone git: credential exchange not installed; agent git auth unavailable",
+			"workspaceID", workspaceID, "error", err, "action", "git_auth_disabled")
 		return
 	}
 
@@ -144,6 +143,31 @@ func ConfigureStandaloneGitCredentialHelper(workspaceID string, timeout time.Dur
 	}
 
 	slog.Info("standalone git: credential helper configured", "path", standaloneGitCredentialHelperPath)
+}
+
+// installStandaloneGitCredentialExchange writes the helper at path with the
+// workspace's exchange bearer, reusing the bearer of an existing helper while it
+// still validates, and installs the bearer's digest for a new one.
+func installStandaloneGitCredentialExchange(path, workspaceID string, timeout time.Duration) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return fmt.Errorf("workspace id is required for the git credential exchange")
+	}
+	exchangeToken, reused, err := bootstrap.ResolveGitCredentialExchangeToken(workspaceID, path)
+	if err != nil {
+		return fmt.Errorf("prepare credential exchange: %w", err)
+	}
+	if err := writeStandaloneGitCredentialHelper(path, timeout, exchangeToken); err != nil {
+		return fmt.Errorf("write credential helper: %w", err)
+	}
+	if reused {
+		return nil
+	}
+	if err := bootstrap.InstallGitCredentialExchange(workspaceID, exchangeToken); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("install credential exchange: %w", err)
+	}
+	return nil
 }
 
 func writeStandaloneGitCredentialHelper(path string, timeout time.Duration, exchangeToken string) error {

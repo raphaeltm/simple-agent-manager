@@ -11,6 +11,7 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -385,7 +386,8 @@ func gitCredentialCallbackToken(s *Server, r *http.Request, workspaceID string) 
 	if presented == "" {
 		return "", false
 	}
-	if isKnownWorkspaceGitCredentialRequest(s, workspaceID) &&
+	if isDirectLocalGitCredentialExchange(r) &&
+		isKnownWorkspaceGitCredentialRequest(s, workspaceID) &&
 		bootstrap.ValidateGitCredentialExchange(workspaceID, presented) {
 		return "", true
 	}
@@ -393,6 +395,23 @@ func gitCredentialCallbackToken(s *Server, r *http.Request, workspaceID string) 
 		return presented, true
 	}
 	return "", false
+}
+
+// isDirectLocalGitCredentialExchange reports whether the request can have come
+// straight from a helper on this node: a loopback or private peer, not relayed
+// by a proxy or the tunnel listener. The helper bearer is a node-local secret,
+// so a relayed request carrying it is refused even though the bearer itself
+// would validate (defence in depth; the callback bearer is unaffected).
+func isDirectLocalGitCredentialExchange(r *http.Request) bool {
+	if isRelayedRequest(r) {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
 }
 
 // isKnownWorkspaceGitCredentialRequest limits dedicated helper bearers to a

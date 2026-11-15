@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/bootstrap"
 )
 
 const testStandaloneGitCredentialExchangeToken = "test-standalone-git-credential-exchange-token"
@@ -237,4 +239,51 @@ func TestStandaloneCloneSpecStripsEmbeddedCredentials(t *testing.T) {
 	if spec.Token != "art_token" {
 		t.Fatalf("token = %q, want art_token", spec.Token)
 	}
+}
+
+// An Instant container's agent can restart in place (self_restart.go). The
+// restarted agent must keep the helper's bearer, and an empty workspace ID must
+// install nothing rather than a helper that can never authenticate.
+func TestInstallStandaloneGitCredentialExchange(t *testing.T) {
+	t.Run("restart reuses the bearer", func(t *testing.T) {
+		workspaceID := "ws-standalone-restart"
+		lockStandaloneExchange(t, workspaceID)
+		t.Cleanup(func() { _ = bootstrap.RemoveCredentialHelperFromHost(workspaceID) })
+		path := filepath.Join(t.TempDir(), "git-credential-sam")
+
+		if err := installStandaloneGitCredentialExchange(path, workspaceID, 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		first, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := installStandaloneGitCredentialExchange(path, workspaceID, 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		second, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		token := bootstrap.ExchangeTokenFromHelperScript(string(first))
+		if token == "" || token != bootstrap.ExchangeTokenFromHelperScript(string(second)) {
+			t.Fatal("agent restart rotated the standalone helper bearer")
+		}
+		if !bootstrap.ValidateGitCredentialExchange(workspaceID, token) {
+			t.Fatal("the helper's bearer must validate after restart")
+		}
+		if bootstrap.ValidateGitCredentialExchange(workspaceID+"-other", token) {
+			t.Fatal("the bearer must not validate for another workspace")
+		}
+	})
+
+	t.Run("empty workspace id installs nothing", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "git-credential-sam")
+		if err := installStandaloneGitCredentialExchange(path, "  ", 5*time.Second); err == nil {
+			t.Fatal("expected an error for an empty workspace id")
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("no helper may be written without a workspace id: %v", err)
+		}
+	})
 }

@@ -514,6 +514,7 @@ func TestHandleGitCredentialExchangeTokenIsWorkspaceBound(t *testing.T) {
 
 	s := newTwoWorkspaceGitCredentialServer(controlPlane.URL)
 	primaryCallbackAttack := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
+	primaryCallbackAttack.RemoteAddr = "172.17.0.3:52144" // a sibling devcontainer on the node bridge
 	primaryCallbackAttack.Header.Set("Authorization", "Bearer primary-callback-token")
 	primaryCallbackAttackRec := httptest.NewRecorder()
 	s.handleGitCredential(primaryCallbackAttackRec, primaryCallbackAttack)
@@ -525,6 +526,7 @@ func TestHandleGitCredentialExchangeTokenIsWorkspaceBound(t *testing.T) {
 	}
 
 	attack := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
+	attack.RemoteAddr = "172.17.0.3:52144" // a sibling devcontainer on the node bridge
 	attack.Header.Set("Authorization", "Bearer "+primaryToken)
 	attackRec := httptest.NewRecorder()
 	s.handleGitCredential(attackRec, attack)
@@ -536,6 +538,7 @@ func TestHandleGitCredentialExchangeTokenIsWorkspaceBound(t *testing.T) {
 	}
 
 	legitimate := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-secondary", nil)
+	legitimate.RemoteAddr = "172.17.0.3:52144" // a sibling devcontainer on the node bridge
 	legitimate.Header.Set("Authorization", "Bearer "+secondaryToken)
 	legitimateRec := httptest.NewRecorder()
 	s.handleGitCredential(legitimateRec, legitimate)

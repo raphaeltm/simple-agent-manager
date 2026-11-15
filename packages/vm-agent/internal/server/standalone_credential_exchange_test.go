@@ -18,7 +18,18 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 )
 
-var standaloneCredentialExchangeSequence atomic.Uint64
+// standaloneExchangeLocks serializes exchanges that share a workspace ID. The
+// helper bearer's digest lives at a path derived from the workspace ID, so two
+// parallel tests installing bearers for the same ID would replace each other's.
+var standaloneExchangeLocks sync.Map
+
+func lockStandaloneExchange(t *testing.T, workspaceID string) {
+	t.Helper()
+	lock, _ := standaloneExchangeLocks.LoadOrStore(workspaceID, &sync.Mutex{})
+	mu := lock.(*sync.Mutex)
+	mu.Lock()
+	t.Cleanup(mu.Unlock)
+}
 
 // standaloneCredentialExchange is the credential path of an Instant workspace
 // with only the network faked: the production-rendered credential helper, the
@@ -39,7 +50,7 @@ type standaloneCredentialExchange struct {
 // a GitHub CLI policy that forbids minting.
 func newStandaloneCredentialExchange(t *testing.T, workspaceID string, mintStatus int, mintedToken string) *standaloneCredentialExchange {
 	t.Helper()
-	workspaceID = fmt.Sprintf("%s-%d", workspaceID, standaloneCredentialExchangeSequence.Add(1))
+	lockStandaloneExchange(t, workspaceID)
 	exchange := &standaloneCredentialExchange{workspaceID: workspaceID}
 
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

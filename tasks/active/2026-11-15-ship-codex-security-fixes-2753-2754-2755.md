@@ -46,12 +46,14 @@ from its own `sam/` branch, closing the bot PR with a link.
 ## Implementation Checklist
 
 ### #2755
-- [ ] Whole `go test ./internal/server` and `./internal/bootstrap` pass
-- [ ] Token stable for the workspace lifetime (reuse on reprovision) or forced in-container reinstall
-- [ ] Failed PrepareWorkspace does not delete digest under a running container
-- [ ] Tests: reprovision against running container then exchange with old helper token; recovery and snapshot-restore paths
-- [ ] Old-helper policy decided per rule 54 and stated in PR
-- [ ] Standalone digest keying + empty-ID path fail closed; digest installed before helper is configured in docker-cp path
+- [x] Whole `go test ./internal/server` and `./internal/bootstrap` pass
+- [x] Token stable for the workspace lifetime (reuse on reprovision) AND in-container reinstall when the container's helper bearer is not accepted
+- [x] Failed PrepareWorkspace does not delete digest under a running container (only removes a bearer it minted, and only with no running container)
+- [x] Tests: reprovision against a running container (real Docker bind mount) then exchange with the old helper's token; bearerless old helper replaced; recovery and snapshot-restore paths already assert the runtime workspace ID reaches PrepareWorkspace
+- [x] Old-helper policy decided per rule 54 and stated in PR
+- [x] Standalone: empty ID fails closed with an error log and writes nothing; bearer reused across agent restart; digest installed before git is configured in the docker-cp path
+- [x] Helper bearer refused on relayed/tunnel/non-local requests (restored the orphaned `isRelayedRequest` guard)
+- [x] security.md documents the exchange
 - [ ] Staging: fresh agent binary, clone/fetch/push, after restart/rebuild, Instant session, cross-workspace refusal, cleanup
 
 ### #2754
