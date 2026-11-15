@@ -2543,6 +2543,10 @@ func writeMintedCredentialHelper(hostPath, script string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("refusing to replace non-regular credential helper path %s", hostPath)
 	}
+	if !ownedByCurrentUser(info) {
+		// Not a helper this agent wrote, so no container of ours pins it.
+		return writeCredentialHelperScriptAtomically(hostPath, script)
+	}
 	f, err := os.OpenFile(hostPath, os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return fmt.Errorf("failed to open credential helper on host: %w", err)
