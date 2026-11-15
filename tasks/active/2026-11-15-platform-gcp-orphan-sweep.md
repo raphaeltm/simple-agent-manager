@@ -1,5 +1,7 @@
 # Authenticate platform GCP orphan reconciliation
 
+**Current status (November15 02:05UTC): blocked at required live staging sweep proof.** Code and full local validation/reviews pass; staging deployment and browser checks pass. No PR or merge. Documented staging KV writes return401/code10000, so the next hourly inventory was outside the bounded window. Baseline restored and all billable fixtures independently removed; staging released.
+
 ## Problem and findings
 
 The selected platform cloud credential goes through the static provider builder in `apps/api/src/scheduled/provider-orphan-reconciliation-core.ts`. That builder rejects every GCP credential, including workload identity and service-account keys. Failed runs retry on each five-minute cron because only successful scans stamp the hourly interval. User/project inventory already uses the GCP-aware exact resolver and isolates account failures.
@@ -65,3 +67,27 @@ Coordinator observation e7898474-108f-4d92-b2fc-6ec06c065811 confirmed that cont
 Two reporting regressions failed before this addition; final real-handler/real-isolator tests cover failed-only, partial-success and zero-error controls, persisted observability context, preserved metrics and downstream continuation. Focused three-file run:16/16 PASS. Follow-up security/Cloudflare review PASS; test-engineer and constitution follow-up PASS after preserving metrics and adding the clean control. Broad handler-delta validation PASS: root lint22/22, typecheck36/36, build18/18, test39/39tasks; API1015files15183testsPASS, 3files4testsskipped. Runner-only upstream2744 merged from main d60c28efd before staging; runtime source unchanged.
 
 Cleanup bound replan01:07UTC: actual security window targetsFREE01:30 and observed deployment takes20min. Moved own stopped-fixture cleanup wake ONCE to02:15UTC (scheduleversion2), unchanged totalbudget<$0.10. Earlier01:45 deadline superseded explicitly in shared staging channel. No further indefinite extension; if this bound cannot fit, clean up and report. No staging mutation/claim yet.
+
+
+## Live window and recovery receipt
+
+Staging actualTAKEN event79c5aa84, run43663972851, reviewed fullSHA8807b4bd96df8f6b69a2c4556f8e7e382df098c8. Fresh01:35 preflight: only own stopped fixture matches scope, foreign control distinct, zero D1 node claims/live nodes. Browser token-login and dashboard/projects/settings pass; original platform Hetzner credential01KNY6DC06C9QCYQM0389NAGNT enabled, updated2026-04-11T11:56:37.766Z. Recovery metadata sent to staging coordinator: restore original via normal adminAPI PATCH isEnabled=true FIRST, then remove only own temporary WIF credential (ID to be recorded before flip); guard against peer updatedAt changes. KV last-run saved locally, not cleared yet. No temporary staging credential created yet. Local Chromium dependencies extracted under .tmp without sudo.
+
+Production read-only recheck01:43UTC: still one enabled platform Hetzner, zero platform GCP. GCP inventory now five exact-production-scope VMs, all five claimed by nonterminal nodes; zero unclaimed/terminal candidates. Current production credential mix enables no new GCP deletion path after this fix. No production mutation.
+
+Before-flip recovery receipt01:54UTC: own temporary platformGCP credential01M7EEGY11G6FZ9EBM1E6VJ2NG created01:53:05.057Z; original Hetzner01KNY6DC06C9QCYQM0389NAGNT still enabled. Restore original enabled first, then DELETE only own credential; guard IDs/provider and post-flip updatedAt against peer changes. Receipt sent to staging coordinator before disable. Cloudflare independently confirms100% Worker version7983f87d-a613-48ca-9a97-2d97747eeaeb, annotation commit8807b4bd96df8f6b69a2c4556f8e7e382df098c8.
+
+Staging blocker01:57UTC: documented CF_TOKEN reads succeed but DELETE intervalmarker returns401; PUT saved original returns401/code10000. Neither KV mutation succeeded. Own temporaryGCP selected, original Hetzner disabled at01:54:37.517Z (guard). Coordinator+parent notified. Inspect next naturalcron then restore/cleanup by02:15 with no gate waiver.
+
+
+## Final staging evidence and unresolved gate
+
+Deploy43663972851 succeeded, including smoke tests, on fullSHA8807b4bd96df8f6b69a2c4556f8e7e382df098c8. Independently confirmed Worker100%version7983f87d-a613-48ca-9a97-2d97747eeaeb with that commit annotation. Real platform GCP workload identity credential was created and selected through normal adminAPI. Post-deploy browser DOM checks for dashboard/projects/settings pass with zero page errors.
+
+**Required live cron deletion/preservation proof did not run.** Natural01:55 and02:00 cron summaries reported interval-not-elapsed, scanned0/destroyed0/errors0. FreshKV read was2026-11-15T01:50:32.815Z. Both authorized debug write attempts failed (DELETE401; PUT401/error10000). Contrary to scoped rule32's stated capabilities, the available CF_TOKEN has working reads but rejected these writes. No documented normal API reset exists (independently checked by staging coordinator). No token/privilege/deploy workaround, extra fixture loop or deadline extension was used. The obsolete saved00:50 timestamp was not restored over legitimate natural cadence; no test KV write succeeded.
+
+Restoration completed02:02: original Hetzner enabled first, ownGCP credential removed, normalAPI metadata matched baseline, session signed out and local cookie cache removed. Root independently confirmed original Hetzner only and currentKV at02:03:56.
+
+Independent provider/IAM/D1 cleanup proof02:04: both fixture VMs and both auto-delete boot disks absent; own service account absent from authoritative project list; own compute IAM membership absent; own WIF pool stateDELETED (provider removed with pool); only original platform Hetzner credential enabled and ownGCP credential absent. Wildcard GET of a deleted service account returned403, so that response was not used as absence proof. Only unavoidable nonbillable remnant: deleted WIF pool name reserved30days. Total bounded fixture spend estimate remains<$0.10.
+
+Staging FREE published event1cdc5c84-dc43-42fa-85f9-7107c7b1f23a. Cleanup guard cancelled before02:15, schedule76a3a75c-a98b-443d-9481-8025cb2138e2 version3. Root coordinator received recovery and cleanup receipts. Parent receives the blocking outcome; no PR, merge or production deploy claimed. Resume requires a coordinated legitimate verification window spanning the next eligible hourly sweep, or restored documented KV write capability. Keep all normal gates; do not archive this unfinished task.
