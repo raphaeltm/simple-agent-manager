@@ -1,4 +1,9 @@
+import {
+  appendDeploymentPublishJobEvent,
+  failExpiredDeploymentPublishJobs,
+} from '@simple-agent-manager/app-deployment';
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
@@ -91,6 +96,67 @@ async function launch() {
   await builder.launchBuilder({ jobId: 'job', attempt: 1 });
 }
 describe('per-job builder lifecycle adapter', () => {
+  it('launches after a controlled late collector callback without undoing admission', async () => {
+    // The row is already atomically admitted by the fixture. Deliver the old
+    // source event before the durable kickoff runs, matching the staging race.
+    expect(
+      await appendDeploymentPublishJobEvent(drizzle(env.DATABASE, { schema }), {
+        publishJobId: 'job',
+        projectId: 'project',
+        environmentId: 'env',
+        workspaceId: 'ws',
+        nodeId: 'node',
+        eventType: 'publish.context.collected',
+        message: 'context collected',
+        status: 'context_ready',
+        currentStep: 'context_ready',
+      })
+    ).toBe(false);
+    expect(
+      sqlite.prepare('SELECT status,current_step FROM deployment_publish_jobs').get()
+    ).toMatchObject({ status: 'starting' });
+    await launch();
+    expect(calls.start).toHaveBeenCalledTimes(1);
+    expect(calls.fetch).toHaveBeenCalledTimes(2);
+  });
+  it('recovers a reserved context_ready row once without repeating an accepted launch', async () => {
+    sqlite.exec(
+      "UPDATE deployment_publish_jobs SET status='context_ready',current_step='context_ready'"
+    );
+    await launch();
+    await launch();
+    expect(calls.start).toHaveBeenCalledTimes(1);
+    expect(
+      sqlite.prepare('SELECT status,executor_instance_id FROM deployment_publish_jobs').get()
+    ).toEqual({ status: 'starting', executor_instance_id: 'job' });
+  });
+
+  it('repairs a regression after acceptance without touching or relaunching the guest', async () => {
+    await launch();
+    const deadline = sqlite
+      .prepare('SELECT executor_deadline_at FROM deployment_publish_jobs')
+      .get();
+    sqlite.exec(
+      "UPDATE deployment_publish_jobs SET status='context_ready',current_step='context_ready'"
+    );
+    sqlite.exec("UPDATE deployment_publish_jobs SET last_heartbeat_at='2000-01-01T00:00:00.000Z'");
+    await builder.startJob('job', 1); // cron recovery enters through this method
+    expect(
+      await failExpiredDeploymentPublishJobs(drizzle(env.DATABASE, { schema }), {
+        stallMs: 60000,
+        deadlineMs: 1800000,
+        sweepLimit: 6,
+      })
+    ).toEqual([]);
+    expect(
+      sqlite.prepare('SELECT status,executor_instance_id FROM deployment_publish_jobs').get()
+    ).toEqual({ status: 'starting', executor_instance_id: 'job' });
+    expect(
+      sqlite.prepare('SELECT executor_deadline_at FROM deployment_publish_jobs').get()
+    ).toEqual(deadline);
+    expect(calls.start).toHaveBeenCalledTimes(1);
+    expect(calls.fetch).toHaveBeenCalledTimes(2);
+  });
   it('arms the persisted deadline before startup and sends no credentials through env', async () => {
     await launch();
     expect(calls.schedule.mock.invocationCallOrder[0]).toBeLessThan(

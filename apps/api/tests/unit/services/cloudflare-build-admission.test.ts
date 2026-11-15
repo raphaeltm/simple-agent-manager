@@ -1,5 +1,6 @@
 import {
   admitCloudflareBuild,
+  recoverReservedCloudflareBuild,
   releaseCloudflareBuildReservation,
 } from '@simple-agent-manager/app-deployment';
 import Database from 'better-sqlite3';
@@ -90,5 +91,19 @@ describe('Cloudflare build final atomic reservation in SQLite D1', () => {
     }
     seed('owner');
     expect(await admitCloudflareBuild(db, 'owner', limits)).toBeTruthy();
+  });
+});
+
+describe('reserved Cloudflare context regression recovery', () => {
+  it.each([
+    "status='canceled'", "status='building'", "attempt=2", "executor_instance_id=NULL",
+    "executor_instance_id='foreign'", "context_shadow=1", "executor_deadline_at=NULL", "executor_deadline_at='2000-01-01T00:00:00.000Z'",
+  ])('does not recover an ineligible reservation: %s', async mutation => {
+    seed('job'); await admitCloudflareBuild(db,'job',limits);
+    sqlite.prepare("UPDATE deployment_publish_jobs SET status='context_ready'").run();
+    sqlite.prepare('UPDATE deployment_publish_jobs SET '+mutation).run();
+    const before=sqlite.prepare('SELECT * FROM deployment_publish_jobs').get();
+    expect(await recoverReservedCloudflareBuild(db,'job',1)).toBeNull();
+    expect(sqlite.prepare('SELECT * FROM deployment_publish_jobs').get()).toEqual(before);
   });
 });

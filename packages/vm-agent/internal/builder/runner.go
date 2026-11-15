@@ -233,7 +233,7 @@ func run(ctx context.Context, launch Launch, spec Spec, sink publish.EventSink) 
 		case <-time.After(time.Duration(spec.DaemonReadyTimeoutMs) * time.Millisecond / 300):
 		}
 	}
-	sink.Event(ctx, publish.Event{Status: "building", CurrentStep: "builder_ready", EventType: "publish.builder.ready", Message: "DinD builder ready"})
+	sink.Event(ctx, publish.Event{Status: "starting", CurrentStep: "builder_ready", EventType: "publish.builder.ready", Message: "DinD builder ready"})
 	artifact, err := publish.Build(ctx, publish.BuildOptions{WorkspaceDir: source, Reference: spec.Reference, BuildEnv: spec.BuildEnv, SecretKeys: spec.SecretKeys, BuildNetwork: "host", Events: sink})
 	if err != nil {
 		return errors.New("compose build failed")

@@ -3,6 +3,7 @@ import {
   appendDeploymentPublishJobEvent,
   isCloudflareBuildCapacityError,
   PUBLISH_JOB_TERMINAL_STATUSES,
+  recoverReservedCloudflareBuild,
   releaseCloudflareBuildReservation,
   startReservedCloudflareBuild,
 } from '@simple-agent-manager/app-deployment';
@@ -65,7 +66,13 @@ export class ComposeBuilderContainer extends Container<Env> {
   /** Acknowledge persisted kickoff promptly; cold startup is owned by a DO
    * alarm, not the source HTTP waitUntil's 30-second lifetime. */
   async startJob(jobId: string, attempt: number) {
-    const { job } = await this.loadJob(jobId, attempt);
+    let { job } = await this.loadJob(jobId, attempt);
+    if (job?.status === 'context_ready' && job.executorInstanceId === job.id) {
+      await recoverReservedCloudflareBuild(drizzle(this.env.DATABASE, { schema }), jobId, attempt);
+      // A competing terminal/progress update may have won the repair CAS.
+      // Inspect it before either the accepted short-circuit or new kickoff.
+      ({ job } = await this.loadJob(jobId, attempt));
+    }
     if (
       !job ||
       job.executorInstanceId !== jobId ||
@@ -92,7 +99,15 @@ export class ComposeBuilderContainer extends Container<Env> {
     // Alarm delivery and cron recovery may overlap. Coalesce the full operation,
     // including stop/requeue, so stale deliveries cannot defeat capacity backoff.
     const run = this.kickoff.then(async () => {
-      const { job } = await this.loadJob(identity.jobId, identity.attempt);
+      let { job } = await this.loadJob(identity.jobId, identity.attempt);
+      if (job?.status === 'context_ready' && job.executorInstanceId === job.id) {
+        job =
+          (await recoverReservedCloudflareBuild(
+            drizzle(this.env.DATABASE, { schema }),
+            identity.jobId,
+            identity.attempt
+          )) ?? undefined;
+      }
       if (!job || job.status !== 'starting' || job.executorInstanceId !== job.id) return;
       const ports = createCloudflareBuildPorts(this.env);
       await startReservedCloudflareBuild(
@@ -250,7 +265,6 @@ export class ComposeBuilderContainer extends Container<Env> {
         environmentId: job.environmentId,
         workspaceId: job.workspaceId,
         nodeId: job.nodeId,
-        currentStep: 'builder_accepted',
         eventType: 'publish.builder.accepted',
         message: 'Cloudflare builder accepted job',
         detail: { version: version.version },

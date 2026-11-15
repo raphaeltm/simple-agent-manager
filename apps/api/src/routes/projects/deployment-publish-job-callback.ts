@@ -107,7 +107,17 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     throw errors.badRequest('Publish job event requires eventType and message');
   }
 
-  const status = optionalString(event.status) ?? undefined;
+  // The verified context callback already handed execution to admission. The
+  // collector reports this receipt afterwards, possibly after the builder has
+  // started. Keep its diagnostic history without letting old source agents
+  // move the job backwards or bypass context verification. Shadow collection
+  // still owns its terminal completion.
+  const sourceContextReceipt =
+    !authenticatedJob &&
+    job.executor === 'cloudflare' &&
+    !job.contextShadow &&
+    eventType === 'publish.context.collected';
+  const status = sourceContextReceipt ? undefined : (optionalString(event.status) ?? undefined);
   if (event.terminal && (!status || !PUBLISH_JOB_TERMINAL_STATUSES.has(status))) {
     throw errors.badRequest('Terminal publish job event requires a terminal status');
   }
@@ -120,7 +130,9 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   if (authenticatedJob && event.releaseId && event.releaseId !== authenticatedJob.releaseId)
     throw errors.forbidden('Event release must already be linked to this job');
   const terminal = event.terminal === true || PUBLISH_JOB_TERMINAL_STATUSES.has(status ?? '');
-  const currentStep = optionalString(event.currentStep) ?? optionalString(event.step);
+  const currentStep = sourceContextReceipt
+    ? undefined
+    : (optionalString(event.currentStep) ?? optionalString(event.step) ?? undefined);
   await assertCurrent();
   const accepted = await appendDeploymentPublishJobEvent(db, {
     publishJobId,

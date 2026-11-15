@@ -4,6 +4,8 @@ import * as schema from '@simple-agent-manager/worker-core/schema';
 import { and, asc, desc, eq, gt, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
+import { publishJobTransitionPredicate } from './publish-job-transitions';
+
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 export const PUBLISH_JOB_TERMINAL_STATUSES = new Set([
@@ -180,7 +182,8 @@ export async function appendDeploymentPublishJobEvent(
     input.expectedStatus
       ? eq(schema.deploymentPublishJobs.status, input.expectedStatus)
       : undefined,
-    notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES])
+    notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES]),
+    publishJobTransitionPredicate(status, input.currentStep, terminal)
   );
   if (input.eventType === 'publish.job.heartbeat') {
     // Heartbeats prove executor liveness independently of slow build/upload progress.

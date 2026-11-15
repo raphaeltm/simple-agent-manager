@@ -92,6 +92,75 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe('publish job atomic guards on SQLite', () => {
+  it.each([
+    ['starting', 'builder_start', 'context_ready', 'context_ready'],
+    ['building', 'compose_build', 'validating', 'compose_config'],
+    ['recording_release', 'release_submission', 'uploading', 'upload_archive'],
+    ['uploading', 'artifact_complete', 'uploading', 'artifact_init'],
+    ['starting', 'builder_start', undefined, 'context_ready'],
+  ])(
+    'atomically rejects backward Cloudflare progress %s/%s to %s/%s',
+    async (from, step, to, incomingStep) => {
+      seed();
+      sqlite
+        .prepare("UPDATE deployment_publish_jobs SET executor='cloudflare',status=?,current_step=?")
+        .run(from, step);
+      const before = row();
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          status: to,
+          currentStep: incomingStep,
+        })
+      ).toBe(false);
+      expect(row()).toEqual(before);
+      expect(
+        sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()
+      ).toEqual({ n: 0 });
+    }
+  );
+  it('allows in-order progress, including the export/upload loop for two services', async () => {
+    seed('job', 'context_ready');
+    sqlite
+      .prepare(
+        "UPDATE deployment_publish_jobs SET executor='cloudflare',current_step='context_ready'"
+      )
+      .run();
+    for (const [status, currentStep] of [
+      ['starting', 'builder_start'],
+      ['starting', 'builder_ready'],
+      ['validating', 'compose_config'],
+      ['building', 'compose_build'],
+      ['uploading', 'artifact_init'],
+      ['exporting', 'docker_save'],
+      ['uploading', 'upload_archive'],
+      ['exporting', 'docker_save'],
+      ['uploading', 'upload_archive'],
+      ['uploading', 'artifact_complete'],
+      ['recording_release', 'release_submission'],
+      ['succeeded', 'complete'],
+    ]) {
+      expect(await appendDeploymentPublishJobEvent(db(), { ...event, status, currentStep })).toBe(
+        true
+      );
+      expect(row()).toMatchObject({ status, current_step: currentStep });
+    }
+  });
+
+  it.each([
+    { status: undefined, currentStep: null },
+    { status: 'constructor', currentStep: undefined },
+    { status: 'building', currentStep: '__proto__' },
+    { status: 'toString', currentStep: 'compose_build' },
+  ])('rejects invalid or clearing Cloudflare progress without throwing: %j', async (incoming) => {
+    seed();
+    sqlite.exec(
+      "UPDATE deployment_publish_jobs SET executor='cloudflare',current_step='compose_build'"
+    );
+    const before = row();
+    expect(await appendDeploymentPublishJobEvent(db(), { ...event, ...incoming })).toBe(false);
+    expect(row()).toEqual(before);
+  });
   it.each([undefined, 'building'])(
     'rejects terminal flag with non-terminal status %s without writes',
     async (status) => {

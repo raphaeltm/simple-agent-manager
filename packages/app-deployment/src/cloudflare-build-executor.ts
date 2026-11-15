@@ -151,7 +151,7 @@ export async function drainCloudflareBuilds(database: D1Database, ports: Cloudfl
       and(
         eq(j.executor, 'cloudflare'),
         eq(j.contextShadow, false),
-        eq(j.status, 'starting'),
+        inArray(j.status, ['starting', 'context_ready']),
         isNotNull(j.executorInstanceId)
       )
     )

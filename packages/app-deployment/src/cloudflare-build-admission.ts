@@ -5,6 +5,29 @@ import type { drizzle } from 'drizzle-orm/d1';
 import { PUBLISH_JOB_TERMINAL_STATUSES } from './deployment-publish-jobs';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+/** Repair only an already owned, live reservation. Do not readmit, acquire a
+ * second slot, extend a deadline, or revive canceled/advanced execution. */
+export async function recoverReservedCloudflareBuild(db: Db, jobId: string, attempt: number) {
+  const j = schema.deploymentPublishJobs;
+  const now = new Date().toISOString();
+  const [job] = await db
+    .update(j)
+    .set({ status: 'starting', currentStep: 'builder_start', updatedAt: now, lastHeartbeatAt: now })
+    .where(
+      and(
+        eq(j.id, jobId),
+        eq(j.attempt, attempt),
+        eq(j.executor, 'cloudflare'),
+        eq(j.contextShadow, false),
+        eq(j.status, 'context_ready'),
+        eq(j.executorInstanceId, jobId),
+        sql`${j.executorDeadlineAt} > ${now}`
+      )
+    )
+    .returning();
+  return job ?? null;
+}
 export const DEFAULT_DEPLOY_BUILDER_MAX_CONCURRENT = 6;
 export const DEFAULT_DEPLOY_BUILDER_PROJECT_MAX_CONCURRENT = 2;
 export const DEFAULT_DEPLOY_BUILDER_CAPACITY_BACKOFF_MS = 30_000;
