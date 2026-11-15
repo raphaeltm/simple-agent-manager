@@ -8,8 +8,7 @@
  * Each file's time is the median over every artifact that ran it, so one slow runner
  * does not skew the plan. `shardOneExtraMs` is kept from the current file.
  */
-import { writeFileSync } from 'node:fs';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 import { loadShardTimings, SHARD_TIMINGS_URL, type WorkerShardTimings } from './shard-plan';
 

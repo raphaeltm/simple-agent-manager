@@ -54,7 +54,7 @@ export function planShards(
     median(unique.flatMap((file) => (file in timings.files ? [timings.files[file]!] : []))) ?? 1;
   const weighted = unique
     .map((file) => ({ file, weight: timings.files[file] ?? fallback }))
-    .sort((a, b) => b.weight - a.weight || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+    .sort((a, b) => b.weight - a.weight || a.file.localeCompare(b.file));
 
   const shards: string[][] = Array.from({ length: count }, () => []);
   const predictedMs = Array.from({ length: count }, (_, i) =>
@@ -66,6 +66,6 @@ export function planShards(
     shards[target]!.push(file);
     predictedMs[target]! += weight;
   }
-  for (const shard of shards) shard.sort();
+  for (const shard of shards) shard.sort((a, b) => a.localeCompare(b));
   return { shards, predictedMs };
 }

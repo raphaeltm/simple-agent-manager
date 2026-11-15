@@ -101,7 +101,7 @@ export function evaluate(
     .trim()
     .replace(/^\$\{\{([\s\S]*)\}\}$/u, '$1')
     .trim();
-  const tokenPattern = /'[^']*'|==|!=|&&|\|\||[()!]|[A-Za-z_][\w.-]*\(\)|[A-Za-z_][\w.-]*/gu;
+  const tokenPattern = /'[^']*'|==|!=|&&|\|\||[()!]|[A-Za-z_][\w.-]*(?:\(\))?/gu;
   const tokens = source.match(tokenPattern);
   if (!tokens || source.replace(tokenPattern, '').trim() !== '') {
     throw new Error(`Unsupported expression syntax: ${source}`);
@@ -253,10 +253,9 @@ export function simulate(
     const inheritsFailure =
       id !== 'durable-object-workers' &&
       needsOf(job).some((need) => results.get(need) === 'failure');
-    results.set(
-      id,
-      runs ? (failing.includes(id) || inheritsFailure ? 'failure' : 'success') : 'skipped'
-    );
+    let result: JobResult = 'skipped';
+    if (runs) result = failing.includes(id) || inheritsFailure ? 'failure' : 'success';
+    results.set(id, result);
   }
   return results;
 }

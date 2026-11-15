@@ -593,7 +593,10 @@ jobs:
           PACKAGES_RESULT: ${{ needs.test-packages.result }}
         run: |
           echo "test-api=$API_RESULT ($API_SELECTED) test-web=$WEB_RESULT ($WEB_SELECTED) test-packages=$PACKAGES_RESULT ($PACKAGES_SELECTED)"
-          expect() { if [ "$1" = true ]; then test "$2" = success; else test "$2" = skipped; fi; }
+          expect() {
+            local selected="$1" result="$2"
+            if [ "$selected" = true ]; then test "$result" = success; else test "$result" = skipped; fi
+          }
           expect "$API_SELECTED" "$API_RESULT"
           expect "$WEB_SELECTED" "$WEB_RESULT"
           expect "$PACKAGES_SELECTED" "$PACKAGES_RESULT"
