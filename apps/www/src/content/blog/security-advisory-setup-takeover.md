@@ -30,6 +30,9 @@ Three things had to be true at the same time. Fixing any one of them would have 
 
 1. **Setup never closed.** SAM has a first-run setup wizard where the new owner enters login providers and other integrations. It is the `POST /api/setup/complete` endpoint, protected by a setup token (`SETUP_TOKEN`). SAM treats setup as finished only once a `setup.completed` row exists in its database. The wizard shipped on July 7, 2026 ([#1528](https://github.com/raphaeltm/simple-agent-manager/pull/1528)). Instances that existed before then already had an owner and users, but nothing ever wrote that row for them. On those instances, including SAM's own production and staging, setup stayed open for about four months.
 2. **The setup token was public.** `SETUP_TOKEN` was a plain-text Worker variable, not a secret. The deploy workflow prints Wrangler's output, and Wrangler prints the value of every plain-text variable it deploys. GitHub Actions logs on a public repository or fork are readable by anyone with a GitHub account, so anyone could read the current token in the latest deploy log.
+
+   That was a deliberate choice, and the reasoning was sound as far as it went. The token is meant to be used once. A new owner reads it from the Cloudflare dashboard, finishes setup with it, and from then on SAM refuses every setup request before it even looks at the token. A token that only opens a door that is already shut is worth nothing, so a copy in a log didn't look like a risk. The flaw was in "already shut": on instances that predate the wizard, condition 1 meant the door never shut, and a one-time token stayed live for four months.
+
 3. **Login providers configured inside SAM were fully trusted.** Providers configured at runtime, through setup or Admin → Integrations, were trusted for automatic account linking by email. Whoever fills in that form chooses the provider, and for GitLab that includes the server address, so the "provider" can be a server the attacker runs. If such a provider said "this person's email is X", SAM signed them in to the existing account with email X. It also let the provider overwrite that account's name and avatar.
 
 ```mermaid
@@ -63,7 +66,28 @@ The fix is merged as [#2748](https://github.com/raphaeltm/simple-agent-manager/p
 - stops a GitLab login configured inside SAM from linking to existing accounts by email or overwriting profiles, unless it points at gitlab.com or at a host you pin with the `GITLAB_HOST` environment variable;
 - fixes the rate limiter on setup attempts.
 
-A second change, [#2747](https://github.com/raphaeltm/simple-agent-manager/pull/2747), emails the owner when an integration changes, when setup completes, and when a new login is linked to an admin account. It also adds a control to clear an integration from the admin UI.
+A second change, [#2747](https://github.com/raphaeltm/simple-agent-manager/pull/2747), emails the owner when an integration changes, when setup completes, and when a new login is linked to an admin account. It also adds a control to clear an integration from the admin UI, and Admin → Integrations now says where each stored value came from, when it changed and who changed it. A value written through the setup wizard reads "first-run setup (unauthenticated)", so the integration I found would have been labelled for what it was.
+
+## Taking GitHub Actions out of the install
+
+Masking fixes this token, but the deeper lesson is about where SAM gets deployed from. With the fork-and-GitHub-Actions path, every deploy log on a public fork is public, and every value a deploy prints is one mistake away from being published. That isn't a risk you should have to manage just to run your own SAM.
+
+That is why we've been building the **[SAM installer](/docs/guides/installer/)**, which first shipped on November 8 ([#2475](https://github.com/raphaeltm/simple-agent-manager/pull/2475)). It doesn't use GitHub Actions, a fork, or a terminal:
+
+- **The build runs in your Cloudflare account.** You sign in with Cloudflare and approve the install. The installer then hands the work to an installation service, a Worker in your own account (`sam-maintenance-…`), which builds and deploys SAM on a builder that also runs in your account. The build output stays in your account rather than on a public page. Updates go through the same service: you review the release and approve it there.
+- **The setup token only reaches you.** When the build finishes, the installation service shows the token on a page you open with your recovery credential, and its **Open SAM setup** link carries the token in the URL fragment, which browsers don't send to the server.
+- **Only your email can become the owner.** You enter your administrator email before anything is built. On an installer-built SAM, that is the only email that can create the first account, and with #2748 a GitLab server someone points SAM at can no longer vouch for that email.
+- **Prebuilt parts are checked before they are used.** When SAM's latest release has prebuilt artifacts, the installation service downloads them instead of building them, and only accepts files that match the release manifest's size and SHA-256 and container images that match the published registry digest. Anything else is built from source in your account.
+- **The installer's own access is short-lived.** The hosted installer holds a Cloudflare OAuth token for 15 minutes by default, and drops its copies when it hands over to the service in your account. If you'd rather not trust it even for that long, you can [host the installer yourself](/docs/guides/installer/#host-the-installer-yourself), and then nothing leaves your account at all.
+
+Two honest caveats. The installer is new, and it still labels a full installation as experimental. And until Cloudflare makes the hosted installer's OAuth client public, most people have to host the installer themselves, which takes a terminal and a Cloudflare API token. The [installer guide](/docs/guides/installer/) covers both. Over time we want the installer to be the default way to run SAM, and the fork-and-Actions path to be the exception.
+
+The same review has been running across the rest of SAM. Recent examples:
+
+- The Pulumi state-repair workflow no longer writes raw state into the GitHub Actions summary ([#2219](https://github.com/raphaeltm/simple-agent-manager/pull/2219)), the same class of leak as this one.
+- A workspace's old credentials stop working when the same workspace ID runs again, instead of staying valid for up to a day ([#2598](https://github.com/raphaeltm/simple-agent-manager/pull/2598)).
+- The VM agent refuses to proxy to its own port, and no longer trusts loopback for relayed credential requests ([#2550](https://github.com/raphaeltm/simple-agent-manager/pull/2550)).
+- Agents that need a secret ask you for it through a secure in-chat input, instead of you pasting it into the conversation ([#2688](https://github.com/raphaeltm/simple-agent-manager/pull/2688)).
 
 ## Who is affected
 
