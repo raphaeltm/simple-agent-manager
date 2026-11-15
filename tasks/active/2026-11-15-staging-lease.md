@@ -8,11 +8,11 @@ Staging live checks outlive deployment jobs; no active run plus five minutes is 
 
 ## Checklist and acceptance
 
-- [ ] Lease decision and API script: missing/free, foreign active refusal, expiry takeover, self renewal; malformed/API errors fail closed.
-- [ ] Environment-keyed serialized workflow preflight with configurable expected deploy time, default/capped hold and optional SAM task ID.
-- [ ] Same-workflow holder-only release and acquire-only path for bounded checks without full redeploys.
-- [ ] Unit and integration tests; permission/gating verification.
-- [ ] Update staging docs, Codex skill summary, and full reference: read/acquire/release, expiry wake rather than chat/poll.
+- [x] Lease decision and API script: missing/free, foreign active refusal, expiry takeover, self renewal; malformed/API errors fail closed.
+- [x] Environment-keyed serialized workflow preflight with configurable expected deploy time, default/capped hold and optional SAM task ID.
+- [x] Same-workflow holder-only release and acquire-only path for bounded checks without full redeploys.
+- [x] Unit and integration tests; permission/gating verification.
+- [x] Update staging docs, Codex skill summary, and full reference: read/acquire/release, expiry wake rather than chat/poll.
 - [ ] Local specialist reviews and affected checks; full CI green.
 - [ ] Live workflow-token/gh read proof, acquisition, refusal, renewal, release, expired takeover; one full staging deploy plus bounded lease-only checks; release after verification.
 - [ ] PR and CodeRabbit gate, rebase shared docs, merge; add usage note to idea 01M7FYGMEESYH3AJZJ0CT3NKCZ and channel evidence.

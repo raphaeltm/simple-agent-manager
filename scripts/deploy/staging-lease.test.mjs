@@ -175,3 +175,12 @@ test('API read/write errors, corrupt history, missing creation id and read-back 
     /mismatch/
   );
 });
+
+test('production aliases and inconsistent environment casing fail before API access', async () => {
+  for (const environment of ['production', 'Production', 'PRODUCTION', 'Staging', '']) {
+    await assert.rejects(
+      runLease({ ...options, environment, api: async () => assert.fail('no API access') }),
+      /lowercase, non-production/
+    );
+  }
+});

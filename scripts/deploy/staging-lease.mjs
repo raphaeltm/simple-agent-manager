@@ -90,8 +90,8 @@ export async function runLease({
   timing,
   now = Date.now(),
 }) {
-  if (!environment || environment === 'production')
-    throw new Error('A non-production environment is required');
+  if (!environment || environment !== environment.toLowerCase() || environment === 'production')
+    throw new Error('A lowercase, non-production environment is required');
   if (!branch || !/^[a-f0-9]{40}$/i.test(sha))
     throw new Error('Branch and full commit SHA are required');
   const query = new URLSearchParams({ environment, task: LEASE_TASK, per_page: '1' });
