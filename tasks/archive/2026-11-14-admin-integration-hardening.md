@@ -38,7 +38,7 @@ Follow-up to the 2026-11-12 setup-takeover incident (contained). Three gaps made
 - [x] Tests: clear route (rows + audit gone/created, env fallback reappears), D1 value never labelled environment, alert module (recipients, failure isolation, wording), hook filter, route wiring
 - [x] Docs: admin/self-hosting docs mention clearing + alerts
 - [x] Playwright visual audit 375/1280
-- [ ] Staging: set + clear test integration (not GitLab), label check, alert delivery evidence
+- [x] Staging: set + clear test integration (not GitLab), label check, alert delivery evidence
 
 ## Acceptance criteria
 
@@ -52,3 +52,10 @@ Follow-up to the 2026-11-12 setup-takeover incident (contained). Three gaps made
 - Actor labels (emails) are only returned to the superadmin admin route, never to the setup-token-gated `/api/setup/*` responses.
 - Clears skip the OAuth id/secret pair validation on purpose: an admin must always be able to delete stored values.
 - Discrimination checks run: label mapping revert -> 2 label tests red; clear statements removed -> 4 clear tests red; account hook removed -> 2 link-alert tests red.
+
+## Staging evidence (run 43657273196, 2026-11-15)
+
+- Labels: GitLab/Google-infra `stored in SAM` with the admin's name; GitHub OAuth/webhook `Worker environment fallback`.
+- GitHub webhook secret set then cleared through the UI. Audit rows: set (revision 58), reset (revision 59). Credential row deleted. Env fallback restored. No reload, no console errors.
+- Workers Observability: 2 × `security-alerts.security_alert.sent` (integration-changed, recipients 1, failed 0).
+- Blocker found and fixed separately: the ubuntu-latest → 26.04 migration broke the VM-agent artifact upload and the Playwright installs (#2744). Follow-up: `tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md` (in #2744).
