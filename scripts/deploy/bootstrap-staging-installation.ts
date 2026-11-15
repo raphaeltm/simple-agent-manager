@@ -256,6 +256,20 @@ export async function bootstrapInstallation(input: BootstrapInput): Promise<Boot
   }
 
   const agentKeys = await copyPlatformAgentKeys(input, admin.id, nowIso, log);
+  // A platform agent key is never handed to a workspace: it is used only through SAM's AI proxy,
+  // which each user opts into per agent (providerMode 'sam'). Opt the test users in for every
+  // agent whose key was copied, once; a setting a user later changes is left alone.
+  for (const agentType of agentKeys) {
+    for (const user of users) {
+      await input.target.run(
+        `INSERT INTO agent_settings (id, user_id, agent_type, provider_mode, created_at, updated_at)
+         SELECT ?, ?, ?, 'sam', ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM agent_settings WHERE user_id = ? AND agent_type = ?)`,
+        [`${user.id}-${agentType}`, user.id, agentType, nowMs, nowMs, user.id, agentType]
+      );
+    }
+    log(`test users use the SAM AI proxy for ${agentType}`);
+  }
 
   return {
     users: users.map((user) => user.id),

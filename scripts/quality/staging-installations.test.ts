@@ -414,6 +414,15 @@ describe('bootstrapInstallation on the real migration chain', () => {
     const report = await run();
 
     expect(report.agentKeys).toEqual(['claude-code']);
+    // The test users are opted into the SAM AI proxy, the only way a platform key is used.
+    expect(
+      target.db
+        .prepare(`SELECT user_id, agent_type, provider_mode FROM agent_settings ORDER BY user_id`)
+        .all()
+    ).toEqual([
+      { user_id: 'staging2-agent-admin', agent_type: 'claude-code', provider_mode: 'sam' },
+      { user_id: 'staging2-agent-user', agent_type: 'claude-code', provider_mode: 'sam' },
+    ]);
     expect(JSON.stringify(report) + logs.join('\n')).not.toContain('NEW-KEY');
     const row = target.db
       .prepare(
@@ -430,6 +439,11 @@ describe('bootstrapInstallation on the real migration chain', () => {
     expect(logs.join('\n')).toMatch(/skip agent key codex-bad \(openai-codex\): cannot decrypt/);
     expect(logs.join('\n')).not.toContain('codex-oauth');
 
+    target.db
+      .prepare(
+        `UPDATE agent_settings SET provider_mode = NULL WHERE user_id = 'staging2-agent-user'`
+      )
+      .run();
     await run();
     expect(
       target.db
@@ -438,6 +452,14 @@ describe('bootstrapInstallation on the real migration chain', () => {
         )
         .get()
     ).toEqual({ n: 1 });
+    // A user's own later choice survives the next deploy.
+    expect(
+      target.db
+        .prepare(
+          `SELECT count(*) AS n, max(provider_mode) AS mode FROM agent_settings WHERE user_id = 'staging2-agent-user'`
+        )
+        .get()
+    ).toEqual({ n: 1, mode: null });
   });
 
   it('is idempotent and keeps changes an admin made on the installation', async () => {
