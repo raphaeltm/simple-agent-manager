@@ -14,7 +14,7 @@ or service-account key) the sweep failed on every five-minute cron and orphaned 
 deleted. The failure was also invisible in `failedSweeps`, because account failures are contained
 inside the sweep.
 
-## Change (same as P1, byte-identical runtime files)
+## Change, part 1 (same as P1, byte-identical runtime files; commit edf482791)
 
 - `provider-orphan-reconciliation-core.ts`: a platform credential with `provider === 'gcp'` goes
   through `parseGcpCredential` + `createGcpTokenProvider` (credentialSource platform, acting as the
@@ -27,6 +27,35 @@ inside the sweep.
   the real entry point, token exchange and provider HTTP boundary; owned positive control plus
   foreign/legacy preservation; per-credential isolation), `handler-kill-switch.test.ts` (failed-only,
   partial-success and zero-error reporting).
+
+## Change, part 2 (scope grew after the box proof; commits 44bd1bfb0, 3f6d35272, 253e6662d)
+
+Box R16 showed that authentication alone does not make GCP orphan cleanup work. Coordinator
+approved the extension (event 44439269) with conditions recorded in the checklist below.
+
+- `44bd1bfb0` pure move: the destroy half of `provider-orphan-reconciliation-core.ts` (575 lines)
+  moves to `provider-orphan-destroy.ts` (rule 18).
+- `3f6d35272`: per-call request timeouts (list, ownership re-read, delete each get
+  `NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS`, as `env.ts` already documented "per-candidate");
+  no candidate starts after the sweep budget; providers with `requestVMDeletion` (GCP) get a
+  send-and-return delete bound to the re-read instance via new provider option
+  `expectedInstance` (id + zone, refuses before anything is sent), counted as
+  `deletionRequested` (new result field, `providerOrphansDeletionRequested` in cron summary),
+  never `destroyed`, and counted toward `PROVIDER_ORPHAN_DESTROY_LIMIT`. Others keep `deleteVM`.
+- `253e6662d`: drops unrelated prettier reformatting from the docs change.
+
+### Bounds (rule 81, rule 47), defaults
+
+- Request timeout T = 5 s per provider call; sweep budget B = 20 s; destroy limit L = 5.
+- Per account: list <= T; per candidate re-read <= T + delete <= T = 2T = 10 s.
+- No candidate starts after B, so one pass is at most about B + 2T + T = 35 s of provider I/O
+  per account loop (platform account first, then user accounts until B or L is reached).
+- Candidates per pass: at most L = 5 deletions; at GCP latency (each lookup up to 9 zonal GETs
+  plus one aggregated list, about 100-300 ms each) a candidate costs about 1-4 s, so all 5 fit
+  in B. The rest are not touched (nothing sent) and are selected again on the next eligible pass
+  (hourly by default). Worst-case drain of N orphans: ceil(N/5) passes, e.g. 20 orphans in 4 h.
+- Next pass after a request: VM gone -> not listed; still present (deleting or delete failed)
+  -> requested again (idempotent).
 
 ## Research findings
 
@@ -51,6 +80,7 @@ inside the sweep.
 - [ ] Box round R16: baseline failure, preflight, fixtures, positive deletion proof, controls,
       clean next run, cleanup, restore, FREE, note on idea 01M77HYN8N41MQ17TQZ622PPPV
 - [x] Main branch change (this PR), byte-identical runtime files
+- [x] Extended fix: per-call timeouts, sweep budget, send-and-return GCP delete bound to re-read (`expectedInstance`), `deletionRequested` counter, Hetzner unchanged control, tests incl. incident reproduction (proven red on shared signal), limit > one pass, budget, next-pass present/absent, identity change
 - [ ] Pre-PR validation: lint, typecheck, test, build
 - [ ] task-completion-validator
 - [ ] Staging no-regression: one natural sweep tick with unchanged platform Hetzner credential,
@@ -70,4 +100,21 @@ inside the sweep.
 
 ## Evidence
 
-(filled in as the work proceeds; see also PR body)
+### Box R16 (sam-box, platform GCP WIF credential 01M7EH6D77XEGNXNTZZN688CQG, env selfhost,
+installation ceb69517d92d6a294f697c7957f01d79). Config overrides in `.state/secrets.env`:
+PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS=240000, PROVIDER_ORPHAN_MIN_AGE_MS=900000 (restore at end).
+
+- Baseline on 4e88377be: `provider_orphan.credential_resolution_failed` every 5-min cron (36 in
+  3 h, 07:50-10:45), config error from `buildProviderConfig`; cron.completed scanned 0, errors 1,
+  skip `credential-resolution-failed`, failedSweeps [] (hidden).
+- Preflight 10:51: 0 node rows; only VM in project sam-box (no labels): zero candidates.
+- Fixtures e2-micro/10 GB/stopped/no IP/no SA, europe-west1-b: owned 4670269250816192548
+  (10:51:55), foreign (installation fedcba98...) 8501352887410241593 (10:52:06), young
+  1822245929685888572 (11:00:35).
+- P1-only build (deploy 10:53, version 6a6dac89a0e60aec): authenticates (10:55/11:00/11:05:
+  scanned 1/1/2, young 1/1/2, errors 0). 11:10 and 11:15: owned selected, delete aborted by the
+  shared 5 s signal BEFORE sending (no GCP delete op). 11:20 and 11:25: DELETE sent by
+  sam-nodes (GCP ops 11:20:05 owned, 11:25:04 young, each ~6 s), then the poll aborted:
+  reported destroy_failed, errors 1-2, failedSweeps [provider_orphan_reconciliation], no
+  deletion record, second candidate dropped. Deletion happened but was reported as failure.
+- Extended build (deploy 11:36:36, box branch 7df2551d5): in progress.
