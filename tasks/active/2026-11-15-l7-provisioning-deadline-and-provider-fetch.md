@@ -114,3 +114,9 @@ Logging adds none; provider-fetch removes a tee branch.
   section, L1/L2 fixed.
 - Extra discrimination: tunnel-budget addition removed -> `adds the tunnel-setup budget...` red;
   `NULL_BODY_STATUSES` removed -> `keeps a null-body status bodiless...` red.
+
+## Final state (2026-11-15 07:55 UTC)
+
+- PR #2749 ready for review, head `8a1c6519a1d01f447e67d15cdcbecf30214a997c`, CI 22 pass / 12 skipping / 0 fail. NOT merged: owner approves.
+- CodeRabbit: 1 Minor docs finding (deadline is a cancellation budget, not a whole-attempt bound), fixed in `8a1c6519`, thread resolved; no incremental re-review arrived.
+- Staging done and freed (root accepted strict FREE 06:36:42). Forced-failure/setting-effect check remains a reported gap (tunnel transport).
