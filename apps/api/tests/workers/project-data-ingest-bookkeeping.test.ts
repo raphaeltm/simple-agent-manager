@@ -61,6 +61,25 @@ async function fixture(enabled: boolean) {
 }
 
 describe('ingest bookkeeping in real workerd', () => {
+  it('keeps a sparse deadline index out of the steady update write cost', async () => {
+    const { stub, session } = await fixture(true);
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql;
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN experiment_due_at INTEGER');
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN experiment_pending INTEGER NOT NULL DEFAULT 0');
+      sql.exec('CREATE INDEX experiment_pending ON chat_sessions(experiment_due_at) WHERE experiment_due_at IS NOT NULL');
+      const first = sql.exec('UPDATE chat_sessions SET experiment_due_at = ?, experiment_pending = experiment_pending + 1 WHERE id = ?', Date.now(), session);
+      expect(first.rowsWritten).toBe(2);
+      const steady = sql.exec('UPDATE chat_sessions SET experiment_pending = experiment_pending + 1 WHERE id = ?', session);
+      expect(steady.rowsWritten).toBe(1);
+      const selection = sql.exec('SELECT id FROM chat_sessions WHERE experiment_due_at IS NOT NULL AND experiment_due_at <= ? ORDER BY experiment_due_at LIMIT 1', Date.now());
+      expect(selection.toArray()).toHaveLength(1);
+      expect(selection.rowsRead).toBeLessThanOrEqual(2);
+      const plan = sql.exec('EXPLAIN QUERY PLAN SELECT id FROM chat_sessions WHERE experiment_due_at IS NOT NULL AND experiment_due_at <= ? ORDER BY experiment_due_at LIMIT 1', Date.now()).toArray();
+      expect(JSON.stringify(plan)).toContain('experiment_pending');
+    });
+  });
+
   it('attributes the steady-state writes including scheduled idle cleanup in both modes', async () => {
     const reports: unknown[] = [];
     for (const enabled of [false, true]) {
