@@ -1,5 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
+import { NATIVE_RUNTIME_SUITES } from './tests/workers/support/native-runtime-suites';
+
 /**
  * Vitest orchestrates from Node; the actual code runs as native workerd modules
  * in Miniflare with real D1 and DO SQLite. The normal Workers pool's dynamic
@@ -7,11 +9,7 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
-    include: [
-      'tests/workers/sam-session-do.test.ts',
-      'tests/workers/sam-grounding-runtime.test.ts',
-      'tests/workers/sam-live-stream.test.ts',
-    ],
+    include: NATIVE_RUNTIME_SUITES,
     testTimeout: 20_000,
     hookTimeout: 60_000,
     fileParallelism: false,
