@@ -8,7 +8,7 @@ user-invocable: false
 
 ## Installer first-owner binding
 
-`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN`, which authorizes provider configuration rather than user login.
+`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN` (a plain-text var masked in deploy logs, accepted only until setup completes or an active superadmin exists), which authorizes provider configuration rather than user login.
 
 ## GitHub Environment Secrets (GitHub Settings -> Environments -> production)
 

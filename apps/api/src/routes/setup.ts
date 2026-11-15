@@ -35,13 +35,14 @@ const SetupRequestBodySchema = v.object({
   config: v.optional(v.unknown()),
 });
 
+/**
+ * The rate-limit bucket for setup-token attempts. Cloudflare's edge sets CF-Connecting-IP and
+ * overwrites any client copy; X-Forwarded-For and User-Agent are whatever the caller sends, so
+ * rotating them would hand out a fresh attempt budget per request. Requests without the header
+ * (never the case behind Cloudflare) share one bucket.
+ */
 function clientIdentifier(c: SetupContext): string {
-  return (
-    c.req.header('CF-Connecting-IP') ??
-    c.req.header('X-Forwarded-For') ??
-    c.req.header('User-Agent') ??
-    'unknown'
-  );
+  return c.req.header('CF-Connecting-IP') ?? 'unknown';
 }
 
 function setupClosed(): AppError {
