@@ -40,25 +40,39 @@ findings of task `01M6Y5N5R79579YVN3RW007H25`.
 
 ## Implementation checklist
 
-- [ ] Timing-balanced Workers sequencer + committed per-file timings + refresh tool
-- [ ] `vitest.workers.config.ts` uses it; CI runs 6 shards; build only `api^...`
-- [ ] `changes` job: graph-derived filters `api`, `api-unit`, `web`, `public-site`, `packages`
+- [x] Timing-balanced Workers sequencer + committed per-file timings + refresh tool
+- [x] `vitest.workers.config.ts` uses it; CI runs 6 shards; build only `api^...`
+- [x] `changes` job: graph-derived filters `api`, `api-unit`, `web`, `public-site`, `packages`
       (YAML anchors for root inputs), forced true on `push`
-- [ ] `test-api` on `api-unit`, `test-web` on `web`, `test-packages` on `packages`, `test` merges only
+- [x] `test-api` on `api-unit`, `test-web` on `web`, `test-packages` on `packages`, `test` merges only
       what ran and requires skipped for unselected suites
-- [ ] `workspace-quality-surfaces` on `public-site`/`browser-install`; lint and type-check www there when
+- [x] `workspace-quality-surfaces` on `public-site`/`browser-install`; lint and type-check www there when
       root Lint did not run; remove `Marketing Site`
-- [ ] Shared simulator module; new `ci-suite-selection.test.ts` (graph coverage, cross-read scan, selection
+- [x] Shared simulator module; new `ci-suite-selection.test.ts` (graph coverage, cross-read scan, selection
       table, runner budget); update existing CI wiring tests
-- [ ] Docs: references to Marketing Site / repo-quality test gating
+- [x] Docs: references to Marketing Site / repo-quality test gating
 - [ ] Real CI runs for at least two change kinds; durations and test counts recorded in PR
 
 ## Acceptance criteria
 
 - [ ] API-touching ready run about 10 min; Workers shards balanced
-- [ ] Selection table in PR, pinned by `scripts/quality/ci-suite-selection.test.ts`; a new package or a new
+- [x] Selection table in PR, pinned by `scripts/quality/ci-suite-selection.test.ts`; a new package or a new
       dependency edge fails that test until the filters include it
-- [ ] Main pushes run every suite
-- [ ] Job counts before/after for API-only, web-only, shared-package PRs; worst case about 26 or less
+- [x] Main pushes run every suite
+- [x] Job counts before/after for API-only, web-only, shared-package PRs; worst case about 26 or less
 - [ ] Test counts per suite unchanged from main where the suite runs
 - [ ] Note on idea `01M7FYGMEESYH3AJZJ0CT3NKCZ`
+
+## Review notes
+
+- task-completion-validator: FAIL with 2 HIGH under-selections (www test reads
+  `apps/web/src/components/AgentSettingsCard.tsx` by segmented join; Workers suite reaches
+  `tests/fixtures/diagnostic-secret-canaries.json` through an in-package helper). Both added to
+  the filters; the scanner now follows segmented joins and in-package imports, with per-suite
+  liveness assertions; removing either entry reddens its scan.
+- test-engineer: same HIGH, plus Test env mapping pinned, closure check refactored so the
+  mutation test runs the real guard, budget block retitled with the 43734352275 combined shape
+  (23 -> 26), sequencer test uses the shared native-runtime exclude list.
+- Demo run (apps/www-only change, PR #2768, run 43757399926): 10.5 min wall; only Workspace
+  Quality Surfaces 10.1, Test other packages 3.8, Code Quality 1.9 (expected failure: demo lacks
+  the apps/api half), Test 0.6 ran; every API and web suite skipped.

@@ -105,7 +105,8 @@ jobs:
               - 'scripts/deploy/worker-var-defaults.ts'
               - 'scripts/quality/fixtures/github-environment-variables-*.json'
               - 'scripts/quality/fixtures/worker-var-binding-audit-*.json'
-              # Cross-boundary fixtures shared with the VM agent.
+              # Cross-boundary fixtures shared with the VM agent and the web app.
+              - 'tests/fixtures/diagnostic-secret-canaries.json'
               - 'tests/fixtures/provider-limit-rejections.json'
             # The API unit suite also reads or imports files outside its dependencies.
             # ci-suite-selection.test.ts scans the tests and their imports for these.
@@ -134,7 +135,6 @@ jobs:
               - 'scripts/quality/node-pool-boundary/**'
               - 'tests/fixtures/acp-activity-report-v1.json'
               - 'tests/fixtures/deploy-release/**'
-              - 'tests/fixtures/diagnostic-secret-canaries.json'
               - 'tests/fixtures/durable-execution-protocol-v1.json'
             web:
               - *workspace-root
@@ -178,6 +178,8 @@ jobs:
               - 'packages/worker-core/**'
               # apps/installer reads the installer protocol and source cache.
               - 'scripts/deploy/installer-*'
+              # The www integrations catalog test checks the app's agent sign-in matrix.
+              - 'apps/web/src/components/AgentSettingsCard.tsx'
             vm-agent:
               - 'packages/vm-agent/**'
               - 'apps/api/Dockerfile.vm-agent-container'

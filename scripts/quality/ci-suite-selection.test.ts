@@ -153,10 +153,22 @@ const SUITES = [
     output: 'packages',
     job: 'test-packages',
     roots: OTHER_TESTED.map((pkg) => pkg.name),
-    extra: {},
+    extra: { 'apps/web': 'the www integrations catalog test reads the agent sign-in matrix' },
     scan: OTHER_TESTED.map((pkg) => pkg.dir),
   },
 ] as const;
+
+/** Paths in a suite's closure (and root inputs) its filter does not match. */
+function closureGaps(suite: (typeof SUITES)[number], filters = pathFilters()): string[] {
+  const probes = [
+    ...[...closure([...suite.roots])].flatMap((name) => {
+      const { dir } = PACKAGES.get(name)!;
+      return [`${dir}/package.json`, `${dir}/src/any/file.ts`];
+    }),
+    ...ROOT_INPUTS,
+  ];
+  return probes.filter((path) => !matches(suite.output, path, filters));
+}
 
 /** paths-filter glob semantics (picomatch, `dot: true`) for the patterns ci.yml uses. */
 function globToRegExp(glob: string): RegExp {
@@ -232,12 +244,7 @@ describe('suite filters follow the package dependency graph', () => {
   it.each(SUITES.map((suite) => [suite.output, suite] as const))(
     '%s covers every package in its dependency closure and every root input',
     (_, suite) => {
-      for (const name of closure([...suite.roots])) {
-        const { dir } = PACKAGES.get(name)!;
-        expect(matches(suite.output, `${dir}/package.json`), `${dir}/package.json`).toBe(true);
-        expect(matches(suite.output, `${dir}/src/any/file.ts`), `${dir}/src`).toBe(true);
-      }
-      for (const input of ROOT_INPUTS) expect(matches(suite.output, input), input).toBe(true);
+      expect(closureGaps(suite)).toEqual([]);
     }
   );
 
@@ -267,15 +274,23 @@ describe('suite filters follow the package dependency graph', () => {
     expect(packagesStep?.run?.match(/--filter=/gu)).toHaveLength(2);
   });
 
-  it('a filter that misses a dependency is caught', () => {
-    const source = workflowSource('ci.yml').replace(
-      "              - 'packages/repo-hosting/**'\n              - 'packages/scheduler-core/**'\n              - 'packages/shared/**'\n              - 'packages/worker-core/**'\n              - 'scripts/quality/*migration*.ts'",
-      "              - 'packages/scheduler-core/**'\n              - 'packages/shared/**'\n              - 'packages/worker-core/**'\n              - 'scripts/quality/*migration*.ts'"
+  it('a filter that misses a dependency or a root input is caught by the same check', () => {
+    const api = SUITES.find((suite) => suite.output === 'api')!;
+    const web = SUITES.find((suite) => suite.output === 'web')!;
+    const without = (line: string) => {
+      const source = workflowSource('ci.yml').replace(`              - '${line}'\n`, '');
+      expect(source, line).not.toBe(workflowSource('ci.yml'));
+      return pathFilters(loadWorkflow(source));
+    };
+    // A dependency of apps/api only (repo-hosting) and a dependency of apps/web only (terminal).
+    expect(closureGaps(api, without('packages/repo-hosting/**'))).toContain(
+      'packages/repo-hosting/package.json'
     );
-    expect(source).not.toBe(workflowSource('ci.yml'));
-    const filters = pathFilters(loadWorkflow(source));
-    expect(matches('api', 'packages/repo-hosting/src/index.ts', filters)).toBe(false);
-    expect(matches('api', 'packages/repo-hosting/src/index.ts')).toBe(true);
+    expect(closureGaps(web, without('packages/terminal/**'))).toContain(
+      'packages/terminal/package.json'
+    );
+    // The shared root inputs live in one anchor every suite includes.
+    expect(closureGaps(web, without('pnpm-lock.yaml'))).toEqual(['pnpm-lock.yaml']);
   });
 });
 
@@ -304,7 +319,8 @@ const CODE_FILE = /\.(?:[cm]?[jt]sx?|astro)$/u;
 /**
  * Paths a source file reads or imports. Relative strings resolve against the file,
  * then the package root (for `process.cwd()` joins); `'<apps|packages|tools>/<x>/src'`
- * resolves against the repository root; a workspace package import names that
+ * and segmented joins (`'apps', 'web', 'src', …`) resolve against the repository root;
+ * a workspace package import names that
  * package's package.json. Strings that resolve to nothing on disk (fixture text) are
  * dropped. `imported` marks module imports, whose own imports are followed.
  */
@@ -328,6 +344,16 @@ function references(file: string): Array<{ path: string; imported: boolean }> {
   for (const match of source.matchAll(/['"`]((?:apps|packages|tools)\/[\w-]+\/src)['"`]/gu)) {
     found.push({ path: resolveExisting(join(REPO_ROOT, match[1]!)), imported: false });
   }
+  // Segmented joins onto the repository root: read('apps', 'web', 'src', 'X.tsx').
+  for (const match of source.matchAll(
+    /['"`](apps|packages|scripts|tests|tools|infra)['"`]((?:\s*,\s*['"`][^'"`\s,()]+['"`])+)/gu
+  )) {
+    const segments = [
+      match[1]!,
+      ...[...match[2]!.matchAll(/['"`]([^'"`]+)['"`]/gu)].map((m) => m[1]!),
+    ];
+    found.push({ path: resolveExisting(join(REPO_ROOT, ...segments)), imported: false });
+  }
   for (const match of source.matchAll(/from\s+['"](@simple-agent-manager\/[\w-]+)/gu)) {
     const pkg = PACKAGES.get(match[1]!);
     if (pkg) found.push({ path: join(REPO_ROOT, pkg.dir, 'package.json'), imported: false });
@@ -336,8 +362,9 @@ function references(file: string): Array<{ path: string; imported: boolean }> {
 }
 
 /**
- * Files outside the scanned package that its sources read or import, following the
- * imports of every module imported from outside the package.
+ * Files outside the scanned package that its sources read or import. Imports are
+ * followed: in-package modules outside the scanned directory (shared test helpers,
+ * app sources) and modules imported from other packages are scanned too.
  */
 function crossReads(
   dir: string,
@@ -361,7 +388,12 @@ function crossReads(
     const file = queue.shift()!;
     for (const { path, imported } of references(file)) {
       const repoPath = relative(REPO_ROOT, path);
-      if (repoPath === '' || repoPath.startsWith('..') || repoPath.startsWith(`${scanned}/`)) {
+      if (repoPath === '' || repoPath.startsWith('..')) continue;
+      if (repoPath.startsWith(`${scanned}/`)) {
+        if (imported && CODE_FILE.test(path) && statSync(path).isFile() && !seen.has(path)) {
+          seen.add(path);
+          queue.push(path);
+        }
         continue;
       }
       const isDirectory = statSync(path).isDirectory();
@@ -397,7 +429,21 @@ describe('every file a suite reads outside its package is in its filter', () => 
         .map(({ path, file }) => `${path} <- ${file}`);
       expect([...new Set(uncovered)].sort()).toEqual([]);
     },
-    60_000
+    120_000
+  );
+
+  it.each([
+    ['api', 'tests/fixtures/diagnostic-secret-canaries.json'],
+    ['web', 'tests/fixtures/diagnostic-secret-canaries.json'],
+    ['public-site', 'packages/ui/package.json'],
+    ['packages', 'apps/web/src/components/AgentSettingsCard.tsx'],
+  ])(
+    'the %s scan finds %s (liveness)',
+    (output, path) => {
+      const suite = SUITES.find((candidate) => candidate.output === output)!;
+      expect(suiteReads(suite).map((read) => read.path)).toContain(path);
+    },
+    120_000
   );
 
   it('finds the known cross-reads (liveness, so an empty scan cannot pass)', () => {
@@ -412,7 +458,7 @@ describe('every file a suite reads outside its package is in its filter', () => 
     const vmAgentRead = apiReads.find((path) => path.startsWith('packages/vm-agent/'))!;
     expect(matches('api', vmAgentRead)).toBe(false);
     expect(matches('api-unit', vmAgentRead)).toBe(true);
-  }, 60_000);
+  }, 120_000);
 });
 
 /**
@@ -538,6 +584,22 @@ describe('Test merges only what ran and requires unselected suites to be skipped
     }
   );
 
+  it("reads each suite's selection and result from the matching job", () => {
+    expect(step.env).toEqual({
+      API_SELECTED: '${{ needs.changes.outputs.api-unit }}',
+      WEB_SELECTED: '${{ needs.changes.outputs.web }}',
+      PACKAGES_SELECTED: '${{ needs.changes.outputs.packages }}',
+      API_RESULT: '${{ needs.test-api.result }}',
+      WEB_RESULT: '${{ needs.test-web.result }}',
+      PACKAGES_RESULT: '${{ needs.test-packages.result }}',
+    });
+    // The suite jobs are gated on the same outputs the step reads.
+    const jobs = loadWorkflow().jobs;
+    expect(jobs['test-api']!.if).toContain("needs.changes.outputs.api-unit == 'true'");
+    expect(jobs['test-web']!.if).toContain("needs.changes.outputs.web == 'true'");
+    expect(jobs['test-packages']!.if).toContain("needs.changes.outputs.packages == 'true'");
+  });
+
   it('merges coverage only for the suites that ran', () => {
     const steps = loadWorkflow().jobs.test!.steps!;
     const byName = (name: string) => steps.find((candidate) => candidate.name === name)!;
@@ -553,11 +615,13 @@ describe('Test merges only what ran and requires unselected suites to be skipped
 });
 
 /**
- * Jobs a ready PR starts, matrix entries counted. Before this change (main at 3f88f49b2):
- * API only 19, web only 16, shared package 19, lockfile 15 (no Workers suite: the old `api`
- * filter had no root inputs), public site or docs 5, every filter 27.
+ * Jobs a ready PR starts, matrix entries counted. GitHub runs at most 20 of the account's
+ * jobs at once and queues the rest, so these bound how much one PR queues others.
+ * Before this change (main at 3f88f49b2, same simulator): API only 19, web only 16,
+ * shared package 19, lockfile 15 (no Workers suite: the old `api` filter had no root
+ * inputs), public site or docs 5, API + web + VM agent + docs 23, every filter 27.
  */
-describe('runner budget (GitHub caps the account at 20 concurrent jobs)', () => {
+describe('runner budget (jobs a ready PR starts)', () => {
   const count = (paths: string[]) =>
     jobCount(simulate({ eventName: 'pull_request', filters: filtersFor(paths) }));
 
@@ -573,6 +637,26 @@ describe('runner budget (GitHub caps the account at 20 concurrent jobs)', () => 
 
   it('no single-area or shared-package PR starts more than 26 jobs', () => {
     for (const [, paths] of TABLE) expect(count(paths)).toBeLessThanOrEqual(26);
+  });
+
+  it.each([
+    // The shape of baseline run 43734352275.
+    [
+      'API, web, VM agent and docs',
+      [
+        'apps/api/src/index.ts',
+        'apps/web/src/App.tsx',
+        'packages/vm-agent/main.go',
+        'apps/www/src/content/docs/docs/index.mdx',
+      ],
+    ],
+    ['shared package and VM agent', ['packages/shared/src/index.ts', 'packages/vm-agent/main.go']],
+    [
+      'lockfile, VM agent and Go modules',
+      ['pnpm-lock.yaml', 'packages/vm-agent/main.go', 'packages/vm-agent/go.mod'],
+    ],
+  ])('a ready %s PR starts at most 26 jobs', (_, paths) => {
+    expect(count(paths)).toBeLessThanOrEqual(26);
   });
 
   it('a PR that matches every filter starts at most 30 jobs (27 before: three more Workers shards)', () => {

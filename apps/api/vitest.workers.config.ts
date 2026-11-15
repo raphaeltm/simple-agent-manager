@@ -14,6 +14,7 @@ import { resolve } from 'node:path';
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
+import { NATIVE_RUNTIME_SUITES } from './tests/workers/support/native-runtime-suites';
 import TimingBalancedSequencer from './tests/workers/support/timing-balanced-sequencer';
 
 const d1Migrations = await readD1Migrations(resolve(__dirname, './src/db/migrations'));
@@ -144,11 +145,7 @@ export default defineConfig({
     globals: true,
     include: ['tests/workers/**/*.test.ts'],
     // Executed by vitest.sam-runtime.config.ts in the same test:workers command.
-    exclude: [
-      'tests/workers/sam-session-do.test.ts',
-      'tests/workers/sam-grounding-runtime.test.ts',
-      'tests/workers/sam-live-stream.test.ts',
-    ],
+    exclude: NATIVE_RUNTIME_SUITES,
     setupFiles: ['./tests/workers/setup-d1-migrations.ts'],
     provide: {
       D1_MIGRATIONS_JSON: JSON.stringify(d1Migrations),

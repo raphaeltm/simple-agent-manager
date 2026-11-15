@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import { BaseSequencer, type TestSpecification, type Vitest } from 'vitest/node';
 
+import { NATIVE_RUNTIME_SUITES } from '../../apps/api/tests/workers/support/native-runtime-suites';
 import { loadShardTimings, planShards } from '../../apps/api/tests/workers/support/shard-plan';
 import TimingBalancedSequencer from '../../apps/api/tests/workers/support/timing-balanced-sequencer';
 
@@ -170,7 +171,10 @@ describe('time-balanced Workers shards', () => {
           ? [`${dir}/${entry.name}`]
           : []
     );
-  })('tests/workers').sort();
+  })('tests/workers')
+    // The Workers pool's include, minus the excludes it shares with the native runtime config.
+    .filter((file) => !NATIVE_RUNTIME_SUITES.includes(file))
+    .sort();
   const timings = loadShardTimings();
   const SHARDS = 6;
 
@@ -180,11 +184,14 @@ describe('time-balanced Workers shards', () => {
   }
   const specs = workerFiles.map((file) => ({ moduleId: join(apiRoot, file) }) as TestSpecification);
   const pathOf = (spec: TestSpecification) => relative(apiRoot, spec.moduleId);
-  const load = (files: string[]) =>
-    files.reduce((sum, file) => sum + (timings.files[file] ?? 0), 0);
+  // The plan's own predictions, so unmeasured files count at the median as planShards counts them.
+  const predicted = (files: string[]) =>
+    planShards(files, 1, { ...timings, shardOneExtraMs: 0 }).predictedMs[0]!;
 
   it('finds the suite and has measurements for most of it (liveness)', () => {
     expect(workerFiles.length).toBeGreaterThan(150);
+    for (const native of NATIVE_RUNTIME_SUITES)
+      expect(existsSync(join(apiRoot, native))).toBe(true);
     const measured = workerFiles.filter((file) => file in timings.files).length;
     expect(measured / workerFiles.length).toBeGreaterThan(0.5);
   });
@@ -203,16 +210,16 @@ describe('time-balanced Workers shards', () => {
     expect(await sequencerFor().balanced.shard(specs)).toEqual(specs);
   });
 
-  it('balances measured time far better than Vitest hash sharding', async () => {
+  it('balances measured time within 10% of the mean, better than Vitest hash sharding', async () => {
     const max = async (kind: 'balanced' | 'hashed') => {
       const loads: number[] = [];
       for (let index = 1; index <= SHARDS; index++) {
         const shard = await sequencerFor({ index, count: SHARDS })[kind].shard(specs);
-        loads.push(load(shard.map(pathOf)) + (index === 1 ? timings.shardOneExtraMs : 0));
+        loads.push(predicted(shard.map(pathOf)) + (index === 1 ? timings.shardOneExtraMs : 0));
       }
       return Math.max(...loads);
     };
-    const mean = (load(workerFiles) + timings.shardOneExtraMs) / SHARDS;
+    const mean = (predicted(workerFiles) + timings.shardOneExtraMs) / SHARDS;
     const balanced = await max('balanced');
     expect(balanced).toBeLessThanOrEqual(mean * 1.1);
     expect(balanced).toBeLessThan(await max('hashed'));
