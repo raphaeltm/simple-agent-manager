@@ -161,6 +161,16 @@ describe('analyzeDockerfile refuses inputs it cannot fingerprint', () => {
       `${from}RUN curl -fsSL https://bun.sh/install | bash\n`,
       /not in REVIEWED_FETCH_URLS/,
     ],
+    [
+      'running a file downloaded from an unreviewed URL',
+      `${from}RUN curl -fsSL -o /tmp/x.sh https://example.com/x.sh; sh /tmp/x.sh\n`,
+      /not in REVIEWED_FETCH_URLS/,
+    ],
+    [
+      'running a file the RUN did not download',
+      `${from}RUN curl -fsSL -o /tmp/uv.sh https://astral.sh/uv/0.13.8/install.sh; sh /tmp/other.sh\n`,
+      /not a copied file/,
+    ],
     ['a command outside the allowlist', `${from}RUN corepack enable\n`, /not in ALLOWED_COMMANDS/],
     [
       'gh release download',

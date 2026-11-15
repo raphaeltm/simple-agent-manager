@@ -56,8 +56,8 @@ const DIGEST_REF = /@(sha256:[a-f0-9]{64})$/;
 const CONTEXT_PATH = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/;
 const NPM_EXACT =
   /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-const PYPI_EXACT = /^[A-Za-z0-9][A-Za-z0-9._-]*==[0-9][0-9A-Za-z.+!-]*$/;
-const URL_LITERAL = /https?:\/\/[^\s"'`)]+/g;
+const PYPI_EXACT = /^[A-Za-z0-9][A-Za-z0-9._-]*==\d[0-9A-Za-z.+!-]*$/;
+const URL_LITERAL = /https?:\/\/[^\s"'`);|&<>]+/g;
 const DEB_LINE =
   /\bdeb\s+(?:\[[^\]]*\]\s+)?(https?:\/\/[^\s"']+)\s+([^\s"'>]+)((?:\s+[A-Za-z0-9][A-Za-z0-9-]*)+)/g;
 /** Installers whose resolution this module cannot fingerprint. */
@@ -98,6 +98,7 @@ const ALLOWED_COMMANDS = new Set([
   'npm',
   'rm',
   'set',
+  'sha256sum',
   'touch',
   'true',
   'uv',
@@ -131,16 +132,21 @@ export function dockerfileInstructions(text: string): { keyword: string; args: s
   for (const raw of lines) {
     // BuildKit drops comment lines, also inside a continued instruction.
     if (/^\s*#/.test(raw)) continue;
-    const line = raw.replace(/\s+$/, '');
+    const line = raw.trimEnd();
     if (line.endsWith('\\')) {
       // A shell line continuation is no separator: `a \\<newline> b` is `a b`.
       current += `${line.slice(0, -1)} `;
       continue;
     }
     current += line;
-    const match = /^\s*([A-Za-z]+)\s+([\s\S]*)$/.exec(current);
-    if (match) instructions.push({ keyword: match[1].toUpperCase(), args: match[2].trim() });
-    else if (current.trim()) unsupported(`unparseable line: ${current.trim().slice(0, 80)}`);
+    const trimmed = current.trim();
+    const keyword = /^[A-Za-z]+/.exec(trimmed)?.[0];
+    if (keyword && /^\s/.test(trimmed.slice(keyword.length)))
+      instructions.push({
+        keyword: keyword.toUpperCase(),
+        args: trimmed.slice(keyword.length).trim(),
+      });
+    else if (trimmed) unsupported(`unparseable line: ${trimmed.slice(0, 80)}`);
     current = '';
   }
   if (current.trim()) unsupported('dangling line continuation');
@@ -233,7 +239,7 @@ function analyzeCopy(args: string, stages: Map<string, Stage>, copies: CopyTarge
     if (!/^--(?:chown|chmod)=/.test(flag)) unsupported(`COPY flag ${flag}`);
   }
   if (paths.length < 2) unsupported('COPY without source and destination');
-  const destination = paths[paths.length - 1];
+  const destination = paths.at(-1) as string;
   for (const source of paths.slice(0, -1)) {
     if (!CONTEXT_PATH.test(source) || source.split('/').includes('..'))
       unsupported(`COPY source ${source} is not a plain context file path`);
@@ -263,7 +269,7 @@ function commandsOf(text: string): string[][] {
     .map((tokens) => {
       // Drop leading VAR=value assignments.
       let index = 0;
-      while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index])) index++;
+      while (index < tokens.length && /^[A-Za-z_]\w*=/.test(tokens[index])) index++;
       return tokens.slice(index);
     })
     .filter((tokens) => tokens.length > 0);
@@ -273,13 +279,28 @@ interface RunState {
   stage: Stage;
   copies: CopyTarget[];
   inputs: ImageInputs;
+  /** Files a curl/wget in this RUN wrote from a literal (reviewed) URL. */
+  downloaded: Set<string>;
+}
+
+/** Output file of a curl/wget command (`-o`, `--output`, `-O`); `-` means stdout. */
+function downloadTarget(tokens: string[]): string | undefined {
+  for (let index = 1; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (token === '-o' || token === '--output' || token === '-O') return tokens[index + 1];
+    const joined = /^(?:--output=|-O)(.+)$/.exec(token);
+    if (joined) return joined[1];
+  }
+  return undefined;
 }
 
 function scriptTarget(path: string | undefined, state: RunState) {
   if (path === undefined) return; // Reads stdin: the piped content is a fetched URL.
   if (path.startsWith('-')) unsupported(`interpreter flag ${path}`);
   // Files of an exact-pinned global npm package (the claude-code postinstall).
-  if (/^\$\(npm root -g\)\//.test(path)) return;
+  if (path.startsWith('$(npm root -g)/')) return;
+  // Downloaded in this RUN from a literal URL, which must be in REVIEWED_FETCH_URLS.
+  if (state.downloaded.has(path)) return;
   const copy = state.copies.find((candidate) => candidate.destination === path);
   if (!copy) unsupported(`build executes ${path}, which is not a copied file`);
   if (!REVIEWED_BUILD_SCRIPTS[copy.source])
@@ -353,6 +374,8 @@ function analyzeRun(args: string, state: RunState) {
     else if (command === 'curl' || command === 'wget') {
       if (!tokens.some((token) => /^https?:\/\//.test(token)))
         unsupported(`${command} without a literal URL`);
+      const target = downloadTarget(tokens);
+      if (target && target !== '-') state.downloaded.add(target);
     } else if (INTERPRETERS.has(command)) scriptTarget(tokens[1], state);
   }
   for (const url of withoutDeb.match(URL_LITERAL) ?? []) {
@@ -368,11 +391,18 @@ function analyzeRun(args: string, state: RunState) {
   }
 }
 
+/**
+ * Code-unit order. Keys must match on every machine, so never `localeCompare`,
+ * whose order depends on the host locale.
+ */
+export function byCodeUnit(a: string, b: string): number {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
+
 function sortedUnique<T>(values: T[], key: (value: T) => string): T[] {
   const byKey = new Map(values.map((value) => [key(value), value]));
-  return [...byKey.keys()]
-    .sort((a, b) => Number(a > b) - Number(a < b))
-    .map((k) => byKey.get(k) as T);
+  return [...byKey.keys()].sort(byCodeUnit).map((k) => byKey.get(k) as T);
 }
 
 /** Every input of the image a Dockerfile builds, or why it cannot be keyed. */
@@ -415,7 +445,8 @@ export function analyzeDockerfile(text: string): DockerfileAnalysis {
         const before = copies.length;
         analyzeCopy(args, stages, copies);
         inputs.copies.push(...copies.slice(before).map((copy) => copy.source));
-      } else if (keyword === 'RUN') analyzeRun(args, { stage, copies, inputs });
+      } else if (keyword === 'RUN')
+        analyzeRun(args, { stage, copies, inputs, downloaded: new Set() });
     }
     if (!stage) unsupported('no FROM');
   } catch (error) {
@@ -439,11 +470,11 @@ export function analyzeDockerfile(text: string): DockerfileAnalysis {
 }
 
 export function aptSourceId(source: AptSource): string {
-  return `${source.url} ${source.suite} ${[...source.components].sort().join(',')}`;
+  return `${source.url} ${source.suite} ${[...source.components].sort(byCodeUnit).join(',')}`;
 }
 
 export function pypiToolId(tool: PypiTool): string {
-  return `${tool.spec} python=${tool.python} with=${[...tool.with].sort().join(',')}`;
+  return `${tool.spec} python=${tool.python} with=${[...tool.with].sort(byCodeUnit).join(',')}`;
 }
 
 /** Fingerprints of every input in an `ImageInputs`, keyed by input identity. */

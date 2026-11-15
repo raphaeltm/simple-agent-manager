@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import {
   type AptSource,
   aptSourceId,
+  byCodeUnit,
   type ImageInputs,
   type InputFingerprints,
   type PypiTool,
@@ -55,7 +56,7 @@ export function aptIndexFingerprint(inRelease: string, source: AptSource): strin
   const lines: string[] = [];
   let inSha256 = false;
   for (const line of inRelease.split('\n')) {
-    if (/^SHA256:/.test(line)) {
+    if (line.startsWith('SHA256:')) {
       inSha256 = true;
       continue;
     }
@@ -69,7 +70,7 @@ export function aptIndexFingerprint(inRelease: string, source: AptSource): strin
   for (const component of source.components)
     if (!lines.some((line) => line.includes(` ${component}/binary-amd64/Packages`)))
       throw new Error(`No amd64 package index for ${aptSourceId(source)} component ${component}`);
-  return sha256(lines.sort().join('\n'));
+  return sha256(lines.sort(byCodeUnit).join('\n'));
 }
 
 /**
@@ -89,12 +90,9 @@ export function npmLockFingerprint(lockJson: string, scriptsRun = false): string
       const entry = value as Record<string, unknown>;
       if (typeof entry.version !== 'string' || !entry.version)
         throw new Error(`npm lock entry ${path} has no version`);
-      const identity =
-        typeof entry.integrity === 'string'
-          ? entry.integrity
-          : typeof entry.resolved === 'string'
-            ? entry.resolved
-            : '';
+      let identity = '';
+      if (typeof entry.integrity === 'string') identity = entry.integrity;
+      else if (typeof entry.resolved === 'string') identity = entry.resolved;
       if (!identity) throw new Error(`npm lock entry ${path} has no integrity`);
       const name = path.split('node_modules/').pop() ?? path;
       if (scriptsRun && entry.hasInstallScript === true && !REVIEWED_NPM_INSTALL_SCRIPTS[name])
@@ -102,7 +100,7 @@ export function npmLockFingerprint(lockJson: string, scriptsRun = false): string
       return `${path}@${entry.version} ${identity}`;
     });
   if (!entries.length) throw new Error('Empty npm lock');
-  return sha256(entries.sort().join('\n'));
+  return sha256(entries.sort(byCodeUnit).join('\n'));
 }
 
 async function npmFingerprint(
@@ -162,7 +160,7 @@ async function pypiFingerprint(tool: PypiTool, io: FingerprintIo, uv: string): P
     .filter((line) => line && !line.startsWith('#'));
   if (!pins.length || !pins.every((line) => /^[A-Za-z0-9._-]+(?:\[[^\]]*\])?==\S+/.test(line)))
     throw new Error(`Unreadable uv resolution for ${tool.spec}`);
-  return sha256(pins.sort().join('\n'));
+  return sha256(pins.sort(byCodeUnit).join('\n'));
 }
 
 /** `<octal mode>:<sha256>` of a copied context file. Directories and links are refused. */
