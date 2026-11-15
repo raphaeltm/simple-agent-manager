@@ -29,6 +29,21 @@ vi.mock('../../../src/middleware/auth', () => ({
     },
   }),
 }));
+// The deadline cases below need an attempt budget shorter than a slow create. The admin setting
+// cannot go below 5 s (`NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS`), so those cases pin the
+// setting's resolved value to the 200 ms request timeout; every other setting resolves for real.
+let attemptBudgetOverrideMs: number | undefined;
+vi.mock('../../../src/services/admin-settings-resolution', async (load) => {
+  const actual = await load<typeof import('../../../src/services/admin-settings-resolution')>();
+  return {
+    ...actual,
+    resolveAdminSetting: (env: Env, name: Parameters<typeof actual.resolveAdminSetting>[1]) =>
+      name === 'operations.nodeProvisioningAttemptDeadlineMs' &&
+      attemptBudgetOverrideMs !== undefined
+        ? Promise.resolve(attemptBudgetOverrideMs)
+        : actual.resolveAdminSetting(env, name),
+  };
+});
 vi.mock('../../../src/routes/projects/_helpers', async (load) => ({
   ...(await load<typeof import('../../../src/routes/projects/_helpers')>()),
   requireRepositoryUserAccess: vi.fn(async () => undefined),
@@ -48,6 +63,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   clearCapacityCatalogCache();
+  attemptBudgetOverrideMs = undefined;
 });
 
 async function createMeteringFixture(
@@ -92,6 +108,7 @@ async function createMeteringFixture(
   const projectStub = f.env.PROJECT_DATA.get(f.env.PROJECT_DATA.idFromName('project-1'));
   Object.assign(projectStub, { recordActivityEvent: vi.fn(async () => 'activity-1') });
   const encryptionKey = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
+  attemptBudgetOverrideMs = options.hangProvider || options.hangDnsBody ? 200 : undefined;
   Object.assign(f.env, keys, {
     ENCRYPTION_KEY: encryptionKey,
     CF_ZONE_ID: 'test-zone',

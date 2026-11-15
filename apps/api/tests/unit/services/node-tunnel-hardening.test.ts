@@ -377,9 +377,13 @@ describe('deadline cuts on each side of the create POST', () => {
       signal: new AbortController().signal,
       durableAllocation: allocation(incarnationId),
     }).catch((e: unknown) => e);
-    // A retryable attempt failure (the node is not marked error), carrying the real cause.
+    // A retryable attempt failure (the node is not marked error), carrying the real cause:
+    // the message names it with log-safe fields only (F16), the error itself is the `cause`.
     expect(err).toBeInstanceOf(NodeAllocationUncertainError);
-    expect(String((err as Error).message)).toContain('GCP token exchange failed');
+    expect((err as Error).message).toBe(
+      'Provider create was not sent; the next attempt retries it (ProviderError (gcp, HTTP 503))'
+    );
+    expect((err as Error).cause).toBe(unsent);
     expect(readNode(node.id)).toMatchObject({ status: 'creating' });
     expect(store.providerCreateRequested).toBe(false);
     // The tunnel is kept for the resume: the durable owner, not this attempt, releases it.
@@ -397,13 +401,17 @@ describe('deadline cuts on each side of the create POST', () => {
   it('an unproven provider failure keeps the mark and names its cause (control)', async () => {
     const node = await freshNode();
     const { store, allocation } = durableHarness(readNode(node.id)!.incarnation!);
-    mocks.createVM.mockRejectedValueOnce(new ProviderError('gcp', 503, 'insert failed'));
+    const insertFailed = new ProviderError('gcp', 503, 'insert failed');
+    mocks.createVM.mockRejectedValueOnce(insertFailed);
     const err = await provisionNode(node.id, env, undefined, {
       signal: new AbortController().signal,
       durableAllocation: allocation(crypto.randomUUID()),
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(NodeAllocationUncertainError);
-    expect(String((err as Error).message)).toContain('insert failed');
+    expect((err as Error).message).toBe(
+      'Provider allocation is unresolved; exact resource reconciliation is required (ProviderError (gcp, HTTP 503))'
+    );
+    expect((err as Error).cause).toBe(insertFailed);
     // The insert may have committed: only reconciliation may proceed.
     expect(store.providerCreateRequested).toBe(true);
   });
