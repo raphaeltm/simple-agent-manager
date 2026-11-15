@@ -191,33 +191,75 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 ### 6a. Standard Verification (All Code Changes)
 
-1. **Check for existing staging deployments** before triggering your own:
+1. **Read the environment lease** (the workflow enforces the same check atomically):
 
    ```bash
-   gh run list --workflow=deploy-staging.yml --status=in_progress --status=queued --json databaseId,status,createdAt,headBranch
+   gh api --method GET repos/raphaeltm/simple-agent-manager/deployments \
+     -f environment=staging -f task=staging-lease -f per_page=1 \
+     --jq '.[0] | {id, payload}'
    ```
 
-   If there are active or queued runs, wait at least **5 minutes** from the most recent run's `createdAt` before triggering yours.
+   Use your selected environment name in every command. The latest `staging-lease`
+   deployment payload is authoritative; ordinary deployment statuses and a quiet
+   Actions queue do not release the slot. A held foreign branch with a future
+   `expiresAt` owns live verification even after its deploy finishes. Schedule a
+   one-time SAM wake at that exact UTC expiry (`schedules_write`, method `create`,
+   `message_session` action for your session), persist the accepted schedule ID,
+   and continue independent work or end the turn. On wake re-read once and retry
+   if free; if renewed, schedule a new wake. Do not poll, wait five minutes, or
+   negotiate the slot in chat.
 
-2. **Deploy to staging:**
+   No record means free (first-use bootstrap). A malformed latest record or API
+   error fails closed: ownership cannot be established safely. Inspect/fix the
+   record through the normal reviewed workflow; never delete history to bypass
+   another branch's lease.
+
+2. **Acquire by deploying your branch**, with your SAM task ID:
 
    ```bash
-   gh workflow run deploy-staging.yml --ref <your-branch-name>
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging -f sam_task_id=<your-task-id> -f lease_hold_minutes=30
    ```
 
-   Then watch for completion:
+   The serialized lease job reads, acquires and reads back the lease before any
+   deploy/audit job. A foreign active lease fails immediately with holder branch,
+   task and expiry. Same-branch redeploys renew it. Expiry is acquisition time plus
+   expected deployment time plus live-check hold. GitHub Environment variables
+   `STAGING_LEASE_EXPECTED_DEPLOY_MINUTES` (default 30),
+   `STAGING_LEASE_DEFAULT_HOLD_MINUTES` (default 30), and
+   `STAGING_LEASE_MAX_HOLD_MINUTES` (default 120) configure durations; positive
+   integer holds above the cap are rejected. Expected deploy time may be zero.
+   Choose a hold covering your checks; renew before expiry if needed. Failed or
+   cancelled runs retain the lease until release/expiry, so failures cannot expose
+   checks to an overwrite.
+
+   To reserve or renew without deploying, use `-f lease_action=acquire`. This
+   holds for just the requested live-check duration (no deploy allowance), and
+   also permits bounded lease lifecycle verification without full redeploys.
+   Audit-only runs acquire/renew through the same gate. Lease writes must go
+   through this workflow; direct `gh api` writes bypass serialization.
+
+3. **Watch the run and verify live**, then **release early** from the holder branch:
 
    ```bash
-   sleep 5
-   gh run list --workflow=deploy-staging.yml --branch=<your-branch-name> --limit=1 --json databaseId,status
+   gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=3 \
+     --json databaseId,status,conclusion,headSha
    gh run watch <run-id>
+   # After live checks and test-resource cleanup:
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging -f lease_action=release -f sam_task_id=<your-task-id>
    ```
 
-   If the deployment fails, inspect logs with `gh run view <run-id> --log-failed`, fix the issue, and re-trigger.
+   Confirm the release job passed and the newest payload has `state: released`.
+   Release shares the same environment concurrency group and refuses a foreign
+   holder. Expiry permits another branch to acquire automatically. Do not mistake
+   successful deployment completion for a release. Only the lease job receives
+   `deployments: write`; agents can inspect records with their existing `gh api`
+   read access. Leases are keyed by environment name for future staging slots.
 
-3. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
+4. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
 
-4. **Authenticate** using the smoke test token via token-login API:
+5. **Authenticate** using the smoke test token via token-login API:
 
    ```
    POST https://api.sammy.party/api/auth/token-login
@@ -227,13 +269,13 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    Do this inside Playwright so the browser context receives the session cookie, then navigate that browser to `https://app.sammy.party`. Do not exchange the staging smoke/API token against `SAM_API_URL`; these tokens correctly fail against production.
    If the env var is not set, ask the human for credentials.
 
-5. **Verify the changed behavior works end-to-end:**
+6. **Verify the changed behavior works end-to-end:**
    - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
    - **API/backend changes**: verify affected endpoints respond correctly and downstream behavior works through the UI
 
-6. **Report findings** to the user with evidence (screenshots or Playwright observations).
+7. **Report findings** to the user with evidence (screenshots or Playwright observations).
 
-7. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
+8. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT proceed to PR creation with known staging failures.
 
 ### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
 
