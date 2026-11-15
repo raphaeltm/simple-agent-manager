@@ -14,6 +14,8 @@ import { resolve } from 'node:path';
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
+import TimingBalancedSequencer from './tests/workers/support/timing-balanced-sequencer';
+
 const d1Migrations = await readD1Migrations(resolve(__dirname, './src/db/migrations'));
 const observabilityD1Migrations = await readD1Migrations(
   resolve(__dirname, './src/db/migrations/observability')
@@ -160,6 +162,10 @@ export default defineConfig({
     // CI must exercise the suite deterministically instead of starting dozens
     // of runtimes concurrently and losing the pool to worker exits.
     fileParallelism: false,
+    // Files run one at a time, so a shard's wall time is the sum of its files.
+    // `--shard=i/n` splits by measured per-file time (tests/workers/shard-timings.json)
+    // instead of by path hash. See tests/workers/support/shard-plan.ts.
+    sequence: { sequencer: TimingBalancedSequencer },
   },
   // Test-only producer bridge. This constant is absent from production builds.
   define: {

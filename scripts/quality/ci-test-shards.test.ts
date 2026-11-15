@@ -180,11 +180,21 @@ describe('sharded unit test wiring', () => {
     expect(() => expectShardWiring(weakened)).toThrow();
   });
 
+  // Selection-dependent cases (unselected suites must be skipped) are in
+  // ci-suite-selection.test.ts; this is the all-selected run every main push makes.
   it('fails the Test job unless every shard job succeeded', () => {
-    const run = step(jobs().test!, 'Require every test shard to pass').run!;
+    const run = step(jobs().test!, 'Require every selected test shard to pass').run!;
     const status = (api: string, web: string, packages: string) =>
-      spawnSync('bash', ['-c', run], {
-        env: { ...process.env, API_RESULT: api, WEB_RESULT: web, PACKAGES_RESULT: packages },
+      spawnSync('bash', ['-e', '-c', run], {
+        env: {
+          ...process.env,
+          API_SELECTED: 'true',
+          WEB_SELECTED: 'true',
+          PACKAGES_SELECTED: 'true',
+          API_RESULT: api,
+          WEB_RESULT: web,
+          PACKAGES_RESULT: packages,
+        },
       }).status;
     expect(status('success', 'success', 'success')).toBe(0);
     for (const bad of ['failure', 'cancelled', 'skipped', '']) {
