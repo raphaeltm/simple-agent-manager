@@ -1,7 +1,14 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import { BaseSequencer, type TestSpecification, type Vitest } from 'vitest/node';
+
+import { NATIVE_RUNTIME_SUITES } from '../../apps/api/tests/workers/support/native-runtime-suites';
+import { loadShardTimings, planShards } from '../../apps/api/tests/workers/support/shard-plan';
+import TimingBalancedSequencer from '../../apps/api/tests/workers/support/timing-balanced-sequencer';
 
 const CI_WORKFLOW_PATH = new URL('../../.github/workflows/ci.yml', import.meta.url);
 
@@ -53,9 +60,9 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
   expect(step).toContain('run: pnpm --filter @simple-agent-manager/api test:workers');
   expect(step).not.toContain('continue-on-error');
   expect(job).toContain('fail-fast: false');
-  expect(job).toContain('shard: [1, 2, 3]');
+  expect(job).toContain('shard: [1, 2, 3, 4, 5, 6, 7]');
   expect(step).toContain('WORKERS_SHARD: ${{ matrix.shard }}');
-  expect(step).toContain('--shard="${WORKERS_SHARD}/3"');
+  expect(step).toContain('--shard="${WORKERS_SHARD}/7"');
   expect(step).toContain('--reporter=./tests/workers/timing-reporter.ts');
   // The required check now gates the whole suite (scripts/quality/ci-draft-and-gate.test.ts);
   // for API changes it must still demand that every Workers shard succeeded.
@@ -105,10 +112,10 @@ describe('Workers shard gate discrimination', () => {
     for (const weakened of [
       // Anchor on the Workers matrix: the API unit-test matrix also lists [1, 2, 3].
       readCiWorkflow().replace(
-        'shard: [1, 2, 3]\n    timeout-minutes: 30',
-        'shard: [1, 2]\n    timeout-minutes: 30'
+        'shard: [1, 2, 3, 4, 5, 6, 7]\n    timeout-minutes: 30',
+        'shard: [1, 2, 3, 4, 5, 6]\n    timeout-minutes: 30'
       ),
-      readCiWorkflow().replace('--shard="${WORKERS_SHARD}/3"', ''),
+      readCiWorkflow().replace('--shard="${WORKERS_SHARD}/7"', ''),
       readCiWorkflow().replace('WORKERS_SHARD: ${{ matrix.shard }}', ''),
     ])
       expect(() => expectRequiredWorkerSuiteWiring(weakened)).toThrow();
@@ -146,5 +153,85 @@ describe('CI Playwright visual audit wiring', () => {
     );
 
     expect(() => expectBlockingPlaywrightVisualJob(warnOnlyWorkflow)).toThrow();
+  });
+});
+
+/**
+ * The Workers shards split by measured per-file time. `vitest list` ignores `--shard`,
+ * so these drive the real sequencer class with the real test file list; the CI run's
+ * per-shard timing artifacts are the end-to-end evidence.
+ */
+describe('time-balanced Workers shards', () => {
+  const apiRoot = fileURLToPath(new URL('../../apps/api/', import.meta.url));
+  const workerFiles = (function walk(dir: string): string[] {
+    return readdirSync(join(apiRoot, dir), { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? walk(`${dir}/${entry.name}`)
+        : entry.name.endsWith('.test.ts')
+          ? [`${dir}/${entry.name}`]
+          : []
+    );
+  })('tests/workers')
+    // The Workers pool's include, minus the excludes it shares with the native runtime config.
+    .filter((file) => !NATIVE_RUNTIME_SUITES.includes(file))
+    .sort();
+  const timings = loadShardTimings();
+  const SHARDS = 7;
+
+  function sequencerFor(shard?: { index: number; count: number }) {
+    const ctx = { config: { root: apiRoot.replace(/\/$/u, ''), shard } } as unknown as Vitest;
+    return { balanced: new TimingBalancedSequencer(ctx), hashed: new BaseSequencer(ctx) };
+  }
+  const specs = workerFiles.map((file) => ({ moduleId: join(apiRoot, file) }) as TestSpecification);
+  const pathOf = (spec: TestSpecification) => relative(apiRoot, spec.moduleId);
+  // The plan's own predictions, so unmeasured files count at the median as planShards counts them.
+  const predicted = (files: string[]) =>
+    planShards(files, 1, { ...timings, shardOneExtraMs: 0 }).predictedMs[0]!;
+
+  it('finds the suite and has measurements for most of it (liveness)', () => {
+    expect(workerFiles.length).toBeGreaterThan(150);
+    for (const native of NATIVE_RUNTIME_SUITES)
+      expect(existsSync(join(apiRoot, native))).toBe(true);
+    const measured = workerFiles.filter((file) => file in timings.files).length;
+    expect(measured / workerFiles.length).toBeGreaterThan(0.5);
+  });
+
+  it('runs every file in exactly one shard, through the real sequencer', async () => {
+    const seen: string[] = [];
+    for (let index = 1; index <= SHARDS; index++) {
+      const shard = await sequencerFor({ index, count: SHARDS }).balanced.shard(specs);
+      expect(shard.length, `shard ${index}`).toBeGreaterThan(0);
+      seen.push(...shard.map(pathOf));
+    }
+    expect(seen.sort()).toEqual(workerFiles);
+  });
+
+  it('returns the files unchanged without --shard', async () => {
+    expect(await sequencerFor().balanced.shard(specs)).toEqual(specs);
+  });
+
+  it('balances measured time within 10% of the mean, better than Vitest hash sharding', async () => {
+    const max = async (kind: 'balanced' | 'hashed') => {
+      const loads: number[] = [];
+      for (let index = 1; index <= SHARDS; index++) {
+        const shard = await sequencerFor({ index, count: SHARDS })[kind].shard(specs);
+        loads.push(predicted(shard.map(pathOf)) + (index === 1 ? timings.shardOneExtraMs : 0));
+      }
+      return Math.max(...loads);
+    };
+    const mean = (predicted(workerFiles) + timings.shardOneExtraMs) / SHARDS;
+    const balanced = await max('balanced');
+    expect(balanced).toBeLessThanOrEqual(mean * 1.1);
+    expect(balanced).toBeLessThan(await max('hashed'));
+  });
+
+  it('is the same plan for any input order, and new files get the median weight', () => {
+    const shuffled = [...workerFiles].reverse();
+    expect(planShards(shuffled, SHARDS, timings).shards).toEqual(
+      planShards(workerFiles, SHARDS, timings).shards
+    );
+    const withNew = planShards(['tests/workers/new.test.ts', ...workerFiles], SHARDS, timings);
+    expect(withNew.shards.flat()).toContain('tests/workers/new.test.ts');
+    expect(withNew.shards.flat()).toHaveLength(workerFiles.length + 1);
   });
 });
