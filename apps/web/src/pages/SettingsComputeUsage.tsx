@@ -3,7 +3,7 @@ import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-ma
 import { Clock, Cpu, Gauge, Key, Server } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { AiBudgetSettingsSection } from '../components/ai-usage/AiBudgetSettingsSection';
+import { BudgetSettingsSection } from '../components/ai-usage/AiBudgetSettingsSection';
 import { AiUsageSection } from '../components/ai-usage/AiUsageSection';
 import { HardwareDetails } from '../components/hardware/HardwareDetails';
 import { fetchComputeUsage, fetchUserQuotaStatus } from '../lib/api';
@@ -165,7 +165,7 @@ export function SettingsComputeUsage() {
       <AiUsageSection />
 
       {/* Budget Controls */}
-      <AiBudgetSettingsSection />
+      <BudgetSettingsSection />
 
       {/* Compute Usage */}
       <div className="space-y-4 min-w-0 overflow-hidden">

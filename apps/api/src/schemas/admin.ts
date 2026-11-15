@@ -1,5 +1,7 @@
 import * as v from 'valibot';
 
+import { PLATFORM_INTEGRATION_GROUPS } from '../services/platform-config-types';
+
 export const AdminUserActionSchema = v.object({
   action: v.picklist(['approve', 'suspend']),
 });
@@ -127,7 +129,6 @@ export const UpdatePlatformIntegrationConfigSchema = v.object({
       v.object({
         clientId: v.optional(v.string()),
         clientSecret: v.optional(v.string()),
-        remove: v.optional(v.boolean()),
       })
     ),
     gitlab: v.optional(
@@ -142,6 +143,13 @@ export const UpdatePlatformIntegrationConfigSchema = v.object({
         projectId: v.optional(v.pipe(v.string(), v.maxLength(200))),
         remove: v.optional(v.boolean()),
       })
+    ),
+    /** Integration groups whose stored values are deleted (Admin → Integrations "Clear"). */
+    clear: v.optional(
+      v.pipe(
+        v.array(v.picklist(PLATFORM_INTEGRATION_GROUPS)),
+        v.maxLength(PLATFORM_INTEGRATION_GROUPS.length)
+      )
     ),
   }),
 });

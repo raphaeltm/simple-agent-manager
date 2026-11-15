@@ -43,7 +43,7 @@ export async function activeProviderCapacityCooldown(
  *
  * Every Hetzner account limit qualifies — servers, vCPU cores and anything else
  * `resource_limit_exceeded` covers. A core quota reaches this only after the attempt chain has no
- * smaller offering left to descend to (`node-provisioning-core-quota.ts`); until then a smaller
+ * smaller offering left to descend to (`node-provisioning-quota-descent.ts`); until then a smaller
  * offering may still fit, and a domain-wide cooldown would stall every other task in it.
  */
 export function classifyVmProviderCapacityError(err: unknown): VmProviderCapacityInfo | null {

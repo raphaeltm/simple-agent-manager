@@ -24,6 +24,7 @@ import {
   validatePlatformIntegrationInput,
   validateSetupCanComplete,
 } from '../services/platform-config-validation';
+import { requestWaitUntil, scheduleSecurityAlert } from '../services/security-alerts';
 
 const setupRoutes = new Hono<{ Bindings: Env }>();
 type SetupContext = Context<{ Bindings: Env }>;
@@ -190,7 +191,8 @@ setupRoutes.post('/complete', async (c) => {
   if (!completion.ok) {
     throw errors.badRequest('Setup cannot be completed', { errors: completion.errors });
   }
-  await completeSetupWithConfig(c.env, config);
+  const changes = await completeSetupWithConfig(c.env, config);
+  scheduleSecurityAlert(c.env, requestWaitUntil(c), { kind: 'setup-completed', changes });
   return c.json({ completed: true, status: await getPlatformConfigStatus(c.env) });
 });
 

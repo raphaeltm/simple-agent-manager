@@ -17,7 +17,6 @@
  */
 
 import { execSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -34,6 +33,7 @@ import {
   listEnvironmentVarOverrides,
   reportEnvironmentVarOverrides,
 } from './environment-var-overrides.js';
+import { generateSetupToken } from './setup-token.js';
 import type {
   AIBinding,
   AnalyticsEngineDatasetBinding,
@@ -59,7 +59,6 @@ const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 export const AGENT_EMAIL_BINDING_NAME = 'AGENT_EMAIL';
 /** The API Worker's own script name, shipped with the binding; mirrors Env in apps/api. */
 export const AGENT_EMAIL_WORKER_NAME_VAR = 'AGENT_EMAIL_WORKER_NAME';
-const SETUP_TOKEN_BYTES = 24;
 const DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES = 6;
 const DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES = 3;
 const CLOUDFLARE_WORKER_TEXT_BINDING_MAX = 350;
@@ -243,10 +242,6 @@ export function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
     throw new Error(`${path} must be a TOML table`);
   }
   return value as TOML.JsonMap;
-}
-
-function generateSetupToken(): string {
-  return randomBytes(SETUP_TOKEN_BYTES).toString('base64url');
 }
 
 function cloudflareWorkerVariablesUrl(
@@ -1100,8 +1095,8 @@ export function getApiWorkerVars(
     ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
     // Artifacts is disabled by default and enabled only with the generated binding.
     ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',
-    // Plaintext by design: first-run admins read this once from the CF dashboard.
-    // Do not print the value in workflow logs; setup.completed gates it after use.
+    // Plaintext by design: first-run admins read this once from the CF dashboard. Inside
+    // GitHub Actions generateSetupToken masks it, because wrangler prints plain-text vars.
     SETUP_TOKEN: generateSetupToken(),
     ...(process.env.SETUP_FORCE === 'true' ? { SETUP_FORCE: 'true' } : {}),
   };

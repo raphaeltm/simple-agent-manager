@@ -1,0 +1,1352 @@
+[
+  {
+    "run": 1,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 30.531,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 284.7787929999977
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 305.7305689999994
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 303.13684099999955
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 345.90494300000137
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 42.17,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 2,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 31.41,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 249.97038500000053
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 281.0741159999998
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 272.5885909999997
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 256.09869099999923
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 43.51,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 3,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.798,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 242.00885199999902
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 262.6109980000001
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 251.37288499999704
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 252.74022400000104
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 41.08,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 4,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.252,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 252.01669499999844
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 260.3008689999988
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 241.98357100000067
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 291.93753800000195
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.67,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 5,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.848,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 239.95363200000065
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 263.3942969999989
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 274.7059389999995
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 274.9889000000003
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.88,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 6,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.138,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 249.4781460000013
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 378.94242099999974
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 262.0710480000016
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 246.8784080000005
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.52,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 7,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.391,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 235.46383600000263
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 244.2129989999994
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 230.68685800000094
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 257.28640200000154
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.44,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 8,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.341,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 227.14708099999916
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 275.3339890000025
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 230.3750880000007
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 294.21130600000106
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.74,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 9,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.944,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 286.33509100000083
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 230.8521989999972
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 210.91439099999843
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 232.6695669999972
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 41.67,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 10,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.187,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 229.24020900000323
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 239.86132200000065
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 246.77507799999876
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 246.40922800000044
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.43,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 11,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 30.044,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 260.41195999999763
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 245.12627000000066
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 278.9026559999984
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 288.84820000000036
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 41.43,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 12,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 28.382,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 221.936485000002
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 268.09156399999847
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 297.8519149999993
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 258.65154000000257
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 38.81,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 13,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.64,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 240.54051199999958
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 267.94086400000015
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 252.32893500000137
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 250.5675850000007
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.99,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 14,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.39,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 226.88974099999905
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 259.3687089999985
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 241.66555199999857
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 250.85249499999918
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.64,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 15,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.799,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 243.4906800000026
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 310.43282700000054
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 264.58380599999873
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 238.09994300000108
+      }
+    ],
+    "head": "ff8c3471980124eb8ab1abd01d2651956b1a58ab",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.95,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 16,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 28.836,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 245.59969799999817
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 271.92719200000283
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 244.7219589999986
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 268.1935140000023
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 39.81,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 17,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.34,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 222.55113300000085
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 300.6063529999992
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 240.80180200000177
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 280.14028699999835
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.36,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 18,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 28.892,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 201.93406699999832
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 253.70232399999804
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 230.07125799999994
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 298.25203500000134
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.01,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 19,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 28.642,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 232.40223700000206
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 243.81961000000229
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 269.96516300000076
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 253.01838399999906
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 39.16,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 20,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 28.887,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 260.24503900000127
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 232.725226999999
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 272.57097099999737
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 269.8911229999976
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 39.94,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 21,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.192,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 221.98275499999727
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 253.82390400000077
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 214.21333900000172
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 259.8312490000026
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.54,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 22,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.29,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 253.62539400000242
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 247.6279969999996
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 223.24979400000302
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 253.98750400000063
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 41.11,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 23,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.495,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 242.23945000000094
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 245.6029890000027
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 263.25194700000065
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 247.80873699999938
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.83,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 24,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.493,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 227.18194100000255
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 278.4057270000012
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 243.85541999999987
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 268.67751300000236
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.77,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 25,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.894,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 232.36881600000197
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 239.05131099999926
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 245.2264380000015
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 275.7945759999966
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 41.53,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 26,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 27.941,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 254.54639099999986
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 246.1712469999984
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 278.8181629999999
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 278.19500400000106
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 38.12,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 27,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 28.941,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 228.6477589999995
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 241.34697999999844
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 241.5815700000021
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 243.5435690000013
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.05,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 28,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 28.288,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 232.42087600000013
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 272.5617480000001
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 250.12495400000262
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 272.05576900000233
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 39.0,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 29,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.843,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 218.82306499999686
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 243.57896899999832
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 231.81831600000078
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 268.20149200000014
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 41.55,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  },
+  {
+    "run": 30,
+    "exit": 0,
+    "passed": 25,
+    "failed": 0,
+    "elapsed": 29.19,
+    "target": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "status": "passed",
+        "duration": 235.6501440000029
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "status": "passed",
+        "duration": 300.167637999999
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "status": "passed",
+        "duration": 251.91275299999688
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "status": "passed",
+        "duration": 254.1395709999997
+      }
+    ],
+    "head": "bde5ce3571a94b8e05e360c918668a1dd0cc1c06",
+    "sourceSha256": {
+      "apps/web/tests/unit/pages/automation-flows.test.tsx": "029e8feab864baeca2a37a79de9b9dd64dc5ea541bbd81f169fc749c967fbc0d",
+      "apps/api/tests/workers/sam-session-do.test.ts": "db0e27ef34120c9c909b583067a05ea10ecc7fc2026b2fe75c9e446b0ae50953",
+      "apps/api/tests/workers/support/sam-native-entry.ts": "df99f08e9216918411f51d602e1e98b4efd30f006509cc243290b7e051a2adf9",
+      "apps/api/tests/workers/support/sam-native-runtime.ts": "d6dfcbfe9acf3690adf48f1cedb74e9263dbb355a5bb6f970d32e2a9795fd93d",
+      "apps/api/src/durable-objects/sam-session/operator/store.ts": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631",
+      "apps/web/src/pages/automation/editor/requests.ts": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+    },
+    "cpuAffinity": "2,3",
+    "loadProcesses": 2,
+    "loadCpuSeconds": 40.48,
+    "total": 25,
+    "pending": 0,
+    "assertionCount": 25,
+    "allAssertionsPassed": true
+  }
+]

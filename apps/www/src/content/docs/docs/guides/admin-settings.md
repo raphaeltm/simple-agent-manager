@@ -82,7 +82,7 @@ nobody can sign in:
 2. Every deploy creates a new `SETUP_TOKEN`. In the deploy's log, the **Sync Wrangler Config (API +
    Tail Worker)** step (on a first install, **Re-sync Wrangler Config (add tail_consumers)**) prints
    a Cloudflare dashboard link ("Setup token is available in Cloudflare dashboard
-   variables: …"). Copy the token there, and open `/setup` with it (as in
+   variables: …"). The log itself masks the token. Copy it from that page, and open `/setup` with it (as in
    [Verification](/docs/guides/self-hosting/#verification)).
 3. Enter working sign-in credentials.
 4. Once you can sign in again, delete `SETUP_FORCE` and deploy again. While it's set, `/setup`
@@ -94,7 +94,7 @@ nobody can sign in:
 For each setting SAM uses the first of these that exists:
 
 1. A value saved in the app, here or on the older **Admin → Integrations** page, which changes the
-   same settings (**Source: database**).
+   same settings (**Source: database**; Integrations labels it **stored in SAM** and can **Clear** it).
 2. The matching Worker variable, set through your GitHub Environment (**Source: environment**).
 3. An older KV value: the cron and alarm switches (**Source: kv**).
 4. The code default (**Source: default**).
@@ -207,6 +207,18 @@ where it says so and the app continues from there.
 | `secrets.expirySweepBatchSize`   | 10                  | 1–25          | Expired or unnotified requests one five-minute sweep handles (each one notifies its agent)                                                                                                                              |
 | `secrets.notifyRetryMinutes`     | 60                  | 15–1,440      | Minutes during which the sweep retries telling an agent about its request's outcome if the first notice could not be queued                                                                                             |
 
+## Node provisioning
+
+This **Operations** setting bounds one durable node-provisioning attempt
+(`resolveNodeProvisioningAttemptDeadlineMs()`, armed by `NodeLifecycleProvisioning.run()`). It cuts
+the work before the provider create starts and the node's DNS record afterwards. A create that has
+started is never cut or repeated: if it outlives the attempt, the next attempt (after
+`NODE_PROVISIONING_RETRY_INTERVAL_MS`, 30 seconds by default) adopts the VM by its labels.
+
+| Setting                                        | Default | Range         | What it controls                                                                                                                                                   |
+| ---------------------------------------------- | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `operations.nodeProvisioningAttemptDeadlineMs` | 60,000  | 5,000–180,000 | Milliseconds one attempt may run before it is cut and resumed. A Google Cloud create takes 9–12 seconds and a Hetzner create 1–2. 5,000 restores the old behaviour |
+
 ## Eviction recovery
 
 These **Operations** settings bound automatic retries after an eviction wake fails to start. Retries preserve the snapshot and source ownership checks.
@@ -216,15 +228,6 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 | `operations.evictionRecoveryRetryBatchSize` | 5       | 1–100        | Failed eviction wakes selected per cron sweep                                                                                       |
 | `operations.evictionRecoveryRetryWallMs`    | 10,000  | 1–30,000     | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
 | `operations.evictionRecoveryRetryDelayMs`   | 60,000  | 1–86,400,000 | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
-
-## Node provisioning
-
-This **Operations** setting bounds one durable node-provisioning attempt
-(`resolveNodeProvisioningAttemptDeadlineMs()`, read by `NodeLifecycleProvisioning.run()`).
-
-| Setting                                        | Default | Range         | What it controls                                                                                                                                                                                         |
-| ---------------------------------------------- | ------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operations.nodeProvisioningAttemptDeadlineMs` | 45,000  | 1,000–600,000 | Milliseconds one attempt may run before it is cut and resumed. A Google Cloud create takes 9–12 s. A create that outlives the attempt is adopted by its labels on the next attempt, never created twice. |
 
 ## Compute pool refresh
 

@@ -1,0 +1,50 @@
+[
+  {
+    "mutation": "github-label-guard-removed",
+    "exit": 1,
+    "passed": 38,
+    "failed": 1,
+    "failures": [
+      {
+        "name": "create flow creates a GitHub automation through its own fields",
+        "messages": [
+          "AssertionError: expected { \u2026(11) } to match object { sourceType: 'github', \u2026(2) }\n(12 matching properties omitted from actual)\n    at Proxy.<anonymous> (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+expect@4.1.5/node_modules/@vitest/expect/dist/index.js:1283:10)\n    at Proxy.<anonymous> (file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+expect@4.1.5/node_modules/@vitest/expect/dist/index.js:1156:15)\n    at Proxy.methodWrapper (file:///workspaces/simple-agent-manager/node_modules/.pnpm/chai@6.2.2/node_modules/chai/index.js:1700:25)\n    at /workspaces/simple-agent-manager/apps/web/tests/unit/pages/automation-flows.test.tsx:566:18\n    at runNextTicks (node:internal/process/task_queues:65:5)\n    at listOnTimeout (node:internal/timers:644:9)\n    at processTimers (node:internal/timers:618:7)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+        ]
+      }
+    ],
+    "restoredSha256": "b0ba72d63baa5b8f261e8e6fab2154840d8c156224b5c94402f28ef8683566e1"
+  },
+  {
+    "mutation": "rate-guard-removed",
+    "exit": 1,
+    "passed": 21,
+    "failed": 4,
+    "failures": [
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 0",
+        "messages": [
+          "AssertionError: expected 202 to be 429 // Object.is equality\n    at /workspaces/simple-agent-manager/apps/api/tests/workers/sam-session-do.test.ts:561:30\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+        ]
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 59999",
+        "messages": [
+          "AssertionError: expected 202 to be 429 // Object.is equality\n    at /workspaces/simple-agent-manager/apps/api/tests/workers/sam-session-do.test.ts:561:30\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+        ]
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60000",
+        "messages": [
+          "AssertionError: expected 202 to be 429 // Object.is equality\n    at /workspaces/simple-agent-manager/apps/api/tests/workers/sam-session-do.test.ts:561:30\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+        ]
+      },
+      {
+        "name": "SamSession durable operator in workerd enforces a durable rate limit and repairs a malformed legacy rate window at offset 60001",
+        "messages": [
+          "AssertionError: expected 202 to be 429 // Object.is equality\n    at /workspaces/simple-agent-manager/apps/api/tests/workers/sam-session-do.test.ts:561:30\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///workspaces/simple-agent-manager/node_modules/.pnpm/@vitest+runner@4.1.5/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+        ]
+      }
+    ],
+    "restoredSha256": "392713dba3a629b38b98b5aed8f9a22d5037dfd6d73d069cfe52fb3806812631"
+  }
+]

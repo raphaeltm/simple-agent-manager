@@ -43,7 +43,8 @@ export function AdminPlatformConfig() {
     [client, scope]
   );
 
-  const handleSave = async (config: PlatformIntegrationConfigInput) => {
+  /** Resolves true when the save landed, so the form can keep a failed clear's dialog open. */
+  const handleSave = async (config: PlatformIntegrationConfigInput): Promise<boolean> => {
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -51,9 +52,15 @@ export function AdminPlatformConfig() {
       await client.cancelQueries({ queryKey: queryKey, exact: true });
       const response = await updateAdminPlatformConfig(config);
       client.setQueryData(queryKey, response);
-      setMessage('Platform integration settings saved.');
+      setMessage(
+        config.clear?.length
+          ? 'Stored integration values cleared.'
+          : 'Platform integration settings saved.'
+      );
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save platform integrations');
+      return false;
     } finally {
       setSaving(false);
     }

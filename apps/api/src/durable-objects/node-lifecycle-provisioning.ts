@@ -10,18 +10,14 @@ import {
   assertDirectCreationAuthority,
   continueDirectWorkspaceCreation,
 } from '../services/direct-workspace-creation';
-import {
-  describeProvisioningAttemptFailure,
-  NodeAllocationUncertainError,
-} from '../services/node-allocation-recovery';
+import { NodeAllocationUncertainError } from '../services/node-allocation-recovery';
 import { provisionNode } from '../services/node-provisioning';
 import { releaseDurableTunnelBeforeVm } from '../services/node-provisioning-predicates';
-import { durableAttemptTunnelBudgetMs } from '../services/node-tunnel-config';
 import { persistError } from '../services/observability';
 import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../services/task-status';
 import { confirmUnassignedWorkspaceAbsence } from '../services/unassigned-workspace-deletion';
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
-import { resolveNodeProvisioningAttemptDeadlineMs } from './node-lifecycle-provisioning-deadline';
+import { attemptDeadlineMs, logAttemptFailure } from './node-lifecycle-provisioning-attempt';
 
 export const DIRECT_PROVISIONING_KEY = 'direct-provisioning:v1';
 export const DEFAULT_NODE_PROVISIONING_REQUEST_TIMEOUT_MS = 5_000;
@@ -214,22 +210,15 @@ export class NodeLifecycleProvisioning {
         await this.finish(intent, 'failed', 'Node no longer exists or belongs to this intent');
         return;
       }
-      // Each provider/Cloudflare request keeps the `timeout` budget (CF_API_TIMEOUT_MS below);
-      // the attempt as a whole also gets the tunnel-setup budget when this incarnation uses
-      // tunnel transport, because tunnel setup is about six sequential Cloudflare calls before
-      // createVM. Setup is resumable, so an attempt that still runs out continues next time.
-      // The attempt budget is separate from the per-request timeout: a GCP create plus its
-      // operation wait takes 9-12 s, so a 5 s attempt cut every GCP node after its create
-      // (see node-lifecycle-provisioning-deadline.ts for the arithmetic).
-      const attemptDeadlineMs =
-        (await resolveNodeProvisioningAttemptDeadlineMs(this.env, timeout)) +
-        (await durableAttemptTunnelBudgetMs(this.env, node, intent.incarnationId));
+      // Each Cloudflare request keeps `timeout` (CF_API_TIMEOUT_MS below); the attempt has its own
+      // admin-set budget. What it does and does not cut: node-lifecycle-provisioning-attempt.ts.
+      const deadlineMs = await attemptDeadlineMs(this.env, node, intent, timeout);
       timer = setTimeout(
         () =>
           controller.abort(
             new NodeAllocationUncertainError('Provisioning request deadline elapsed')
           ),
-        attemptDeadlineMs
+        deadlineMs
       );
       const mustAllocate = !input.workspace || input.workspace.mustProvisionNode;
       if (
@@ -318,13 +307,7 @@ export class NodeLifecycleProvisioning {
         ));
       if (completed) await this.finish(intent, 'complete', null);
     } catch (error) {
-      // Every attempt's cause is logged: lastError is overwritten by the next attempt and only
-      // surfaces after exhaustion, so the first failure would otherwise be invisible.
-      log.warn('node_provisioning.attempt_failed', {
-        nodeId: intent.input.nodeId,
-        attempt: intent.attempts,
-        ...describeProvisioningAttemptFailure(error),
-      });
+      logAttemptFailure(intent, error);
       await this.withLock(async () => {
         const current =
           await this.ctx.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);

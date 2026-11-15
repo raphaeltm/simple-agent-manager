@@ -36,7 +36,12 @@ const { adminPlatformConfigRoutes } = await import('../../../src/routes/admin-pl
 function createEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
-    CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      role TEXT NOT NULL DEFAULT 'user',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL DEFAULT 0
+    );
     INSERT INTO users (id) VALUES ('system_anonymous_trials'), ('superadmin-1'), ('owner-1');
     CREATE TABLE projects (
       id TEXT PRIMARY KEY,
@@ -164,7 +169,7 @@ describe('admin platform config routes', () => {
     await expect(res.json()).resolves.toMatchObject({
       status: {
         integrations: {
-          gitlabOAuth: { configured: true, label: 'set here' },
+          gitlabOAuth: { configured: true, label: 'stored in SAM' },
         },
       },
     });
@@ -201,6 +206,8 @@ describe('admin platform config routes', () => {
       clientId: 'gitlab-admin-client',
       clientSecret: 'gitlab-admin-secret',
       allowPrivateNetwork: false,
+      // A self-managed host saved at runtime cannot vouch for emails.
+      identityTrusted: false,
     });
   });
 
@@ -285,7 +292,7 @@ describe('admin platform config routes', () => {
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-        body: JSON.stringify({ config: { googleInfrastructure: { remove: true } } }),
+        body: JSON.stringify({ config: { clear: ['googleInfrastructureOAuth'] } }),
       },
       env
     );

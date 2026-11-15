@@ -14,8 +14,8 @@
  * nothing. Confirmed forward: at 12:15Z only 19,984 units remained, and the 13:00Z tick was
  * refused.
  *
- * Since 2026-09-27 the cadence claims every 20 minutes (72 ticks/day) and the allowance was
- * tripled with it. Since 2026-11-12 a tick keeps working for `_WALL_TIME_MS` (60 s) instead of
+ * Since 2026-11-14 the 9-minute cadence claims about every 10 minutes (144 ticks/day),
+ * with a 6M allowance. Since 2026-11-12 a tick keeps working for `_WALL_TIME_MS` (60 s) instead of
  * stopping after one session, so the allowance must pay for a full tick of messages on every
  * tick, not just one migration. `shippedSweepTicksPerDay` and the shipped wall time are read
  * from `wrangler.toml`, so raising either without the allowance turns those cases red.
@@ -27,7 +27,7 @@
  * `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` is absent from the `production` and `staging`
  * Environments, so its checked-in value IS the deployed value.
  * `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` IS pinned in the `production` Environment and is
- * changed in lockstep with `wrangler.toml` (2400000 since 2026-09-27); the deploy log names any
+ * changed in lockstep with `wrangler.toml` (6000000 since 2026-11-14); the deploy log names any
  * divergence between the two.
  *
  * The reservation runs against a real SQLite engine through `createSqliteD1`, not a stub,
@@ -165,10 +165,22 @@ describe('shipped archive write-estimate factor', () => {
     const admitted = await reserveUntilRefused(allowance, factor, unitsPerSession);
 
     // If the allowance ran out before the day's ticks did, raising the wall time would buy
-    // nothing past the point the window is exhausted. At 60 s this needs 10 sessions x 72 ticks
-    // = 720 reservations of 2,736 writes (~1.97M). Proven discriminating on 2026-11-12: with the
+    // nothing past the point the window is exhausted. At 60 s this needs 10 sessions x 144 ticks
+    // = 1440 reservations of 2,736 writes (~3.94M). Proven discriminating on 2026-11-12: with the
     // allowance set to 1900000 it admits 694 and goes red.
     expect(admitted).toBeGreaterThanOrEqual(sessionsPerTick * ticksPerDay);
+  });
+
+  it('funds the measured fixture at the targeted 72k raw rows per hour', async () => {
+    const { allowance, factor } = archiveWriteBudgetConfig(shippedBudgetEnv());
+    // 2026-11-14 real Reporter/workerd fixture: 2100 raw + 1 tool + 315 grouped
+    // + 322 FTS byte units. The fixed charge repeats for every migration.
+    const rawRowsPerMigration = 2_100;
+    const fixtureUnits = 2_738;
+    const migrationsPerDay = Math.ceil((72_000 * 24) / rawRowsPerMigration);
+    const admitted = await reserveUntilRefused(allowance, factor, fixtureUnits);
+    expect(admitted).toBeGreaterThanOrEqual(migrationsPerDay);
+    expect(shippedSweepTicksPerDay()).toBe(144);
   });
 
   it('keeps a safety margin over the measured billed-rows ratio', async () => {
