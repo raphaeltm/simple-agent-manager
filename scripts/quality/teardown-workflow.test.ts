@@ -169,7 +169,9 @@ describe('teardown workflow', () => {
       'if [ "$INPUT_KEEP_DATA" != "true" ]; then FORCE_QUERY="?force=true"; fi'
     );
     expect(workflow).toContain('workers/scripts/$WORKER_NAME$FORCE_QUERY');
-    expect(workflow).toContain('STACK_BUCKET="$(pulumi stack output r2Name 2>/dev/null || true)"');
+    expect(workflow).toContain(
+      'STACK_BUCKET="$(pulumi stack output r2Name --stack "$STACK" 2>/dev/null || true)"'
+    );
   });
 
   it('matches workspace and node DNS records by literal domain suffix', () => {

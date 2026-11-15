@@ -622,7 +622,7 @@ jobs:
         working-directory: infra
         run: |
           # Empty only the bucket the selected stack itself owns.
-          STACK_BUCKET="$(pulumi stack output r2Name 2>/dev/null || true)"
+          STACK_BUCKET="$(pulumi stack output r2Name --stack "$STACK" 2>/dev/null || true)"
           if [ -z "$STACK_BUCKET" ] || [ "$STACK_BUCKET" != "$BUCKET_NAME" ]; then
             echo "::warning::Stack $STACK owns bucket '$STACK_BUCKET', not '$BUCKET_NAME'; not emptying."
             exit 0
