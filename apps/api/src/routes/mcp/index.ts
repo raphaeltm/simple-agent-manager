@@ -8,10 +8,8 @@
  * Auth: task-scoped opaque token stored in KV, passed as Bearer token.
  */
 import { Hono } from 'hono';
-import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
-import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { formatIssues, JsonRpcEnvelopeSchema } from '../../schemas';
@@ -60,10 +58,6 @@ import {
   handleListLibraryFileCommentThreads,
 } from './library-file-comment-tools';
 import { handleGetRepoSetupGuide } from './onboarding-tools';
-import {
-  denyWhenMcpActorLacksCurrentProjectCapability,
-  getRequiredMcpProjectCapability,
-} from './orchestration-authority';
 import { handleChannelTool } from './project-event-channel-tools';
 import { handleListSubscriptionEvents } from './project-event-tools';
 import { handleScheduleTool } from './project-schedule-tools';
@@ -198,18 +192,6 @@ mcpRoutes.post('/', async (c) => {
       const toolArgs = resolved.toolArgs;
 
       try {
-        const requiredCapability = getRequiredMcpProjectCapability(toolName);
-        if (requiredCapability) {
-          const staleActor = await denyWhenMcpActorLacksCurrentProjectCapability(
-            requestId,
-            drizzle(c.env.DATABASE, { schema }),
-            tokenData,
-            requiredCapability,
-            toolName
-          );
-          if (staleActor) return c.json(staleActor);
-        }
-
         switch (toolName) {
           case 'get_instructions':
             return c.json(await handleGetInstructions(requestId, tokenData, c.env));

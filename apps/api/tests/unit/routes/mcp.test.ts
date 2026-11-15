@@ -43,10 +43,6 @@ const deploymentToolMocks = vi.hoisted(() => ({
   handlePreviewDeploymentRoutes: vi.fn(),
 }));
 
-const currentAuthorityMocks = vi.hoisted(() => ({
-  deny: vi.fn().mockResolvedValue(null),
-}));
-
 const instantSessionMocks = vi.hoisted(() => ({
   launchInstantSession: vi.fn(),
 }));
@@ -78,12 +74,6 @@ vi.mock('../../../src/services/provider-credentials', () => ({
 
 vi.mock('../../../src/services/agent-activity', () => ({
   listAgentActivityTasks: agentActivityMocks.listAgentActivityTasks,
-}));
-
-vi.mock('../../../src/routes/mcp/orchestration-authority', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../src/routes/mcp/orchestration-authority')>()),
-  denyWhenMcpActorLacksCurrentProjectCapability: (...args: unknown[]) =>
-    currentAuthorityMocks.deny(...args),
 }));
 
 vi.mock('../../../src/services/admin-settings', async (original) => ({
@@ -639,7 +629,6 @@ describe('MCP Routes', () => {
     mockDoStub.archiveSourceGetLogicalTranscript.mockImplementation(readTranscript);
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
-    currentAuthorityMocks.deny.mockResolvedValue(null);
     mockDispatchProjectAccess({ consumeConfigured: false });
     mockEnv.CF_CONTAINER_ENABLED = 'false';
     delete (mockEnv as Record<string, unknown>).ENCRYPTION_KEY;
@@ -1823,42 +1812,6 @@ describe('MCP Routes', () => {
 
   // ─── list_sessions ──────────────────────────────────────────────────
 
-  describe('current project capability gate', () => {
-    beforeEach(() => {
-      mockKV.get.mockResolvedValue(validTokenData);
-    });
-
-    it.each([
-      ['get_archived_tool_payloads', 'task:read'],
-      ['set_deployment_environment_config', 'secret:write'],
-      ['build_and_publish', 'deployment:deploy'],
-      ['pause_mission', 'task:write'],
-    ])('rejects %s before dispatch when current %s authority is absent', async (tool, capability) => {
-      currentAuthorityMocks.deny.mockResolvedValueOnce({
-        jsonrpc: '2.0',
-        id: 1,
-        error: { code: -32602, message: 'Current project capability is required' },
-      });
-
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', { name: tool, arguments: {} })
-      );
-
-      expect(res.status).toBe(200);
-      await expect(res.json()).resolves.toMatchObject({
-        error: { code: -32602, message: 'Current project capability is required' },
-      });
-      expect(currentAuthorityMocks.deny).toHaveBeenCalledWith(
-        1,
-        expect.anything(),
-        expect.objectContaining({ projectId: 'proj-456', userId: 'user-789' }),
-        capability,
-        tool
-      );
-    });
-  });
-
   describe('list_sessions', () => {
     beforeEach(() => {
       mockKV.get.mockResolvedValue(validTokenData);
@@ -2119,13 +2072,6 @@ describe('MCP Routes', () => {
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
       expect(data.payloads[0].content[0].text).toBe('archived output');
-      expect(currentAuthorityMocks.deny).toHaveBeenCalledWith(
-        1,
-        expect.anything(),
-        expect.objectContaining({ projectId: 'proj-456', userId: 'user-789' }),
-        'task:read',
-        'get_archived_tool_payloads'
-      );
       expect(mockDoStub.getArchivedToolPayloads).toHaveBeenCalledWith({
         sessionId: 'sess-1',
         startTime: 1710000000000,
