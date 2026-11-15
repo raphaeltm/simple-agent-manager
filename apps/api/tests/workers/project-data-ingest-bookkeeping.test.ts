@@ -1,9 +1,22 @@
 import { projectDataPorts } from '@simple-agent-manager/project-data/internal/do/ports';
-import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
+import {
+  env,
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { projectDataStub } from './helpers/archive-fixtures';
 import { profileObject, type WriteSample } from './helpers/archive-write-profile';
+import {
+  seedInstallation,
+  seedNode,
+  seedProject,
+  seedTask,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -64,6 +77,81 @@ async function fixture(enabled: boolean) {
 }
 
 describe('ingest bookkeeping in real workerd', () => {
+  it.each(
+    [false, true].flatMap((enabled) =>
+      ['batch', 'browser'].map((writer) => [enabled, writer] as const)
+    )
+  )(
+    'preserves the task when real ingest lands during the cleanup liveness await (merging=%s, writer=%s)',
+    async (enabled, writer) => {
+      const { stub, session, batch, base } = await fixture(enabled);
+      const projectId = `receipt-project-${crypto.randomUUID()}`;
+      const userId = `receipt-user-${crypto.randomUUID()}`;
+      const nodeId = `receipt-node-${crypto.randomUUID()}`;
+      const taskId = `receipt-task-${crypto.randomUUID()}`;
+      await seedUser(userId);
+      await seedInstallation(projectId, userId);
+      await seedProject(projectId, userId, projectId);
+      await seedNode(nodeId, userId);
+      await seedWorkspace(source.workspaceId, nodeId, userId, {
+        projectId,
+        chatSessionId: session,
+        status: 'running',
+      });
+      await seedTask(taskId, projectId, userId, {
+        workspaceId: source.workspaceId,
+        chatSessionId: session,
+        status: 'in_progress',
+      });
+      await stub.ensureProjectId(projectId);
+      await stub.scheduleIdleCleanup(session, source.workspaceId, taskId);
+      vi.spyOn(projectDataPorts().sessions, 'stoppingTaskSleepOwnsCleanup').mockResolvedValue(
+        false
+      );
+      let ingestDuringProbe!: () => Promise<unknown>;
+      await runInDurableObject(stub, (instance) => {
+        ingestDuringProbe = () =>
+          writer === 'batch'
+            ? instance.persistMessageBatch(session, batch(10002), source)
+            : instance.persistMessage(
+                session,
+                'user',
+                'synthetic browser turn',
+                null,
+                'browser-probe-race'
+              );
+      });
+      const liveness = vi
+        .spyOn(projectDataPorts().taskLiveness, 'getLocalTaskRuntimeVerdict')
+        .mockImplementation(async () => {
+          await Promise.resolve();
+          // Use the actual production ingest method in this DO's I/O context during the probe await.
+          await ingestDuringProbe();
+          return {
+            live: false,
+            conclusive: true,
+            reason: 'synthetic_dead',
+            supersededTermination: false,
+            evidenceLogFields: {},
+            delivery: { kind: 'terminal', reason: 'synthetic_dead', nodeId },
+          };
+        });
+      vi.spyOn(Date, 'now').mockReturnValue(base + 61000);
+      const alarm = runDurableObjectAlarm(stub);
+      expect(await alarm).toBe(true);
+      expect(liveness).toHaveBeenCalled();
+      expect((await stub.getSession(session))?.status).toBe('active');
+      expect(
+        await env.DATABASE.prepare('SELECT status FROM tasks WHERE id=?').bind(taskId).first()
+      ).toMatchObject({ status: 'in_progress' });
+      expect(
+        await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id=?')
+          .bind(source.workspaceId)
+          .first()
+      ).toMatchObject({ status: 'running' });
+    }
+  );
+
   it.each([false, true])(
     'recovers pending activity after eviction before a stale idle cleanup (merging=%s)',
     async (enabled) => {
@@ -122,8 +210,11 @@ describe('ingest bookkeeping in real workerd', () => {
   it.each([false, true])(
     'exposes pending counts immediately and flushes them at the real turn-end boundary (merging=%s)',
     async (enabled) => {
-      const { stub, session, batch } = await fixture(enabled);
+      const { stub, session, batch, base } = await fixture(enabled);
       await stub.persistMessageBatch(session, batch(10002), source);
+      expect((await stub.getSessionState('bookkeeping-acp'))?.activityAt).toBeGreaterThanOrEqual(
+        base + 10002
+      );
       expect((await stub.getSession(session))?.messageCount).toBe(10002);
       expect(
         (await stub.listSessions()).sessions.find((row) => row.id === session)?.messageCount

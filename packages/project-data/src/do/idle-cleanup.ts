@@ -18,7 +18,7 @@ import { createAttentionMarker } from './attention';
 import { terminalizeIdleTaskInD1 } from './idle-cleanup-terminalization';
 import { materializeSession, resolveMaterializationPassConfig } from './materialization';
 import { persistSystemMessage } from './messages';
-import { flushMessageBookkeeping } from './message-bookkeeping';
+import { flushMessageBookkeeping, type MessageReceiptLock } from './message-bookkeeping';
 import { parseCleanupAt, parseIdleCleanupSchedule, parseMinEarliest } from './row-schemas';
 import { upsertActivityState } from './session-state';
 import { stopSessionInternal } from './sessions';
@@ -242,7 +242,8 @@ export async function processExpiredCleanups(
   projectId: string | null,
   stopWorkspaceInD1: (workspaceId: string, projectId: string) => Promise<void>,
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void,
-  scheduleSummarySync: () => void
+  scheduleSummarySync: () => void,
+  withReceiptLock?: MessageReceiptLock
 ): Promise<void> {
   const now = Date.now();
   const maxRetries = parsePositiveInt(
@@ -323,15 +324,37 @@ export async function processExpiredCleanups(
         continue;
       }
 
-      const transition = await terminalizeIdleTaskInD1(sql, env, {
-        sweep: 'session_idle_cleanup',
-        projectId,
-        taskId: entry.taskId,
-        workspaceId: entry.workspaceId,
-        sessionId: entry.sessionId,
-        idleDurationMs: Math.max(0, now - (entry.cleanupAt - timeoutMs)),
-        timeoutMs,
-      });
+      const stopLocally = () => {
+        // Stop the session in DO SQLite
+        stopSessionInternal(sql, entry.sessionId);
+
+        // Clear activity state so the browser status bar reflects idle
+        upsertActivityState(sql, entry.sessionId, { activity: 'idle' });
+
+        // Materialize grouped messages (best-effort)
+        try {
+          materializeSession(sql, entry.sessionId, resolveMaterializationPassConfig(env));
+        } catch (e) {
+          log.error('materialize_session_failed', {
+            sessionId: entry.sessionId,
+            error: String(e),
+          });
+        }
+      };
+      const transition = await terminalizeIdleTaskInD1(
+        sql,
+        env,
+        {
+          sweep: 'session_idle_cleanup',
+          projectId,
+          taskId: entry.taskId,
+          workspaceId: entry.workspaceId,
+          sessionId: entry.sessionId,
+          idleDurationMs: Math.max(0, now - (entry.cleanupAt - timeoutMs)),
+          timeoutMs,
+        },
+        { withReceiptLock, onTerminalized: stopLocally }
+      );
       if (transition.outcome === 'preserved') {
         if (maxResidenceExceeded(entry, now, maxResidenceMs)) {
           markIdleCleanupAttentionRequired(
@@ -366,22 +389,6 @@ export async function processExpiredCleanups(
       }
       if (transition.outcome === 'rejected') {
         throw new Error('Idle cleanup reporter scope did not match the task');
-      }
-
-      // Stop the session in DO SQLite
-      stopSessionInternal(sql, entry.sessionId);
-
-      // Clear activity state so the browser status bar reflects idle
-      upsertActivityState(sql, entry.sessionId, { activity: 'idle' });
-
-      // Materialize grouped messages (best-effort)
-      try {
-        materializeSession(sql, entry.sessionId, resolveMaterializationPassConfig(env));
-      } catch (e) {
-        log.error('materialize_session_failed', {
-          sessionId: entry.sessionId,
-          error: String(e),
-        });
       }
 
       // Stop workspace only after the same task-scoped liveness result proved

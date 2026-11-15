@@ -4,6 +4,9 @@ import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
 import type { Env } from './types';
 
+/** Serializes a short D1 commit with ingest; external liveness probes stay outside it. */
+export type MessageReceiptLock = <T>(work: () => Promise<T>) => Promise<T>;
+
 export const DEFAULT_MESSAGE_BOOKKEEPING = { intervalMs: 15_000, flushBatchSize: 100 } as const;
 /** Protocol state, outside the range of real millisecond deadlines; never a configurable limit. */
 export const BOOKKEEPING_AWAITING_SUMMARY = Number.MAX_SAFE_INTEGER;
@@ -22,16 +25,26 @@ export function messageBookkeepingInterval(env: Env, configured?: number): numbe
   return Math.min(interval, idleMs / 2);
 }
 
-export function latestMessageIngestAt(sql: SqlStorage, sessionId: string): number {
+export function latestMessageClocks(
+  sql: SqlStorage,
+  sessionId: string
+): { ingestedAt: number; activityAt: number } {
   const row = sql
     .exec(
-      `SELECT message_ingested_at FROM chat_sessions
-      WHERE id = COALESCE((SELECT chat_session_id FROM acp_sessions WHERE id = ?), ?)`,
+      `SELECT message_ingested_at, message_activity_at FROM chat_sessions
+     WHERE id = COALESCE((SELECT chat_session_id FROM acp_sessions WHERE id = ?), ?)`,
       sessionId,
       sessionId
     )
     .toArray()[0];
-  return typeof row?.message_ingested_at === 'number' ? row.message_ingested_at : 0;
+  return {
+    ingestedAt: typeof row?.message_ingested_at === 'number' ? row.message_ingested_at : 0,
+    activityAt: typeof row?.message_activity_at === 'number' ? row.message_activity_at : 0,
+  };
+}
+
+export function latestMessageIngestAt(sql: SqlStorage, sessionId: string): number {
+  return latestMessageClocks(sql, sessionId).ingestedAt;
 }
 
 /** Flush synchronously, with no await between sampling and folding. Idempotent side effects precede

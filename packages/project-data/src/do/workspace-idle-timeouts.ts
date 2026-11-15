@@ -24,8 +24,10 @@ import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 import { recordActivityEventInternal } from './activity';
 import {
   listReporterScopedTaskCandidates,
-  terminalizeIdleTaskInD1,
+  prepareIdleTaskTerminalization,
+  type PreparedIdleTaskTerminalization,
 } from './idle-cleanup-terminalization';
+import { latestMessageIngestAt, type MessageReceiptLock } from './message-bookkeeping';
 import { materializeSession, resolveMaterializationPassConfig } from './materialization';
 import { parseMinEarliest, parseWorkspaceIdleCheck } from './row-schemas';
 import { upsertActivityState } from './session-state';
@@ -90,6 +92,7 @@ interface WorkspaceIdleSweep {
   deleteWorkspaceInD1: (workspaceId: string, projectId: string) => Promise<void>;
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
   scheduleSummarySync: () => void;
+  withReceiptLock: MessageReceiptLock;
 }
 
 /**
@@ -102,7 +105,8 @@ export async function checkWorkspaceIdleTimeouts(
   projectId: string | null,
   deleteWorkspaceInD1: (workspaceId: string, projectId: string) => Promise<void>,
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void,
-  scheduleSummarySync: () => void
+  scheduleSummarySync: () => void,
+  withReceiptLock: MessageReceiptLock = (work) => work()
 ): Promise<void> {
   if (!nextDueWorkspaceIdleRow(sql, Date.now())) return;
 
@@ -126,6 +130,7 @@ export async function checkWorkspaceIdleTimeouts(
     deleteWorkspaceInD1,
     broadcastEvent,
     scheduleSummarySync,
+    withReceiptLock,
   };
   await forEachDueWorkspaceIdleCheck(sql, env, candidateLimit, (check, now) =>
     runWorkspaceIdleCheck(sweep, check, now)
@@ -374,35 +379,52 @@ async function retireIdleWorkspace(
     return candidates.overflow ? 'candidate_overflow' : 'no_candidate_tasks';
   }
 
-  const transitions = [];
+  const prepared: PreparedIdleTaskTerminalization[] = [];
   for (const { id } of candidates.tasks) {
-    transitions.push(
-      await terminalizeIdleTaskInD1(sweep.sql, sweep.env, {
-        sweep: 'workspace_idle_timeout',
-        projectId,
-        taskId: id,
-        workspaceId,
-        sessionId,
-        idleDurationMs,
-        timeoutMs,
-      })
-    );
-  }
-  if (!transitions.every((transition) => transition.outcome === 'failed')) {
-    log.info('workspace_idle_runtime_preserved', {
+    const candidate = await prepareIdleTaskTerminalization(sweep.sql, sweep.env, {
+      sweep: 'workspace_idle_timeout',
       projectId,
+      taskId: id,
       workspaceId,
       sessionId,
-      outcomes: transitions.map((transition) => transition.outcome),
-      reasons: transitions.map((transition) => transition.liveness?.reason ?? null),
-      action: 'preserved',
+      idleDurationMs,
+      timeoutMs,
     });
-    return 'runtime_preserved';
+    if (!('commit' in candidate)) {
+      log.info('workspace_idle_runtime_preserved', {
+        projectId,
+        workspaceId,
+        sessionId,
+        outcome: candidate.outcome,
+        reason: candidate.liveness?.reason ?? null,
+        action: 'preserved',
+      });
+      return 'runtime_preserved';
+    }
+    prepared.push(candidate);
   }
 
-  const failedTaskIds = transitions.map((transition) => transition.taskId);
-  await closeIdleWorkspace(sweep, check, projectId, idleDurationMs, failedTaskIds);
-  return 'retired';
+  // A single critical section covers every task commit and local stop. External probes above
+  // remain concurrent with ingest; no accepted batch can land between task failure and stop.
+  const committed: PreparedIdleTaskTerminalization[] = [];
+  try {
+    return await sweep.withReceiptLock(async () => {
+      if (latestMessageIngestAt(sweep.sql, sessionId) > Date.now() - timeoutMs)
+        return 'runtime_preserved' as const;
+      const failedTaskIds = [];
+      for (const candidate of prepared) {
+        const transition = await candidate.commit();
+        if (transition.outcome !== 'failed') return 'runtime_preserved' as const;
+        committed.push(candidate);
+        failedTaskIds.push(transition.taskId);
+      }
+      await closeIdleWorkspace(sweep, check, projectId, idleDurationMs, failedTaskIds);
+      return 'retired' as const;
+    });
+  } finally {
+    // A later task CAS or workspace cleanup can fail after an earlier task committed.
+    await Promise.all(committed.map((candidate) => candidate.sync()));
+  }
 }
 
 async function closeIdleWorkspace(

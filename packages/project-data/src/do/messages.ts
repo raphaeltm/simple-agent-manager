@@ -700,7 +700,8 @@ export function persistSystemMessage(
       sequence
     );
     sql.exec(
-      `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + 1 WHERE id = ?`,
+      `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ?, message_ingested_at = MAX(COALESCE(message_ingested_at, 0), ?), last_message_sequence = ?, last_message_sequence_count = message_count + 1 WHERE id = ?`,
+      now,
       now,
       sequence,
       sessionId

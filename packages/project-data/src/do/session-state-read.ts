@@ -9,7 +9,7 @@ import type {
   SessionStateSnapshot,
 } from '@simple-agent-manager/shared';
 
-import { latestMessageIngestAt } from './message-bookkeeping';
+import { latestMessageClocks } from './message-bookkeeping';
 
 export function getSessionState(sql: SqlStorage, sessionId: string): SessionStateSnapshot | null {
   const rows = sql
@@ -37,12 +37,13 @@ export function getSessionState(sql: SqlStorage, sessionId: string): SessionStat
     }
   }
 
-  const ingestAt = ['prompting', 'recovering'].includes(String(row.activity))
-    ? latestMessageIngestAt(sql, sessionId)
-    : 0;
+  const clocks = ['prompting', 'recovering'].includes(String(row.activity))
+    ? latestMessageClocks(sql, sessionId)
+    : { ingestedAt: 0, activityAt: 0 };
+  const ingestAt = clocks.ingestedAt;
   return {
     activity: (row.activity as SessionStateSnapshot['activity']) || 'idle',
-    activityAt: (row.activity_at as number) || 0,
+    activityAt: Math.max(Number(row.activity_at) || 0, clocks.activityAt),
     statusError: (row.status_error as string) || null,
     currentPlan,
     planUpdatedAt: (row.plan_updated_at as number) || null,

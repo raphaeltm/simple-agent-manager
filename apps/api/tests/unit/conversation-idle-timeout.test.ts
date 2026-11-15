@@ -498,6 +498,19 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     ]);
   });
 
+  it('syncs an already committed task even when workspace retirement cleanup fails', async () => {
+    const reporter = seed({ nodeStatus: 'stopped', withTrigger: true });
+    const deleteWorkspace = vi.fn().mockRejectedValue(new Error('synthetic cleanup failure'));
+    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
+    expect(deleteWorkspace).toHaveBeenCalled();
+    expect(task(reporter.taskId).status).toBe('failed');
+    expect(
+      d1Db
+        .prepare('SELECT status FROM trigger_executions WHERE id=?')
+        .get(`trigger-${reporter.taskId}`)
+    ).toEqual({ status: 'failed' });
+  });
+
   describe('workspace idle timeouts', () => {
     const QUIET_ACTIVE_MS = 10 * 60_000;
 

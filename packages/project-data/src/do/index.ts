@@ -3356,7 +3356,8 @@ export class ProjectData extends DurableObject<Env> {
           (workspaceId, projectId) =>
             idleCleanup.deleteWorkspaceInD1(this.env.DATABASE, workspaceId, projectId),
           (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-          () => this.scheduleSummarySync()
+          () => this.scheduleSummarySync(),
+          (work) => this.withArchiveTranscriptLock(work)
         )
       );
       await tick.run('expired_idle_cleanups', () =>
@@ -3367,7 +3368,8 @@ export class ProjectData extends DurableObject<Env> {
           (workspaceId, projectId) =>
             this.stopIdleWorkspaceAndScheduleDeletion(workspaceId, projectId),
           (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-          () => this.scheduleSummarySync()
+          () => this.scheduleSummarySync(),
+          (work) => this.withArchiveTranscriptLock(work)
         )
       );
 

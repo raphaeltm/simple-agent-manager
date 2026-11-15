@@ -1,7 +1,7 @@
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { ulid } from '@simple-agent-manager/worker-core';
 
-import { latestMessageIngestAt } from './message-bookkeeping';
+import { latestMessageIngestAt, type MessageReceiptLock } from './message-bookkeeping';
 import { type LocalTaskRuntimeVerdict, projectDataPorts } from './ports';
 import type { Env } from './types';
 
@@ -159,12 +159,18 @@ function diagnosticMessage(reporter: IdleTaskReporter, liveness: LocalTaskRuntim
   );
 }
 
-/** Fail exactly the task attested by the idle reporter, and only after conclusive death. */
-export async function terminalizeIdleTaskInD1(
+export interface PreparedIdleTaskTerminalization {
+  commit(onTerminalized?: () => void): Promise<IdleTaskTerminalizationResult>;
+  sync(): Promise<void>;
+}
+
+/** Resolve external liveness before acquiring the ingest mutex. The caller commits and stops
+ * locally under one mutex, including when retiring several tasks for one workspace. */
+export async function prepareIdleTaskTerminalization(
   sql: SqlStorage,
   env: Env,
   reporter: IdleTaskReporter
-): Promise<IdleTaskTerminalizationResult> {
+): Promise<IdleTaskTerminalizationResult | PreparedIdleTaskTerminalization> {
   const recentIngest = () =>
     latestMessageIngestAt(sql, reporter.sessionId) > Date.now() - reporter.timeoutMs;
   if (recentIngest())
@@ -255,71 +261,97 @@ export async function terminalizeIdleTaskInD1(
   // (policies `a974b04f`, `486d1dd1`; `.claude/rules/61` keeps the two runtimes
   // in lockstep).
   const errorMessage = supersededTermination ? null : statusEventReason;
-  const now = new Date().toISOString();
-  const update = env.DATABASE.prepare(
-    `UPDATE tasks
+  return {
+    commit: async (onTerminalized): Promise<IdleTaskTerminalizationResult> => {
+      // A batch may have landed during liveness or while waiting for this mutex. Hold the
+      // same ingest mutex through D1 commit AND synchronous local stop, never through probes.
+      if (recentIngest())
+        return { outcome: 'preserved', taskId: task.id, liveness, errorMessage: null };
+      const now = new Date().toISOString();
+      const update = env.DATABASE.prepare(
+        `UPDATE tasks
      SET status = ?, execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
      WHERE id = ? AND project_id = ? AND workspace_id = ? AND chat_session_id = ? AND status = ?`
-  ).bind(
-    terminalStatus,
-    errorMessage,
-    now,
-    now,
-    task.id,
-    reporter.projectId,
-    reporter.workspaceId,
-    reporter.sessionId,
-    task.status
-  );
-  const event = env.DATABASE.prepare(
-    `INSERT INTO task_status_events
+      ).bind(
+        terminalStatus,
+        errorMessage,
+        now,
+        now,
+        task.id,
+        reporter.projectId,
+        reporter.workspaceId,
+        reporter.sessionId,
+        task.status
+      );
+      const event = env.DATABASE.prepare(
+        `INSERT INTO task_status_events
        (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
      SELECT ?, id, ?, ?, 'system', NULL, ?, ?
      FROM tasks
      WHERE id = ? AND project_id = ? AND workspace_id = ? AND chat_session_id = ?
        AND status = ? AND completed_at = ?
        AND ((? IS NULL AND error_message IS NULL) OR error_message = ?)`
-  ).bind(
-    ulid(),
-    task.status,
-    terminalStatus,
-    statusEventReason,
-    now,
-    task.id,
-    reporter.projectId,
-    reporter.workspaceId,
-    reporter.sessionId,
-    terminalStatus,
-    now,
-    errorMessage,
-    errorMessage
-  );
+      ).bind(
+        ulid(),
+        task.status,
+        terminalStatus,
+        statusEventReason,
+        now,
+        task.id,
+        reporter.projectId,
+        reporter.workspaceId,
+        reporter.sessionId,
+        terminalStatus,
+        now,
+        errorMessage,
+        errorMessage
+      );
 
-  try {
-    const [updateResult, eventResult] = await env.DATABASE.batch([update, event]);
-    if (!updateResult?.meta.changes) {
-      return { outcome: 'superseded', taskId: task.id, liveness, errorMessage: null };
-    }
-    if (!eventResult?.meta.changes) {
-      throw new Error('Idle cleanup task transition did not append its status event');
-    }
-  } catch (err) {
-    log.error('d1_failure_transition_failed', {
-      taskId: task.id,
-      projectId: reporter.projectId,
-      workspaceId: reporter.workspaceId,
-      sessionId: reporter.sessionId,
-      action: 'preserved_for_retry',
-      ...serializeError(err),
-    });
-    throw err;
-  }
+      try {
+        const [updateResult, eventResult] = await env.DATABASE.batch([update, event]);
+        if (!updateResult?.meta.changes) {
+          return { outcome: 'superseded', taskId: task.id, liveness, errorMessage: null };
+        }
+        if (!eventResult?.meta.changes) {
+          throw new Error('Idle cleanup task transition did not append its status event');
+        }
+      } catch (err) {
+        log.error('d1_failure_transition_failed', {
+          taskId: task.id,
+          projectId: reporter.projectId,
+          workspaceId: reporter.workspaceId,
+          sessionId: reporter.sessionId,
+          action: 'preserved_for_retry',
+          ...serializeError(err),
+        });
+        throw err;
+      }
 
-  await projectDataPorts().tasks.syncTriggerExecutionStatus(
-    env,
-    task.id,
-    terminalStatus,
-    statusEventReason
-  );
-  return { outcome: 'failed', taskId: task.id, liveness, errorMessage: statusEventReason };
+      onTerminalized?.();
+      return { outcome: 'failed', taskId: task.id, liveness, errorMessage: statusEventReason };
+    },
+    sync: async () => {
+      await projectDataPorts().tasks.syncTriggerExecutionStatus(
+        env,
+        task.id,
+        terminalStatus,
+        statusEventReason
+      );
+    },
+  };
+}
+
+/** Fail exactly the task attested by the idle reporter, and only after conclusive death. */
+export async function terminalizeIdleTaskInD1(
+  sql: SqlStorage,
+  env: Env,
+  reporter: IdleTaskReporter,
+  hooks: { withReceiptLock?: MessageReceiptLock; onTerminalized?: () => void } = {}
+): Promise<IdleTaskTerminalizationResult> {
+  const prepared = await prepareIdleTaskTerminalization(sql, env, reporter);
+  if (!('commit' in prepared)) return prepared;
+  const withReceiptLock: MessageReceiptLock = hooks.withReceiptLock ?? ((work) => work());
+  const committed = await withReceiptLock(() => prepared.commit(hooks.onTerminalized));
+  if (committed.outcome === 'failed') await prepared.sync();
+  return committed;
 }
