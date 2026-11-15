@@ -92,11 +92,12 @@ export function toolResult<T>(response: McpToolResponse): T {
 
 /**
  * Make the workspace an MCP token names authorize it, the way a live agent session's
- * workspace does: present, owned by the token's user and project, and on a running node
- * (`validateActiveWorkspaceMcpToken`). Creates the `nodes`/`workspaces` tables when a
- * narrow fixture omitted them. A workspace row the test already seeded keeps its status,
- * so a test of an inactive workspace still sees that status; only a missing node is filled.
- * Pass `nodeId` to reuse a node the fixture already has (installation-wide listings).
+ * workspace does: present, owned by the token's current active project member, and on a
+ * running node (`validateActiveWorkspaceMcpToken`). Creates the authority/lifecycle tables
+ * when a narrow fixture omitted them. Existing user and membership rows are preserved so
+ * role-sensitive fixtures keep their intended authority. A workspace row the test already
+ * seeded keeps its status; only a missing node is filled. Pass `nodeId` to reuse a node the
+ * fixture already has (installation-wide listings).
  */
 export function seedActiveMcpWorkspace(
   sqlite: Database.Database,
@@ -111,8 +112,19 @@ export function seedActiveMcpWorkspace(
   );
   createSchemaTables(
     sqlite,
-    [schema.nodes, schema.workspaces].filter((table) => !existing.has(getTableConfig(table).name))
+    [schema.users, schema.projectMembers, schema.nodes, schema.workspaces].filter(
+      (table) => !existing.has(getTableConfig(table).name)
+    )
   );
+  sqlite
+    .prepare(`INSERT OR IGNORE INTO users (id, email, status) VALUES (?, ?, 'active')`)
+    .run(data.userId, `${data.userId}@example.test`);
+  sqlite
+    .prepare(
+      `INSERT OR IGNORE INTO project_members (project_id, user_id, role, status)
+       VALUES (?, ?, 'owner', 'active')`
+    )
+    .run(data.projectId, data.userId);
   sqlite
     .prepare(
       `INSERT INTO workspaces (id, user_id, project_id, node_id, status)

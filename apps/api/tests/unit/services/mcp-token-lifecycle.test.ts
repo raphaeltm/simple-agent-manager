@@ -62,6 +62,15 @@ async function tokenStillStored(): Promise<boolean> {
 beforeEach(async () => {
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema as unknown as Record<string, unknown>);
+  sqlite
+    .prepare(`INSERT INTO users (id, email, status) VALUES ('user-1', 'user@example.test', 'active')`)
+    .run();
+  sqlite
+    .prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status)
+       VALUES ('project-1', 'user-1', 'owner', 'active')`
+    )
+    .run();
   env = { DATABASE: createSqliteD1(sqlite), KV: createJsonKv() } as unknown as Env;
   await storeMcpToken(env.KV, TOKEN, TOKEN_DATA);
 });
@@ -76,6 +85,37 @@ describe('validateActiveWorkspaceMcpToken', () => {
       await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
     }
   );
+
+  it('keeps an active viewer token valid for downstream read-capability checks', async () => {
+    sqlite
+      .prepare(`UPDATE project_members SET role = 'viewer' WHERE user_id = 'user-1'`)
+      .run();
+    seed({ status: 'running' });
+
+    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+    expect(await tokenStillStored()).toBe(true);
+  });
+
+  it.each(['invited', 'suspended', 'removed'])(
+    'rejects and revokes the token when project membership becomes %s',
+    async (membershipStatus) => {
+      sqlite
+        .prepare(`UPDATE project_members SET status = ? WHERE user_id = 'user-1'`)
+        .run(membershipStatus);
+      seed({ status: 'running' });
+
+      await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toBeNull();
+      expect(await tokenStillStored()).toBe(false);
+    }
+  );
+
+  it('rejects and revokes the token when the user account is suspended', async () => {
+    sqlite.prepare(`UPDATE users SET status = 'suspended' WHERE id = 'user-1'`).run();
+    seed({ status: 'running' });
+
+    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toBeNull();
+    expect(await tokenStillStored()).toBe(false);
+  });
 
   it.each(['stopping', 'stopped', 'sleeping', 'evicted', 'error', 'pending'])(
     'rejects, but keeps, the token while its workspace is %s',
@@ -138,7 +178,7 @@ describe('validateActiveWorkspaceMcpToken', () => {
   });
 });
 
-describe('MCP entry points refuse a token whose workspace stopped', () => {
+describe('MCP entry points enforce current token lifecycle authority', () => {
   let app: Hono;
 
   beforeAll(async () => {
@@ -172,6 +212,19 @@ describe('MCP entry points refuse a token whose workspace stopped', () => {
     setWorkspaceStatus('stopped');
     const stale = await postMcp('/mcp', toolsList);
     expect(stale.status).toBe(401);
+  });
+
+  it('serves tools/list while membership is active, then 401s after removal', async () => {
+    seed({ status: 'running' });
+    const live = await postMcp('/mcp', toolsList);
+    expect(live.status).toBe(200);
+
+    sqlite
+      .prepare(`UPDATE project_members SET status = 'removed' WHERE user_id = 'user-1'`)
+      .run();
+    const stale = await postMcp('/mcp', toolsList);
+    expect(stale.status).toBe(401);
+    expect(await tokenStillStored()).toBe(false);
   });
 
   it('refuses webhook-claim redemption for a stopped workspace token', async () => {
