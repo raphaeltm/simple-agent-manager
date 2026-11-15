@@ -194,6 +194,8 @@ const LegacyTriggerDetailRedirect = lazyNamed(
   'LegacyTriggerDetailRedirect'
 );
 const Sam = lazyNamed(() => import('./pages/Sam'), 'Sam');
+// PROTOTYPE ONLY (dev-only route) — remove before any merge to main.
+const InboxPrototype = lazyNamed(() => import('./pages/inbox-prototype'), 'InboxPrototype');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
 const ConnectorConsent = lazyNamed(() => import('./pages/ConnectorConsent'), 'ConnectorConsent');
@@ -260,10 +262,7 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-export const DEV_ONLY_ROUTE_PATHS = [
-  '/__test/error-boundary',
-  '/ui-standards',
-] as const;
+export const DEV_ONLY_ROUTE_PATHS = ['/__test/error-boundary', '/ui-standards'] as const;
 
 /** TEMP audit-only harness — forces ErrorBoundary crash screen for Playwright review. Reverted after use. */
 function ErrorBoundaryAuditHarness(): never {
@@ -301,6 +300,7 @@ export default function App() {
                           path="/__test/error-boundary"
                           element={<ErrorBoundaryAuditHarness />}
                         />
+                        <Route path="/prototype/inbox" element={page(<InboxPrototype />)} />
                       </>
                     )}
                     {/* Protected routes with AppShell (persistent navigation) */}
