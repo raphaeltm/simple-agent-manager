@@ -1,6 +1,6 @@
 # Authenticate platform GCP orphan reconciliation
 
-**Current status (November15 02:05UTC): blocked at required live staging sweep proof.** Code and full local validation/reviews pass; staging deployment and browser checks pass. No PR or merge. Documented staging KV writes return401/code10000, so the next hourly inventory was outside the bounded window. Baseline restored and all billable fixtures independently removed; staging released.
+**Current status (November15 02:11UTC): arranging naturally eligible staging sweep proof.** Code and full local validation/reviews pass; staging deployment and browser checks pass. No PR or merge. Documented staging KV writes return401/code10000, so the next hourly inventory was outside the bounded window. Baseline restored and all billable fixtures independently removed; staging released.
 
 ## Problem and findings
 
@@ -91,3 +91,12 @@ Restoration completed02:02: original Hetzner enabled first, ownGCP credential re
 Independent provider/IAM/D1 cleanup proof02:04: both fixture VMs and both auto-delete boot disks absent; own service account absent from authoritative project list; own compute IAM membership absent; own WIF pool stateDELETED (provider removed with pool); only original platform Hetzner credential enabled and ownGCP credential absent. Wildcard GET of a deleted service account returned403, so that response was not used as absence proof. Only unavoidable nonbillable remnant: deleted WIF pool name reserved30days. Total bounded fixture spend estimate remains<$0.10.
 
 Staging FREE published event1cdc5c84-dc43-42fa-85f9-7107c7b1f23a. Cleanup guard cancelled before02:15, schedule76a3a75c-a98b-443d-9481-8025cb2138e2 version3. Root coordinator received recovery and cleanup receipts. Parent receives the blocking outcome; no PR, merge or production deploy claimed. Resume requires a coordinated legitimate verification window spanning the next eligible hourly sweep, or restored documented KV write capability. Keep all normal gates; do not archive this unfinished task.
+
+
+## Natural-window continuation
+
+Coordinator event9f402b28 directs continuation by a timed natural sweep, no KV workaround/new permission. Prior window remains concluded and fully cleaned. Fresh02:09 read still shows last-run01:50:32.815UTC, interval1h; first cron tick after eligibility is02:55 (actual invocation around02:50 can also be eligible depending on elapsed timing). New resources must also age for1h, and deployment observed20–24min, so a fixture created12min before the earliest tick cannot be selected. Requested a coordinated approximately03:30–04:15 window and will re-read the marker after02:55 to finalize. Prepare only two own stopped fixtures outside the shared claim sufficiently early; no platform/global state mutations until actual handoff.
+
+Coordinator permits at most one next-hour retry after a missed tick, with at most one extra hour of shared staging and a report after two failed attempts. This is a separate newly coordinated natural-window plan, not extension of the concluded02:15 guard. No new resources provisioned yet. Cumulative conservative fixture budget remains<$0.10.
+
+Environment reporting tool returned report_failed/storage failed. Durable follow-up filed at `tasks/backlog/2026-11-15-staging-cloudflare-kv-write-capability.md` with sanitized calls/statuses; no retry or permissions workaround.
