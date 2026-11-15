@@ -14,8 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 )
+
+var standaloneCredentialExchangeSequence atomic.Uint64
 
 // standaloneCredentialExchange is the credential path of an Instant workspace
 // with only the network faked: the production-rendered credential helper, the
@@ -36,12 +39,16 @@ type standaloneCredentialExchange struct {
 // a GitHub CLI policy that forbids minting.
 func newStandaloneCredentialExchange(t *testing.T, workspaceID string, mintStatus int, mintedToken string) *standaloneCredentialExchange {
 	t.Helper()
+	workspaceID = fmt.Sprintf("%s-%d", workspaceID, standaloneCredentialExchangeSequence.Add(1))
 	exchange := &standaloneCredentialExchange{workspaceID: workspaceID}
 
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		exchange.mintCalls.Add(1)
 		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces/"+workspaceID+"/git-token" {
 			t.Errorf("unexpected control plane request: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer callback-token" {
+			t.Errorf("control plane Authorization = %q, want workspace callback token", got)
 		}
 		if mintStatus != http.StatusOK {
 			w.WriteHeader(mintStatus)
@@ -66,8 +73,17 @@ func newStandaloneCredentialExchange(t *testing.T, workspaceID string, mintStatu
 	t.Cleanup(vmAgent.Close)
 	exchange.endpoint = vmAgent.URL + "/git-credential"
 
+	exchangeToken, err := bootstrap.NewGitCredentialExchangeToken()
+	if err != nil {
+		t.Fatalf("prepare credential exchange token: %v", err)
+	}
+	if err := bootstrap.InstallGitCredentialExchange(workspaceID, exchangeToken); err != nil {
+		t.Fatalf("install credential exchange token: %v", err)
+	}
+	t.Cleanup(func() { _ = bootstrap.RemoveCredentialHelperFromHost(workspaceID) })
+
 	exchange.helperPath = filepath.Join(t.TempDir(), "git-credential-sam")
-	if err := writeStandaloneGitCredentialHelper(exchange.helperPath, 5*time.Second); err != nil {
+	if err := writeStandaloneGitCredentialHelper(exchange.helperPath, 5*time.Second, exchangeToken); err != nil {
 		t.Fatalf("write credential helper: %v", err)
 	}
 	return exchange

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/bootstrap"
 )
 
 // standaloneGitCredentialHelperPath is where the standalone git credential
@@ -64,20 +66,27 @@ if [ -n "$path" ]; then
   credential_query="${credential_query}&path=${encoded_path}"
 fi
 
+exchange_token={{ git_credential_exchange_token }}
 curl -fsS --max-time {{ credential_timeout_seconds }} \
+	-H "Authorization: Bearer ${exchange_token}" \
   "${endpoint}?${credential_query}" 2>/dev/null || true
 `
 
-func renderStandaloneGitCredentialHelperScript(timeout time.Duration) (string, error) {
+func renderStandaloneGitCredentialHelperScript(timeout time.Duration, exchangeToken string) (string, error) {
 	if timeout <= 0 {
 		return "", fmt.Errorf("invalid git credential timeout: %s", timeout)
 	}
+	exchangeToken = strings.TrimSpace(exchangeToken)
+	if exchangeToken == "" {
+		return "", fmt.Errorf("git credential exchange token is required")
+	}
 	timeoutSeconds := strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64)
-	return strings.ReplaceAll(
+	script := strings.ReplaceAll(
 		standaloneGitCredentialHelperScriptTemplate,
 		"{{ credential_timeout_seconds }}",
 		timeoutSeconds,
-	), nil
+	)
+	return strings.ReplaceAll(script, "{{ git_credential_exchange_token }}", shellSingleQuote(exchangeToken)), nil
 }
 
 // ConfigureStandaloneGitCredentialHelper installs a git credential helper that
@@ -86,9 +95,19 @@ func renderStandaloneGitCredentialHelperScript(timeout time.Duration) (string, e
 // commands (clone, ls-remote, fetch, push) and `gh` calls authenticate in
 // standalone mode for the whole session, not just the first token lifetime.
 // Failures are non-fatal — the agent can still run without git access.
-func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
-	if err := writeStandaloneGitCredentialHelper(standaloneGitCredentialHelperPath, timeout); err != nil {
+func ConfigureStandaloneGitCredentialHelper(workspaceID string, timeout time.Duration) {
+	exchangeToken, err := bootstrap.NewGitCredentialExchangeToken()
+	if err != nil {
+		slog.Warn("standalone git: failed to prepare credential exchange; agent git auth unavailable", "error", err)
+		return
+	}
+	if err := writeStandaloneGitCredentialHelper(standaloneGitCredentialHelperPath, timeout, exchangeToken); err != nil {
 		slog.Warn("standalone git: failed to write credential helper; agent git auth unavailable", "error", err)
+		return
+	}
+	if err := bootstrap.InstallGitCredentialExchange(workspaceID, exchangeToken); err != nil {
+		_ = os.Remove(standaloneGitCredentialHelperPath)
+		slog.Warn("standalone git: failed to install credential exchange; agent git auth unavailable", "error", err)
 		return
 	}
 
@@ -127,8 +146,8 @@ func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
 	slog.Info("standalone git: credential helper configured", "path", standaloneGitCredentialHelperPath)
 }
 
-func writeStandaloneGitCredentialHelper(path string, timeout time.Duration) error {
-	script, err := renderStandaloneGitCredentialHelperScript(timeout)
+func writeStandaloneGitCredentialHelper(path string, timeout time.Duration, exchangeToken string) error {
+	script, err := renderStandaloneGitCredentialHelperScript(timeout, exchangeToken)
 	if err != nil {
 		return fmt.Errorf("render helper: %w", err)
 	}

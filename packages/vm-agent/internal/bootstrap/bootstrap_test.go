@@ -196,6 +196,8 @@ func TestIsGitHubRepo(t *testing.T) {
 	}
 }
 
+const testGitCredentialExchangeToken = "test-git-credential-exchange-token"
+
 func TestRenderGitCredentialHelperScript(t *testing.T) {
 	t.Parallel()
 
@@ -205,7 +207,7 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 		GitCredentialTimeout: 1750 * time.Millisecond,
 	}
 
-	script, err := renderGitCredentialHelperScript(cfg)
+	script, err := renderGitCredentialHelperScript(cfg, testGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
 	}
@@ -213,6 +215,8 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	required := []string{
 		`http://${target}:8080/git-credential`,
 		`--max-time 1.75`,
+		"Authorization: Bearer ${exchange_token}",
+		testGitCredentialExchangeToken,
 		"host.docker.internal",
 		"172.17.0.1",
 	}
@@ -224,7 +228,6 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	}
 	forbidden := []string{
 		"callback-token-123",
-		"Authorization: Bearer",
 	}
 	for _, fragment := range forbidden {
 		if strings.Contains(script, fragment) {
@@ -255,7 +258,7 @@ func checkCredentialHelperHost(t *testing.T, tc credentialHelperHostCase) {
 		CallbackToken: "callback-token-123",
 		WorkspaceID:   "ws-123",
 	}
-	script, err := renderGitCredentialHelperScript(cfg)
+	script, err := renderGitCredentialHelperScript(cfg, testGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
 	}
@@ -349,7 +352,7 @@ func TestRenderGitCredentialHelperScriptGitLabHostCaseInsensitive(t *testing.T) 
 				RepoProvider:   "gitlab",
 				RepositoryHost: "GitLab.Example.com", // mixed case in config too
 			}
-			script, err := renderGitCredentialHelperScript(cfg)
+			script, err := renderGitCredentialHelperScript(cfg, testGitCredentialExchangeToken)
 			if err != nil {
 				t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
 			}
@@ -397,7 +400,7 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 		TLSEnabled:    true,
 	}
 
-	script, err := renderGitCredentialHelperScript(cfg)
+	script, err := renderGitCredentialHelperScript(cfg, testGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
 	}
@@ -405,6 +408,8 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 	required := []string{
 		`https://${target}:8443/git-credential`,
 		" -k",
+		"Authorization: Bearer ${exchange_token}",
+		testGitCredentialExchangeToken,
 		"host.docker.internal",
 		"172.17.0.1",
 	}
@@ -416,7 +421,6 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 	}
 	forbidden := []string{
 		"callback-token-tls",
-		"Authorization: Bearer",
 	}
 	for _, fragment := range forbidden {
 		if strings.Contains(script, fragment) {
@@ -433,16 +437,20 @@ func TestRenderGitCredentialHelperScriptTLS(t *testing.T) {
 func TestRenderGitCredentialHelperScriptValidation(t *testing.T) {
 	t.Parallel()
 
-	if _, err := renderGitCredentialHelperScript(nil); err == nil {
+	if _, err := renderGitCredentialHelperScript(nil, testGitCredentialExchangeToken); err == nil {
 		t.Fatal("expected error for nil config")
 	}
 
-	if _, err := renderGitCredentialHelperScript(&config.Config{Port: 8080}); err == nil {
+	if _, err := renderGitCredentialHelperScript(&config.Config{Port: 8080}, testGitCredentialExchangeToken); err == nil {
 		t.Fatal("expected error for missing callback token")
 	}
 
-	if _, err := renderGitCredentialHelperScript(&config.Config{CallbackToken: "token", Port: 0}); err == nil {
+	if _, err := renderGitCredentialHelperScript(&config.Config{CallbackToken: "token", Port: 0}, testGitCredentialExchangeToken); err == nil {
 		t.Fatal("expected error for invalid port")
+	}
+
+	if _, err := renderGitCredentialHelperScript(&config.Config{CallbackToken: "token", Port: 8080}, ""); err == nil {
+		t.Fatal("expected error for missing git credential exchange token")
 	}
 }
 
@@ -2756,7 +2764,7 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 	if hostPath == "" {
 		t.Fatal("expected non-empty host path")
 	}
-	defer os.Remove(hostPath)
+	defer RemoveCredentialHelperFromHost(workspaceID)
 
 	// Verify file exists and has correct permissions.
 	info, err := os.Stat(hostPath)
@@ -2781,6 +2789,9 @@ func TestWriteCredentialHelperToHost(t *testing.T) {
 	if strings.Contains(string(content), "test-token") {
 		t.Fatal("credential helper must not contain callback token")
 	}
+	if !strings.Contains(string(content), "Authorization: Bearer ${exchange_token}") {
+		t.Fatal("credential helper must authenticate with its dedicated exchange token")
+	}
 }
 
 func TestWriteCredentialHelperToHostReplacesExistingRegularFile(t *testing.T) {
@@ -2791,7 +2802,7 @@ func TestWriteCredentialHelperToHostReplacesExistingRegularFile(t *testing.T) {
 	if err := os.WriteFile(hostPath, []byte("stale-helper"), 0o755); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
-	defer os.Remove(hostPath)
+	defer RemoveCredentialHelperFromHost(workspaceID)
 
 	cfg := &config.Config{
 		WorkspaceID:   workspaceID,
@@ -2906,11 +2917,26 @@ func TestRemoveCredentialHelperFromHost(t *testing.T) {
 	if err := os.WriteFile(hostPath, []byte("test"), 0o755); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
+	exchangeToken, err := NewGitCredentialExchangeToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := InstallGitCredentialExchange(workspaceID, exchangeToken); err != nil {
+		t.Fatal(err)
+	}
+	if !ValidateGitCredentialExchange(workspaceID, exchangeToken) {
+		t.Fatal("installed exchange token should validate before cleanup")
+	}
 
-	RemoveCredentialHelperFromHost(workspaceID)
+	if err := RemoveCredentialHelperFromHost(workspaceID); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := os.Stat(hostPath); !os.IsNotExist(err) {
 		t.Fatal("expected file to be removed")
+	}
+	if ValidateGitCredentialExchange(workspaceID, exchangeToken) {
+		t.Fatal("removed exchange token must no longer validate")
 	}
 }
 
@@ -3727,7 +3753,7 @@ func TestProjectSecretEnvIsPlaceholderEvenFromLegacyState(t *testing.T) {
 }
 
 func TestGitCredentialDefaultBudget(t *testing.T) {
-	script, err := renderGitCredentialHelperScript(&config.Config{Port: 8080, CallbackToken: "test", WorkspaceID: "ws-test"})
+	script, err := renderGitCredentialHelperScript(&config.Config{Port: 8080, CallbackToken: "test", WorkspaceID: "ws-test"}, testGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3752,7 +3778,7 @@ func TestGeneratedDevcontainerHelperSlowCredentials(t *testing.T) {
 	if _, err := fmt.Sscan(portText, &port); err != nil {
 		t.Fatal(err)
 	}
-	script, err := renderGitCredentialHelperScript(&config.Config{Port: port, CallbackToken: "not-in-script", WorkspaceID: "ws-slow"})
+	script, err := renderGitCredentialHelperScript(&config.Config{Port: port, CallbackToken: "not-in-script", WorkspaceID: "ws-slow"}, testGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatal(err)
 	}
