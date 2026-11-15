@@ -366,6 +366,9 @@ describe('AWS', () => {
     expect(init.status).not.toBe(0);
     expect(init.out).toContain('(denied: aws-kms');
     expect(init.out).toContain('SAM_KEY_PROVIDER=file');
+    // The generic denied advice; the Google Cloud bootstrap command is not offered on AWS.
+    expect(init.out).toContain('denied means no key by that name was set up for this install');
+    expect(init.out).not.toContain('selfhost:gcp-bootstrap');
     expectNothingSealed();
   });
 });
