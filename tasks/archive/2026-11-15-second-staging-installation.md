@@ -75,10 +75,10 @@ credential environment.
 - [x] `deploy-reusable.yml`: `installation` input, overrides, workers.dev read-only, bootstrap step (after task A merges or by agreement)
 - [x] `deploy-staging.yml`: installation choice, credential environment for jobs (after task C merges)
 - [x] Docs: staging verification rule + full reference, /do steps, self-hosting/deploy docs, CLAUDE.md, cf-api-debugging pointer
-- [ ] Live: deploy main to staging2, agent sign-in, VM session, Instant session on Artifacts project
-- [ ] Live: isolation both directions (version + data unchanged on the other installation)
-- [ ] Live: teardown staging2, redeploy from nothing, bootstrap re-runs; VMs cleaned up
-- [ ] Idea note with deploy/sign-in/teardown instructions and remaining owner actions
+- [x] Live: deploy main to staging2, agent sign-in, VM session, Instant session on Artifacts project
+- [x] Live: isolation both directions (version + data unchanged on the other installation)
+- [x] Live: teardown staging2, redeploy from nothing, bootstrap re-runs; VMs cleaned up
+- [x] Idea note with deploy/sign-in/teardown instructions and remaining owner actions
 
 ### Added during implementation (found live or in review)
 
@@ -95,7 +95,9 @@ credential environment.
 - Run 43749577505 (branch, dd482e2): full deploy + 12 smoke tests on sammy2.party; workload-identity sign-in; Artifacts project; Instant "PONG"; VM (Hetzner cx33) "PONG-VM" (project default agent set by hand at that point; fixed since by the AI-proxy opt-in).
 - Isolation both ways via deployment history and D1 counts (PR #2766 body).
 - Teardown runs 43754362452 (gaps found), 43755074175 (full), 43755378489 (idempotent).
-- Rebuild 43755537071 failed: stale container applications; fixed by the new teardown step. Re-run pending.
+- Rebuild 43755537071 failed: stale container applications; fixed by the new teardown step. Teardown 43757350800, then rebuild 43757889555 green from nothing. Final-code proof on the rebuilt installation: Instant "PONG", VM "PONG-VM", with `providerMode` already set by the bootstrap.
+- Merged as 0163801 (PR #2766). Deploying `main` to staging2 (run 43763835394) passed, including 12/12 smoke tests; lease released (run 43765933375).
+- Idea note 01M7GK3ZH76SR8M4PTHX6RMHBQ on 01M7FYGMEESYH3AJZJ0CT3NKCZ.
 
 ## Acceptance criteria
 
