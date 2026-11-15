@@ -238,6 +238,7 @@ Users select their provider mode per-agent in Settings → Agent Settings. The `
 ## Testing
 
 - **Staging authentication**: Use Playwright browser auth with the staging smoke/API token in `SAM_PLAYWRIGHT_PRIMARY_USER`. In the Playwright browser context, POST to `https://api.sammy.party/api/auth/token-login` with body `{ "token": "<value>" }`, verify a 200 response, then navigate to `https://app.sammy.party`. Do not rely on `SAM_API_URL`; it may point at production, where staging tokens correctly fail with `401 Invalid token`. See `.claude/rules/13-staging-verification.md` for full procedure.
+- **Two staging installations**: `staging` (`sammy.party`) and `staging2` (`sammy2.party`, deploy with `-f environment=staging2`). Both use the `staging` GitHub Environment's credentials and have separate data and leases; take whichever is free. staging2 is signed into by workload identity only. Details: full staging reference, "Two Staging Installations".
 - **Production authentication**: Use GitHub OAuth credentials at `/workspaces/.tmp/secure/demo-credentials.md` (outside repo)
 - **Live test cleanup required**: delete test workspaces/nodes after verification
 - **Staging verification required for every code PR** — see `.claude/rules/13-staging-verification.md`

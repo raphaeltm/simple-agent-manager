@@ -4,11 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to tear down'
+        description: 'Installation to tear down (staging2 uses the staging credentials; see scripts/deploy/staging-installations.mjs)'
         required: true
         type: choice
         options:
           - staging
+          - staging2
           - production
       confirm:
         description: 'Type DELETE to confirm teardown'
@@ -43,10 +44,29 @@ env:
   INPUT_ENVIRONMENT: ${{ inputs.environment }}
 
 jobs:
+  # Maps the requested installation to the GitHub Environment that holds its credentials.
+  # A secondary installation (staging2) runs with another environment's secrets and differs
+  # only in target; the checked-in allowlist refuses anything else. No secrets in this job.
+  resolve:
+    name: Resolve Installation
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm == 'DELETE' }}
+    outputs:
+      credential_environment: ${{ steps.resolve.outputs.credential_environment }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve credential environment
+        id: resolve
+        env:
+          INSTALLATION: ${{ inputs.environment }}
+        run: node scripts/deploy/staging-installations.mjs credential-environment
+
   teardown:
     name: Teardown Cloudflare Resources (${{ inputs.environment }}${{ inputs.dry_run && ' — DRY RUN' || '' }})
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    needs: resolve
+    environment: ${{ needs.resolve.outputs.credential_environment }}
     if: ${{ github.event.inputs.confirm == 'DELETE' }}
 
     steps:
@@ -68,12 +88,30 @@ jobs:
       - name: Resolve Resource Names
         id: names
         env:
-          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          INPUT_ENVIRONMENT: ${{ needs.resolve.outputs.credential_environment }}
+          INSTALLATION: ${{ inputs.environment }}
           RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           AI_GATEWAY_ID: ${{ vars.AI_GATEWAY_ID }}
           PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET }}
         run: node scripts/deploy/workflow-resource-names.mjs teardown
+
+      # A secondary installation has its own zone, found by name with the environment's token.
+      # The step fails closed; nothing falls back to the primary's CF_ZONE_ID.
+      - name: Resolve Installation Zone
+        id: zone
+        if: ${{ steps.names.outputs.secondary == 'true' }}
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          ZONE_NAME: ${{ steps.names.outputs.zone_name }}
+        run: node scripts/deploy/resolve-installation-zone.mjs
+
+      - name: Refuse shared marketing teardown for a secondary installation
+        if: ${{ steps.names.outputs.secondary == 'true' && inputs.include_marketing }}
+        run: |
+          echo "::error::include_marketing is shared across installations and cannot be used with a secondary installation."
+          exit 1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -145,7 +183,7 @@ jobs:
 
           echo "Deleting Tail Worker: $WORKER_NAME"
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            "$API/accounts/$CF_ACCOUNT_ID/workers/scripts/$WORKER_NAME" \
+            "$API/accounts/$CF_ACCOUNT_ID/workers/scripts/$WORKER_NAME?force=true" \
             -X DELETE \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
@@ -158,7 +196,7 @@ jobs:
             echo "Tail Worker not found (already deleted)."
             echo "status=not_found" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Failed to delete Tail Worker (HTTP $HTTP_CODE)"
+            echo "::warning::Failed to delete Tail Worker (HTTP $HTTP_CODE): $(echo "$BODY" | jq -r '[.errors[]?.message] | join("; ")' 2>/dev/null | tr -d '\r\n:' | cut -c1-200)"
             echo "status=failed" >> "$GITHUB_OUTPUT"
           fi
 
@@ -186,9 +224,13 @@ jobs:
             exit 0
           fi
 
+          # force=true also deletes the Worker's Durable Object namespaces and their data, so it
+          # is used only on a full teardown; keep_data leaves a Worker with Durable Objects.
+          FORCE_QUERY=""
+          if [ "$INPUT_KEEP_DATA" != "true" ]; then FORCE_QUERY="?force=true"; fi
           echo "Deleting API Worker: $WORKER_NAME"
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            "$API/accounts/$CF_ACCOUNT_ID/workers/scripts/$WORKER_NAME" \
+            "$API/accounts/$CF_ACCOUNT_ID/workers/scripts/$WORKER_NAME$FORCE_QUERY" \
             -X DELETE \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
@@ -201,12 +243,25 @@ jobs:
             echo "API Worker not found (already deleted)."
             echo "status=not_found" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Failed to delete API Worker (HTTP $HTTP_CODE)"
+            echo "::warning::Failed to delete API Worker (HTTP $HTTP_CODE): $(echo "$BODY" | jq -r '[.errors[]?.message] | join("; ")' 2>/dev/null | tr -d '\r\n:' | cut -c1-200)"
             echo "status=failed" >> "$GITHUB_OUTPUT"
           fi
 
+      # Container applications outlive their Worker and stay bound to the deleted Durable
+      # Object namespace; a later deploy of the same installation then fails. Full teardown only.
+      - name: Delete Container Applications
+        id: delete_container_apps
+        if: ${{ !inputs.keep_data }}
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          API_WORKER: ${{ steps.names.outputs.api_worker }}
+          STACK: ${{ steps.names.outputs.stack }}
+        run: node scripts/deploy/delete-container-applications.mjs
+
       # ================================================================
-      # Phase 2: Clean Up Workspace DNS Records (runtime-created ws-*)
+      # Phase 2: Clean Up Workspace and Node DNS Records (runtime-created ws-* and *.vm)
       # Searches all record types (A, AAAA, CNAME) matching ws-*.{domain}
       # ================================================================
       - name: Delete Workspace DNS Records
@@ -214,7 +269,7 @@ jobs:
         continue-on-error: true
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.names.outputs.secondary == 'true' && (steps.zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
           API="https://api.cloudflare.com/client/v4"
@@ -222,7 +277,7 @@ jobs:
           FAILED=0
           PAGE=1
 
-          echo "Searching for workspace DNS records (ws-*.${BASE_DOMAIN})..."
+          echo "Searching for workspace and node DNS records (ws-*.${BASE_DOMAIN}, *.vm.${BASE_DOMAIN})..."
 
           while true; do
             RESPONSE=$(curl -sf "$API/zones/$CF_ZONE_ID/dns_records?per_page=100&page=$PAGE" \
@@ -235,8 +290,10 @@ jobs:
               exit 0
             fi
 
-            # Extract ws-* records — no type filter so we catch A, AAAA, and CNAME
-            WS_IDS=$(echo "$RESPONSE" | jq -r ".result[] | select(.name | test(\"^ws-.*\\.${BASE_DOMAIN}$\")) | .id + \" \" + .name")
+            # Workspace (ws-*.<domain>) and node backend (<node>.vm.<domain>) records, matched
+            # as literal suffixes of this installation's domain. No type filter so we catch A,
+            # AAAA, and CNAME.
+            WS_IDS=$(echo "$RESPONSE" | jq -r --arg d ".${BASE_DOMAIN}" '.result[] | select((.name | endswith($d)) and ((.name | startswith("ws-")) or (.name | endswith(".vm" + $d)))) | .id + " " + .name')
 
             if [ -n "$WS_IDS" ]; then
               echo "$WS_IDS" | while IFS=' ' read -r RECORD_ID RECORD_NAME; do
@@ -294,7 +351,7 @@ jobs:
         continue-on-error: true
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.names.outputs.secondary == 'true' && (steps.zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
           API="https://api.cloudflare.com/client/v4"
@@ -386,7 +443,7 @@ jobs:
         continue-on-error: true
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.names.outputs.secondary == 'true' && (steps.zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
         run: |
           API="https://api.cloudflare.com/client/v4"
@@ -546,12 +603,43 @@ jobs:
       # ================================================================
       # Phase 5: Pulumi Destroy
       # ================================================================
+      # An R2 bucket must be empty before it can be deleted (HTTP 409), so a full teardown
+      # empties the installation's assets bucket first. Deadline-bounded; anything left makes
+      # the bucket deletion fail as before and is reported.
+      - name: Empty Assets Bucket
+        id: empty_assets_bucket
+        if: ${{ steps.pulumi_stack.outputs.status == 'ok' && inputs.dry_run != true && !inputs.keep_data }}
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BUCKET_NAME: ${{ steps.names.outputs.assets_bucket }}
+          STACK: ${{ steps.names.outputs.stack }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          R2_EMPTY_DEADLINE_SECONDS: ${{ vars.TEARDOWN_R2_EMPTY_DEADLINE_SECONDS }}
+        working-directory: infra
+        run: |
+          # Empty only the bucket the selected stack itself owns.
+          STACK_BUCKET="$(pulumi stack output r2Name --stack "$STACK" 2>/dev/null || true)"
+          if [ -z "$STACK_BUCKET" ] || [ "$STACK_BUCKET" != "$BUCKET_NAME" ]; then
+            echo "::warning::Stack $STACK owns bucket '$STACK_BUCKET', not '$BUCKET_NAME'; not emptying."
+            exit 0
+          fi
+          node ../scripts/deploy/empty-r2-bucket.mjs
+
       - name: Unprotect Pulumi Resources
         id: unprotect
         if: ${{ steps.pulumi_stack.outputs.status == 'ok' && inputs.dry_run != true }}
         continue-on-error: true
         working-directory: infra
         run: |
+          # The Pulumi backend can hold several installations' stacks; act only on this one.
+          if [ "$(pulumi stack --show-name)" != "$STACK" ]; then
+            echo "::error::Selected Pulumi stack is not $STACK; refusing."
+            exit 1
+          fi
           echo "Scanning for protected Pulumi resources..."
 
           # Use structured JSON export for robust URN parsing
@@ -584,6 +672,7 @@ jobs:
           echo "status=ok" >> "$GITHUB_OUTPUT"
           echo "count=$UNPROTECTED" >> "$GITHUB_OUTPUT"
         env:
+          STACK: ${{ steps.names.outputs.stack }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
@@ -594,6 +683,11 @@ jobs:
         continue-on-error: true
         working-directory: infra
         run: |
+          # The Pulumi backend can hold several installations' stacks; act only on this one.
+          if [ "$(pulumi stack --show-name)" != "$STACK" ]; then
+            echo "::error::Selected Pulumi stack is not $STACK; refusing."
+            exit 1
+          fi
           if [ "$INPUT_DRY_RUN" = "true" ]; then
             echo "DRY RUN: Listing Pulumi-managed resources..."
             echo ""
@@ -645,6 +739,7 @@ jobs:
             echo "status=deleted" >> "$GITHUB_OUTPUT"
           fi
         env:
+          STACK: ${{ steps.names.outputs.stack }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
@@ -740,7 +835,7 @@ jobs:
           echo "| Workers | API Worker (\`$API_WORKER\`) | $(fmt "$API_WORKER_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
 
           # Workspace DNS
-          echo "| DNS | Workspace records (\`ws-*\`) | $(fmt "$WS_DNS_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| DNS | Workspace and node records (\`ws-*\`, \`*.vm\`) | $(fmt "$WS_DNS_STATUS") |" >> "$GITHUB_STEP_SUMMARY"
 
           # Marketing site
           if [ "$INPUT_INCLUDE_MARKETING" = "true" ]; then
