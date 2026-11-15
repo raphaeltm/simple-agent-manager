@@ -18,7 +18,7 @@ In the last day, three places where that assumption broke on Google Cloud were f
 
 Google Compute Engine handles most changes as **long-running operations**. You send a request to create or delete a machine, Google answers right away with an operation ID, and you then ask about that operation until it reports `DONE`. The request is accepted in a fraction of a second, but the work takes longer.
 
-How much longer? On a test installation yesterday, Google's record of one delete shows it was sent at 12:20:03 and finished at 12:20:09: about six seconds. Creating a machine is longer still, because SAM also exchanges a token, makes sure a firewall rule exists, inserts the instance, waits for the operation and reads back the result. That takes 9 to 12 seconds.
+How much longer? On a test installation earlier today, Google's record of one delete shows it was sent at 12:20:03 and finished at 12:20:09: about six seconds. Creating a machine is longer still, because SAM also exchanges a token, makes sure a firewall rule exists, inserts the instance, waits for the operation and reads back the result. That takes 9 to 12 seconds.
 
 Neither number is slow for a cloud. Both are longer than five seconds.
 
@@ -45,7 +45,8 @@ sequenceDiagram
     participant S as Orphan sweep (hourly)
     participant G as Google Compute Engine
     S->>G: List VMs with SAM's labels
-    G-->>S: One VM over an hour old with no live node
+    G-->>S: VMs with SAM's labels
+    Note over S: One is over an hour old and no live node claims it
     S->>G: Read it again (still labelled? same zone?)
     G-->>S: Yes
     S->>G: DELETE, bound to that id, zone and labels
@@ -70,7 +71,7 @@ if (changedLabel) {
 }
 ```
 
-Hetzner and the other providers keep the old behavior: their delete call returns once the server is gone.
+Hetzner and the other providers keep their old delete call: it returns as soon as the provider accepts the request, so it already fits the time limit.
 
 ## A quota covers one bucket, not the whole cloud
 
@@ -91,9 +92,9 @@ const GCP_REGIONAL_QUOTA_MESSAGE =
   /quota '([A-Z0-9_]+)' exceeded\.?\s+limit:\s*[\d.]+\s+in region ([a-z0-9-]+)/i;
 ```
 
-It then skips only the machine options that the same bucket rules out: the same family in the same region with at least as many vCPUs. Smaller machines of that family, other families and other regions are still tried. SAM moves to the next cloud only when no Google Cloud option is left. A quota that names no region, such as `CPUS_ALL_REGIONS`, still moves on right away.
+For a CPU quota like this one, it then skips only the machine options that the same bucket rules out: the same family in the same region with at least as many vCPUs. Smaller machines of that family, other families and other regions are still tried. SAM moves to the next cloud only when no Google Cloud option is left. A quota that names no region, such as `CPUS_ALL_REGIONS`, still moves on right away.
 
-One more detail. SAM tries up to eight options per cloud before moving on. If all eight came from the exhausted bucket, the smaller machine that would fit never got a turn, so the eight slots are now spread across buckets (region plus machine family). The [compute pools guide](/docs/guides/compute-pools/) has the full rules, and an [earlier entry](/blog/cloud-compute-pools-provider-fallback/) explains how pools rank clouds in the first place.
+One more detail. With the pool's `fallback-chain` policy, SAM tries up to eight options per cloud by default before moving on. If all eight came from the exhausted bucket, the smaller machine that would fit never got a turn, so the eight slots are now spread across buckets (region plus machine family). The [compute pools guide](/docs/guides/compute-pools/) has the full rules, and an [earlier entry](/blog/cloud-compute-pools-provider-fallback/) explains how pools rank clouds in the first place.
 
 ## What I take from it
 
@@ -103,4 +104,4 @@ Each of these fixes works outside SAM too:
 - **"Accepted" and "done" are different states.** If you do not wait for "done", record "requested" and check again later, and tie the request to exactly what you checked.
 - **Read the scope of an error before you react to it.** A quota error that names a region is a statement about that region, not about the cloud.
 
-The orphan sweep has a short follow-up list of smaller items, such as not spending the hourly delete limit on a machine whose deletion is already in progress. Those are next.
+The orphan sweep has a short follow-up list of smaller items, such as not spending the hourly delete limit on a machine whose deletion is already in progress. Those are tracked for a later change.
