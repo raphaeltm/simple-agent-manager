@@ -2,7 +2,7 @@
 
 ## Problem
 
-The `UI Compliance` job in `.github/workflows/ci.yml` passes on every pull request without checking
+The `UI Compliance` check (since 2026-11-15 the "Validate UI checklist evidence" step of the `PR Evidence` job) in `.github/workflows/ci.yml` passes on every pull request without checking
 anything. `scripts/ci/check-ui-compliance.mjs` lists changed files with
 `git diff --name-only origin/${GITHUB_BASE_REF}...HEAD` and falls back to
 `git diff --name-only HEAD~1 HEAD`. The job's `actions/checkout` step uses the default shallow fetch,
