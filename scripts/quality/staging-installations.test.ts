@@ -159,6 +159,7 @@ describe('resolveResourceNames with an installation', () => {
       web_pages_project: 'sam2-web-staging2',
       ai_gateway: 'sam2',
       analytics_dataset: 'sam2_analytics',
+      assets_bucket: 'sam2-staging2-assets',
       pulumi_state_bucket: 'sam-pulumi-state',
       primary_stack: 'staging',
       primary_prefix: 'sam',

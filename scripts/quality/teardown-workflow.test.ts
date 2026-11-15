@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 const workflow = readFileSync(
@@ -37,7 +38,7 @@ describe('teardown workflow', () => {
     }
 
     const workspaceDns = workflow.match(
-      /- name: Delete Workspace DNS Records[\s\S]*?(?=\n      - name:|\n      #|$)/
+      /- name: Delete Workspace DNS Records[\s\S]*?(?=\n {6}- name:|\n {6}#|$)/
     )?.[0];
     expect(workspaceDns).toBeDefined();
     expect(workspaceDns).toContain('if [ "$INPUT_DRY_RUN" = "true" ]; then');
@@ -45,7 +46,7 @@ describe('teardown workflow', () => {
     expect(workspaceDns).toContain('echo "status=dry_run" >> "$GITHUB_OUTPUT"');
 
     const marketingDns = workflow.match(
-      /- name: Delete Marketing DNS Records[\s\S]*?(?=\n      - name:|\n      #|$)/
+      /- name: Delete Marketing DNS Records[\s\S]*?(?=\n {6}- name:|\n {6}#|$)/
     )?.[0];
     expect(marketingDns).toBeDefined();
     expect(marketingDns).toContain('if [ "$INPUT_DRY_RUN" = "true" ]; then');
@@ -55,14 +56,14 @@ describe('teardown workflow', () => {
     expect(marketingDns).toContain('APEX_STATUS="dry_run_exists"');
 
     const unprotect = workflow.match(
-      /- name: Unprotect Pulumi Resources[\s\S]*?(?=\n      - name:|\n      #|$)/
+      /- name: Unprotect Pulumi Resources[\s\S]*?(?=\n {6}- name:|\n {6}#|$)/
     )?.[0];
     expect(unprotect).toContain(
       "if: ${{ steps.pulumi_stack.outputs.status == 'ok' && inputs.dry_run != true }}"
     );
 
     const pulumiDestroy = workflow.match(
-      /- name: Pulumi Destroy[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Pulumi Destroy[\s\S]*?(?=\n {6}# ================================================================)/
     )?.[0];
     expect(pulumiDestroy).toContain("if: ${{ steps.pulumi_stack.outputs.status == 'ok' }}");
     expect(pulumiDestroy).toContain('if [ "$INPUT_DRY_RUN" = "true" ]; then');
@@ -70,14 +71,14 @@ describe('teardown workflow', () => {
     expect(pulumiDestroy).toContain('pulumi destroy --yes');
 
     const fallback = workflow.match(
-      /- name: Delete Web Pages Project \(fallback\)[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Delete Web Pages Project \(fallback\)[\s\S]*?(?=\n {6}# ================================================================)/
     )?.[0];
     expect(fallback).toContain(
       "if: ${{ steps.pulumi_destroy.outputs.status != 'deleted' && steps.pulumi_destroy.outputs.status != 'dry_run' && inputs.dry_run != true }}"
     );
 
     const removeStack = workflow.match(
-      /- name: Remove Pulumi Stack[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Remove Pulumi Stack[\s\S]*?(?=\n {6}# ================================================================)/
     )?.[0];
     expect(removeStack).toContain(
       "if: ${{ !inputs.keep_data && !inputs.dry_run && steps.pulumi_stack.outputs.status == 'ok' && steps.pulumi_destroy.outputs.status == 'deleted' }}"
@@ -86,7 +87,7 @@ describe('teardown workflow', () => {
 
   it('only removes Pulumi stack state after Pulumi destroy succeeds', () => {
     const stepMatch = workflow.match(
-      /- name: Remove Pulumi Stack[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Remove Pulumi Stack[\s\S]*?(?=\n {6}# ================================================================)/
     );
 
     expect(stepMatch?.[0]).toBeDefined();
@@ -96,7 +97,7 @@ describe('teardown workflow', () => {
 
   it('defaults AI Gateway teardown to the resolved deployment prefix, not sam', () => {
     const stepMatch = workflow.match(
-      /- name: Resolve Resource Names[\s\S]*?(?=\n      - name: Install dependencies)/
+      /- name: Resolve Resource Names[\s\S]*?(?=\n {6}- name: Install dependencies)/
     );
 
     expect(stepMatch?.[0]).toBeDefined();
@@ -108,10 +109,10 @@ describe('teardown workflow', () => {
 
   it('preserves installation identity with data and removes it on full teardown', () => {
     const unprotect = workflow.match(
-      /- name: Unprotect Pulumi Resources[\s\S]*?(?=\n      - name: Pulumi Destroy)/
+      /- name: Unprotect Pulumi Resources[\s\S]*?(?=\n {6}- name: Pulumi Destroy)/
     )?.[0];
     const destroy = workflow.match(
-      /- name: Pulumi Destroy[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Pulumi Destroy[\s\S]*?(?=\n {6}# ================================================================)/
     )?.[0];
 
     expect(unprotect).toContain('if [ "$INPUT_KEEP_DATA" = "true" ]');
@@ -150,5 +151,17 @@ describe('teardown workflow', () => {
       expect(step, stepName).toContain('if [ "$(pulumi stack --show-name)" != "$STACK" ]; then');
       expect(step, stepName).toContain('STACK: ${{ steps.names.outputs.stack }}');
     }
+  });
+
+  it('empties the assets bucket before the Pulumi destroy and force-deletes Workers', () => {
+    const empty = workflow.indexOf('- name: Empty Assets Bucket');
+    const destroy = workflow.indexOf('- name: Pulumi Destroy');
+    expect(empty).toBeGreaterThan(0);
+    expect(empty).toBeLessThan(destroy);
+    expect(workflow).toContain(
+      "if: ${{ steps.pulumi_stack.outputs.status == 'ok' && inputs.dry_run != true && !inputs.keep_data }}"
+    );
+    expect(workflow).toContain('BUCKET_NAME: ${{ steps.names.outputs.assets_bucket }}');
+    expect(workflow.match(/workers\/scripts\/\$WORKER_NAME\?force=true/g)).toHaveLength(2);
   });
 });

@@ -217,6 +217,7 @@ function resolvePrimaryResourceNames(env, mode, environment, explicitStack) {
     outputs.pages_project = outputs.web_pages_project;
     outputs.www_project = `${prefix}-www`;
     outputs.analytics_dataset = `${prefix}_analytics`;
+    outputs.assets_bucket = `${prefix}-${stack}-assets`;
     if (baseDomain) {
       outputs.api_url = `https://api.${baseDomain}`;
       outputs.app_url = `https://app.${baseDomain}`;
