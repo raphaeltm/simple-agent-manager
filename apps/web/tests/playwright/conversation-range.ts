@@ -30,8 +30,36 @@ function unicodeShape(text: string) {
  * Call only after the agent and async cards have settled; hashes contain no text.
  */
 export async function captureFullConversation(page: Page, expected?: ConversationInventory) {
+  const diagnostic = {
+    stage: 'scroller',
+    step: 0,
+    sweeps: 0,
+    captured: 0,
+    expected: expected?.itemIds.length ?? null,
+  };
+  try {
+    return await captureRanges(page, expected, diagnostic);
+  } catch (error) {
+    // Fixed step names and counts only: Playwright messages may contain page text.
+    if (error instanceof Error) Object.assign(error, { captureDiagnostic: diagnostic });
+    throw error;
+  }
+}
+
+async function captureRanges(
+  page: Page,
+  expected: ConversationInventory | undefined,
+  diagnostic: {
+    stage: string;
+    step: number;
+    sweeps: number;
+    captured: number;
+    expected: number | null;
+  }
+) {
   const scroller = page.locator('[data-sam-conversation-scroller="true"]');
   await scroller.waitFor({ state: 'visible' });
+  diagnostic.stage = 'history-pagination';
   for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
     await scroller.evaluate((element) => {
       element.scrollTop = 0;
@@ -105,6 +133,8 @@ export async function captureFullConversation(page: Page, expected?: Conversatio
     last: number;
   }> = [];
   for (let step = 0; step < 300; step++) {
+    diagnostic.stage = 'range-traversal';
+    diagnostic.step = step;
     const soughtTail = seekTail;
     let tailRows: Awaited<ReturnType<typeof readRows>> | undefined;
     if (seekTail) {
@@ -126,6 +156,7 @@ export async function captureFullConversation(page: Page, expected?: Conversatio
       if (expected) {
         // Capture the same DOM snapshot that proves the last item mounted.
         // Waiting and reading again can lose it to a subsequent size correction.
+        diagnostic.stage = 'tail-mount';
         await expect
           .poll(async () => {
             tailRows = await readRows();
@@ -140,6 +171,7 @@ export async function captureFullConversation(page: Page, expected?: Conversatio
       }, top);
     }
     if (!tailRows) await page.waitForTimeout(100);
+    diagnostic.stage = 'row-snapshot';
     const rows = tailRows ?? (await readRows());
     for (const { id, ...row } of rows) {
       if (!Number.isSafeInteger(row.index)) throw new Error('Missing conversation item position');
@@ -148,11 +180,22 @@ export async function captureFullConversation(page: Page, expected?: Conversatio
         throw new Error('Conversation changed during audit');
       captured.set(id, row);
     }
-    const position = await scroller.evaluate((element) => ({
-      top: element.scrollTop,
-      height: element.clientHeight,
-      total: element.scrollHeight,
-    }));
+    diagnostic.captured = captured.size;
+    const position = await scroller.evaluate((element) => {
+      const viewport = element.getBoundingClientRect();
+      const mountedBottom = Math.max(
+        0,
+        ...[...element.querySelectorAll('[data-conversation-item-id]')].map(
+          (row) => row.getBoundingClientRect().bottom - viewport.top + element.scrollTop
+        )
+      );
+      return {
+        top: element.scrollTop,
+        height: element.clientHeight,
+        total: element.scrollHeight,
+        mountedBottom,
+      };
+    });
     progress.push({
       requested: top,
       ...position,
@@ -181,6 +224,7 @@ export async function captureFullConversation(page: Page, expected?: Conversatio
       // Earlier async Markdown/cards can still change after the final card
       // appears. Require two independently complete, identical sweeps; a changed
       // sweep restarts settling, without changing any content/equality check.
+      diagnostic.sweeps++;
       previousComplete = new Map(captured);
       captured.clear();
       top = 0;
@@ -197,9 +241,18 @@ export async function captureFullConversation(page: Page, expected?: Conversatio
     }
     // Advance the requested range independently of corrected browser positions;
     // deriving it only from actual scrollTop can repeat the same two windows.
-    top = Math.max(top, position.top) + Math.max(1, Math.floor(position.height * 0.75));
+    // Each snapshot already contains the entire mounted row, including content
+    // below the viewport. Cross that measured extent instead of serializing a
+    // tall Markdown reply once per screen. Keep one pixel of overlap so the
+    // next virtual range shares its boundary with an observed row. Inventory
+    // checks and independent complete sweeps still detect skipped/changed rows.
+    top = Math.max(
+      Math.max(top, position.top) + Math.max(1, Math.floor(position.height * 0.75)),
+      position.mountedBottom - 1
+    );
     seekTail = top >= position.total - position.height;
   }
+  diagnostic.stage = 'completeness';
   if (!reachedEnd || captured.size === 0)
     throw new Error(
       `Incomplete rendered conversation audit: ${JSON.stringify({
@@ -207,6 +260,7 @@ export async function captureFullConversation(page: Page, expected?: Conversatio
         missingIndices: expected?.itemIds.flatMap((id, index) => (captured.has(id) ? [] : [index])),
       })}`
     );
+  diagnostic.stage = 'ordered-inventory';
   const ordered = [...captured].sort(([, left], [, right]) => left.index - right.index);
   if (ordered.some(([, row], index) => row.index !== index)) {
     throw new Error('Conversation audit skipped virtualized display items');
