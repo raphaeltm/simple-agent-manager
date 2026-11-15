@@ -119,7 +119,12 @@ jobs:
 
   deploy:
     name: Deploy to Cloudflare
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the VM-agent amd64 binary is published under an immutable,
+    # content-keyed release path (scripts/deploy/publish-vm-agent-artifacts.sh) and must rebuild
+    # byte-identically. The native amd64 build is cgo-enabled, so its bytes follow the runner's
+    # toolchain; when ubuntu-latest moved to ubuntu-26.04 (2026-11-14) every deploy was refused.
+    # Move this only together with a new VM-agent release key (or a CGO_ENABLED=0 build).
+    runs-on: ubuntu-24.04
     needs: validate
     environment: ${{ inputs.environment }}
     env:
