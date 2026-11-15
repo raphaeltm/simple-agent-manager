@@ -39,7 +39,7 @@ Merge them into the integration branch so landed code resolves to main's version
 - [ ] Checks: build, typecheck, lint (check:fast), full tests, selfhost:test, hosted-git
       conformance, quality:wrangler-bindings, DO migration compatibility tests, quality gates
 - [ ] Draft PR (base sam/selfhost-pass-2), CI by hand, SonarCloud
-- [x] Reviews: cloudflare-specialist (PASS, MEDIUM/LOW fixed), task-completion-validator (FAIL on e399e0120: HIGH setup test + MEDIUM dead helper, fixed in dd95a017b; LOW task-file gaps fixed)
+- [x] Reviews: cloudflare-specialist (PASS, MEDIUM/LOW fixed), task-completion-validator (FAIL on e399e0120: HIGH setup test + MEDIUM dead helper, fixed in dd95a017b; LOW task-file gaps fixed; re-run on dd95a017b: one stale README citation, fixed; PASS)
 - [ ] Diff measure after; box-round checklist; PR #2750 conflict check
 
 ## Acceptance criteria
