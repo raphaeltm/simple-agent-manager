@@ -1,0 +1,27 @@
+# Bound chat ingest bookkeeping writes
+
+Task01M7GB4125DFTECRYYCAHXAWTS. Part2, stacked locally on Part1 head3bc3e9ae4e739ed173584e71f5a47d2994219aa2. Do not open its PR until Part1 PR2765 is released. Part1 staging takes priority immediately after the foreign holder finishes and releases.
+
+## Baseline and scope
+Real-workerd production indexes on10k rows, real persistMessageBatch: mergingOFF14reads/10writes; mergingON20reads/8writes. Write attribution: raw message insert3 (OFF) or merged append1 (ON); chat_sessions counter/timestamp/index update4; prompting/recovering session_state timestamps2; workspace_activity1. Idle cleanup adds writes when scheduled. Re-measure before implementation. Local samples, not production forecasts.
+
+Goal: about1–2writes per steady merged batch, with durable receipt/text/idempotency state always written. Typed admin interval with safe default, no Worker variable and no production setting changes. OFFmode must remain correct and no more expensive. Preserve reporter sequence semantics from Part1.
+
+## Research/checklist
+- [x] Real-workerd per-statement baseline, both modes, including scheduled idle cleanup and real session-state paths.
+- [ ] Enumerate every counter/timestamp reader and writer, archive/import/restore and lifecycle transition; preserve persisted count/tag synchronization from Part1.
+- [ ] Design durable latest count/activity truth piggybacked onto existing receipt update, bounded indexed bookkeeping flush, safe across restart and concurrent awaits.
+- [ ] Typed admin setting, provable interval shorter than minimum idle window; always exact flush at end turn, stop, sleep/idle, alarm, merged-row seal.
+- [ ] Production-ingest tests for idle deadline extension/restart, sleep/wake, recency, UI count/unread/activity, search/comment anchors, retries/text, both merge modes.
+- [ ] Required local suites, migration safety and specialist reviews.
+- [ ] Only after Part1 release: own PR, CI/CodeRabbit, coordinated bounded staging ON/OFF and strict cleanup, merge, production deploy monitor, coordinator/ideas updates.
+
+## Safety constraints
+No storage/archive protection weakening; no destructive migrations or new per-message index. No production provisioning/restarts/test sessions/settings changes or Cloudflare Worker API writes. VM cadence and merging defaultOFF unchanged. Secrets by names only through exec_with_secrets; never publish raw logs/content/secrets. No foreign staging takeover based on lease expiry. Follow-ups use SAM ideas.
+
+## Baseline measured before implementation (2026-11-15)
+Existing production-index10k/30k test rerun passed. Without scheduled cleanup: mergingOFF14reads/10SQLwrites; mergingON20reads/8SQLwrites. Dedicated10k fixture with scheduled cleanup, prompting ACP mirror and workspace activity, driven through actual stub.persistMessageBatch: OFF13SQLwrites plus1storage.setAlarm; ON11SQLwrites plus1storage.setAlarm. Per-statement raw writes: individual insert3/merged append1, chat_sessions4, idle_cleanup_schedule3, session_state2, workspace_activity1. Snapshot records statement templates/counters only, not bindings/content. All are local samples, not production forecasts.
+
+Architecture constraints: migration076's archive-generation trigger observes message_count, so true deferred counters are required. Candidate sparse deadline index on a nullable chat_sessions column is updated only on clean→dirty and flush SQL variants; the steady UPDATE must not mention that indexed column. Verify in real workerd before relying on it. Durable latest-ingest clock protects idle/workspace/probe decisions and final checks after await regardless of interval. Direct reads overlay pending count/activity; all writers and archive boundaries must fold pending count/tag atomically. Summary sync must retain a durable dirty marker until consumed or emit a fresh summary-visible stamp without falsely advancing activity; bounded dirty selection cannot silently lose an omitted session.
+
+Local review research: Cloudflare recommends bounded indexed dirty discovery; status+pending LIMIT scans unbounded rows. Test specialist requires real-ingest restart-before-old-deadline, concurrent ingest during suspended cleanup, all exact flush boundaries, pending→single/system, multi-session activity order, broadcast/retry/search/anchors, both modes and interval-amortized profiles. No runtime implementation yet. Staging remains untouched.

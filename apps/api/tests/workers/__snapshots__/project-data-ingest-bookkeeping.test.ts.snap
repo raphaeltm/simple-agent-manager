@@ -1,0 +1,88 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ingest bookkeeping in real workerd > attributes the steady-state writes including scheduled idle cleanup in both modes 1`] = `
+[
+  {
+    "enabled": false,
+    "writes": [
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 1,
+        "statement": "storage.setAlarm",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 3,
+        "statement": "INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 4,
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 3,
+        "statement": "UPDATE idle_cleanup_schedule SET cleanup_at = ?, retry_count = 0, last_error = NULL WHERE session_id = ? AND terminal_state IS NULL",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 2,
+        "statement": "UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 1,
+        "statement": "INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+      },
+    ],
+  },
+  {
+    "enabled": true,
+    "writes": [
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 1,
+        "statement": "storage.setAlarm",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 1,
+        "statement": "UPDATE chat_messages SET content = content || ? WHERE id = ? AND session_id = ? RETURNING id",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 4,
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 3,
+        "statement": "UPDATE idle_cleanup_schedule SET cleanup_at = ?, retry_count = 0, last_error = NULL WHERE session_id = ? AND terminal_state IS NULL",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 2,
+        "statement": "UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+      },
+      {
+        "owner": "root",
+        "phase": "persistMessageBatch",
+        "rowsWritten": 1,
+        "statement": "INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+      },
+    ],
+  },
+]
+`;
