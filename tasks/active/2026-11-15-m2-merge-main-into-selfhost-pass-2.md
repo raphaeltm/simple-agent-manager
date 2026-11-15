@@ -19,19 +19,27 @@ Merge them into the integration branch so landed code resolves to main's version
 - #2748 GitLab trust (untrusted runtime-saved host: host-scoped ids, emails unverified, no
   override, not in trustedProviders) and the branch's guarded GitLab provider are combined in
   `gitlab-login-provider.ts`; main's `untrustedGitLabUserInfo` (unguarded fetch) removed.
-- Branch's `closeSetupWithoutToken` is now subsumed by main's `isSetupCompleted` owner check
-  (kept, listed as noticed redundancy, not refactored).
+- S2: the branch's GitHub App manifest completion route stored integration credentials without
+  main's (#2747) owner security alert, and returned status without main's actor labels (the
+  admin page writes it into the same query cache). Fixed in `73ebcbfc1`, with a test through
+  the real manifest flow (both halves proven discriminating).
+- S3: `AdminSettingName` listed `operations.nodeProvisioningAttemptDeadlineMs` twice. Fixed in
+  `73ebcbfc1`.
+- S4: the branch's `closeSetupWithoutToken` became unreachable under main's `isSetupCompleted`
+  owner check, and the branch test control "a token install with an owner stays open"
+  contradicted main's #2748 fix (red). Helper removed, control asserts main's 410 (`dd95a017b`).
 
 ## Checklist
 
 - [x] Merge origin/main with a real merge commit; resolve 18 conflicts
 - [x] Remove duplicate registry entry and doc row; delete branch-only deadline module
-- [ ] Audit: admin settings registry, wrangler.toml DO bindings/migrations vs main, D1 numbering,
+- [x] Fix silent breakages S2, S3, S4 found by the audit and reviews
+- [x] Audit: admin settings registry, wrangler.toml DO bindings/migrations vs main, D1 numbering,
       index.ts hosted-git import, celld-project.ts / celld-config.ts, ci.yml hosted-git job
 - [ ] Checks: build, typecheck, lint (check:fast), full tests, selfhost:test, hosted-git
       conformance, quality:wrangler-bindings, DO migration compatibility tests, quality gates
 - [ ] Draft PR (base sam/selfhost-pass-2), CI by hand, SonarCloud
-- [ ] Reviews: cloudflare-specialist, task-completion-validator
+- [x] Reviews: cloudflare-specialist (PASS, MEDIUM/LOW fixed), task-completion-validator (FAIL on e399e0120: HIGH setup test + MEDIUM dead helper, fixed in dd95a017b; LOW task-file gaps fixed)
 - [ ] Diff measure after; box-round checklist; PR #2750 conflict check
 
 ## Acceptance criteria
