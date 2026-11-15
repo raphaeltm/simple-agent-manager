@@ -15,7 +15,7 @@ Staging live checks outlive deployment jobs; no active run plus five minutes is 
 - [x] Update staging docs, Codex skill summary, and full reference: read/acquire/release, expiry wake rather than chat/poll.
 - [x] Local specialist reviews and affected checks; full CI green.
 - [x] Live workflow-token/gh read proof, acquisition, refusal, renewal, release, expired takeover; one full staging deploy plus bounded lease-only checks; release after verification.
-- [ ] PR and CodeRabbit gate, rebase shared docs, merge; add usage note to idea 01M7FYGMEESYH3AJZJ0CT3NKCZ and channel evidence.
+- [x] Open PR, request CodeRabbit, resolve findings, and add usage note to idea 01M7FYGMEESYH3AJZJ0CT3NKCZ and channel evidence.
 
 References: .claude/rules/13-staging-verification.md and full reference; GitHub REST deployments documentation; idea notes read 2026-11-15. Existing isolated SAM branch used without a redundant worktree. Task tracked on this branch to avoid a separate main commit triggering unrelated pipelines.
 
@@ -31,3 +31,7 @@ References: .claude/rules/13-staging-verification.md and full reference; GitHub 
 - Final contender release43747780656 SUCCESS, deployment7808019196 released18:37:33.669Z. No second full deployment; no VM/resource fixtures created. Free-slot evidence sent to both channels and waiting owners/coordinators.
 - Idea usage note01M7G6NP18SB64A00XNZDJTGGE added. Final merge evidence will be posted there and in the coordination channel.
 - CodeRabbit review5912203347 returned4 valid findings. Fixed secondary legacy-audit preflight, strict UTC/calendar expiry, and permission guard string/null overrides. Regression tests and independent review PASS. Final incremental review/CI and authorized merge remain release gates, tracked in PR2762 and local .do-state.md.
+
+## Release gate (tracked in PR)
+
+Implementation and live acceptance are complete. The authorized merge follows only after the final review-fix commit passes CI/Sonar, the incremental CodeRabbit wait completes without unresolved findings, and main/shared-doc changes are reconciled. This task record does not assert a merge before that receipt exists.
