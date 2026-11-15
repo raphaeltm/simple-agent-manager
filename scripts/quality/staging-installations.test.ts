@@ -4,15 +4,17 @@ import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  decryptToken,
+  encryptToken,
+  hmacApiToken,
+} from '../deploy/bootstrap-installation-credentials';
+import {
   bootstrapCloudCredentialId,
   bootstrapInstallation,
   bootstrapSmokeTokenId,
   bootstrapUsers,
   type D1Like,
-  decryptToken,
   deriveAgentSignInTrust,
-  encryptToken,
-  hmacApiToken,
 } from '../deploy/bootstrap-staging-installation';
 import { resolveInstallationZone } from '../deploy/resolve-installation-zone.mjs';
 import {
@@ -369,6 +371,60 @@ describe('bootstrapInstallation on the real migration chain', () => {
       token_hash: await hmacApiToken('sam_smoke_token_value', TARGET_KEY),
       revoked_at: null,
     });
+  });
+
+  it('copies the primary platform agent keys, one per agent type, re-encrypted', async () => {
+    await seedSourceCredential({
+      table: 'platform_credentials',
+      id: 'hz',
+      provider: 'hetzner',
+      plaintext: 'hetzner-token',
+    });
+    const add = async (
+      id: string,
+      agentType: string,
+      plaintext: string,
+      keyBase64 = SOURCE_KEY,
+      at = '2026-11-01'
+    ) => {
+      const sealed = await encryptToken(plaintext, keyBase64);
+      source.db
+        .prepare(
+          `INSERT INTO platform_credentials (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
+           VALUES (?, 'agent-api-key', NULL, ?, 'api-key', 'k', ?, ?, 1, 'owner', ?, ?)`
+        )
+        .run(id, agentType, sealed.ciphertext, sealed.iv, at, at);
+    };
+    await add('claude-old', 'claude-code', 'OLD-KEY', SOURCE_KEY, '2026-01-01');
+    await add('claude-new', 'claude-code', 'NEW-KEY', SOURCE_KEY, '2026-11-10');
+    await add('codex-bad', 'openai-codex', 'X', key(9));
+
+    const report = await run();
+
+    expect(report.agentKeys).toEqual(['claude-code']);
+    expect(JSON.stringify(report) + logs.join('\n')).not.toContain('NEW-KEY');
+    const row = target.db
+      .prepare(
+        `SELECT agent_type, credential_type, encrypted_token, iv FROM platform_credentials WHERE id = 'staging2-bootstrap-agent-claude-code'`
+      )
+      .get() as {
+      agent_type: string;
+      credential_type: string;
+      encrypted_token: string;
+      iv: string;
+    };
+    expect(row).toMatchObject({ agent_type: 'claude-code', credential_type: 'agent-api-key' });
+    expect(await decryptToken(row.encrypted_token, row.iv, TARGET_KEY)).toBe('NEW-KEY');
+    expect(logs.join('\n')).toMatch(/skip agent key codex-bad \(openai-codex\): cannot decrypt/);
+
+    await run();
+    expect(
+      target.db
+        .prepare(
+          `SELECT count(*) AS n FROM platform_credentials WHERE credential_type = 'agent-api-key'`
+        )
+        .get()
+    ).toEqual({ n: 1 });
   });
 
   it('is idempotent and repairs drift on a second run', async () => {

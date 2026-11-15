@@ -5,7 +5,8 @@
  *   1. an admin and a non-admin test user (fixed IDs, so the sign-in trust can name them);
  *   2. a platform cloud credential so VMs can be provisioned, copied from the primary
  *      installation of the same credential environment (preferring GCP over Hetzner);
- *   3. the staging smoke token, so the deploy's smoke tests also run against this installation;
+ *   3. the staging smoke token, so the deploy's smoke tests also run against this installation,
+ *      and the primary's enabled platform agent keys, so sessions have an agent to run;
  *   4. an agent sign-in trust naming the two users (`derive-trust` mode, set as a Worker secret);
  *   5. machines in the shared compute pool (bootstrap-installation-pool.ts), via the admin API.
  *
@@ -19,6 +20,13 @@
  */
 import { appendFileSync } from 'node:fs';
 
+import {
+  decryptToken,
+  encryptToken,
+  hmacApiToken,
+  type SelectedCloudCredential,
+  selectSourceCloudCredential,
+} from './bootstrap-installation-credentials';
 import { readPrimaryPoolPicks, seedInstallationPool } from './bootstrap-installation-pool';
 import { SECONDARY_INSTALLATIONS } from './staging-installations.mjs';
 
@@ -106,159 +114,6 @@ export function deriveAgentSignInTrust(
 }
 
 // ---------------------------------------------------------------------------
-// Crypto, byte-compatible with apps/api/src/services/encryption.ts (AES-256-GCM, no AAD) and
-// the token-login HMAC in apps/api/src/routes/api-tokens.ts.
-// ---------------------------------------------------------------------------
-
-function base64ToBytes(value: string): Uint8Array {
-  return Uint8Array.from(Buffer.from(value, 'base64'));
-}
-
-export async function encryptToken(
-  plaintext: string,
-  keyBase64: string
-): Promise<{ ciphertext: string; iv: string }> {
-  const key = await crypto.subtle.importKey('raw', base64ToBytes(keyBase64), 'AES-GCM', false, [
-    'encrypt',
-  ]);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    new TextEncoder().encode(plaintext)
-  );
-  return {
-    ciphertext: Buffer.from(ciphertext).toString('base64'),
-    iv: Buffer.from(iv).toString('base64'),
-  };
-}
-
-export async function decryptToken(
-  ciphertext: string,
-  iv: string,
-  keyBase64: string
-): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', base64ToBytes(keyBase64), 'AES-GCM', false, [
-    'decrypt',
-  ]);
-  const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: base64ToBytes(iv) },
-    key,
-    base64ToBytes(ciphertext)
-  );
-  return new TextDecoder().decode(plaintext);
-}
-
-export async function hmacApiToken(rawToken: string, secret: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawToken));
-  return Buffer.from(signature).toString('hex');
-}
-
-// ---------------------------------------------------------------------------
-// Cloud credential selection
-// ---------------------------------------------------------------------------
-
-interface EncryptedRow {
-  id: string;
-  provider: string | null;
-  encrypted_token: string;
-  iv: string;
-}
-
-export interface SelectedCloudCredential {
-  provider: string;
-  plaintext: string;
-  sourceTable: 'platform_credentials' | 'credentials';
-  sourceId: string;
-  authType: string | null;
-}
-
-function gcpAuthType(plaintext: string): string | null {
-  try {
-    const parsed: unknown = JSON.parse(plaintext);
-    if (parsed && typeof parsed === 'object' && 'authType' in parsed) {
-      const value = (parsed as { authType: unknown }).authType;
-      return typeof value === 'string' ? value : null;
-    }
-  } catch {
-    // Not JSON: treated as an unknown auth type below.
-  }
-  return null;
-}
-
-/**
- * Pick the cloud credential to copy, in order: an enabled platform GCP credential, a user GCP
- * service-account-key credential, then any other enabled platform cloud credential.
- *
- * GCP workload-identity credentials are skipped: Google trusts the primary installation's token
- * issuer (`https://api.<primary domain>`), which this installation cannot sign for. A row that
- * fails to decrypt is skipped and logged, never fatal on its own (rule 41).
- */
-export async function selectSourceCloudCredential(
-  source: D1Like,
-  sourceKey: string,
-  log: (message: string) => void
-): Promise<SelectedCloudCredential | null> {
-  const platformRows = await source.all<EncryptedRow>(
-    `SELECT id, provider, encrypted_token, iv FROM platform_credentials
-     WHERE credential_type = 'cloud-provider' AND is_enabled = 1 AND provider IS NOT NULL
-     ORDER BY CASE WHEN provider = 'gcp' THEN 0 ELSE 1 END, updated_at DESC, id`
-  );
-  const userGcpRows = await source.all<EncryptedRow>(
-    `SELECT id, provider, encrypted_token, iv FROM credentials
-     WHERE credential_type = 'cloud-provider' AND provider = 'gcp' AND is_active = 1
-       AND project_id IS NULL
-     ORDER BY updated_at DESC, id`
-  );
-
-  const decryptOrSkip = async (row: EncryptedRow, table: string): Promise<string | null> => {
-    try {
-      return await decryptToken(row.encrypted_token, row.iv, sourceKey);
-    } catch (error) {
-      log(
-        `skip ${table} ${row.id} (${row.provider ?? 'unknown'}): cannot decrypt (${error instanceof Error ? error.name : 'error'})`
-      );
-      return null;
-    }
-  };
-
-  const usable = async (
-    row: EncryptedRow,
-    table: SelectedCloudCredential['sourceTable']
-  ): Promise<SelectedCloudCredential | null> => {
-    const plaintext = await decryptOrSkip(row, table);
-    if (plaintext === null || !row.provider) return null;
-    const authType = row.provider === 'gcp' ? gcpAuthType(plaintext) : null;
-    if (row.provider === 'gcp' && authType !== 'service-account-key') {
-      log(`skip ${table} ${row.id} (gcp): auth type ${authType ?? 'unknown'} is not portable`);
-      return null;
-    }
-    return { provider: row.provider, plaintext, sourceTable: table, sourceId: row.id, authType };
-  };
-
-  for (const row of platformRows.filter((r) => r.provider === 'gcp')) {
-    const picked = await usable(row, 'platform_credentials');
-    if (picked) return picked;
-  }
-  for (const row of userGcpRows) {
-    const picked = await usable(row, 'credentials');
-    if (picked) return picked;
-  }
-  for (const row of platformRows.filter((r) => r.provider !== 'gcp')) {
-    const picked = await usable(row, 'platform_credentials');
-    if (picked) return picked;
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
 
@@ -283,10 +138,84 @@ export interface BootstrapReport {
   users: string[];
   cloudCredential: Omit<SelectedCloudCredential, 'plaintext'> & { targetId: string };
   smokeToken: 'registered' | 'skipped';
+  /** Agent types whose platform agent key was copied. */
+  agentKeys: string[];
 }
 
 export function bootstrapCloudCredentialId(installation: string): string {
   return `${installation}-bootstrap-cloud`;
+}
+
+export function bootstrapAgentKeyId(installation: string, agentType: string): string {
+  return `${installation}-bootstrap-agent-${agentType}`;
+}
+
+/**
+ * Copy every enabled platform agent key of the primary (one per agent type, newest first), so
+ * sessions on this installation have an agent to talk to. A row that cannot be decrypted is
+ * skipped and logged (rule 41); no key at all is not fatal, agents then need their own key.
+ */
+async function copyPlatformAgentKeys(
+  input: BootstrapInput,
+  adminId: string,
+  nowIso: string,
+  log: (message: string) => void
+): Promise<string[]> {
+  const rows = await input.source.all<{
+    id: string;
+    agent_type: string | null;
+    credential_kind: string;
+    encrypted_token: string;
+    iv: string;
+  }>(
+    `SELECT id, agent_type, credential_kind, encrypted_token, iv FROM platform_credentials
+     WHERE credential_type = 'agent-api-key' AND is_enabled = 1 AND agent_type IS NOT NULL
+     ORDER BY agent_type, updated_at DESC, id`
+  );
+  const copied: string[] = [];
+  for (const row of rows) {
+    const agentType = row.agent_type as string;
+    if (copied.includes(agentType)) continue;
+    if (!/^[a-z0-9-]{1,40}$/u.test(agentType)) {
+      log(`skip agent key ${row.id}: unexpected agent type`);
+      continue;
+    }
+    let plaintext: string;
+    try {
+      plaintext = await decryptToken(row.encrypted_token, row.iv, input.sourceCredentialKey);
+    } catch (error) {
+      log(
+        `skip agent key ${row.id} (${agentType}): cannot decrypt (${error instanceof Error ? error.name : 'error'})`
+      );
+      continue;
+    }
+    const sealed = await encryptToken(plaintext, input.targetCredentialKey);
+    await input.target.run(
+      `INSERT INTO platform_credentials
+         (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv,
+          is_enabled, created_by, created_at, updated_by, updated_at)
+       VALUES (?, 'agent-api-key', NULL, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         credential_kind = excluded.credential_kind, encrypted_token = excluded.encrypted_token,
+         iv = excluded.iv, is_enabled = 1, updated_by = excluded.updated_by,
+         updated_at = excluded.updated_at`,
+      [
+        bootstrapAgentKeyId(input.installation, agentType),
+        agentType,
+        row.credential_kind,
+        `Copied from ${input.environment} by bootstrap (${agentType})`,
+        sealed.ciphertext,
+        sealed.iv,
+        adminId,
+        nowIso,
+        adminId,
+        nowIso,
+      ]
+    );
+    copied.push(agentType);
+    log(`platform agent key for ${agentType} copied from ${row.id}`);
+  }
+  return copied;
 }
 
 export function bootstrapSmokeTokenId(installation: string): string {
@@ -363,8 +292,11 @@ export async function bootstrapInstallation(input: BootstrapInput): Promise<Boot
     log(`smoke token registered for ${admin.id}`);
   }
 
+  const agentKeys = await copyPlatformAgentKeys(input, admin.id, nowIso, log);
+
   return {
     users: users.map((user) => user.id),
+    agentKeys,
     // Never the plaintext: the report is printed.
     cloudCredential: {
       provider: selected.provider,
@@ -491,6 +423,7 @@ async function main(): Promise<void> {
           `- Users: ${report.users.join(', ')}`,
           `- Platform cloud credential: ${report.cloudCredential.provider} from ${report.cloudCredential.sourceTable} ${report.cloudCredential.sourceId}`,
           `- Smoke token: ${report.smokeToken}`,
+          `- Platform agent keys: ${report.agentKeys.join(', ') || 'none'}`,
           `- Installation pool: ${pool}`,
           '',
         ].join('\n')
