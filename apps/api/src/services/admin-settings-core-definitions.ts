@@ -19,11 +19,14 @@ import {
   DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
   DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
   DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
+  DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
   DEFAULT_WEBHOOK_QUEUE_MAX_PENDING,
   DEFAULT_WEBHOOK_QUEUE_TTL_SECONDS,
   DEFAULT_WEBHOOK_SIGNATURE_TOLERANCE_SECONDS,
   DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
+  NODE_PROVISIONING_ATTEMPT_DEADLINE_MAX_MS,
+  NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS,
 } from '@simple-agent-manager/shared';
 
 import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
@@ -73,6 +76,16 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'How long in milliseconds a started provider VM deletion may stay unconfirmed before the node is reported blocked and an operator alert is raised.',
     { min: 60000, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.nodeProvisioningAttemptDeadlineMs',
+    DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
+    'Operations',
+    'Milliseconds one durable node-provisioning attempt may spend before its provider create starts and on the node DNS record afterwards; past it the attempt is cut and the next one (30 s later) resumes it. A create that has started is never cut or repeated: the next attempt adopts the VM.',
+    {
+      min: NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS,
+      max: NODE_PROVISIONING_ATTEMPT_DEADLINE_MAX_MS,
+    }
   ),
   integerDefinition(
     'operations.nodeLifetimeForceSleepAfterMs',

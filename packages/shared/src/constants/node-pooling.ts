@@ -113,6 +113,25 @@ export const DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS = 15_000;
 export const DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS = 30 * 60 * 1000;
 
 /**
+ * Default wall-clock budget for one durable node-provisioning attempt (admin setting
+ * `operations.nodeProvisioningAttemptDeadlineMs`, read by
+ * `resolveNodeProvisioningAttemptDeadlineMs()` in the API worker). A GCP create measured
+ * 9-12 s on the self-host test box (2026-11-11) and Hetzner 1-2 s; 60 s is 5x the GCP worst case,
+ * the owner's choice (2026-11-14) because provisioning is asynchronous. Sizing and what the
+ * budget cuts: `apps/api/src/durable-objects/node-lifecycle-provisioning-deadline.ts`.
+ */
+export const DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS = 60_000;
+
+/**
+ * Admin-setting bounds for the attempt budget. The minimum is the default per-request timeout
+ * (5 s), so an operator can restore the behaviour from before the setting existed. The maximum
+ * keeps at least two attempt cycles (budget plus one 30 s retry interval) inside the default
+ * 15-minute intent age.
+ */
+export const NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS = 5_000;
+export const NODE_PROVISIONING_ATTEMPT_DEADLINE_MAX_MS = 300_000;
+
+/**
  * Default maximum workspace candidates processed per cleanup phase per sweep (rule 47).
  * Override via WORKSPACE_CLEANUP_SWEEP_LIMIT env var.
  */
