@@ -61,6 +61,28 @@ async function fixture(enabled: boolean) {
 }
 
 describe('ingest bookkeeping in real workerd', () => {
+  it.each([false, true])('exposes pending counts immediately and flushes them at the real turn-end boundary (merging=%s)', async (enabled) => {
+    const { stub, session, batch } = await fixture(enabled);
+    await stub.persistMessageBatch(session, batch(10002), source);
+    expect((await stub.getSession(session))?.messageCount).toBe(10002);
+    expect((await stub.listSessions()).sessions.find((row) => row.id === session)?.messageCount).toBe(10002);
+    expect(await stub.recordSessionTurnEnd('bookkeeping-acp', {reason:'completed', observedAt:Date.now()})).toBe(true);
+    await runInDurableObject(stub, (_instance, state) => {
+      const row=state.storage.sql.exec('SELECT message_count,pending_message_count,last_message_sequence_count FROM chat_sessions WHERE id=?',session).toArray()[0];
+      expect(row).toMatchObject({message_count:10002,pending_message_count:0,last_message_sequence_count:10002});
+    });
+  });
+
+  it.each([false, true])('folds pending chunks when the browser writes the next message (merging=%s)', async (enabled) => {
+    const { stub, session, batch } = await fixture(enabled);
+    await stub.persistMessageBatch(session, batch(10002), source);
+    await stub.persistMessage(session,'user','next synthetic turn',null,'browser-next');
+    await runInDurableObject(stub, (_instance, state) => {
+      const row=state.storage.sql.exec('SELECT message_count,pending_message_count,last_message_sequence_count FROM chat_sessions WHERE id=?',session).toArray()[0];
+      expect(row).toMatchObject({message_count:10003,pending_message_count:0,last_message_sequence_count:10003});
+    });
+  });
+
   it('keeps a sparse deadline index out of the steady update write cost', async () => {
     const { stub, session } = await fixture(true);
     await runInDurableObject(stub, (_instance, state) => {
