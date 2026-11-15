@@ -30,6 +30,8 @@ export type CapacityPoolSummaryWorkloadRoles = 'editor-visible' | 'all';
 
 export interface ReadDefaultPoolSummaryOptions {
   workloadRoles?: CapacityPoolSummaryWorkloadRoles;
+  /** Only write-authorized placement may queue interrupted legacy work for this exact pool. */
+  adoptLegacyPublication?: boolean;
   /**
    * Default placement reads must remain active-only. UI/editor reads opt into
    * disabled default pools so users can add back offerings after removing the

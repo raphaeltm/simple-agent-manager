@@ -376,6 +376,13 @@ your decisions:
   A claimed pass that crashes can be retried after its lease expires (3 minutes by default).
   Upgrade adoption queues at most the configured scope batch size (25 by default) per pass;
   previously tracked failures do not prevent later scopes from being adopted.
+- After a rollback to a version that wrote catalog batches directly into live rows, an interrupted
+  publication cannot safely use its earlier catalog proof. SAM reports that unfinished legacy
+  publication and blocks placement until a fresh publication completes. The minute check adopts
+  pending pools even if a previous build left a completed refresh record. If a settings edit has
+  already marked the pool complete, the next normal placement queues that one pool for automatic
+  continuation; read-only catalog views do not trigger a refresh. Existing failed episodes keep
+  their error and cooldown rather than restarting on every request.
 - By default, SAM spends up to 20 seconds per source publishing a changed catalog, within a shared
   20-second budget across sources and scopes for each pass. Its two-hour recovery deadline starts
   with the first claim, after discovery queue time. If it runs out, the pool summary and Admin Errors

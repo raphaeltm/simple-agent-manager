@@ -30,6 +30,9 @@ export const MISSING_CANDIDATE_SOURCE_GENERATION_GUARD_BIND_COUNT = 4;
 /** Candidate ROWS written per D1 batch. A pass writes successive batches until its budget ends. */
 export const DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE = 200;
 
+export const CAPACITY_POOL_CANDIDATE_PUBLICATION_CURSOR_PREFIX =
+  'capacityPools.candidatePublication.v1:';
+
 /**
  * Wall-clock budget for publishing one changed catalog in a single pass
  * (`operations.capacityPoolPublishBudgetMs`). A pool is unplaceable until its catalog is
@@ -106,4 +109,6 @@ export interface PublicationCursor {
   published: number;
   /** This exact semantic catalog has completed at least one fenced publication. */
   complete?: boolean;
+  /** Incomplete writes touched private staging only; inherited legacy unsafety stays false. */
+  atomic?: boolean;
 }

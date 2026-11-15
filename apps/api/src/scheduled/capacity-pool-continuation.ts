@@ -1,9 +1,10 @@
-import { and, asc, eq, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, lte } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
+import { legacyPublicationAdoptionSql } from '../services/capacity-pool-legacy-publication';
 import {
   type CapacityPoolRefreshSettings,
   capacityPoolRefreshSettings,
@@ -36,16 +37,9 @@ export async function continueCapacityPoolPublications(
   const now = Date.now();
   const result = { resumed: 0, failed: 0 };
   if (now >= deadlineAt) return result;
-  // Adopt legacy unfinished pools at upgrade. They cannot prove a pre-upgrade atomic catalog,
-  // so keep bootstrap gated while resuming them promptly rather than waiting a day.
-  await db.run(sql`INSERT INTO capacity_pool_refreshes
-    (pool_id, scope, owner_user_id, owner_project_id, state, generation, attempts, started_at, deadline_at, next_attempt_at)
-    SELECT id, scope, owner_user_id, owner_project_id, 'pending', 0, 0, 0, 0, ${now}
-    FROM capacity_pools
-    WHERE is_default = 1 AND migration_state = 'pending'
-      AND NOT EXISTS (SELECT 1 FROM capacity_pool_refreshes WHERE pool_id = capacity_pools.id)
-    ORDER BY id LIMIT ${resolveBackfillScopeBatchSize({ env })}
-    ON CONFLICT(pool_id) DO NOTHING`);
+  // A rollback can leave completed new-build work beside unfinished old-build publication.
+  // Adopt that condition too, while preserving running leases and terminal cooldowns.
+  await db.run(legacyPublicationAdoptionSql(now, resolveBackfillScopeBatchSize({ env })));
   while (Date.now() < deadlineAt) {
     const [work] = await db
       .select()

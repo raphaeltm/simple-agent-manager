@@ -191,6 +191,7 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
       const summary = await readDefaultPoolSummary(db, scope, {
         includeDisabled: true,
         workloadRoles: input.workloadRoles,
+        adoptLegacyPublication: input.ensure === true && input.initializeOnly === true,
       });
       // Upgraded installations can still contain only abstract VM-size rows.
       // Materialize native offerings once; do not refresh migrated catalogs or

@@ -17,11 +17,13 @@ import {
   updateAdminSettings,
 } from '../../src/services/admin-settings';
 import { CAPACITY_POOL_CONTINUATION_CRON } from '../../src/services/capacity-pool-refresh-defaults';
+import { candidatePublicationCursorKey } from '../../src/services/default-capacity-pool-candidates-publication';
 import { defaultPoolId } from '../../src/services/default-capacity-pool-helpers';
 import { ensureUserDefaultPool } from '../../src/services/default-capacity-pools-ensure';
 import { seedUser } from './helpers/seed-d1';
 
 const refreshPoolIds: string[] = [];
+const legacyPublications: { cursorKey: string; sourceId: string; credentialId: string }[] = [];
 beforeEach(() => __resetAdminSettingsCacheForTest());
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -36,6 +38,15 @@ afterEach(async () => {
       ).bind(poolId),
       env.DATABASE.prepare('DELETE FROM capacity_pool_refreshes WHERE pool_id = ?').bind(poolId),
       env.DATABASE.prepare('DELETE FROM capacity_pools WHERE id = ?').bind(poolId),
+    ]);
+  }
+  for (const publication of legacyPublications.splice(0)) {
+    await env.DATABASE.batch([
+      env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(
+        publication.cursorKey
+      ),
+      env.DATABASE.prepare('DELETE FROM capacity_sources WHERE id = ?').bind(publication.sourceId),
+      env.DATABASE.prepare('DELETE FROM credentials WHERE id = ?').bind(publication.credentialId),
     ]);
   }
 });
@@ -61,9 +72,74 @@ async function pendingRefresh(nextAttemptAt = Date.now() - 1) {
   return { userId, poolId };
 }
 
+async function legacyPublication(
+  options: {
+    state?: 'complete' | 'pending' | 'failed' | 'missing';
+    complete?: boolean;
+    nextAttemptAt?: number;
+  } = {}
+) {
+  const fixture = await pendingRefresh();
+  const sourceId = `legacy-source-${fixture.userId}`;
+  const credentialId = `legacy-credential-${fixture.userId}`;
+  const cursorKey = candidatePublicationCursorKey(fixture.poolId, sourceId);
+  legacyPublications.push({ cursorKey, sourceId, credentialId });
+  const historicalSuccess = Date.now() - 2 * 60 * 60_000;
+  const historicalSuccessIso = new Date(historicalSuccess).toISOString();
+  const cursorUpdatedAt = new Date(historicalSuccess + 60 * 60_000).toISOString();
+  await env.DATABASE.batch([
+    // The disconnected account still has its old active source. Ensure must retire it
+    // normally after adoption, without trying to contact its provider.
+    env.DATABASE.prepare(
+      `INSERT INTO credentials
+         (id, user_id, provider, credential_type, is_active, encrypted_token, iv)
+       VALUES (?, ?, 'hetzner', 'cloud-provider', 0, 'retired-ciphertext', 'retired-iv')`
+    ).bind(credentialId, fixture.userId),
+    env.DATABASE.prepare(
+      `INSERT INTO capacity_sources
+         (id, scope, owner_user_id, source_kind, provider, credential_source,
+          credential_id, credential_reference, credential_version, status)
+       VALUES (?, 'user', ?, 'cloud-provider-credential', 'hetzner', 'user', ?, ?, 1, 'active')`
+    ).bind(sourceId, fixture.userId, credentialId, credentialId),
+    env.DATABASE.prepare(
+      `UPDATE capacity_pools SET configuration_state = 'configured-ready',
+         catalog_published_at = ?, last_reconciled_at = ? WHERE id = ?`
+    ).bind(historicalSuccessIso, historicalSuccessIso, fixture.poolId),
+    env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, ?)`
+    ).bind(
+      cursorKey,
+      JSON.stringify({
+        digest: 'legacy-publication-digest',
+        published: 2,
+        complete: options.complete ?? false,
+      }),
+      cursorUpdatedAt
+    ),
+    env.DATABASE.prepare(
+      `UPDATE capacity_pool_refreshes SET state = ?, generation = 6, attempts = 4,
+         started_at = ?, deadline_at = ?, next_attempt_at = ?, last_success_at = ?,
+         last_error = ? WHERE pool_id = ?`
+    ).bind(
+      options.state === 'missing' ? 'complete' : (options.state ?? 'complete'),
+      historicalSuccess,
+      historicalSuccess + 60_000,
+      options.nextAttemptAt ?? historicalSuccess,
+      historicalSuccess,
+      options.state === 'failed' ? 'Retained cooldown failure' : null,
+      fixture.poolId
+    ),
+  ]);
+  if (options.state === 'missing')
+    await env.DATABASE.prepare('DELETE FROM capacity_pool_refreshes WHERE pool_id = ?')
+      .bind(fixture.poolId)
+      .run();
+  return { ...fixture, sourceId, historicalSuccess };
+}
+
 async function readRefresh(poolId: string) {
   return env.DATABASE.prepare(
-    `SELECT state, generation, attempts, started_at, deadline_at, next_attempt_at, last_success_at
+    `SELECT state, generation, attempts, started_at, deadline_at, next_attempt_at, last_success_at, last_error
        FROM capacity_pool_refreshes WHERE pool_id = ?`
   )
     .bind(poolId)
@@ -140,6 +216,107 @@ async function refreshErrors(poolId: string) {
 }
 
 describe('one-minute catalog continuation on migrated D1', () => {
+  it('adopts unfinished legacy catalogs once despite an older completed refresh, preserving owned work', async () => {
+    const staleComplete = await legacyPublication();
+    const finished = await legacyPublication({ complete: true });
+    const undiscovered = await legacyPublication({ state: 'missing' });
+    const pending = await legacyPublication({
+      state: 'pending',
+      nextAttemptAt: Date.now() + 5 * 60_000,
+    });
+    const failed = await legacyPublication({
+      state: 'failed',
+      nextAttemptAt: Date.now() + 5 * 60_000,
+    });
+    const controls = [finished, pending, failed];
+    const controlRows = await Promise.all(controls.map((fixture) => readRefresh(fixture.poolId)));
+    await setCronEnabled(staleComplete.userId, true);
+    const dailySuccess = new Date().toISOString();
+    await env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_at)
+       VALUES ('capacityPools.scheduledReconciliation.lastRun.v1', ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+    )
+      .bind(dailySuccess, dailySuccess)
+      .run();
+    const external = vi.spyOn(globalThis, 'fetch');
+    const logged = vi.spyOn(console, 'log');
+
+    await tick();
+
+    expect(await readRefresh(staleComplete.poolId)).toMatchObject({
+      state: 'complete',
+      generation: 7,
+      attempts: 1,
+      last_success_at: expect.any(Number),
+    });
+    expect((await readRefresh(staleComplete.poolId))?.last_success_at).toBeGreaterThan(
+      staleComplete.historicalSuccess
+    );
+    expect(await readRefresh(undiscovered.poolId)).toMatchObject({
+      state: 'complete',
+      generation: 1,
+      attempts: 1,
+      last_success_at: expect.any(Number),
+    });
+    expect(await Promise.all(controls.map((fixture) => readRefresh(fixture.poolId)))).toEqual(
+      controlRows
+    );
+    for (const fixture of [staleComplete, undiscovered]) {
+      expect(
+        await env.DATABASE.prepare(
+          'SELECT migration_state, configuration_state FROM capacity_pools WHERE id = ?'
+        )
+          .bind(fixture.poolId)
+          .first()
+      ).toEqual({ migration_state: 'complete', configuration_state: 'source-disabled' });
+      expect(
+        await env.DATABASE.prepare('SELECT status FROM capacity_sources WHERE id = ?')
+          .bind(fixture.sourceId)
+          .first()
+      ).toEqual({ status: 'disabled' });
+    }
+    expect(events(logged)).toContainEqual(
+      expect.objectContaining({
+        event: 'cron.completed',
+        type: 'capacity-pool-continuation',
+        resumed: 2,
+        failed: 0,
+      })
+    );
+    const completed = await Promise.all(
+      [staleComplete, undiscovered].map((fixture) => readRefresh(fixture.poolId))
+    );
+    logged.mockClear();
+
+    await tick();
+
+    expect(
+      await Promise.all([staleComplete, undiscovered].map((fixture) => readRefresh(fixture.poolId)))
+    ).toEqual(completed);
+    expect(await Promise.all(controls.map((fixture) => readRefresh(fixture.poolId)))).toEqual(
+      controlRows
+    );
+    expect(events(logged)).toContainEqual(
+      expect.objectContaining({
+        event: 'cron.completed',
+        type: 'capacity-pool-continuation',
+        resumed: 0,
+        failed: 0,
+      })
+    );
+    expect(external).not.toHaveBeenCalled();
+    expect(
+      (
+        await env.DATABASE.prepare(
+          `SELECT key, value FROM platform_settings
+       WHERE key IN ('capacityPools.scheduledReconciliation.lastRun.v1',
+                     'capacityPools.scheduledReconciliation.claim.v1')`
+        ).all()
+      ).results
+    ).toEqual([{ key: 'capacityPools.scheduledReconciliation.lastRun.v1', value: dailySuccess }]);
+  });
+
   it('leaves due work unchanged while disabled and resumes that same work after re-enable', async () => {
     const f = await pendingRefresh();
     await setCronEnabled(f.userId, false);

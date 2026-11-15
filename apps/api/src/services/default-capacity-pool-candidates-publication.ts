@@ -16,6 +16,7 @@ import {
 import { providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import {
   ACTIVE_STATUS,
+  CAPACITY_POOL_CANDIDATE_PUBLICATION_CURSOR_PREFIX,
   type CapacityCandidatePublicationCursorStore,
   type Db,
   DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE,
@@ -199,6 +200,7 @@ export async function ensureCandidatesForSource(
       digest,
       published: publishedTotal,
       complete: false,
+      atomic: !progress.unsafeLegacy,
     });
   }
 
@@ -234,7 +236,14 @@ export async function ensureCandidatesForSource(
         publicationComplete &&
         options.catalogComplete !== false
         ? null
-        : { digest, published: publishedTotal, complete: publicationComplete }
+        : {
+            digest,
+            published: publishedTotal,
+            complete: publicationComplete,
+            // A partial new staged batch cannot recertify rows an older binary rewrote.
+            // Only completed promotion clears inherited legacy unsafety.
+            atomic: publicationComplete || !progress.unsafeLegacy,
+          }
     );
   }
 
@@ -306,7 +315,7 @@ export async function publishCandidateValues(
 }
 
 export function candidatePublicationCursorKey(poolId: string, sourceId: string): string {
-  return `capacityPools.candidatePublication.v1:${poolId}:${sourceId}`;
+  return `${CAPACITY_POOL_CANDIDATE_PUBLICATION_CURSOR_PREFIX}${poolId}:${sourceId}`;
 }
 
 /**
@@ -351,16 +360,28 @@ export async function readPublicationProgress(
   store: CapacityCandidatePublicationCursorStore | undefined,
   key: string,
   digest: string
-): Promise<{ published: number; complete: boolean; cursorPresent: boolean }> {
-  if (!store) return { published: 0, complete: false, cursorPresent: false };
+): Promise<{
+  published: number;
+  complete: boolean;
+  cursorPresent: boolean;
+  unsafeLegacy: boolean;
+}> {
+  if (!store) return { published: 0, complete: false, cursorPresent: false, unsafeLegacy: false };
   const raw = await store.read(key);
   const cursor = parsePublicationCursor(raw);
+  // Provenance belongs to the raw cursor, even when changed semantic content resets its offset.
+  const unsafeLegacy = cursor !== null && cursor.complete !== true && cursor.atomic !== true;
   // A cursor for a DIFFERENT catalog is still present and must be cleared/overwritten, but it
   // contributes no progress: publication restarts from the beginning.
   if (!cursor || cursor.digest !== digest) {
-    return { published: 0, complete: false, cursorPresent: raw !== null };
+    return { published: 0, complete: false, cursorPresent: raw !== null, unsafeLegacy };
   }
-  return { published: cursor.published, complete: cursor.complete === true, cursorPresent: true };
+  return {
+    published: cursor.published,
+    complete: cursor.complete === true,
+    cursorPresent: true,
+    unsafeLegacy,
+  };
 }
 
 export async function writePublicationProgress(
@@ -391,7 +412,12 @@ export function parsePublicationCursor(raw: string | null): PublicationCursor | 
       return null;
     }
     if ('complete' in parsed && typeof parsed.complete !== 'boolean') return null;
-    return { digest, published, complete: 'complete' in parsed && parsed.complete === true };
+    return {
+      digest,
+      published,
+      complete: 'complete' in parsed && parsed.complete === true,
+      atomic: 'atomic' in parsed && parsed.atomic === true,
+    };
   } catch {
     return null;
   }

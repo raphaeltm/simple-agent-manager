@@ -13,6 +13,10 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import {
+  legacyPublicationAdoptionSql,
+  unfinishedLegacyPublicationSql,
+} from './capacity-pool-legacy-publication';
+import {
   parseCapacityPoolExcludedSources,
   toCapacityPool,
   toCapacityPoolCandidate,
@@ -254,7 +258,11 @@ export async function readDefaultPoolSummary(
       : eq(schema.capacityPools.status, ACTIVE_STATUS);
 
   const [result] = await db
-    .select({ pool: schema.capacityPools, refresh: schema.capacityPoolRefreshes })
+    .select({
+      pool: schema.capacityPools,
+      refresh: schema.capacityPoolRefreshes,
+      legacyPublicationUnfinished: unfinishedLegacyPublicationSql().mapWith(Boolean),
+    })
     .from(schema.capacityPools)
     .leftJoin(
       schema.capacityPoolRefreshes,
@@ -269,8 +277,44 @@ export async function readDefaultPoolSummary(
     )
     .limit(1);
   if (!result) return null;
-  const { pool, refresh } = result;
-  const catalogPublished = pool.migrationState === 'complete' || Boolean(pool.catalogPublishedAt);
+  const { pool, legacyPublicationUnfinished } = result;
+  type RefreshStatus = Pick<
+    schema.CapacityPoolRefresh,
+    'state' | 'attempts' | 'deadlineAt' | 'lastError'
+  >;
+  let refresh: RefreshStatus | null = result.refresh;
+  if (
+    options.adoptLegacyPublication &&
+    pool.status === ACTIVE_STATUS &&
+    legacyPublicationUnfinished &&
+    !(refresh?.state === 'pending' && (refresh.attempts === 0 || Date.now() < refresh.deadlineAt))
+  ) {
+    // An operator edit can complete the migration mirror while an older writer's live
+    // prefix is unfinished. Queue this selected pool, without provider I/O or a full scan.
+    // RETURNING acknowledges the fenced write; a no-op reads only the winning owner's
+    // state. Reuse all authority/candidate reads below instead of repeating the summary.
+    const [queued] =
+      await db.all<RefreshStatus>(sql`${legacyPublicationAdoptionSql(Date.now(), 1, pool.id)}
+      RETURNING state, attempts, deadline_at AS deadlineAt, last_error AS lastError`);
+    refresh =
+      queued ??
+      (
+        await db
+          .select({
+            state: schema.capacityPoolRefreshes.state,
+            attempts: schema.capacityPoolRefreshes.attempts,
+            deadlineAt: schema.capacityPoolRefreshes.deadlineAt,
+            lastError: schema.capacityPoolRefreshes.lastError,
+          })
+          .from(schema.capacityPoolRefreshes)
+          .where(eq(schema.capacityPoolRefreshes.poolId, pool.id))
+          .limit(1)
+      )[0] ??
+      null;
+  }
+  const catalogPublished =
+    !legacyPublicationUnfinished &&
+    (pool.migrationState === 'complete' || Boolean(pool.catalogPublishedAt));
   const rows = await db
     .select({
       source: schema.capacitySources,
@@ -436,6 +480,12 @@ export async function readDefaultPoolSummary(
     effectiveState,
     diagnostics: [
       ...defaultPoolDiagnostics(effectiveState),
+      ...(legacyPublicationUnfinished
+        ? [
+            'legacy-catalog-publication-unfinished',
+            'An older catalog publication is unfinished. A complete fresh publication is required before this catalog can be used.',
+          ]
+        : []),
       ...(!catalogPublished && !catalogRefreshPending && refresh?.state !== 'failed'
         ? [
             'catalog-refresh-not-pending',

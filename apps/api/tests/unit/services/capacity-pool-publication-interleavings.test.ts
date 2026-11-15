@@ -227,6 +227,7 @@ describe('pool publication real SQL interleavings', () => {
       digest: expect.any(String),
       published: 4,
       complete: true,
+      atomic: true,
     });
     await reconcileDefaultPoolStatus(db, 'pool', undefined, completed);
     const readyPool = sqlite
@@ -256,6 +257,7 @@ describe('pool publication real SQL interleavings', () => {
       digest: expect.any(String),
       published: 2,
       complete: false,
+      atomic: true,
     });
     expect(repricedCursor.digest).not.toBe(completedCursor.digest);
     await reconcileDefaultPoolStatus(db, 'pool', undefined, repriced);

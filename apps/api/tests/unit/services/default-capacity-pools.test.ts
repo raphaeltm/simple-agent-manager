@@ -7388,6 +7388,359 @@ describe('durable catalog refresh continuation', () => {
     return { env, fetchMock };
   }
 
+  async function legacyInterruptedCatalog() {
+    const fixture = await interruptedCatalog();
+    await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env: fixture.env,
+      candidatePublishBudgetMs: 20_000,
+    });
+    await pickStarterMachines(poolDb() as never);
+    await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env: fixture.env,
+      candidatePublishBudgetMs: 20_000,
+    });
+    const lastSuccess = Date.now();
+    vi.setSystemTime(Date.now() + 60_000);
+    // Rollback: the older binary rewrites a live prefix but knows nothing about the
+    // completed durable work row or private staging left by the newer binary.
+    sqlite!.exec(`UPDATE capacity_pool_candidates SET provider_instance_price_hourly_micros=99
+      WHERE rowid IN (SELECT rowid FROM capacity_pool_candidates ORDER BY id LIMIT 6);
+      UPDATE capacity_pools SET migration_state='pending';
+      DELETE FROM capacity_pool_candidate_staging;`);
+    sqlite!
+      .prepare(
+        `UPDATE capacity_pool_refreshes SET state='complete', generation=6,
+      attempts=1, started_at=?, deadline_at=?, next_attempt_at=?, last_success_at=?`
+      )
+      .run(lastSuccess, lastSuccess + 120_000, lastSuccess, lastSuccess);
+    const cursor = getRows<{ key: string }>(
+      "SELECT key FROM platform_settings WHERE key LIKE 'capacityPools.candidatePublication.v1:%'"
+    )[0]!;
+    sqlite!
+      .prepare('UPDATE platform_settings SET value=?,updated_at=? WHERE key=?')
+      .run(
+        JSON.stringify({ digest: 'pre-atomic-catalog', published: 6, complete: false }),
+        new Date().toISOString(),
+        cursor.key
+      );
+    return { ...fixture, lastSuccess, cursorKey: cursor.key };
+  }
+
+  it.each(['complete', 'failed', 'expired'] as const)(
+    'quarantines an unfinished legacy live prefix with %s work before any adopter runs',
+    async (state) => {
+      await legacyInterruptedCatalog();
+      if (state !== 'complete')
+        sqlite!
+          .prepare(
+            `UPDATE capacity_pool_refreshes
+        SET state=?, deadline_at=?, next_attempt_at=?, last_error=?`
+          )
+          .run(
+            state === 'expired' ? 'pending' : 'failed',
+            Date.now() - 1,
+            Date.now() + 60_000,
+            'Retained actionable catalog error'
+          );
+      const before = getRows('SELECT * FROM capacity_pool_refreshes');
+      const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        labels: false,
+      });
+      expect(summary.user?.catalogRefreshPending).toBe(false);
+      expect(summary.user?.catalogPublished).toBe(false);
+      expect(summary.user?.diagnostics).toContain('legacy-catalog-publication-unfinished');
+      expect(summary.user?.effectiveState).toBe('catalog-unavailable');
+      expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(before);
+      expect(getCount('capacity_pool_candidate_staging')).toBe(0);
+    }
+  );
+
+  it.each(['pending', 'failed'] as const)(
+    'does not overwrite a newer %s owner at the adoption conflict',
+    async (state) => {
+      const { env } = await legacyInterruptedCatalog();
+      const now = Date.now();
+      // A newer owner wins after discovery but before the insert conflict resolves.
+      // Exercise the real conflict WHERE independently of the discovery predicate.
+      sqlite!.exec(`CREATE TEMP TRIGGER adoption_owner_race BEFORE INSERT ON capacity_pool_refreshes
+        BEGIN UPDATE capacity_pool_refreshes SET state='${state}',generation=99,attempts=3,
+          started_at=${now},deadline_at=${now + 120_000},next_attempt_at=${now + 60_000},
+          last_error='New owner error' WHERE pool_id=NEW.pool_id; END`);
+      await continueCapacityPoolPublications(
+        poolDb() as never,
+        env,
+        await capacityPoolRefreshSettings(),
+        Date.now() + 20_000
+      );
+      expect(
+        getRows(
+          'SELECT state,generation,attempts,started_at,deadline_at,next_attempt_at,last_error FROM capacity_pool_refreshes'
+        )
+      ).toEqual([
+        {
+          state,
+          generation: 99,
+          attempts: 3,
+          started_at: now,
+          deadline_at: now + 120_000,
+          next_attempt_at: now + 60_000,
+          last_error: 'New owner error',
+        },
+      ]);
+      expect(getCount('capacity_pool_candidate_staging')).toBe(0);
+    }
+  );
+
+  it.each([
+    ['finished cursor', JSON.stringify({ digest: 'legacy', published: 6, complete: true }), false],
+    ['malformed JSON', '{', false],
+    [
+      'noninteger prefix',
+      JSON.stringify({ digest: 'legacy', published: 1.5, complete: false }),
+      false,
+    ],
+    [
+      'invalid completion',
+      JSON.stringify({ digest: 'legacy', published: 6, complete: 'false' }),
+      false,
+    ],
+    ['wrong source key', JSON.stringify({ digest: 'legacy', published: 6, complete: false }), true],
+  ] as const)(
+    'ignores %s when detecting unfinished legacy publication',
+    async (_name, value, wrongSource) => {
+      const { env, cursorKey } = await legacyInterruptedCatalog();
+      sqlite!
+        .prepare('UPDATE platform_settings SET key=?,value=? WHERE key=?')
+        .run(wrongSource ? cursorKey + '-other-source' : cursorKey, value, cursorKey);
+      const before = getRows('SELECT * FROM capacity_pool_refreshes');
+      const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        labels: false,
+      });
+      expect(summary.user?.catalogPublished).toBe(true);
+      expect(summary.user?.diagnostics).not.toContain('legacy-catalog-publication-unfinished');
+      await continueCapacityPoolPublications(
+        poolDb() as never,
+        env,
+        await capacityPoolRefreshSettings(),
+        Date.now() + 20_000
+      );
+      expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(before);
+    }
+  );
+
+  it('quarantines known-temporary mirror-complete legacy work until point adoption', async () => {
+    const { env, fetchMock } = await legacyInterruptedCatalog();
+    sqlite!.exec("UPDATE capacity_pools SET migration_state='complete'");
+    const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      labels: false,
+    });
+    expect(summary.user?.catalogPublished).toBe(false);
+    expect(summary.user?.catalogRefreshPending).toBe(false);
+    expect(summary.user?.diagnostics).toContain('legacy-catalog-publication-unfinished');
+    const before = getRows('SELECT * FROM capacity_pool_refreshes');
+    const calls = fetchMock.mock.calls.length;
+    // Known temporary idle-only discovery boundary: Idea 01M7FN82782X6K04SEHF6JBY2E.
+    // Minute discovery stays indexed on pending pools, rather than scanning all pools.
+    await continueCapacityPoolPublications(
+      poolDb() as never,
+      env,
+      await capacityPoolRefreshSettings(),
+      Date.now() + 20_000
+    );
+    expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(before);
+    await resolveTaskStartCapacityPoolSelection(
+      poolDb() as never,
+      defaultTaskPlacement('legacy-read-only'),
+      { ensure: false, env }
+    );
+    expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(before);
+    const admitted = await resolveTaskStartCapacityPoolSelection(
+      poolDb() as never,
+      defaultTaskPlacement('legacy-admit'),
+      { env }
+    );
+    expect(admitted?.catalogRefreshPending).toBe(true);
+    expect(admitted?.catalogPublished).toBe(false);
+    expect(admitted?.candidates).toHaveLength(0);
+    expect(
+      getRows<{ state: string; generation: number; attempts: number }>(
+        'SELECT state,generation,attempts FROM capacity_pool_refreshes'
+      )
+    ).toEqual([{ state: 'pending', generation: 6, attempts: 0 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(calls);
+    await runScheduledCapacityPoolReconciliation({
+      ...env,
+      DATABASE: createSqliteD1WithBindLimit(sqlite!, 100),
+    });
+    expect(getCount('capacity_pool_candidate_staging')).toBe(2);
+    expect(
+      getRows<{ generation: number; attempts: number }>(
+        'SELECT generation,attempts FROM capacity_pool_refreshes'
+      )
+    ).toEqual([{ generation: 7, attempts: 1 }]);
+  });
+
+  it.each(['pending', 'failed', 'expired'] as const)(
+    'uses the winning %s refresh state when point adoption loses its conflict',
+    async (state) => {
+      const { env, fetchMock } = await legacyInterruptedCatalog();
+      sqlite!.exec("UPDATE capacity_pools SET migration_state='complete'");
+      const now = Date.now();
+      sqlite!
+        .exec(`CREATE TEMP TRIGGER adoption_point_owner_race BEFORE INSERT ON capacity_pool_refreshes
+        BEGIN UPDATE capacity_pool_refreshes SET state='${state === 'failed' ? 'failed' : 'pending'}',
+          generation=99,attempts=3,started_at=${now},
+          deadline_at=${state === 'expired' ? now - 1 : now + 120_000},
+          next_attempt_at=${now + 60_000},last_error='New owner error'
+          WHERE pool_id=NEW.pool_id; END`);
+      const calls = fetchMock.mock.calls.length;
+      const summary = await resolveEffectiveDefaultCapacityPoolSummary(poolDb() as never, {
+        userId: 'user-1',
+        ensure: true,
+        initializeOnly: true,
+        includeInstallation: false,
+        env,
+      });
+      expect(summary?.catalogPublished).toBe(false);
+      expect(summary?.catalogRefreshPending).toBe(state === 'pending');
+      expect(summary?.effectiveState).toBe(
+        state === 'pending' ? 'migration-pending' : 'catalog-unavailable'
+      );
+      expect(summary?.diagnostics).toContain('legacy-catalog-publication-unfinished');
+      expect(summary?.diagnostics).toContain(
+        state === 'pending'
+          ? 'configured-default-pool-migration-pending'
+          : state === 'failed'
+            ? 'catalog-refresh-failed'
+            : 'catalog-refresh-not-pending'
+      );
+      if (state === 'failed') expect(summary?.diagnostics).toContain('New owner error');
+      expect(getRows('SELECT generation,attempts FROM capacity_pool_refreshes')).toEqual([
+        { generation: 99, attempts: 3 },
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(calls);
+      expect(getCount('capacity_pool_candidate_staging')).toBe(0);
+    }
+  );
+
+  it('rebuilds a legacy live prefix privately across restarts despite a stale completed work row', async () => {
+    const { env, cursorKey, lastSuccess } = await legacyInterruptedCatalog();
+    const liveBefore = getRows('SELECT * FROM capacity_pool_candidates ORDER BY id');
+    const daily = getRows(
+      "SELECT value FROM platform_settings WHERE key='capacityPools.scheduledReconciliation.lastRun.v1'"
+    );
+    let digest: string | undefined;
+    let deadline: number | undefined;
+    for (let pass = 1; pass <= 5; pass++) {
+      const due = getRows<{ next_attempt_at: number }>(
+        'SELECT next_attempt_at FROM capacity_pool_refreshes'
+      )[0]!.next_attempt_at;
+      vi.setSystemTime(Math.max(Date.now() + 60_000, Math.ceil(due / 60_000) * 60_000));
+      await runScheduledCapacityPoolReconciliation({
+        ...env,
+        DATABASE: createSqliteD1WithBindLimit(sqlite!, 100),
+      });
+      const work = getRows<{
+        state: string;
+        generation: number;
+        attempts: number;
+        deadline_at: number;
+        last_success_at: number;
+      }>('SELECT * FROM capacity_pool_refreshes')[0]!;
+      const saved = sqlite!
+        .prepare('SELECT value FROM platform_settings WHERE key=?')
+        .get(cursorKey) as { value: string };
+      const progress = JSON.parse(saved.value) as {
+        digest: string;
+        published: number;
+        complete: boolean;
+        atomic?: boolean;
+      };
+      digest ??= progress.digest;
+      deadline ??= work.deadline_at;
+      expect(progress.digest).toBe(digest);
+      expect(work.deadline_at).toBe(deadline);
+      expect(work.generation).toBe(6 + pass);
+      expect(work.attempts).toBe(pass);
+      const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        labels: false,
+      });
+      if (pass < 5) {
+        expect(progress).toMatchObject({ published: pass * 2, complete: false, atomic: false });
+        expect(work).toMatchObject({ state: 'pending', last_success_at: lastSuccess });
+        expect(getRows('SELECT * FROM capacity_pool_candidates ORDER BY id')).toEqual(liveBefore);
+        expect(getCount('capacity_pool_candidate_staging')).toBe(pass * 2);
+        expect(summary.user?.catalogPublished).toBe(false);
+        expect(summary.user?.catalogRefreshPending).toBe(true);
+      } else {
+        expect(progress).toMatchObject({ published: 10, complete: true, atomic: true });
+        expect(work.state).toBe('complete');
+        expect(work.last_success_at).toBeGreaterThan(lastSuccess);
+        expect(summary.user?.catalogPublished).toBe(true);
+        expect(summary.user?.catalogRefreshPending).toBe(false);
+        expect(getCount('capacity_pool_candidate_staging')).toBe(0);
+        expect(
+          getRows<{ price: number }>(
+            'SELECT provider_instance_price_hourly_micros AS price FROM capacity_pool_candidates'
+          ).every((r) => r.price !== 99)
+        ).toBe(true);
+      }
+      expect(
+        getRows(
+          "SELECT value FROM platform_settings WHERE key='capacityPools.scheduledReconciliation.lastRun.v1'"
+        )
+      ).toEqual(daily);
+    }
+    const finished = getRows('SELECT * FROM capacity_pool_refreshes');
+    vi.setSystemTime(Date.now() + 60_000);
+    await runScheduledCapacityPoolReconciliation(env);
+    expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(finished);
+  });
+
+  it('accepts an older writer finishing inherited unsafe progress without atomic provenance', async () => {
+    const { env, cursorKey } = await legacyInterruptedCatalog();
+    await runScheduledCapacityPoolReconciliation(env);
+    const stored = sqlite!
+      .prepare('SELECT value FROM platform_settings WHERE key=?')
+      .get(cursorKey) as { value: string };
+    const progress = JSON.parse(stored.value) as { digest: string; atomic: boolean };
+    expect(progress.atomic).toBe(false);
+    // The previous build reads digest/published/complete and ignores unknown fields.
+    // Its normal completed payload omits the new field; that must release quarantine.
+    sqlite!
+      .prepare('UPDATE platform_settings SET value=? WHERE key=?')
+      .run(JSON.stringify({ digest: progress.digest, published: 10, complete: true }), cursorKey);
+    sqlite!.exec(`UPDATE capacity_pool_candidates SET provider_instance_price_hourly_micros=4800;
+      UPDATE capacity_pools SET migration_state='complete'`);
+    const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      labels: false,
+    });
+    expect(summary.user?.catalogPublished).toBe(true);
+    expect(summary.user?.diagnostics).not.toContain('legacy-catalog-publication-unfinished');
+    const due = getRows<{ next_attempt_at: number }>(
+      'SELECT next_attempt_at FROM capacity_pool_refreshes'
+    )[0]!.next_attempt_at;
+    vi.setSystemTime(Math.max(Date.now() + 60_000, due));
+    await runScheduledCapacityPoolReconciliation(env);
+    expect(getRows<{ state: string }>('SELECT state FROM capacity_pool_refreshes')).toEqual([
+      { state: 'complete' },
+    ]);
+  });
+
   it('resumes saved multi-batch work on cron within minutes, independently of the daily gate', async () => {
     const { env } = await interruptedCatalog();
     const startedAt = Date.now();

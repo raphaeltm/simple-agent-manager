@@ -56,8 +56,9 @@ References: `tasks/backlog/2026-11-09-capacity-pool-readiness-gate-during-republ
 - [x] Archive exact-write fencing covers direct wake activation. Once this exact chat/workspace is durably active, completed/failed historical recovery tasks no longer withhold new prompts; cancellation and current target ownership still apply. Receipt probes never activate.
 - [x] Real entry-point regressions cover initial versus established pools, interrupted multi-batch/restart, unchanged catalogs, daily-independent retry/lost notification, stale/concurrent publishers, revocation, cancellation/TTL and automatic original inbox delivery without repeated Continue.
 - [x] Production-size 7,200-row indexed promotion, current migration chain and guard-deletion discrimination tests; scoped source/test specialist review.
+- [x] Adopt rollback/redeploy legacy interruption despite a stale completed work row; quarantine unsafe live prefixes through full promotion; indexed minute discovery and write-authorized point adoption preserve leases, cooldowns and prior success.
 - [x] Final documentation/constitution review and consolidated native/Workers/full quality pass. Completion remains WARN for open runtime/release gates.
-- [ ] Real coordinated staging retained-publication VM chain, short sequential Instant compatibility, promotion timing and independent provider/control-plane cleanup.
+- [ ] Real coordinated staging retained-publication VM chain, promotion timing and independent provider/control-plane cleanup. R7 is VM-first; focused tests preserve Instant compatibility.
 - [ ] Fresh candidate CI, best-effort CodeRabbit request/wait, final exact-SHA coordinator approval and authorized release/production smoke.
 
 ## Review changes and discriminating evidence
@@ -120,6 +121,58 @@ batch per pass needs36 claims: the first35 backoffs total15+30+60+120+240+30×30
 (157.75min), already beyond2h before tick quantization. That diagnostic setting must be restored
 promptly in the staging recipe; it is not a sustainable production throughput setting.
 
+## Rollback/redeploy interruption found on staging (2026-11-15)
+
+Exact staging deploy43711661347 and all smokes passed at2f04b03f54affadc220f0df5c63ef27b42abc889.
+Before allocation, the real readiness guard found poolR95 migration pending and a legacy GCP cursor
+stopped at3,000/3,418, with zero private staging rows and an older completed refresh/gen6. The prior
+83705cb4 build had begun its in-place refresh during12:00–12:01; the new build returned afterward.
+This models a production rollback followed by redeploy. Previously it stayed pending until a daily
+refresh or a human Refresh, while the retained marker incorrectly trusted half-rewritten rows.
+
+The successor adopts active pending pools with unfinished legacy cursors even when completed work
+already exists. The existing generation/attempt/lease CAS and first-claim deadline remain authoritative.
+Only the optional cursor `atomic:true` proves that incomplete writes used private staging; inherited
+legacy unsafety survives changed digests and every partial write until full promotion succeeds. An
+older parser ignores the extra field and its older writer omits it; completed old-format cursors
+release quarantine normally. Current staged refreshes retain their valid committed catalog. Failed
+or expired work remains non-retryable; a separate unfinished-publication diagnostic reports quarantine.
+
+Minute adoption still uses idx_capacity_pools_migration_state, scoped source indexes and exact settings
+PK lookups. It replaces one existing SQL request per tick, not one request per pending pool; an empty
+continuation pass still uses adoption plus the due-work lookup. The quarantine projection adds no SQL
+round trip to a summary. A write-authorized placement hitting a mirror-complete unsafe pool queues
+that exact pool by PK and uses RETURNING to acknowledge its fenced write. If another owner wins,
+one narrow refresh-state lookup observes pending/failed/expired state. The original candidate and
+credential-authority reads run once; no synchronous provider refresh occurs. Measured selection
+helper totals are10 executions read-only,11 on adoption and12 on a conflict/no-op; these exclude
+the caller's existing route/authentication work, not a claim that the whole task route costs12.
+ensure=false does no writes. Operator candidate edits call reconcileDefaultPoolStatus and can create
+that complete mirror. Idle-only background discovery remains daily (up to24h plus publication), tracked
+as known-temporary Idea01M7FN82782X6K04SEHF6JBY2E; accepted placement demand queues it immediately.
+
+At3,418 materialized rows and200/batch, fresh rebuilding requires18 staging writes, about18 cursor
+writes and one promotion transaction:37 write round trips. At the stated0.5s/write assumption this
+is18.5s of writes, excluding reads/provider/preparation/promotion; it can exceed a20s pass and needs
+continuation. Adoption normally starts on the next one-minute tick, with the existing180s lost-claim
+lease and≤300s eligibility backoff. If forced to one batch/pass,17 backoffs total4,065s (67.75min),
+plus≤17min tick quantization; aggregate contention/other I/O can exhaust the existing2h episode.
+This is not a promise that all scopes or provider calls finish in one pass. No budget is reset by retry.
+
+Pre-fix real Workers cron RED left generation6 and resumed only the no-row case; successor matrix
+passes with all6 existing cron tests retained. Native pre-adoption quarantine/complete-failed-expired
+and provider-backed private rebuild/restart assertions were red before the fix. Controlled deletion
+of adoption eligibility, conflict CAS, quarantine, or sticky provenance each causes intended assertion
+failures; original bytes are restored afterward. Three real point-conflict cases also assert that
+the winning pending, failed and expired state controls the returned wait/error without spending
+another generation or provider call. Full live wake proof remains UNMET.
+
+R7 stopped before project/profile/candidate/settings/VM/sleep/wake/T0. Its one login was signed out200,
+session200/null and cache gone; complete provider inventories0 repeated after136s and34 managed jobs
+terminal were independently accepted by Root0440c9ae. Closed12:52:43, both cleanup guards cancelledv2.
+Evidence Library01M7FKVGVB97JGYG6EJ1Y0ARRM; PRcomment6894508145. New source needs full CI,
+scoped review from2f04 and a mechanical recipe head/hash successor before any new live window.
+
 ## Deliberately tracked boundaries
 
 The coordinator explicitly allowed item11 to be fixed or narrowed/tracked. Automatic continuation here
@@ -148,7 +201,6 @@ not live provider-crash or abrupt isolate proof. The operational recipe uses nor
 cleanup, and conservativeUSD0.85 underUSD1 estimate. Fresh quote/authority, all-in cost/headroom,
 exact admin/candidate CAS restoration, actual lane handoff and independent provider absence plus
 late control-plane cleanup are required. No SQL fixture mutation, fake callback or production trial.
-
 
 ## Deployment runner prerequisite and final reviewed boundaries (2026-11-15)
 
