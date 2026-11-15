@@ -503,6 +503,7 @@ export function updateSessionTopic(sql: SqlStorage, sessionId: string, topic: st
 }
 
 export function markAgentCompleted(sql: SqlStorage, sessionId: string): number {
+  flushMessageBookkeeping(sql, sessionId);
   const now = Date.now();
   sql.exec(
     `UPDATE chat_sessions SET agent_completed_at = ?, updated_at = ? WHERE id = ? AND agent_completed_at IS NULL`,

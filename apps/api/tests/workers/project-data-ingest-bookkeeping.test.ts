@@ -1,5 +1,5 @@
 import { projectDataPorts } from '@simple-agent-manager/project-data/internal/do/ports';
-import { runInDurableObject } from 'cloudflare:test';
+import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { projectDataStub } from './helpers/archive-fixtures';
@@ -60,10 +60,65 @@ async function fixture(enabled: boolean) {
     },
   ];
   await stub.persistMessageBatch(session, batch(10001), source);
-  return { stub, session, batch };
+  return { stub, session, batch, base };
 }
 
 describe('ingest bookkeeping in real workerd', () => {
+  it.each([false, true])(
+    'recovers pending activity after eviction before a stale idle cleanup (merging=%s)',
+    async (enabled) => {
+      const { stub, session, batch, base } = await fixture(enabled);
+      await stub.persistMessageBatch(session, batch(10002), source);
+      await runInDurableObject(stub, (_instance, state) => {
+        state.storage.sql.exec(
+          'UPDATE idle_cleanup_schedule SET cleanup_at=? WHERE session_id=?',
+          base + 1000,
+          session
+        );
+      });
+      await evictDurableObject(stub);
+      vi.spyOn(Date, 'now').mockReturnValue(base + 2000);
+      expect(await runDurableObjectAlarm(stub)).toBe(true);
+      expect((await stub.getSession(session))?.status).toBe('active');
+      await runInDurableObject(stub, (_instance, state) => {
+        const row = state.storage.sql
+          .exec('SELECT cleanup_at FROM idle_cleanup_schedule WHERE session_id=?', session)
+          .toArray()[0];
+        expect(Number(row?.cleanup_at)).toBeGreaterThan(base + 2000);
+        expect(
+          state.storage.sql
+            .exec('SELECT pending_message_count FROM chat_sessions WHERE id=?', session)
+            .toArray()[0]?.pending_message_count
+        ).toBe(0);
+      });
+    }
+  );
+
+  it.each([false, true])(
+    'keeps cleanup and work clocks extended across an entire idle window of real batches (merging=%s)',
+    async (enabled) => {
+      const { stub, session, batch, base } = await fixture(enabled);
+      const clock = vi.spyOn(Date, 'now');
+      for (let n = 1; n <= 5; n++) {
+        const now = base + n * 20000;
+        clock.mockReturnValue(now);
+        await stub.persistMessageBatch(session, batch(10001 + n), source);
+        expect((await stub.getSessionState('bookkeeping-acp'))?.workAt).toBeGreaterThanOrEqual(now);
+        expect(await runDurableObjectAlarm(stub)).toBe(true);
+        expect((await stub.getSession(session))?.status).toBe('active');
+        await runInDurableObject(stub, (_instance, state) => {
+          expect(
+            Number(
+              state.storage.sql
+                .exec('SELECT cleanup_at FROM idle_cleanup_schedule WHERE session_id=?', session)
+                .toArray()[0]?.cleanup_at
+            )
+          ).toBeGreaterThan(now);
+        });
+      }
+    }
+  );
+
   it.each([false, true])(
     'exposes pending counts immediately and flushes them at the real turn-end boundary (merging=%s)',
     async (enabled) => {

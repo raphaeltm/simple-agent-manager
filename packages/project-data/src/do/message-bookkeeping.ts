@@ -24,7 +24,12 @@ export function messageBookkeepingInterval(env: Env, configured?: number): numbe
 
 export function latestMessageIngestAt(sql: SqlStorage, sessionId: string): number {
   const row = sql
-    .exec('SELECT message_ingested_at FROM chat_sessions WHERE id = ?', sessionId)
+    .exec(
+      `SELECT message_ingested_at FROM chat_sessions
+      WHERE id = COALESCE((SELECT chat_session_id FROM acp_sessions WHERE id = ?), ?)`,
+      sessionId,
+      sessionId
+    )
     .toArray()[0];
   return typeof row?.message_ingested_at === 'number' ? row.message_ingested_at : 0;
 }

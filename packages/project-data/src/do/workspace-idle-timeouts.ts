@@ -44,7 +44,7 @@ const WORKSPACE_IDLE_CHECKS_CTE = `
     SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count,
            wa.next_idle_check_at,
            max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0),
-               COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at
+               COALESCE(cs.updated_at, 0), COALESCE(cs.message_ingested_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at
       FROM workspace_activity wa
      INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id
      WHERE cs.status = 'active'

@@ -18,6 +18,7 @@ import { createAttentionMarker } from './attention';
 import { terminalizeIdleTaskInD1 } from './idle-cleanup-terminalization';
 import { materializeSession, resolveMaterializationPassConfig } from './materialization';
 import { persistSystemMessage } from './messages';
+import { flushMessageBookkeeping } from './message-bookkeeping';
 import { parseCleanupAt, parseIdleCleanupSchedule, parseMinEarliest } from './row-schemas';
 import { upsertActivityState } from './session-state';
 import { stopSessionInternal } from './sessions';
@@ -282,6 +283,15 @@ export async function processExpiredCleanups(
 
   for (const entry of expired) {
     try {
+      // The persisted receipt survives eviction even while derived deadlines lag a batch.
+      flushMessageBookkeeping(sql, entry.sessionId);
+      const current = sql
+        .exec(
+          'SELECT cleanup_at FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL',
+          entry.sessionId
+        )
+        .toArray()[0];
+      if (!current || Number(current.cleanup_at) > Date.now()) continue;
       if (!projectId || !entry.taskId) {
         log.warn('reporter_identity_incomplete', {
           projectId,

@@ -1,6 +1,7 @@
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { ulid } from '@simple-agent-manager/worker-core';
 
+import { latestMessageIngestAt } from './message-bookkeeping';
 import { type LocalTaskRuntimeVerdict, projectDataPorts } from './ports';
 import type { Env } from './types';
 
@@ -164,6 +165,10 @@ export async function terminalizeIdleTaskInD1(
   env: Env,
   reporter: IdleTaskReporter
 ): Promise<IdleTaskTerminalizationResult> {
+  const recentIngest = () =>
+    latestMessageIngestAt(sql, reporter.sessionId) > Date.now() - reporter.timeoutMs;
+  if (recentIngest())
+    return { outcome: 'preserved', taskId: reporter.taskId, liveness: null, errorMessage: null };
   const task = await env.DATABASE.prepare(
     `SELECT id, project_id, workspace_id, chat_session_id, status
      FROM tasks WHERE id = ? LIMIT 1`
@@ -235,6 +240,8 @@ export async function terminalizeIdleTaskInD1(
   // lifecycle outcome, not a runtime failure — the same distinction the cron sweep
   // makes, kept in lockstep here so the two terminalization runtimes cannot
   // disagree about what a supersession means (`.claude/rules/61`, `.claude/rules/66`).
+  if (recentIngest())
+    return { outcome: 'preserved', taskId: task.id, liveness, errorMessage: null };
   const supersededTermination = liveness.supersededTermination;
   const terminalStatus: 'failed' | 'cancelled' = supersededTermination ? 'cancelled' : 'failed';
   // The reason always lands on the status event so the timeline stays complete.

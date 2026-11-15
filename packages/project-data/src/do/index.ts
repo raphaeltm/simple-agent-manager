@@ -60,7 +60,11 @@ import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
 import * as idleCleanup from './idle-cleanup';
-import { flushDueMessageBookkeeping, DEFAULT_MESSAGE_BOOKKEEPING } from './message-bookkeeping';
+import {
+  flushDueMessageBookkeeping,
+  DEFAULT_MESSAGE_BOOKKEEPING,
+  flushMessageBookkeeping,
+} from './message-bookkeeping';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';
 import * as links from './links';
@@ -1080,9 +1084,12 @@ export class ProjectData extends DurableObject<Env> {
       this.sql,
       prepared
     );
-    const begun = await this.withArchiveTranscriptLock(() =>
-      archiveSharding.beginArchiveSourcePrepare(this.sql, prepared, { estimateExceedsReservation })
-    );
+    const begun = await this.withArchiveTranscriptLock(() => {
+      flushMessageBookkeeping(this.sql, prepared.sessionId);
+      return archiveSharding.beginArchiveSourcePrepare(this.sql, prepared, {
+        estimateExceedsReservation,
+      });
+    });
     if (begun.kind === 'refused') return begun.refusal;
     const terminalVersion = await archiveSharding.computeTerminalVersion(
       this.sql,

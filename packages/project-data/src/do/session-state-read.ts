@@ -9,6 +9,8 @@ import type {
   SessionStateSnapshot,
 } from '@simple-agent-manager/shared';
 
+import { latestMessageIngestAt } from './message-bookkeeping';
+
 export function getSessionState(sql: SqlStorage, sessionId: string): SessionStateSnapshot | null {
   const rows = sql
     .exec(
@@ -35,6 +37,9 @@ export function getSessionState(sql: SqlStorage, sessionId: string): SessionStat
     }
   }
 
+  const ingestAt = ['prompting', 'recovering'].includes(String(row.activity))
+    ? latestMessageIngestAt(sql, sessionId)
+    : 0;
   return {
     activity: (row.activity as SessionStateSnapshot['activity']) || 'idle',
     activityAt: (row.activity_at as number) || 0,
@@ -53,7 +58,12 @@ export function getSessionState(sql: SqlStorage, sessionId: string): SessionStat
       typeof row.runtime_work_updated_at === 'number' ? row.runtime_work_updated_at : null,
     runtimeWorkProgressAt:
       typeof row.runtime_work_progress_at === 'number' ? row.runtime_work_progress_at : null,
-    workAt: typeof row.work_at === 'number' ? row.work_at : null,
+    workAt:
+      ingestAt > 0
+        ? Math.max(Number(row.work_at) || 0, ingestAt)
+        : typeof row.work_at === 'number'
+          ? row.work_at
+          : null,
     reportedPromptStartedAt:
       typeof row.reported_prompt_started_at === 'number' && row.reported_prompt_started_at > 0
         ? row.reported_prompt_started_at

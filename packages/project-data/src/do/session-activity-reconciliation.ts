@@ -24,6 +24,7 @@
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 
 import { recordActivityEventInternal } from './activity';
+import { latestMessageIngestAt } from './message-bookkeeping';
 import {
   minReconciliationAlarmDelayMs,
   sessionActivityProbeMaxAttempts,
@@ -59,6 +60,7 @@ export interface StaleActivityCandidate {
   nodeId: string;
   activityAt: number;
   probeAttempts: number;
+  messageIngestAt?: number;
 }
 
 export type ProbeOutcome =
@@ -151,11 +153,13 @@ export function selectStaleActivityProbeCandidates(
               acp.workspace_id AS workspace_id,
               acp.node_id AS node_id,
               ss.activity_at AS activity_at,
+              COALESCE(cs.message_ingested_at, 0) AS message_ingest_at,
               ss.activity_probe_attempts AS probe_attempts
        FROM session_state ss
        JOIN acp_sessions acp ON acp.id = ss.session_id
+       LEFT JOIN chat_sessions cs ON cs.id = acp.chat_session_id
        WHERE ss.activity IN (${placeholders})
-         AND ss.activity_at < ?
+         AND MAX(ss.activity_at, COALESCE(cs.message_ingested_at, 0)) < ?
          AND COALESCE(ss.activity_probe_attempts, 0) < ?
          AND (ss.activity_probe_at IS NULL OR ss.activity_probe_at <= ?)
          AND acp.workspace_id IS NOT NULL
@@ -198,6 +202,7 @@ export function selectStaleActivityProbeCandidates(
           nodeId,
           activityAt: typeof row.activity_at === 'number' ? row.activity_at : 0,
           probeAttempts: typeof row.probe_attempts === 'number' ? row.probe_attempts : 0,
+          messageIngestAt: Number(row.message_ingest_at),
         },
       ];
     });
@@ -249,9 +254,10 @@ export function computeSessionActivityProbeAlarmTime(
   // with no log signal. See `.claude/rules/47`.
   const row = sql
     .exec(
-      `SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due
+      `SELECT MIN(MAX(MAX(ss.activity_at, COALESCE(cs.message_ingested_at, 0)) + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due
        FROM session_state ss
        JOIN acp_sessions acp ON acp.id = ss.session_id
+       LEFT JOIN chat_sessions cs ON cs.id = acp.chat_session_id
        WHERE ss.activity IN (${placeholders})
          AND COALESCE(ss.activity_probe_attempts, 0) < ?
          AND acp.workspace_id IS NOT NULL
@@ -362,6 +368,8 @@ export function applyProbeOutcome(
   options: { maxAttempts: number; now?: number }
 ): boolean {
   const now = options.now ?? Date.now();
+  if (latestMessageIngestAt(sql, candidate.chatSessionId) > (candidate.messageIngestAt ?? 0))
+    return false;
 
   if (outcome.kind === 'working') {
     // Positive proof of an in-flight turn. Refresh the staleness clock and
