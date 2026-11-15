@@ -47,7 +47,7 @@ import {
   resolveTunnelSettings,
   tunnelWorkerVars,
 } from './box-settings.js';
-import { adoptNewDeployment, checkAgentSignInRoute } from './celld-adopt.js';
+import { verifyNewVersionServes } from './celld-adopt.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import {
   assertOperatorSecretsAllowed,
@@ -63,7 +63,6 @@ import {
   intEnv,
   redact,
   syncGatewayEnv,
-  waitForHealth,
 } from './deploy-steps.js';
 import {
   assertCelldTaggedImages,
@@ -432,9 +431,15 @@ async function main(): Promise<void> {
 
   // celld reads deploy/current.json only every CELLD_DEPLOY_POLL_S (30 s); without this the
   // health check below passed on the previous version (box round R15, G3). celld-adopt.ts.
-  log(`celld adopted the new version: ${await adoptNewDeployment(box)}`);
-  await waitForHealth(box.CELLD_PORT || DEFAULT_CELLD_PORT, baseDomain);
-  if (secrets.AGENT_SIGN_IN_TRUST?.trim()) await checkAgentSignInRoute(box);
+  await verifyNewVersionServes(
+    box,
+    {
+      celldPort: box.CELLD_PORT || DEFAULT_CELLD_PORT,
+      baseDomain,
+      agentSignInConfigured: Boolean(secrets.AGENT_SIGN_IN_TRUST?.trim()),
+    },
+    log
+  );
   log(`deployed: https://app.${baseDomain} (API https://api.${baseDomain})`);
   if (collectorPassword) {
     log(

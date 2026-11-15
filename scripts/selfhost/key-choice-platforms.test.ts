@@ -237,6 +237,26 @@ describe('Google Cloud', () => {
     expectNothingSealed();
   });
 
+  it('keeps the placeholders when the metadata answer is not a VM name (it is pasted into a shell)', async () => {
+    fake = await startFakeKeyServices({
+      gcpProject: PROJECT,
+      existingKeys: [GCP_KEY],
+      gceInstance: { name: 'x; rm -rf ~', zone: 'europe-west1-b' },
+    });
+    fake.setDenied(true);
+    const envFile = writeBox(dir, [
+      ...elsewhere('gce'),
+      `SAM_GCE_METADATA_HOST=${fake.host}`,
+      `SAM_GCP_KMS_ENDPOINT=http://${fake.host}`,
+      dmi('gcp'),
+    ]);
+    const init = await runDeploy(envFile, ['--init']);
+    expect(init.status).not.toBe(0);
+    expect(init.out).toContain('--box-instance <box VM> --box-zone <zone> --new-key-version`');
+    expect(init.out).not.toContain('rm -rf');
+    expectNothingSealed();
+  });
+
   it('denied on a key named in .env: the command names that key, ring and location', async () => {
     const own = `projects/${PROJECT}/locations/europe-west1/keyRings/mine/cryptoKeys/box`;
     fake = await startFakeKeyServices({ gcpProject: PROJECT, existingKeys: [own] });

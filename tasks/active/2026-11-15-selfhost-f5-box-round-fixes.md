@@ -46,12 +46,24 @@ Out of scope (tracked elsewhere): Admin Settings 503 on one invalid stored value
       real SMTP server; Cloudflare binding control; no-transport control. Verified red pre-fix
       (4 SMTP cases red, controls green).
 - [x] D1 docs: self-hosting.mdx security alerts, deploy/selfhost/README.md Email sign-in.
-- [ ] G3: measure on the box, read code, fix if small (deploy health check waits for the route).
-- [ ] G5: teardown firewall-rule users exclude VMs SAM did not create; never touch non-owned.
-- [ ] G4: refusal message names the command and where to run it.
-- [ ] Sealed values: supported removal (command/flag) or documented procedure.
-- [ ] D4: GitLab scope de-duplicated, test.
-- [ ] Backup wording: pre-copy 404 on node lease says it is expected.
+- [x] G3: cause from celld 0.6.3 source/docs (nodes poll `deploy/current.json` every 30 s,
+      `POST /reload` adopts at once; `selfhost:deploy` never called it, so `/health` passed on the
+      previous version). Fix: `verifyNewVersionServes` (`scripts/selfhost/celld-adopt.ts`) adopts,
+      then health, then the agent sign-in route when `AGENT_SIGN_IN_TRUST` is set; 422 and silence
+      fail the deploy. Adopt helpers moved from `secrets-box-deps.ts`. Box measurement pending.
+- [x] G5: teardown advice reads the rule's network/target tags and all project VMs
+      (`firewallUsage`, `teardown-gcp.ts`); rules still never deleted. CLI test + branch tests.
+- [x] G4: refusal says "Then run `pnpm selfhost:deploy --init` again on this box, in the SAM
+      checkout." (`switch --to auto` names itself); GCE VM name/zone filled from metadata.
+- [x] Sealed values: `pnpm selfhost:deploy --unset NAME` (`assertUnsettable`, `key-service.ts`);
+      dry run only checks names (security review); README section.
+- [x] D4: `disableDefaultScope: true` (`gitlab-login-provider.ts`); authorize-URL test.
+- [x] Backup wording: `backup-lib.ts` log line + README.
+- [x] Reviews: security-auditor (1 MEDIUM fixed), cloudflare-specialist (lint + 2 LOW fixed),
+      test-engineer (HIGH: deploy wiring and dry-run; addressed with `verifyNewVersionServes`
+      ordering tests, dry-run deploy test, contract fake, branch tests, account-link via the real
+      better-auth hook), task-completion-validator (WARN: stale checklist, fixed here).
+- [ ] CI dispatched by hand and green; SonarCloud checked.
 - [ ] Box verification per item.
 
 ## Acceptance criteria
@@ -68,6 +80,10 @@ Out of scope (tracked elsewhere): Admin Settings 503 on one invalid stored value
 
 ## Notes
 
-- D1 shared files touched: `apps/api/src/services/security-alerts.ts`,
-  `apps/api/src/services/email-sign-in.ts`, new `apps/api/src/services/agent-email/system-email.ts`,
-  comment in `packages/agent-email/src/provider.ts`.
+- Shared files touched (apps/api, packages): `apps/api/src/services/agent-email/system-email.ts`
+  (new), `apps/api/src/services/security-alerts.ts`, `apps/api/src/services/email-sign-in.ts`,
+  `packages/agent-email/src/provider.ts` (comment), `apps/api/src/services/gitlab-login-provider.ts`
+  (the only Cloudflare-visible change: the GitLab authorize URL no longer repeats `read_user`).
+- Untested by unit tests: the single call of `verifyNewVersionServes` in `deploy.ts` (the deploy
+  needs a real build and celld); covered on the box.
+- Workspace was recreated once after a provider usage-limit pause (22:17 UTC); Git was intact.

@@ -30,6 +30,7 @@ const { adminSettingsRoutes } = await import('../../src/routes/admin-settings');
 
 const FROM = 'alerts@box.example.com';
 const OWNER = 'owner@example.com';
+const OWNER_2 = 'owner-2@example.com';
 const app = new Hono<{ Bindings: Env }>().route('/settings', adminSettingsRoutes);
 
 let sqlite: Database.Database;
@@ -47,6 +48,9 @@ function buildEnv(overrides: Partial<Env>): Env {
     CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT, name TEXT, role TEXT, status TEXT);
     INSERT INTO users VALUES ('system_anonymous_trials', 'system@internal', 'System', 'superadmin', 'system');
     INSERT INTO users VALUES ('owner', '${OWNER}', 'Owner', 'superadmin', 'active');
+    INSERT INTO users VALUES ('owner-2', '${OWNER_2}', NULL, 'superadmin', 'active');
+    INSERT INTO users VALUES ('suspended', 'suspended@example.com', 'S', 'superadmin', 'suspended');
+    INSERT INTO users VALUES ('member', 'member@example.com', 'M', 'user', 'active');
   `);
   return fixture.env;
 }
@@ -123,19 +127,21 @@ describe('owner security alerts over SMTP (self-hosted box, no AGENT_EMAIL)', ()
     let logs = await captureLogs(async () => expect((await patch(SAVE, 0)).status).toBe(200));
     expect(logs).not.toContain('security_alert.no_sender');
     expect(logs).toContain('"transport":"smtp"');
-    expect(smtp.messages).toHaveLength(1);
-    expect(smtp.messages[0]).toMatchObject({ from: FROM, to: [OWNER] });
-    expect(smtp.messages[0]!.data).toContain(`From: "SAM security" <${FROM}>`);
-    expect(smtp.messages[0]!.data).toContain(
+    // Every active superadmin, one message each; never the sentinel, a suspended one or a user.
+    expect(smtp.messages.map((m) => m.to[0]).sort()).toEqual([OWNER, OWNER_2].sort());
+    const first = smtp.messages.find((m) => m.to[0] === OWNER)!;
+    expect(first).toMatchObject({ from: FROM, to: [OWNER] });
+    expect(first.data).toContain(`From: "SAM security" <${FROM}>`);
+    expect(first.data).toContain(
       'Subject: SAM security alert: Google sign-in (OAuth) settings changed'
     );
-    expect(smtp.messages[0]!.data).toContain('client id set');
-    expect(smtp.messages[0]!.data).not.toContain('stored-client-secret');
+    expect(first.data).toContain('client id set');
+    expect(first.data).not.toContain('stored-client-secret');
 
     logs = await captureLogs(async () => expect((await patch(CLEAR, 1)).status).toBe(200));
     expect(logs).not.toContain('security_alert.no_sender');
-    expect(smtp.messages).toHaveLength(2);
-    expect(smtp.messages[1]!.data).toContain('client id cleared');
+    expect(smtp.messages).toHaveLength(4);
+    expect(smtp.messages[2]!.data).toContain('client id cleared');
   });
 
   it('emails the owner when a sign-in is linked to a superadmin account', async () => {
@@ -146,7 +152,7 @@ describe('owner security alerts over SMTP (self-hosted box, no AGENT_EMAIL)', ()
       { waitUntil: (promise) => background.push(promise) }
     );
     await Promise.all(background);
-    expect(smtp.messages).toHaveLength(1);
+    expect(smtp.messages).toHaveLength(2);
     expect(smtp.messages[0]!.data).toContain(
       'Subject: SAM security alert: a GitLab sign-in was linked to a superadmin account'
     );
@@ -156,13 +162,14 @@ describe('owner security alerts over SMTP (self-hosted box, no AGENT_EMAIL)', ()
     // Liveness: sign-in is offered on this env, and the alert went out over the same SMTP.
     expect(emailSignInPlugins(env)).toHaveLength(1);
     await patch(SAVE, 0);
-    expect(smtp.messages.map((message) => message.from)).toEqual([FROM]);
+    expect(smtp.messages.map((message) => message.from)).toEqual([FROM, FROM]);
   });
 
   it('logs a failed send and still answers the admin change with 200', async () => {
     await smtp.close();
     const logs = await captureLogs(async () => expect((await patch(SAVE, 0)).status).toBe(200));
     expect(logs).toContain('security_alert.send_failed');
+    expect(logs).toContain('"failed":2');
     expect(logs).not.toContain(OWNER);
   });
 });
@@ -181,8 +188,9 @@ describe('owner security alerts through the Cloudflare binding (unchanged)', () 
       } as unknown as SendEmail,
     });
     expect((await patch(SAVE, 0)).status).toBe(200);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({
+    expect(sent.map((m) => m.to).sort()).toEqual([OWNER, OWNER_2].sort());
+    const first = sent.find((m) => m.to === OWNER)!;
+    expect(first).toMatchObject({
       from: { email: 'security@agents.example.com', name: 'SAM security' },
       to: OWNER,
       subject: 'SAM security alert: Google sign-in (OAuth) settings changed',
@@ -195,6 +203,8 @@ describe('owner security alerts through the Cloudflare binding (unchanged)', () 
 describe('owner security alerts with no transport configured', () => {
   it('logs security_alert.no_sender, sends nothing, and the admin change still succeeds', async () => {
     env = buildEnv({});
+    // The same decision as sign-in: no transport, so no email sign-in either.
+    expect(emailSignInPlugins(env)).toHaveLength(0);
     const logs = await captureLogs(async () => expect((await patch(SAVE, 0)).status).toBe(200));
     expect(logs).toContain('security_alert.no_sender');
     expect(smtp.messages).toHaveLength(0);

@@ -13,7 +13,7 @@
  * about 20 s. The deploy now asks celld to adopt before its health check (`adoptNewDeployment`)
  * and checks the agent sign-in route when the trust is configured (`checkAgentSignInRoute`).
  */
-import { intEnv, sleep } from './deploy-steps.js';
+import { intEnv, sleep, waitForHealth } from './deploy-steps.js';
 
 /**
  * How long a check after a deploy keeps trying. celld can stall for seconds while it adopts a
@@ -183,4 +183,22 @@ export async function checkAgentSignInRoute(box: Box): Promise<void> {
       'the Worker has no usable trust. Look for agent_sign_in.config_invalid in the celld log ' +
       '(docker compose logs celld), fix the value and deploy again.'
   );
+}
+
+/**
+ * What `pnpm selfhost:deploy` runs after `celld deploy`: celld adopts the new version, then the
+ * API answers `/health`, then (with `AGENT_SIGN_IN_TRUST` among the Worker's secrets) the agent
+ * sign-in route answers. In this order, so the checks reach the new version (box round R15, G3).
+ */
+export async function verifyNewVersionServes(
+  box: Box,
+  input: { celldPort: string; baseDomain: string; agentSignInConfigured: boolean },
+  log: (message: string) => void
+): Promise<void> {
+  log(`celld adopted the new version: ${await adoptNewDeployment(box)}`);
+  await waitForHealth(input.celldPort, input.baseDomain);
+  if (input.agentSignInConfigured) {
+    await checkAgentSignInRoute(box);
+    log('agent sign-in route answers on the new version');
+  }
 }
