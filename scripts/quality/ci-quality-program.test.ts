@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+import { pathFilters } from './ci-job-simulator';
+
 const ci = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const e2eSmoke = readFileSync(
   new URL('../../.github/workflows/e2e-smoke.yml', import.meta.url),
@@ -89,13 +91,14 @@ describe('deterministic quality-program CI wiring', () => {
     expect(changes).toContain("- 'scripts/quality/runtime-tunables-baseline.json'");
   });
 
-  it('keeps marketing-site changes on a narrow CI path', () => {
+  it('keeps public-site changes on a narrow CI path', () => {
     const changes = jobBlock(ci, 'changes');
     expect(changes).toContain('ci-workflow: ${{ steps.filter.outputs.ci-workflow }}');
-    expect(changes).toContain('marketing-site: ${{ steps.filter.outputs.marketing-site }}');
     expect(changes).toContain('repo-quality: ${{ steps.filter.outputs.repo-quality }}');
+    expect(changes).toContain(
+      "public-site: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.public-site }}"
+    );
     expect(changes).toContain('ci-workflow:');
-    expect(changes).toContain('marketing-site:');
     expect(changes).toContain("- 'apps/www/**'");
     expect(changes).not.toContain("- 'scripts/**'");
 
@@ -112,36 +115,35 @@ describe('deterministic quality-program CI wiring', () => {
       'ci-evidence-token-wiring.test.ts',
       'ci-test-shards.test.ts',
       'ci-draft-and-gate.test.ts',
+      'ci-suite-selection.test.ts',
     ]) {
       expect(codeQuality, `wiring test ${testFile} must run in CI`).toContain(testFile);
     }
     expect(ci).not.toMatch(/\n {2}ci-workflow:\n/u);
 
-    const marketing = jobBlock(ci, 'marketing-site');
-    expect(marketing).toContain('needs: [changes]');
-    expect(marketing).toContain("needs.changes.outputs.marketing-site == 'true'");
-    expect(marketing).toContain('pnpm --filter @simple-agent-manager/www lint');
-    expect(marketing).toContain('pnpm --filter @simple-agent-manager/www typecheck');
-    expect(marketing).toContain(
-      'pnpm --filter @simple-agent-manager/www build && pnpm --filter @simple-agent-manager/www check:links'
-    );
-    expect(marketing).toContain('pnpm --filter @simple-agent-manager/www test:browser');
+    // The public-site job replaced Marketing Site and keeps its www lint and type check
+    // for changes the root Lint and Build and Type Check jobs do not run for.
+    expect(ci).not.toMatch(/\n {2}marketing-site:\n/u);
+    const surfaces = jobBlock(ci, 'workspace-quality-surfaces');
+    expect(surfaces).toContain("needs.changes.outputs.public-site == 'true'");
+    expect(surfaces).toContain('run: pnpm --filter @simple-agent-manager/www lint');
+    expect(surfaces).toContain('run: pnpm --filter @simple-agent-manager/www typecheck');
+    expect(surfaces.match(/if: needs\.changes\.outputs\.repo-quality != 'true'/gu)).toHaveLength(2);
 
-    for (const jobName of [
-      'lint',
-      'typecheck',
-      'test-api',
-      'test-web',
-      'test-packages',
-      'test',
-      'workspace-quality-surfaces',
-      'code-quality',
-    ]) {
+    for (const jobName of ['lint', 'typecheck', 'code-quality']) {
       const job = jobBlock(ci, jobName);
       expect(job, `${jobName} should be repo-quality gated`).toMatch(/needs: \[changes[\],]/u);
-      expect(job, `${jobName} should not run for marketing-only changes`).toContain(
+      expect(job, `${jobName} should not run for public-site-only changes`).toContain(
         "needs.changes.outputs.repo-quality == 'true'"
       );
+    }
+    // Test suites are selected by package dependency (ci-suite-selection.test.ts).
+    for (const [jobName, output] of [
+      ['test-api', 'api-unit'],
+      ['test-web', 'web'],
+      ['test-packages', 'packages'],
+    ]) {
+      expect(jobBlock(ci, jobName!)).toContain(`needs.changes.outputs.${output} == 'true'`);
     }
 
     expect(jobBlock(ci, 'durable-object-worker-shards')).toContain(
@@ -152,9 +154,15 @@ describe('deterministic quality-program CI wiring', () => {
       "needs.changes.outputs.deploy-scripts == 'true'"
     );
 
-    const expensiveFilterSnippet = changes.slice(changes.indexOf('filters: |'));
+    // Read from the parsed filters, so a YAML anchor (`api: &api`) or alias cannot hide a
+    // filter from this check.
+    const filters = pathFilters();
     for (const filterName of [
       'api',
+      'api-unit',
+      'web',
+      'public-site',
+      'packages',
       'vm-agent',
       'devcontainer',
       'devcontainer-volume-mount',
@@ -163,12 +171,9 @@ describe('deterministic quality-program CI wiring', () => {
       'web-ui',
       'go-modules',
     ]) {
-      const nextFilter = expensiveFilterSnippet.match(
-        new RegExp(
-          String.raw`\n            ${filterName}:\n([\s\S]*?)(?=\n            [a-zA-Z0-9_-]+:\n|\n\n|\n  [a-zA-Z0-9_-]+:)`
-        )
-      );
-      expect(nextFilter?.[1] ?? '', `${filterName} must not fan out on ci.yml`).not.toContain(
+      const patterns = (filters[filterName] ?? []).flat(Infinity);
+      expect(patterns.length, `${filterName} filter exists`).toBeGreaterThan(0);
+      expect(patterns, `${filterName} must not fan out on ci.yml`).not.toContain(
         '.github/workflows/ci.yml'
       );
     }

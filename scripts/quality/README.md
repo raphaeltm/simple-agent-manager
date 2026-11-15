@@ -12,6 +12,23 @@ the blocking type-boundary ratchet. CI invokes those same leaf commands rather t
 different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
 `scripts/quality/ci-quality-program.test.ts`.
 
+## CI suite selection
+
+On a pull request each test suite runs only when its inputs changed: a package's suite runs
+when that package or any workspace package it depends on changes (`changes` job filters
+`api`, `api-unit`, `web`, `public-site` and `packages` in `.github/workflows/ci.yml`). A main
+push runs every suite. `scripts/quality/ci-suite-selection.test.ts` derives each suite's
+dependency closure from every `package.json`, scans each suite's tests (and the modules they
+import) for files they read outside their package, and checks the filters cover both. When it
+fails after you add a package, a dependency or a cross-package read, add the path it names to
+the suite's filter.
+
+The `Durable Object Workers` shards split files by measured time
+(`apps/api/tests/workers/shard-timings.json`, read by the sequencer in
+`apps/api/tests/workers/support/`). Unmeasured files get the median. To refresh the timings,
+download several runs' `workers-timings-*` artifacts and run
+`apps/api/tests/workers/support/update-shard-timings.ts` (usage in its header).
+
 ## Authoritative and advisory layers
 
 - ESLint 9 flat config remains authoritative. `eslint.config.mjs` preserves the captured legacy

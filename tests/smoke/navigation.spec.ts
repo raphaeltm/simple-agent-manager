@@ -34,7 +34,10 @@ test.describe('Navigation', () => {
     const body = await page.textContent('body');
     // Either we're on a login page or we see a sign-in prompt
     const isLoginPage = url.includes('sign-in') || url.includes('login');
-    const hasSignIn = body?.includes('Sign in') || body?.includes('GitHub');
+    // An installation without GitHub OAuth (for example the second staging) offers only the
+    // email code sign-in, so accept any sign-in affordance.
+    const hasSignIn =
+      body?.includes('Sign in') || body?.includes('GitHub') || /sign-in code/i.test(body ?? '');
     expect(isLoginPage || hasSignIn).toBe(true);
   });
 });
