@@ -35,6 +35,7 @@ import {
   type DestroyBounds,
   destroyEligibleCandidates,
   hasAmbiguousOwnershipLabels,
+  type ProviderErrorKey,
 } from './provider-orphan-destroy';
 import {
   type ClaimingNode,
@@ -135,7 +136,8 @@ export async function reconcileProviderOrphans(
       minAgeMs,
       destroyLimit,
       result,
-      bounds
+      bounds,
+      'errors'
     );
   } else {
     Object.assign(result, resolution.result);
@@ -145,7 +147,6 @@ export async function reconcileProviderOrphans(
     let lastAttempted: (typeof credentials)[number] | undefined;
     for (const credential of credentials) {
       if (Date.now() >= bounds.deadline || deletionsStarted(result) >= destroyLimit) break;
-      const errorsBefore = result.errors;
       try {
         const resolved = await resolveInventoryProvider(env, credential);
         if (resolved) {
@@ -159,18 +160,16 @@ export async function reconcileProviderOrphans(
             minAgeMs,
             destroyLimit,
             result,
-            bounds
+            bounds,
+            'accountErrors'
           );
         }
       } catch (error) {
-        result.errors++;
+        // Resolving this account's credential failed: that account's failure.
+        result.accountErrors++;
         log.warn('provider_orphan.account_inventory_failed', {
           error: error instanceof Error ? error.message : String(error),
         });
-      } finally {
-        // Everything that failed inside one user/project account is that account's failure.
-        result.accountErrors += result.errors - errorsBefore;
-        result.errors = errorsBefore;
       }
       lastAttempted = credential;
     }
@@ -192,13 +191,14 @@ async function reconcileInventory(
   minAgeMs: number,
   destroyLimit: number,
   result: ProviderOrphanResult,
-  bounds: DestroyBounds
+  bounds: DestroyBounds,
+  providerErrors: ProviderErrorKey
 ): Promise<void> {
   const discovery = await discoverServers(provider, scope, {
     signal: AbortSignal.timeout(bounds.requestTimeoutMs),
   });
   if ('result' in discovery) {
-    result.errors += discovery.result.errors;
+    result[providerErrors] += discovery.result.errors;
     result.skipped = true;
     result.skipReason = discovery.result.skipReason;
     return;
@@ -207,6 +207,8 @@ async function reconcileInventory(
   const candidates = classifyCandidates(discovery.servers, scope, now.getTime() - minAgeMs, result);
   logOwnershipSkips(result);
   if (candidates.length === 0) return;
+  // A failed D1 claim lookup is shared infrastructure: it stays in `errors` (failed sweep) even
+  // inside a user/project account.
   const claims = await loadClaimsOrAbort(env, candidates, result);
   if ('result' in claims) {
     Object.assign(result, claims.result);
@@ -221,7 +223,8 @@ async function reconcileInventory(
     minAgeMs,
     destroyLimit,
     result,
-    bounds
+    bounds,
+    providerErrors
   );
 }
 
