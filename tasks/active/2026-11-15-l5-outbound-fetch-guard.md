@@ -90,6 +90,50 @@ The full row was ~45 source files, above the ~30-file cap. Split approved:
 - [ ] Staging (window from PR Shepherd, channel `feature.pr-shepherd-deps-20261111`): push subscribe + receive; agent sign-in via workload identity; deployment-release image resolve (public image + one refused registry); `check_dns_status`; credential with custom public base URL saved and used + one refused private host; cleanup
 - [ ] PR ready (not merged), CodeRabbit requested and waited
 
+## Staging recipe (window from the PR Shepherd; provisional 15:00-16:40Z)
+
+Preparation outside the authenticated job: deploy `deploy-staging.yml` on the frozen head, wait
+green, read-only checks (`/health`, deployed version, platform cloud credential row present, no
+staging node owned by this task). Late read-only proof after the job: staging D1 shows the owned
+node/workspace `deleted`, no `l5a-probe` credential/configuration/environment rows.
+
+Job 1, agent sign-in (separate, short, no browser): `exec_with_secrets` with
+`oidc.audience = https://api.sammy.party/api/auth/workload-identity-login`; exchange, `GET
+/api/auth/get-session` with the returned cookie (print user id only), `POST /api/auth/sign-out`,
+`GET get-session` → null. The cookie never leaves process memory.
+
+Job 2, the ONE authenticated job (`.tmp/l5-scripts/staging-l5a.mjs`, primary smoke user,
+`SAM_PLAYWRIGHT_PRIMARY_USER` + `SELFHOST_TEST_OPENCODE_API_KEY` in memory only), project
+`01KWHD8XS7MQ7R6KWXJYRHDVH4` (Potato, smoke user's own):
+
+1. token-login once in a Playwright browser context; dashboard, projects, settings load.
+2. Push: read VAPID key; register a real Mozilla autopush channel (Node client, no browser push);
+   `POST /api/notifications/push/subscriptions` (expect 200); refused `127.0.0.1` and
+   `169.254.169.254` endpoints (expect 400).
+3. Credential: refused `https://10.0.0.5/v1` and `https://169.254.169.254/v1` (expect 400);
+   create `l5a-probe-opencode-zen` with base URL `https://opencode.ai/zen/v1` (owner's
+   OpenCode test key, free model `deepseek-v4.1-flash-free` only); configuration for `opencode`;
+   refused configuration `https://localhost/v1` (400).
+4. Image resolver: create environment `l5a-probe-*`; JSON release with `docker.io/library/busybox:1.36`
+   → `MANIFEST_VALIDATION_FAILED` (digest resolved, no node, no release row); `10.0.0.5:5000/...`
+   and single-label `registry/...` → `IMAGE_RESOLVE_FAILED` "not a public registry endpoint".
+5. Session: one VM conversation task (`agentType: opencode`, the probe configuration via
+   `agentConfigurationId`) asking the agent to call `check_dns_status` and then
+   `request_human_input`; wait for the push on the autopush socket and decrypt it; read the DNS
+   result from the session messages. Uses the custom public base URL through the passthrough.
+6. Cleanup in `finally`, restore-first: stop session, close task, delete workspace, delete node,
+   delete environment, configuration, credential, our push subscription; verify none left;
+   sign out (200), `get-session` null, browser closed, job terminal.
+
+Cutoffs: admission cutoff 50 min after job start (no new step starts after it), cleanup reserve
+12 min, session wait at most 20 min. Ledger of owned ids: `.tmp/l5-staging/ledger.json`
+(ids only), rerunnable with `--phase=cleanup`.
+
+Resources and cost: one platform Hetzner node at the project default size (small, cx23-class,
+about EUR 0.006/h) for under 40 min, no deployment node (the resolver check creates no release).
+All-in upper bound under USD 0.10 including Worker requests, D1/DO operations, R2 (none written)
+and egress (a few MB). Zero VMs at rest afterwards.
+
 ## Evidence log
 
 - Lint probe (2026-11-15): a throwaway `apps/api/src/zz-probe.ts` with `fetch(u)`, `(0, fetch)(u)`,
