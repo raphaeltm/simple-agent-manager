@@ -51,10 +51,9 @@ export function nextSequence(
   // both together. Older builds only change count, forcing one recovery scan.
   const stored = current.last_message_sequence;
   if (stored != null && current.last_message_sequence_count === current.message_count) {
-    if (typeof stored !== 'number' || !Number.isSafeInteger(stored) || stored < 0)
-      throw new Error('Invalid session sequence watermark');
+    const maximum = parseMaxSeq({ max_seq: stored }, 'messages.sequence_watermark');
     const stream = readMessageIngestState(current.stream_ingest_state);
-    return checkedNextSequence(Math.max(stored, stream?.maxSequence ?? 0));
+    return Math.max(maximum, stream?.maxSequence ?? 0) + 1;
   }
   const row = sql
     .exec(
@@ -65,7 +64,7 @@ export function nextSequence(
   // Absorbed chunks reserve logical positions beyond the last physical row.
   const state = readMessageIngestState(current.stream_ingest_state);
   const maximum = Math.max(
-    typeof stored === 'number' && Number.isSafeInteger(stored) ? stored : 0,
+    typeof stored === 'number' ? stored : 0,
     row ? parseMaxSeq(row, 'messages.next_sequence') : 0,
     state?.maxSequence ?? 0
   );
@@ -74,26 +73,7 @@ export function nextSequence(
     maximum,
     sessionId
   );
-  return checkedNextSequence(maximum);
-}
-
-function checkedNextSequence(maximum: number): number {
-  if (!Number.isSafeInteger(maximum) || maximum < 0 || maximum >= Number.MAX_SAFE_INTEGER)
-    throw new Error('Session message sequence exhausted or invalid');
   return maximum + 1;
-}
-
-/** Reporter sequence is optional. Unsupported positions must never poison the durable allocator. */
-export function canonicalMessageSequence(next: number, supplied?: number): number {
-  const candidate =
-    supplied !== undefined &&
-    Number.isSafeInteger(supplied) &&
-    supplied > 0 &&
-    supplied < Number.MAX_SAFE_INTEGER
-      ? Math.max(next, supplied)
-      : next;
-  checkedNextSequence(candidate);
-  return candidate;
 }
 
 /** Archive imports preserve canonical positions; never lower a known watermark.

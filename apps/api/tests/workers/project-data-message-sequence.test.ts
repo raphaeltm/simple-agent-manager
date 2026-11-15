@@ -1,3 +1,4 @@
+import { readMessageIngestState } from '@simple-agent-manager/project-data/internal/do/message-stream-ingest';
 import { persistSystemMessage } from '@simple-agent-manager/project-data/internal/do/messages';
 import { nextSequence } from '@simple-agent-manager/project-data/internal/do/messages-persist-helpers';
 import { projectDataPorts } from '@simple-agent-manager/project-data/internal/do/ports';
@@ -191,7 +192,7 @@ describe('durable per-session sequence watermark', () => {
       ]);
       await runInDurableObject(stub, (_instance, state) => {
         const system = persistSystemMessage(state.storage.sql, session, 'synthetic system notice');
-        expect(system?.sequence).toBe(6);
+        expect(system?.sequence).toBe(4);
       });
       await stub.persistMessageBatch(session, [message('reset-chunk', 1)], {
         ...source,
@@ -199,18 +200,16 @@ describe('durable per-session sequence watermark', () => {
       });
       const rows = (await stub.getMessages(session, 100, null, null, undefined, false, 'asc'))
         .messages;
-      const sequences = rows.map((row) => row.sequence);
-      expect(new Set(sequences).size).toBe(sequences.length);
-      // A merged run reserves positions for its absorbed chunks too.
-      expect(sequences.at(-1)).toBe(7);
+      // Reporter positions retain the existing semantics, including an outbox reset.
+      expect(rows.find((row) => row.id === 'reset-chunk')?.sequence).toBe(1);
       await runInDurableObject(stub, async (_instance, state) => {
         expect(
           state.storage.sql
             .exec('SELECT last_message_sequence FROM chat_sessions WHERE id=?', session)
             .toArray()[0]?.last_message_sequence
-        ).toBe(7);
+        ).toBe(4);
         // No instance-local cache participates: a fresh allocator sees SQL state.
-        expect(nextSequence(state.storage.sql, session)).toBe(8);
+        expect(nextSequence(state.storage.sql, session)).toBe(5);
         await state.storage.deleteAlarm();
       });
     });
@@ -244,24 +243,68 @@ describe('durable per-session sequence watermark', () => {
     });
   });
 
-  it('ignores unusable optional reporter positions without poisoning later writers', async () => {
-    const stub = projectDataStub(`invalid-sequence-${crypto.randomUUID()}`);
-    const session = await stub.createSession(null, 'Invalid reporter fixture');
-    await stub.persistMessageBatch(session, [
-      message('fraction', 10000.5),
-      message('huge', Number.MAX_SAFE_INTEGER),
-      message('negative', -1),
-    ]);
-    await stub.persistMessage(session, 'user', 'synthetic followup', null, 'valid-after-invalid');
-    await runInDurableObject(stub, (_instance, state) => {
-      expect(
-        state.storage.sql
-          .exec('SELECT sequence FROM chat_messages WHERE session_id=? ORDER BY sequence', session)
-          .toArray()
-          .map((row) => row.sequence)
-      ).toEqual([1, 2, 3, 4]);
+  for (const enabled of [false, true]) {
+    it(`matches the old MAX allocator for every stored position with merging ${enabled}`, async () => {
+      vi.spyOn(projectDataPorts().operations, 'messageMergeConfig').mockResolvedValue({
+        enabled, maxRowBytes: 65536, recentIds: 200,
+      });
+      const subjects = await Promise.all(['watermark', 'legacy-max'].map(async (kind) => {
+        const stub = projectDataStub(`${kind}-${crypto.randomUUID()}`);
+        return { stub, session: await stub.createSession(source.workspaceId, 'Differential fixture') };
+      }));
+      const expectedPositions = new Map<string, number>();
+      const inspect = async (index: number) => {
+        const subject = subjects[index]!;
+        return runInDurableObject(subject.stub, (_instance, state) => {
+          const sql = state.storage.sql;
+          const rows = sql.exec("SELECT CASE WHEN role='system' THEN 'system' ELSE id END AS id,sequence FROM chat_messages WHERE session_id=? ORDER BY 1", subject.session).toArray();
+          // Independent model of the original assignment expression, including positions
+          // that merging keeps as a canonical row. This catches normalization even if
+          // both real-ingest subjects accidentally share that behavior in a future edit.
+          for (const row of rows) expect(row.sequence).toBe(expectedPositions.get(String(row.id)));
+          const maximum = Number(sql.exec('SELECT COALESCE(MAX(sequence),0) AS n FROM chat_messages WHERE session_id=?', subject.session).toArray()[0]!.n);
+          const session = sql.exec('SELECT stream_ingest_state FROM chat_sessions WHERE id=?', subject.session).toArray()[0]!;
+          const oldNext = Math.max(maximum, readMessageIngestState(session.stream_ingest_state)?.maxSequence ?? 0) + 1;
+          expect(nextSequence(sql, subject.session)).toBe(oldNext);
+          return { rows, next: oldNext };
+        });
+      };
+      const apply = async (operation: (stub: typeof subjects[number]['stub'], session: string) => Promise<unknown>) => {
+        // Force the reference through the same MAX query the previous implementation ran
+        // before every operation. The candidate keeps its durable watermark between calls.
+        const reference = subjects[1]!;
+        await runInDurableObject(reference.stub, (_instance, state) => {
+          state.storage.sql.exec('UPDATE chat_sessions SET last_message_sequence=NULL,last_message_sequence_count=NULL WHERE id=?', reference.session);
+        });
+        for (const subject of subjects) await operation(subject.stub, subject.session);
+        expect(await inspect(0)).toEqual(await inspect(1));
+      };
+      let batch = 0;
+      const send = async (positions: Array<number | undefined>) => {
+        const group = ++batch;
+        let oldNext = (await inspect(1)).next;
+        positions.forEach((position, index) => expectedPositions.set(`batch-${group}-${index}`, position ?? oldNext++));
+        const messages = positions.map((position, index) => ({
+          ...message(`batch-${group}-${index}`, position),
+          timestamp: '2026-11-15T00:00:00.000Z',
+        }));
+        await apply((stub, session) => stub.persistMessageBatch(session, messages, source));
+      };
+      await send([undefined, undefined]);
+      await send([5, 6]);
+      await send([9, 8, 7]);
+      await send([10, 10]);
+      expectedPositions.set('user', (await inspect(1)).next);
+      await apply((stub, session) => stub.persistMessage(session, 'user', 'synthetic differential user', null, 'user'));
+      expectedPositions.set('system', (await inspect(1)).next);
+      await apply((stub, session) => runInDurableObject(stub, (_instance, state) => persistSystemMessage(state.storage.sql, session, 'synthetic differential system')));
+      await send([20, undefined, 15, undefined]);
+      await send([0, -1, 10000.5]);
+      await send([undefined]);
+      await send([Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 10]);
+      await send([undefined]);
     });
-  });
+  }
 
   it('initializes a legacy NULL only once and honors absorbed logical positions', async () => {
     const stub = projectDataStub(`legacy-sequence-${crypto.randomUUID()}`);

@@ -17,7 +17,6 @@ import {
   readMessageIngestState,
 } from './message-stream-ingest';
 import {
-  canonicalMessageSequence,
   insertNewMessage,
   nextSequence,
   resolveDuplicateMessage,
@@ -244,6 +243,7 @@ export function persistMessageBatch(
   let limitReached = false;
   const now = Date.now();
   let nextSeq = nextSequence(sql, sessionId, session);
+  let maximumSequence = nextSeq - 1;
   const persistedMessages: Array<{
     id: string;
     role: string;
@@ -317,10 +317,10 @@ export function persistMessageBatch(
     // Rows without a usable timestamp share `now`; reads page on (created_at, sequence, id),
     // so ties are safe (see message-cursor.ts).
     const createdAt = new Date(msg.timestamp).getTime() || now;
-    // Reporter positions belong to its outbox; browser/system messages and a
-    // recreated outbox may already have used them in the canonical transcript.
-    const sequence = canonicalMessageSequence(nextSeq, msg.sequence);
-    nextSeq = sequence + 1;
+    // Preserve reporter positions and the established within-batch allocator.
+    // The watermark caches the maximum, independently of the next fallback position.
+    const sequence = msg.sequence ?? nextSeq++;
+    maximumSequence = Math.max(maximumSequence, sequence);
     const boundedToolMetadata = boundToolMetadataForStorage(
       withoutSamNotice(msg.toolMetadata, sessionId, msg.messageId),
       env
@@ -391,7 +391,7 @@ export function persistMessageBatch(
         persisted,
         now,
         staged.state,
-        nextSeq - 1,
+        maximumSequence,
         persisted,
         sessionId
       );
@@ -400,7 +400,7 @@ export function persistMessageBatch(
         `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?`,
         persisted,
         now,
-        nextSeq - 1,
+        maximumSequence,
         persisted,
         sessionId
       );
