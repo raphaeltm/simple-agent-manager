@@ -607,3 +607,68 @@ describe('resolveInstallationZone', () => {
     ).rejects.toThrow(/workers.dev/);
   });
 });
+
+describe('deploy-reusable.yml secondary installation wiring', () => {
+  const workflow = readFileSync(
+    new URL('../../.github/workflows/deploy-reusable.yml', import.meta.url),
+    'utf8'
+  );
+  const step = (name: string) =>
+    workflow.match(
+      new RegExp(String.raw`      - name: ${name}\n[\s\S]*?(?=\n      - name:|\n      # [A-Z=]|$)`)
+    )?.[0] ?? '';
+
+  it('never writes the account-wide workers.dev subdomain for a secondary installation', () => {
+    expect(step('Ensure workers.dev Subdomain')).toContain(
+      "steps.deploy_resources.outputs.secondary != 'true'"
+    );
+    expect(step('Resolve Installation Zone')).toContain(
+      'node scripts/deploy/resolve-installation-zone.mjs --workers-subdomain'
+    );
+    expect(step('Set Pulumi Configuration')).toContain(
+      'pulumi config set workersDevSubdomain "$WORKERS_DEV_SUBDOMAIN"'
+    );
+  });
+
+  it('never falls back to the primary zone when the lookup produced nothing', () => {
+    const zoneLines = workflow.match(/^ {10}CF_ZONE_ID: .*/gm) ?? [];
+    expect(zoneLines.length).toBeGreaterThanOrEqual(3);
+    for (const line of zoneLines) {
+      expect(line.trim()).toBe(
+        "CF_ZONE_ID: ${{ steps.deploy_resources.outputs.secondary == 'true' && (steps.installation_zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}"
+      );
+    }
+  });
+
+  it('does not hand the primary installation identity-bound secrets to a secondary one', () => {
+    const configure = step('Configure Worker Secrets');
+    for (const name of [
+      'GH_CLIENT_ID',
+      'GH_APP_PRIVATE_KEY',
+      'GH_WEBHOOK_SECRET',
+      'GOOGLE_LOGIN_CLIENT_SECRET',
+      'BETTER_AUTH_SECRET',
+      'CREDENTIAL_ENCRYPTION_KEY',
+      'DEPLOY_SIGNING_PRIVATE_KEY',
+      'VAPID_PRIVATE_KEY',
+    ]) {
+      expect(configure).toContain(
+        `${name}: \${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.${name} || '' }}`
+      );
+    }
+    expect(configure).toContain(
+      "SECRET_ENCRYPTION_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.ENCRYPTION_KEY || '' }}"
+    );
+    expect(configure).toContain('steps.installation_trust.outputs.value');
+  });
+
+  it('bootstraps secondary installations only and never production', () => {
+    const bootstrap = step('Bootstrap Secondary Installation');
+    expect(bootstrap).toContain("steps.deploy_resources.outputs.secondary == 'true'");
+    expect(bootstrap).toContain("inputs.environment != 'production'");
+    expect(bootstrap).toContain(
+      'pnpm tsx scripts/deploy/bootstrap-staging-installation.ts bootstrap'
+    );
+    expect(bootstrap).toContain('echo "::add-mask::$TARGET_ENCRYPTION_KEY"');
+  });
+});
