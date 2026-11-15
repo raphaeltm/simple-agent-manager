@@ -157,7 +157,8 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
   const deployCall = block(staging, /^ {2}deploy:\s*$/m, /^ {2}[a-zA-Z0-9_-]+:\s*$/m);
   for (const requiredCallLine of [
     'uses: ./.github/workflows/deploy-reusable.yml',
-    "environment: ${{ inputs.environment || 'staging' }}",
+    'environment: ${{ needs.lease.outputs.credential_environment }}',
+    'installation: ${{ needs.lease.outputs.installation }}',
     'skip_agent: false',
     'dry_run: ${{ inputs.dry_run || false }}',
     'secrets: inherit',
@@ -341,8 +342,36 @@ describe('job-level broad permission overrides', () => {
   });
   it('wires the legacy audit compatibility check into the lease preflight', () => {
     const workflow = parse(stagingWorkflow);
-    expect(workflow.jobs.lease.steps[1].env.LEASE_PRIMARY_ONLY_AUDIT).toBe(
-      '${{ inputs.activation_only || inputs.agent_email_dns_audit }}'
+    const leaseStep = workflow.jobs.lease.steps.find(
+      (step: { run?: string }) => step.run === 'node scripts/deploy/staging-lease.mjs'
     );
+    expect(leaseStep.env.LEASE_PRIMARY_ONLY_AUDIT).toBe(
+      '${{ inputs.activation_only || inputs.agent_email_dns_audit || inputs.github_trigger_audit }}'
+    );
+  });
+});
+
+describe('installation targeting', () => {
+  it('runs the lease job in the staging Environment with no secrets, validating the target first', () => {
+    const workflow = parse(stagingWorkflow);
+    expect(workflow.jobs.lease.environment).toBe('staging');
+    expect(JSON.stringify(workflow.jobs.lease)).not.toContain('secrets.');
+    expect(workflow.jobs.lease.steps[1].run).toBe(
+      'node scripts/deploy/staging-installations.mjs workflow-target'
+    );
+  });
+
+  it('keeps primary-only audits off secondary installations', () => {
+    const workflow = parse(stagingWorkflow);
+    for (const name of ['storage-activation', 'agent-email-dns-audit']) {
+      expect(workflow.jobs[name].if).toContain("needs.lease.outputs.installation == ''");
+      expect(workflow.jobs[name].environment).toBe(
+        '${{ needs.lease.outputs.credential_environment }}'
+      );
+    }
+    const lease = workflow.jobs.lease.steps.find(
+      (step: { run?: string }) => step.run === 'node scripts/deploy/staging-lease.mjs'
+    );
+    expect(lease.env.LEASE_PRIMARY_ONLY_AUDIT).toContain('inputs.github_trigger_audit');
   });
 });

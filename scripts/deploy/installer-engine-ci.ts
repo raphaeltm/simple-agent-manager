@@ -114,6 +114,23 @@ export function resolveLegacyCiEnvironment(
           setting[3] ||
           ''
         );
+      // Secondary installations (deploy-reusable.yml `installation` input) never use the shared
+      // engine: the workflow refuses that combination. Here `secondary` is therefore false, so
+      // a secondary-only branch yields its primary fallback.
+      const primaryValue =
+        /^steps\.deploy_resources\.outputs\.secondary != 'true' && (vars|secrets)\.([A-Z_0-9]+) \|\| ''$/.exec(
+          expression
+        ) ??
+        /^steps\.deploy_resources\.outputs\.secondary == 'true' && .+ \|\| (vars|secrets)\.([A-Z_0-9]+)$/.exec(
+          expression
+        );
+      if (primaryValue)
+        return (
+          (primaryValue[1] === 'vars' ? input.variables : input.secrets)[primaryValue[2] ?? ''] ||
+          ''
+        );
+      if (/^steps\.deploy_resources\.outputs\.secondary == 'true' && .+ \|\| ''$/.test(expression))
+        return '';
       const output = /^steps\.([a-z_-]+)\.outputs\.([a-z_]+)$/.exec(expression);
       if (output && `${output[1]}.${output[2]}` in outputs)
         return outputs[`${output[1]}.${output[2]}`] ?? '';
