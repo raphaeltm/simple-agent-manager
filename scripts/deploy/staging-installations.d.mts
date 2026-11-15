@@ -14,3 +14,8 @@ export function resolveInstallation(input: {
 }): { installation: string; secondary: boolean; entry?: SecondaryInstallation };
 
 export function credentialEnvironmentFor(installation: string | undefined): string;
+
+export function workflowTargetFor(
+  installation: string,
+  primaryBaseDomain: string | undefined
+): { credential_environment: string; installation: string; base_domain: string };

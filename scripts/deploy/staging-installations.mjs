@@ -105,19 +105,49 @@ export function credentialEnvironmentFor(installation) {
     : requested;
 }
 
+/**
+ * Everything a staging workflow needs to target an installation: the environment whose
+ * credentials it uses, the `installation` input for deploy-reusable.yml (empty for a primary)
+ * and the installation's domain (the primary's own BASE_DOMAIN variable for a primary).
+ */
+export function workflowTargetFor(installation, primaryBaseDomain) {
+  // Staging workflows never target production, under any name.
+  if (looksLikeProduction(installation ?? '')) {
+    throw new Error(
+      `Refusing installation '${installation}': staging workflows never target production.`
+    );
+  }
+  const credentialEnvironment = credentialEnvironmentFor(installation);
+  const secondary = Object.hasOwn(SECONDARY_INSTALLATIONS, installation);
+  const baseDomain = secondary
+    ? SECONDARY_INSTALLATIONS[installation].baseDomain
+    : primaryBaseDomain;
+  if (!baseDomain) {
+    throw new Error(`No domain is known for installation '${installation}'.`);
+  }
+  return {
+    credential_environment: credentialEnvironment,
+    installation: secondary ? installation : '',
+    base_domain: baseDomain,
+  };
+}
+
 async function main() {
   const mode = process.argv[2];
-  if (mode !== 'credential-environment') {
-    throw new Error('Usage: staging-installations.mjs credential-environment');
+  if (mode !== 'credential-environment' && mode !== 'workflow-target') {
+    throw new Error('Usage: staging-installations.mjs <credential-environment|workflow-target>');
   }
   const { appendFileSync } = await import('node:fs');
-  const credentialEnvironment = credentialEnvironmentFor(process.env.INSTALLATION);
-  const line = `credential_environment=${credentialEnvironment}\n`;
+  const outputs =
+    mode === 'workflow-target'
+      ? workflowTargetFor(process.env.INSTALLATION?.trim() ?? '', process.env.PRIMARY_BASE_DOMAIN)
+      : { credential_environment: credentialEnvironmentFor(process.env.INSTALLATION) };
+  const lines = Object.entries(outputs).map(([key, value]) => `${key}=${value}`);
   if (process.env.GITHUB_OUTPUT) {
-    appendFileSync(process.env.GITHUB_OUTPUT, line);
+    appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join('\n')}\n`);
   }
   console.log(
-    `Installation ${process.env.INSTALLATION} runs with the '${credentialEnvironment}' environment's credentials.`
+    `Installation ${process.env.INSTALLATION} runs with the '${outputs.credential_environment}' environment's credentials.`
   );
 }
 

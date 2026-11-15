@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Non-production GitHub environment to deploy and lease'
+        description: 'Staging installation to deploy and lease: staging (sammy.party) or staging2 (sammy2.party). Both use the staging credentials.'
         type: string
         default: staging
       sam_task_id:
@@ -100,8 +100,21 @@ jobs:
       contents: read
       deployments: write
       id-token: none
+    outputs:
+      credential_environment: ${{ steps.target.outputs.credential_environment }}
+      installation: ${{ steps.target.outputs.installation }}
+      base_domain: ${{ steps.target.outputs.base_domain }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The lease is keyed by installation. A secondary installation (staging2) has no secrets of
+      # its own: its jobs run with the environment the allowlist names (scripts/deploy/
+      # staging-installations.mjs) and it is deployed to its own domain, stack and prefix.
+      - name: Resolve installation target
+        id: target
+        env:
+          INSTALLATION: ${{ inputs.environment || 'staging' }}
+          PRIMARY_BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+        run: node scripts/deploy/staging-installations.mjs workflow-target
       - name: Read and acquire, renew or release verification lease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -121,7 +134,8 @@ jobs:
     if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
     uses: ./.github/workflows/deploy-reusable.yml
     with:
-      environment: ${{ inputs.environment || 'staging' }}
+      environment: ${{ needs.lease.outputs.credential_environment }}
+      installation: ${{ needs.lease.outputs.installation }}
       use_shared_engine: ${{ inputs.use_shared_engine || false }}
       skip_agent: false # Required: staging VMs need the agent binary in R2
       dry_run: ${{ inputs.dry_run || false }}
@@ -136,11 +150,11 @@ jobs:
     # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
     # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
     runs-on: ubuntu-24.04
-    environment: ${{ inputs.environment || 'staging' }}
+    environment: ${{ needs.lease.outputs.credential_environment }}
     env:
       SMOKE_TEST_TOKEN: ${{ !inputs.github_trigger_audit_send_only && secrets.SMOKE_TEST_TOKEN || '' }}
-      SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
-      SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
+      SMOKE_TEST_URL: https://app.${{ needs.lease.outputs.base_domain }}
+      SMOKE_TEST_API_URL: https://api.${{ needs.lease.outputs.base_domain }}
       SAM_PERFORMANCE_AUDIT: ${{ inputs.performance_audit && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

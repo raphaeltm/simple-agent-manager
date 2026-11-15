@@ -19,6 +19,7 @@ import {
   credentialEnvironmentFor,
   resolveInstallation,
   SECONDARY_INSTALLATIONS,
+  workflowTargetFor,
 } from '../deploy/staging-installations.mjs';
 import { resolveResourceNames } from '../deploy/workflow-resource-names.mjs';
 
@@ -534,6 +535,32 @@ describe('credentialEnvironmentFor', () => {
 
   it.each(['', 'Staging2', 'staging2\nx=y', '../staging'])('rejects %j', (value) => {
     expect(() => credentialEnvironmentFor(value)).toThrow();
+  });
+});
+
+describe('workflowTargetFor (deploy-staging.yml)', () => {
+  it('maps staging2 to the staging credentials and its own domain', () => {
+    expect(workflowTargetFor('staging2', 'sammy.party')).toEqual({
+      credential_environment: 'staging',
+      installation: 'staging2',
+      base_domain: 'sammy2.party',
+    });
+  });
+
+  it('leaves the primary on its own environment and domain', () => {
+    expect(workflowTargetFor('staging', 'sammy.party')).toEqual({
+      credential_environment: 'staging',
+      installation: '',
+      base_domain: 'sammy.party',
+    });
+  });
+
+  it.each(['production', 'prod', 'Production', 'preprod'])('refuses %s', (name) => {
+    expect(() => workflowTargetFor(name, 'example.org')).toThrow();
+  });
+
+  it('needs a domain for a primary', () => {
+    expect(() => workflowTargetFor('staging', undefined)).toThrow(/No domain/);
   });
 });
 
