@@ -1021,6 +1021,22 @@ describe('sync wrangler config', () => {
     expect(String(envConfig.vars?.SETUP_TOKEN).length).toBeGreaterThan(20);
   });
 
+  it('masks the setup token in GitHub Actions before wrangler can print it', () => {
+    // wrangler deploy prints every plain-text var, and the deploy job echoes that output into a
+    // public log. On 2026-11-12 a token read from that log took over production's /setup.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('GITHUB_ACTIONS', 'true');
+    const written: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    });
+
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false, null);
+
+    expect(written).toContain(`::add-mask::${String(envConfig.vars?.SETUP_TOKEN)}\n`);
+  });
+
   it('includes SETUP_FORCE only when explicitly requested', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
@@ -1311,8 +1327,14 @@ describe('Worker vars omitted because they equal the code default', () => {
     ...RETIRED_WITH_BUSY_BUILD_WAIT,
   ];
 
-  it('pins every original binding to its retained value or proven runtime default', () => {
+  it('pins original bindings to retained values, deliberate retunes or proven runtime defaults', () => {
     const current = readCheckedInWrangler().vars ?? {};
+    // Approved 2026-11-14 archive throughput tuning. Preserve the dated audit snapshot;
+    // only these two retained bindings intentionally differ from that historical baseline.
+    const retuned: Record<string, string> = {
+      PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '6000000',
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '540000',
+    };
     // Vars whose only consumer was deleted later (the anonymous-trial product, the busy-build
     // wait; both 2026-11-08) are dead too: nothing reads them, so they are neither retained nor
     // recorded as defaults.
@@ -1320,7 +1342,7 @@ describe('Worker vars omitted because they equal the code default', () => {
     expect(Object.keys(bindingAudit.variables)).toHaveLength(283);
     for (const [name, value] of Object.entries(bindingAudit.variables)) {
       if (has(current, name)) {
-        expect(current[name], name).toBe(value);
+        expect(current[name], name).toBe(retuned[name] ?? value);
       } else if (dead.has(name)) {
         expect(OMITTED_WORKER_VAR_DEFAULTS, name).not.toHaveProperty(name);
       } else {

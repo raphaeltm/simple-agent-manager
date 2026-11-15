@@ -8,14 +8,17 @@
  * test ran a real OAuth callback. A dependency bump that breaks sign-in must fail here.
  */
 import Database from 'better-sqlite3';
-import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { handleAppError } from '../../src/middleware/app-error-handler';
-import { authRoutes } from '../../src/routes/auth';
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
+import {
+  buildAuthApp,
+  type CookieJar,
+  createCookieJar,
+  startSocialSignIn,
+} from '../helpers/oauth-sign-in';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const API_ORIGIN = 'https://api.example.com';
@@ -117,38 +120,12 @@ function createFakeGitHub() {
   return { approve, fetch, outboundRequests };
 }
 
-/** Carries cookies between requests the way the browser does across the OAuth redirects. */
-function createCookieJar() {
-  const cookies = new Map<string, string>();
-  return {
-    store(response: Response) {
-      for (const setCookie of response.headers.getSetCookie()) {
-        const pair = setCookie.split(';', 1)[0] ?? '';
-        const separator = pair.indexOf('=');
-        const name = pair.slice(0, separator).trim();
-        const value = pair.slice(separator + 1).trim();
-        if (value === '' || /max-age=0/i.test(setCookie)) cookies.delete(name);
-        else cookies.set(name, value);
-      }
-    },
-    header: () => [...cookies].map(([name, value]) => `${name}=${value}`).join('; '),
-  };
-}
-
-function buildApp() {
-  // Mounted, and its errors handled, exactly as `src/index.ts` does.
-  const app = new Hono<{ Bindings: Env }>();
-  app.onError(handleAppError);
-  app.route('/api/auth', authRoutes);
-  return app;
-}
-
 describe('GitHub sign-in through better-auth (vertical slice)', () => {
   let sqlite: Database.Database;
   let env: Env;
   let github: ReturnType<typeof createFakeGitHub>;
-  let jar: ReturnType<typeof createCookieJar>;
-  const app = buildApp();
+  let jar: CookieJar;
+  const app = buildAuthApp();
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
@@ -176,19 +153,12 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     code?: string,
     onBeforeCallback?: (state: string, authorizeUrl: URL) => void
   ): Promise<Response> {
-    const start = await app.request(
-      `${API_ORIGIN}/api/auth/sign-in/social`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: APP_ORIGIN, cookie: jar.header() },
-        body: JSON.stringify({ provider: 'github', callbackURL: CALLBACK_URL }),
-      },
-      env
-    );
-    expect(start.status).toBe(200);
-    jar.store(start);
-    const { url } = (await start.json()) as { url: string };
-    const authorizeUrl = new URL(url);
+    const authorizeUrl = await startSocialSignIn(app, env, jar, {
+      apiOrigin: API_ORIGIN,
+      appOrigin: APP_ORIGIN,
+      provider: 'github',
+      callbackURL: CALLBACK_URL,
+    });
     const state = authorizeUrl.searchParams.get('state') ?? '';
     onBeforeCallback?.(state, authorizeUrl);
     const approvedCode = github.approve(authorizeUrl);
@@ -314,4 +284,52 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     expect(response.headers.get('location')).toBe(CALLBACK_URL);
     expect(verificationIdentifiers()).toEqual([]);
   });
+
+  it.each([
+    { role: 'superadmin', alerted: true },
+    { role: 'admin', alerted: true },
+    { role: 'user', alerted: false },
+  ])(
+    'linking a GitHub sign-in to an existing $role account alerts the owners: $alerted',
+    async ({ role, alerted }) => {
+      const sent: Array<{ to: string; subject: string }> = [];
+      env = {
+        ...env,
+        AGENT_EMAIL: {
+          send: async (message: { to: string; subject: string }) => {
+            sent.push(message);
+            return { messageId: `m-${sent.length}` };
+          },
+        },
+      } as unknown as Env;
+      // The 2026-11-12 shape: an existing account, and a provider sign-in with the same verified
+      // email that better-auth links to it automatically. An owner must hear about that.
+      const createdAt = Date.parse('2026-06-26T10:13:40Z');
+      sqlite
+        .prepare(
+          `INSERT INTO users (id, email, email_verified, name, image, role, status, created_at, updated_at) VALUES
+            ('owner', 'owner@example.com', 1, 'Owner', NULL, 'superadmin', 'active', ?, ?),
+            ('linked', 'mona@example.com', 1, 'Mona', NULL, ?, 'active', ?, ?)`
+        )
+        .run(createdAt, createdAt, role, createdAt, createdAt);
+
+      const callback = await signInWithGitHub();
+      expect(callback.status).toBe(302);
+      // Liveness: the sign-in really linked a GitHub account to the existing user.
+      expect(githubAccounts()).toMatchObject([{ user_id: 'linked' }]);
+
+      if (alerted) {
+        await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+        expect(sent.map((message) => message.to).sort()).toEqual(
+          role === 'superadmin' ? ['mona@example.com', 'owner@example.com'] : ['owner@example.com']
+        );
+        expect(sent[0]!.subject).toBe(
+          `SAM security alert: a GitHub sign-in was linked to ${role === 'admin' ? 'an' : 'a'} ${role} account`
+        );
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(sent).toEqual([]);
+      }
+    }
+  );
 });

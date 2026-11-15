@@ -19,12 +19,14 @@ import {
 } from './services/bootstrap-owner';
 import { emailSignInPlugins } from './services/email-sign-in';
 import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
+import { untrustedGitLabUserInfo } from './services/gitlab-sign-in-identity';
 import {
   resolveLoginOAuthConfig,
   selectGitHubOAuthConfig,
   selectGitLabOAuthConfig,
   selectGoogleLoginOAuthConfig,
 } from './services/platform-config';
+import { scheduleAccountLinkedAlert } from './services/security-alerts';
 import { isSignupApprovalRequired } from './services/signup-approval';
 
 export { refreshGitHubAccessToken };
@@ -158,7 +160,7 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
   const platformConfig = await resolveLoginOAuthConfig(env);
   const githubOAuth = selectGitHubOAuthConfig(platformConfig);
   const googleOAuth = selectGoogleLoginOAuthConfig(platformConfig);
-  const gitlabOAuth = selectGitLabOAuthConfig(platformConfig);
+  const gitlabOAuth = selectGitLabOAuthConfig(platformConfig, env.GITLAB_HOST);
   // Typed with better-auth's own provider contract so a library upgrade that changes what a
   // provider hook must return fails `pnpm typecheck` instead of failing sign-in in production.
   const socialProviders: SocialProviders = {};
@@ -269,13 +271,18 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
   }
 
   if (gitlabOAuth) {
-    trustedProviders.push('gitlab');
+    // better-auth links a sign-in to the existing user with that email when the provider is
+    // trusted OR the provider says the email is verified, so an untrusted host must lose both.
+    const trusted = gitlabOAuth.identityTrusted;
+    if (trusted) trustedProviders.push('gitlab');
     socialProviders.gitlab = {
       clientId: gitlabOAuth.clientId,
       clientSecret: gitlabOAuth.clientSecret,
       issuer: gitlabOAuth.host,
       scope: ['read_user', 'api', 'read_repository', 'write_repository'],
-      overrideUserInfoOnSignIn: true,
+      overrideUserInfoOnSignIn: trusted,
+      // An untrusted host's emails count as unverified and its account ids are host-scoped.
+      ...(trusted ? {} : { getUserInfo: untrustedGitLabUserInfo(gitlabOAuth.host) }),
     };
   }
 
@@ -351,6 +358,15 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
       },
     },
     databaseHooks: {
+      // Owner alert when a social sign-in is linked to an admin or superadmin (best-effort).
+      account: {
+        create: {
+          after: (account) => {
+            scheduleAccountLinkedAlert(env, account, options);
+            return Promise.resolve();
+          },
+        },
+      },
       user: {
         create: {
           before: async (incoming) => {

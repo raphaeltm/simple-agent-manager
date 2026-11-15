@@ -21,7 +21,12 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
 function createEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
-    CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      role TEXT NOT NULL DEFAULT 'user',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL DEFAULT 0
+    );
     INSERT INTO users (id) VALUES ('system_anonymous_trials');
     CREATE TABLE platform_settings (
       key TEXT PRIMARY KEY NOT NULL,
@@ -224,7 +229,7 @@ describe('platform config resolver', () => {
       'admin-1'
     );
 
-    await savePlatformIntegrationConfig(env, { googleInfrastructure: { remove: true } }, 'admin-2');
+    await savePlatformIntegrationConfig(env, { clear: ['googleInfrastructureOAuth'] }, 'admin-2');
 
     await expect(getGoogleInfraOAuthConfig(env)).resolves.toEqual({
       clientId: 'env-google-infra-client',
@@ -359,6 +364,8 @@ describe('platform config resolver', () => {
       apiBaseUrl: 'https://gitlab.runtime.example.com/api/v4',
       clientId: 'runtime-gitlab-client',
       clientSecret: 'runtime-gitlab-secret',
+      // A self-managed host saved at runtime cannot vouch for emails.
+      identityTrusted: false,
     });
   });
 
@@ -413,12 +420,15 @@ describe('platform config resolver', () => {
     });
     expect(status.integrations.githubApp).toMatchObject({
       configured: true,
-      label: 'set via environment fallback',
+      label: 'Worker environment fallback',
     });
-    expect(status.integrations.googleOAuth).toMatchObject({ configured: true, label: 'set here' });
+    expect(status.integrations.googleOAuth).toMatchObject({
+      configured: true,
+      label: 'stored in SAM',
+    });
     expect(status.integrations.gitlabOAuth).toMatchObject({
       configured: true,
-      label: 'set via environment fallback',
+      label: 'Worker environment fallback',
     });
   });
 
