@@ -11,6 +11,7 @@
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
+  CHAT_MESSAGE_APPEND_CAPABILITY,
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
   type IdeaUpdateNote,
@@ -68,6 +69,11 @@ import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messageContext from './message-context';
 import * as messagePersistence from './message-persistence';
+import {
+  DEFAULT_MESSAGE_MERGE_CONFIG,
+  type MessageIngestSource,
+  sealMessageStream,
+} from './message-stream-ingest';
 import * as messages from './messages';
 import { runMigrations } from './migrations';
 import * as missionState from './missions';
@@ -832,17 +838,31 @@ export class ProjectData extends DurableObject<Env> {
       timestamp: string;
       sequence?: number;
       origin?: string | null;
-    }>
+    }>,
+    source?: MessageIngestSource
   ): Promise<messagePersistence.MessageBatchPersistenceResult> {
-    return this.withArchiveTranscriptLock(() =>
-      messagePersistence.persistMessageBatchWithSideEffects(
+    return this.withArchiveTranscriptLock(async () => {
+      const config = source
+        ? ((await projectDataPorts().operations.messageMergeConfig?.(this.env)) ??
+          DEFAULT_MESSAGE_MERGE_CONFIG)
+        : DEFAULT_MESSAGE_MERGE_CONFIG;
+      const legacyClient = this.ctx.getWebSockets().some((ws) => {
+        const tags = this.ctx.getTags(ws);
+        const sessionTag = tags.find((tag) => tag.startsWith('session:'));
+        return (
+          (!sessionTag || sessionTag === `session:${sessionId}`) &&
+          !tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY)
+        );
+      });
+      return messagePersistence.persistMessageBatchWithSideEffects(
         this.sql,
         this.env,
         this.messagePersistenceHooks(),
         sessionId,
-        batchMessages
-      )
-    );
+        batchMessages,
+        { source, config: { ...config, enabled: config.enabled && !legacyClient } }
+      );
+    });
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
@@ -937,6 +957,7 @@ export class ProjectData extends DurableObject<Env> {
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
+      transactionSync: (fn) => this.meteredStorage.transactionSync(fn),
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
       broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
@@ -3475,6 +3496,9 @@ export class ProjectData extends DurableObject<Env> {
           return new Response('Invalid sessionId format', { status: 400 });
         tags.push(`session:${sessionId}`);
       }
+      if (url.searchParams.get('messageAppend') === CHAT_MESSAGE_APPEND_CAPABILITY)
+        tags.push(CHAT_MESSAGE_APPEND_CAPABILITY);
+      else sealMessageStream(this.sql, sessionId ?? undefined);
       this.ctx.acceptWebSocket(pair[1], tags);
       return new Response(null, { status: 101, webSocket: pair[0] });
     }

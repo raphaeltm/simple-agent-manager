@@ -218,7 +218,8 @@ describe('rows persisted between the last read and the socket subscription', () 
     // through the messages-only route.
     await waitFor(() =>
       expect(mocks.listChatMessages).toHaveBeenCalledWith('proj-1', 'sess-1', {
-        after: '[2000,2000,"m2"]',
+        // Include the stable tail so content appended under its existing ID is refreshed.
+        after: '[2000,1999,"m2"]',
         limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
         signal: undefined,
       })
@@ -261,7 +262,8 @@ describe('rows persisted between the last read and the socket subscription', () 
     await waitFor(() => expect(mocks.getChatSession).toHaveBeenCalledTimes(1));
     expect(mocks.getChatSession).toHaveBeenLastCalledWith('proj-1', 'sess-1', {
       signal: expect.any(AbortSignal),
-      after: '[2000,2000,"m2"]',
+      // Include the stable tail so content appended under its existing ID is refreshed.
+      after: '[2000,1999,"m2"]',
     });
     // The cached session is active, so the socket opens while the refresh is in flight.
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
@@ -283,7 +285,8 @@ describe('rows persisted between the last read and the socket subscription', () 
     // live row (which would skip the gap).
     await waitFor(() =>
       expect(mocks.listChatMessages).toHaveBeenCalledWith('proj-1', 'sess-1', {
-        after: '[3000,3000,"m3"]',
+        // Include the stable tail so content appended under its existing ID is refreshed.
+        after: '[3000,2999,"m3"]',
         limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
         signal: undefined,
       })
@@ -328,7 +331,8 @@ describe('rows persisted between the last read and the socket subscription', () 
     });
 
     expect(mocks.listChatMessages).toHaveBeenCalledWith('proj-1', 'sess-1', {
-      after: '[2000,2000,"m2"]',
+      // Include the stable tail so content appended under its existing ID is refreshed.
+      after: '[2000,1999,"m2"]',
       limit: DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
       signal: undefined,
     });

@@ -548,10 +548,15 @@ describe('workflow browser install wiring', () => {
       'browser-install: ${{ steps.filter.outputs.browser-install }}'
     );
     const jobs = workflowJobs('ci.yml');
-    for (const name of CI_BROWSER_JOBS)
+    // Marketing Site installs Chromium only when Workspace Quality Surfaces does not run.
+    // A helper change runs Workspace Quality Surfaces, which installs Chromium through the
+    // helper and runs the public-site browser tests, so every browser install path that
+    // can run is exercised (see ci-draft-and-gate.test.ts, "exactly one job runs them").
+    for (const name of CI_BROWSER_JOBS.filter((job) => job !== 'marketing-site'))
       expect(jobs[name]?.if, name).toContain("needs.changes.outputs.browser-install == 'true'");
+    expect(jobs['marketing-site']?.if).toContain("needs.changes.outputs.browser-install != 'true'");
     expect(
-      jobs['ci-workflow']?.steps?.find((step) => step.name === 'Validate CI workflow wiring')?.run
+      jobs['code-quality']?.steps?.find((step) => step.name === 'CI workflow wiring tests')?.run
     ).toContain('ci-browser-install.test.ts');
   });
 

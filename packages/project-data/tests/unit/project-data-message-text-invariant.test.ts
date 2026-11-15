@@ -5,8 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * The absolute product invariant for the ProjectData storage-relief work: message TEXT
- * (`chat_messages.content`) is never deleted or rewritten by any cleanup, archive or
- * relief path. Only `tool_metadata` may be stripped, and only after a verified archive.
+ * (`chat_messages.content`) is never rewritten by any cleanup, archive or relief
+ * path. The canonical ingest module alone may append a verified new suffix;
+ * real workerd tests prove that it never opens historical rows for appending.
+ * Only `tool_metadata` may be stripped, and only after a verified archive.
  *
  * The behavioural tests cover the paths that DO write (they assert `content` survives a
  * successful strip), but ~17 fail-closed tests never reach a write at all, so a future
@@ -15,8 +17,7 @@ import { describe, expect, it } from 'vitest';
  * source-contract tests for structural verification) so a NEW writer cannot be added
  * without tripping it.
  */
-const MODULE_DIR = new URL('../../src/do/', import.meta.url)
-  .pathname;
+const MODULE_DIR = new URL('../../src/do/', import.meta.url).pathname;
 
 function sourceFiles(): string[] {
   return readdirSync(MODULE_DIR)
@@ -44,8 +45,9 @@ describe('ProjectData message-text invariant', () => {
     expect(files.length).toBeGreaterThan(20);
   });
 
-  it('never writes chat_messages.content from any ProjectData module', () => {
+  it('permits only the canonical ingest suffix append to write chat_messages.content', () => {
     const offenders: string[] = [];
+    let canonicalAppends = 0;
     for (const file of files) {
       const source = readFileSync(file, 'utf8');
       for (const statement of chatMessageMutations(source)) {
@@ -53,11 +55,20 @@ describe('ProjectData message-text invariant', () => {
         // A `content` reference inside a WHERE predicate is a read and is fine.
         const setClause = /\bSET\b(.*?)(\bWHERE\b|$)/i.exec(statement)?.[1] ?? '';
         if (/\bcontent\s*=/i.test(setClause)) {
+          if (
+            file.endsWith('/message-stream-ingest.ts') &&
+            /^\s*content\s*=\s*content\s*\|\|\s*\?\s*$/i.test(setClause) &&
+            /WHERE id = \? AND session_id = \? RETURNING id/.test(statement)
+          ) {
+            canonicalAppends++;
+            continue;
+          }
           offenders.push(`${file}: ${statement.slice(0, 160)}`);
         }
       }
     }
     expect(offenders).toEqual([]);
+    expect(canonicalAppends).toBe(1);
   });
 
   it('never deletes chat_messages rows outside the explicitly archived session path', () => {
