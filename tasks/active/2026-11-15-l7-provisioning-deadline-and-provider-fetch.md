@@ -49,10 +49,16 @@ Default 60 s (not 45 s), configurable as an admin setting (Raphaël, 2026-11-14)
 - [x] `NodeAllocationUncertainError` keeps `{ cause }`; messages use a safe summary (F16)
 - [x] provider-fetch reads once and re-wraps (204/205/304 null body)
 - [x] Docs: admin-settings guide, configuration reference, env reference, .env.example
-- [ ] Tests: provider-fetch (uncloneable stream, null-body status)
-- [ ] Tests: safe summary/describe unit tests (F16)
-- [ ] Tests: worker vertical slice, slow create completes under default; control at 5 s cut then adopted, one create; admin setting effective; attempt log; lastError has no raw provider text
-- [ ] Discrimination checks recorded
+- [x] Tests: provider-fetch (uncloneable stream, null-body status)
+- [x] Tests: safe summary/describe unit tests (F16), built through the real `providerFetch` producer
+- [x] Tests: worker vertical slice, slow create completes under default; control at 5 s cut then adopted, one create; admin setting effective; attempt log; lastError has no raw provider text
+- [x] Discrimination checks recorded:
+  - provider-fetch reverted to `clone()` -> `returns a readable body on a runtime that cannot clone...` red
+  - attempt budget reverted to the request timeout -> `completes a create slower than the request timeout in its first attempt at the default` red
+  - admin setting ignored (always default) -> `at the setting minimum, cuts the attempt after the create...` red
+  - F16 reverted (raw message in wrapper) -> `logs each failed attempt ... keeps raw provider text out of lastError` red
+  - attempt log removed -> both log-asserting worker tests red
+- [x] Existing tests updated: tunnel-transport deadline test re-timed to the 5 s minimum; metering deadline cases pin a 200 ms budget through a passthrough settings mock; two node-tunnel-hardening tests now assert the safe wrapper message plus `cause`
 - [ ] Staging: real Hetzner + GCP node to heartbeat, one forced failure, admin setting takes effect, cleanup
 
 ## Acceptance criteria
