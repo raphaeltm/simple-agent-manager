@@ -1,3 +1,4 @@
+// CI selection demo for PR #2767 (throwaway branch; do not merge).
 /**
  * Types for the /integrations/ hub and /integrations/[slug]/ detail pages.
  *
