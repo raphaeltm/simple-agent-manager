@@ -23,6 +23,8 @@ export type AdminSettingName =
   | 'chat.messageMergingEnabled'
   | 'chat.messageMergeMaxRowBytes'
   | 'chat.messageMergeRecentIds'
+  | 'chat.messageBookkeepingIntervalMs'
+  | 'chat.messageBookkeepingFlushBatchSize'
   | 'deployments.buildContextCollectionMode'
   | 'deployments.buildContextStartTimeoutMs'
   | `deployments.buildContext${'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`

@@ -22,6 +22,11 @@ import { DEFAULT_SESSION_INDEX_MAX_ROWS } from '@simple-agent-manager/shared';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 
 import { getAttentionSummary } from './attention';
+import {
+  BOOKKEEPING_AWAITING_SUMMARY,
+  BOOKKEEPING_SUMMARY_CURSOR_KEY,
+  DEFAULT_MESSAGE_BOOKKEEPING,
+} from './message-bookkeeping';
 import type { Env } from './types';
 
 const log = createModuleLogger('session_summary_sync');
@@ -68,7 +73,8 @@ export const SESSION_SUMMARY_DELTA_SQL = `SELECT ${SUMMARY_COLUMNS} FROM chat_se
 export async function syncSessionSummariesToD1(
   sql: SqlStorage,
   env: Env,
-  projectId: string
+  projectId: string,
+  bookkeepingLimit: number = DEFAULT_MESSAGE_BOOKKEEPING.flushBatchSize
 ): Promise<void> {
   // Look up the project owner from D1
   const projectRow = await env.DATABASE.prepare('SELECT user_id FROM projects WHERE id = ?')
@@ -123,7 +129,28 @@ export async function syncSessionSummariesToD1(
         .toArray()
     : readBackfillPage(sql, coverage, maxRows);
 
-  const statements = rows.map((row) => {
+  // Keep this independently bounded queue page separate from the ordinary backfill cursor.
+  // A recent delta page must never discard old dirty rows and then acknowledge them.
+  const cursor = Number(
+    sql.exec('SELECT value FROM do_meta WHERE key = ?', BOOKKEEPING_SUMMARY_CURSOR_KEY).toArray()[0]
+      ?.value ?? 0
+  );
+  const readQueue = (after: number) =>
+    sql
+      .exec(
+        `SELECT rowid AS bookkeeping_rowid, message_ingested_at, last_message_sequence, ${SUMMARY_COLUMNS}
+     FROM chat_sessions WHERE message_bookkeeping_due_at = ? AND rowid > ?
+     AND pending_message_count = 0 ORDER BY rowid LIMIT ?`,
+        BOOKKEEPING_AWAITING_SUMMARY,
+        after,
+        bookkeepingLimit
+      )
+      .toArray();
+  let queued = readQueue(cursor);
+  if (queued.length === 0 && cursor > 0) queued = readQueue(0);
+  const published = new Map(rows.map((row) => [row.id, row]));
+  for (const row of queued) published.set(row.id, row);
+  const statements = [...published.values()].map((row) => {
     // Resolved-marker semantics must match getAttentionSummary() exactly — it
     // returns the newest UNRESOLVED marker regardless of expiry, because expiry
     // is processed separately by the DO alarm. Re-deriving that here (e.g.
@@ -209,6 +236,29 @@ export async function syncSessionSummariesToD1(
     backfillStartedAt: !isDelta && !backfillComplete ? backfillStartedAt : null,
     backfillCompletedAt: !isDelta && backfillComplete ? syncedAt : null,
   });
+
+  // D1 publication and coverage have both succeeded. A request can ingest during either
+  // await; acknowledge only the exact folded snapshot and leave renewed receipts queued.
+  for (const row of queued) {
+    sql.exec(
+      `UPDATE chat_sessions SET message_bookkeeping_due_at = NULL
+      WHERE id = ? AND message_bookkeeping_due_at = ? AND pending_message_count = 0
+        AND message_count = ? AND message_ingested_at IS ? AND updated_at = ?
+        AND last_message_sequence IS ?`,
+      row.id,
+      BOOKKEEPING_AWAITING_SUMMARY,
+      row.message_count,
+      row.message_ingested_at,
+      row.updated_at,
+      row.last_message_sequence
+    );
+  }
+  if (queued.length > 0)
+    sql.exec(
+      'INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      BOOKKEEPING_SUMMARY_CURSOR_KEY,
+      String(queued[queued.length - 1]!.bookkeeping_rowid)
+    );
 
   log.info('session_summaries_synced', {
     projectId,

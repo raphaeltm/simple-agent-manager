@@ -11,15 +11,20 @@ import { workerEnv } from './worker-env';
 /** Operational brakes, the stalled-task loop classifier and operator alerts. */
 export const operationsPort: OperationsPort = {
   messageMergeConfig: async (env) => {
-    const [enabled, maxRowBytes, recentIds] = await Promise.all([
-      resolveAdminSetting(workerEnv(env), 'chat.messageMergingEnabled'),
-      resolveAdminSetting(workerEnv(env), 'chat.messageMergeMaxRowBytes'),
-      resolveAdminSetting(workerEnv(env), 'chat.messageMergeRecentIds'),
-    ]);
+    const [enabled, maxRowBytes, recentIds, bookkeepingIntervalMs, bookkeepingFlushBatchSize] =
+      await Promise.all([
+        resolveAdminSetting(workerEnv(env), 'chat.messageMergingEnabled'),
+        resolveAdminSetting(workerEnv(env), 'chat.messageMergeMaxRowBytes'),
+        resolveAdminSetting(workerEnv(env), 'chat.messageMergeRecentIds'),
+        resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingIntervalMs'),
+        resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingFlushBatchSize'),
+      ]);
     return {
       enabled: enabled === true,
       maxRowBytes: Number(maxRowBytes),
       recentIds: Number(recentIds),
+      bookkeepingIntervalMs: Number(bookkeepingIntervalMs),
+      bookkeepingFlushBatchSize: Number(bookkeepingFlushBatchSize),
     };
   },
   rowUsageIntervalMs: async (env) =>

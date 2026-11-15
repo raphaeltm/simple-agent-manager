@@ -60,6 +60,7 @@ import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
 import * as idleCleanup from './idle-cleanup';
+import { flushDueMessageBookkeeping, DEFAULT_MESSAGE_BOOKKEEPING } from './message-bookkeeping';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';
 import * as links from './links';
@@ -3326,6 +3327,17 @@ export class ProjectData extends DurableObject<Env> {
       // even when idle/reconciliation work has accumulated.
       await tick.run('storage_safety', () => this.runStorageSafetyAlarmLocked());
 
+      await tick.run('message_bookkeeping', async () => {
+        const config = await projectDataPorts().operations.messageMergeConfig?.(this.env);
+        this.ctx.storage.transactionSync(() =>
+          flushDueMessageBookkeeping(
+            this.sql,
+            config?.bookkeepingFlushBatchSize ?? DEFAULT_MESSAGE_BOOKKEEPING.flushBatchSize
+          )
+        );
+      });
+      await tick.run('bookkeeping_summary', () => this.runSummarySyncLocked());
+
       await tick.run('workspace_idle_timeouts', () =>
         workspaceIdleTimeouts.checkWorkspaceIdleTimeouts(
           this.sql,
@@ -4122,12 +4134,19 @@ export class ProjectData extends DurableObject<Env> {
       await this.syncSessionSummariesToD1(projectId);
     } catch (err) {
       log.error('d1_session_summary_sync_failed', { projectId, ...serializeError(err) });
+      throw err;
     }
   }
 
   /** Batch-sync session metadata from DO SQLite to D1 session_summaries table. */
   private async syncSessionSummariesToD1(projectId: string): Promise<void> {
-    await sessionSummarySync.syncSessionSummariesToD1(this.sql, this.env, projectId);
+    const config = await projectDataPorts().operations.messageMergeConfig?.(this.env);
+    await sessionSummarySync.syncSessionSummariesToD1(
+      this.sql,
+      this.env,
+      projectId,
+      config?.bookkeepingFlushBatchSize
+    );
   }
 }
 

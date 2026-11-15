@@ -7,6 +7,20 @@ import {
 } from './admin-setting-definitions';
 
 export const MESSAGE_MERGE_SETTINGS: AdminSettingDefinition[] = [
+  integerDefinition(
+    'chat.messageBookkeepingIntervalMs',
+    DEFAULT_MESSAGE_MERGE_CONFIG.bookkeepingIntervalMs,
+    'Operations',
+    'Maximum delay before persisted chat activity is folded into counters and timers. Clamped below half the session idle window; lifecycle boundaries flush immediately.',
+    { min: 1000, max: 60_000 }
+  ),
+  integerDefinition(
+    'chat.messageBookkeepingFlushBatchSize',
+    DEFAULT_MESSAGE_MERGE_CONFIG.bookkeepingFlushBatchSize,
+    'Operations',
+    'Maximum chat bookkeeping rows folded or published by one maintenance pass.',
+    { min: 1, max: 1000 }
+  ),
   switchDefinition(
     'chat.messageMergingEnabled',
     DEFAULT_MESSAGE_MERGE_CONFIG.enabled,

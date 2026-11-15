@@ -12,6 +12,10 @@ import * as attention from './attention';
 import { resolveDurableExecutionConfig } from './durable-execution-config';
 import * as idleCleanup from './idle-cleanup';
 import * as mailbox from './mailbox';
+import {
+  computeMessageBookkeepingAlarmTime,
+  computeBookkeepingSummaryAlarmTime,
+} from './message-bookkeeping';
 import { computeScheduleAlarmTime } from './project-event-schedules-runner';
 import {
   computeProjectEventMaterializationAlarmTime,
@@ -37,6 +41,7 @@ const log = createModuleLogger('project_data.alarm_schedule');
 export const PROJECT_DATA_ALARM_SECTIONS = [
   'runtime_heartbeat_timeouts',
   'storage_safety',
+  'message_bookkeeping',
   'workspace_idle_timeouts',
   'expired_idle_cleanups',
   'task_reconciliation',
@@ -49,6 +54,7 @@ export const PROJECT_DATA_ALARM_SECTIONS = [
   'task_waits',
   'prompt_delivery',
   'project_event_retention',
+  'bookkeeping_summary',
 ] as const;
 
 export type ProjectDataAlarmSection = (typeof PROJECT_DATA_ALARM_SECTIONS)[number];
@@ -96,6 +102,12 @@ export function computeProjectDataAlarmSectionTimes(
       acpSessions.computeHeartbeatAlarmTime(sql, env)
     ),
     storage_safety: compute('storage_safety', () => computeStorageSafetyAlarmTime(sql, env)),
+    message_bookkeeping: compute('message_bookkeeping', () =>
+      computeMessageBookkeepingAlarmTime(sql)
+    ),
+    bookkeeping_summary: compute('bookkeeping_summary', () =>
+      computeBookkeepingSummaryAlarmTime(sql, env, now)
+    ),
     workspace_idle_timeouts: compute('workspace_idle_timeouts', () =>
       workspaceIdleTimeouts.computeWorkspaceIdleAlarmTime(sql, now)
     ),
