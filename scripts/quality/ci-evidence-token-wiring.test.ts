@@ -23,7 +23,9 @@ import { describe, expect, it } from 'vitest';
 
 const WORKFLOW_PATH = join(__dirname, '..', '..', '.github', 'workflows', 'ci.yml');
 
-const EVIDENCE_JOBS = ['preflight-evidence', 'specialist-review-evidence'] as const;
+// Both evidence checks run as steps of one job (they used to be two jobs).
+const EVIDENCE_JOB = 'pr-evidence';
+const TOKEN_STEPS = ['Validate agent preflight evidence', 'Validate specialist review evidence'];
 
 function readWorkflow(): string {
   return readFileSync(WORKFLOW_PATH, 'utf8');
@@ -38,27 +40,35 @@ function jobBlock(workflow: string, jobId: string): string {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
-describe('PR evidence checks are wired for live PR reads', () => {
-  for (const jobId of EVIDENCE_JOBS) {
-    it(`${jobId} grants pull-requests: read`, () => {
-      const job = jobBlock(readWorkflow(), jobId);
-      // Job-level `permissions` REPLACES the top-level block, so contents: read
-      // must be restated for actions/checkout.
-      expect(job).toMatch(/^ {4}permissions:$/m);
-      expect(job).toMatch(/^ {6}pull-requests: read$/m);
-      expect(job).toMatch(/^ {6}contents: read$/m);
-    });
+/** Extract one step block of a job, from `- name: <step>` to the next step. */
+function stepBlock(job: string, stepName: string): string {
+  const start = job.indexOf(`      - name: ${stepName}\n`);
+  expect(start, `step ${stepName} not found`).toBeGreaterThan(-1);
+  const rest = job.slice(start + 1);
+  const next = rest.search(/\n {6}- /);
+  return next === -1 ? rest : rest.slice(0, next);
+}
 
-    it(`${jobId} passes GITHUB_TOKEN to its validate step`, () => {
-      const job = jobBlock(readWorkflow(), jobId);
-      expect(job).toMatch(/GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
+describe('PR evidence checks are wired for live PR reads', () => {
+  it(`${EVIDENCE_JOB} grants pull-requests: read`, () => {
+    const job = jobBlock(readWorkflow(), EVIDENCE_JOB);
+    // Job-level `permissions` REPLACES the top-level block, so contents: read
+    // must be restated for actions/checkout.
+    expect(job).toMatch(/^ {4}permissions:$/m);
+    expect(job).toMatch(/^ {6}pull-requests: read$/m);
+    expect(job).toMatch(/^ {6}contents: read$/m);
+  });
+
+  for (const stepName of TOKEN_STEPS) {
+    it(`passes GITHUB_TOKEN to "${stepName}"`, () => {
+      const step = stepBlock(jobBlock(readWorkflow(), EVIDENCE_JOB), stepName);
+      expect(step).toMatch(/GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
     });
   }
 
-  it('finds both jobs (guards against a broken extractor reporting all-clear)', () => {
-    const workflow = readWorkflow();
-    for (const jobId of EVIDENCE_JOBS) {
-      expect(jobBlock(workflow, jobId).length).toBeGreaterThan(200);
-    }
+  it('finds the job and both steps (guards against a broken extractor reporting all-clear)', () => {
+    const job = jobBlock(readWorkflow(), EVIDENCE_JOB);
+    expect(job.length).toBeGreaterThan(200);
+    for (const stepName of TOKEN_STEPS) expect(stepBlock(job, stepName).length).toBeGreaterThan(40);
   });
 });

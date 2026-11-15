@@ -346,10 +346,17 @@ describe('useSessionLifecycle loading semantics', () => {
     expect(result.current.hasMore).toBe(true);
   });
 
-  it('delta-fetches after the newest cached message and merges cached plus new rows', async () => {
+  it('overlaps the cached tail to refresh in-place growth and merges new rows', async () => {
     const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
-    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], false));
-    mocks.getChatSession.mockResolvedValue(detail([msg('new', 2000)], false));
+    const cached = { ...msg('cached', 1000), role: 'assistant' };
+    const grown = { ...cached, content: `${cached.content} streamed while closed 🙂` };
+    queryClient.setQueryData(queryKey, detail([cached], false));
+    mocks.getChatSession.mockImplementation(
+      async (_projectId: string, _sessionId: string, options: { after: string }) => {
+        const [, sequence] = JSON.parse(options.after) as [number, number, string];
+        return detail([...(sequence < cached.sequence! ? [grown] : []), msg('new', 2000)], false);
+      }
+    );
 
     const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
       wrapper,
@@ -358,9 +365,11 @@ describe('useSessionLifecycle loading semantics', () => {
     await waitFor(() =>
       expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'new'])
     );
+    expect(result.current.messages[0]).toEqual(grown);
     expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
       signal: expect.any(AbortSignal),
-      after: '[1000,1000,"cached"]',
+      // Include the stable tail so content appended under its existing ID is refreshed.
+      after: '[1000,999,"cached"]',
     });
   });
 
@@ -382,7 +391,8 @@ describe('useSessionLifecycle loading semantics', () => {
     );
     expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
       signal: expect.any(AbortSignal),
-      after: '[1000,1000,"cached"]',
+      // Include the stable tail so content appended under its existing ID is refreshed.
+      after: '[1000,999,"cached"]',
     });
   });
 
@@ -436,7 +446,8 @@ describe('useSessionLifecycle loading semantics', () => {
     );
     expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
       signal: expect.any(AbortSignal),
-      after: '[1000,1000,"cached"]',
+      // Include the stable tail so content appended under its existing ID is refreshed.
+      after: '[1000,999,"cached"]',
     });
   });
 
@@ -578,7 +589,8 @@ describe('useSessionLifecycle loading semantics', () => {
     );
     expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
       signal: expect.any(AbortSignal),
-      after: '[1000,1000,"loaded-tail"]',
+      // Include the stable tail so content appended under its existing ID is refreshed.
+      after: '[1000,999,"loaded-tail"]',
     });
   });
 
@@ -600,7 +612,8 @@ describe('useSessionLifecycle loading semantics', () => {
     await waitFor(() =>
       expect(mocks.getChatSession).toHaveBeenLastCalledWith('proj-1', 'sess-1', {
         signal: undefined,
-        after: '[1000,1000,"loaded-tail"]',
+        // Include the stable tail so content appended under its existing ID is refreshed.
+        after: '[1000,999,"loaded-tail"]',
       })
     );
 

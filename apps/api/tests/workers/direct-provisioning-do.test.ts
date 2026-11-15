@@ -12,11 +12,16 @@ import {
   type DirectProvisioningIntent,
   NodeLifecycleProvisioning,
 } from '../../src/durable-objects/node-lifecycle-provisioning';
+import {
+  attemptDeadlineMs,
+  resolveNodeProvisioningAttemptDeadlineMs,
+} from '../../src/durable-objects/node-lifecycle-provisioning-attempt';
 import type { Env } from '../../src/env';
 import { nodesRoutes } from '../../src/routes/nodes';
 import { crudRoutes } from '../../src/routes/workspaces/crud';
 import { registerWorkspaceCreateRoute } from '../../src/routes/workspaces/workspace-create';
 import { updateAdminSettings } from '../../src/services/admin-settings';
+import { findAdminSetting } from '../../src/services/admin-settings-registry';
 import { clearCapacityCatalogCache } from '../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../src/services/encryption';
 import { getSession } from '../../src/services/project-data';
@@ -30,6 +35,7 @@ import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/see
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   clearCapacityCatalogCache();
 });
 
@@ -38,8 +44,14 @@ async function setup(
   interruptDispatch = false,
   directNode = false,
   /** Tunnel transport: route every Cloudflare API call to this stateful fake. */
-  tunnelCf?: FakeCloudflare
+  tunnelCf?: FakeCloudflare,
+  options: {
+    /** Admin setting applied before the POST, so even an automatically delivered first alarm sees it. */
+    attemptDeadlineMs?: number;
+    requestTimeoutMs?: number;
+  } = {}
 ) {
+  const { attemptDeadlineMs } = options;
   const userId = 'durable-user-' + crypto.randomUUID();
   const projectId = 'durable-project-' + crypto.randomUUID();
   const installationId = 'durable-install-' + crypto.randomUUID();
@@ -81,7 +93,7 @@ async function setup(
     SAM_INSTALLATION_ID: '0123456789abcdef0123456789abcdef',
     CF_ZONE_ID: 'durable-zone',
     CF_API_TOKEN: 'durable-dns-test',
-    NODE_PROVISIONING_REQUEST_TIMEOUT_MS: '3000',
+    NODE_PROVISIONING_REQUEST_TIMEOUT_MS: String(options.requestTimeoutMs ?? 3000),
     NODE_PROVISIONING_RETRY_INTERVAL_MS: '30000',
     COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
     ...(tunnelCf
@@ -197,6 +209,12 @@ async function setup(
     env: testEnv,
     owner: { userId, projectId },
   });
+  if (attemptDeadlineMs !== undefined) {
+    await updateAdminSettings(testEnv, {
+      actorUserId: userId,
+      changes: [{ name: 'operations.nodeProvisioningAttemptDeadlineMs', value: attemptDeadlineMs }],
+    });
+  }
   const app = new Hono<{ Bindings: Env }>();
   app.onError((error, c) => c.json({ error: error.message }, 500));
   registerWorkspaceCreateRoute(app);
@@ -724,24 +742,202 @@ describe('durable direct workspace allocation', () => {
   });
 });
 
+describe('the durable attempt deadline (operations.nodeProvisioningAttemptDeadlineMs)', () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  // A GCP create (insert plus operation poll) takes 9-12 s against the 5 s per-request timeout.
+  // Here the per-request timeout is 3 s. The fake provider holds the create on a deferred
+  // promise (`release`), so the test owns the midpoint: it releases the create only after the
+  // per-request timeout (or the configured attempt budget) has certainly elapsed. Path: real
+  // POST -> NodeLifecycle alarm -> provisionNode -> provider HTTP -> migrated D1.
+  async function holdCreateFor(f: Awaited<ReturnType<typeof setup>>, holdMs: number) {
+    if ((await f.intent())?.attempts === 0) await f.tick();
+    await vi.waitFor(() => expect(f.creates).toHaveLength(1));
+    // The attempt deadline is armed before provisionNode starts, so once the create is seen,
+    // holding it `holdMs` past that point outlasts any deadline shorter than `holdMs`.
+    await sleep(holdMs);
+    f.release();
+  }
+  async function nodeRow(f: Awaited<ReturnType<typeof setup>>) {
+    const nodeId = (await f.intent())?.input.nodeId;
+    return env.DATABASE.prepare(
+      'SELECT provider_instance_id,status,backend_dns_record_id FROM nodes WHERE id=?'
+    )
+      .bind(nodeId)
+      .first();
+  }
+  function attemptLogs(warn: ReturnType<typeof vi.spyOn>) {
+    return warn.mock.calls
+      .map(([line]) => (typeof line === 'string' ? line : ''))
+      .filter((line) => line.includes('node_provisioning.durable_attempt_failed'))
+      .map((line) => JSON.parse(line) as Record<string, any>);
+  }
+
+  it('registers a 60 s default bounded to 5 s - 180 s, and never resolves below the request timeout', async () => {
+    const def = findAdminSetting('operations.nodeProvisioningAttemptDeadlineMs')!;
+    expect(def).toMatchObject({ type: 'integer', defaultValue: 60_000, category: 'Operations' });
+    expect([4_999, 5_000, 180_000, 180_001, 60_000.5].map((value) => def.validate(value))).toEqual([
+      false,
+      true,
+      true,
+      false,
+      false,
+    ]);
+    // Unset: the default, through the real resolver and settings store.
+    const testEnv = env as unknown as Env;
+    expect(await resolveNodeProvisioningAttemptDeadlineMs(testEnv, 3_000)).toBe(60_000);
+    // An install that raised NODE_PROVISIONING_REQUEST_TIMEOUT_MS keeps at least that.
+    expect(await resolveNodeProvisioningAttemptDeadlineMs(testEnv, 90_000)).toBe(90_000);
+  });
+
+  it('adds the tunnel-setup budget only for an incarnation on Cloudflare Tunnel transport', async () => {
+    const testEnv = env as unknown as Env;
+    const incarnation = { incarnationId: 'incarnation-a' };
+    const node = (transport: string | null) =>
+      ({
+        runtimeIncarnationId: 'incarnation-a', // resuming: the node row's transport decides
+        transport,
+        runtime: 'vm',
+        nodeClass: 'managed',
+      }) as Parameters<typeof attemptDeadlineMs>[1];
+    // 60 s attempt budget + the 20 s default `vmTunnels.provisioningBudgetMs`.
+    expect(await attemptDeadlineMs(testEnv, node('cloudflare-tunnel'), incarnation, 3_000)).toBe(
+      80_000
+    );
+    expect(await attemptDeadlineMs(testEnv, node(null), incarnation, 3_000)).toBe(60_000);
+  });
+
+  it('completes a create slower than the request timeout in its first attempt at the default', async () => {
+    // The default budget is what decides: nothing earlier in this file left a setting behind.
+    expect(await resolveNodeProvisioningAttemptDeadlineMs(env as unknown as Env, 3_000)).toBe(
+      60_000
+    );
+    const f = await setup(false);
+    await holdCreateFor(f, 3500);
+    await vi.waitFor(async () => expect((await f.intent())?.status).toBe('complete'), {
+      timeout: 8000,
+    });
+    const intent = (await f.intent())!;
+    expect(intent.attempts).toBe(1);
+    expect(intent.lastError).toBeNull();
+    expect(f.creates).toHaveLength(1);
+    expect(f.dispatches).toHaveLength(1);
+    expect(await nodeRow(f)).toEqual({
+      provider_instance_id: '9876',
+      status: 'running',
+      backend_dns_record_id: 'durable-dns',
+    });
+  }, 20_000);
+
+  it('at the setting minimum, cuts the attempt after the create, records the VM, and adopts it next attempt with one create', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const f = await setup(false, false, false, undefined, { attemptDeadlineMs: 5000 });
+    await holdCreateFor(f, 5500);
+    await vi.waitFor(
+      async () => expect((await f.intent())?.lastError).toMatch(/deadline elapsed/),
+      { timeout: 8000 }
+    );
+    // The started create was not cut: its VM identity is on the row, the node is still
+    // `creating` (not `error`, not deleted), and the cut DNS step left no record id.
+    expect(await nodeRow(f)).toEqual({
+      provider_instance_id: '9876',
+      status: 'creating',
+      backend_dns_record_id: null,
+    });
+    expect(
+      await env.DATABASE.prepare('SELECT status,node_id FROM workspaces WHERE id=?')
+        .bind(f.workspaceId)
+        .first()
+    ).toMatchObject({ status: 'creating' });
+    // The next attempt is scheduled one retry interval (30 s) after the cut attempt started.
+    const remaining = (await f.intent())!.nextAttemptAt! - Date.now();
+    expect(remaining).toBeGreaterThan(15_000);
+    expect(remaining).toBeLessThanOrEqual(30_000);
+    // The settings writer refuses values outside 5 s - 180 s and keeps the stored one.
+    for (const value of [4_999, 180_001]) {
+      await expect(
+        updateAdminSettings(f.testEnv, {
+          actorUserId: f.userId,
+          changes: [{ name: 'operations.nodeProvisioningAttemptDeadlineMs', value }],
+        })
+      ).rejects.toThrow();
+    }
+    expect(await resolveNodeProvisioningAttemptDeadlineMs(f.testEnv, 3_000)).toBe(5_000);
+    const nodeId = (await f.intent())!.input.nodeId;
+    expect(attemptLogs(warn)).toContainEqual(
+      expect.objectContaining({
+        nodeId,
+        attempt: 1,
+        error: {
+          name: 'NodeAllocationUncertainError',
+          message: 'Provisioning request deadline elapsed',
+        },
+      })
+    );
+
+    await runInDurableObject(f.stub, async (instance) => {
+      (instance as unknown as { provisioningController: unknown }).provisioningController =
+        undefined;
+    });
+    await f.tick();
+    await vi.waitFor(async () => expect((await f.intent())?.status).toBe('complete'), {
+      timeout: 8000,
+    });
+    expect((await f.intent())!.attempts).toBe(2);
+    expect(f.creates).toHaveLength(1);
+    expect(f.dispatches).toHaveLength(1);
+    expect(await nodeRow(f)).toEqual({
+      provider_instance_id: '9876',
+      status: 'running',
+      backend_dns_record_id: 'durable-dns',
+    });
+  }, 30_000);
+
+  it('logs each failed attempt with the wrapped provider cause and keeps raw provider text out of lastError', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const f = await setup(true);
+    if ((await f.intent())?.attempts === 0) await f.tick();
+    await vi.waitFor(async () => expect((await f.intent())?.lastError).toMatch(/unresolved/));
+    const intent = (await f.intent())!;
+    // The fake's create throws a TypeError whose text providerFetch embeds in its message.
+    expect(intent.lastError).toBe(
+      'Provider allocation is unresolved; exact resource reconciliation is required (ProviderError (hetzner, no HTTP response))'
+    );
+    expect(intent.lastError).not.toContain('lost successful provider response');
+    expect(attemptLogs(warn)).toContainEqual(
+      expect.objectContaining({
+        nodeId: intent.input.nodeId,
+        error: expect.objectContaining({ name: 'NodeAllocationUncertainError' }),
+        cause: {
+          name: 'ProviderError',
+          providerName: 'hetzner',
+          category: 'unknown',
+        },
+      })
+    );
+  });
+});
+
 describe('durable direct allocation on Cloudflare Tunnel transport', () => {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   it('resumes the same incarnation after its first attempt is cut mid tunnel setup by the real deadline', async () => {
     const cf = new FakeCloudflare('durable-account', 'durable-zone');
     // Real POST /nodes -> NodeLifecycle start -> alarm -> provisionNode. The first attempt's
-    // deadline is the 3 s request timeout plus a 1 ms tunnel budget. The first tunnel list
-    // takes 1.0 s and the create 2.5 s (each under the 3 s per-call timeout), so the real
-    // AbortController fires inside the create POST (between ~1.1 s and 3.5 s): a lost
-    // response that commits later.
-    const f = await setup(false, false, true, cf);
+    // deadline is the 5 s attempt budget (the setting's minimum, above the 4.5 s per-call timeout
+    // used here) plus a 1 ms tunnel budget. The first tunnel list takes 2.5 s and the create
+    // 2.8 s (each well under the per-call timeout), so the real AbortController fires inside the
+    // create POST (between ~2.5 s and 5.3 s): a lost response that commits later.
+    const f = await setup(false, false, true, cf, {
+      attemptDeadlineMs: 5000,
+      requestTimeoutMs: 4500,
+    });
     await updateAdminSettings(f.testEnv, {
       actorUserId: f.userId,
       changes: [{ name: 'vmTunnels.provisioningBudgetMs', value: 1 }],
     });
     f.release();
-    cf.inject('tunnel.list', { kind: 'hook', run: () => sleep(1000) });
-    cf.inject('tunnel.create', { kind: 'hook', run: () => sleep(2500) });
+    cf.inject('tunnel.list', { kind: 'hook', run: () => sleep(2500) });
+    cf.inject('tunnel.create', { kind: 'hook', run: () => sleep(2800) });
     if ((await f.intent())?.attempts === 0) await f.tick();
     await vi.waitFor(
       async () => expect((await f.intent())?.lastError).toMatch(/deadline elapsed/),
