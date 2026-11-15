@@ -326,3 +326,50 @@ describe('GcpProvider two-phase deletion', () => {
     });
   });
 });
+
+describe('GcpProvider requestVMDeletion expectedInstance binding', () => {
+  const originalFetch = globalThis.fetch;
+  const tokenProvider = vi.fn().mockResolvedValue('test-gcp-token');
+  let provider: GcpProvider;
+
+  beforeEach(() => {
+    provider = new GcpProvider(PROJECT, tokenProvider, 'us-central1-a');
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function deleteTracking() {
+    return installFetch((url, init) => {
+      if (init?.method === 'DELETE') return json({ name: 'operation-1', status: 'RUNNING' });
+      return lookupResponse(url) ?? notFound();
+    });
+  }
+
+  it('sends the delete when the resolved instance is exactly the expected id and zone', async () => {
+    const fetchMock = deleteTracking();
+    const result = await provider.requestVMDeletion(INSTANCE.id, undefined, {
+      expectedInstance: { id: INSTANCE.id, location: 'europe-west1-b' },
+    });
+    expect(result.state).toBe('requested');
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
+  });
+
+  it.each([
+    ['a different instance id', { id: '999', location: 'europe-west1-b' }],
+    ['a different zone', { id: INSTANCE.id, location: 'us-central1-a' }],
+  ])(
+    'refuses before beforeSend and sends nothing when the lookup resolved %s',
+    async (_, expected) => {
+      const fetchMock = deleteTracking();
+      const beforeSend = vi.fn(async () => undefined);
+      const error = await provider
+        .requestVMDeletion(INSTANCE.id, undefined, { beforeSend, expectedInstance: expected })
+        .catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(ProviderError);
+      expect((error as Error).message).toMatch(/refusing to delete it/);
+      expect(beforeSend).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+    }
+  );
+});

@@ -132,11 +132,15 @@ describe('provider orphan reconciliation — real provider delete boundaries', (
       getServer: owned,
     });
     globalThis.fetch = fetchMock;
-    providerState.current = new HetznerProvider('token', 'fsn1');
+    const provider = new HetznerProvider('token', 'fsn1');
+    // Control: a provider without two-phase deletion keeps the synchronous deleteVM path.
+    expect((provider as Provider).requestVMDeletion).toBeUndefined();
+    providerState.current = provider;
 
     const result = await runProviderOrphanReconciliation(env());
 
     expect(result.destroyed, JSON.stringify({ result, calls: methods(fetchMock) })).toBe(1);
+    expect(result.deletionRequested).toBe(0);
     expect(methods(fetchMock).filter(([method]) => method === 'DELETE')).toEqual([
       ['DELETE', 'https://api.hetzner.cloud/v1/servers/101'],
     ]);
@@ -207,6 +211,11 @@ describe('provider orphan reconciliation — real provider delete boundaries', (
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       const method = (init?.method ?? 'GET').toUpperCase();
+      // Real GCP `instances.get` accepts the numeric id, in the instance's own zone only.
+      if (method === 'GET' && url.endsWith(`/zones/us-central1-a/instances/${ownedId}`))
+        return json(owned);
+      if (method === 'GET' && url.endsWith(`/zones/${newZone}/instances/${ownedNewZoneId}`))
+        return json(ownedNewZone);
       if (method === 'GET' && /\/instances\/\d+$/.test(url)) {
         return json({ error: { message: 'Not found by name' } }, 404);
       }
@@ -238,7 +247,16 @@ describe('provider orphan reconciliation — real provider delete boundaries', (
 
     const result = await runProviderOrphanReconciliation(env());
 
-    expect(result.destroyed, JSON.stringify({ result, calls: methods(fetchMock) })).toBe(2);
+    // GCP deletes are sent and not awaited: requested, never counted as destroyed.
+    expect(result.deletionRequested, JSON.stringify({ result, calls: methods(fetchMock) })).toBe(2);
+    expect(result.destroyed).toBe(0);
+    // (result.errors here comes from this harness's unmocked account inventory, not deletion.)
+    const { log } = await import('../../../src/lib/logger');
+    expect(vi.mocked(log.error)).not.toHaveBeenCalledWith(
+      'provider_orphan.destroy_failed',
+      expect.anything()
+    );
+    expect(methods(fetchMock).some(([, url]) => url.includes('/operations/'))).toBe(false);
     expect(methods(fetchMock).filter(([method]) => method === 'DELETE')).toEqual([
       ['DELETE', expect.stringContaining('/zones/us-central1-a/instances/vm-owned')],
       ['DELETE', expect.stringContaining(`/zones/${newZone}/instances/vm-owned-new-zone`)],

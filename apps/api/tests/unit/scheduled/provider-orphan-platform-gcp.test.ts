@@ -137,6 +137,9 @@ async function setup(credential: unknown = wifCredential) {
       return json({ name: 'delete-operation', status: 'DONE' });
     if (url.endsWith('/operations/delete-operation'))
       return json({ name: 'delete-operation', status: 'DONE' });
+    // Real GCP `instances.get` accepts the numeric id, in the instance's own zone only.
+    if (url.endsWith('/zones/us-central1-a/instances/123'))
+      return json(instance('123', INSTALLATION));
     if (/\/instances\/\d+$/.test(url)) return json({}, 404);
     if (url.endsWith('/instances/vm-123')) return json(instance('123', INSTALLATION));
     throw new Error(`Unexpected provider request: ${init?.method ?? 'GET'} ${url}`);
@@ -157,7 +160,8 @@ describe('platform GCP orphan sweep configuration and authentication', () => {
     const result = await runProviderOrphanReconciliation(env);
 
     expect(result.errors).toBe(0);
-    expect(result.destroyed).toBe(1);
+    expect(result.deletionRequested).toBe(1);
+    expect(result.destroyed).toBe(0);
     const sts = fetchMock.mock.calls.find(([url]) => String(url).includes('sts.googleapis.com'));
     expect(sts).toBeDefined();
     const body = JSON.parse(sts![1]!.body as string);
@@ -186,7 +190,8 @@ describe('platform GCP orphan sweep configuration and authentication', () => {
     });
     const result = await runProviderOrphanReconciliation(env);
     expect(result.errors).toBe(0);
-    expect(result.destroyed).toBe(1);
+    expect(result.deletionRequested).toBe(1);
+    expect(result.destroyed).toBe(0);
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes('oauth2.googleapis.com/token'))
     ).toBe(true);

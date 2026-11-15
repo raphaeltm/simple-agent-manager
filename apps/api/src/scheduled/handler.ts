@@ -318,6 +318,7 @@ export async function scheduled(
     cfContainersDestroyed: nodeCleanup?.cfContainersDestroyed,
     providerOrphansScanned: providerOrphans?.scanned,
     providerOrphansDestroyed: providerOrphans?.destroyed,
+    providerOrphansDeletionRequested: providerOrphans?.deletionRequested,
     providerOrphansSkippedUnlabeled: providerOrphans?.skippedUnlabeled,
     providerOrphansSkippedForeignManaged: providerOrphans?.skippedForeignManaged,
     providerOrphansSkippedForeignEnvironment: providerOrphans?.skippedForeignEnv,

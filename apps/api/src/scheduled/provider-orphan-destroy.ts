@@ -29,6 +29,22 @@ import type {
 
 const TERMINAL_NODE_STATUSES: ReadonlySet<string> = new Set(['deleted', 'destroyed']);
 
+/**
+ * Time bounds of the destroy loop. `requestTimeoutMs` bounds ONE provider call (the ownership
+ * re-read, the delete); each call gets its own signal, so a slow provider's lookups cannot use
+ * up the time of the delete that follows them. `deadline` is the sweep budget: no candidate is
+ * started after it, and the rest wait for the next eligible pass.
+ */
+export interface DestroyBounds {
+  requestTimeoutMs: number;
+  deadline: number;
+}
+
+/** Deletions this pass started: completed synchronously, or requested and still in flight. */
+export function deletionsStarted(result: ProviderOrphanResult): number {
+  return result.destroyed + result.deletionRequested;
+}
+
 export async function destroyEligibleCandidates(
   env: Env,
   provider: Provider,
@@ -38,34 +54,49 @@ export async function destroyEligibleCandidates(
   minAgeMs: number,
   destroyLimit: number,
   result: ProviderOrphanResult,
-  context: ProviderRequestContext
+  bounds: DestroyBounds
 ): Promise<void> {
-  for (const candidate of candidates) {
-    if (context.signal?.aborted) {
-      result.errors++;
-      return;
-    }
-    if (result.destroyed >= destroyLimit) {
+  for (const [index, candidate] of candidates.entries()) {
+    if (deletionsStarted(result) >= destroyLimit) {
       log.info('provider_orphan.destroy_limit_reached', {
         destroyLimit,
-        remaining: candidates.length - result.destroyed,
+        remaining: candidates.length - index,
+      });
+      return;
+    }
+    if (Date.now() >= bounds.deadline) {
+      log.info('provider_orphan.sweep_budget_reached', {
+        remaining: candidates.length - index,
+        action: 'left for the next eligible pass; nothing was sent for them',
       });
       return;
     }
     const claim = claims.get(candidate.nodeId.toLowerCase());
     if (!claimAllowsDeletion(candidate, claim, result)) continue;
-    if (!(await finalOwnershipMatches(provider, candidate, scope, result, context))) continue;
+    const proven = await finalOwnershipMatches(
+      provider,
+      candidate,
+      scope,
+      result,
+      requestContext(bounds)
+    );
+    if (!proven) continue;
     await destroyCandidate(
       env,
       provider,
       candidate,
+      proven,
       claim?.status,
       scope,
       minAgeMs,
       result,
-      context
+      requestContext(bounds)
     );
   }
+}
+
+function requestContext(bounds: DestroyBounds): ProviderRequestContext {
+  return { signal: AbortSignal.timeout(bounds.requestTimeoutMs) };
 }
 
 function claimAllowsDeletion(
@@ -95,9 +126,9 @@ async function finalOwnershipMatches(
   scope: OwnershipScope,
   result: ProviderOrphanResult,
   context: ProviderRequestContext
-): Promise<boolean> {
+): Promise<VMInstance | null> {
   const current = await readCurrentServer(provider, candidate, result, context);
-  if (!current) return false;
+  if (!current) return null;
   const labels = current.labels ?? {};
   if (hasAmbiguousOwnershipLabels(labels)) {
     result.skippedAmbiguousOwnership++;
@@ -119,7 +150,7 @@ async function finalOwnershipMatches(
     result.skippedAmbiguousOwnership++;
     return finalOwnershipSkip('provider resource identity changed before deletion');
   }
-  return true;
+  return current;
 }
 
 async function readCurrentServer(
@@ -160,18 +191,31 @@ export function hasAmbiguousOwnershipLabels(labels: Record<string, string>): boo
   ].some((key) => hasAmbiguousLabel(labels, key));
 }
 
-function finalOwnershipSkip(reason: string): false {
+function finalOwnershipSkip(reason: string): null {
   log.warn('provider_orphan.final_ownership_skipped', {
     reason,
     action: 'preserved without calling the provider delete boundary',
   });
-  return false;
+  return null;
 }
 
+/**
+ * Delete one proven orphan.
+ *
+ * A provider with two-phase deletion (GCP today) gets a send-and-return request bound to the
+ * exact instance the ownership re-read just proved (`expectedInstance`: same numeric id, same
+ * zone), so the delete can never land on anything the proof did not cover. It is counted as
+ * `deletionRequested`, never as `destroyed`: the provider has accepted it but not finished it.
+ * The next eligible pass is idempotent either way: a VM still being deleted (or whose delete
+ * failed) is selected and requested again; one already gone is not listed at all.
+ * `deleteVM` on GCP polls the operation to completion, which cannot fit a background request
+ * budget. Every other provider keeps `deleteVM`, which returns once the delete is done.
+ */
 async function destroyCandidate(
   env: Env,
   provider: Provider,
   candidate: Candidate,
+  proven: VMInstance,
   claimStatus: string | undefined,
   scope: OwnershipScope,
   minAgeMs: number,
@@ -186,8 +230,43 @@ async function destroyCandidate(
       claimStatus: claimStatus ?? 'no-row',
       environment: scope.environmentLabel,
     });
+    if (provider.requestVMDeletion) {
+      const request = await provider.requestVMDeletion(candidate.serverId, context, {
+        expectedInstance: { id: proven.id, location: proven.location },
+      });
+      if (request.state === 'absent') {
+        log.info('provider_orphan.already_absent', {
+          serverId: candidate.serverId,
+          nodeId: candidate.nodeId,
+          action: 'nothing sent; the provider no longer has this instance',
+        });
+        return;
+      }
+      log.warn('provider_orphan.deletion_requested', {
+        serverId: candidate.serverId,
+        nodeId: candidate.nodeId,
+        location: proven.location ?? null,
+      });
+      await recordDestroyedOrphan(
+        env,
+        candidate,
+        claimStatus,
+        scope.environmentLabel,
+        minAgeMs,
+        'requested'
+      );
+      result.deletionRequested++;
+      return;
+    }
     await provider.deleteVM(candidate.serverId, context);
-    await recordDestroyedOrphan(env, candidate, claimStatus, scope.environmentLabel, minAgeMs);
+    await recordDestroyedOrphan(
+      env,
+      candidate,
+      claimStatus,
+      scope.environmentLabel,
+      minAgeMs,
+      'completed'
+    );
     result.destroyed++;
   } catch (err) {
     log.error('provider_orphan.destroy_failed', {
@@ -204,15 +283,20 @@ async function recordDestroyedOrphan(
   candidate: Candidate,
   claimStatus: string | undefined,
   environmentLabel: string,
-  minAgeMs: number
+  minAgeMs: number,
+  deletion: 'completed' | 'requested'
 ): Promise<void> {
   await persistError(
     env.OBSERVABILITY_DATABASE,
     {
       source: 'api',
       level: 'warn',
-      message: 'Destroyed provider server that no live node row claimed',
+      message:
+        deletion === 'completed'
+          ? 'Destroyed provider server that no live node row claimed'
+          : 'Requested deletion of provider server that no live node row claimed',
       context: {
+        deletion,
         recoveryType: 'provider_orphan_reconciliation',
         nodeId: candidate.nodeId,
         providerInstanceId: candidate.serverId,

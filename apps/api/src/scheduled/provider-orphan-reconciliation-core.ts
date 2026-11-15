@@ -30,7 +30,12 @@ import {
   markInventoryCredentialAttempted,
   resolveInventoryProvider,
 } from './provider-orphan-credentials';
-import { destroyEligibleCandidates, hasAmbiguousOwnershipLabels } from './provider-orphan-destroy';
+import {
+  deletionsStarted,
+  type DestroyBounds,
+  destroyEligibleCandidates,
+  hasAmbiguousOwnershipLabels,
+} from './provider-orphan-destroy';
 import {
   type ClaimingNode,
   loadClaimingNodeStatuses,
@@ -42,7 +47,10 @@ export interface ProviderOrphanResult {
   skipped: boolean;
   skipReason: string | null;
   scanned: number;
+  /** Deleted synchronously: the provider reported the deletion done. */
   destroyed: number;
+  /** Deletion sent and accepted, not yet confirmed done (two-phase providers such as GCP). */
+  deletionRequested: number;
   skippedUnlabeled: number;
   skippedForeignManaged: number;
   skippedForeignEnv: number;
@@ -64,6 +72,7 @@ export function emptyProviderOrphanResult(
     skipReason: null,
     scanned: 0,
     destroyed: 0,
+    deletionRequested: 0,
     skippedUnlabeled: 0,
     skippedForeignManaged: 0,
     skippedForeignEnv: 0,
@@ -103,10 +112,23 @@ export async function reconcileProviderOrphans(
     env.PROVIDER_ORPHAN_DESTROY_LIMIT,
     DEFAULT_PROVIDER_ORPHAN_DESTROY_LIMIT
   );
-  const deadline = Date.now() + resolveCleanupConfig(env).stoppedHandoffSweepBudgetMs;
+  const cleanupConfig = resolveCleanupConfig(env);
+  const bounds: DestroyBounds = {
+    requestTimeoutMs: cleanupConfig.stoppedHandoffRequestTimeoutMs,
+    deadline: Date.now() + cleanupConfig.stoppedHandoffSweepBudgetMs,
+  };
   const resolution = await resolveProvider(env);
   if ('provider' in resolution) {
-    await reconcileInventory(env, now, scope, resolution.provider, minAgeMs, destroyLimit, result);
+    await reconcileInventory(
+      env,
+      now,
+      scope,
+      resolution.provider,
+      minAgeMs,
+      destroyLimit,
+      result,
+      bounds
+    );
   } else {
     Object.assign(result, resolution.result);
   }
@@ -114,7 +136,7 @@ export async function reconcileProviderOrphans(
     const credentials = await listInventoryCredentials(env);
     let lastAttempted: (typeof credentials)[number] | undefined;
     for (const credential of credentials) {
-      if (Date.now() >= deadline || result.destroyed >= destroyLimit) break;
+      if (Date.now() >= bounds.deadline || deletionsStarted(result) >= destroyLimit) break;
       try {
         const resolved = await resolveInventoryProvider(env, credential);
         if (resolved) {
@@ -127,7 +149,8 @@ export async function reconcileProviderOrphans(
             resolved.provider,
             minAgeMs,
             destroyLimit,
-            result
+            result,
+            bounds
           );
         }
       } catch (error) {
@@ -155,12 +178,12 @@ async function reconcileInventory(
   provider: Provider,
   minAgeMs: number,
   destroyLimit: number,
-  result: ProviderOrphanResult
+  result: ProviderOrphanResult,
+  bounds: DestroyBounds
 ): Promise<void> {
-  const context = {
-    signal: AbortSignal.timeout(resolveCleanupConfig(env).stoppedHandoffRequestTimeoutMs),
-  };
-  const discovery = await discoverServers(provider, scope, context);
+  const discovery = await discoverServers(provider, scope, {
+    signal: AbortSignal.timeout(bounds.requestTimeoutMs),
+  });
   if ('result' in discovery) {
     result.errors += discovery.result.errors;
     result.skipped = true;
@@ -185,7 +208,7 @@ async function reconcileInventory(
     minAgeMs,
     destroyLimit,
     result,
-    context
+    bounds
   );
 }
 
