@@ -71,10 +71,10 @@ approved the extension (event 44439269) with conditions recorded in the checklis
 
 ## Research findings
 
-- Files on main + this change are byte-identical to P1's reviewed tip; the modules they call
-  (`gcp-provider-factory.ts`, `gcp-token-provider.ts`, `provider-credential-codecs.ts`, providers
-  GCP files, shared constants) have no drift between P1's tip and main. P1's security-auditor,
-  cloudflare-specialist and test-engineer results therefore apply unchanged.
+- Part 1 (`edf482791`) is byte-identical to P1's reviewed tip, with no drift in the modules it
+  calls, so P1's reviews cover part 1 only. Part 2 and the review fixes (`3f6d35272`,
+  `73f570618`, `68f19d929`) were reviewed separately: security-auditor, cloudflare-specialist and
+  test-engineer in two rounds, task-completion-validator twice (see PR #2757).
 - The sweep's interval (`PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS`) and minimum age
   (`PROVIDER_ORPHAN_MIN_AGE_MS`) are Worker vars; on a self-host box they can be overridden in
   `.state/secrets.env`, which `wrapWorker` merges into the cron's `env`
@@ -91,11 +91,12 @@ approved the extension (event 44439269) with conditions recorded in the checklis
       01M7FBJF8CK4Y9KTY1PW4Y9QTR, identical tree), CI started by hand
 - [x] Box round R16: baseline failure, preflight, fixtures, positive deletion proof, controls,
       clean next run, cleanup, restore, FREE, note on idea 01M77HYN8N41MQ17TQZ622PPPV
-- [x] Main branch change (this PR), byte-identical runtime files
+- [x] Main branch change (this PR): part 1 byte-identical to P1; part 2 reviewed separately
 - [x] Extended fix: per-call timeouts, sweep budget, send-and-return GCP delete bound to re-read (`expectedInstance`), `deletionRequested` counter, Hetzner unchanged control, tests incl. incident reproduction (proven red on shared signal), limit > one pass, budget, next-pass present/absent, identity change
 - [x] Pre-PR validation: lint 22/22, typecheck 36/36, build 18/18, test 39/39 tasks (API 1022 files /
       15254 tests passed, 4 skipped; providers 48/892) on 73f570618; later commits test/task-only
-- [ ] task-completion-validator
+- [x] task-completion-validator (PASS on `3dd0d5891` and on `f5fce2813`)
+- [x] Deferred MEDIUM/LOW review items: `tasks/backlog/2026-11-15-provider-orphan-sweep-followups.md`
 - [ ] Staging no-regression: one natural sweep tick with unchanged platform Hetzner credential,
       zero errors, zero destroyed (no fixtures, swaps or KV/D1 writes)
 - [x] Production first-run deletion-risk read (12:01 UTC; repeat right before the approval request)
