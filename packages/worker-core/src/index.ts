@@ -42,6 +42,17 @@ export {
   type LogLevel,
   serializeError,
 } from './logger';
+export {
+  assertOutboundUrl,
+  classifyHost,
+  DEFAULT_OUTBOUND_MAX_REDIRECTS,
+  guardedFetch,
+  type HostClass,
+  MAX_OUTBOUND_REDIRECTS,
+  type OutboundPolicy,
+  type OutboundRefusalReason,
+  OutboundRequestRefusedError,
+} from './network-hosts';
 export { parsePositiveInt, requireRouteParam } from './route-helpers';
 export { mapRows, parseRow, parseRowOrNull } from './row-parsing';
 export {

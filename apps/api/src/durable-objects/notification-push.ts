@@ -13,6 +13,7 @@ import {
   MAX_WEB_PUSH_DELIVERY_BUDGET_MS,
   MAX_WEB_PUSH_NOTIFICATION_ACTIONS,
 } from '@simple-agent-manager/shared';
+import { assertOutboundUrl, OutboundRequestRefusedError } from '@simple-agent-manager/worker-core';
 
 import { createModuleLogger } from '../lib/logger';
 import type { VapidKeyMaterial, WebPushSubscription } from '../lib/web-push';
@@ -194,6 +195,19 @@ export async function deliverWebPushSubscription(
     p256dh: subscription.p256dh,
     auth: subscription.auth,
   };
+
+  // The endpoint is user-supplied. Save time already refuses non-public hosts
+  // (validateWebPushSubscription); this catches rows stored before that check. Redirects are
+  // never followed (`redirect: 'manual'` below): a 3xx is a non-retryable failure.
+  try {
+    assertOutboundUrl(subscription.endpoint);
+  } catch (err) {
+    log.warn('web_push.endpoint_refused', {
+      userId: subscription.userId,
+      reason: err instanceof OutboundRequestRefusedError ? err.reason : 'invalid_url',
+    });
+    return { kind: 'failure', attempts: 0, status: null };
+  }
 
   let lastStatus: number | null = null;
   for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
