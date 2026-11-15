@@ -9,6 +9,7 @@
  */
 import { log } from '@simple-agent-manager/worker-core';
 
+import { readMessageIngestState } from './message-stream-ingest';
 import { parseMaxSeq, parseMessageCount, parseWorkspaceId } from './row-schemas';
 import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import type { Env } from './types';
@@ -38,7 +39,13 @@ export function nextSequence(sql: SqlStorage, sessionId: string): number {
       sessionId
     )
     .toArray()[0];
-  return (row ? parseMaxSeq(row, 'messages.next_sequence') : 0) + 1;
+  const session = sql
+    .exec('SELECT stream_ingest_state FROM chat_sessions WHERE id = ?', sessionId)
+    .toArray()[0];
+  const state = readMessageIngestState(session?.stream_ingest_state);
+  return (
+    Math.max(row ? parseMaxSeq(row, 'messages.next_sequence') : 0, state?.maxSequence ?? 0) + 1
+  );
 }
 
 export function resolveMaxMessagesPerSession(env: Env): number {
@@ -81,9 +88,7 @@ export function resolveDuplicateMessage(
     id,
     now: createdAt,
     sequence,
-    workspaceId: wsRow
-      ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
-      : null,
+    workspaceId: wsRow ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace') : null,
     inserted: false,
     toolMetadata: typeof existing.tool_metadata === 'string' ? existing.tool_metadata : null,
   };

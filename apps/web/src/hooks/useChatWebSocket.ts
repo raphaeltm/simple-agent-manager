@@ -1,4 +1,6 @@
 import {
+  CHAT_MESSAGE_APPEND_CAPABILITY,
+  type ChatMessageAppend,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   isTaskExecutionStep,
   type TaskExecutionStep,
@@ -11,6 +13,8 @@ import {
   mapBackendMessageCommentThread,
   type MessageCommentRealtimeEvent,
 } from '../lib/api/comments';
+import { mergeMessages } from '../lib/merge-messages';
+import { fetchHistoryUntil } from '../lib/message-paging';
 import {
   parsePromptDeliveryUpdate,
   type PromptDeliveryUpdate,
@@ -43,6 +47,8 @@ interface UseChatWebSocketOptions {
   enabled: boolean;
   /** Called when a new message arrives via WebSocket (single or from batch). */
   onMessage: (msg: ChatMessageResponse) => void;
+  /** False requests recovery of a missing canonical base or revision gap. */
+  onMessageAppend?: (append: ChatMessageAppend) => boolean;
   /** Called when the session is stopped server-side. */
   onSessionStopped: () => void;
   /**
@@ -57,7 +63,7 @@ interface UseChatWebSocketOptions {
     messages: ChatMessageResponse[],
     session: ChatSessionResponse,
     state?: SessionStateSnapshot | null
-  ) => void;
+  ) => void | Promise<void>;
   /** Called when the agent completes on the session. */
   onAgentCompleted?: (agentCompletedAt: number) => void;
   /** A durable delivery changed state (`mailbox.delivery_updated`); names the transcript row. */
@@ -107,6 +113,7 @@ export function useChatWebSocket({
   sessionId,
   enabled,
   onMessage,
+  onMessageAppend,
   onSessionStopped,
   onSubscribed,
   onCatchUp,
@@ -127,9 +134,13 @@ export function useChatWebSocket({
   const mountedRef = useRef(true);
   const connectRef = useRef<() => void>(() => {});
   const hadConnectionRef = useRef(false);
+  const pendingAppendsRef = useRef<ChatMessageAppend[]>([]);
+  const appendRecoveryPageRef = useRef<ChatMessageResponse[] | null>(null);
+  const catchUpFlightRef = useRef<Promise<void> | null>(null);
 
   // Keep callbacks stable via refs
   const onMessageRef = useRef(onMessage);
+  const onMessageAppendRef = useRef(onMessageAppend);
   const onSessionStoppedRef = useRef(onSessionStopped);
   const onSubscribedRef = useRef(onSubscribed);
   const onCatchUpRef = useRef(onCatchUp);
@@ -141,6 +152,7 @@ export function useChatWebSocket({
   const onCommentEventRef = useRef(onCommentEvent);
   const onSessionAccessChangedRef = useRef(onSessionAccessChanged);
   onMessageRef.current = onMessage;
+  onMessageAppendRef.current = onMessageAppend;
   onSessionStoppedRef.current = onSessionStopped;
   onSubscribedRef.current = onSubscribed;
   onCatchUpRef.current = onCatchUp;
@@ -176,6 +188,7 @@ export function useChatWebSocket({
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
+    catchUpFlightRef.current = null;
 
     setConnectionState(retriesRef.current === 0 ? 'connecting' : 'reconnecting');
 
@@ -188,13 +201,14 @@ export function useChatWebSocket({
     const API_URL = import.meta.env.VITE_API_URL || '';
     const wsUrl =
       API_URL.replace(/^http/, 'ws') +
-      `/api/projects/${projectId}/sessions/ws?sessionId=${encodeURIComponent(sessionId)}`;
+      `/api/projects/${projectId}/sessions/ws?sessionId=${encodeURIComponent(sessionId)}` +
+      (onMessageAppendRef.current ? `&messageAppend=${CHAT_MESSAGE_APPEND_CAPABILITY}` : '');
 
     try {
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        if (!mountedRef.current) {
+        if (!mountedRef.current || wsRef.current !== ws) {
           ws.close(1000);
           return;
         }
@@ -218,7 +232,7 @@ export function useChatWebSocket({
       };
 
       ws.onmessage = (event) => {
-        if (!mountedRef.current || wsRef.current !== ws) return;
+        if (!mountedRef.current || wsRef.current !== ws || ws.readyState !== WebSocket.OPEN) return;
 
         try {
           const data = JSON.parse(event.data);
@@ -232,7 +246,35 @@ export function useChatWebSocket({
             return;
           }
 
-          if (data.type === 'message.new') {
+          if (data.type === 'message.append') {
+            if (payload.sessionId !== sessionId) return;
+            if (
+              typeof payload.id !== 'string' ||
+              typeof payload.content !== 'string' ||
+              !Number.isSafeInteger(payload.offset) ||
+              !Number.isSafeInteger(payload.revision) ||
+              payload.offset < 0 ||
+              payload.revision !== payload.offset + payload.content.length
+            )
+              return;
+            const append: ChatMessageAppend = {
+              id: payload.id,
+              sessionId,
+              content: payload.content,
+              offset: payload.offset,
+              revision: payload.revision,
+            };
+            if (!onMessageAppendRef.current?.(append)) {
+              pendingAppendsRef.current.push(append);
+              if (pendingAppendsRef.current.length > DEFAULT_CHAT_SESSION_MESSAGE_LIMIT) {
+                // Preserve recovery targets across reconnect; ignore further
+                // frames once close begins so this queue remains bounded.
+                ws.close(4000);
+                return;
+              }
+              void catchUpMessages();
+            }
+          } else if (data.type === 'message.new') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
             // Only deliver if content is present (broadcast now includes it)
@@ -392,17 +434,68 @@ export function useChatWebSocket({
 
   connectRef.current = connect;
 
-  const catchUpMessages = useCallback(async () => {
-    try {
-      // Reconnect catch-up fetches only the recent window (like the poll), not the
-      // whole conversation — mergeReplace preserves any earlier-loaded history.
-      const data = await getChatSession(projectId, sessionId, {
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
-      });
-      onCatchUpRef.current(data.messages, data.session, data.state);
-    } catch {
-      // Best-effort catch-up — the next reconnect or explicit reload will retry.
-    }
+  const catchUpMessages = useCallback((): Promise<void> => {
+    if (catchUpFlightRef.current) return catchUpFlightRef.current;
+    const socket = wsRef.current;
+    const flight = (async () => {
+      try {
+        // Reconnect catch-up fetches only the recent window (like the poll), not the
+        // whole conversation — mergeReplace preserves any earlier-loaded history.
+        const data = await getChatSession(projectId, sessionId, {
+          limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+        });
+        if (!mountedRef.current || wsRef.current !== socket) return;
+        await onCatchUpRef.current(data.messages, data.session, data.state);
+        if (!mountedRef.current || wsRef.current !== socket) return;
+        // Keep entries queued until applied: rejected history requests and socket
+        // replacement must leave every unprocessed delta available for retry.
+        const pending = pendingAppendsRef.current.slice();
+        const acknowledge = (append: ChatMessageAppend) => {
+          const index = pendingAppendsRef.current.indexOf(append);
+          if (index >= 0) pendingAppendsRef.current.splice(index, 1);
+        };
+        for (const append of pending) {
+          if (!mountedRef.current || wsRef.current !== socket) return;
+          if (onMessageAppendRef.current?.(append)) {
+            acknowledge(append);
+            continue;
+          }
+          // A base can have fallen behind the newest window while its initial
+          // snapshot was loading. Read authoritative history to its exact ID,
+          // independently of gaps in the cache, before retrying the delta.
+          const start = appendRecoveryPageRef.current ?? data.messages;
+          const older = await fetchHistoryUntil(projectId, sessionId, start, {
+            messageId: append.id,
+            timestamp: 0,
+          });
+          if (!mountedRef.current || wsRef.current !== socket) return;
+          const recovered = mergeMessages(start, older.messages, 'prepend');
+          await onCatchUpRef.current(recovered, data.session, data.state);
+          if (!mountedRef.current || wsRef.current !== socket) return;
+          if (!onMessageAppendRef.current?.(append)) {
+            // Keep only the oldest page as the next pass's cursor; the cache
+            // already holds the recovered rows. Progress survives reconnects.
+            appendRecoveryPageRef.current = recovered.slice(0, DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
+            if (!older.hasMore) {
+              socket?.close(1000);
+              return;
+            }
+          } else {
+            acknowledge(append);
+          }
+        }
+        if (pendingAppendsRef.current.length === 0) appendRecoveryPageRef.current = null;
+        if (wsRef.current === socket && pendingAppendsRef.current.length > 0) socket?.close(4000);
+      } catch {
+        // Reconnect recovers a missing base even if this was the stream's final batch.
+        if (wsRef.current === socket && pendingAppendsRef.current.length > 0) socket?.close(4000);
+      }
+    })();
+    catchUpFlightRef.current = flight;
+    void flight.finally(() => {
+      if (catchUpFlightRef.current === flight) catchUpFlightRef.current = null;
+    });
+    return flight;
   }, [projectId, sessionId]);
 
   // Ping keep-alive with pong timeout detection.
@@ -437,6 +530,9 @@ export function useChatWebSocket({
 
   // Connection lifecycle
   useEffect(() => {
+    pendingAppendsRef.current = [];
+    appendRecoveryPageRef.current = null;
+    catchUpFlightRef.current = null;
     if (!enabled) {
       // Disconnect when disabled
       if (wsRef.current) {

@@ -890,7 +890,8 @@ export async function persistMessageBatch(
     timestamp: string;
     sequence?: number;
     origin?: string | null;
-  }>
+  }>,
+  source?: import('../do/message-stream-ingest').MessageIngestSource
 ): Promise<{
   persisted: number;
   duplicates: number;
@@ -913,7 +914,8 @@ export async function persistMessageBatch(
         // so the persisted message can be collapsed in the UI and excluded from
         // dedup/search/topic/attention. Dropping it here silently loses the tag.
         origin: m.origin ?? null,
-      }))
+      })),
+      source
     )
   );
 }

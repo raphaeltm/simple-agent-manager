@@ -20,6 +20,9 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
+  | 'chat.messageMergingEnabled'
+  | 'chat.messageMergeMaxRowBytes'
+  | 'chat.messageMergeRecentIds'
   | 'deployments.buildContextCollectionMode'
   | 'deployments.buildContextStartTimeoutMs'
   | `deployments.buildContext${'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
@@ -69,6 +72,7 @@ export type AdminSettingName =
   | 'operations.nodeCleanupBlockedRetirementMs'
   | 'operations.nodeProviderDeletionRequestTimeoutMs'
   | 'operations.nodeProviderDeletionConfirmMaxMs'
+  | 'operations.nodeProvisioningAttemptDeadlineMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
   | 'operations.sessionStaleTurnNoWorkMinutes'
   | 'operations.projectDataArchiveMinStorageUsagePercent'

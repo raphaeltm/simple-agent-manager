@@ -1,4 +1,5 @@
 // Types
+export * from './chat-message-append';
 export * from './types';
 
 // Agents

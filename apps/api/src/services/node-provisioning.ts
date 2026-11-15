@@ -23,6 +23,7 @@ import {
   type DurableNodeAllocation,
   NodeAllocationUncertainError,
   recoverNodeAllocation,
+  summarizeProvisioningFailure,
 } from './node-allocation-recovery';
 import {
   assertNodeAllocationPlanCurrent,
@@ -56,10 +57,7 @@ import {
   type NodeTunnelProvisioning,
   type NodeTunnelProvisioningPhase,
 } from './node-tunnel-provisioning';
-import {
-  describeProvisioningFailure,
-  recordTunnelProvisioningFailure,
-} from './node-tunnel-provisioning-failure';
+import { recordTunnelProvisioningFailure } from './node-tunnel-provisioning-failure';
 import { persistError } from './observability';
 import {
   createProviderForUser,
@@ -397,12 +395,14 @@ export async function provisionNode(
         await durable.clearProviderCreateRequested();
         providerCreateRequested = false;
         throw new NodeAllocationUncertainError(
-          `Provider create was not sent; the next attempt retries it (${describeProvisioningFailure(err)})`
+          `Provider create was not sent; the next attempt retries it (${summarizeProvisioningFailure(err)})`,
+          { cause: err }
         );
       }
       if (durable && !providerAllocationRejected) {
         throw new NodeAllocationUncertainError(
-          `Provider allocation is unresolved; exact resource reconciliation is required (${describeProvisioningFailure(err)})`
+          `Provider allocation is unresolved; exact resource reconciliation is required (${summarizeProvisioningFailure(err)})`,
+          { cause: err }
         );
       }
       throw err;

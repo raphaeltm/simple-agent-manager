@@ -1,3 +1,4 @@
+import { CHAT_MESSAGE_APPEND_CAPABILITY } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -119,7 +120,11 @@ export function useProjectWebSocket({
     }
 
     const API_URL = import.meta.env.VITE_API_URL || '';
-    const wsUrl = API_URL.replace(/^http/, 'ws') + `/api/projects/${projectId}/sessions/ws`;
+    // This socket reads lifecycle/comment deltas, not transcript chunks. It is safe
+    // to receive canonical append events, which it intentionally ignores.
+    const wsUrl =
+      API_URL.replace(/^http/, 'ws') +
+      `/api/projects/${projectId}/sessions/ws?messageAppend=${CHAT_MESSAGE_APPEND_CAPABILITY}`;
 
     try {
       const ws = new WebSocket(wsUrl);
