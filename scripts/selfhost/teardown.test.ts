@@ -308,8 +308,9 @@ describe('pnpm selfhost:teardown', () => {
     await install();
     setGcp((db) => {
       const fixture = (name: string) => {
-        const { tags: _tags, ...untagged } = vm(name, OTHER_INSTALL);
-        return untagged;
+        const untagged: Partial<ReturnType<typeof vm>> = vm(name, OTHER_INSTALL);
+        delete untagged.tags;
+        return untagged as ReturnType<typeof vm>;
       };
       db.instances = db.instances
         .filter((i) => i.name !== 'sam-node-other')
@@ -319,17 +320,17 @@ describe('pnpm selfhost:teardown', () => {
     let result = await teardown([]);
     expect(result.status, result.out).toBe(0);
     expect(result.out).toContain(
-      'no other VM in this project uses it (tag sam-agent); 2 other SAM-labelled VM(s) do not carry it (sam-orphan-owned, sam-orphan-foreign)'
+      'no existing VM in this project uses it (tag sam-agent; a VM made later may); 2 other SAM-labelled VM(s) do not carry it (sam-orphan-owned, sam-orphan-foreign)'
     );
     expect(result.out).not.toMatch(/still use it|so keep it/);
     expect(snapshot()).toBe(before);
 
     // Control: a VM that carries the tag uses the rule, labelled by SAM or not; own nodes do not count.
     setGcp((db) => {
-      db.instances.push(
-        vm('sam-node-other', OTHER_INSTALL),
-        { ...vm('hand-made', OTHER_INSTALL), labels: {} }
-      );
+      db.instances.push(vm('sam-node-other', OTHER_INSTALL), {
+        ...vm('hand-made', OTHER_INSTALL),
+        labels: {},
+      });
     });
     result = await teardown([]);
     expect(result.status, result.out).toBe(0);
@@ -337,9 +338,12 @@ describe('pnpm selfhost:teardown', () => {
       '2 other VM(s) in this project use it (tag sam-agent: sam-node-other, hand-made), so keep it'
     );
     expect(result.out).toContain(
-      'no other VM in this project uses it (tag sam-deployment-app-routes); 3 other SAM-labelled VM(s) do not carry it'
+      'no existing VM in this project uses it (tag sam-deployment-app-routes; a VM made later may); 3 other SAM-labelled VM(s) do not carry it'
     );
-    expect(Object.keys(gcp().firewalls).sort()).toEqual(['sam-allow-agent', 'sam-allow-app-routes']);
+    expect(Object.keys(gcp().firewalls).sort()).toEqual([
+      'sam-allow-agent',
+      'sam-allow-app-routes',
+    ]);
   });
 
   it('dry run of either mode changes nothing and prints the plan', async () => {

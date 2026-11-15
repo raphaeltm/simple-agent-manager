@@ -396,8 +396,9 @@ function listAllInstances(ctx: TeardownContext, project: string): GcpInstance[] 
 
 export function parseFirewallTargets(json: string): GcpFirewallTargets | null {
   try {
-    const v = JSON.parse(json) as Record<string, unknown>;
-    if (!v || typeof v !== 'object') return null;
+    const raw: unknown = JSON.parse(json);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const v = raw as Record<string, unknown>;
     const targetTags = Array.isArray(v.targetTags)
       ? v.targetTags.filter((t): t is string => typeof t === 'string')
       : [];
@@ -447,15 +448,19 @@ export function firewallUsage(
   if (users.length > 0) {
     return `${users.length} other VM(s) in this project use it (${target}: ${names(users)}), so keep it`;
   }
-  const lookalikes = others.filter((i) => i.labels[SAM_MANAGED_LABEL_KEY] === SAM_MANAGED_LABEL_VALUE);
+  const lookalikes = others.filter(
+    (i) => i.labels[SAM_MANAGED_LABEL_KEY] === SAM_MANAGED_LABEL_VALUE
+  );
   const aside =
     lookalikes.length > 0
       ? `; ${lookalikes.length} other SAM-labelled VM(s) do not carry it (${names(lookalikes)})`
       : '';
-  return `no other VM in this project uses it (${target})${aside}`;
+  return `no existing VM in this project uses it (${target}; a VM made later may)${aside}`;
 }
 
 function names(instances: GcpInstance[]): string {
   const shown = instances.slice(0, 5).map((i) => i.name);
-  return instances.length > 5 ? `${shown.join(', ')} and ${instances.length - 5} more` : shown.join(', ');
+  return instances.length > 5
+    ? `${shown.join(', ')} and ${instances.length - 5} more`
+    : shown.join(', ');
 }

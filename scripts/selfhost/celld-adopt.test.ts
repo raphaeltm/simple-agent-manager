@@ -12,7 +12,12 @@ import type { AddressInfo } from 'node:net';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { adoptNewDeployment, AGENT_SIGN_IN_PATH, checkAgentSignInRoute } from './celld-adopt';
+import {
+  adoptAndCheck,
+  adoptNewDeployment,
+  AGENT_SIGN_IN_PATH,
+  checkAgentSignInRoute,
+} from './celld-adopt';
 import { waitForHealth } from './deploy-steps';
 
 interface Version {
@@ -123,6 +128,16 @@ describe('deploy adoption (G3)', () => {
     );
     expect(reloads).toBe(1);
     expect(serving.id).toBe('v1');
+  });
+
+  it('adoptAndCheck (rotate, migrate, switch) also stops at once on a version that does not build', async () => {
+    celldDeploy({ id: 'v2', builds: false, agentSignIn: false });
+    const result = await adoptAndCheck(box);
+    expect(result.healthy).toBe(false);
+    expect(result.detail).toMatch(
+      /HTTP 422 version v2: syntax\)\. The previous version keeps serving$/
+    );
+    expect(reloads).toBe(1);
   });
 
   it('fails after the window when celld never answers', async () => {

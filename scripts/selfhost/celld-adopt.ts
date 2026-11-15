@@ -67,9 +67,12 @@ export async function requestAdoption(box: Box): Promise<AdoptionResult> {
     };
   }
   const body = (await reload.text().catch(() => '')).slice(0, 2000);
-  let parsed: { outcome?: unknown; version?: unknown; error?: unknown } = {};
+  let parsed: Record<string, unknown> = {};
   try {
-    parsed = JSON.parse(body) as typeof parsed;
+    const raw: unknown = JSON.parse(body);
+    if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+      parsed = raw as Record<string, unknown>;
+    }
   } catch {
     parsed = {};
   }
@@ -80,10 +83,15 @@ export async function requestAdoption(box: Box): Promise<AdoptionResult> {
   }
   const error =
     typeof parsed.error === 'string' ? `: ${parsed.error.slice(0, MAX_DETAIL_CHARS)}` : '';
+  // celld before 0.6.3 has no /reload; the deploy pins 0.6.3 (versions.ts CELLD_VERSION).
+  const tooOld = reload.status === 404 ? '; celld 0.6.3 or later is needed for /reload' : '';
+  const buildFailed = reload.status === 422;
   return {
     adopted: false,
-    buildFailed: reload.status === 422,
-    detail: `celld did not adopt the deployment (HTTP ${reload.status}${version}${error})`,
+    buildFailed,
+    detail:
+      `celld did not adopt the deployment (HTTP ${reload.status}${version}${error})${tooOld}` +
+      (buildFailed ? '. The previous version keeps serving' : ''),
   };
 }
 
@@ -97,9 +105,7 @@ export async function adoptNewDeployment(box: Box): Promise<string> {
   for (;;) {
     const result = await requestAdoption(box);
     if (result.adopted) return result.detail;
-    if (result.buildFailed) {
-      throw new Error(`${result.detail}. The previous version keeps serving.`);
-    }
+    if (result.buildFailed) throw new Error(`${result.detail}.`);
     if (Date.now() + pollInterval() >= deadline) {
       throw new Error(
         `${result.detail}. celld adopts it by itself within CELLD_DEPLOY_POLL_S (default 30 s); ` +
@@ -118,15 +124,20 @@ export async function adoptNewDeployment(box: Box): Promise<string> {
 export async function adoptAndCheck(box: Box): Promise<{ healthy: boolean; detail: string }> {
   const deadline = windowDeadline();
   for (;;) {
-    const result = await adoptAndCheckOnce(box);
-    if (result.healthy || Date.now() + pollInterval() >= deadline) return result;
+    const { final, ...result } = await adoptAndCheckOnce(box);
+    if (result.healthy || final || Date.now() + pollInterval() >= deadline) return result;
     await sleep(pollInterval());
   }
 }
 
-async function adoptAndCheckOnce(box: Box): Promise<{ healthy: boolean; detail: string }> {
+/** `final`: a version that did not build; retrying cannot change the answer. */
+async function adoptAndCheckOnce(
+  box: Box
+): Promise<{ healthy: boolean; detail: string; final?: boolean }> {
   const adoption = await requestAdoption(box);
-  if (!adoption.adopted) return { healthy: false, detail: adoption.detail };
+  if (!adoption.adopted) {
+    return { healthy: false, detail: adoption.detail, final: adoption.buildFailed };
+  }
   const health = await fetch(`http://127.0.0.1:${box.CELLD_PORT || '8080'}/health`, {
     headers: apiHeaders(box),
     signal: AbortSignal.timeout(DEFAULT_HEALTH_REQUEST_TIMEOUT_MS),
@@ -148,12 +159,15 @@ export async function checkAgentSignInRoute(box: Box): Promise<void> {
   const deadline = windowDeadline();
   let last = 'no response';
   for (;;) {
-    const response = await fetch(`http://127.0.0.1:${box.CELLD_PORT || '8080'}${AGENT_SIGN_IN_PATH}`, {
-      method: 'POST',
-      headers: { ...apiHeaders(box), 'content-type': 'application/json' },
-      body: '{}',
-      signal: AbortSignal.timeout(DEFAULT_ROUTE_REQUEST_TIMEOUT_MS),
-    }).catch((error: unknown) => error);
+    const response = await fetch(
+      `http://127.0.0.1:${box.CELLD_PORT || '8080'}${AGENT_SIGN_IN_PATH}`,
+      {
+        method: 'POST',
+        headers: { ...apiHeaders(box), 'content-type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(DEFAULT_ROUTE_REQUEST_TIMEOUT_MS),
+      }
+    ).catch((error: unknown) => error);
     if (response instanceof Response) {
       await response.arrayBuffer().catch(() => undefined);
       if (response.status !== 404 && response.status < 500) return;

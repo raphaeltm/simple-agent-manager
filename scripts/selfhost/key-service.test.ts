@@ -244,7 +244,7 @@ describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
   it('removes it into a new bundle, and keeps every other secret', async () => {
     await seal({ ...OPERATOR, PROVIDER_ORPHAN_MIN_AGE_MS: '900000' });
     const before = await newest();
-    const { PROVIDER_ORPHAN_MIN_AGE_MS: _removed, ...rest } = OPERATOR as Record<string, string>;
+    const rest: Record<string, string> = { ...OPERATOR };
     const lines: string[] = [];
     const r = await resolveSealedSecrets({
       settings: settings(),
@@ -256,9 +256,12 @@ describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
     expect(r.sealed).toBe(true);
     const opened = await newest();
     expect(opened).not.toHaveProperty('PROVIDER_ORPHAN_MIN_AGE_MS');
-    const { PROVIDER_ORPHAN_MIN_AGE_MS: _gone, ...expected } = before;
+    const expected = { ...before };
+    delete expected.PROVIDER_ORPHAN_MIN_AGE_MS;
     expect(opened).toEqual(expected);
-    expect(lines.join('\n')).toContain('removing PROVIDER_ORPHAN_MIN_AGE_MS from the sealed secrets');
+    expect(lines.join('\n')).toContain(
+      'removing PROVIDER_ORPHAN_MIN_AGE_MS from the sealed secrets'
+    );
     // The next plain deploy keeps it removed.
     expect((await seal(rest)).secrets).not.toHaveProperty('PROVIDER_ORPHAN_MIN_AGE_MS');
   });
