@@ -1,5 +1,5 @@
-import { act, renderHook } from '@testing-library/react';
 import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useChatWebSocket } from '../../../src/hooks/useChatWebSocket';
