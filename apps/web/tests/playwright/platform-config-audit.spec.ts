@@ -10,110 +10,105 @@ const ADMIN_USER = makeMockUser({
   userId: 'admin-platform-config',
 });
 
-const PLATFORM_STATUS = {
-  setupCompleted: false,
-  setupForced: false,
-  integrations: {
-    githubOAuth: {
-      configured: true,
-      source: 'environment',
-      label: 'set via environment fallback',
-      fields: {
-        clientId: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
-        clientSecret: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
-      },
-    },
-    githubApp: {
-      configured: true,
-      source: 'environment',
-      label: 'set via environment fallback',
-      fields: {
-        appId: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
-        appPrivateKey: {
-          configured: true,
-          source: 'environment',
-          updatedAt: null,
-          updatedBy: null,
-        },
-        appSlug: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
-      },
-    },
-    githubWebhook: {
-      configured: false,
-      source: 'unset',
-      label: 'not configured',
-      fields: {
-        webhookSecret: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
-      },
-    },
-    googleOAuth: {
-      configured: true,
-      source: 'runtime',
-      label: 'set here',
-      fields: {
-        clientId: {
-          configured: true,
-          source: 'runtime',
-          updatedAt: '2026-07-07T00:00:00Z',
-          updatedBy: 'admin-platform-config',
-        },
-        clientSecret: {
-          configured: true,
-          source: 'runtime',
-          updatedAt: '2026-07-07T00:00:00Z',
-          updatedBy: 'admin-platform-config',
-        },
-      },
-    },
-    googleInfrastructureOAuth: {
-      configured: true,
-      source: 'runtime',
-      label: 'set here',
-      fields: {
-        clientId: {
-          configured: true,
-          source: 'runtime',
-          updatedAt: '2026-07-16T12:00:00Z',
-          updatedBy: 'admin-platform-config',
-        },
-        clientSecret: {
-          configured: true,
-          source: 'runtime',
-          updatedAt: '2026-07-16T12:00:00Z',
-          updatedBy: 'admin-platform-config',
-        },
-      },
-    },
-    gitlabOAuth: {
-      configured: false,
-      source: 'unset',
-      label: 'not configured',
-      fields: {
-        host: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
-        clientId: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
-        clientSecret: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
-      },
-    },
-  },
-  feedbackProject: {
-    configured: true,
-    source: 'environment',
-    label: 'set via environment fallback',
-    state: 'ready',
-    projectId: 'feedback-project-1',
-    project: { id: 'feedback-project-1', name: 'Platform Feedback', status: 'active' },
-    message:
-      'Report Issue, automated platform triage, incident trigger sweeps, and private incident MCP tools use this project for new feedback.',
-    fields: {
-      projectId: {
-        configured: true,
-        source: 'environment',
-        updatedAt: null,
-        updatedBy: null,
-      },
-    },
-  },
+type Source = 'runtime' | 'environment' | 'legacy-kv' | 'unset';
+const LABELS: Record<Source, string> = {
+  runtime: 'stored in SAM',
+  environment: 'Worker environment fallback',
+  'legacy-kv': 'legacy KV value',
+  unset: 'not configured',
 };
+const LONG_ACTOR =
+  'Operator With An Extraordinarily Long Display Name <operator.with.a.very.long.mailbox.name.for.testing@ops-team.long-subdomain.example.com>';
+
+function field(source: Source, updatedByLabel: string | null = null) {
+  const stored = source === 'runtime';
+  return {
+    configured: source !== 'unset',
+    source,
+    label: LABELS[source],
+    updatedAt: stored ? '2026-11-12T04:07:00Z' : null,
+    updatedBy: stored ? 'user-id' : null,
+    updatedByLabel: stored ? updatedByLabel : null,
+  };
+}
+
+function group(fields: Record<string, ReturnType<typeof field>>, label: string) {
+  const values = Object.values(fields);
+  const sources = values.map((item) => item.source);
+  return {
+    configured: values.every((item) => item.configured),
+    source:
+      (['runtime', 'environment', 'legacy-kv'] as const).find((s) => sources.includes(s)) ??
+      'unset',
+    label,
+    clearable: sources.includes('runtime'),
+    fields,
+  };
+}
+
+const SETUP_ACTOR = 'first-run setup (unauthenticated)';
+
+function platformStatus(gitlabCleared = false) {
+  return {
+    setupCompleted: true,
+    setupForced: false,
+    integrations: {
+      githubOAuth: group(
+        { clientId: field('runtime', LONG_ACTOR), clientSecret: field('environment') },
+        'stored in SAM + Worker environment fallback'
+      ),
+      githubApp: group(
+        {
+          appId: field('environment'),
+          appPrivateKey: field('environment'),
+          appSlug: field('environment'),
+        },
+        'Worker environment fallback'
+      ),
+      githubWebhook: group({ webhookSecret: field('unset') }, 'not configured'),
+      googleOAuth: group(
+        {
+          clientId: field('runtime', 'Admin User <admin@example.com>'),
+          clientSecret: field('runtime', 'Admin User <admin@example.com>'),
+        },
+        'stored in SAM'
+      ),
+      googleInfrastructureOAuth: group(
+        {
+          clientId: field('runtime', 'Admin User <admin@example.com>'),
+          clientSecret: field('runtime', 'Admin User <admin@example.com>'),
+        },
+        'stored in SAM'
+      ),
+      gitlabOAuth: gitlabCleared
+        ? group(
+            { host: field('unset'), clientId: field('unset'), clientSecret: field('unset') },
+            'not configured'
+          )
+        : group(
+            {
+              host: field('runtime', SETUP_ACTOR),
+              clientId: field('runtime', SETUP_ACTOR),
+              clientSecret: field('runtime', SETUP_ACTOR),
+            },
+            'stored in SAM'
+          ),
+    },
+    feedbackProject: {
+      configured: true,
+      source: 'environment',
+      label: LABELS.environment,
+      state: 'ready',
+      projectId: 'feedback-project-1',
+      project: { id: 'feedback-project-1', name: 'Platform Feedback', status: 'active' },
+      message:
+        'Report Issue, automated platform triage, incident trigger sweeps, and private incident MCP tools use this project for new feedback.',
+      fields: { projectId: field('environment') },
+    },
+  };
+}
+
+const PLATFORM_STATUS = platformStatus();
 
 async function respondJson(route: Route, status: number, body: unknown) {
   await route.fulfill({
@@ -133,6 +128,7 @@ async function setupMocks(
     window.localStorage.setItem('sam-onboarding-wizard-dismissed-admin-platform-config', 'true');
   });
   await page.routeWebSocket('**/api/notifications/ws', () => undefined);
+  let gitlabCleared = false;
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -202,7 +198,13 @@ async function setupMocks(
       });
 
     if (path === '/api/admin/platform-config') {
-      return respondJson(route, 200, { status: PLATFORM_STATUS });
+      if (request.method() === 'PUT') {
+        const body = JSON.parse(request.postData() ?? '{}') as { config?: { clear?: string[] } };
+        gitlabCleared ||= Boolean(body.config?.clear?.includes('gitlabOAuth'));
+      }
+      return respondJson(route, 200, {
+        status: gitlabCleared ? platformStatus(true) : PLATFORM_STATUS,
+      });
     }
 
     return respondJson(route, 200, {});
@@ -219,8 +221,13 @@ test.describe('Platform config admin UI', () => {
     await expect(page.getByRole('heading', { name: 'Google infrastructure OAuth' })).toBeVisible();
     await expect(page.getByText(/\/auth\/google\/callback/)).toBeVisible();
     await expect(page.getByText(/\/api\/deployment\/gcp\/callback/)).toBeVisible();
-    await expect(page.getByTestId('google-infrastructure-audit')).toContainText(
-      'admin-platform-config'
+    const gitlab = page.getByTestId('integration-gitlab-oauth');
+    await expect(gitlab.getByTestId('platform-section-audit')).toContainText(
+      'by first-run setup (unauthenticated)'
+    );
+    await expect(gitlab).not.toContainText('environment fallback');
+    await expect(page.getByTestId('integration-github-oauth')).toContainText(
+      'stored in SAM + Worker environment fallback'
     );
     await expect(page.getByRole('heading', { name: 'Operations project' })).toBeVisible();
     await expect(page.getByLabel('Operations project')).toHaveValue('feedback-project-1');
@@ -228,14 +235,66 @@ test.describe('Platform config admin UI', () => {
       'Report Issue, automated platform triage'
     );
     await expect(
-      page.getByRole('button', { name: 'Remove runtime infrastructure client' })
+      page.getByRole('button', { name: 'Clear stored Google infrastructure OAuth values' })
     ).toBeVisible();
+    // Env-only and unset groups offer nothing to clear.
+    await expect(page.getByRole('button', { name: 'Clear stored GitHub App values' })).toHaveCount(
+      0
+    );
+    await expect(
+      page.getByRole('button', { name: 'Clear stored GitHub Webhooks values' })
+    ).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Load more projects' })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-admin');
     await page.getByRole('heading', { name: 'Operations project' }).scrollIntoViewIfNeeded();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-admin-feedback');
+  });
+
+  test('clearing GitLab asks for confirmation, sends only the clear, and updates without reload', async ({
+    page,
+  }) => {
+    await setupMocks(page);
+    await page.goto('/admin/integrations');
+    const gitlab = page.getByTestId('integration-gitlab-oauth');
+    await gitlab.scrollIntoViewIfNeeded();
+    await assertNoOverflow(page);
+    await screenshot(page, 'platform-config-gitlab-stored-by-setup');
+    // Mark the document so a full reload would be detectable.
+    await page.evaluate(() => ((window as unknown as { __noReload: boolean }).__noReload = true));
+
+    await gitlab.getByRole('button', { name: 'Clear stored GitLab OAuth values' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Clear GitLab OAuth?' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('its sign-in button disappears');
+    const box = await dialog.boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 1);
+    await assertNoOverflow(page);
+    await screenshot(page, 'platform-config-clear-confirm');
+
+    const saveRequest = page.waitForRequest(
+      (request) =>
+        new URL(request.url()).pathname === '/api/admin/platform-config' &&
+        request.method() === 'PUT'
+    );
+    await dialog.getByRole('button', { name: 'Clear stored values' }).click();
+    const body = JSON.parse((await saveRequest).postData() ?? '{}') as { config?: unknown };
+    expect(body.config).toEqual({ clear: ['gitlabOAuth'] });
+
+    await expect(dialog).toHaveCount(0);
+    await expect(gitlab).toContainText('not configured');
+    await expect(gitlab.getByRole('button', { name: /^Clear stored/ })).toHaveCount(0);
+    await expect(page.getByText('Stored integration values cleared.')).toBeVisible();
+    await expect(page.locator('#integration-heading-gitlabOAuth')).toBeFocused();
+    expect(
+      await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)
+    ).toBe(true);
+    await gitlab.scrollIntoViewIfNeeded();
+    await assertNoOverflow(page);
+    await screenshot(page, 'platform-config-gitlab-cleared');
   });
 
   test('admin feedback project selector sends the selected project to the platform config API', async ({

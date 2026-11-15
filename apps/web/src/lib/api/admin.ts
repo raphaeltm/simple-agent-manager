@@ -407,6 +407,7 @@ export type {
   PlatformConfigStatus,
   PlatformConfigStatusResponse,
   PlatformIntegrationConfigInput,
+  PlatformIntegrationGroup,
   PlatformIntegrationStatus,
 } from './admin-platform-config';
 export { fetchAdminPlatformConfig, updateAdminPlatformConfig } from './admin-platform-config';

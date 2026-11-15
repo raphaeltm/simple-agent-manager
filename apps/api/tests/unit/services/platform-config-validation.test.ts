@@ -109,15 +109,15 @@ describe('validatePlatformIntegrationInput — Google infrastructure OAuth', () 
     });
 
     const removal = await validatePlatformIntegrationInput(env, {
+      clear: ['googleInfrastructureOAuth'],
       googleInfrastructure: {
-        remove: true,
         clientId: 'infra-client-id',
         clientSecret: 'infra-client-secret',
       },
     });
     expect(removal.ok).toBe(false);
     expect(removal.errors).toContain(
-      'Google infrastructure OAuth removal cannot include replacement values'
+      'Google infrastructure OAuth cannot be cleared and set in the same save'
     );
   });
 
