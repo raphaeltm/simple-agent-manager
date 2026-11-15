@@ -231,8 +231,18 @@ describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
     if (!bundle) throw new Error('no bundle');
     return openBundle(bundle, createFileProvider({ SAM_KEY_FILE: join(state, 'key-agent/kek') }));
   };
-  const seal = (operatorSecrets: Record<string, string>, unset?: string[]) =>
-    resolveSealedSecrets({ settings: settings(), platformKeysFile: null, operatorSecrets, unset });
+  // Bundles are ordered by createdAt (ms); two seals in one millisecond would tie, which no real
+  // deploy can do. Space them as the other bundle tests do.
+  const tick = () => new Promise((done) => setTimeout(done, 5));
+  const seal = async (operatorSecrets: Record<string, string>, unset?: string[]) => {
+    await tick();
+    return resolveSealedSecrets({
+      settings: settings(),
+      platformKeysFile: null,
+      operatorSecrets,
+      unset,
+    });
+  };
 
   it('reproduces R16: a deleted secrets.env line survives in the sealed secrets', async () => {
     await seal({ PROVIDER_ORPHAN_MIN_AGE_MS: '900000' });
@@ -246,6 +256,7 @@ describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
     const before = await newest();
     const rest: Record<string, string> = { ...OPERATOR };
     const lines: string[] = [];
+    await tick();
     const r = await resolveSealedSecrets({
       settings: settings(),
       platformKeysFile: null,
@@ -255,6 +266,7 @@ describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
     });
     expect(r.sealed).toBe(true);
     const opened = await newest();
+    expect(listBundles(join(state, 'key-agent/bundles'))[0]?.bundleId).toBe(r.bundleId);
     expect(opened).not.toHaveProperty('PROVIDER_ORPHAN_MIN_AGE_MS');
     const expected = { ...before };
     delete expected.PROVIDER_ORPHAN_MIN_AGE_MS;
