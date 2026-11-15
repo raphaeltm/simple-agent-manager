@@ -60,7 +60,14 @@ export interface ProviderOrphanResult {
   skippedYoung: number;
   skippedClaimed: number;
   skippedAmbiguousClaim: number;
+  /** Platform-account and infrastructure failures: the sweep itself did not work. */
   errors: number;
+  /**
+   * Failures confined to one user or project cloud account (revoked token, deleted project,
+   * failed list or delete there). Logged per account; they do not fail the platform sweep, so
+   * one tenant's dead credential cannot mask a platform failure.
+   */
+  accountErrors: number;
 }
 
 export function emptyProviderOrphanResult(
@@ -83,6 +90,7 @@ export function emptyProviderOrphanResult(
     skippedClaimed: 0,
     skippedAmbiguousClaim: 0,
     errors: 0,
+    accountErrors: 0,
     ...overrides,
   };
 }
@@ -137,6 +145,7 @@ export async function reconcileProviderOrphans(
     let lastAttempted: (typeof credentials)[number] | undefined;
     for (const credential of credentials) {
       if (Date.now() >= bounds.deadline || deletionsStarted(result) >= destroyLimit) break;
+      const errorsBefore = result.errors;
       try {
         const resolved = await resolveInventoryProvider(env, credential);
         if (resolved) {
@@ -158,6 +167,10 @@ export async function reconcileProviderOrphans(
         log.warn('provider_orphan.account_inventory_failed', {
           error: error instanceof Error ? error.message : String(error),
         });
+      } finally {
+        // Everything that failed inside one user/project account is that account's failure.
+        result.accountErrors += result.errors - errorsBefore;
+        result.errors = errorsBefore;
       }
       lastAttempted = credential;
     }

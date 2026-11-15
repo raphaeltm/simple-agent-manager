@@ -56,6 +56,7 @@ function instance(id: string, installation: string | undefined) {
     name: `vm-${id}`,
     status: 'RUNNING',
     machineType: 'zones/us-central1-a/machineTypes/e2-medium',
+    zone: 'https://www.googleapis.com/compute/v1/projects/test-project/zones/us-central1-a',
     creationTimestamp: '2026-01-01T00:00:00Z',
     labels: {
       managed: 'simple-agent-manager',
@@ -211,7 +212,9 @@ describe('platform GCP orphan sweep configuration and authentication', () => {
       .mockResolvedValueOnce({ provider: { listVMs, deleteVM } } as never);
 
     const result = await runProviderOrphanReconciliation(env);
-    expect(result.errors).toBe(2);
+    // Platform configuration failure fails the sweep; the account failure is account-scoped.
+    expect(result.errors).toBe(1);
+    expect(result.accountErrors).toBe(1);
     expect(result.skipped).toBe(false);
     expect(resolveInventoryProvider).toHaveBeenCalledTimes(2);
     expect(listVMs).toHaveBeenCalledWith(
