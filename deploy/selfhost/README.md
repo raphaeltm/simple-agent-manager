@@ -1199,8 +1199,9 @@ entry (`apps/api/src/index.ts`) do not mention it: the celld config adds the `HO
 and its own migration tag `selfhost-hosted-git-v1` (`scripts/selfhost/selfhost-durable-objects.ts`),
 and the generated entry exports the class and mounts the `/git/*` route from
 `apps/api/src/selfhost/hosted-git.ts`. A box first deployed when the class was wrangler.toml's
-migration `v23` keeps its repositories: celld keys an object's storage by Worker, class and id,
-not by migration tag.
+migration `v23` should keep its repositories (the class name and binding are unchanged; observed
+with `celld dev`). Upgrading such a box in place with `celld deploy` has not been verified yet;
+rebuild it from scratch if the deploy refuses the migration list.
 
 - Remote: `https://api.SAM_DOMAIN/git/<repo>.git`, served by the Worker's `/git/*` route (no Caddy
   fragment). Every request needs a SAM repository token as the HTTP Basic password (any username).

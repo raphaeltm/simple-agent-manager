@@ -39,9 +39,6 @@ export class HostedGitRepoTest extends HostedGitRepo {
 const app = new Hono<{ Bindings: Env }>();
 app.onError(handleAppError);
 
-// The production mount (the generated celld entry calls the same function).
-mountHostedGitRoute(app);
-
 const projects = new Hono<{ Bindings: Env }>();
 projects.use('*', async (c, next) => {
   const userId = c.req.header('x-test-user-id');
@@ -54,6 +51,9 @@ projects.route('/', hostedGitTokenRoutes);
 projects.route('/', repoBrowseRoutes);
 app.route('/api/projects', projects);
 app.route('/api/workspaces', runtimeRoutes);
+
+// The production mount, after the other routes as in the generated celld entry.
+mountHostedGitRoute(app);
 
 app.post('/__test/hosted-git-token', async (c) => {
   const body = await c.req.json<{

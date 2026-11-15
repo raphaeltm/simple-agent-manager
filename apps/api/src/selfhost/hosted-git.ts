@@ -33,6 +33,11 @@ export { HostedGitRepo } from '../durable-objects/hosted-git-repo';
  * session of the default `fetch`. tests/unit/selfhost/hosted-git-route-order.test.ts pins that.
  */
 export function mountHostedGitRoute(app: Hono<{ Bindings: Env }>): void {
+  // An empty app means this is not the instance index.ts registered on (for example a bundle that
+  // loaded app.ts twice); the route would then serve nothing and every clone would 404 silently.
+  if (app.routes.length === 0) {
+    throw new Error('mountHostedGitRoute: the app has no routes; mount after src/index.ts');
+  }
   app.all(`${HOSTED_GIT_PATH_PREFIX}*`, async (c, next) => {
     if (!isLocalHostedGitActive(c.env)) return next();
     const response = await handleHostedGitRequest(c.req.raw, c.env);

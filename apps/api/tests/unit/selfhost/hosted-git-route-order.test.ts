@@ -9,6 +9,7 @@
  * Hono runs every matching handler in registration order, so the matching set is computed from
  * `app.routes` with Hono's own router.
  */
+import { Hono } from 'hono';
 import { TrieRouter } from 'hono/router/trie-router';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -27,6 +28,10 @@ function matching(method: string, path: string): number[] {
 }
 
 describe('hosted git route position in the self-host build', () => {
+  it('refuses to mount on an app index.ts has not registered on', () => {
+    expect(() => mountHostedGitRoute(new Hono())).toThrow(/mount after src\/index.ts/);
+  });
+
   it('runs after exactly the shared global middleware, and nothing else matches /git/*', () => {
     const sharedRouteCount = app.routes.length;
     // The shared entry alone serves no /git/* route: the Cloudflare build has none.

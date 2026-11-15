@@ -5,19 +5,21 @@
  * classes: a Cloudflare Durable Object migration cannot be taken back, and the Cloudflare bundle
  * must not carry their code. The celld config (`buildCelldConfig`) appends each one's binding
  * and migration after wrangler.toml's, and the generated celld entry (`celld-project.ts`) exports
- * the class from `ENTRY_MODULE`, which the shared entry `apps/api/src/index.ts` never imports.
+ * the class from `SELFHOST_ENTRY_MODULE`, which the shared entry `apps/api/src/index.ts` never
+ * imports. Today that module is hosted git's; a second self-host-only class must be exported from
+ * the same module (tests/unit/selfhost/selfhost-only-modules.test.ts checks every class is).
  *
  * celld 0.6.3 validates migrations declaratively (a tag or a class may appear once; a class with
- * storage must be declared in `new_sqlite_classes`) and keys an object's storage by Worker
- * name, class name and id, not by migration tag. So a box first deployed when this class was
- * wrangler.toml's `v23` keeps its repositories under this tag. Observed with `celld dev`
- * (task file tasks/archive/2026-11-15-hosted-git-selfhost-only-build.md).
+ * storage must be declared in `new_sqlite_classes`). Observed with `celld dev`, which keeps state
+ * across restarts: an object written while this class was wrangler.toml's `v23` keeps its data
+ * once the class is declared under this tag. Bucket-mode `celld deploy` over an existing box is not
+ * yet verified (task tasks/archive/2026-11-15-hosted-git-selfhost-only-build.md).
  */
 
 export interface SelfhostDurableObject {
   /** Worker binding name (`Env.HOSTED_GIT`). */
   binding: string;
-  /** Class exported by `ENTRY_MODULE`. */
+  /** Class exported by `SELFHOST_ENTRY_MODULE`. */
   className: string;
   /** celld migration tag; distinct from wrangler.toml's `vN` tags so the two never collide. */
   migrationTag: string;

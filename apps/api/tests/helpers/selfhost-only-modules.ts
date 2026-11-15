@@ -22,9 +22,8 @@ export const API_SRC = resolve(REPO_ROOT, 'apps/api/src');
 /** Repository-relative path prefixes only the self-host build may contain. */
 export const SELFHOST_ONLY_PATHS: readonly string[] = [
   'apps/api/src/selfhost/',
-  'apps/api/src/durable-objects/hosted-git-repo.ts',
-  'apps/api/src/durable-objects/hosted-git-gc.ts',
-  'apps/api/src/durable-objects/hosted-git-ls-refs.ts',
+  // hosted-git-repo.ts, hosted-git-gc.ts, hosted-git-ls-refs.ts and any file split out of them.
+  'apps/api/src/durable-objects/hosted-git-',
   'apps/api/src/vendor/dgit/',
 ];
 
@@ -82,9 +81,7 @@ export function collectImportGraph(entry: string): ImportGraph {
 
 /** Every self-host-only file and package `graph` reaches, as human-readable findings. */
 export function selfhostOnlyFindings(graph: ImportGraph): string[] {
-  const files = graph.files.filter((file) =>
-    SELFHOST_ONLY_PATHS.some((path) => (path.endsWith('/') ? file.startsWith(path) : file === path))
-  );
+  const files = graph.files.filter((file) => SELFHOST_ONLY_PATHS.some((p) => file.startsWith(p)));
   const packages = SELFHOST_ONLY_PACKAGES.filter((name) => graph.packages.has(name)).map(
     (name) => `package ${name} (imported by ${graph.packages.get(name)})`
   );
