@@ -97,9 +97,32 @@ authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, async (c, next) => {
   }
 });
 
+/**
+ * better-auth endpoints that hand out, refresh or use a stored provider token. SAM reads tokens
+ * server-side through `getBetterAuthAccessTokenForProvider`, which only uses an account the
+ * configured identity host issued; over HTTP these would refresh any of the caller's accounts
+ * against, or send its token to, whatever host is configured now. No SAM client calls them.
+ */
+const CLOSED_PROVIDER_TOKEN_PATHS = new Set([
+  '/api/auth/get-access-token',
+  '/api/auth/refresh-token',
+  '/api/auth/account-info',
+]);
+
+function isClosedProviderTokenPath(pathname: string): boolean {
+  const path = pathname
+    .toLowerCase()
+    .replace(/\/{2,}/g, '/')
+    .replace(/(.)\/$/, '$1');
+  return CLOSED_PROVIDER_TOKEN_PATHS.has(path);
+}
+
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
+  const pathname = new URL(c.req.url).pathname;
   // SAM has no passwords: the plugin's reset, verification and email-change routes stay closed.
-  if (isClosedEmailOtpPath(new URL(c.req.url).pathname)) throw errors.notFound('Route');
+  if (isClosedEmailOtpPath(pathname) || isClosedProviderTokenPath(pathname)) {
+    throw errors.notFound('Route');
+  }
   try {
     const auth = await createAuth(c.env, { waitUntil: executionWaitUntil(c) });
     if (await isAgentSessionChangingAccount(auth, c.req.raw)) {
