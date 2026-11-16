@@ -99,6 +99,12 @@ function publicPortRequest(port: number, path = '/git-credential?host=github.com
   );
 }
 
+function forwardedRequest(runtime: 'vm' | 'cf-container'): Request {
+  if (runtime === 'cf-container') return proxyHttp.mock.calls[0]![0] as Request;
+  const [url, options] = vi.mocked(fetch).mock.calls[0]!;
+  return new Request(url, options);
+}
+
 describe('cf-container workspace port routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -137,10 +143,7 @@ describe('cf-container workspace port routes', () => {
       );
       expect(response.status).toBe(304);
       expect(response.headers.get('etag')).toBe('"cached"');
-      const forwarded =
-        runtime === 'cf-container'
-          ? (proxyHttp.mock.calls[0]![0] as Request)
-          : new Request(vi.mocked(fetch).mock.calls[0]![0], vi.mocked(fetch).mock.calls[0]![1]);
+      const forwarded = forwardedRequest(runtime);
       expect(forwarded.redirect).toBe('manual');
     }
   );
@@ -184,10 +187,7 @@ describe('cf-container workspace port routes', () => {
       );
       expect(response.status).toBe(502);
       expect(response.headers.get('location')).toBeNull();
-      const forwarded =
-        runtime === 'cf-container'
-          ? (proxyHttp.mock.calls[0]![0] as Request)
-          : new Request(vi.mocked(fetch).mock.calls[0]![0], vi.mocked(fetch).mock.calls[0]![1]);
+      const forwarded = forwardedRequest(runtime);
       expect(forwarded.redirect).toBe('manual');
     }
   );
@@ -208,10 +208,7 @@ describe('cf-container workspace port routes', () => {
       const response = await worker.default.fetch(request, containerEnv());
       expect(response.status).toBe(302);
       expect(response.headers.get('location')).toBe('/assets/probe.txt');
-      const forwarded =
-        runtime === 'cf-container'
-          ? (proxyHttp.mock.calls[0]![0] as Request)
-          : new Request(vi.mocked(fetch).mock.calls[0]![0], vi.mocked(fetch).mock.calls[0]![1]);
+      const forwarded = forwardedRequest(runtime);
       expect(forwarded.headers.get('cookie')).toBe('app_session=app; theme=dark');
       expect(forwarded.redirect).toBe('manual');
     }
