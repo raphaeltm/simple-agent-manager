@@ -138,3 +138,7 @@ Historically flaky files to re-check: `repo-selector.test.tsx`, `agents-section.
 - `tasks/archive/2026-04-11-fix-flaky-useAvailableCommands-test.md` (superseded analysis)
 - `tasks/archive/2026-02-28-fix-flaky-vm-agent-tests.md` (superseded analysis — Option A invalid, ingestion is synchronous)
 - Prior flake fixes: PRs #867, #878, commit 3217faa06
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The named automation-flows flake is fixed at the root. Still open: the global `asyncUtilTimeout` (no `configure(` in `apps/web/tests/setup.ts` or `packages/acp-client/src/test-setup.ts`), the fail-fast fetch stub, the Go replay test and the pattern audit. Evidence: #2739; `apps/web/tests/unit/pages/automation-flows.test.tsx` (paste events, waits for the detail route).

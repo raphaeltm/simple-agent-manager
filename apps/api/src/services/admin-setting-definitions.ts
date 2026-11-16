@@ -1,3 +1,5 @@
+import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-deployment';
+
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
@@ -21,13 +23,11 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
+  | DeploymentPublishJobSettingName
+  | 'deployments.publishCallbackMaxBodyBytes'
   | 'chat.messageMergingEnabled'
   | 'chat.messageMergeMaxRowBytes'
   | 'chat.messageMergeRecentIds'
-  | 'deployments.buildContextCollectionMode'
-  | 'deployments.buildContextStartTimeoutMs'
-  | `deployments.buildContext${'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
-  | `deployments.publishJob${'StallMs' | 'DeadlineMs' | 'SweepLimit' | 'CancelTimeoutMs'}`
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `lifecycleLatency.${LifecycleLatencySettingKey}`
   | `aiModels.${AgentModelSettingKey}`

@@ -27,3 +27,7 @@ synchronous `deleteVM`, and two providers' `deleteVM` wait for completion:
 - [ ] UpCloud implements `requestVMDeletion` / `getVMDeletionStatus`, or its stop wait is shown to
       fit the cron budget
 - [ ] Cron-entry tests per caller with a provider whose delete outlasts one attempt
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2757 (2026-11-15) made orphan-sweep deletes send-and-return with per-phase timeouts (`apps/api/src/scheduled/provider-orphan-destroy.ts`). Still open: unhealthy release, deployment-node cleanup (also tracked with env-level criteria in `2026-11-11-gcp-deployment-node-teardown-5s-timeout.md`) and UpCloud.

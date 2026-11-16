@@ -3,6 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
 
+vi.mock('../../../src/app-deployment-ports/cloudflare-builder', () => ({
+  createCloudflareBuildPorts: vi.fn(),
+}));
+vi.mock('../../../src/routes/projects/publish-job-spec', async () => {
+  const { Hono } = await import('hono');
+  return { publishJobSpecRoute: new Hono() };
+});
 const WORKSPACES = {
   __table: 'workspaces',
   id: 'workspaces.id',
@@ -35,7 +42,8 @@ const { appendMock, recordDeploymentPublishJobLifecycleEventBestEffort, signalCa
     signalCallbackMock: vi.fn(async () => undefined),
   }));
 
-vi.mock('drizzle-orm', () => ({
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('drizzle-orm')>()),
   and: (...conds: unknown[]) => ({ op: 'and', conds }),
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
 }));
@@ -77,6 +85,7 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 
 vi.mock('../../../src/services/deployment-publish-jobs', () => ({
+  PUBLISH_JOB_TERMINAL_STATUSES: new Set(['succeeded', 'failed', 'canceled', 'unknown']),
   appendDeploymentPublishJobEvent: (...args: unknown[]) => appendMock(...args),
 }));
 vi.mock('../../../src/services/project-lifecycle-events', () => ({

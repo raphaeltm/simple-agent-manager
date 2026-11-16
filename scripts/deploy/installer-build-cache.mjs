@@ -46,6 +46,7 @@ export const VM_AGENT_OUTPUTS = [
   'packages/vm-agent/bin/vm-agent-darwin-amd64',
   'packages/vm-agent/bin/vm-agent-darwin-arm64',
   'apps/api/container-artifacts/vm-agent-linux-amd64',
+  'apps/api/container-artifacts/sam-builder-linux-amd64',
   'apps/api/container-artifacts/install-opencode.sh',
   'apps/api/container-artifacts/vm-agent-version.json',
 ];

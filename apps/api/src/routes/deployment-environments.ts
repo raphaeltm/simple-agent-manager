@@ -1,10 +1,10 @@
+import { assertNoReservedCloudflareBuilds } from '@simple-agent-manager/app-deployment';
 /**
  * Deployment environment routes.
  *
  * Scoped under /api/projects/:projectId/environments.
  * Auth: session cookie + active project membership/capabilities.
  */
-
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -362,6 +362,7 @@ deploymentEnvironmentRoutes.delete(
     if (!environment) {
       throw errors.notFound('Deployment environment');
     }
+    await assertNoReservedCloudflareBuilds(db, { environmentId: envId });
 
     // Reconstruct app-route hostnames from each release's manifest before the
     // cascade delete removes the rows.
