@@ -17,7 +17,7 @@
  */
 import type { OverviewBrief, OverviewBriefRef } from '@simple-agent-manager/shared';
 import { ChevronDown, ExternalLink, Sparkles } from 'lucide-react';
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -170,6 +170,21 @@ export function ProjectBriefSection({
   const now = useMinuteClock();
   const [expanded, setExpanded] = useState(false);
   const textId = useId();
+  // Folded and open are different elements, so a toggle would drop keyboard focus on <body>.
+  // After a toggle the person made (never on first render or a resize), focus the control that
+  // replaced the one they pressed.
+  const foldedRef = useRef<HTMLButtonElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const toggled = useRef(false);
+  useEffect(() => {
+    if (!toggled.current) return;
+    toggled.current = false;
+    (expanded ? toggleRef : foldedRef).current?.focus();
+  }, [expanded]);
+  const toggle = (open: boolean) => {
+    toggled.current = true;
+    setExpanded(open);
+  };
   if (!brief || brief.sentences.length === 0) return null;
 
   const collapsed = isMobile && !expanded;
@@ -224,10 +239,10 @@ export function ProjectBriefSection({
         // once open). The button's name is the sentence itself.
         <button
           type="button"
-          onClick={() => setExpanded(true)}
+          ref={foldedRef}
+          onClick={() => toggle(true)}
           aria-expanded={false}
-          aria-controls={textId}
-          className="flex min-h-11 w-full min-w-0 items-start gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left"
+          className="flex min-h-11 w-full min-w-0 cursor-pointer items-start gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left hover:bg-surface-hover"
           data-testid="overview-brief"
         >
           {body}
@@ -244,7 +259,8 @@ export function ProjectBriefSection({
           {isMobile && (
             <button
               type="button"
-              onClick={() => setExpanded(false)}
+              ref={toggleRef}
+              onClick={() => toggle(false)}
               aria-expanded={true}
               aria-controls={textId}
               aria-label="Project brief details"

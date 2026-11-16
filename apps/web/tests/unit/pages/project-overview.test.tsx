@@ -942,11 +942,12 @@ describe('Project Overview', () => {
       expect(within(brief).getByRole('link', { name: 'Pick a deploy target' })).toBeInTheDocument();
       expect(within(brief).getByRole('link', { name: /Nightly/ })).toBeInTheDocument();
       expect(within(brief).queryByRole('link', { name: /Round tax totals/ })).toBeNull();
+      // Focus follows the control the person pressed, both ways.
+      expect(toggle).toHaveFocus();
       fireEvent.click(toggle);
-      expect(within(brief).getByRole('button', { name: /Pick a deploy target/ })).toHaveAttribute(
-        'aria-expanded',
-        'false'
-      );
+      const folded = within(brief).getByRole('button', { name: /Pick a deploy target/ });
+      expect(folded).toHaveAttribute('aria-expanded', 'false');
+      expect(folded).toHaveFocus();
     });
 
     it('keeps a stale brief visible, dimmed with its age, and refetches to catch up', async () => {
