@@ -126,3 +126,15 @@ const DEFAULT_PROVISIONING_RESTORE_RETRIES = 3;
 export const PROVISIONING_RESTORE_RETRIES = Number.parseInt(
   import.meta.env.VITE_PROVISIONING_RESTORE_RETRIES || String(DEFAULT_PROVISIONING_RESTORE_RETRIES)
 );
+
+/** Pre-filled fork/retry context shown on the new chat screen. */
+export interface PendingDerived {
+  type: 'fork' | 'retry';
+  parentSessionId: string;
+  parentSessionLabel: string;
+  parentTaskId: string;
+  parentBranch?: string;
+  errorMessage?: string;
+  /** Retry only: true while the original prompt loads; Send stays disabled until it arrives. */
+  promptLoading: boolean;
+}
