@@ -79,13 +79,18 @@ model is in `scripts/quality/agent-instructions.ts`:
   without a reviewed edit to that list;
 - a workspace directory has path-scoped rules and no `AGENTS.md`, or an
   `AGENTS.override.md` would replace one for Codex;
-- a Claude Code hook entry is malformed, names an unknown event, or all hooks are
-  disabled (Claude Code skips such entries without an error);
-- a generated rule index is stale, or a size ceiling in the budget file is exceeded.
+- a Claude Code or Codex hook entry is malformed, names an unknown event, or all hooks
+  are disabled (both harnesses skip such entries without an error), or a hook runs a
+  script that does not exist;
+- a generated rule index or the Codex hook's rule lookup (`.codex/hooks/rule-scopes.json`)
+  is stale, or a size ceiling in the budget file is exceeded.
 
 `--write` regenerates the rule index in `.claude/rules/00-rule-routing.md`, the launch-rule
-list in the root `AGENTS.md`, and the "Rules for this directory" section of each nested
-`AGENTS.md`.
+list in the root `AGENTS.md`, the "Rules for this directory" section of each nested
+`AGENTS.md`, and `.codex/hooks/rule-scopes.json`.
+
+`pnpm quality:agent-tooling:test` (Code Quality Checks) runs the instruction model tests
+and drives both hook scripts below through the real script against fixture repositories.
 
 What the check does not prove: that a rule's scope is complete for code that never names
 it, that Codex opens the rules its `AGENTS.md` lists, or that an agent follows a rule it
@@ -104,6 +109,63 @@ A mismatch means the model is wrong about the harness. Use a fresh session: a ru
 was already in context at launch is not loaded a second time when its `paths` match. An
 empty log, or one without `session_start` entries, is reported as a mismatch; pass
 `--lazy-only` to compare lazy loads alone.
+
+## Agent hooks
+
+### Test-quality Stop gate
+
+`.claude/hooks/verify-test-quality.mjs` runs at the end of every turn in Claude Code
+(`.claude/settings.json`) and Codex (`.codex/config.toml`). It reads every change on the
+branch (commits since the merge base with `origin/main`, staged, unstaged and untracked
+files) and reports two classes:
+
+| Class                      | Meaning                                                                                                                                                                        | Delivery                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| `untested-boundary-change` | API routes, services, Durable Objects or scheduled code, worker-package `src`, web data hooks, or VM agent server code changed, and no test in the tests that cover it changed | feedback: once per session and set         |
+| `shallow-test`             | a changed test is mostly empty mocks (`mockResolvedValue({})`) with no realistic state                                                                                         | block: repeats while open, at most 3 times |
+
+Measured on the last merged PRs as they landed (2026-11-16): `untested-boundary-change`
+flagged 2 of 80 (4 of 300); one was a pure move with existing coverage (#2733), the other
+a web hook changed without a web test (#2774). With a false positive in half the hits, it
+is feedback: the turn continues once with the findings, and the agent adds a test or says
+why none is needed. `shallow-test` flagged 0 of 300, so it blocks, capped so a false
+positive can never trap a session. Revisit both with fresh measurements before changing
+`FINDING_MODES`. The gate cannot prove a test is a vertical slice; review still decides
+that (`.claude/rules/35-vertical-slice-testing.md`).
+
+### Codex rule delivery
+
+Codex loads only the root `AGENTS.md` by itself. `.codex/hooks/rule-context.mjs`
+(SessionStart and PreToolUse on `Bash` and `apply_patch`) adds the bodies of the
+path-scoped rules that govern the files a tool call touches, most specific scope first,
+capped per call (`SAM_CODEX_RULE_CONTEXT_MAX_BYTES`, default 40,000 bytes, below the
+handler's `additionalContextLimit`), and names the rules it had no room for. The first
+write to files whose rules were never delivered is refused once with the rules attached.
+Deliveries are logged to `.tmp/instruction-loads/codex-<session>.jsonl`.
+
+Codex runs repository hooks only for a trusted project, and only hook definitions that
+have themselves been trusted. SAM-managed Codex sessions do not trust the repository
+today, so these hooks, like the rest of `.codex/config.toml`, do not run there (probe
+evidence on idea 01M7H32EK6S4E31EHWVSJSENR5).
+
+## Rule 73: optional fields must not overwrite on absence
+
+`pnpm quality:go-optional-fields` (`scripts/quality/go-optional-fields/`, Go standard
+library only, blocking in Code Quality Checks) walks every Go package in the repository.
+It reports a non-string scalar field (bool, integer, float, `time.Duration`, or a named type
+over one) of an options value (a variadic `opts ...T`, or a parameter typed `*Opts`,
+`*Options`, `*Patch` and similar) that is assigned onto existing state with no check for
+"not supplied", or guarded only by its own truthiness. Assignments onto a value the
+function builds itself are construction and are not reported. A deliberate full
+replacement opts out with `//sam:optional-field-ok <reason>`.
+
+Measured 2026-11-16: 0 findings on the tree (320 Go files, 16 functions taking options).
+Across 25 commits sampled from February to November 2026 the only finding was the
+original incident (`runtime.Lightweight = opt.Lightweight`), at every sampled commit from
+2026-03-16 until its fix in #2055. That is why it started blocking rather than advisory
+(policy f9ae7f88). There is no TypeScript counterpart: strict null checks reject the
+direct form, and the remaining forms (`patch.x ?? false`, spreads) are also how records
+are created, so a lint would be mostly noise.
 
 ## Runtime workflow state
 
