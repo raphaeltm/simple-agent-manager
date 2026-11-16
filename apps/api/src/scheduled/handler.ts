@@ -26,8 +26,8 @@ import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconcil
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
-import { DAILY_CRON, scheduleDailyJobs } from './daily-jobs';
 import { runScheduledDeploymentReleaseRetention } from './d1-retention';
+import { DAILY_CRON, scheduleDailyJobs } from './daily-jobs';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { runDeploymentPublishJobSweep } from './deployment-publish-jobs';
 import { notifyFailedSweeps } from './failed-sweep-notifications';

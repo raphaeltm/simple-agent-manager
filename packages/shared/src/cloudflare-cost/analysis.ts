@@ -12,6 +12,7 @@ import { calculateCloudflareMetricCost, cloudflareDaysInMonth } from './pricing'
 import {
   BYTES_PER_GB,
   BYTES_PER_GIB,
+  CLOUDFLARE_COST_METRIC_KEYS,
   type CloudflareCostAnalysis,
   type CloudflareCostMetricKey,
   type CloudflareCostMetricKind,
@@ -22,7 +23,6 @@ import {
   type CloudflareCostRows,
   type CloudflareDailyUsage,
   type CloudflareMetricProjection,
-  CLOUDFLARE_COST_METRIC_KEYS,
   DEFAULT_CLOUDFLARE_COST_RECENT_DAYS,
   DO_BILLING_MEMORY_GB,
   type DurableObjectNamespaceBreakdown,
