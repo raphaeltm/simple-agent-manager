@@ -24,6 +24,7 @@ import { ToastProvider } from './hooks/useToast';
 import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
 import { prefetchProjectRoute } from './lib/project-route-prefetch';
 import { queryClient } from './lib/query-client';
+import { platformCapabilitiesQueryOptions } from './lib/query-options';
 import { isProjectChatRoute, isProjectOverviewRoute } from './lib/shell-routes';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
@@ -290,6 +291,12 @@ export function devOnlyRoutesEnabled() {
 
 export default function App() {
   const showDevOnlyRoutes = devOnlyRoutesEnabled();
+  // Which platform services this installation has (public, cached for minutes). Fetched once at
+  // start so composers and model settings rarely wait on it; until it answers every service is
+  // assumed present (hooks/usePlatformCapabilities.ts).
+  useEffect(() => {
+    void queryClient.prefetchQuery(platformCapabilitiesQueryOptions());
+  }, []);
 
   return (
     <ErrorBoundary>

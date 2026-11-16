@@ -6,7 +6,6 @@ import { CHAT_SESSION_LIST_LIMIT } from './chat-query-config';
 import {
   chatSessionMessagesQueryOptions,
   inboxListQueryOptions,
-  platformCapabilitiesQueryOptions,
   projectChatSessionsQueryOptions,
   projectDetailQueryOptions,
   projectOverviewQueryOptions,
@@ -94,9 +93,6 @@ export function prefetchProjectRoute(
   if (!projectId) return;
 
   void queryClient.prefetchQuery(projectDetailQueryOptions(queryScope, projectId));
-  // Decides whether the composer offers voice input; fetched early so it rarely changes after
-  // the composer first renders.
-  void queryClient.prefetchQuery(platformCapabilitiesQueryOptions());
 
   // The project index lands on the Overview (inbox slice F2): its aggregated read and the
   // first page of Needs you, the same entries the page reads.

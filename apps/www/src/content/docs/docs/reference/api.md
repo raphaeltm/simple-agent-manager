@@ -327,6 +327,8 @@ Routes that need a missing service answer `404` with
 `{ "error": "FEATURE_UNAVAILABLE", "message": "…", "details": { "feature": "<capability>" } }`
 (`errors.featureUnavailable()` in `apps/api/src/middleware/error.ts`): `POST /api/transcribe`,
 `POST /api/tts/synthesize` and `GET /api/agent-models/catalog` without the Workers AI binding.
+Agent-facing model calls (`list_ai_models`, `run_ai_model`) answer with the non-retryable
+`not_available` code in that case.
 
 ### `GET /api/config/instant-runtime`
 

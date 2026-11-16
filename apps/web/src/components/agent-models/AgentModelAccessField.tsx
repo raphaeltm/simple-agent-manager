@@ -94,9 +94,12 @@ export function AgentModelAccessField({
 
   if (!available) {
     return (
-      <p className="m-0 min-w-0 break-words text-xs text-fg-muted">
-        AI model calls are not available on this installation (they need Cloudflare Workers AI).
-      </p>
+      <div className="grid min-w-0 gap-1.5">
+        <span className="text-sm text-fg-muted">AI models this {ownerLabel} can call</span>
+        <p className="m-0 min-w-0 break-words text-xs text-fg-muted">
+          Not available on this installation: model calls need Cloudflare Workers AI.
+        </p>
+      </div>
     );
   }
 

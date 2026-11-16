@@ -80,8 +80,10 @@ describe('AgentModelAccessField', () => {
     try {
       renderField({ initialValue: null });
       expect(
-        await screen.findByText(/AI model calls are not available on this installation/)
+        await screen.findByText(/Not available on this installation: model calls need Cloudflare Workers AI/)
       ).toBeInTheDocument();
+      // The field keeps its label, so the message has context inside profile and skill forms.
+      expect(screen.getByText(/AI models this .* can call/)).toBeInTheDocument();
       expect(mocks.getAgentModelCatalog).not.toHaveBeenCalled();
       expect(mocks.getProjectAgentModelSettings).not.toHaveBeenCalled();
     } finally {
