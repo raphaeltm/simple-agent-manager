@@ -33,4 +33,5 @@ Codex runs a non-managed hook only when its definition is trusted by hash (an in
 - Staging lease: `staging` held by sam/implement-slice-d-inbox-vhkf2w until 17:04Z; staging2 has no Codex credentials. Wake scheduled ~17:05Z.
 - 18:13Z: reserved in staging queue v2 (run 43925944919), position 6, turn est. 19:58:55Z. SAM wake schedule 892014a9-8b40-4fd7-8acd-af8366b4adcc at 19:45Z.
 - 18:18Z: 42a7941a3 fixes SonarCloud (33 duplicated test lines -> shared helpers in session_host_adapter_process_helpers_test.go; curl --proto =https in the seed script) and a gofmt miss in gateway.go. Real-binary hook probe passes 3/3 after the refactor.
+- 19:45Z: holder sam/self-host-landing-slice-14gedp until 20:28Z; now position 4, turn est. 20:58:38Z. Wake schedule 540cc862-1129-4390-a924-34eba080c280 at 20:45Z. SonarCloud passes on b723b9792; rest of CI still queued.
 - CodeRabbit: request workflow 43925636583 succeeded 18:08Z; CodeRabbit check reports "skipping" (Review skipped) -> wait ended, recorded in PR body.
