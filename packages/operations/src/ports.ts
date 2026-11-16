@@ -33,6 +33,7 @@ import type * as schema from '@simple-agent-manager/worker-core/schema';
 import type { ConnectorAnswerChoice } from './connector-answer-input';
 import type { ConnectorReadSettingName } from './connector-read-settings-definition';
 import type { InboxSettingName } from './inbox-settings-definition';
+import type { InsightsFlowSettingName } from './insights-flow-settings';
 import type {
   AgentActivityTask,
   LimitKey,
@@ -82,7 +83,8 @@ export type OperationSettingName =
   | 'collaboration.ideaUpdateQuoteMaxLength'
   | 'collaboration.ideaAgentNoteMinIntervalSeconds'
   | 'collaboration.ideaUpdatePageSize'
-  | InboxSettingName;
+  | InboxSettingName
+  | InsightsFlowSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;
 

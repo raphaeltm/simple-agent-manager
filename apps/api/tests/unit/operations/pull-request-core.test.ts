@@ -45,6 +45,12 @@ describe('pull request state refresh', () => {
         'utf8'
       )
     );
+    sqlite.exec(
+      readFileSync(
+        new URL('../../../src/db/migrations/0251_pull_request_heads.sql', import.meta.url),
+        'utf8'
+      )
+    );
     sqlite
       .prepare("INSERT INTO github_installations VALUES ('install', 'stored', 'external')")
       .run();
@@ -164,6 +170,37 @@ describe('pull request state refresh', () => {
     expect(sqlite.prepare('SELECT head_sha FROM pull_request_checks').all()).toEqual([
       { head_sha: otherSha },
     ]);
+    // SAM knew this pull request at an earlier commit it never recorded as a head, so the new
+    // head is not the one it opened with: its first try stays "not recorded".
+    expect(sqlite.prepare('SELECT head_sha, from_open FROM pull_request_heads').all()).toEqual([
+      { head_sha: 'c'.repeat(40), from_open: 0 },
+    ]);
+  });
+
+  it('marks the head of a pull request SAM had only as a URL as the one it opened with', async () => {
+    await ensurePullRequest(env, 'p1', repo, url(3));
+    const snapshot = (sha: string, updatedAt: string) => ({
+      repository: repo,
+      number: 3,
+      url: url(3),
+      title: 'Opened by an agent',
+      state: 'open' as const,
+      isDraft: false,
+      headRef: 'topic',
+      headSha: sha,
+      baseRef: 'main',
+      authorLogin: 'alice',
+      mergedAt: null,
+      closedAt: null,
+      createdAt: '2026-10-23T10:00:00Z',
+      updatedAt,
+    });
+    await upsertPullRequestSnapshot(env, 'p1', snapshot('d'.repeat(40), '2026-10-24T00:00:00Z'));
+    // The same head observed again later keeps its earliest time and its opening mark.
+    await upsertPullRequestSnapshot(env, 'p1', snapshot('d'.repeat(40), '2026-10-24T00:05:00Z'));
+    expect(
+      sqlite.prepare('SELECT head_sha, first_seen_at, from_open FROM pull_request_heads').all()
+    ).toEqual([{ head_sha: 'd'.repeat(40), first_seen_at: '2026-10-24T00:00:00Z', from_open: 1 }]);
   });
 
   it('shares one installation budget across concurrent projects and caps each read', async () => {

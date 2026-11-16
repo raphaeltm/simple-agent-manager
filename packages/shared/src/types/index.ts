@@ -825,6 +825,31 @@ export {
   MAX_PROJECT_OVERVIEW_LIMIT,
 } from './project-overview';
 
+// Insights · Flow (Insights slice F)
+export type {
+  FlowFlakyCheck,
+  FlowMedian,
+  FlowRate,
+  FlowRuns,
+  FlowRunsBucket,
+  FlowSection,
+  FlowStopReason,
+  FlowStopReasonCount,
+  FlowTopBlocker,
+  FlowWaitingIdea,
+  InsightsRange,
+  ProjectFlowResponse,
+} from './insights-flow';
+export {
+  DEFAULT_INSIGHTS_RANGE,
+  FLOW_DELIBERATE_STOP_REASONS,
+  FLOW_STOP_REASON_LABELS,
+  FLOW_STOP_REASONS,
+  INSIGHTS_RANGE_DAYS,
+  INSIGHTS_RANGES,
+  isInsightsRange,
+} from './insights-flow';
+
 // Knowledge Graph
 export type {
   AddObservationRequest,

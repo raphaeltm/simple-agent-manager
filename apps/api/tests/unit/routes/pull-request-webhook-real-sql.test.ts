@@ -46,6 +46,12 @@ describe('verified GitHub PR webhooks', () => {
         'utf8'
       )
     );
+    sqlite.exec(
+      readFileSync(
+        new URL('../../../src/db/migrations/0251_pull_request_heads.sql', import.meta.url),
+        'utf8'
+      )
+    );
     sqlite
       .prepare('INSERT INTO projects (id, name, repository, github_repo_id) VALUES (?, ?, ?, ?)')
       .run('p1', 'First', 'acme/widget', 91);
@@ -240,11 +246,105 @@ describe('verified GitHub PR webhooks', () => {
         .prepare("SELECT head_sha, checks_state FROM pull_requests WHERE project_id = 'p1'")
         .get()
     ).toEqual({ head_sha: nextSha, checks_state: 'success' });
+    // The commit the pull request opened with keeps its checks (one row per project): Insights
+    // reads them for "CI passed on the first try".
     expect(
       sqlite
         .prepare('SELECT count(*) AS n FROM pull_request_checks WHERE head_sha = ?')
         .get(firstSha)
-    ).toEqual({ n: 0 });
+    ).toEqual({ n: 2 });
+    // A later push still drops the checks of a commit that is neither current nor the opening one.
+    const thirdSha = 'c'.repeat(40);
+    await deliver(
+      'pull_request',
+      pr('synchronize', {
+        head: { ref: 'topic', sha: thirdSha },
+        updated_at: '2026-10-23T10:03:00Z',
+      })
+    );
+    expect(
+      sqlite
+        .prepare(
+          'SELECT head_sha, count(*) AS n FROM pull_request_checks GROUP BY head_sha ORDER BY head_sha'
+        )
+        .all()
+    ).toEqual([{ head_sha: firstSha, n: 2 }]);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT head_sha, from_open FROM pull_request_heads WHERE project_id = 'p1' ORDER BY first_seen_at"
+        )
+        .all()
+    ).toEqual([
+      { head_sha: firstSha, from_open: 1 },
+      { head_sha: nextSha, from_open: 0 },
+      { head_sha: thirdSha, from_open: 0 },
+    ]);
+  });
+
+  it('remembers a failure that a rerun turned green, whatever order GitHub delivers them in', async () => {
+    await deliver('pull_request', pr('opened'));
+    const run = (conclusion: 'failure' | 'success', updatedAt: string, id: number) => ({
+      action: 'completed',
+      repository: { id: 91, full_name: 'acme/widget' },
+      check_run: {
+        id,
+        name: 'unit tests',
+        app: { id: 12 },
+        head_sha: 'a'.repeat(40),
+        conclusion,
+        updated_at: updatedAt,
+      },
+    });
+    const row = () =>
+      sqlite
+        .prepare(
+          "SELECT state, updated_at, first_failed_at FROM pull_request_checks WHERE project_id = 'p1'"
+        )
+        .get();
+
+    // In order: failure, then the rerun passes. The latest state is green; the failure stays.
+    await deliver('check_run', run('failure', '2026-10-23T10:05:00Z', 1));
+    await deliver('check_run', run('success', '2026-10-23T10:09:00Z', 2));
+    expect(row()).toEqual({
+      state: 'success',
+      updated_at: '2026-10-23T10:09:00.000Z',
+      first_failed_at: '2026-10-23T10:05:00.000Z',
+    });
+
+    // Out of order: an even earlier failure arrives last. It moves first_failed_at back but
+    // cannot roll the state back to failure.
+    await deliver('check_run', run('failure', '2026-10-23T10:02:00Z', 3));
+    expect(row()).toEqual({
+      state: 'success',
+      updated_at: '2026-10-23T10:09:00.000Z',
+      first_failed_at: '2026-10-23T10:02:00.000Z',
+    });
+    // The pull request's rollup still reads the latest state.
+    expect(
+      sqlite.prepare("SELECT checks_state FROM pull_requests WHERE project_id = 'p1'").get()
+    ).toEqual({ checks_state: 'success' });
+  });
+
+  it('records no failure for a check that only ever passed (control)', async () => {
+    await deliver('pull_request', pr('opened'));
+    await deliver('check_run', {
+      action: 'completed',
+      repository: { id: 91, full_name: 'acme/widget' },
+      check_run: {
+        id: 1,
+        name: 'unit tests',
+        app: { id: 12 },
+        head_sha: 'a'.repeat(40),
+        conclusion: 'success',
+        updated_at: '2026-10-23T10:05:00Z',
+      },
+    });
+    expect(
+      sqlite
+        .prepare("SELECT state, first_failed_at FROM pull_request_checks WHERE project_id = 'p1'")
+        .get()
+    ).toEqual({ state: 'success', first_failed_at: null });
   });
 
   it('keeps terminal check state when an older pending delivery arrives later', async () => {

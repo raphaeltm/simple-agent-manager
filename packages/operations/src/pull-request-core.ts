@@ -114,6 +114,7 @@ export async function upsertPullRequestSnapshot(
       now
     )
     .run();
+  if (pr.headSha) await recordPullRequestHead(env, projectId, pr, previous);
   if (pr.headSha) {
     await env.DATABASE.prepare(
       `UPDATE pull_requests SET
@@ -147,16 +148,22 @@ export async function upsertPullRequestSnapshot(
       )
       .run();
   }
-  // A synchronized PR may orphan observations for its previous head commit.
+  // A synchronized PR may orphan observations for its previous head commit. The checks of a
+  // commit a pull request opened with are kept: Insights reads them for "CI passed on the first
+  // try" (`insights-flow.ts`), and they are at most one commit's checks per pull request.
   if (previous?.head_sha && previous.head_sha !== pr.headSha) {
     await env.DATABASE.prepare(
       `DELETE FROM pull_request_checks
        WHERE project_id = ? AND repository = ? AND head_sha = ?
          AND NOT EXISTS (
            SELECT 1 FROM pull_requests
-           WHERE project_id = ? AND repository = ? AND head_sha = ?)`
+           WHERE project_id = ? AND repository = ? AND head_sha = ?)
+         AND NOT EXISTS (${openingHeadExistsSql()})`
     )
       .bind(
+        projectId,
+        pr.repository,
+        previous.head_sha,
         projectId,
         pr.repository,
         previous.head_sha,
@@ -166,6 +173,50 @@ export async function upsertPullRequestSnapshot(
       )
       .run();
   }
+}
+
+/**
+ * `SELECT 1` when a commit is the one some pull request in the project and repository opened
+ * with. Shared by both old-head check deletes so neither drops the checks Insights reads for
+ * "first try". With no argument it binds three parameters (project, repository, head sha); pass
+ * a table alias to correlate on that alias's columns instead. The alias is a code constant at
+ * every call site, never input.
+ */
+export function openingHeadExistsSql(alias?: 'c'): string {
+  const [project, repository, head] = alias
+    ? [`${alias}.project_id`, `${alias}.repository`, `${alias}.head_sha`]
+    : ['?', '?', '?'];
+  return `SELECT 1 FROM pull_request_heads h
+           WHERE h.project_id = ${project} AND h.repository = ${repository}
+             AND h.head_sha = ${head} AND h.from_open = 1`;
+}
+
+/**
+ * Records the head commit an observation carried (`pull_request_heads`, migration 0251).
+ *
+ * `from_open` is 1 when SAM had no head for this pull request before this observation (a new
+ * pull request, or a URL-only placeholder from `ensurePullRequest`): this is the commit the pull
+ * request opened with. A pull request SAM first saw at a later commit never gets one, so its
+ * first try reads "not recorded" instead of being guessed from a later commit.
+ * `first_seen_at` keeps the earliest GitHub clock that carried the head, so delivery order
+ * cannot move it later.
+ */
+async function recordPullRequestHead(
+  env: OperationsEnv,
+  projectId: string,
+  pr: PullRequestSnapshot,
+  previous: { head_sha: string | null } | null
+): Promise<void> {
+  const fromOpen = previous?.head_sha ? 0 : 1;
+  await env.DATABASE.prepare(
+    `INSERT INTO pull_request_heads (project_id, repository, pr_number, head_sha, first_seen_at, from_open)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(project_id, repository, pr_number, head_sha) DO UPDATE SET
+       first_seen_at = min(pull_request_heads.first_seen_at, excluded.first_seen_at),
+       from_open = max(pull_request_heads.from_open, excluded.from_open)`
+  )
+    .bind(projectId, pr.repository, pr.number, pr.headSha, pr.updatedAt, fromOpen)
+    .run();
 }
 
 export type PullRequestStates = Record<string, PullRequestState | null>;
