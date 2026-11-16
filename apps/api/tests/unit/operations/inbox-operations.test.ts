@@ -4,8 +4,6 @@
  * 0245 migration. Attack cases are paired with owner controls; only the ProjectData prompt
  * delivery (the agent's notice) and the session-access lookup are replaced.
  */
-import { readFileSync } from 'node:fs';
-
 import { type OperationContext, OperationError } from '@simple-agent-manager/operations';
 import {
   answerInboxItem,
@@ -32,7 +30,11 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
 import { runInboxAskSweep } from '../../../src/services/inbox/sweep';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  applySqliteMigration,
+  createAllSchemaTables,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const P1 = 'proj-1';
 const P2 = 'proj-2';
@@ -146,8 +148,9 @@ beforeEach(() => {
   createAllSchemaTables(sqlite, schema);
   // The shipped migration, not the drizzle mirror: its partial unique index is under test.
   sqlite.exec('DROP TABLE asks');
-  sqlite.exec(
-    readFileSync(new URL('../../../src/db/migrations/0245_asks.sql', import.meta.url), 'utf8')
+  applySqliteMigration(
+    sqlite,
+    new URL('../../../src/db/migrations/0245_asks.sql', import.meta.url)
   );
   for (const [id, role] of [
     ['owner', 'user'],

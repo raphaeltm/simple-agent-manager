@@ -7,6 +7,7 @@
  */
 import type { InboxAskNoticeOutcome, InboxAskNoticeRow } from '@simple-agent-manager/operations';
 import { buildSamNotice, type SamNotice } from '@simple-agent-manager/shared';
+import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 
 import { resolveDurableExecutionConfig } from '../../durable-objects/project-data/durable-execution-config';
 import type { Env } from '../../env';
@@ -21,11 +22,7 @@ export function inboxAskDeliveryId(askId: string): string {
 function answerText(answerJson: string | null): string | null {
   if (!answerJson) return null;
   try {
-    const parsed = JSON.parse(answerJson) as unknown;
-    const text =
-      parsed && typeof parsed === 'object' && 'text' in parsed
-        ? (parsed as { text: unknown }).text
-        : null;
+    const text = maybeJsonRecord(JSON.parse(answerJson) as unknown)?.text;
     return typeof text === 'string' && text ? text : null;
   } catch {
     return null;
