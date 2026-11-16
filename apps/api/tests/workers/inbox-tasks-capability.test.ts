@@ -9,14 +9,25 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { moveDepartedMemberTasksToTeam } from '../../src/services/inbox/departed-member-tasks';
 import { storeMcpToken } from '../../src/services/mcp-token';
+import { inboxRows, materializeWakes, sqlRows } from './helpers/agent-message-channels';
 import {
-  inboxRows,
-  materializeWakes,
-  sqlRows,
-} from './helpers/agent-message-channels';
-import { callTool, fetchMock, get, post, seed, type Seeded, testEnv } from './helpers/inbox-harness';
-import { seedAgentSession, seedSignedInUser, seedTask, seedUser, seedWorkspace } from './helpers/seed-d1';
+  callTool,
+  fetchMock,
+  get,
+  post,
+  seed,
+  type Seeded,
+  testEnv,
+} from './helpers/inbox-harness';
+import {
+  seedAgentSession,
+  seedSignedInUser,
+  seedTask,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 
 type TaskView = {
   item: { ref: string; kind: string; canAct: boolean; status: string };
@@ -168,7 +179,9 @@ describe('human tasks through the real entry points', () => {
       `/api/projects/${s.projectId}/inbox?filter=tasks`,
       s.colleagueCookie
     );
-    expect(colleagueTasks.body.items).toEqual([expect.objectContaining({ ref, kind: 'task', canAct: true })]);
+    expect(colleagueTasks.body.items).toEqual([
+      expect.objectContaining({ ref, kind: 'task', canAct: true }),
+    ]);
     const strangerView = await get<unknown>(itemPath(s, ref), strangerCookie);
     expect([403, 404]).toContain(strangerView.status);
     const strangerInbox = await get<ListBody>('/api/inbox?filter=tasks', strangerCookie);
@@ -178,7 +191,9 @@ describe('human tasks through the real entry points', () => {
 
     // Three quick ticks: recorded, no wake.
     for (const index of [0, 1, 2]) {
-      const ticked = await post(itemPath(s, ref, `/steps/${index}`), s.colleagueCookie, { done: true });
+      const ticked = await post(itemPath(s, ref, `/steps/${index}`), s.colleagueCookie, {
+        done: true,
+      });
       expect(ticked.status).toBe(200);
     }
     expect(await wakesFor(s, s.chatSessionId)).toHaveLength(0);
@@ -215,7 +230,7 @@ describe('human tasks through the real entry points', () => {
 
     // The agent reads the whole task: steps, activity, discussion. No duplicate notice was queued.
     const read = await callTool(s.token, 'inbox_read', { method: 'get', ref });
-    const task = (read.item as { status: string; task: NonNullable<TaskView['task']> });
+    const task = read.item as { status: string; task: NonNullable<TaskView['task']> };
     expect(task.status).toBe('done');
     expect(task.task.steps.every((step) => step.done)).toBe(true);
     expect(task.task.activity.map((entry) => entry.kind)).toEqual([
@@ -277,7 +292,10 @@ describe('human tasks through the real entry points', () => {
       third.cookie
     );
     expect(countAfter.body.needsYou).toBe(0);
-    const thirdTasks = await get<ListBody>(`/api/projects/${s.projectId}/inbox?filter=tasks`, third.cookie);
+    const thirdTasks = await get<ListBody>(
+      `/api/projects/${s.projectId}/inbox?filter=tasks`,
+      third.cookie
+    );
     expect(thirdTasks.body.items).toEqual([expect.objectContaining({ ref, canAct: false })]);
     const thirdView = await get<TaskView>(itemPath(s, ref), third.cookie);
     expect(thirdView.body.task).toMatchObject({
@@ -331,7 +349,10 @@ describe('human tasks through the real entry points', () => {
 
     // The person's task is not readable by the bystander at all (same not-found as missing).
     const hidden = await get<unknown>(itemPath(s, filed.inboxItem.ref), bystander.cookie);
-    const missing = await get<unknown>(itemPath(s, 'ask:01NOTATASKID000000000000'), bystander.cookie);
+    const missing = await get<unknown>(
+      itemPath(s, 'ask:01NOTATASKID000000000000'),
+      bystander.cookie
+    );
     expect(hidden.status).toBe(404);
     expect(missing.status).toBe(404);
     expect(hidden.body).toEqual(missing.body);
@@ -347,8 +368,12 @@ describe('human tasks through the real entry points', () => {
     expect(view.body.task).toMatchObject({ canWrite: false, canClaim: false });
     expect((await post(itemPath(s, ref, '/done'), viewer.cookie, {})).status).toBe(403);
     expect((await post(itemPath(s, ref, '/claim'), viewer.cookie, {})).status).toBe(403);
-    expect((await post(itemPath(s, ref, '/steps/0'), viewer.cookie, { done: true })).status).toBe(403);
-    const comment = await post(itemPath(s, ref, '/comments'), viewer.cookie, { body: 'Include VAT.' });
+    expect((await post(itemPath(s, ref, '/steps/0'), viewer.cookie, { done: true })).status).toBe(
+      403
+    );
+    const comment = await post(itemPath(s, ref, '/comments'), viewer.cookie, {
+      body: 'Include VAT.',
+    });
     expect(comment.status).toBe(200);
     // Owner control: a writer completes it.
     expect((await post(itemPath(s, ref, '/done'), s.colleagueCookie, {})).body).toMatchObject({
@@ -383,6 +408,80 @@ describe('human tasks through the real entry points', () => {
     const own = await get<TaskView>(itemPath(s, ref), s.colleagueCookie);
     expect(own.status).toBe(200);
     expect(own.body.item.status).toBe('done');
+  });
+
+  it('edge cases: the assignee leaves (task to the team, agent told); the agent cancels a moot task with a reason', async () => {
+    const s = await seed();
+    const filed = await assign(s, {
+      title: 'Approve the DNS change',
+      assignee: { userId: s.colleagueId },
+    });
+    const ref = filed.inboxItem.ref;
+    await deliverWakes(s, s.chatSessionId);
+    await testEnv.DATABASE.prepare(
+      `UPDATE project_members SET status = 'removed' WHERE project_id = ? AND user_id = ?`
+    )
+      .bind(s.projectId, s.colleagueId)
+      .run();
+    expect(await moveDepartedMemberTasksToTeam(testEnv, s.projectId, s.colleagueId)).toBe(1);
+    const wakes = await wakesFor(s, s.chatSessionId);
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]!.content).toContain('SAM reassigned');
+    const view = await get<TaskView>(itemPath(s, ref), s.ownerCookie);
+    expect(view.body.task).toMatchObject({ assignee: { kind: 'team', userId: null } });
+    // Control: nothing else moves on a second run.
+    expect(await moveDepartedMemberTasksToTeam(testEnv, s.projectId, s.colleagueId)).toBe(0);
+
+    const moot = await assign(s, {
+      title: 'Rotate the old webhook secret',
+      assignee: { team: true },
+    });
+    const cancelled = await callTool(s.token, 'inbox_write', {
+      method: 'cancel',
+      ref: moot.inboxItem.ref,
+      reason: 'Found a way to do it without a person.',
+    });
+    expect(cancelled).toMatchObject({ status: 'cancelled' });
+    const after = await get<TaskView>(itemPath(s, moot.inboxItem.ref), s.ownerCookie);
+    expect(after.body.item.status).toBe('cancelled');
+    expect(after.body.task).toMatchObject({
+      cancelReason: 'Found a way to do it without a person.',
+    });
+    expect(after.body.task?.activity.map((entry) => entry.kind)).toEqual(['created', 'cancelled']);
+  });
+
+  it('task discussion shows on the project Comments page only for people who may read the task', async () => {
+    const s = await seed();
+    const bystander = await addMember(s, 'maintainer', 'bystander');
+    const mine = await assign(s, {
+      title: 'Sign the vendor contract',
+      assignee: { userId: s.colleagueId },
+    });
+    const team = await assign(s, { title: 'Pick the launch date', assignee: { team: true } });
+    await post(itemPath(s, mine.inboxItem.ref, '/comments'), s.colleagueCookie, {
+      body: 'Signed copy?',
+    });
+    await post(itemPath(s, team.inboxItem.ref, '/comments'), s.colleagueCookie, {
+      body: 'Tuesday?',
+    });
+    type Comments = {
+      inboxItemThreads: { itemId: string; body: string }[];
+      inboxItems: { ref: string; title: string }[];
+    };
+    const assignee = await get<Comments>(
+      `/api/projects/${s.projectId}/comments`,
+      s.colleagueCookie
+    );
+    expect(assignee.body.inboxItemThreads.map((thread) => thread.body).sort()).toEqual([
+      'Signed copy?',
+      'Tuesday?',
+    ]);
+    const other = await get<Comments>(`/api/projects/${s.projectId}/comments`, bystander.cookie);
+    expect(other.status).toBe(200);
+    expect(other.body.inboxItemThreads.map((thread) => thread.body)).toEqual(['Tuesday?']);
+    expect(other.body.inboxItems).toEqual([
+      { ref: team.inboxItem.ref, id: team.inboxItem.id, title: 'Pick the launch date' },
+    ]);
   });
 });
 

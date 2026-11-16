@@ -67,17 +67,17 @@ export function buildWakePromptInput(
   const content = inboxContent
     ? urgentPrefix + inboxContent
     : agentMessageChannel
-    ? agentMessageWakeContent({
-        batchId: options.batchId,
-        channel: agentMessageChannel,
-        eventIds: options.eventIds,
-        urgentClass: urgentAgentClass,
-      })
-    : urgentPrefix +
-      `Project event wake batch ${options.batchId} is ready for this chat. ` +
-      `Event IDs: ${eventIds}. ` +
-      'Read the events through the ProjectData event MCP tools before acting on their contents. ' +
-      'Checkpoint or finish through the normal chat workflow after processing this batch.';
+      ? agentMessageWakeContent({
+          batchId: options.batchId,
+          channel: agentMessageChannel,
+          eventIds: options.eventIds,
+          urgentClass: urgentAgentClass,
+        })
+      : urgentPrefix +
+        `Project event wake batch ${options.batchId} is ready for this chat. ` +
+        `Event IDs: ${eventIds}. ` +
+        'Read the events through the ProjectData event MCP tools before acting on their contents. ' +
+        'Checkpoint or finish through the normal chat workflow after processing this batch.';
   return {
     deliveryId: options.batchId,
     targetSessionId,
@@ -103,10 +103,13 @@ export function buildWakePromptInput(
       ...(urgentAgentClass ? { agentMessageClass: urgentAgentClass } : {}),
       ...(agentMessageChannel ? { agentMessageChannel } : {}),
     },
-    notice: projectDataPorts().notices.safe(() => projectDataPorts().notices.projectEventWake(options.events ?? []), {
-      batchId: options.batchId,
-      subscriptionId: options.subscription.id,
-    }),
+    notice: projectDataPorts().notices.safe(
+      () => projectDataPorts().notices.projectEventWake(options.events ?? []),
+      {
+        batchId: options.batchId,
+        subscriptionId: options.subscription.id,
+      }
+    ),
     ttlMs: options.ttlMs,
     maxMessages: options.maxMessages,
   };

@@ -100,7 +100,7 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_assign',
     description:
-      "Hand a person non-blocking work only a person can do (add a production secret, decide a price, record a demo). It goes to their inbox under Tasks; you keep working. You are woken in this chat when they comment, take it, hand it on, finish, reopen or archive it. It never expires.",
+      'Hand a person non-blocking work only a person can do (add a production secret, decide a price, record a demo). It goes to their inbox under Tasks; you keep working. You are woken in this chat when they comment, take it, hand it on, finish, reopen or archive it. It never expires.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -123,7 +123,8 @@ export const INBOX_TOOLS = [
         },
         dueHint: {
           type: 'string',
-          description: 'Optional soft due date in words ("before Friday\'s launch"). Sorts and highlights only.',
+          description:
+            'Optional soft due date in words ("before Friday\'s launch"). Sorts and highlights only.',
         },
         links,
         wakeOnSteps,

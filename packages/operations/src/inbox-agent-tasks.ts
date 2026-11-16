@@ -299,7 +299,9 @@ export async function attachAgentTask(
   if (row.status !== 'open')
     throw new OperationError('conflict', `This task is already ${row.status}`);
   const limits = await getInboxLimits(ctx);
-  if ((await ctx.ports.inboxTasks.countWatchers(row.projectId, row.id)) >= limits.watchersPerItemMax)
+  if (
+    (await ctx.ports.inboxTasks.countWatchers(row.projectId, row.id)) >= limits.watchersPerItemMax
+  )
     throw new OperationError(
       'rate_limited',
       `This task already has ${limits.watchersPerItemMax} watching chats`

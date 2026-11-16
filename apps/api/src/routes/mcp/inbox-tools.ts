@@ -213,7 +213,9 @@ export const handleInboxListItems: Handler = (requestId, params, tokenData, env)
 
 export const handleInboxGetItem: Handler = (requestId, params, tokenData, env) =>
   run(requestId, 'inbox_read get', tokenData, env, async (ctx, source) => ({
-    item: await getAgentItem(ctx, source, { ref: typeof params.ref === 'string' ? params.ref : '' }),
+    item: await getAgentItem(ctx, source, {
+      ref: typeof params.ref === 'string' ? params.ref : '',
+    }),
   }));
 
 /** The assign result: `inboxItem` is what the chat card reads, as for an ask or a review. */

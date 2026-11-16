@@ -234,7 +234,9 @@ export async function commentOnTask(
     row.claimedByUserId,
     row.filerUserId,
     created.thread.author.kind === 'human' ? created.thread.author.id : null,
-    ...created.thread.replies.flatMap((reply) => (reply.author.kind === 'human' ? [reply.author.id] : [])),
+    ...created.thread.replies.flatMap((reply) =>
+      reply.author.kind === 'human' ? [reply.author.id] : []
+    ),
   ].filter((id): id is string => Boolean(id));
   await ctx.ports.inboxTasks.notifyComment({
     projectId: row.projectId,

@@ -92,7 +92,11 @@ projectCommentRoutes.get('/', async (c) => {
       messageThreads: inbox.messageThreads,
       fileThreads: inbox.fileThreads,
       inboxItemThreads: itemThreads.filter((thread) => readable.has(thread.itemId)),
-      inboxItems: readableItems.map((item) => ({ ref: `ask:${item.id}`, id: item.id, title: item.title })),
+      inboxItems: readableItems.map((item) => ({
+        ref: `ask:${item.id}`,
+        id: item.id,
+        title: item.title,
+      })),
       sessions: inbox.sessions,
       files,
       hasMore: inbox.hasMore,

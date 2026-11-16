@@ -13,7 +13,11 @@ import type { CommentMention, InboxItemCommentThread } from '@simple-agent-manag
 import { createReplyRecord, createThreadRecord } from './anchored-comment-mutations';
 import type { CommentAnchorScope } from './anchored-comment-scope';
 import { type CommentThreadRecord, listThreadRecords } from './anchored-comment-store';
-import { type CommentActor, CommentNotFoundError, CommentValidationError } from './comment-contracts';
+import {
+  type CommentActor,
+  CommentNotFoundError,
+  CommentValidationError,
+} from './comment-contracts';
 import { resolveCommentListLimit } from './comment-normalization';
 import type { Env } from './types';
 

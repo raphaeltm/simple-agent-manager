@@ -202,7 +202,11 @@ export async function loadTaskForAgent(
 }
 
 /** Whether the person's role and position let them change the task (see the header). */
-export function canWriteTask(row: TaskRow, userId: string, writerRoles: readonly string[]): boolean {
+export function canWriteTask(
+  row: TaskRow,
+  userId: string,
+  writerRoles: readonly string[]
+): boolean {
   if (!row.viewerRole || !writerRoles.includes(row.viewerRole)) return false;
   if (row.assigneeKind === 'user')
     return row.assigneeUserId === userId || row.filerUserId === userId;

@@ -3489,7 +3489,6 @@ export async function expireQuestionAsk(
   return stub.expireQuestionAsk(input);
 }
 
-
 export async function prepareAttentionAnswer(
   env: Env,
   projectId: string,

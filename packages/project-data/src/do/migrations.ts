@@ -2754,7 +2754,9 @@ export const MIGRATIONS: Migration[] = [
       // layer over another value (the stored-override case in rule 73), so NOT NULL with the
       // real default is correct here; the row parser also reads a missing or unknown value
       // as pinned, so a bad value fails toward full injection rather than toward hiding.
-      sql.exec("ALTER TABLE project_policies ADD COLUMN inject_mode TEXT NOT NULL DEFAULT 'pinned'");
+      sql.exec(
+        "ALTER TABLE project_policies ADD COLUMN inject_mode TEXT NOT NULL DEFAULT 'pinned'"
+      );
     },
   },
   {

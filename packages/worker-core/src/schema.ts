@@ -880,11 +880,7 @@ export const askActivity = sqliteTable(
     createdAt: integer('created_at').notNull(),
   },
   (table) => ({
-    askCreatedIdx: index('idx_ask_activity_ask_created').on(
-      table.askId,
-      table.createdAt,
-      table.id
-    ),
+    askCreatedIdx: index('idx_ask_activity_ask_created').on(table.askId, table.createdAt, table.id),
   })
 );
 

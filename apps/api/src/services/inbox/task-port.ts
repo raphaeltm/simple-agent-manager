@@ -108,34 +108,30 @@ export function createInboxTaskPort(env: Env): OperationInboxTaskPort {
         ...INBOX_TASK_DEFAULT_WAKE_EVENT_TYPES,
         ...(input.includeSteps ? INBOX_TASK_STEP_EVENT_TYPES : []),
       ];
-      const result = await projectDataService.createProjectEventSubscription(
-        env,
-        input.projectId,
-        {
-          // The same owner identity the chat's own subscriptions use, so the agent can list and
-          // cancel this one with the event tools.
-          owner: { type: 'agent', id: `${input.projectId}:${input.sessionId}`, name: null },
-          idempotencyKey: `inbox-watch:${input.askId}`,
-          filter: {
-            version: PROJECT_EVENT_FILTER_VERSION,
-            source: INBOX_EVENT_SOURCE,
-            subjectType: INBOX_EVENT_SUBJECT_TYPE,
-            subjectId: input.askId,
-            eventType: eventTypes,
-          },
-          deliveryPreference: resolveDeliveryPreference('existing_session_prompt', {
-            sessionId: input.sessionId,
-            taskId: input.taskId,
-            runtimeId: null,
-            agentId: input.agentSessionId,
-          }),
-          ownerTaskId: task?.recovery_source_task_id ?? input.taskId,
-          reason: 'Watching a human task in the inbox',
-          // A task never expires, so neither does the watch. When the chat's work is finished
-          // the source-task guard stops waking it and the events stay recorded.
-          expiresAt: null,
-        }
-      );
+      const result = await projectDataService.createProjectEventSubscription(env, input.projectId, {
+        // The same owner identity the chat's own subscriptions use, so the agent can list and
+        // cancel this one with the event tools.
+        owner: { type: 'agent', id: `${input.projectId}:${input.sessionId}`, name: null },
+        idempotencyKey: `inbox-watch:${input.askId}`,
+        filter: {
+          version: PROJECT_EVENT_FILTER_VERSION,
+          source: INBOX_EVENT_SOURCE,
+          subjectType: INBOX_EVENT_SUBJECT_TYPE,
+          subjectId: input.askId,
+          eventType: eventTypes,
+        },
+        deliveryPreference: resolveDeliveryPreference('existing_session_prompt', {
+          sessionId: input.sessionId,
+          taskId: input.taskId,
+          runtimeId: null,
+          agentId: input.agentSessionId,
+        }),
+        ownerTaskId: task?.recovery_source_task_id ?? input.taskId,
+        reason: 'Watching a human task in the inbox',
+        // A task never expires, so neither does the watch. When the chat's work is finished
+        // the source-task guard stops waking it and the events stay recorded.
+        expiresAt: null,
+      });
       return { subscriptionId: result.subscription.id, created: !result.idempotent };
     },
 
@@ -187,7 +183,9 @@ export function createInboxTaskPort(env: Env): OperationInboxTaskPort {
       try {
         const [projectName, actorName] = await Promise.all([
           getProjectName(env, input.projectId),
-          input.actor.name ? Promise.resolve(input.actor.name) : displayName(env, input.actor.userId),
+          input.actor.name
+            ? Promise.resolve(input.actor.name)
+            : displayName(env, input.actor.userId),
         ]);
         const who = actorName ?? 'A teammate';
         const recipients = new Map<string, 'mention' | 'comment'>();

@@ -106,10 +106,15 @@ projectInboxTaskRoutes.post(
   }
 );
 
-projectInboxTaskRoutes.post('/items/:ref/claim', ...session, jsonValidator(EmptySchema), async (c) => {
-  const ctx = context(c);
-  return c.json(await run(() => claimTask(ctx, target(c))));
-});
+projectInboxTaskRoutes.post(
+  '/items/:ref/claim',
+  ...session,
+  jsonValidator(EmptySchema),
+  async (c) => {
+    const ctx = context(c);
+    return c.json(await run(() => claimTask(ctx, target(c))));
+  }
+);
 
 projectInboxTaskRoutes.post(
   '/items/:ref/reassign',
@@ -129,13 +134,23 @@ projectInboxTaskRoutes.post(
   }
 );
 
-projectInboxTaskRoutes.post('/items/:ref/done', ...session, jsonValidator(DoneSchema), async (c) => {
-  const ctx = context(c);
-  const { note } = c.req.valid('json');
-  return c.json(await run(() => completeTask(ctx, { ...target(c), note })));
-});
+projectInboxTaskRoutes.post(
+  '/items/:ref/done',
+  ...session,
+  jsonValidator(DoneSchema),
+  async (c) => {
+    const ctx = context(c);
+    const { note } = c.req.valid('json');
+    return c.json(await run(() => completeTask(ctx, { ...target(c), note })));
+  }
+);
 
-projectInboxTaskRoutes.post('/items/:ref/reopen', ...session, jsonValidator(EmptySchema), async (c) => {
-  const ctx = context(c);
-  return c.json(await run(() => reopenTask(ctx, target(c))));
-});
+projectInboxTaskRoutes.post(
+  '/items/:ref/reopen',
+  ...session,
+  jsonValidator(EmptySchema),
+  async (c) => {
+    const ctx = context(c);
+    return c.json(await run(() => reopenTask(ctx, target(c))));
+  }
+);
