@@ -59,6 +59,8 @@ interface ProjectChatComposerProps {
   submitLabel?: string;
   readOnly?: boolean;
   focusOnMount?: boolean;
+  /** Accessible name for the text box; the placeholder is used when absent. */
+  inputLabel?: string;
 }
 
 const TEXTAREA_MAX_HEIGHT_PX = 120;
@@ -93,6 +95,7 @@ export function ProjectChatComposer({
   submitLabel = 'Send',
   readOnly = false,
   focusOnMount = true,
+  inputLabel,
 }: ProjectChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const internalFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -148,13 +151,20 @@ export function ProjectChatComposer({
     const textarea = textareaRef.current;
     if (!textarea || typeof ResizeObserver === 'undefined') return;
     let width = textarea.clientWidth;
+    let frame = 0;
     const observer = new ResizeObserver(() => {
       if (textarea.clientWidth === width) return;
       width = textarea.clientWidth;
-      fitTextareaHeight();
+      // Next frame, not inside the callback: resizing the observed box there makes the browser
+      // report "ResizeObserver loop completed", which the error reporter would forward.
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fitTextareaHeight);
     });
     observer.observe(textarea);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [fitTextareaHeight]);
 
   const setFileInput = useCallback(
@@ -376,6 +386,7 @@ export function ProjectChatComposer({
           disabled={sending || disabled}
           readOnly={readOnly}
           rows={1}
+          aria-label={inputLabel}
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={showSlashPalette || showMentionPalette}

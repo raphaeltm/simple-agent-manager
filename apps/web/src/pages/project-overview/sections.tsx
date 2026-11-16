@@ -33,7 +33,8 @@ export function SectionHead({
 }: {
   title: string;
   count?: ReactNode;
-  tone?: 'attention';
+  /** Amber means waiting on you; red means something is broken. */
+  tone?: 'attention' | 'danger';
   to?: string;
   linkLabel?: string;
 }) {
@@ -43,7 +44,7 @@ export function SectionHead({
         {title}
         {count !== undefined && (
           <span
-            className={`font-mono text-[13px] font-medium ${tone === 'attention' ? 'text-warning-fg' : 'text-fg-muted'}`}
+            className={`font-mono text-[13px] font-medium ${tone === 'attention' ? 'text-warning-fg' : tone === 'danger' ? 'text-danger-fg' : 'text-fg-muted'}`}
           >
             {count}
           </span>
@@ -121,7 +122,7 @@ function RunningMeta({ chat, now }: { chat: OverviewRunningChat; now: number }) 
           : 'Waiting for an answer'
         : formatMsSpan(now - chat.startedAt);
   return (
-    <span className="line-clamp-1 break-all text-[13px] text-fg-muted">
+    <span className="line-clamp-1 text-[13px] text-fg-muted [overflow-wrap:anywhere]">
       <span className={chat.state === 'waiting' && chat.waitingOnViewer ? 'text-warning-fg' : ''}>
         {lead}
       </span>
@@ -165,6 +166,7 @@ export function RunningNowSection({
   projectId,
   items,
   total,
+  waitingOnViewerTotal,
   loading,
   unavailable,
   className,
@@ -172,6 +174,8 @@ export function RunningNowSection({
   projectId: string;
   items: OverviewRunningChat[];
   total: number;
+  /** Running chats waiting on the viewer, including those past the cap. */
+  waitingOnViewerTotal: number;
   loading: boolean;
   unavailable: boolean;
   className?: string;
@@ -179,12 +183,17 @@ export function RunningNowSection({
   const now = Date.now();
   const shown = items.slice(0, DEFAULT_PROJECT_OVERVIEW_RUNNING_LIMIT);
   const more = total - shown.length;
+  // The read ranks these first, so the cap hides one only when more are waiting than fit.
+  const hiddenWaiting = Math.max(
+    0,
+    waitingOnViewerTotal - shown.filter((chat) => chat.waitingOnViewer).length
+  );
   const chats = `/projects/${projectId}/chat`;
   return (
     <Section label="Running now" className={className}>
       <SectionHead
         title="Running now"
-        count={loading ? undefined : total}
+        count={loading || total === 0 ? undefined : total}
         to={chats}
         linkLabel="Chats"
       />
@@ -204,9 +213,15 @@ export function RunningNowSection({
       {more > 0 && (
         <Link
           to={chats}
-          className="flex min-h-11 items-center px-2 text-[13px] text-fg-muted no-underline hover:text-fg-primary"
+          className="flex min-h-11 items-center gap-1 px-2 text-[13px] text-fg-muted no-underline hover:text-fg-primary"
         >
-          {more} more running
+          <span>
+            {more} more running
+            {hiddenWaiting > 0 && (
+              <span className="text-warning-fg">{` · ${hiddenWaiting} waiting on you`}</span>
+            )}
+          </span>
+          <ChevronRight size={14} aria-hidden="true" />
         </Link>
       )}
     </Section>
@@ -231,7 +246,7 @@ function MergedPullRequestRow({ pr }: { pr: OverviewMergedPullRequest }) {
           <span className="line-clamp-2 break-words text-[15px] font-medium leading-snug text-fg-primary">
             {pr.title?.trim() || `Pull request #${pr.number}`}
           </span>
-          <span className="line-clamp-1 break-all text-[13px] text-fg-muted">
+          <span className="line-clamp-1 text-[13px] text-fg-muted [overflow-wrap:anywhere]">
             #{pr.number}
             {Number.isFinite(mergedAt) && <> · merged {formatTimeFromNow(mergedAt)}</>}
           </span>
@@ -266,7 +281,7 @@ export function RecentlySection({
       {ideas.length > 0 && (
         <div className="flex flex-col" data-testid="overview-recent-ideas">
           {ideas.map((item) => (
-            <IdeaRow key={item.ideaId} item={item} projectId={projectId} />
+            <IdeaRow key={item.ideaId} item={item} projectId={projectId} compact />
           ))}
         </div>
       )}

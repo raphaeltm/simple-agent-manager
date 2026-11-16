@@ -30,8 +30,14 @@ export function AutomationsSection({
     <Section label="Automations" className={className}>
       <SectionHead
         title="Automations"
-        count={data.isPending ? undefined : failing.length > 0 ? `${failing.length} failing` : live}
-        tone={failing.length > 0 ? 'attention' : undefined}
+        count={
+          data.isPending
+            ? undefined
+            : failing.length > 0
+              ? `${failing.length} failing`
+              : live || undefined
+        }
+        tone={failing.length > 0 ? 'danger' : undefined}
         to={automationPaths.overview(projectId)}
         linkLabel="All"
       />
@@ -55,7 +61,7 @@ export function AutomationsSection({
         >
           <CalendarClock size={16} aria-hidden="true" className="shrink-0 text-fg-muted" />
           <span className="flex min-w-0 flex-col">
-            <span className="line-clamp-1 break-all text-sm font-medium text-fg-primary">
+            <span className="line-clamp-2 break-words text-sm font-medium text-fg-primary [overflow-wrap:anywhere]">
               {next.name}
             </span>
             <span className="text-xs text-fg-muted">Next run {formatTimeFromNow(next.nextAt)}</span>

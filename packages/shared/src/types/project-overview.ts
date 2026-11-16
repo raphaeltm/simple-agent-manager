@@ -55,10 +55,15 @@ export interface OverviewMergedPullRequest {
 export interface ProjectOverviewResponse {
   projectId: string;
   running: {
-    /** Newest activity first, at most the read's limit. */
+    /** Chats waiting on the viewer first, then newest activity first; at most the read's limit. */
     items: OverviewRunningChat[];
     /** Every running chat in the project, including those past the limit. */
     total: number;
+    /**
+     * Running chats paused on a question for the viewer, including those past the limit. Those
+     * rows are ranked first, so a page can say how many the cap still hid.
+     */
+    waitingOnViewerTotal: number;
   };
   recent: {
     /** The most recently updated ideas, open or closed. */

@@ -110,7 +110,6 @@ import { gitlabRoutes } from './routes/gitlab';
 import { googleAuthRoutes } from './routes/google-auth';
 import { ideaUpdateRoutes } from './routes/idea-updates';
 import { ideaRoutes } from './routes/ideas';
-import { projectOverviewRoutes } from './routes/project-overview';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
@@ -140,6 +139,7 @@ import {
 } from './routes/project-deployment';
 import { projectEventChannelRoutes } from './routes/project-event-channels';
 import { projectEventSubscriptionRoutes } from './routes/project-event-subscriptions';
+import { projectOverviewRoutes } from './routes/project-overview';
 import { projectsRoutes } from './routes/projects';
 import { acpInteractionCallbackRoute } from './routes/projects/acp-interaction-callback';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';

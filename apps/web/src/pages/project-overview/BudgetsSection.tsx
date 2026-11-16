@@ -13,6 +13,7 @@ import { Link } from 'react-router';
 import {
   type ProfileUsage,
   ProfileUsageAvatar,
+  usageSpoken,
   usageWords,
 } from '../../components/project-chat/profile-picker';
 import { Section, SectionHead, SectionNote } from './sections';
@@ -97,6 +98,13 @@ export function budgetAccounts(
   return { accounts, exceptions };
 }
 
+/** What a screen reader hears for a tile: the account, what is left, and who uses it. */
+export function budgetTileLabel(account: BudgetAccount): string {
+  const left = account.usage.state === 'platform' ? null : usageSpoken(account.usage);
+  const users = account.profiles.map((profile) => profile.name).join(', ');
+  return [account.label, left, `used by ${users}`].filter(Boolean).join(', ');
+}
+
 export function BudgetsSection({
   projectId,
   profiles,
@@ -126,7 +134,8 @@ export function BudgetsSection({
               <Link
                 to={accountsPage}
                 className="flex min-h-11 min-w-0 flex-1 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-center no-underline hover:bg-surface-hover"
-                aria-label={`${account.label}, used by ${account.profiles.map((p) => p.name).join(', ')}`}
+                // The ring is decorative, so the label carries what is left (rule 80, item 7).
+                aria-label={budgetTileLabel(account)}
               >
                 <ProfileUsageAvatar profile={account.first} usage={account.usage} />
                 <span className="line-clamp-1 w-full break-all text-[13px] font-medium text-fg-primary">

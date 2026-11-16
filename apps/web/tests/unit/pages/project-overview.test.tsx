@@ -10,6 +10,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ToastProvider } from '../../../src/hooks/useToast';
 import { API_URL } from '../../../src/lib/api/client';
 import { ProjectOverview } from '../../../src/pages/project-overview';
 import { ProjectContext } from '../../../src/pages/ProjectContext';
@@ -70,7 +71,11 @@ const PROFILE = {
 function overview(items: ProjectOverviewResponse['running']['items']): ProjectOverviewResponse {
   return {
     projectId: PROJECT_ID,
-    running: { items, total: items.length },
+    running: {
+      items,
+      total: items.length,
+      waitingOnViewerTotal: items.filter((item) => item.waitingOnViewer).length,
+    },
     recent: { ideas: [], mergedPullRequests: [] },
     unavailable: [],
     generatedAt: '2026-11-16T00:00:00.000Z',
@@ -98,6 +103,8 @@ interface Recorded {
 let recorded: Recorded[];
 let submitResponse: { status: number; body: unknown };
 let overviewBody: ProjectOverviewResponse;
+/** Extra GET routes a test serves (automation lists, members), keyed by path. */
+let extraRoutes: Record<string, unknown>;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -111,6 +118,11 @@ function route(path: string, method: string): Response {
   if (method === 'POST' && path === `/api/projects/${PROJECT_ID}/tasks/submit`) {
     return json(submitResponse.status, submitResponse.body);
   }
+  if (method === 'PATCH' && path === `/api/projects/${PROJECT_ID}/triggers/trg-deps`) {
+    return json(200, { ...FAILING_TRIGGER, status: 'active' });
+  }
+  const extra = Object.entries(extraRoutes).find(([prefix]) => path.startsWith(prefix));
+  if (method === 'GET' && extra) return json(200, extra[1]);
   switch (path) {
     case '/api/agents':
       return json(200, {
@@ -135,6 +147,87 @@ function route(path: string, method: string): Response {
   }
 }
 
+const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString();
+const FAILING_TRIGGER = {
+  id: 'trg-deps',
+  projectId: PROJECT_ID,
+  userId: 'user-1',
+  name: 'Nightly dependency audit',
+  description: null,
+  status: 'paused',
+  sourceType: 'cron',
+  cronExpression: '30 2 * * *',
+  cronHumanReadable: 'Every day at 2:30 AM',
+  cronTimezone: 'UTC',
+  skipIfRunning: true,
+  promptTemplate: 'Audit the dependencies.',
+  agentProfileId: PROFILE.id,
+  skillId: null,
+  taskMode: 'task',
+  vmSizeOverride: null,
+  resourceRequirementsJson: null,
+  maxConcurrent: 1,
+  lastTriggeredAt: iso(-26 * 3_600_000),
+  triggerCount: 11,
+  nextFireAt: null,
+  createdAt: iso(-40 * 86_400_000),
+  updatedAt: iso(-86_400_000),
+};
+const NEXT_TRIGGER = {
+  ...FAILING_TRIGGER,
+  id: 'trg-morning',
+  name: 'Morning pull request summary',
+  status: 'active',
+  nextFireAt: iso(3 * 3_600_000),
+  lastTriggeredAt: null,
+};
+function failedRun(id: string, agoHours: number) {
+  return {
+    id,
+    triggerId: 'trg-deps',
+    projectId: PROJECT_ID,
+    status: 'failed',
+    skipReason: null,
+    taskId: `task-${id}`,
+    eventType: 'cron',
+    renderedPrompt: null,
+    errorMessage: 'The GitHub token for this project expired.',
+    scheduledAt: iso(-agoHours * 3_600_000),
+    startedAt: iso(-agoHours * 3_600_000),
+    completedAt: iso(-agoHours * 3_600_000 + 240_000),
+    sequenceNumber: 1,
+    createdAt: iso(-agoHours * 3_600_000),
+  };
+}
+const AUTOMATION_ROUTES = {
+  [`/api/projects/${PROJECT_ID}/triggers/trg-deps/executions`]: {
+    executions: [failedRun('r3', 26), failedRun('r2', 50), failedRun('r1', 74)],
+    nextCursor: null,
+  },
+  [`/api/projects/${PROJECT_ID}/triggers/trg-morning/executions`]: {
+    executions: [],
+    nextCursor: null,
+  },
+  [`/api/projects/${PROJECT_ID}/triggers`]: { triggers: [FAILING_TRIGGER, NEXT_TRIGGER] },
+  [`/api/projects/${PROJECT_ID}/schedules`]: { schedules: [], nextCursor: null },
+  [`/api/projects/${PROJECT_ID}/standing-watches`]: { watches: [], nextCursor: null },
+  [`/api/projects/${PROJECT_ID}/members`]: {
+    members: [
+      {
+        userId: 'user-1',
+        name: 'Test User',
+        email: 'user@example.com',
+        avatarUrl: null,
+        role: 'owner',
+        status: 'active',
+        joinedAt: '2026-10-01T00:00:00Z',
+      },
+    ],
+    inviteLinks: [],
+    accessRequests: [],
+  },
+};
+
 function LocationProbe() {
   const location = useLocation();
   return <div data-testid="location">{location.pathname}</div>;
@@ -147,15 +240,17 @@ function renderOverview() {
   const context = { projectId: PROJECT_ID, project: null, reload: async () => {} };
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/projects/${PROJECT_ID}/overview`]}>
-        <ProjectContext.Provider value={context}>
-          <Routes>
-            <Route path="/projects/:id/overview" element={<ProjectOverview />} />
-            <Route path="/projects/:id/chat/:sessionId" element={<div>chat page</div>} />
-          </Routes>
-          <LocationProbe />
-        </ProjectContext.Provider>
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[`/projects/${PROJECT_ID}/overview`]}>
+          <ProjectContext.Provider value={context}>
+            <Routes>
+              <Route path="/projects/:id/overview" element={<ProjectOverview />} />
+              <Route path="/projects/:id/chat/:sessionId" element={<div>chat page</div>} />
+            </Routes>
+            <LocationProbe />
+          </ProjectContext.Provider>
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>
   );
 }
@@ -175,6 +270,7 @@ async function typeAndSend(text: string) {
 describe('Project Overview', () => {
   beforeEach(() => {
     recorded = [];
+    extraRoutes = {};
     overviewBody = overview([EXISTING]);
     submitResponse = {
       status: 200,
@@ -320,5 +416,109 @@ describe('Project Overview', () => {
     act(() => socket.onSessionEvent?.({ type: 'session.agent_completed', payload: {} }));
     await waitFor(() => expect(reads()).toBeGreaterThan(before), { timeout: 4000 });
     await screen.findByText('Nothing is running.');
+  });
+
+  it('shows each failing automation as one line with its fix, and the next run', async () => {
+    extraRoutes = AUTOMATION_ROUTES;
+    renderOverview();
+    const automations = await screen.findByRole('region', { name: 'Automations' });
+    const line = await within(automations).findByTestId('automation-attention-line');
+    expect(line).toHaveTextContent('Nightly dependency audit');
+    expect(line).toHaveTextContent('Paused · its last 3 runs failed');
+    expect(within(automations).getByText('1 failing')).toBeInTheDocument();
+    expect(within(automations).getByTestId('overview-automation-next')).toHaveTextContent(
+      'Morning pull request summary'
+    );
+    // The fix is the Automation page's own: Resume turns the trigger back on.
+    await act(async () => {
+      fireEvent.click(within(line).getByRole('button', { name: 'Resume' }));
+    });
+    await waitFor(() =>
+      expect(
+        recorded.find((r) => r.method === 'PATCH' && r.path.endsWith('/triggers/trg-deps'))?.body
+      ).toEqual({ status: 'active' })
+    );
+  });
+
+  it('links recent ideas to their pages and merged pull requests to GitHub', async () => {
+    overviewBody = {
+      ...overview([EXISTING]),
+      recent: {
+        ideas: [
+          {
+            ideaId: 'idea-pause',
+            title: 'Pause subscriptions',
+            summary: 'Let customers pause.',
+            createdAt: '2026-11-01T00:00:00Z',
+            updatedAt: '2026-11-16T00:00:00Z',
+            derived: {
+              state: 'not-started',
+              needsYou: null,
+              source: { origin: 'none', observedAt: null, stale: false },
+              session: null,
+              pullRequest: null,
+              note: null,
+            },
+            counts: { updates: 0, chats: 0, files: 0, pullRequests: 0, atLeast: [] },
+            filedByAgent: false,
+            filedBy: null,
+            viaConnector: null,
+          } as never,
+        ],
+        mergedPullRequests: [
+          {
+            number: 2771,
+            url: 'https://github.com/acme/billing/pull/2771',
+            title: 'Round tax totals per line',
+            repository: 'acme/billing',
+            mergedAt: new Date().toISOString(),
+          },
+        ],
+      },
+    };
+    renderOverview();
+    const recently = await screen.findByRole('region', { name: 'Recently' });
+    expect(
+      await within(recently).findByRole('link', { name: /Pause subscriptions/ })
+    ).toHaveAttribute('href', `/projects/${PROJECT_ID}/ideas/idea-pause`);
+    const pr = within(recently).getByRole('link', { name: /Round tax totals per line/ });
+    expect(pr).toHaveAttribute('href', 'https://github.com/acme/billing/pull/2771');
+    expect(pr).toHaveAttribute('target', '_blank');
+  });
+
+  it('says how many more are waiting on you when they do not all fit', async () => {
+    const waiting = (i: number) => ({
+      ...EXISTING,
+      sessionId: `sess-wait-${i}`,
+      topic: `Question ${i}`,
+      state: 'waiting' as const,
+      waitingOnViewer: true,
+    });
+    overviewBody = overview([1, 2, 3, 4, 5].map(waiting));
+    overviewBody.running.total = 9;
+    overviewBody.running.waitingOnViewerTotal = 7;
+    renderOverview();
+    const running = await screen.findByRole('region', { name: 'Running now' });
+    await within(running).findByRole('link', { name: /Question 1/ });
+    expect(
+      within(running).getByRole('link', { name: /4 more running\s?· 2 waiting on you/ })
+    ).toHaveAttribute('href', `/projects/${PROJECT_ID}/chat`);
+  });
+
+  it('does not refetch on socket events while the tab is hidden, and catches up when shown', async () => {
+    renderOverview();
+    await screen.findByRole('link', { name: /Fix rounding in tax totals/ });
+    const reads = () => recorded.filter((r) => r.path.endsWith('/overview')).length;
+    const before = reads();
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    act(() => socket.onSessionEvent?.({ type: 'session.activity', payload: {} }));
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    expect(reads()).toBe(before);
+    hidden.mockReturnValue(false);
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    hidden.mockRestore();
   });
 });

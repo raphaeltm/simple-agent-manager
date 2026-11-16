@@ -91,6 +91,7 @@ export function ProjectOverview() {
             projectId={projectId}
             items={overview.running.items}
             total={overview.running.total}
+            waitingOnViewerTotal={overview.running.waitingOnViewerTotal}
             loading={loading}
             unavailable={overview.isError || unavailable.has('running')}
             className={PHONE_ORDER.running}

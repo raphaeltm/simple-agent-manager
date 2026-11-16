@@ -8,7 +8,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { paneClassName } from '@simple-agent-manager/ui';
 import { Paperclip } from 'lucide-react';
-import type { FocusEvent, MutableRefObject, ReactNode } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
@@ -104,6 +104,8 @@ type ChatInputProps = Readonly<{
   collapseToolbarWhenIdle?: boolean;
   /** Focus the text box on mount (default true). */
   focusOnMount?: boolean;
+  /** Accessible name for the text box when the placeholder alone is not enough. */
+  inputLabel?: string;
 }>;
 
 function getComposerPlaceholder({
@@ -170,9 +172,14 @@ export function ChatInput({
   receipt,
   collapseToolbarWhenIdle = false,
   focusOnMount = true,
+  inputLabel,
 }: ChatInputProps) {
   const isMobile = useIsMobile();
-  const [focusWithin, setFocusWithin] = useState(false);
+  // Unfolded by any touch or focus inside the composer. Folded again by a tap outside it or a
+  // completed send, never by blur: iOS Safari does not focus tapped buttons, so a blur would
+  // fold the To row away between the touch and the click that was meant for it.
+  const [unfolded, setUnfolded] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [accountsOpen, setAccountsOpen] = useState(false);
@@ -284,22 +291,38 @@ export function ChatInput({
   const idle =
     value.length === 0 &&
     (attachments?.length ?? 0) === 0 &&
-    !focusWithin &&
+    !unfolded &&
     !showOptions &&
     !accountsOpen &&
     !profileSheet.open;
   const toolbarVisible = showToolbar && !(collapseToolbarWhenIdle && idle);
-  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
-    // Focus moving between controls inside the composer keeps it unfolded.
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusWithin(false);
-  };
+  useEffect(() => {
+    if (!collapseToolbarWhenIdle || !unfolded) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node | null)) setUnfolded(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [collapseToolbarWhenIdle, unfolded]);
+  // A send that cleared the box is done with it: fold, and let go of the focus it held (the
+  // Send button is disabled once the box is empty, and a disabled button never blurs).
+  const wasSubmitting = useRef(submitting);
+  useEffect(() => {
+    const sent = wasSubmitting.current && !submitting && value.length === 0;
+    wasSubmitting.current = submitting;
+    if (!sent || !collapseToolbarWhenIdle) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && containerRef.current?.contains(active)) active.blur();
+    setUnfolded(false);
+  }, [submitting, value, collapseToolbarWhenIdle]);
 
   return (
     // The new-chat message box is a SAM Glass slab, like the follow-up composer in a chat.
     <div
+      ref={containerRef}
       className={`${paneClassName('slab')} shrink-0 px-3 py-3 md:px-4`}
-      onFocus={() => setFocusWithin(true)}
-      onBlur={handleBlur}
+      onFocus={() => setUnfolded(true)}
+      onPointerDown={() => setUnfolded(true)}
     >
       {receipt}
       {error && (
@@ -428,6 +451,7 @@ export function ChatInput({
         showAttachButton={!showToolbar}
         attachTitle="Attach files to this task"
         focusOnMount={focusOnMount}
+        inputLabel={inputLabel}
       />
       <ProfilePickerSheet
         open={profileSheet.open}

@@ -262,7 +262,7 @@ function overviewBody(scene: 'normal' | 'busy' | 'quiet'): ProjectOverviewRespon
   if (scene === 'quiet') {
     return {
       projectId: PROJECT_ID,
-      running: { items: [], total: 0 },
+      running: { items: [], total: 0, waitingOnViewerTotal: 0 },
       recent: { ideas: [], mergedPullRequests: [] },
       unavailable: [],
       generatedAt: new Date().toISOString(),
@@ -271,7 +271,12 @@ function overviewBody(scene: 'normal' | 'busy' | 'quiet'): ProjectOverviewRespon
   const busy = scene === 'busy';
   return {
     projectId: PROJECT_ID,
-    running: { items: busy ? BUSY_RUNNING : NORMAL_RUNNING, total: busy ? 12 : 5 },
+    running: {
+      items: busy ? BUSY_RUNNING : NORMAL_RUNNING,
+      total: busy ? 12 : 5,
+      // Busy: three chats wait on you; one fits in the five rows, two are past the cap.
+      waitingOnViewerTotal: busy ? 3 : 1,
+    },
     recent: {
       ideas: [
         idea(
@@ -523,7 +528,9 @@ test.describe('Project Overview', () => {
     await page.goto(BASE);
     const running = page.getByRole('region', { name: 'Running now' });
     await expect(running.getByTestId('overview-running-row')).toHaveCount(5);
-    await expect(running.getByRole('link', { name: '7 more running' })).toBeVisible();
+    await expect(
+      running.getByRole('link', { name: /7 more running\s?· 2 waiting on you/ })
+    ).toBeVisible();
     await expect(page.getByTestId('overview-budget-exceptions')).toContainText(
       'Weekly window · 6% left'
     );
@@ -574,7 +581,12 @@ test.describe('Project Overview', () => {
         name: /Add a pause subscription option/,
       })
     ).toBeVisible();
-    if (isPhone(testInfo)) await box.blur();
+    if (isPhone(testInfo)) {
+      // A completed send folds the phone box back to one row.
+      await expect(page.getByRole('button', { name: /^To / })).toHaveCount(0);
+      const height = await box.evaluate((el) => el.getBoundingClientRect().height);
+      expect(height).toBeLessThanOrEqual(50);
+    }
     await expectTaskBoxPinned(page);
     await capture(page, 'overview-after-send');
   });

@@ -6,9 +6,11 @@
  * when an automation needs attention) live in the web app's shared models, and the page reuses
  * those models and their cached reads rather than restating the rules on the server.
  *
- * Round trips: authorization (the access port's membership read), then in parallel the running
- * query (1), the merged pull requests (1) and the ideas list (`listIdeasWithDerivedStatus`, about
- * ten). Within the 20 a dashboard read may spend (`.claude/rules/60`).
+ * Round trips: authorization (1, the access port's membership read), then in parallel the
+ * running query (1), the merged pull requests (1) and the recent ideas
+ * (`listRecentIdeasWithDerivedStatus`: rows, repository, the ProjectData snapshot, and up to four
+ * evidence reads, so at most 7). About 10, within the 20 a dashboard read may spend
+ * (`.claude/rules/60`).
  */
 import {
   DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
@@ -24,7 +26,7 @@ import { log } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import { authorizeProjectOperation } from './authorization';
-import { listIdeasWithDerivedStatus } from './idea-list-core';
+import { listRecentIdeasWithDerivedStatus } from './idea-list-core';
 import type { OperationContext } from './types';
 
 /**
@@ -41,11 +43,21 @@ export const OVERVIEW_RUNNING_TASK_STATUSES = [
 const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
 
 /**
+ * 1 for a chat paused on a question the viewer must answer (they started it, it is past
+ * starting), else 0. Ranked first so the cap can never hide the one exception the page exists to
+ * surface (`apps/api/.claude/rules/65`), and summed so the page can say how many there are.
+ * Binds the viewer id; it appears twice in `RUNNING_SQL` (the sum and the ranking).
+ */
+const WAITING_ON_VIEWER_SQL = `(CASE WHEN ss.attention_json IS NOT NULL AND ss.created_by_user_id = ?
+      AND t.status NOT IN (${sqlList(OVERVIEW_STARTING_TASK_STATUSES)}) THEN 1 ELSE 0 END)`;
+
+/**
  * Awake chats (`session_summaries.status = 'active'`, the D1 index the DO keeps in sync) whose
  * task is in a running status, and that are either still being placed, mid-turn
  * (`agent_completed_at IS NULL`, the same rule the chat list uses for "idle"), or paused on an
  * open question. The task join carries `project_id` so a task id cannot reach across projects
- * (rule 11). `COUNT(*) OVER ()` gives the total without a second round trip.
+ * (rule 11), and a profile name is shown only for this project's profiles or the task creator's
+ * own global ones, so a hint naming someone else's global profile reveals nothing. `COUNT(*) OVER ()` gives the total without a second round trip.
  */
 const RUNNING_SQL = `
   SELECT ss.id, ss.task_id, ss.topic, ss.started_at, ss.created_at, ss.last_message_at,
@@ -53,11 +65,13 @@ const RUNNING_SQL = `
          CASE WHEN ss.attention_json IS NULL THEN 0 ELSE 1 END AS has_attention,
          t.status AS task_status, t.agent_profile_hint,
          ap.name AS profile_name,
-         COUNT(*) OVER () AS total
+         COUNT(*) OVER () AS total,
+         SUM(${WAITING_ON_VIEWER_SQL}) OVER () AS waiting_on_viewer_total
     FROM session_summaries ss
     JOIN tasks t ON t.id = ss.task_id AND t.project_id = ss.project_id
     LEFT JOIN agent_profiles ap
-      ON ap.id = t.agent_profile_hint AND (ap.project_id IS NULL OR ap.project_id = ss.project_id)
+      ON ap.id = t.agent_profile_hint
+     AND (ap.project_id = ss.project_id OR (ap.project_id IS NULL AND ap.user_id = t.user_id))
    WHERE ss.project_id = ?
      AND ss.status = 'active'
      AND t.status IN (${sqlList(OVERVIEW_RUNNING_TASK_STATUSES)})
@@ -67,14 +81,16 @@ const RUNNING_SQL = `
        OR (ss.agent_completed_at IS NULL
            AND (t.execution_step IS NULL OR t.execution_step <> 'awaiting_followup'))
      )
-   ORDER BY COALESCE(ss.last_message_at, ss.created_at, ss.started_at) DESC, ss.id DESC
+   ORDER BY ${WAITING_ON_VIEWER_SQL} DESC,
+            COALESCE(ss.last_message_at, ss.created_at, ss.started_at) DESC, ss.id DESC
    LIMIT ?`;
 
+/** Served by `idx_pull_requests_project_state_merged` (migration 0246): no scan of the project's history. */
 const MERGED_PULL_REQUESTS_SQL = `
   SELECT number, url, title, repository, merged_at
     FROM pull_requests
    WHERE project_id = ? AND state = 'merged'
-   ORDER BY COALESCE(merged_at, updated_at) DESC, id DESC
+   ORDER BY merged_at DESC
    LIMIT ?`;
 
 /** A row read back out of D1 is a trust boundary: validate it, never cast it (rule 51). */
@@ -95,7 +111,9 @@ const RunningRowSchema = v.object({
 
 const MergedPullRequestRowSchema = v.object({
   number: v.pipe(v.number(), v.integer()),
-  url: v.pipe(v.string(), v.url()),
+  // Rendered as a link: only https (the writers already store canonical GitHub URLs; this keeps
+  // a stray `javascript:` or `data:` value from ever reaching an href).
+  url: v.pipe(v.string(), v.url(), v.regex(/^https:\/\//i)),
   title: v.nullable(v.string()),
   repository: v.string(),
   merged_at: v.nullable(v.string()),
@@ -142,7 +160,8 @@ async function readRunning(
   limit: number
 ): Promise<ProjectOverviewResponse['running']> {
   const result = await ctx.env.DATABASE.prepare(RUNNING_SQL)
-    .bind(projectId, limit)
+    // Placeholders in order: viewer (sum), project, viewer (ranking), limit.
+    .bind(ctx.actor.userId, projectId, ctx.actor.userId, limit)
     .all<Record<string, unknown>>();
   const rows = result.results ?? [];
   const items: OverviewRunningChat[] = [];
@@ -163,7 +182,16 @@ async function readRunning(
   // The window count is the query's, so a skipped row still counts as running.
   const windowTotal = rows[0]?.total;
   const total = typeof windowTotal === 'number' ? windowTotal : rows.length;
-  return { items, total: Math.max(total, items.length) };
+  const waitingTotal = rows[0]?.waiting_on_viewer_total;
+  const shownWaiting = items.filter((item) => item.waitingOnViewer).length;
+  return {
+    items,
+    total: Math.max(total, items.length),
+    waitingOnViewerTotal: Math.max(
+      typeof waitingTotal === 'number' ? waitingTotal : 0,
+      shownWaiting
+    ),
+  };
 }
 
 async function readMergedPullRequests(
@@ -198,18 +226,13 @@ async function readMergedPullRequests(
   return items;
 }
 
-/** The newest ideas, open or closed: the ideas list's own rows, so each carries its state. */
-async function readRecentIdeas(
+/** The newest ideas, open or closed: the Ideas list's own item shape, so each carries its state. */
+function readRecentIdeas(
   ctx: OperationContext,
   projectId: string,
   limit: number
 ): Promise<IdeaListItem[]> {
-  const { items } = await listIdeasWithDerivedStatus(ctx, {
-    projectId,
-    openLimit: limit,
-    closedLimit: limit,
-  });
-  return [...items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit);
+  return listRecentIdeasWithDerivedStatus(ctx, { projectId, limit });
 }
 
 /**
@@ -251,7 +274,7 @@ export async function projectOverviewGet(
     section(
       'running',
       projectId,
-      { items: [], total: 0 },
+      { items: [], total: 0, waitingOnViewerTotal: 0 },
       () => readRunning(ctx, projectId, runningLimit),
       unavailable
     ),

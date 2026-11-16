@@ -31,6 +31,7 @@ export { RunAccountButton, RunAccountPanel } from './RunAccountControl';
 export {
   type ProfileUsage,
   usageEntry,
+  usageSpoken,
   type UsageWord,
   usageWords,
   useProfileUsages,

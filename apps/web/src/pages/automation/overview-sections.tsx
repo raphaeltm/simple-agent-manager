@@ -127,13 +127,17 @@ function AttentionFix({
   );
   const detail = automationPaths.detail(projectId, item.kind, item.id);
   const inlineResume = canWrite && attention.fix === 'resume' && item.kind === 'trigger';
-  const sizing = compact ? 'min-h-11 px-3 text-sm' : 'min-h-11 px-4 text-[0.95rem]';
+  const linkStyle = compact
+    ? 'sam-raised min-h-11 rounded-[var(--sam-radius-control)] px-3 text-sm text-fg-primary'
+    : 'min-h-11 rounded-md bg-accent px-4 text-[0.95rem] text-fg-on-accent';
   if (inlineResume) {
     return (
       <>
         <Button
           onClick={() => resume.mutate()}
           loading={resume.isPending}
+          // In a summary the fix is secondary: the page's primary action is elsewhere.
+          variant={compact ? 'raised' : undefined}
           size={compact ? 'sm' : undefined}
           className={compact ? 'min-h-11 shrink-0' : undefined}
         >
@@ -153,7 +157,7 @@ function AttentionFix({
   return (
     <Link
       to={attention.fix === 'review-runs' ? `${detail}#runs` : detail}
-      className={`inline-flex shrink-0 items-center rounded-md bg-accent font-semibold text-fg-on-accent no-underline ${sizing}`}
+      className={`inline-flex shrink-0 items-center font-semibold no-underline ${linkStyle}`}
     >
       {canWrite || attention.fix === 'review-runs' || attention.fix === 'review'
         ? FIX_LABELS[attention.fix]
@@ -229,10 +233,12 @@ export function AttentionLine({
           className={`shrink-0 ${attention.tone === 'danger' ? 'text-danger-fg' : 'text-warning-fg'}`}
         />
         <span className="flex min-w-0 flex-col">
-          <span className="line-clamp-1 break-all text-sm font-medium text-fg-primary">
+          <span className="line-clamp-2 text-sm font-medium text-fg-primary [overflow-wrap:anywhere]">
             {item.name}
           </span>
-          <span className="line-clamp-1 break-all text-xs text-fg-muted">{attention.title}</span>
+          <span className="line-clamp-1 text-xs text-fg-muted [overflow-wrap:anywhere]">
+            {attention.title}
+          </span>
         </span>
       </Link>
       <AttentionFix item={item} attention={attention} canWrite={canWrite} compact />

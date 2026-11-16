@@ -6,7 +6,7 @@
  */
 import type { OverviewRunningChat } from '@simple-agent-manager/shared';
 import { AlertTriangle, Check } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 
 import type { ProfileUsage } from '../../components/project-chat/profile-picker';
@@ -17,6 +17,21 @@ import { ChatInput } from '../project-chat/ChatInput';
 import type { NewChatComposer } from '../project-chat/useNewChatComposer';
 
 const RECEIPT_TITLE_MAX = 80;
+
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * How long "Started: …" stays. The new row in Running now says the same thing for good, so the
+ * line is only the moment's confirmation; typing the next task clears it sooner.
+ */
+export const DEFAULT_OVERVIEW_RECEIPT_MS = 8_000;
+export const OVERVIEW_RECEIPT_MS = positiveInt(
+  import.meta.env.VITE_OVERVIEW_RECEIPT_MS,
+  DEFAULT_OVERVIEW_RECEIPT_MS
+);
 
 /** The task's first line, as the receipt names it until the chat gets its own topic. */
 export function startedTitle(message: string): string {
@@ -29,6 +44,10 @@ interface StartedReceipt {
   sessionId: string;
 }
 
+/**
+ * The receipt line. Both live regions are always in the DOM and empty when idle, so assistive
+ * technology announces what appears in them; a failure is an alert, a start is a status.
+ */
 function ReceiptLine({
   projectId,
   started,
@@ -38,36 +57,38 @@ function ReceiptLine({
   started: StartedReceipt | null;
   error: string | null;
 }) {
-  if (!error && !started) return null;
   return (
-    <p
-      role="status"
-      aria-live="polite"
-      data-testid="overview-start-receipt"
-      className={`m-0 mb-2 flex min-w-0 items-center gap-1.5 text-[13px] ${error ? 'text-danger-fg' : 'text-[var(--sam-status-success-fg)]'}`}
-    >
-      {error ? (
-        <AlertTriangle size={14} aria-hidden="true" className="shrink-0" />
-      ) : (
-        <Check size={14} strokeWidth={2.5} aria-hidden="true" className="shrink-0" />
-      )}
-      {error ? (
-        <span className="min-w-0 break-words">Couldn’t start: {error}</span>
-      ) : (
-        started && (
-          <>
+    <>
+      <div role="alert">
+        {error && (
+          <p
+            data-testid="overview-start-receipt"
+            className="m-0 mb-2 flex min-w-0 items-center gap-1.5 text-[13px] text-danger-fg"
+          >
+            <AlertTriangle size={14} aria-hidden="true" className="shrink-0" />
+            <span className="min-w-0 break-words">Couldn’t start: {error}</span>
+          </p>
+        )}
+      </div>
+      <div role="status" aria-live="polite">
+        {!error && started && (
+          <p
+            data-testid="overview-start-receipt"
+            className="m-0 mb-1 flex min-w-0 items-center gap-1.5 text-[13px] text-[var(--sam-status-success-fg)]"
+          >
+            <Check size={14} strokeWidth={2.5} aria-hidden="true" className="shrink-0" />
             <span className="min-w-0 truncate">Started: {started.title}</span>
             <span aria-hidden="true">·</span>
             <Link
               to={`/projects/${projectId}/chat/${started.sessionId}`}
-              className="inline-flex min-h-11 shrink-0 items-center text-[13px] text-accent no-underline hover:underline"
+              className="-my-3 inline-flex min-h-11 shrink-0 items-center text-[13px] text-accent no-underline hover:underline"
             >
               Open chat
             </Link>
-          </>
-        )
-      )}
-    </p>
+          </p>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -85,6 +106,16 @@ export function OverviewTaskBox({
   const { projectId, profileChoice, attachments, overrides } = composer;
   const { commands: slashCommands } = useAvailableCommands(projectId);
   const [started, setStarted] = useState<StartedReceipt | null>(null);
+  // The confirmation is momentary: it leaves after a while, or as soon as the next task is typed.
+  useEffect(() => {
+    if (!started) return;
+    const timer = setTimeout(() => setStarted(null), OVERVIEW_RECEIPT_MS);
+    return () => clearTimeout(timer);
+  }, [started]);
+  const typing = composer.message.length > 0;
+  useEffect(() => {
+    if (typing) setStarted(null);
+  }, [typing]);
 
   const handleSubmit = async () => {
     const start = await composer.startNewChat(null);
@@ -154,6 +185,7 @@ export function OverviewTaskBox({
       uploading={attachments.chatUploading}
       collapseToolbarWhenIdle={isMobile}
       focusOnMount={false}
+      inputLabel="Start a task"
     />
   );
 }

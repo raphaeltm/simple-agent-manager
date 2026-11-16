@@ -48,19 +48,37 @@ export function useProjectOverview(projectId: string) {
   });
 
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // An event that arrived while the tab was hidden: refetch once when it is shown again.
+  const missedWhileHidden = useRef(false);
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({
       queryKey: projectOverviewQueryKeys.detail(queryScope, projectId),
     });
   }, [queryClient, queryScope, projectId]);
   const scheduleRefresh = useCallback(() => {
+    // A hidden tab does not refetch on events, as it does not poll; it catches up when shown.
+    if (document.hidden) {
+      missedWhileHidden.current = true;
+      return;
+    }
     if (refreshTimer.current) return;
     refreshTimer.current = setTimeout(() => {
       refreshTimer.current = undefined;
       refresh();
     }, OVERVIEW_EVENT_REFRESH_MS);
   }, [refresh]);
-  useEffect(() => () => clearTimeout(refreshTimer.current), []);
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.hidden || !missedWhileHidden.current) return;
+      missedWhileHidden.current = false;
+      refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      clearTimeout(refreshTimer.current);
+    };
+  }, [refresh]);
 
   useProjectWebSocket({
     projectId,
@@ -83,7 +101,8 @@ export function useProjectOverview(projectId: string) {
   const data = query.data;
   const running = useMemo(() => mergeRunning(data, pending, Date.now()), [data, pending]);
 
-  // Drop pending rows the read now includes, or that outlived their TTL.
+  // Drop pending rows the read now includes, or that outlived their TTL (on a timer too, so a
+  // start the server never lists leaves even when no refetch lands).
   useEffect(() => {
     if (pending.length === 0) return;
     const now = Date.now();
@@ -92,7 +111,21 @@ export function useProjectOverview(projectId: string) {
       (entry) =>
         !shown.has(entry.chat.sessionId) && now - entry.addedAt < OVERVIEW_PENDING_START_TTL_MS
     );
-    if (keep.length !== pending.length) setPending(keep);
+    if (keep.length !== pending.length) {
+      setPending(keep);
+      return;
+    }
+    const nextExpiry = Math.min(
+      ...keep.map((entry) => entry.addedAt + OVERVIEW_PENDING_START_TTL_MS)
+    );
+    const timer = setTimeout(
+      () =>
+        setPending((current) =>
+          current.filter((entry) => Date.now() - entry.addedAt < OVERVIEW_PENDING_START_TTL_MS)
+        ),
+      Math.max(0, nextExpiry - now)
+    );
+    return () => clearTimeout(timer);
   }, [data, pending]);
 
   return {
@@ -110,7 +143,7 @@ export function mergeRunning(
   data: ProjectOverviewResponse | undefined,
   pending: readonly PendingStart[],
   now: number
-): { items: OverviewRunningChat[]; total: number } {
+): { items: OverviewRunningChat[]; total: number; waitingOnViewerTotal: number } {
   const server = data?.running.items ?? [];
   const shown = new Set(server.map((item) => item.sessionId));
   const extra = pending
@@ -119,5 +152,9 @@ export function mergeRunning(
         !shown.has(entry.chat.sessionId) && now - entry.addedAt < OVERVIEW_PENDING_START_TTL_MS
     )
     .map((entry) => entry.chat);
-  return { items: [...extra, ...server], total: (data?.running.total ?? 0) + extra.length };
+  return {
+    items: [...extra, ...server],
+    total: (data?.running.total ?? 0) + extra.length,
+    waitingOnViewerTotal: data?.running.waitingOnViewerTotal ?? 0,
+  };
 }

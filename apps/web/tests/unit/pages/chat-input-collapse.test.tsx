@@ -91,6 +91,71 @@ function Harness({
   );
 }
 
+function Controlled({ value, submitting }: { value: string; submitting: boolean }) {
+  return (
+    <ChatInput
+      value={value}
+      onChange={vi.fn()}
+      onSubmit={vi.fn()}
+      submitting={submitting}
+      error={null}
+      placeholder="Start a task…"
+      transcribeApiUrl="/t"
+      projectId="p1"
+      agents={[{ id: 'claude-code', name: 'Claude Code' } as never]}
+      agentProfiles={[profile]}
+      selectedProfileId="opus"
+      onProfileChange={vi.fn()}
+      profilePicker={{
+        picker: { status: 'ready', state: undefined } as never,
+        state: undefined,
+        setHidden: vi.fn(),
+        updating: false,
+        updateError: null,
+        refresh: vi.fn(),
+      }}
+      profileUsages={null}
+      profileSheet={{ open: false, anchor: null }}
+      onOpenProfileSheet={vi.fn()}
+      onCloseProfileSheet={vi.fn()}
+      skills={[]}
+      selectedSkillId={null}
+      onSkillChange={vi.fn()}
+      onUpdateProfile={vi.fn()}
+      taskResourceReqs={{ ...EMPTY_RESOURCE_STATE }}
+      onTaskResourceReqsChange={vi.fn()}
+      taskResourceErrors={{}}
+      onTaskResourceErrorsClear={vi.fn()}
+      agentOverrides={EMPTY_CHAT_AGENT_OVERRIDES}
+      onAgentOverridesChange={vi.fn()}
+      profileWizard={{ open: false } as never}
+      onOpenProfileWizard={vi.fn()}
+      onCloseProfileWizard={vi.fn()}
+      onUpdateProfileWizard={vi.fn()}
+      onCreateProfileFromWizard={vi.fn()}
+      suggestProfileName={() => 'x'}
+      collapseToolbarWhenIdle
+      focusOnMount={false}
+    />
+  );
+}
+
+const STABLE_CLIENT = new QueryClient();
+
+function sending(props: { value: string; submitting: boolean }) {
+  return (
+    <QueryClientProvider client={STABLE_CLIENT}>
+      <MemoryRouter>
+        <Controlled {...props} />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function renderSending(props: { value: string; submitting: boolean }) {
+  return render(sending(props));
+}
+
 function renderInput(props: Parameters<typeof Harness>[0]) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
@@ -118,13 +183,31 @@ describe('ChatInput collapseToolbarWhenIdle', () => {
     expect(toControl()).not.toBeNull();
   });
 
-  it('folds again when focus leaves an empty box', () => {
+  it('folds again on a tap outside an empty box, but not on a tap inside it', () => {
     renderInput({ collapse: true });
     const box = screen.getByPlaceholderText('Start a task…');
     fireEvent.focus(box);
     expect(toControl()).not.toBeNull();
-    fireEvent.blur(box, { relatedTarget: document.body });
+    // A tap on the To row itself (iOS Safari does not focus buttons) keeps it unfolded.
+    fireEvent.pointerDown(toControl() as HTMLElement);
+    fireEvent.blur(box, { relatedTarget: null });
+    expect(toControl()).not.toBeNull();
+    fireEvent.pointerDown(document.body);
     expect(toControl()).toBeNull();
+  });
+
+  it('folds after a completed send that cleared the box, and keeps it open after a failed one', () => {
+    const view = renderSending({ value: 'Fix the flaky test', submitting: false });
+    fireEvent.focus(screen.getByPlaceholderText('Start a task…'));
+    view.rerender(sending({ value: 'Fix the flaky test', submitting: true }));
+    // Failed: the text stays, so the row stays.
+    view.rerender(sending({ value: 'Fix the flaky test', submitting: false }));
+    expect(toControl()).not.toBeNull();
+    view.rerender(sending({ value: 'Fix the flaky test', submitting: true }));
+    // Succeeded: the box was cleared.
+    view.rerender(sending({ value: '', submitting: false }));
+    expect(toControl()).toBeNull();
+    expect(screen.getByPlaceholderText('Start a task…')).toBeInTheDocument();
   });
 
   it('never folds on the chat page, which does not ask for it', () => {

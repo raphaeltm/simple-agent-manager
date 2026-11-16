@@ -12,7 +12,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  createAllSchemaTables,
+  createDeclaredIndexes,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({ snapshots: vi.fn() }));
 vi.mock('../../../src/services/project-data', async (importOriginal) => ({
@@ -21,6 +25,7 @@ vi.mock('../../../src/services/project-data', async (importOriginal) => ({
 }));
 
 const NOW = 1_794_000_000_000;
+const HOUR = 3_600_000;
 
 describe('projectOverviewGet', () => {
   let sqlite: Database.Database;
@@ -100,7 +105,9 @@ describe('projectOverviewGet', () => {
         ('p','owner','owner','active'), ('p','teammate','member','active'), ('foreign','outsider','owner','active');
       INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type) VALUES
         ('profile-build', 'p', 'owner', 'Opus 5.5 Build', 'claude-code'),
-        ('profile-foreign', 'foreign', 'outsider', 'Foreign profile', 'claude-code');
+        ('profile-foreign', 'foreign', 'outsider', 'Foreign profile', 'claude-code'),
+        ('profile-own-global', NULL, 'owner', 'My global profile', 'claude-code'),
+        ('profile-mate-global', NULL, 'teammate', 'Teammate private profile', 'claude-code');
     `);
     mocks.snapshots.mockImplementation(async (_env: unknown, _projectId: string, ids: string[]) =>
       Object.fromEntries(
@@ -180,12 +187,22 @@ describe('projectOverviewGet', () => {
     chat('borrowed', { task_id: 'task-borrowed' });
     // Attack 3: our task naming a foreign project's profile.
     running('foreign-profile', {}, { agent_profile_hint: 'profile-foreign' });
+    // Attack 4: a task naming another member's private global profile.
+    running('mate-global', {}, { agent_profile_hint: 'profile-mate-global' });
+    // Owner control: the task creator's own global profile is named.
+    running('own-global', {}, { agent_profile_hint: 'profile-own-global' });
 
     const result = await projectOverviewGet(ctx(), { projectId: 'p' });
 
     const ids = result.running.items.map((item) => item.sessionId).sort();
-    expect(ids).toEqual(['foreign-profile', 'mine']);
-    expect(result.running.items.find((i) => i.sessionId === 'foreign-profile')?.profile).toBeNull();
+    expect(ids).toEqual(['foreign-profile', 'mate-global', 'mine', 'own-global']);
+    const profileOf = (id: string) => result.running.items.find((i) => i.sessionId === id)?.profile;
+    expect(profileOf('foreign-profile')).toBeNull();
+    expect(profileOf('mate-global')).toBeNull();
+    expect(profileOf('own-global')).toEqual({
+      id: 'profile-own-global',
+      name: 'My global profile',
+    });
   });
 
   it('refuses a caller who is not a member, with the same answer as a missing project', async () => {
@@ -209,6 +226,45 @@ describe('projectOverviewGet', () => {
       'chat-4',
     ]);
     expect(result.running.total).toBe(12);
+  });
+
+  it('ranks chats waiting on the viewer first, so the cap never hides them, and counts them', async () => {
+    for (let i = 0; i < 8; i++) running(`busy-${i}`, { last_message_at: NOW - i * 1000 });
+    // Older than every busy chat: by recency alone it would fall behind the cap of five.
+    const question = JSON.stringify({ markerId: 'm1' });
+    running('old-question', {
+      last_message_at: NOW - HOUR,
+      agent_completed_at: NOW - HOUR,
+      attention_json: question,
+    });
+    running('older-question', {
+      last_message_at: NOW - 2 * HOUR,
+      agent_completed_at: NOW - 2 * HOUR,
+      attention_json: question,
+    });
+    // Control: a teammate's waiting chat is not the owner's to answer and is not lifted.
+    running('mates-question', {
+      last_message_at: NOW - 3 * HOUR,
+      agent_completed_at: NOW - 3 * HOUR,
+      attention_json: question,
+      created_by_user_id: 'teammate',
+    });
+
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+
+    expect(result.running.items.map((item) => item.sessionId)).toEqual([
+      'old-question',
+      'older-question',
+      'busy-0',
+      'busy-1',
+      'busy-2',
+    ]);
+    expect(result.running.total).toBe(11);
+    expect(result.running.waitingOnViewerTotal).toBe(2);
+    // The teammate sees their own question first and counts only that one.
+    const mate = await projectOverviewGet(ctx('teammate'), { projectId: 'p' });
+    expect(mate.running.items[0]?.sessionId).toBe('mates-question');
+    expect(mate.running.waitingOnViewerTotal).toBe(1);
   });
 
   it('skips one malformed row and keeps the rest', async () => {
@@ -249,10 +305,13 @@ describe('projectOverviewGet', () => {
       merged_at: '2026-11-16T00:00:00.000Z',
     });
     pr(8, { url: 'not a url', merged_at: '2026-11-15T12:00:00.000Z' });
+    pr(9, { url: 'javascript:alert(1)', merged_at: '2026-11-15T13:00:00.000Z' });
 
     const result = await projectOverviewGet(ctx(), { projectId: 'p' });
 
-    expect(result.recent.mergedPullRequests.map((item) => item.number)).toEqual([4, 2]);
+    // The two newest rows are malformed (not a URL, not https) and are skipped, not refilled:
+    // the read is capped at three rows and a bad row costs its own slot only.
+    expect(result.recent.mergedPullRequests.map((item) => item.number)).toEqual([4]);
     expect(result.recent.mergedPullRequests[0]).toEqual({
       number: 4,
       url: 'https://github.com/acme/app/pull/4',
@@ -295,5 +354,103 @@ describe('projectOverviewGet', () => {
     expect(result.unavailable).toEqual(['ideas']);
     expect(result.recent.ideas).toEqual([]);
     expect(result.running.items.map((item) => item.sessionId)).toEqual(['working']);
+  });
+
+  it('stays within the dashboard round-trip budget with ideas that have linked work', async () => {
+    running('working');
+    for (let i = 0; i < 3; i++) {
+      task(`idea-${i}`, { is_idea: 1, status: 'draft', execution_step: null });
+      task(`task-idea-${i}`, { chat_session_id: `idea-chat-${i}` });
+    }
+    // Every idea has a strong linked chat, so evidence reads (tasks, PR associations, profile
+    // names, PR states) all run: the expensive shape, not the empty one.
+    mocks.snapshots.mockImplementation(async (_env: unknown, _projectId: string, ids: string[]) =>
+      Object.fromEntries(
+        ids.map((id) => [
+          id,
+          {
+            ideaId: id,
+            sessions: [
+              {
+                sessionId: `idea-chat-${id}`,
+                topic: 'Working on it',
+                sessionStatus: 'active',
+                sessionTaskId: `task-${id}`,
+                lastActivityAt: NOW,
+                relations: ['implements'],
+                strong: true,
+                linkedAt: NOW - HOUR,
+              },
+            ],
+            needsInput: [],
+            fileIds: [],
+            pullRequestUrls: ['https://github.com/acme/app/pull/7'],
+            updates: 1,
+            truncated: { sessions: false, files: false, pullRequests: false },
+          },
+        ])
+      )
+    );
+    const d1 = env.DATABASE;
+    let d1Reads = 0;
+    env = {
+      ...env,
+      DATABASE: new Proxy(d1, {
+        get(target, prop, receiver) {
+          if (prop === 'prepare') {
+            return (sql: string) => {
+              d1Reads += 1;
+              return target.prepare(sql);
+            };
+          }
+          if (prop === 'batch') {
+            return (statements: unknown[]) => {
+              d1Reads += 1;
+              return (target.batch as (s: unknown[]) => Promise<unknown>)(statements);
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      }),
+    } as Env;
+
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+
+    expect(result.unavailable).toEqual([]);
+    expect(result.recent.ideas).toHaveLength(3);
+    const doCalls = mocks.snapshots.mock.calls.length;
+    // .claude/rules/60: a dashboard read spends at most 20 D1 + DO round trips.
+    expect(d1Reads + doCalls).toBeLessThanOrEqual(20);
+    expect(doCalls).toBe(1);
+  });
+
+  it('reads the newest merged pull requests from an index, without sorting the project history', async () => {
+    createDeclaredIndexes(sqlite, [schema.pullRequests]);
+    const seen: string[] = [];
+    const d1 = env.DATABASE;
+    env = {
+      ...env,
+      DATABASE: new Proxy(d1, {
+        get(target, prop, receiver) {
+          if (prop === 'prepare') {
+            return (sql: string) => {
+              seen.push(sql);
+              return target.prepare(sql);
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      }),
+    } as Env;
+    await projectOverviewGet(ctx(), { projectId: 'p' });
+    const sql = seen.find((statement) => statement.includes('FROM pull_requests'));
+    expect(sql).toBeDefined();
+    const plan = sqlite
+      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+      .all('p', 3)
+      .map((row) => (row as { detail: string }).detail)
+      .join('\n');
+    expect(plan).toContain('idx_pull_requests_project_state_merged');
+    expect(plan).not.toContain('TEMP B-TREE');
   });
 });
