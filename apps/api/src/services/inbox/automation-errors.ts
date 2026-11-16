@@ -180,18 +180,20 @@ export async function runInboxAutomationErrorSweep(
       // Auto-pause happens at the next fire (`trigger-admission.ts`) and records no run, so the
       // failed-run scan above never sees it: refresh the item here so it says paused and offers
       // Resume.
+      const triggerId = item.trigger_id;
       if (
+        triggerId &&
         item.trigger_status === 'paused' &&
         item.user_id &&
         !(item.answer_spec_json ?? '').includes('"resume"')
       ) {
-        const streak = await consecutiveFailureCount(env, item.trigger_id!, 50);
+        const streak = await consecutiveFailureCount(env, triggerId, 50);
         if (streak.count > 0) {
           const refreshed = await fileAndNotify(
             env,
             automationFailureError(
               {
-                trigger_id: item.trigger_id!,
+                trigger_id: triggerId,
                 project_id: item.project_id,
                 user_id: item.user_id,
                 name: item.name,
