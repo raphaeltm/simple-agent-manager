@@ -53,6 +53,7 @@ import type { Env } from '../../../../src/env';
 import { createOperationPorts } from '../../../../src/operation-ports';
 import { __resetAdminSettingsCacheForTest } from '../../../../src/services/admin-settings';
 import { buildInboxAskPrompt } from '../../../../src/services/inbox/ask-notice';
+import { fileQuestionAsk } from '../../../../src/services/inbox/question-asks';
 import {
   applySqliteMigration,
   createAllSchemaTables,
@@ -520,6 +521,45 @@ describe('cross-user isolation and pull request hosts', () => {
       links: [{ kind: 'pr', url: 'https://github.com/Acme/One/pull/12/' }],
     });
     expect(JSON.parse(String(askRow(filed.id).links_json))).toHaveLength(1);
+  });
+});
+
+describe('request_human_input alias', () => {
+  it('files a blocking ask through the same operation: title, schedule, live chat, push and link', async () => {
+    const filed = await fileQuestionAsk(env, {
+      projectId: P1,
+      sessionId: 'chat-1',
+      taskId: 'task-1',
+      workspaceId: 'ws-1',
+      userId: 'owner',
+      context: 'Ship the fix now? Staging is green.',
+      category: 'approval',
+      options: ['Yes', 'No'],
+    });
+    expect(filed.notificationScheduled).toBe(true);
+    expect(askRow(filed.id)).toMatchObject({
+      kind: 'question',
+      blocking: 1,
+      title: 'Ship the fix now?',
+      body_md: 'Ship the fix now? Staging is green.',
+      category: 'approval',
+      notification_id: 'notif-1',
+      expires_at: filed.expiresAt,
+    });
+    expect(askRow(filed.id).next_escalation_at).not.toBeNull();
+    expect(edges.recordQuestionAsked).toHaveBeenCalledWith(
+      env,
+      P1,
+      expect.objectContaining({ askId: filed.id, options: ['Yes', 'No'] })
+    );
+    expect(edges.createNotification).toHaveBeenCalledWith(
+      'owner',
+      expect.objectContaining({
+        type: 'needs_input',
+        title: expect.stringMatching(/^Approval needed/),
+        metadata: expect.objectContaining({ attentionMarkerId: filed.id, options: ['Yes', 'No'] }),
+      })
+    );
   });
 });
 
