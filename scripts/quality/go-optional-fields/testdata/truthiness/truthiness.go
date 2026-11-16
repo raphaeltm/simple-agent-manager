@@ -13,10 +13,10 @@ type State struct {
 func apply(state *State, opts ...syncOpts) {
 	for _, opt := range opts {
 		if opt.Force {
-			state.Force = opt.Force
+			state.Force = opt.Force // want truthiness
 		}
 		if opt.Retries != 0 {
-			state.Retries = opt.Retries
+			state.Retries = opt.Retries // want truthiness
 		}
 	}
 }

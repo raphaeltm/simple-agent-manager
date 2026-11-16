@@ -18,6 +18,6 @@ func (p *Profile) Apply(patch *ProfilePatch) {
 	if patch.Name != "" {
 		p.Name = patch.Name
 	}
-	p.Mode = patch.Mode
-	p.Pin = patch.Pin
+	p.Mode = patch.Mode // want unguarded
+	p.Pin = patch.Pin   // want unguarded
 }

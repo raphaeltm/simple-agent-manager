@@ -155,14 +155,23 @@ evidence on idea 01M7H32EK6S4E31EHWVSJSENR5).
 
 `pnpm quality:go-optional-fields` (`scripts/quality/go-optional-fields/`, Go standard
 library only, blocking in Code Quality Checks) walks every Go package in the repository.
-It reports a non-string scalar field (bool, integer, float, `time.Duration`, or a named type
-over one) of an options value (a variadic `opts ...T`, or a parameter typed `*Opts`,
-`*Options`, `*Patch` and similar) that is assigned onto existing state with no check for
-"not supplied", or guarded only by its own truthiness. Assignments onto a value the
-function builds itself are construction and are not reported. A deliberate full
-replacement opts out with `//sam:optional-field-ok <reason>`.
+An options value is a parameter or receiver whose struct type ends in `Opts`, `Options`,
+`Opt`, `Patch` or `Override(s)`, a variadic of such a type or named `opts`/`options`, and any
+`opts[i]` or local bound from one. The check reports a non-string scalar field (bool,
+integer, float, `time.Duration`, or a named type over one) of such a value written onto
+existing state, directly or through an expression (`!o.F`, `time.Duration(o.F)`), or in a
+struct literal replacing a value (`*r = R{F: o.F}`), when no enclosing `if`, `case` or
+early-return condition checks that it was supplied (a mention of the field or a presence
+flag such as `HasF`; else and default branches and `if o.F != r.F` do not count), or when
+the only check is the field's own truthiness. Writes onto a local the function builds itself
+are construction; a local stops counting as built when it is loaded, passed to a call, has
+its address taken or is written through. `//sam:optional-field-ok <reason>` opts a
+statement out. Not covered: writes through helper calls, options types from another
+package, and struct literals stored into maps (usually creates). `main_test.go` pins each
+shape with `// want` annotations in `testdata/`, including every variant a Go review of the
+first version found.
 
-Measured 2026-11-16: 0 findings on the tree (320 Go files, 16 functions taking options).
+Measured 2026-11-16: 0 findings on the tree (323 Go files, 16 functions taking options).
 Across 25 commits sampled from February to November 2026 the only finding was the
 original incident (`runtime.Lightweight = opt.Lightweight`), at every sampled commit from
 2026-03-16 until its fix in #2055. That is why it started blocking rather than advisory

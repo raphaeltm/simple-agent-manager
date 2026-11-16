@@ -238,7 +238,7 @@ describe('checkClaudeHookConfig', () => {
     const shipped = {
       hooks: {
         Stop: [
-          { type: 'command', command: '.claude/hooks/verify-test-quality.mjs', timeout: 30000 },
+          { type: 'command', command: '.claude/hooks/verify-test-quality.sh', timeout: 30000 },
         ],
       },
     };
