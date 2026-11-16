@@ -325,6 +325,40 @@ async function setupMocks(page: Page, scenario: MockScenario) {
   return { retiredRequests };
 }
 
+/** Kept sections render, retired ones are gone, and the page never asks for them. */
+async function expectOnlyKeptSections(page: Page) {
+  const { retiredRequests } = await setupMocks(page, NORMAL);
+  await page.goto('/admin/analytics');
+  await page.waitForTimeout(800);
+
+  for (const kept of [
+    /^AI Usage/,
+    /^Daily Active Users/,
+    /^Feature Adoption/,
+    /^Website Traffic/,
+    /^Top Events/,
+  ]) {
+    await expect(page.getByRole('heading', { level: 3, name: kept })).toBeVisible();
+  }
+  for (const retired of [/Conversion Funnel/, /Geographic Distribution/, /Retention Cohorts/]) {
+    await expect(page.getByRole('heading', { name: retired })).toHaveCount(0);
+  }
+  expect(retiredRequests).toEqual([]);
+  await assertNoHorizontalOverflow(page);
+
+  // The page scrolls inside the app shell, so capture each kept section in view.
+  const width = page.viewportSize()?.width ?? 0;
+  for (const [slug, heading] of [
+    ['ai-usage', /^AI Usage/],
+    ['adoption', /^Feature Adoption/],
+    ['traffic', /^Website Traffic/],
+  ] as const) {
+    await page.getByRole('heading', { level: 3, name: heading }).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(300);
+    await screenshot(page, `admin-analytics-sections-${slug}-${width}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Mobile tests (default viewport from config: 375x667)
 // ---------------------------------------------------------------------------
@@ -336,36 +370,7 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
   );
 
   test('retired sections are gone and kept sections render', async ({ page }) => {
-    const { retiredRequests } = await setupMocks(page, NORMAL);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-
-    for (const kept of [
-      /^AI Usage/,
-      /^Daily Active Users/,
-      /^Feature Adoption/,
-      /^Website Traffic/,
-      /^Top Events/,
-    ]) {
-      await expect(page.getByRole('heading', { level: 3, name: kept })).toBeVisible();
-    }
-    for (const retired of [/Conversion Funnel/, /Geographic Distribution/, /Retention Cohorts/]) {
-      await expect(page.getByRole('heading', { name: retired })).toHaveCount(0);
-    }
-    expect(retiredRequests).toEqual([]);
-    await assertNoHorizontalOverflow(page);
-
-    // The page scrolls inside the app shell, so capture each kept section in view.
-    const width = page.viewportSize()?.width ?? 0;
-    for (const [slug, heading] of [
-      ['ai-usage', /^AI Usage/],
-      ['adoption', /^Feature Adoption/],
-      ['traffic', /^Website Traffic/],
-    ] as const) {
-      await page.getByRole('heading', { level: 3, name: heading }).scrollIntoViewIfNeeded();
-      await page.waitForTimeout(300);
-      await screenshot(page, `admin-analytics-sections-${slug}-${width}`);
-    }
+    await expectOnlyKeptSections(page);
   });
 
   test('normal data — all charts render', async ({ page }) => {
@@ -564,36 +569,7 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('retired sections are gone and kept sections render', async ({ page }) => {
-    const { retiredRequests } = await setupMocks(page, NORMAL);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-
-    for (const kept of [
-      /^AI Usage/,
-      /^Daily Active Users/,
-      /^Feature Adoption/,
-      /^Website Traffic/,
-      /^Top Events/,
-    ]) {
-      await expect(page.getByRole('heading', { level: 3, name: kept })).toBeVisible();
-    }
-    for (const retired of [/Conversion Funnel/, /Geographic Distribution/, /Retention Cohorts/]) {
-      await expect(page.getByRole('heading', { name: retired })).toHaveCount(0);
-    }
-    expect(retiredRequests).toEqual([]);
-    await assertNoHorizontalOverflow(page);
-
-    // The page scrolls inside the app shell, so capture each kept section in view.
-    const width = page.viewportSize()?.width ?? 0;
-    for (const [slug, heading] of [
-      ['ai-usage', /^AI Usage/],
-      ['adoption', /^Feature Adoption/],
-      ['traffic', /^Website Traffic/],
-    ] as const) {
-      await page.getByRole('heading', { level: 3, name: heading }).scrollIntoViewIfNeeded();
-      await page.waitForTimeout(300);
-      await screenshot(page, `admin-analytics-sections-${slug}-${width}`);
-    }
+    await expectOnlyKeptSections(page);
   });
 
   test('normal data — full layout', async ({ page }) => {
