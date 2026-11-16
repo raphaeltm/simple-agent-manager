@@ -309,7 +309,7 @@ Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-api
 ## Insights flow
 
 Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow tab
-(`packages/operations/src/insights-flow-settings.ts`).
+(`packages/operations/src/insights-page-settings.ts`).
 
 | Setting                          | Default | Range  | What it limits                                                                                      |
 | -------------------------------- | ------- | ------ | --------------------------------------------------------------------------------------------------- |
