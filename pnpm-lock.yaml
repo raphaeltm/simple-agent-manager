@@ -893,6 +893,9 @@ importers:
 
   packages/operations:
     dependencies:
+      '@simple-agent-manager/scheduler-core':
+        specifier: workspace:*
+        version: link:../scheduler-core
       '@simple-agent-manager/shared':
         specifier: workspace:*
         version: link:../shared

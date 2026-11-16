@@ -174,6 +174,7 @@ export {
   projectRuntimeConfigQueryOptions,
 } from './projects';
 export { reportIssueConfigQueryOptions, reportIssueQueryKeys } from './report-issue';
+export { runReceiptQueryKeys, runReceiptQueryOptions } from './run-receipt';
 export {
   activeTasksQueryOptions,
   taskDetailQueryOptions,

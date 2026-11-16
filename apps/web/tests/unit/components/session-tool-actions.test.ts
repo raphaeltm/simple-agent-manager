@@ -248,3 +248,47 @@ describe('taskEndIntent', () => {
     expect(actions.find((a) => a.id === 'complete')).toBeUndefined();
   });
 });
+
+describe('buildSessionToolActions — run receipt', () => {
+  const input = (
+    overrides: Partial<BuildSessionToolActionsInput> = {}
+  ): BuildSessionToolActionsInput => ({
+    session: { id: 's1', workspaceId: 'ws1', taskId: 't1' } as never,
+    sessionState: 'active',
+    taskEmbed: { id: 't1', status: 'completed' } as never,
+    reportEnabled: false,
+    unresolvedCommentCount: 0,
+    needsAttentionCommentCount: 0,
+    hasFilesHandler: false,
+    hasGitHandler: false,
+    hasTimelineHandler: true,
+    hasAutomationHandler: false,
+    hasCommentsHandler: false,
+    hasRetryHandler: true,
+    hasForkHandler: true,
+    hasReceiptHandler: true,
+    ...overrides,
+  });
+  const ids = (overrides: Partial<BuildSessionToolActionsInput> = {}) =>
+    buildSessionToolActions(input(overrides)).map((action) => action.id);
+
+  it('offers the receipt in the session group for a task-backed chat, before Retry', () => {
+    const actions = buildSessionToolActions(input());
+    const receipt = actions.find((action) => action.id === 'receipt');
+    expect(receipt).toMatchObject({ label: 'Receipt', group: 'session' });
+    expect(ids().indexOf('receipt')).toBeLessThan(ids().indexOf('retry'));
+  });
+
+  it('offers it for a live run, which shows the time so far', () => {
+    expect(ids({ taskEmbed: { id: 't1', status: 'in_progress' } as never })).toContain('receipt');
+  });
+
+  it('leaves it out of a chat with no task, and when no handler is wired', () => {
+    expect(
+      ids({ session: { id: 's1', workspaceId: null, taskId: null } as never, taskEmbed: null })
+    ).not.toContain('receipt');
+    expect(ids({ hasReceiptHandler: false })).not.toContain('receipt');
+    // Liveness: the same inputs still produce the other tools.
+    expect(ids({ hasReceiptHandler: false })).toContain('timeline');
+  });
+});
