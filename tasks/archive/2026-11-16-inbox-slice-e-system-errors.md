@@ -82,7 +82,7 @@ Failure points (writers of `tasks.status='failed'`, 16 of them):
 - [x] Provider-limit block supersedes an open failed-wake item (`closeWakeErrorAskForProviderLimit`), and a usage-limit wait files nothing, both through the real callback route (`provider-limit-lifecycle.test.ts`)
 - [x] API reference: failed-wake and undelivered-inbox-answer rows, wake action, provider-limit behaviour
 - [x] Re-run reviewers on the rebased head (security-auditor, cloudflare-specialist, test-engineer, task-completion-validator): all findings fixed or deferred with reasons (2fe59c8d6, 2fce75c87, 5e56f8333); validator re-run PASS
-- [ ] Staging verification on the rebased head: real failed start + real failing/paused automation, Retry/Resume from the inbox closes each, phone viewport
+- [x] Staging verification on the rebased head (staging2, runs 43893788553 and 43905747468): real Instant failed start filed one item, Retry from a 375px phone closed it; VM failures filed; a VM automation failed 3 runs, filed, was really auto-paused by the cron fire, gained Resume, Resume from the phone closed it, next tick filed nothing. Evidence in PR #2781.
 
 ## Notes
 
