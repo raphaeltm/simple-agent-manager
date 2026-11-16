@@ -50,6 +50,18 @@ async function flush(stub: DurableObjectStub<ProjectData>) {
     usage.flush(start + usage.intervalMs);
   });
 }
+async function captureBatchError(stub: DurableObjectStub<ProjectData>, session: string) {
+  const response = await stub.fetch(
+    new Request('https://test/__capture-expected-error', {
+      method: 'POST',
+      body: JSON.stringify({
+        operation: 'persistMessageBatch',
+        args: [session, [chunk(1), chunk(2)], source],
+      }),
+    })
+  );
+  return response.json();
+}
 afterEach(() => vi.restoreAllMocks());
 
 describe('content-free message ingestion counters through real workerd', () => {
@@ -124,26 +136,34 @@ describe('content-free message ingestion counters through real workerd', () => {
     }
   );
 
-  it('keeps a capable socket live while measuring successful coalescing', async () => {
-    const { stub, session } = await setup();
-    const response = await stub.fetch(
-      new Request(`https://test/ws?sessionId=${session}&messageAppend=message-append-v1`, {
-        headers: { Upgrade: 'websocket' },
-      })
-    );
-    expect(response.status).toBe(101);
-    response.webSocket!.accept();
-    const log = vi.spyOn(console, 'log');
-    await stub.persistMessageBatch(session, [chunk(1), chunk(2)], source);
-    await flush(stub);
-    expect(reports(log).at(-1)!.messageIngest).toMatchObject({
-      coalesced: 1,
-      refused: {},
-      legacySessionSocketsMax: 0,
-      legacyProjectSocketsMax: 0,
-    });
-    response.webSocket!.close();
-  });
+  it.each(['capable reader', 'unrelated legacy reader'])(
+    'merges with a %s connected',
+    async (reader) => {
+      const { stub, session } = await setup();
+      const watched =
+        reader === 'capable reader'
+          ? session
+          : await stub.createSession(source.workspaceId, 'Unrelated');
+      const capability = reader === 'capable reader' ? '&messageAppend=message-append-v1' : '';
+      const response = await stub.fetch(
+        new Request(`https://test/ws?sessionId=${watched}${capability}`, {
+          headers: { Upgrade: 'websocket' },
+        })
+      );
+      expect(response.status).toBe(101);
+      response.webSocket!.accept();
+      const log = vi.spyOn(console, 'log');
+      await stub.persistMessageBatch(session, [chunk(1), chunk(2)], source);
+      await flush(stub);
+      expect(reports(log).at(-1)!.messageIngest).toMatchObject({
+        coalesced: 1,
+        refused: {},
+        legacySessionSocketsMax: 0,
+        legacyProjectSocketsMax: 0,
+      });
+      response.webSocket!.close();
+    }
+  );
 
   it.each(['setting_disabled', 'missing_incarnation', 'invalid_sequence', 'receipt_cap'] as const)(
     'explains primary refusal %s',
@@ -196,16 +216,7 @@ describe('content-free message ingestion counters through real workerd', () => {
         },
       });
     });
-    const rejected = await stub.fetch(
-      new Request('https://test/__capture-expected-error', {
-        method: 'POST',
-        body: JSON.stringify({
-          operation: 'persistMessageBatch',
-          args: [session, [chunk(1), chunk(2)], source],
-        }),
-      })
-    );
-    expect(await rejected.json()).toMatchObject({
+    expect(await captureBatchError(stub, session)).toMatchObject({
       threw: true,
       message: 'controlled insert failure',
     });
@@ -234,16 +245,7 @@ describe('content-free message ingestion counters through real workerd', () => {
         original(type, payload, sessionId);
       };
     });
-    const rejected = await stub.fetch(
-      new Request('https://test/__capture-expected-error', {
-        method: 'POST',
-        body: JSON.stringify({
-          operation: 'persistMessageBatch',
-          args: [session, [chunk(1), chunk(2)], source],
-        }),
-      })
-    );
-    expect(await rejected.json()).toMatchObject({
+    expect(await captureBatchError(stub, session)).toMatchObject({
       threw: true,
       message: 'controlled post-commit broadcast failure',
     });
@@ -257,27 +259,6 @@ describe('content-free message ingestion counters through real workerd', () => {
     const rows = (await stub.getMessages(session, 50)).messages;
     expect(rows).toHaveLength(1);
     expect(rows[0]!.content).toBe('part1 part2 ');
-  });
-
-  it('does not let an unrelated session legacy socket affect this batch', async () => {
-    const { stub, session } = await setup();
-    const otherSession = await stub.createSession(source.workspaceId, 'Unrelated');
-    const response = await stub.fetch(
-      new Request(`https://test/ws?sessionId=${otherSession}`, {
-        headers: { Upgrade: 'websocket' },
-      })
-    );
-    response.webSocket!.accept();
-    const log = vi.spyOn(console, 'log');
-    await stub.persistMessageBatch(session, [chunk(1), chunk(2)], source);
-    await flush(stub);
-    expect(reports(log).at(-1)!.messageIngest).toMatchObject({
-      coalesced: 1,
-      refused: {},
-      legacySessionSocketsMax: 0,
-      legacyProjectSocketsMax: 0,
-    });
-    response.webSocket!.close();
   });
 
   it('explains source replacement and a delayed retired-source continuation', async () => {
