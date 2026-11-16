@@ -98,8 +98,8 @@ Remaining before staging:
 - [ ] Test: cross-user isolation (colleague's items not in list/get/similar) + owner control; PR foreign-host attack
 - [ ] Test: non-blocking ask survives runInboxAskSweep; non-blocking ask answered through /answer once
 - [ ] Test: get_instructions in conversation mode; liveness before attention-null assertions
-- [ ] Revert unrelated list renumbering in apps/www/.../guides/agents.md (prettier)
-- [ ] Docs: say inbox tools need a task-backed session (as request_human_input did)
+- [x] Revert unrelated list renumbering in apps/www/.../guides/agents.md (prettier)
+- [x] Docs: say inbox tools need a task-backed session (as request_human_input did)
 - [ ] PR body (preflight, review table, discrimination, I/O per call: ask 10 round trips with 0 links,
       +1 per link; instruction paragraph 1,072 bytes)
 - [ ] Mark ready + CodeRabbit; staging (Claude Code + Codex on VM, one Instant)
