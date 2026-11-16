@@ -33,9 +33,20 @@ const CLI_VERSION = {
 };
 
 async function setupMocks(page: Page) {
+  // The first-run setup dialog would otherwise cover the page in every screenshot.
+  await page.addInitScript(
+    (id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+    MOCK_USER.user.id
+  );
   await setupAuditRoutes(page, (path, respond) => {
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
     if (path === '/api/cli/version') return respond(200, CLI_VERSION);
+    if (path === '/api/connector/settings')
+      return respond(200, {
+        enabled: true,
+        writeEnabled: true,
+        url: 'https://api.example.com/connect/mcp',
+      });
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/agents') return respond(200, []);
     if (path.startsWith('/api/credentials')) return respond(200, []);
@@ -53,10 +64,10 @@ async function setupMocks(page: Page) {
 }
 
 describeThemeAudit('Tools theme audit', setupMocks, async (page, theme, suffix) => {
-  // /tools — grid of tool cards (available + coming-soon chips on bg-inset)
+  // /tools — grid of tool cards, each linking to where the tool is set up
   await visitAndCapture(page, '/tools', `tools-grid-${suffix}`, theme);
 
-  // /tools/cli — download CTA (accent fill + text-fg-on-accent) + other-platforms chips
+  // /tools/cli — download CTA (accent fill + text-fg-on-accent), quick start, other-platforms chips
   await visitAndCapture(page, '/tools/cli', `tools-cli-${suffix}`, theme);
 
   // Expand the "Other platforms" disclosure to render the bg-inset chip rows.
