@@ -329,7 +329,7 @@ interface SceneOptions {
   budget: Budget;
   /** Which automations exist: the normal set, two failing ones, or none. */
   automations: 'normal' | 'failing' | 'none';
-  submit?: 'ok' | 'fail';
+  submit?: 'ok' | 'fail' | 'reauth';
 }
 
 async function setupScene(page: Page, options: SceneOptions) {
@@ -404,6 +404,11 @@ async function setupScene(page: Page, options: SceneOptions) {
         return respond(200, body);
       }
       if (sub === '/tasks/submit' && method === 'POST') {
+        if (options.submit === 'reauth')
+          return respond(401, {
+            error: 'GITHUB_REAUTH_REQUIRED',
+            message: 'Your GitHub authorization has expired — please sign out and back in',
+          });
         if (options.submit === 'fail')
           return respond(503, {
             error: 'PROVISIONING_UNAVAILABLE',
@@ -608,6 +613,36 @@ test.describe('Project Overview', () => {
     );
     await expect(box).toHaveValue('Add a pause subscription option');
     await capture(page, 'overview-start-failed');
+  });
+
+  test('a GitHub sign-in prompt is opaque over the task box', async ({ page }) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      submit: 'reauth',
+    });
+    await page.goto(BASE);
+    const box = page.getByPlaceholder('Start a task…');
+    await box.click();
+    await box.fill('Add a pause subscription option');
+    await page.getByRole('button', { name: /send/i }).click();
+    await expect(page.getByTestId('overview-start-receipt')).toContainText(
+      'Couldn’t start: Your GitHub authorization has expired'
+    );
+    // The app-wide prompt sits over the bottom of every page, so it must hide what is under
+    // it: its own background is painted, not transparent.
+    const prompt = page.getByRole('alert').filter({ hasText: 'GitHub sign-in required' });
+    await expect(prompt.getByRole('button', { name: 'Sign out and reconnect' })).toBeVisible();
+    const background = await prompt.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { color: style.backgroundColor, image: style.backgroundImage };
+    });
+    expect(
+      background.color !== 'rgba(0, 0, 0, 0)' || background.image !== 'none',
+      `prompt background ${JSON.stringify(background)}`
+    ).toBe(true);
+    await capture(page, 'overview-github-reauth');
   });
 
   test('phone composer is one row until used', async ({ page }, testInfo) => {

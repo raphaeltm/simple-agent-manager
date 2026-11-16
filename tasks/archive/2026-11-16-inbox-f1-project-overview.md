@@ -109,3 +109,15 @@ an Overview nav item. It is not the landing page yet and has no Needs you sectio
   - UI M6 (phone visual order differs from DOM order): one CSS-arranged tree is required so the
     composer never remounts across the breakpoint (rule 48); desktop DOM order is logical.
 - Screenshots: PR comment https://github.com/raphaeltm/simple-agent-manager/pull/2775#issuecomment-6905653701
+- Staging (staging2, sammy2.party, run 43816025863 on 9488f63ee): Overview first in nav; a task
+  started from the Overview box kept the page, showed "Started: … · Open chat", added a Starting
+  row that became working with a real Claude Code agent (which answered and completed), the
+  server read listed it, and Open chat reached the chat; phone had no overflow; no console errors.
+  The first attempt used a misconfigured staging project (repoProvider github with an Artifacts
+  URL) and showed the failed-start path working (error in the receipt line, text kept, no
+  navigation). That attempt also exposed a pre-existing bug: the app-wide "GitHub sign-in
+  required" prompt in `AuthProvider` used an undefined `bg-surface-elevated` class and rendered
+  transparent over the task box. Fixed with the Toast's `glass-surface` + `shadow-dropdown`; the
+  new audit scene asserts the prompt paints a background and was red against the old class.
+- Migration renumbered 0246 → 0249: 0246 is #2772 (already applied on staging2), 0247 #2780,
+  0248 #2781.
