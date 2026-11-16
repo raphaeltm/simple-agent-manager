@@ -9,6 +9,7 @@ import {
   inboxItemQueryOptions,
   inboxListQueryOptions,
   inboxQueryKeys,
+  projectOverviewQueryKeys,
 } from '../../lib/query-options';
 import { isRenderableInboxItem } from './inbox-model';
 
@@ -63,13 +64,18 @@ export function useInboxItem(projectId: string | null, ref: string | null) {
   });
 }
 
-/** Refetch every inbox list and count (after an answer or an archive). */
+/**
+ * Refetch every inbox list and count (after an answer or an archive), and the Project Overview's
+ * read: whether a chat is paused on its person is part of it (Running now's "Paused on this"), so
+ * coming back to the Overview after answering must not show the chat still waiting (slice F2).
+ */
 export function useInvalidateInbox() {
   const scope = useQueryScope();
   const queryClient = useQueryClient();
   return useCallback(() => {
     if (!scope) return;
     void queryClient.invalidateQueries({ queryKey: inboxQueryKeys.all(scope) });
+    void queryClient.invalidateQueries({ queryKey: projectOverviewQueryKeys.all(scope) });
   }, [queryClient, scope]);
 }
 

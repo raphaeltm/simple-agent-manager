@@ -858,6 +858,22 @@ describe('InboxPage — opened from the Project Overview (slice F2)', () => {
     expect(screen.queryByRole('button', { name: 'Back to Overview' })).not.toBeInTheDocument();
   });
 
+  it('answering marks the Overview read stale, so Running now is fresh on the way back', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    const { client } = renderInbox(fromOverview('ask:a'));
+    const overviewKey = ['auth', 'user-1', 'project-overview', 'p1'];
+    client.setQueryData(overviewKey, { projectId: 'p1' });
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    expect(client.getQueryState(overviewKey)?.isInvalidated).toBe(false);
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Yes' }));
+    await within(itemPane()).findByRole('heading', { name: 'Title ask:b' });
+    expect(client.getQueryState(overviewKey)?.isInvalidated).toBe(true);
+  });
+
   it('opened from the inbox itself, Back stays in the inbox (control)', async () => {
     mobile.value = true;
     server.items = [item({ ref: 'ask:a' })];
