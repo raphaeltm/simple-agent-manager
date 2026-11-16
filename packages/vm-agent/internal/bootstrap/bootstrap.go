@@ -2479,7 +2479,9 @@ func writeCredentialHelperToHost(cfg *config.Config) (hostPath, script string, m
 	}
 	if !reused {
 		if err := InstallGitCredentialExchange(cfg.WorkspaceID, exchangeToken); err != nil {
-			_ = os.Remove(hostPath)
+			// Keep the helper: a running container's bind mount may already pin the
+			// inode just rewritten with this bearer, and the next attempt reinstalls
+			// the digest from it (ResolveGitCredentialExchangeToken's lost-digest path).
 			return "", "", false, fmt.Errorf("failed to install git credential exchange: %w", err)
 		}
 	}

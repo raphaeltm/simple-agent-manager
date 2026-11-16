@@ -301,3 +301,49 @@ func TestExchangeTokenFromHelperScript(t *testing.T) {
 		}
 	}
 }
+
+// A digest that cannot be installed must not unlink a helper that was just
+// rewritten in place: a running container pins that inode, and the next attempt
+// must be able to reinstall the digest from the bearer it carries.
+func TestFailedDigestInstallKeepsRewrittenHelperForRecovery(t *testing.T) {
+	cfg := newExchangeTestConfig(t)
+	hostPath := credentialHelperHostPath(cfg.WorkspaceID)
+	if err := os.WriteFile(hostPath, []byte("#!/bin/sh\ncurl -fsS http://host/git-credential\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pinned := mustStat(t, hostPath)
+	// Block the digest write: a directory where the digest file belongs.
+	digestPath := gitCredentialExchangeDigestPath(cfg.WorkspaceID)
+	if err := os.Mkdir(digestPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(digestPath) })
+
+	if _, _, _, err := writeCredentialHelperToHost(cfg); err == nil {
+		t.Fatal("expected the digest install to fail")
+	}
+	after := mustStat(t, hostPath)
+	if !os.SameFile(pinned, after) {
+		t.Fatal("the pinned helper inode must be kept after a failed digest install")
+	}
+	content, err := os.ReadFile(hostPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := ExchangeTokenFromHelperScript(string(content))
+	if token == "" {
+		t.Fatal("the rewritten helper must carry the new bearer")
+	}
+
+	// Once the digest can be written again, the next attempt recovers the same bearer.
+	if err := os.RemoveAll(digestPath); err != nil {
+		t.Fatal(err)
+	}
+	_, _, minted := mustWriteHostHelper(t, cfg)
+	if minted {
+		t.Fatal("recovery must reuse the bearer the pinned helper already carries")
+	}
+	if !ValidateGitCredentialExchange(cfg.WorkspaceID, token) {
+		t.Fatal("the pinned helper's bearer must validate after recovery")
+	}
+}
