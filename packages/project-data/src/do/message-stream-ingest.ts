@@ -252,14 +252,7 @@ export class MessageStreamBatch {
     const contentBytes = new TextEncoder().encode(JSON.stringify(message.content)).byteLength - 2;
     const open = this.state.open;
     const eligible = this.canMerge && message.role === 'assistant' && message.toolMetadata === null;
-    if (eligible) {
-      if (!open) breakMerge(this.metrics, 'no_open');
-      else if (open.origin !== message.origin) breakMerge(this.metrics, 'origin');
-      else if (sequence !== open.lastSequence + 1) breakMerge(this.metrics, 'sequence_gap');
-      else if (message.createdAt < open.lastCreatedAt) breakMerge(this.metrics, 'timestamp');
-      else if (open.bytes + contentBytes > this.config.maxRowBytes)
-        breakMerge(this.metrics, 'size_cap');
-    }
+    if (eligible) this.recordContinuationBreak(message, sequence, contentBytes);
     if (
       eligible &&
       open &&
@@ -299,8 +292,7 @@ export class MessageStreamBatch {
     ).byteLength;
     const newest =
       !this.latestPosition || compareMessagePositions(message, this.latestPosition) >= 0;
-    if (eligible && !newest) breakMerge(this.metrics, 'out_of_order');
-    else if (eligible && bytes > this.config.maxRowBytes) breakMerge(this.metrics, 'size_cap');
+    if (eligible) this.recordOpeningBreak(newest, bytes);
     if (newest) this.latestPosition = message;
     this.state.open =
       eligible && newest && bytes <= this.config.maxRowBytes
@@ -318,6 +310,25 @@ export class MessageStreamBatch {
           }
         : null;
     return message.id;
+  }
+
+  private recordContinuationBreak(
+    message: StoredBatchMessage,
+    sequence: number | undefined,
+    contentBytes: number
+  ): void {
+    const open = this.state.open;
+    if (!open) breakMerge(this.metrics, 'no_open');
+    else if (open.origin !== message.origin) breakMerge(this.metrics, 'origin');
+    else if (sequence !== open.lastSequence + 1) breakMerge(this.metrics, 'sequence_gap');
+    else if (message.createdAt < open.lastCreatedAt) breakMerge(this.metrics, 'timestamp');
+    else if (open.bytes + contentBytes > this.config.maxRowBytes)
+      breakMerge(this.metrics, 'size_cap');
+  }
+
+  private recordOpeningBreak(newest: boolean, bytes: number): void {
+    if (!newest) breakMerge(this.metrics, 'out_of_order');
+    else if (bytes > this.config.maxRowBytes) breakMerge(this.metrics, 'size_cap');
   }
 
   flush(sql: SqlStorage): {
