@@ -13,6 +13,8 @@ import {
   type OperationContext,
 } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const edges = vi.hoisted(() => ({
@@ -47,6 +49,7 @@ import {
   runInboxSystemErrorSweep,
 } from '../../../src/services/inbox/system-errors';
 import { markTaskFailedIfNonTerminal } from '../../../src/services/task-failure';
+import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
 import { syncTriggerExecutionStatus } from '../../../src/services/trigger-execution-sync';
 import {
   applySqliteMigration,
@@ -471,6 +474,10 @@ describe('failing automations', () => {
       sequence_number: sequence,
       scheduled_at: new Date().toISOString(),
     });
+    // Admission reserves the sequence by advancing the trigger's counter (a resume reads it).
+    sqlite
+      .prepare(`UPDATE triggers SET next_execution_sequence = ? WHERE id = ?`)
+      .run(sequence + 1, triggerId);
     task(taskId, { trigger_execution_id: execId, status: 'in_progress' });
     // The real writer every terminal task path calls.
     await syncTriggerExecutionStatus(
@@ -579,6 +586,143 @@ describe('failing automations', () => {
     await run('tr-heal', 'completed');
     expect((await runInboxAutomationErrorSweep(env)).closed).toBe(1);
     expect(errorAsks()[0]).toMatchObject({ status: 'done', dedupe_key: null });
+  });
+
+  async function triggerRow(id: string) {
+    const [row] = await drizzle(env.DATABASE, { schema })
+      .select()
+      .from(schema.triggers)
+      .where(eq(schema.triggers.id, id));
+    return row!;
+  }
+
+  it('the real auto-pause at the next fire adds Resume; resuming ends the streak for good', async () => {
+    trigger('tr-auto');
+    for (let i = 0; i < 3; i += 1) await run('tr-auto', 'failed');
+    await runInboxAutomationErrorSweep(env);
+    expect(errorAsks()[0]!.answer_spec_json).toBe(JSON.stringify({ type: 'acknowledge' }));
+
+    // The next scheduled fire is refused and pauses the automation (`trigger-admission.ts`).
+    const submitter = vi.fn();
+    await expect(
+      admitAndSubmitTriggerExecution(
+        env,
+        {
+          trigger: await triggerRow('tr-auto'),
+          eventType: 'cron',
+          triggeredBy: 'cron',
+          renderPrompt: () => 'Do it',
+        },
+        submitter
+      )
+    ).resolves.toEqual({ outcome: 'inactive', reason: 'paused' });
+    expect(submitter).not.toHaveBeenCalled();
+
+    await runInboxAutomationErrorSweep(env);
+    const [item] = (await listInbox(ctx('owner'), { projectId: P1 })).items;
+    expect(item?.answerSpec).toEqual({
+      type: 'actions',
+      actions: [{ id: 'resume', label: 'Resume' }],
+    });
+    await expect(
+      answerInboxItem(ctx('owner'), { projectId: P1, ref: item!.ref, action: 'resume' })
+    ).resolves.toMatchObject({ outcome: 'resumed' });
+    expect(
+      sqlite
+        .prepare(`SELECT status, auto_pause_reset_sequence FROM triggers WHERE id = 'tr-auto'`)
+        .get()
+    ).toEqual({ status: 'active', auto_pause_reset_sequence: 4 });
+
+    // The old failures are behind the reset: nothing is filed again.
+    expect((await runInboxAutomationErrorSweep(env)).filed).toBe(0);
+    // One fresh failure after the resume is a streak of one, below the threshold.
+    await run('tr-auto', 'failed');
+    expect((await runInboxAutomationErrorSweep(env)).filed).toBe(0);
+    expect(errorAsks()).toHaveLength(1);
+    expect(errorAsks()[0]).toMatchObject({ status: 'done', dedupe_key: null });
+  });
+
+  it('a clean run closes the item, and the next sweep files nothing', async () => {
+    trigger('tr-heal2');
+    await run('tr-heal2', 'failed');
+    await run('tr-heal2', 'failed');
+    await runInboxAutomationErrorSweep(env);
+    await run('tr-heal2', 'completed');
+    await runInboxAutomationErrorSweep(env);
+    expect((await runInboxAutomationErrorSweep(env)).filed).toBe(0);
+    expect(errorAsks()).toHaveLength(1);
+  });
+
+  it('an automation whose item is archived does not hold the sweep’s slot', async () => {
+    insert('platform_settings', {
+      key: 'inbox.errorSweepBatchSize',
+      value: '1',
+      updated_at: '2026-11-16T00:00:00Z',
+    });
+    trigger('tr-archived');
+    await run('tr-archived', 'failed');
+    await run('tr-archived', 'failed');
+    await runInboxAutomationErrorSweep(env);
+    const archived = errorAsks()[0]!;
+    await archiveInboxItem(ctx('owner'), { projectId: P1, ref: `ask:${String(archived.id)}` });
+    // Archived a while ago; the automation has failed again since.
+    sqlite
+      .prepare(`UPDATE asks SET updated_at = ? WHERE id = ?`)
+      .run(Date.now() - 120_000, archived.id);
+
+    trigger('tr-other');
+    await run('tr-other', 'failed');
+    await run('tr-other', 'failed');
+    sqlite
+      .prepare(`UPDATE trigger_executions SET completed_at = ? WHERE trigger_id = 'tr-other'`)
+      .run(new Date(Date.now() - 60_000).toISOString());
+    // The archived automation keeps failing, newest of all.
+    await run('tr-archived', 'failed');
+    // Only the other automation is even checked: the archived one costs no streak read.
+    expect(await runInboxAutomationErrorSweep(env)).toMatchObject({ checked: 1, filed: 1 });
+    const rows = errorAsks();
+    expect(rows.map((row) => row.dedupe_key)).toEqual([
+      'error:automation:tr-archived',
+      'error:automation:tr-other',
+    ]);
+    // The archived item stays archived and quiet.
+    expect(rows[0]).toMatchObject({ status: 'archived', failure_count: 2 });
+    expect(edges.createNotification).toHaveBeenCalledTimes(2);
+  });
+
+  it('files at the admin-set threshold, not the default', async () => {
+    insert('platform_settings', {
+      key: 'inbox.automationFailureThreshold',
+      value: '3',
+      updated_at: '2026-11-16T00:00:00Z',
+    });
+    trigger('tr-three');
+    await run('tr-three', 'failed');
+    await run('tr-three', 'failed');
+    expect((await runInboxAutomationErrorSweep(env)).filed).toBe(0);
+    await run('tr-three', 'failed');
+    expect((await runInboxAutomationErrorSweep(env)).filed).toBe(1);
+  });
+
+  it('a foreign project cannot resume an automation through its item; the owner can', async () => {
+    trigger('tr-attack');
+    for (let i = 0; i < 3; i += 1) await run('tr-attack', 'failed');
+    sqlite.prepare(`UPDATE triggers SET status = 'paused' WHERE id = 'tr-attack'`).run();
+    await runInboxAutomationErrorSweep(env);
+    const ref = `ask:${String(errorAsks()[0]!.id)}`;
+    await expect(
+      answerInboxItem(ctx('outsider'), { projectId: P2, ref, action: 'resume' })
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await expect(
+      answerInboxItem(ctx('colleague'), { projectId: P1, ref, action: 'resume' })
+    ).rejects.toMatchObject({ code: 'not_found' });
+    expect(sqlite.prepare(`SELECT status FROM triggers WHERE id = 'tr-attack'`).get()).toEqual({
+      status: 'paused',
+    });
+    // Owner control.
+    await expect(
+      answerInboxItem(ctx('owner'), { projectId: P1, ref, action: 'resume' })
+    ).resolves.toMatchObject({ outcome: 'resumed' });
   });
 });
 
@@ -741,5 +885,202 @@ describe('the wake action', () => {
     expect(sqlite.prepare(`SELECT status FROM asks WHERE id = 'w-1'`).get()).toEqual({
       status: 'open',
     });
+  });
+});
+
+describe('sweep bounds and races (review of the rebased head)', () => {
+  function failedAt(id: string, minutesAgo: number) {
+    sqlite
+      .prepare(`UPDATE tasks SET updated_at = ? WHERE id = ?`)
+      .run(new Date(Date.now() - minutesAgo * 60_000).toISOString(), id);
+  }
+
+  it('pages past a flood of normal endings to file the genuine failure behind them', async () => {
+    task('t-genuine');
+    await markTaskFailedIfNonTerminal(env.DATABASE, 't-genuine', 'Task runner startup failed');
+    failedAt('t-genuine', 10);
+    // More parent-stopped children than one page holds (4 x batch = 40), all newer.
+    for (let i = 0; i < 45; i += 1) {
+      task(`t-stopped-${i}`, { status: 'in_progress', started_at: new Date().toISOString() });
+      await markTaskFailedIfNonTerminal(
+        env.DATABASE,
+        `t-stopped-${i}`,
+        'Stopped by parent: no longer needed'
+      );
+      failedAt(`t-stopped-${i}`, 1);
+    }
+    const stats = await runInboxSystemErrorSweep(env);
+    expect(stats).toMatchObject({ filed: 1, skippedNormal: 45 });
+    expect(taskItem('t-genuine')).toBeDefined();
+    expect(errorAsks()).toHaveLength(1);
+  });
+
+  it('files at most the admin-set batch per tick and the rest on the next', async () => {
+    insert('platform_settings', {
+      key: 'inbox.errorSweepBatchSize',
+      value: '1',
+      updated_at: '2026-11-16T00:00:00Z',
+    });
+    for (const id of ['t-b1', 't-b2']) {
+      task(id);
+      await markTaskFailedIfNonTerminal(env.DATABASE, id, 'Task runner startup failed');
+    }
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(1);
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(1);
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
+    expect(errorAsks()).toHaveLength(2);
+  });
+
+  it('leaves a failure older than the admin-set lookback alone', async () => {
+    insert('platform_settings', {
+      key: 'inbox.errorLookbackMinutes',
+      value: '5',
+      updated_at: '2026-11-16T00:00:00Z',
+    });
+    task('t-old');
+    task('t-new');
+    await markTaskFailedIfNonTerminal(env.DATABASE, 't-old', 'Task runner startup failed');
+    await markTaskFailedIfNonTerminal(env.DATABASE, 't-new', 'Task runner startup failed');
+    failedAt('t-old', 10);
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(1);
+    expect(taskItem('t-new')).toBeDefined();
+    expect(taskItem('t-old')).toBeUndefined();
+  });
+
+  it('two overlapping Retry answers start one task', async () => {
+    task('t-race');
+    await markTaskFailedIfNonTerminal(env.DATABASE, 't-race', 'Task runner startup failed');
+    await runInboxSystemErrorSweep(env);
+    const ref = `ask:${String(taskItem('t-race')!.id)}`;
+    const releases: Array<(value: unknown) => void> = [];
+    edges.retrySubtask.mockImplementation(() => new Promise((resolve) => releases.push(resolve)));
+    // Both start together, so both read the item while it is still open.
+    const answers = [0, 1].map(() =>
+      answerInboxItem(ctx('owner'), { projectId: P1, ref, action: 'retry' }).then(
+        (value) => ({ ok: true as const, value }),
+        (error: { code?: string }) => ({ ok: false as const, code: error.code })
+      )
+    );
+    await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releases.forEach((release) => release({ newTaskId: 't-race-2' }));
+    const results = await Promise.all(answers);
+    expect(edges.retrySubtask).toHaveBeenCalledTimes(1);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results.find((result) => !result.ok)).toEqual({ ok: false, code: 'conflict' });
+    expect(taskItem('t-race')).toMatchObject({ status: 'done', dedupe_key: null });
+    expect(JSON.parse(String(taskItem('t-race')!.answer_json))).toEqual({ resolution: 'retried' });
+  });
+
+  it('a recovered task closes only its own project’s item', async () => {
+    // Attack fixture: a P1 item keyed on a P2 task that is no longer failed.
+    insert('tasks', {
+      id: 't-foreign',
+      project_id: P2,
+      user_id: 'outsider',
+      title: 'Foreign',
+      status: 'ready',
+      updated_at: new Date().toISOString(),
+    });
+    insert('asks', {
+      id: 'e-foreign',
+      project_id: P1,
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      kind: 'error',
+      blocking: 0,
+      title: 'x',
+      status: 'open',
+      dedupe_key: 'error:task:t-foreign',
+      created_at: 1,
+      updated_at: 1,
+    });
+    // Owner control: this project's task recovers and closes its item.
+    task('t-mine');
+    await markTaskFailedIfNonTerminal(env.DATABASE, 't-mine', 'Task runner startup failed');
+    await runInboxSystemErrorSweep(env);
+    sqlite
+      .prepare(`UPDATE tasks SET status = 'ready', updated_at = ? WHERE id = 't-mine'`)
+      .run(new Date().toISOString());
+    expect((await runInboxSystemErrorSweep(env)).closed).toBe(1);
+    expect(taskItem('t-mine')!.status).toBe('done');
+    expect(sqlite.prepare(`SELECT status FROM asks WHERE id = 'e-foreign'`).get()).toEqual({
+      status: 'open',
+    });
+  });
+
+  it('an error item is archived by its assignee only', async () => {
+    task('t-arch');
+    await markTaskFailedIfNonTerminal(env.DATABASE, 't-arch', 'Task runner startup failed');
+    await runInboxSystemErrorSweep(env);
+    const ref = `ask:${String(taskItem('t-arch')!.id)}`;
+    await expect(archiveInboxItem(ctx('colleague'), { projectId: P1, ref })).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await expect(archiveInboxItem(ctx('outsider'), { projectId: P2, ref })).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    expect(taskItem('t-arch')!.status).toBe('open');
+    await expect(archiveInboxItem(ctx('owner'), { projectId: P1, ref })).resolves.toMatchObject({
+      outcome: 'archived',
+    });
+  });
+
+  function lostAnswer(id: string, sessionId: string, minutesAgo: number) {
+    const resolvedAt = Date.now() - minutesAgo * 60_000;
+    insert('asks', {
+      id,
+      project_id: P1,
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      kind: 'question',
+      blocking: 1,
+      title: `Question ${id}`,
+      status: 'answered',
+      source_session_id: sessionId,
+      source_task_id: `t-${sessionId}`,
+      resolved_by_user_id: 'owner',
+      resolved_at: resolvedAt,
+      created_at: resolvedAt - 1000,
+      updated_at: resolvedAt,
+    });
+  }
+
+  function chat(sessionId: string, status = 'active') {
+    task(`t-${sessionId}`, { status: 'in_progress', chat_session_id: sessionId });
+    insert('session_summaries', {
+      id: sessionId,
+      project_id: P1,
+      user_id: 'owner',
+      created_by_user_id: 'owner',
+      task_id: `t-${sessionId}`,
+      topic: `Topic ${sessionId}`,
+      status,
+      started_at: 1,
+      updated_at: 1,
+    });
+  }
+
+  it('two given-up answers in one chat make one stable delivery item', async () => {
+    chat('chat-two');
+    lostAnswer('q-a', 'chat-two', 62);
+    lostAnswer('q-b', 'chat-two', 61);
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(2);
+    for (let tick = 0; tick < 3; tick += 1)
+      expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
+    const rows = errorAsks();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ dedupe_key: 'error:delivery:chat-two', failure_count: 2 });
+    expect(edges.createNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('a given-up answer in an archived chat files nothing', async () => {
+    chat('chat-archived', 'archived');
+    chat('chat-live');
+    lostAnswer('q-archived', 'chat-archived', 61);
+    lostAnswer('q-live', 'chat-live', 61);
+    await runInboxSystemErrorSweep(env);
+    // Liveness: the live chat's lost answer is filed in the same tick.
+    expect(errorAsks().map((row) => row.dedupe_key)).toEqual(['error:delivery:chat-live']);
   });
 });

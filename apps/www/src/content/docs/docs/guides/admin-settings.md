@@ -273,7 +273,7 @@ items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 | `inbox.answerMaxChars`             | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                |
 | `inbox.noticeRetryMinutes`         | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired  |
 | `inbox.automationFailureThreshold` | 2       | 1–20       | Failed runs in a row that file an inbox error item for an automation's owner           |
-| `inbox.errorSweepBatchSize`        | 10      | 1–50       | Failed tasks (and automations) one minute's sweep turns into error items at most       |
+| `inbox.errorSweepBatchSize`        | 10      | 1–50       | Error items one minute's sweep files at most (failed tasks, automations, lost answers) |
 | `inbox.errorLookbackMinutes`       | 30      | 5–1,440    | How far back that sweep looks for failures with no error item yet                      |
 | `inbox.sweepBatchSize`             | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries) |
 
