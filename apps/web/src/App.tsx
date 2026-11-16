@@ -42,6 +42,7 @@ const AdminComputeQuotas = lazyNamed(
 );
 const AdminComputeUsage = lazyNamed(() => import('./pages/AdminComputeUsage'), 'AdminComputeUsage');
 const AdminCosts = lazyNamed(() => import('./pages/AdminCosts'), 'AdminCosts');
+const AdminHealthCost = lazyNamed(() => import('./pages/AdminHealthCost'), 'AdminHealthCost');
 const AdminDiagnoses = lazyNamed(() => import('./pages/AdminDiagnoses'), 'AdminDiagnoses');
 const AdminApprovals = lazyNamed(() => import('./pages/AdminApprovals'), 'AdminApprovals');
 const AdminDiagnosis = lazyNamed(() => import('./pages/AdminDiagnosis'), 'AdminDiagnosis');
@@ -481,6 +482,7 @@ export default function App() {
                         <Route path="infrastructure" element={page(<AdminInfrastructure />)} />
                         <Route path="storage" element={page(<AdminStorage />)} />
                         <Route path="ai-proxy" element={page(<AdminAIProxy />)} />
+                        <Route path="health-cost" element={page(<AdminHealthCost />)} />
                         <Route path="costs" element={page(<AdminCosts />)} />
                         <Route path="usage" element={page(<AdminComputeUsage />)} />
                         <Route path="quotas" element={page(<AdminComputeQuotas />)} />
