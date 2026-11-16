@@ -13,8 +13,8 @@ import { resolveDurableExecutionConfig } from './durable-execution-config';
 import * as idleCleanup from './idle-cleanup';
 import * as mailbox from './mailbox';
 import {
-  computeMessageBookkeepingAlarmTime,
   computeBookkeepingSummaryAlarmTime,
+  computeMessageBookkeepingAlarmTime,
 } from './message-bookkeeping';
 import { computeScheduleAlarmTime } from './project-event-schedules-runner';
 import {

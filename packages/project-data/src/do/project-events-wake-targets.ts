@@ -10,7 +10,10 @@ import type { Env } from './types';
 export function isTargetAtWakeCapacity(sql: SqlStorage, env: Env, sessionId: string): boolean {
   const maxTranscriptMessages = resolveMaxMessagesPerSession(env);
   const messageRow = sql
-    .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
+    .exec(
+      'SELECT message_count + pending_message_count AS message_count FROM chat_sessions WHERE id = ?',
+      sessionId
+    )
     .toArray()[0];
   const currentMessages =
     typeof messageRow?.message_count === 'number'

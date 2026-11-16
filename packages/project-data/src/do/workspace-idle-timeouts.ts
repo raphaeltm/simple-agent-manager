@@ -24,11 +24,11 @@ import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 import { recordActivityEventInternal } from './activity';
 import {
   listReporterScopedTaskCandidates,
-  prepareIdleTaskTerminalization,
   type PreparedIdleTaskTerminalization,
+  prepareIdleTaskTerminalization,
 } from './idle-cleanup-terminalization';
-import { latestMessageIngestAt, type MessageReceiptLock } from './message-bookkeeping';
 import { materializeSession, resolveMaterializationPassConfig } from './materialization';
+import { latestMessageIngestAt, type MessageReceiptLock } from './message-bookkeeping';
 import { parseMinEarliest, parseWorkspaceIdleCheck } from './row-schemas';
 import { upsertActivityState } from './session-state';
 import { stopSessionInternal } from './sessions';
