@@ -28,6 +28,7 @@ import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
 import { createOperationPorts } from '../../operation-ports';
 import * as notificationService from '../notification';
+import * as projectDataService from '../project-data';
 
 export function systemErrorDeps(env: Env) {
   return { env, ports: createOperationPorts(env) };
@@ -255,7 +256,10 @@ export function resolveSystemErrorFor(
   return resolveSystemError({ env }, input);
 }
 
-/** A chat as an error item names it: its task, topic and creator (the D1 chat index). */
+/**
+ * A chat as an error item names it: its task, topic and creator. Reads the D1 chat index first
+ * and falls back to the ProjectData session when the index has not synced the chat yet.
+ */
 export async function loadChatForError(
   env: Env,
   projectId: string,
@@ -274,12 +278,26 @@ export async function loadChatForError(
       created_by_user_id: string | null;
       bound_task_id: string | null;
     }>();
-  if (!row) return null;
+  if (row) {
+    return {
+      // `createAsk` requires the chat to be the task's own; prefer the task bound to it now.
+      taskId: row.bound_task_id ?? row.task_id,
+      topic: row.topic,
+      createdBy: row.created_by_user_id,
+    };
+  }
+  const session = await projectDataService.getSession(env, projectId, sessionId);
+  if (!session) return null;
+  const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
+  const bound = await env.DATABASE.prepare(
+    'SELECT id FROM tasks WHERE project_id = ? AND chat_session_id = ?'
+  )
+    .bind(projectId, sessionId)
+    .first<{ id: string }>();
   return {
-    // `createAsk` requires the chat to be the task's own; prefer the task bound to it now.
-    taskId: row.bound_task_id ?? row.task_id,
-    topic: row.topic,
-    createdBy: row.created_by_user_id,
+    taskId: bound?.id ?? text(session.taskId),
+    topic: text(session.topic),
+    createdBy: text(session.createdByUserId),
   };
 }
 
