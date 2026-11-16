@@ -60,18 +60,19 @@ export interface InstallationComputeSpend {
 }
 
 /**
- * Placements of a workspace on a machine. A placement is on a new machine when no earlier
- * workspace exists on that machine, and on an existing machine otherwise.
+ * Placements of a workspace on a machine. A placement is on an existing machine when an earlier
+ * workspace exists on that machine or a warm-pool claim on it preceded the placement, and on a new
+ * machine otherwise.
  */
 export interface InstallationMachineReuse {
   placements: number;
   onExistingMachine: number;
   onNewMachine: number;
   /**
-   * Warm-pool claims recorded in the node decision log during the range (part of "existing");
-   * null when that count could not be read.
+   * Placements on an existing machine that came from the warm pool: a warm-pool claim in the node
+   * decision log on that machine since its previous workspace. Always a part of `onExistingMachine`.
    */
-  fromWarmPool: number | null;
+  fromWarmPool: number;
   /** onExistingMachine / placements, 0-1; null with no placements. */
   reuseRate: number | null;
   weeks: { weekStart: string; placements: number; reuseRate: number | null }[];

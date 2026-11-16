@@ -18,12 +18,8 @@ import { useState } from 'react';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { adminHealthCostQueryOptions } from '../lib/query-options';
 import { rangeLabel } from './admin-health-cost/format';
-import {
-  LatencyPane,
-  ReasonsPane,
-  SpendPane,
-  StatTiles,
-} from './admin-health-cost/HealthCostSections';
+import { ReasonsPane, SpendPane, StatTiles } from './admin-health-cost/HealthCostSections';
+import { LatencyPane } from './admin-health-cost/LatencyPane';
 
 const RANGE_OPTIONS: { value: InstallationHealthRange; label: string }[] = [
   { value: '7d', label: '7 days' },

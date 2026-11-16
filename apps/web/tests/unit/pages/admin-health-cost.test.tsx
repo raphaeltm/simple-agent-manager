@@ -160,6 +160,7 @@ describe('AdminHealthCost', () => {
       'Stop a workspacep95 31m 00s ✕, budget 10m 00s, 14 episodes, over budget'
     );
     expect(latencyRows[1]).toHaveTextContent('Start a machineno data, budget 15m 00s');
+    expect(screen.getByTestId('latency-sampling-note')).toHaveTextContent('lower bounds');
     expect(mocks.getInstallationHealth).toHaveBeenCalledWith('month', expect.anything());
   });
 
@@ -174,15 +175,14 @@ describe('AdminHealthCost', () => {
     expect(rows[2]).toHaveTextContent('Nov 16$20.00Google Cloud $20.00');
   });
 
-  it('leaves out the warm-pool part when that count could not be read', async () => {
-    mocks.getInstallationHealth.mockResolvedValue(
-      health({ reuse: { ...health().reuse!, fromWarmPool: null } })
-    );
+  it('gives the warm-pool part of reuse under the reuse rate', async () => {
+    mocks.getInstallationHealth.mockResolvedValue(health());
     renderPage();
 
     const reuse = await screen.findByTestId('stat-reuse');
-    expect(reuse).toHaveTextContent('61 of 100 placements on an existing machine');
-    expect(reuse).not.toHaveTextContent('warm pool');
+    expect(reuse).toHaveTextContent(
+      '61 of 100 placements on an existing machine · 7 from the warm pool'
+    );
   });
 
   it('links the open watchdog incident for an over-budget state', async () => {

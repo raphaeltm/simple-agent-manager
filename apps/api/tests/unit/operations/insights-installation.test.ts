@@ -351,17 +351,57 @@ describe('installationHealth', () => {
       expect(result.newMachines?.otherReasons).toBe(3);
     });
 
-    it('says the reuse rate but not the warm-pool part when the decision log cannot be read', async () => {
-      sqlite.exec('DROP TABLE node_lifecycle_decisions');
+    it('does not count a warm claim whose workspace row was later deleted', async () => {
+      // The decision log outlives workspace rows (cleanup and node delete remove them); a claim
+      // with no placement after it must not inflate the warm-pool part past the placements.
+      insert('node_lifecycle_decisions', {
+        id: 'claim-orphaned',
+        node_id: 'a',
+        source: 'node_lifecycle',
+        decision: 'claimed',
+        reason: 'warm_node_reused',
+        created_at: iso('2026-11-11T06:00:00Z'),
+      });
 
       const result = await installationHealth(ctx(), { range: '7d' }, NOW);
 
       expect(result.reuse).toMatchObject({
         placements: 6,
         onExistingMachine: 2,
-        fromWarmPool: null,
+        fromWarmPool: 1,
       });
-      expect(result.unavailable).toEqual([]);
+    });
+
+    it('counts a warm-claimed placement as reuse even when the earlier workspace row is gone', async () => {
+      node('f', { created_at: iso('2026-11-13T12:00:00Z') });
+      insert('node_lifecycle_decisions', {
+        id: 'claim-f',
+        node_id: 'f',
+        source: 'node_lifecycle',
+        decision: 'claimed',
+        reason: 'warm_node_reused',
+        created_at: iso('2026-11-14T00:00:00Z'),
+      });
+      // Stored in SQLite's CURRENT_TIMESTAMP text form: compared to the ISO claim as times, not text.
+      workspace('f-2', 'f', '2026-11-14T00:01:00Z', { created_at: '2026-11-14 00:01:00' });
+
+      const result = await installationHealth(ctx(), { range: '7d' }, NOW);
+
+      expect(result.reuse).toMatchObject({
+        placements: 7,
+        onExistingMachine: 3,
+        onNewMachine: 4,
+        fromWarmPool: 2,
+      });
+      expect(result.newMachines?.newMachines).toBe(4);
+    });
+
+    it('does not credit the warm pool for a placement packed after the claimed one', async () => {
+      // a-3 follows a-2 on the same machine; the claim before a-2 belongs to a-2 alone.
+      const result = await installationHealth(ctx(), { range: '7d' }, NOW);
+
+      expect(result.reuse?.onExistingMachine).toBe(2);
+      expect(result.reuse?.fromWarmPool).toBe(1);
     });
 
     it('marks placements truncated when the cap is reached', async () => {

@@ -550,17 +550,21 @@ shared `installationHealth` operation (`packages/operations/src/insights-install
   cloud accounts as well as the platform's, and exclude discounts, storage and traffic. A machine
   removed with an explicit delete loses its row, so its time is not counted.
 - **Warm machine reuse.** The share of workspace placements that went onto a machine that already
-  existed. A placement counts as a new machine when no earlier workspace exists on that machine.
-  The note under it gives how many came from the warm pool (warm-pool claims in the node decision
-  log). If a machine's first workspace row is later removed, its next placement reads as new, so
-  the rate is a lower bound.
+  existed: an earlier workspace exists on that machine, or the node decision log recorded a
+  warm-pool claim on it since its previous workspace. The note under it gives how many of those
+  placements came from the warm pool. A claim whose workspace was later deleted is not counted, so
+  the warm-pool number is always part of the reuse number. If a machine's first workspace row is
+  later removed and its next placement packed onto it without a warm-pool claim, that placement
+  reads as new, so the rate is a lower bound.
 - **Agents per busy machine.** Agents running at once on a machine, averaged over the time it had
   at least one running. Running time comes from resource telemetry (first to last sample while a
   workspace ran), not from the compute ledger, which runs from a workspace's creation to its
   deletion and would count stopped workspaces that were not deleted yet.
 - **Slowest 5% vs budget.** The p95 of each [lifecycle latency](#lifecycle-latency-monitoring)
   state in the range against its budget. A state is over budget when it has at least
-  `lifecycleLatency.minSamples` finished episodes and its p95 is above the budget. The page also
+  `lifecycleLatency.minSamples` finished episodes and its p95 is above the budget. Times are the
+  watchdog's sampled lower bounds, the same ones the daily check uses (first to last sample of an
+  episode), so a state seen in only one sample reads 0s. The page also
   shows rows stuck past their budget right now and links any open incident the watchdog or daily
   check raised for that state. A state whose budget is 0 is not watched and not shown.
 - **Why new machines were created.** For the first workspace on each new machine, the reasons the
