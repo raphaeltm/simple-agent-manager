@@ -117,6 +117,8 @@ const PULL_REQUEST_SQL = `
            WHERE c.project_id = pr.project_id AND c.repository = pr.repository
              AND c.head_sha = pr.head_sha) AS checks,
          -- The opening commit's verdict; NULL (not recorded) when SAM has no from_open head.
+         -- Only the pull_request.opened webhook sets from_open (recordPullRequestHead), so a PR has
+         -- at most one such head and this reads the same commit as Flow's ciFirstTryStatement.
          -- Served by the pull_request_heads primary key prefix and the checks primary key.
          (SELECT CASE WHEN count(h.head_sha) = 0 THEN NULL ELSE ${firstTryVerdictSql({
            failed: FIRST_TRY_FAILED_SQL,

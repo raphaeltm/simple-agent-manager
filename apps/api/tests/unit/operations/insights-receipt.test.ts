@@ -422,6 +422,20 @@ describe('runReceipt', () => {
       expect(await firstTry()).toBe('passed');
     });
 
+    it('decides a pending suite once a new commit was pushed', async () => {
+      head('p');
+      sqlite
+        .prepare(
+          `UPDATE pull_requests SET state = 'open', merged_at = NULL, head_sha = ? WHERE id = 'pr-own'`
+        )
+        .run('c'.repeat(40));
+      sqlite.exec(`UPDATE pull_request_checks SET state = 'pending' WHERE check_key = 'test'`);
+      expect(await firstTry()).toBe('passed');
+      // Control: the same suite on a pull request that has not moved on stays pending.
+      sqlite.prepare(`UPDATE pull_requests SET head_sha = ? WHERE id = 'pr-own'`).run(OWN_HEAD);
+      expect(await firstTry()).toBe('pending');
+    });
+
     it('is not recorded when SAM did not see the pull request from its first commit', async () => {
       head('p', OWN_HEAD, 0);
       expect(await firstTry()).toBe('not_recorded');
