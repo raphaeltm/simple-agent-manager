@@ -238,7 +238,9 @@ export function ToolsCli() {
           </Link>{' '}
           and set it as <code className="font-mono">SAM_API_TOKEN</code>, with{' '}
           <code className="font-mono">SAM_API_URL</code> set to{' '}
-          <code className="font-mono break-all">{API_URL}</code>.
+          <code className="font-mono break-all">{API_URL}</code>. Pass{' '}
+          <code className="font-mono">--project</code> on every command, because{' '}
+          <code className="font-mono">sam project use</code> is not saved in that mode.
         </p>
       </section>
 

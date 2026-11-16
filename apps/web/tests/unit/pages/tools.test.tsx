@@ -50,7 +50,7 @@ describe('Tools page', () => {
     });
     renderTools();
 
-    await waitFor(() => expect(mocks.connectorSettings).toHaveBeenCalled());
+    expect(await screen.findByText('SAM Connector')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'Tools' })).toBeInTheDocument();
     const hrefs = cardLinks().map((link) => link.getAttribute('href'));
     expect(hrefs).toEqual([
@@ -67,6 +67,7 @@ describe('Tools page', () => {
     mocks.connectorSettings.mockResolvedValue({ enabled: false, writeEnabled: false, url: '' });
     renderTools();
 
+    await waitFor(() => expect(mocks.connectorSettings).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByText('SAM Connector')).not.toBeInTheDocument());
     // Liveness: the rest of the page rendered.
     expect(cardLinks().map((link) => link.getAttribute('href'))).toEqual([

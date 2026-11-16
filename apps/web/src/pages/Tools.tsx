@@ -55,14 +55,10 @@ export function Tools() {
   const scope = useQueryScope();
   const connector = useQuery(connectorSettingsQueryOptions(scope));
   // The Connector can be switched off for an installation; then Settings → Access has no
-  // "Connect an AI app" section, so the card would lead nowhere.
-  const connectorOff = connector.data?.enabled === false;
-  const tools = [
-    CLI_TOOL,
-    ...(connectorOff ? [] : [CONNECTOR_TOOL]),
-    GITHUB_TOOL,
-    MCP_SERVERS_TOOL,
-  ];
+  // "Connect an AI app" section. Show the card only once the installation says it is on, so a
+  // card that leads nowhere never appears, even briefly.
+  const connectorOn = connector.data?.enabled === true;
+  const tools = [CLI_TOOL, ...(connectorOn ? [CONNECTOR_TOOL] : []), GITHUB_TOOL, MCP_SERVERS_TOOL];
 
   return (
     <PageLayout maxWidth="xl">
