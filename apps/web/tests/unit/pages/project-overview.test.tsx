@@ -758,6 +758,38 @@ describe('Project Overview', () => {
       expect(screen.getAllByTestId('inbox-row')[0]).toBe(before);
     });
 
+    it('coming back while the list refetches: focus follows to the section when the row leaves', async () => {
+      inboxItems = [
+        inboxItem('ask:q1', { title: 'Question 1?' }),
+        inboxItem('ask:q2', { title: 'Question 2?' }),
+      ];
+      const { queryClient } = renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      fireEvent.click(screen.getByRole('button', { name: /Question 2\?/ }));
+      await screen.findByRole('button', { name: 'inbox page back' });
+      // The person answered item 2; its refetch is held open while they come back.
+      inboxItems = [inboxItem('ask:q1', { title: 'Question 1?' })];
+      let release = () => {};
+      inboxGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await act(async () => {
+        void queryClient.invalidateQueries({ queryKey: ['auth', 'user-1', 'inbox'] });
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'inbox page back' }));
+      // Cached rows first: the answered row is still listed and takes focus for now.
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Question 2\?/ }))
+      );
+      await act(async () => {
+        release();
+      });
+      await waitFor(() => expect(screen.getAllByTestId('inbox-row')).toHaveLength(1));
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Needs you' }))
+      );
+    });
+
     it('coming back from an item puts focus on its row', async () => {
       inboxItems = [
         inboxItem('ask:q1', { title: 'Question 1?' }),

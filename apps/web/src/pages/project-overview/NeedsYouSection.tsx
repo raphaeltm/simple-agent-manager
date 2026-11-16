@@ -16,10 +16,7 @@ import { InboxRow } from '../../components/inbox/InboxRow';
 import { useInboxCount, useInboxList } from '../../components/inbox/useInbox';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useMinuteClock } from '../../hooks/useMinuteClock';
-import {
-  OVERVIEW_BEHIND_STATE,
-  projectInboxItemFromOverviewPath,
-} from '../../lib/project-routes';
+import { OVERVIEW_BEHIND_STATE, projectInboxItemFromOverviewPath } from '../../lib/project-routes';
 import { Section, SectionHead } from './sections';
 
 /**
@@ -63,26 +60,34 @@ const ROW_HEIGHT_PX = 64;
 
 /**
  * The item last opened from Needs you. Coming back to the Overview puts keyboard focus on its row
- * (or, once answered, on the section), as the inbox's own Back does for its list. Read once.
+ * (or, once it is answered and gone, on the section), as the inbox's own Back does for its list.
+ * Kept until the list has settled after the return: the cached list can still hold an answered
+ * item while its refetch is in flight.
  */
 let returnFocusRef: string | null = null;
 
 /** `data-focus-target` of the Needs you section, in whichever form it is rendered. */
 const FOCUS_TARGET = 'needs-you';
 
-function focusReturnTarget() {
+/**
+ * Put focus where the person left. While the list is refetching, focus the row if it is still
+ * there and keep the target; once settled, fall back to the section if the row is gone and focus
+ * has not moved on to something else, then forget the target.
+ */
+function restoreReturnFocus(settled: boolean) {
   const ref = returnFocusRef;
-  returnFocusRef = null;
   const container = document.querySelector<HTMLElement>(`[data-focus-target="${FOCUS_TARGET}"]`);
   if (!ref || !container) return;
-  const rows = container.querySelectorAll<HTMLElement>('[data-inbox-refs]');
-  for (const row of rows) {
-    if ((row.dataset.inboxRefs ?? '').split(' ').includes(ref)) {
-      row.focus();
-      return;
-    }
+  const row = [...container.querySelectorAll<HTMLElement>('[data-inbox-refs]')].find((candidate) =>
+    (candidate.dataset.inboxRefs ?? '').split(' ').includes(ref)
+  );
+  if (row) {
+    if (document.activeElement !== row) row.focus();
+  } else if (settled) {
+    const active = document.activeElement;
+    if (!active || active === document.body || container.contains(active)) container.focus();
   }
-  container.focus();
+  if (settled) returnFocusRef = null;
 }
 
 /** The section when there is no list to show: one quiet line, not an empty panel. */
@@ -152,10 +157,11 @@ export function NeedsYouSection({
     },
     [navigate, projectId]
   );
-  // Back from an item: once the list has loaded, put focus where the person left.
+  // Back from an item: put focus where the person left, following the list until it settles.
+  const settled = list.loaded && !list.isFetching;
   useEffect(() => {
-    if (list.loaded) focusReturnTarget();
-  }, [list.loaded]);
+    if (list.loaded) restoreReturnFocus(settled);
+  }, [list.loaded, list.items, settled]);
 
   const expected = count.data?.needsYou ?? 0;
   if (!list.loaded && !list.error && expected > 0) {
