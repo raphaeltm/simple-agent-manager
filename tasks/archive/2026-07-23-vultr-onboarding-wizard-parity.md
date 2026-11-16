@@ -31,3 +31,7 @@ The 5 "has-cloud-provider" detection gates (incl. onboarding completion checks) 
 ## References
 - Parent PR / task: `tasks/archive/2026-07-23-vultr-cloud-provider.md`
 - Rule 42 (no untracked degrading placeholders — this is the tracked follow-up), Rule 26 (project-chat-first — onboarding is secondary).
+
+## Reconciliation (2026-11-16)
+
+**SHIPPED.** The premise (a hardcoded Hetzner/Scaleway wizard) is gone: onboarding uses the same seven-provider flow as Settings. Caveat: no onboarding-specific per-provider Playwright or staging evidence. The shared flow is covered by `settings-vultr-credential-audit.spec.ts:153`. Evidence: #2610 deleted the binary `StepForm.tsx`; `apps/web/src/components/onboarding/choose-path/StepExecution.tsx:276` renders the shared `CloudProviderConnectFlow` (Vultr/DO arms at `apps/web/src/components/CloudProviderConnectFlow.tsx:75,87,248,299`). Moved from `tasks/backlog/` by the weekly queue reconciliation.

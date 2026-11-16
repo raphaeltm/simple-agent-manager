@@ -23,3 +23,7 @@ Found by the doc-sync reviewer on the setup-takeover fix PR (branch
       or an emailed sign-in code when the deploy prepared email
 - [ ] Wording matches `guides/self-hosting.mdx`
 - [ ] Installer build and its browser audit still pass
+
+## Reconciliation (2026-11-16)
+
+**DUPLICATE.** Same stale installer sign-in copy as `tasks/backlog/2026-11-10-installer-page-stale-sign-in-copy.md`; its file list and criterion were folded in there. Moved from `tasks/backlog/` by the weekly queue reconciliation.

@@ -23,3 +23,7 @@ workspace `01M2EYHVKGDJ0QZGF3G5VGM7ZK`), so the archive path is not the cause.
 - [ ] A 404 for a workspace is not retried (TanStack Query `retry` must exclude 4xx).
 - [ ] Opening a stopped session with a deleted workspace produces no 404 console errors.
 - [ ] Behavioral test covering the deleted-workspace case.
+
+## Reconciliation (2026-11-16)
+
+**DUPLICATE.** Same root cause as `tasks/backlog/2026-09-08-ended-chat-requests-deleted-workspace.md`; its root-object reproduction was folded in there. Moved from `tasks/backlog/` by the weekly queue reconciliation.

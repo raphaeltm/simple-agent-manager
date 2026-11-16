@@ -65,3 +65,7 @@ direct workspace and node creation the same way. Do not enable it until this is 
 - [ ] Tunnel steps resume across attempts instead of relying only on a larger 5s budget. State the throughput (rule 81).
 - [ ] A regression test drives `scheduleDirectProvisioning` with `VM_AGENT_TRANSPORT=cloudflare-tunnel`, a Cloudflare create slower than the attempt deadline, and the retry, and asserts it converges.
 - [ ] `node-tunnel-races.test.ts` controls its own ordering, so it cannot flake on slow runners (rule 62).
+
+## Reconciliation (2026-11-16)
+
+**SHIPPED.** PR #2646 (merged 2026-11-11) fixed the masked failure, records `last_error`, keeps the pre-VM journal for resumable intents, resumes tunnel steps across attempts and made `node-tunnel-races.test.ts` deterministic, with staging VM evidence; see `tasks/archive/2026-11-10-tunnel-transport-hardening.md`. Moved from `tasks/backlog/` by the weekly queue reconciliation.

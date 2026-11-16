@@ -19,3 +19,7 @@ Found while validating the new-chat profile picker (branch `sam/new-chat-profile
 - [ ] Landing script budget: decide whether the chunk graph regressed (fix the chunking) or the budget is stale (re-baseline with a measured number), then make the assertion pass.
 - [ ] Stale-chunk test: make it deterministic. For example, block service workers for this test (`test.use({ serviceWorkers: 'block' })`) if the recovery ladder doesn't need one, or intercept at a layer the service worker cannot bypass. Then verify 20/20 passes.
 - [ ] `sam-chat-tool-stream`: update the fixture or the assertion to match how tool rows render today, and re-check the marketing image.
+
+## Reconciliation (2026-11-16)
+
+**DUPLICATE.** Items 1-2 (landing script budget in `lazy-route-chunks-audit.spec.ts`, stale 404-chunk retry) live in `tasks/backlog/2026-11-05-lazy-route-chunks-audit-preexisting-failures.md`; item 3 (`sam-chat-tool-stream`) lives in `tasks/backlog/2026-11-11-marketing-shots-drift-after-sam-glass.md`. Nothing here is untracked. Moved from `tasks/backlog/` by the weekly queue reconciliation.

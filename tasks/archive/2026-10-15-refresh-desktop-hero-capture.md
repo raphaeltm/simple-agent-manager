@@ -29,3 +29,7 @@ removed on 2026-11-11.
       tool row, or expand the group, instead of the individual Read row)
 - [ ] Both themes re-captured (`MARKETING_SHOTS=1`, then `MARKETING_THEME=light`)
 - [ ] `pnpm --filter @simple-agent-manager/www optimize:features` re-run for the feature page copy
+
+## Reconciliation (2026-11-16)
+
+**SUPERSEDED.** The homepage hero it fed was removed with the software-factory homepage (#2655). The remaining `sam-hero-live-session` capture issue is tracked in `tasks/backlog/2026-11-11-marketing-shots-drift-after-sam-glass.md` (line 15), as this file's own 2026-11-11 status says. Moved from `tasks/backlog/` by the weekly queue reconciliation.

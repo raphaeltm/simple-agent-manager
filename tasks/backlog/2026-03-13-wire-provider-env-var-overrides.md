@@ -45,3 +45,7 @@ When a Scaleway user submits a task via API without specifying `vmLocation`, the
 - [ ] Update nodes.ts, workspaces/crud.ts, tasks/run.ts, tasks/submit.ts to check env override
 - [ ] Resolve vmLocation from provider.defaultLocation when none supplied (Scaleway fix)
 - [ ] Document the SQL schema default as non-overridable
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. One hard-coded `nbg1` site is gone. Still open: `apps/api/src/routes/nodes.ts:126` and `routes/workspaces/workspace-create.ts:102`, `HETZNER_DATACENTER` still unwired (the comment at `packages/shared/src/constants/hetzner.ts:5` is stale), and the D1 `vm_location` default is undocumented. Evidence: #2731 removed `DEFAULT_VM_LOCATION` / `defaultLocation` from `apps/api/src/services/canonical-vm-allocation.ts`.

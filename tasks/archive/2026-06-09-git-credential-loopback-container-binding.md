@@ -58,3 +58,7 @@ workspace mapping already tracked in the runtime registry) and require the reque
 - `packages/vm-agent/internal/server/git_credential.go` (`isKnownWorkspaceGitCredentialRequest`, `isLocalGitCredentialExchange`)
 - `packages/vm-agent/internal/server/workspace_routing.go` (`getWorkspaceRuntime`, IP→workspace mapping)
 - `.claude/rules/34-vm-agent-callback-auth.md`
+
+## Reconciliation (2026-11-16)
+
+**SHIPPED.** Each workspace now has its own helper bearer, so container A cannot get B's token and bearerless loopback/private-peer requests get 401. This uses a per-workspace bearer rather than the IP binding the task proposed. Caveats: the empty-id criterion now resolves to the routed workspace and still needs a bearer, and the same-org submodule clone was not checked separately. Evidence: #2759; `packages/vm-agent/internal/server/git_credential.go:380-397` (`gitCredentialCallbackToken`), `:35-37` (empty id falls back to routed workspace); tests `git_credential_test.go:41,456,483,556`. Moved from `tasks/backlog/` by the weekly queue reconciliation.

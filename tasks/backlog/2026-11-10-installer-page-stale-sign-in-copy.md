@@ -28,3 +28,16 @@ installer page itself still says otherwise, so a user reading both sees a contra
       is done)
 - [ ] `apps/installer/README.md` matches the deployed production mode and email sign-in
 - [ ] `apps/installer/tests/browser-audit.ts` screenshots reviewed after the copy change
+
+## Folded in (2026-11-16)
+
+`2026-11-14-installer-pages-say-no-email-login` (doc-sync finding on branch `sam/never-enabled-gitlab-prod-0etcqz`) reported the same stale copy and was archived. Extra locations it named:
+
+- `apps/installer/README.md:9` ("SAM has no email login")
+- `apps/installer/src/pages/privacy.astro:35`
+- `apps/installer/src/pages/self-host.astro:32`
+- `apps/installer/site-static/self-host.html:4`
+
+Added criterion:
+
+- [ ] Each installer page and the README describe sign-in the way `guides/self-hosting.mdx` does (OAuth, or an emailed code when the deploy prepared email).

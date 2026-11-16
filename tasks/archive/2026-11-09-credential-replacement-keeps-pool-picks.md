@@ -27,3 +27,7 @@ Either way the person's picks are lost by an action meant only to repair permiss
       write (`.claude/rules/66`: record the handoff).
 - [ ] A vertical-slice test drives the real replacement route and asserts the picks survive.
 - [ ] Running nodes bound to the old credential keep a working teardown path.
+
+## Reconciliation (2026-11-16)
+
+**SHIPPED.** PR #2718 (ca9672f74, merged 2026-11-14): a GCP re-save updates the credential row in place (`apps/api/src/services/gcp-credential-store.ts:144-148`), so pool source, picks and order survive, and old-source nodes stay reapable (`services/node-teardown-provenance.ts`); vertical-slice test `apps/api/tests/workers/credential-resave-capacity-provenance.test.ts`. Sibling #2715 covers teardown with the current credential. Moved from `tasks/backlog/` by the weekly queue reconciliation.

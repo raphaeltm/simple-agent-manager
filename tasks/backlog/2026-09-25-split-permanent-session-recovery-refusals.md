@@ -75,3 +75,7 @@ fence), which a parallel wake-placement change owns.
       each `PlacementResolutionError` kind.
 - [ ] Decide whether `recovery_attempts_exhausted` (released by a 15-minute decay) belongs in the
       list for both callers.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2693 now produces `session_recovery_placement_transient` while a catalog refresh is pending (`apps/api/src/services/session-recovery.ts`) and added `placement_catalog_refresh_unavailable` and `placement_sources_disabled`, so the "remove the unproduced transient entry" item is moot. Still open: `archive_migration_fenced` (retry) for non-root sessions, and the producer tests.

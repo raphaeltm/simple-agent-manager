@@ -152,3 +152,7 @@ The task state machine is the contract that every other subsystem depends on. If
 | `packages/shared/src/types.ts` | Export typed execution step enum for cross-package use |
 | `apps/api/tests/unit/task-status.test.ts` | Exhaustive unit tests (create or expand) |
 | `apps/api/tests/integration/task-transitions.test.ts` | Miniflare integration tests for locking |
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. `stop_subtask` is now a compare-and-set batch that writes its event only if the cancel won. Still open: `setTaskStatus`'s unfenced UPDATE and separate event write (`apps/api/src/routes/tasks/_helpers.ts:308,311`), the TaskRunner state machine, the conversation-close event, and real-SQL race tests. Evidence: #2627 (D2); `apps/api/src/durable-objects/sam-session/tools/stop-subtask.ts:59-70`; `apps/api/tests/unit/durable-objects/sam-stop-subtask-cas.test.ts`.

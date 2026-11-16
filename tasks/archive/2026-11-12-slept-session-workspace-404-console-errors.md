@@ -23,3 +23,7 @@ while their sessions were awake.
       retired; a 404 for the session's workspace is treated as terminal for that id
 - [ ] Opening a slept chat on staging produces no 404 console errors
 - [ ] A test drives the hook with a slept session and asserts no retry after a 404
+
+## Reconciliation (2026-11-16)
+
+**DUPLICATE.** Same retry-on-404 in `useSessionInfrastructure` as `tasks/backlog/2026-09-08-ended-chat-requests-deleted-workspace.md`; its sleeping-session case and criteria were folded in there. Moved from `tasks/backlog/` by the weekly queue reconciliation.

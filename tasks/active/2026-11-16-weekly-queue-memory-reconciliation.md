@@ -25,12 +25,21 @@ backlog entries outlive the work that resolved them, and stale open PRs sit with
 - [x] Classify every `tasks/active/` file against merged PRs; archive the shipped ones with a dated
       reconciliation note; tick only boxes the merge proves.
 - [x] Weekly status comment on each open PR older than 7 days.
-- [ ] Classify the 40 new backlog files in full and re-check the 260 older ones against PRs merged since
+- [x] Classify the 40 new backlog files in full and re-check the 260 older ones against PRs merged since
       2026-11-09; remove only proven shipped/obsolete/duplicate entries, one-line rationale each.
-- [ ] PR description lists every archived and removed file with its evidence.
+- [x] PR description lists every archived and removed file with its evidence.
 
 ## Acceptance criteria
 
 - [ ] Every file left in `tasks/active/` has a live owner or open PR.
 - [ ] Every removed backlog file has PR or code evidence in the PR description; uncertain files stay.
 - [ ] No non-task file changes in the diff.
+
+## Results
+
+- `tasks/active/`: 31 → 3 (+ this file). 28 archived with a dated note; 3 kept with live owners.
+- `tasks/backlog/`: 300 → 291. 9 moved to `tasks/archive/` with a dated verdict note (4 SHIPPED,
+  4 DUPLICATE folded into a survivor, 1 SUPERSEDED). 20 PARTIAL files got a dated progress note;
+  2 survivors received the folded criteria. 268 KEEP unchanged.
+- Nothing was deleted: obsolete and duplicate files moved to the archive with a pointer, so the history
+  stays searchable.
