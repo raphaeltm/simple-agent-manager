@@ -28,6 +28,7 @@ import {
   checkDirectoriesHaveIndex,
   checkLaunchRuleBaseline,
   checkRuleReferencesInSource,
+  checkRulesLiveAtRoot,
   ruleFilesNamedIn,
 } from './agent-instruction-guards';
 import { compareObservedLoads, parseObservedLog } from './agent-instruction-observed';
@@ -323,6 +324,7 @@ function collectFindings(
     ...checkCitationsCovered(input),
     ...checkNoDuplicateBodies(model.rules),
     ...checkLaunchRuleBaseline(model, budget.launchRules),
+    ...checkRulesLiveAtRoot(model),
     ...checkCodexEntryFiles(files),
     ...checkCodexChainSizes(agentsFileSizes(files), CODEX_PROJECT_DOC_MAX_BYTES),
     ...checkDirectoriesHaveIndex(model, files),

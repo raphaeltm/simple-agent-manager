@@ -1393,6 +1393,12 @@ export const pullRequests = sqliteTable(
       table.repository,
       table.headSha
     ),
+    /** The Project Overview's newest merged pull requests (migration 0249). */
+    projectMerged: index('idx_pull_requests_project_state_merged').on(
+      table.projectId,
+      table.state,
+      table.mergedAt
+    ),
   })
 );
 
@@ -5358,10 +5364,14 @@ export const deploymentPublishJobs = sqliteTable(
     errorCode: text('error_code'),
     retryable: integer('retryable', { mode: 'boolean' }).notNull().default(false),
     executor: text('executor').notNull().default('node'),
+    executorInstanceId: text('executor_instance_id'),
+    executorDeadlineAt: text('executor_deadline_at'),
+    executorNotBefore: text('executor_not_before'),
     contextShadow: integer('context_shadow', { mode: 'boolean' }).notNull().default(false),
     contextR2Key: text('context_r2_key'),
     contextBytes: integer('context_bytes'),
     contextSha256: text('context_sha256'),
+    contextProjectName: text('context_project_name'),
     queuedAt: text('queued_at'),
     attempt: integer('attempt').notNull().default(1),
     lastEventAt: text('last_event_at'),

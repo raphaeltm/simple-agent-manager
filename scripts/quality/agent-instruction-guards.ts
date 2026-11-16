@@ -36,6 +36,21 @@ export function checkLaunchRuleBaseline(model: InstructionModel, recorded: strin
 }
 
 /**
+ * Rules live once, in the root rules directory, scoped by `paths`. A rule file added
+ * beside a package (the old layout, and what an in-flight branch may still do) loads as
+ * an unscoped batch for that whole directory and is invisible to the root index.
+ */
+export function checkRulesLiveAtRoot(model: InstructionModel): Finding[] {
+  return model.rules
+    .filter((rule) => rule.baseDir !== '')
+    .map((rule) => ({
+      check: 'nested-rule',
+      file: rule.path,
+      message: `belongs in .claude/rules/ with paths frontmatter for ${rule.baseDir}/** (see .claude/rules/00-rule-routing.md). If it edits a rule that moved, apply the edit to the root copy.`,
+    }));
+}
+
+/**
  * Codex reads one instruction file per directory, AGENTS.override.md before AGENTS.md.
  * An override at the root would replace the routing in AGENTS.md without any diff to it.
  */

@@ -133,6 +133,7 @@ export {
   type OperationPorts,
   type ProjectEventErrorKind,
 } from './ports';
+export { projectOverviewGet, type ProjectOverviewInput } from './project-overview';
 export {
   ensurePullRequest,
   getPullRequestStates,

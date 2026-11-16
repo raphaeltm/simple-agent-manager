@@ -3,6 +3,9 @@ import './repo-hosting-wiring';
 
 export { McpRateCounter } from './durable-objects/mcp-rate-counter';
 export { WorkspaceBootLog } from './durable-objects/workspace-boot-log';
+// SDK 0.3.7 requires this helper when reconstructing a running Container.
+// Builders register no outbound interceptors, so their network traffic stays direct.
+export { ContainerProxy } from '@cloudflare/containers';
 import { adminAgentEmailRoutes } from './routes/admin-agent-email';
 import { cliOperationReceiptRoutes } from './routes/cli-operation-receipts';
 import { cliProjectMetadataRoutes } from './routes/cli-project-metadata';
@@ -140,6 +143,7 @@ import {
 } from './routes/project-deployment';
 import { projectEventChannelRoutes } from './routes/project-event-channels';
 import { projectEventSubscriptionRoutes } from './routes/project-event-subscriptions';
+import { projectOverviewRoutes } from './routes/project-overview';
 import { projectsRoutes } from './routes/projects';
 import { acpInteractionCallbackRoute } from './routes/projects/acp-interaction-callback';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
@@ -416,6 +420,7 @@ app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before pr
 app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/ideas', ideaRoutes);
+app.route('/api/projects/:projectId/overview', projectOverviewRoutes);
 app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
@@ -546,3 +551,5 @@ export default {
     await handleInboundAgentEmail(message, env);
   },
 };
+
+export { ComposeBuilderContainer } from './durable-objects/compose-builder-container';

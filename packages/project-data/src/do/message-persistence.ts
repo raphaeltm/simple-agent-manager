@@ -3,6 +3,7 @@ import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import * as activity from './activity';
 import * as attention from './attention';
 import * as idleCleanup from './idle-cleanup';
+import type { MessageIngestMetrics } from './message-ingest-metrics';
 import type { MessageIngestSource, MessageMergeConfig } from './message-stream-ingest';
 import * as messages from './messages';
 import { observeReconciliationMessage } from './reconciliation-episode';
@@ -23,6 +24,7 @@ export type BatchMessageInput = {
 };
 
 export type MessagePersistenceHooks = {
+  recordMessageIngest?: (metrics: MessageIngestMetrics) => void;
   transactionSync?: <T>(fn: () => T) => T;
   recalculateAlarm: () => Promise<void>;
   scheduleSummarySync: () => void;
@@ -132,10 +134,16 @@ export async function persistMessageBatchWithSideEffects(
   hooks: MessagePersistenceHooks,
   sessionId: string,
   batchMessages: BatchMessageInput[],
-  merge?: { source?: MessageIngestSource; config: MessageMergeConfig }
+  merge?: {
+    source?: MessageIngestSource;
+    config: MessageMergeConfig;
+    metrics?: MessageIngestMetrics;
+  }
 ): Promise<MessageBatchPersistenceResult> {
   const persist = () => messages.persistMessageBatch(sql, env, sessionId, batchMessages, merge);
   const result = hooks.transactionSync ? hooks.transactionSync(persist) : persist();
+  // Publish only after the synchronous transaction commits; later effects may fail.
+  if (merge?.metrics) hooks.recordMessageIngest?.(merge.metrics);
   if (result.persisted === 0) {
     return {
       persisted: result.persisted,

@@ -1,0 +1,35 @@
+# Refresh the desktop hero marketing capture
+
+## Status (2026-11-11)
+
+The homepage hero this capture fed was removed with the software-factory homepage, along with
+`build-hero-layers.ts`. The fix is still needed only if `sam-hero-live-session` is kept for other
+uses; it is now covered by `2026-11-11-marketing-shots-drift-after-sam-glass.md`.
+
+## Problem
+
+`apps/web/tests/playwright/marketing-shots-platform.spec.ts` › `sam-hero-live-session` no longer
+passes against the current app: it waits for `Read payments/webhooks/refund_handler.py` to be
+visible, but the chat now groups tool calls ("3 tool calls · running Bash: …") and that row is
+collapsed inside the group. The committed `sam-hero-live-session(-light).png` therefore shows the
+older, ungrouped tool rows, while the phone capture (`sam-hero-phone`) shows the current grouping.
+
+## Context
+
+Found 2026-10-15 while capturing the phone source for the glasshouse homepage hero
+(`tasks/archive/2026-10-14-glasshouse-homepage-a2.md`). The marketing capture specs are not part
+of CI (only `*audit.spec.ts` runs), so the stale assertion went unnoticed.
+
+The homepage hero layers used to be cropped from this capture; that hero and its script were
+removed on 2026-11-11.
+
+## Acceptance Criteria
+
+- [ ] The `sam-hero-live-session` capture passes against the current chat UI (assert the grouped
+      tool row, or expand the group, instead of the individual Read row)
+- [ ] Both themes re-captured (`MARKETING_SHOTS=1`, then `MARKETING_THEME=light`)
+- [ ] `pnpm --filter @simple-agent-manager/www optimize:features` re-run for the feature page copy
+
+## Reconciliation (2026-11-16)
+
+**SUPERSEDED.** The homepage hero it fed was removed with the software-factory homepage (#2655). The remaining `sam-hero-live-session` capture issue is tracked in `tasks/backlog/2026-11-11-marketing-shots-drift-after-sam-glass.md` (line 15), as this file's own 2026-11-11 status says. Moved from `tasks/backlog/` by the weekly queue reconciliation.

@@ -12,11 +12,12 @@ import (
 const gitCredentialRejectGenerationMismatch = "generation_mismatch"
 
 // isValidCallbackAuth authorizes a bearer on the local git-credential endpoint.
-// An exact match with a token this agent holds is accepted. Otherwise a
-// signature-valid workspace callback JWT is accepted only if it carries the same
-// callback generation ("cgen") as the workspace's current token: the control
-// plane rotates the generation when the workspace ID is reactivated, and a
-// previous runtime's token must stop working here as it does at the control plane.
+// An exact match with a token this agent holds for the requested workspace is
+// accepted. Otherwise a signature-valid workspace callback JWT is accepted only
+// if it carries the same callback generation ("cgen") as the workspace's current
+// token. The control plane rotates the generation when the workspace ID is
+// reactivated, and a previous runtime's token must stop working here as it does
+// at the control plane.
 func (s *Server) isValidCallbackAuth(r *http.Request, workspaceID string) bool {
 	given := bearerTokenFromHeader(r.Header.Get("Authorization"))
 	if given == "" {
@@ -67,12 +68,13 @@ type callbackAuthCandidate struct {
 }
 
 func (s *Server) callbackAuthCandidates(workspaceID string) []callbackAuthCandidate {
-	candidates := []callbackAuthCandidate{{
-		source: "config",
-		token:  strings.TrimSpace(s.config.CallbackToken),
-	}}
-	if workspaceID == "" {
-		return candidates
+	workspaceID = strings.TrimSpace(workspaceID)
+	candidates := make([]callbackAuthCandidate, 0, 2)
+	if workspaceID != "" && workspaceID == strings.TrimSpace(s.config.WorkspaceID) {
+		candidates = append(candidates, callbackAuthCandidate{
+			source: "config",
+			token:  strings.TrimSpace(s.config.CallbackToken),
+		})
 	}
 	if token, ok := s.lookupWorkspaceCallbackToken(workspaceID); ok {
 		candidates = append(candidates, callbackAuthCandidate{

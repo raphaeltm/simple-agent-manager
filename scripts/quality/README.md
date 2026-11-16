@@ -73,7 +73,7 @@ model is in `scripts/quality/agent-instructions.ts`:
 - a `paths` pattern matches no file, or uses syntax outside the supported subset;
 - a rule names source files outside its own scope, or a source file names a rule that
   does not load for it (the rule was left behind by a code move);
-- two rule files are copies;
+- two rule files are copies, or a rule file sits outside the root `.claude/rules/`;
 - the set of launch rules differs from `launchRules` in
   `scripts/quality/agent-context-budget.json`, so a rule cannot leave launch context
   without a reviewed edit to that list;

@@ -38,3 +38,7 @@
 - [ ] All imports still resolve (barrel re-exports where needed)
 - [ ] All tests pass after splitting
 - [ ] File removed from allowlist in `scripts/quality/check-file-sizes.ts`
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. `index.ts` is done. Still open: `bootstrap.go` 3,474, vm-agent `server.go` 1,681, `gateway.go` 1,395, `workspaces.go` 2,275, `stuck-tasks.ts` 1,794, `sync-wrangler-config.ts` 1,403, `MultiTerminal.tsx` 825, `useAcpSession.ts` 831. `session_host.go` (794) is still exempt. Evidence: #2714; `apps/api/src/index.ts` 986→548 lines and removed from `EXEMPT_FILES` (`scripts/quality/check-file-sizes.ts:33-45`).

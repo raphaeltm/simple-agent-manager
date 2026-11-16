@@ -13,6 +13,8 @@ The `users` table (and others) contains internal **sentinel rows** that are not 
 
 The first-user-superadmin promotion in `apps/api/src/auth.ts` (`user.create.before` hook) counted _all_ existing user rows to decide "is this the first human?". On a freshly forked deployment the `system_anonymous_trials` sentinel already existed, so the genuine first human was counted as the _second_ user, created as `role='user'` instead of `role='superadmin'`, and locked out of every superadmin-gated admin surface — with no in-product recovery (the role-change endpoint is itself superadmin-gated). The fix (idea `01KTBCWSTJ83YM280YP7MTE967`) was a login-time + migration self-heal whose every guard had to re-derive the `status != 'system'` exclusion the original count omitted.
 
+Since 2026-11-15 the promotion is an atomic election in `session.create.before` (`establishFirstSuperadmin`, `apps/api/src/services/first-superadmin.ts`); its only-real-user guard and the `first_superadmin_election` migration still exclude `status = 'system'`.
+
 ## Rule
 
 When writing any query or in-memory check whose result depends on **how many** rows exist (or whether _any_ real row exists) in a table that can hold internal/sentinel rows:

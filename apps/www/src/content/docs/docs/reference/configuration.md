@@ -59,7 +59,7 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ENCRYPTION_KEY`                           | AES-256-GCM master key. Used for BetterAuth session cookies and user credential encryption unless a purpose-specific override below is set (auto-generated)                                                                                                                                                                     |
 | `BETTER_AUTH_SECRET`                       | Optional purpose-specific override for BetterAuth session cookie signing/encryption. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                                                                                                                  |
-| `BOOTSTRAP_OWNER_EMAIL`                    | Optional installer-managed Worker secret restricting first administration to this verified login email. Unset preserves manual-install behavior. Set before enabling login; preserve across updates.                                                                                                                            |
+| `BOOTSTRAP_OWNER_EMAIL`                    | Optional installer-managed Worker secret restricting first administration to this verified login email. Unset preserves manual-install behavior. Set before enabling login; preserve across updates. Also the recovery path when no superadmin remains (self-hosting guide).                                                                                                                            |
 | `CREDENTIAL_ENCRYPTION_KEY`                | Optional purpose-specific override for AES-GCM encryption of user cloud/agent credentials. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                                                                                                            |
 | `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                                                                                                                                                                                                                                        |
 | `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                                                                                                                                                                                                                                   |
@@ -2044,9 +2044,40 @@ Installation admins edit these at **Admin → Settings**. They use the existing 
 | `deployments.buildContextStartTimeoutMs`   | 10,000  | Bounds control-plane wait for source collection acceptance                                                 |
 | `deployments.buildContextMaxBytes`         | 2 GiB   | Maximum raw tar (including headers) and compressed bundle bytes                                            |
 | `deployments.buildContextCollectTimeoutMs` | 120,000 | Source collection deadline                                                                                 |
-| `deployments.buildContextUploadTtlSeconds` | 300     | Presigned upload URL lifetime                                                                              |
+| `deployments.buildContextUploadTtlSeconds` | 300     | Presigned upload/download URL lifetime                                                                              |
 | `deployments.buildContextRetentionHours`   | 48      | Minimum age before abandoned/terminal bundles are deleted                                                  |
 | `deployments.buildContextCleanupBudgetMs`  | 10,000  | Work budget per daily cleanup pass                                                                         |
 | `deployments.buildContextCleanupPageSize`  | 250     | R2 listing page size; a persisted cursor resumes remaining pages                                           |
 
 Collection has no file-count cutoff. For a 100,000-file context near 1.5 GiB, tar headers add at least 49 MiB, plus filename/padding metadata. At 50 MiB/s the payload alone needs about 31 seconds to collect and another 31 seconds to upload; filesystem traversal, compression, and network conditions add time. Collection stops at its deadline rather than repeatedly processing a fixed batch. Phase timings are stored in publish-job events. The source request retains the existing overall VM publish timeout (20 minutes by default) and emits publish heartbeats throughout collection/upload.
+
+## Cloudflare application build executor
+
+Edit runtime controls in **Admin → Settings**. Instant sessions always use Cloudflare; `deployments.buildExecutor` selects the VM-session executor. These controls are independent of the default-off context shadow probe. Keep the VM setting at `node` until staging validates Cloudflare publishing from a VM with unchanged source build/save counters and a served release; that validation remains pending.
+
+| Runtime setting                           | Default   | Meaning                                                                                             |
+| ----------------------------------------- | --------- | --------------------------------------------------------------------------------------------------- |
+| `deployments.buildExecutor`               | `node`    | VM build executor (`node` or `cloudflare`); explicit Cloudflare selection never silently falls back |
+| `deployments.builderMaxConcurrent`        | 6         | Platform reservations, clamped to the deployed class capacity; maximum 6                            |
+| `deployments.builderProjectMaxConcurrent` | 2         | Per-project reservations; maximum 2                                                                 |
+| `deployments.builderReservationGraceMs` | 300,000 | Grace after the stored builder deadline before cron force-releases unconfirmed reservations with an alert; active jobs become unknown, and physical shutdown may remain unconfirmed |
+| `deployments.builderDeadlineMs`           | 1,200,000 | Absolute deadline after first admission; also capped by the overall publish-job deadline            |
+| `deployments.builderCapacityBackoffMs`    | 30,000    | Delay before retrying platform capacity errors                                                      |
+| `deployments.builderDrainLimit`           | 6         | Maximum queued jobs considered per cron tick                                                        |
+| `deployments.builderDaemonReadyTimeoutMs` | 60,000    | DinD readiness deadline                                                                             |
+| `deployments.publishCallbackMaxBodyBytes` | 1,048,576 | Maximum actual JSON bytes for authenticated publish events, image artifacts and release callbacks, for source and builder tokens. |
+| `deployments.builderCallbackTimeoutMs`    | 30,000    | Control-plane HTTP timeout; also controls bootstrap HTTP shutdown                                   |
+| `deployments.builderCallbackAttempts`     | 3         | Maximum attempts for retryable callbacks                                                            |
+| `deployments.builderCallbackRetryDelayMs` | 5,000     | Delay between retryable callbacks                                                                   |
+| `deployments.builderHeartbeatIntervalMs`  | 15,000    | Builder liveness callback interval                                                                  |
+
+Deployment topology is configured through GitHub Environment variables:
+
+| Variable                       | Default      | Meaning                                                                      |
+| ------------------------------ | ------------ | ---------------------------------------------------------------------------- |
+| `DEPLOY_BUILDER_INSTANCE_TYPE` | `standard-4` | Cloudflare Container instance type; applies on deployment                    |
+| `DEPLOY_BUILDER_MAX_INSTANCES` | 6            | `ComposeBuilderContainer` class capacity; runtime admission never exceeds it |
+
+The deploy generator mirrors actual class capacity into the Worker binding `DEPLOY_BUILDER_CLASS_MAX_INSTANCES`; do not set that binding independently. Builder images contain Docker, Compose and `sam-builder`; no installation or user credentials are baked into them. Each job receives only a job-and-attempt callback token and short-lived presigned URLs for its context and image keys. The control plane checks the builder against `VM_AGENT_REQUIRED_VERSION`, when configured, before accepting a job.
+
+Application builders have unrestricted internet egress. Package installation in Dockerfile `RUN` steps and direct presigned object transfers use normal TLS trust; there is no builder host allowlist, outbound proxy, or interception CA setting. Isolation relies on the dedicated microVM, one-job callback authority, and hard deadline. See the [security architecture](/docs/architecture/security/#application-build-executor).

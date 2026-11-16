@@ -71,6 +71,7 @@ import * as logicalTranscript from './logical-transcript';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messageContext from './message-context';
+import { emptyMessageIngestMetrics, refuseMerge } from './message-ingest-metrics';
 import * as messagePersistence from './message-persistence';
 import { DEFAULT_MESSAGE_MERGE_CONFIG, type MessageIngestSource } from './message-stream-ingest';
 import * as messages from './messages';
@@ -125,7 +126,7 @@ import {
   admitBrowserSocket,
   broadcastToBrowserSockets,
   closeQuietly,
-  hasLegacySessionSocket,
+  countLegacySockets,
 } from './session-sockets';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
@@ -908,16 +909,21 @@ export class ProjectData extends DurableObject<Env> {
         ? ((await projectDataPorts().operations.messageMergeConfig?.(this.env)) ??
           DEFAULT_MESSAGE_MERGE_CONFIG)
         : DEFAULT_MESSAGE_MERGE_CONFIG;
-      // Only a socket watching this session can miss an append; project sockets never get
-      // transcript frames (session-sockets.ts).
-      const legacyClient = hasLegacySessionSocket(this.ctx, sessionId);
+      const metrics = emptyMessageIngestMetrics();
+      const legacy = countLegacySockets(this.ctx, sessionId);
+      metrics.legacySessionSocketsMax = legacy.session;
+      // Informational only: project sockets get no transcript frames and never gate merging.
+      metrics.legacyProjectSocketsMax = legacy.project;
+      const legacyClient = legacy.session > 0;
+      if (!config.enabled) refuseMerge(metrics, 'setting_disabled');
+      else if (legacyClient) refuseMerge(metrics, 'legacy_client');
       return messagePersistence.persistMessageBatchWithSideEffects(
         this.sql,
         this.env,
         this.messagePersistenceHooks(),
         sessionId,
         batchMessages,
-        { source, config: { ...config, enabled: config.enabled && !legacyClient } }
+        { source, config: { ...config, enabled: config.enabled && !legacyClient }, metrics }
       );
     });
   }
@@ -1014,6 +1020,7 @@ export class ProjectData extends DurableObject<Env> {
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
+      recordMessageIngest: (metrics) => this.rowUsage.recordMessageIngest(metrics),
       transactionSync: (fn) => this.meteredStorage.transactionSync(fn),
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),

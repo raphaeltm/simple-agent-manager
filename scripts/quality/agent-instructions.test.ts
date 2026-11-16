@@ -7,6 +7,7 @@ import {
   checkDirectoriesHaveIndex,
   checkLaunchRuleBaseline,
   checkRuleReferencesInSource,
+  checkRulesLiveAtRoot,
   ruleFilesNamedIn,
 } from './agent-instruction-guards';
 import { compareObservedLoads, parseObservedLog } from './agent-instruction-observed';
@@ -518,5 +519,20 @@ describe('second review round', () => {
     ];
     expect(checkCodexChainSizes(sizes, 32_768).map((f) => f.file)).toEqual(['apps/api/AGENTS.md']);
     expect(checkCodexChainSizes(sizes, 40_000)).toEqual([]);
+  });
+});
+
+describe('checkRulesLiveAtRoot', () => {
+  it('flags a rule file added beside a package, as a concurrent branch on the old layout would', () => {
+    const nested = rule('apps/api/.claude/rules/40-sentinel-rows.md', null);
+    const root = rule(
+      '.claude/rules/40-sentinel-rows.md',
+      "paths:\n  - 'apps/api/**'",
+      '# Other\n'
+    );
+    expect(checkRulesLiveAtRoot(model(nested, root)).map((f) => [f.check, f.file])).toEqual([
+      ['nested-rule', 'apps/api/.claude/rules/40-sentinel-rows.md'],
+    ]);
+    expect(checkRulesLiveAtRoot(model(root))).toEqual([]);
   });
 });
