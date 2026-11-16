@@ -1018,6 +1018,21 @@ export async function listActiveAttentionMarkers(
   );
 }
 
+/** One chat's run-receipt facts for a time window (`do/run-receipt-facts.ts`, Insights slice R). */
+export async function getRunReceiptFacts(
+  env: Env,
+  projectId: string,
+  input: Parameters<ProjectData['getRunReceiptFacts']>[0]
+): Promise<ReturnType<ProjectData['getRunReceiptFacts']>> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getRunReceiptFacts',
+    (stub) => stub.getRunReceiptFacts(input),
+    'idempotent_read'
+  );
+}
+
 export async function getMessages(
   env: Env,
   projectId: string,

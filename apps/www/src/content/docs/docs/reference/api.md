@@ -945,6 +945,34 @@ Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequ
 Optional query `runningLimit` and `recentLimit` (defaults 5 and 3, at most 20). Requires project
 membership.
 
+### `GET /api/projects/:projectId/tasks/:taskId/receipt`
+
+The Run receipt for one task (`runReceipt`, `packages/operations/src/insights-receipt.ts`; Connector
+operation `sam_run_receipt`). Everything is derived when you ask, from records SAM already keeps:
+
+- `phases`: `{ key, durationMs }` for `machine` (task created until its workspace was placed),
+  `setup` (placed until the agent started), `agent`, `waiting` (the agent's open questions and asks,
+  overlaps counted once) and `ci` (from the agent's last message until the pull request's last
+  check finished). `durationMs` is null when SAM has no record to measure the phase from.
+- `outcome`: `pullRequest` (`{ number, url, title, repository, state, mergedAt }` or null), `checks`
+  (state on the latest head, or null), `ciFirstTry` (always `not_recorded`: SAM does not keep which
+  checks ran on earlier pushes) and `terminalReason`.
+- `account`: `agentType`, `credentialSource`, `credentialScope`, and `accountName`, which is only
+  filled in for the person who ran the session.
+- `resources`: peak memory and CPU from resource history, with the memory and CPU the run
+  requested. `measured` is false when no history was recorded (Instant runs record none).
+- `toolCalls`: `{ total, byKind, scanLimited }`, or null when the chat was archived or the read
+  failed. `scanLimited` means the counts are a floor.
+- `tokens`: `{ state: "not_reported" }`. SAM never estimates token use.
+- `slowedDown`: up to three items, largest delay first. A machine wait or setup is listed only when
+  it took at least `insights.receiptSlowFactorPercent` of the usual duration for recent runs of the
+  same skill (or profile) in the project.
+- `unavailable`: parts whose read failed this time (`outcome`, `toolCalls`, `comparison`,
+  `account`); the rest of the receipt is still returned.
+
+Requires project membership. A task in another project and a missing task both return `404`. The
+admin settings under `insights.receipt*` bound every read.
+
 ### `POST /api/projects/:id/tasks`
 
 Create a task record.

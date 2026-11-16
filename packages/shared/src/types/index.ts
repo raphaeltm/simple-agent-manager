@@ -825,6 +825,26 @@ export {
   MAX_PROJECT_OVERVIEW_LIMIT,
 } from './project-overview';
 
+// Run receipt (Insights slice R)
+export type {
+  RunReceipt,
+  RunReceiptAccount,
+  RunReceiptFacts,
+  RunReceiptFactsInput,
+  RunReceiptOutcome,
+  RunReceiptPhase,
+  RunReceiptPhaseKey,
+  RunReceiptPullRequest,
+  RunReceiptResources,
+  RunReceiptSection,
+  RunReceiptSlowItem,
+  RunReceiptSlowKind,
+  RunReceiptToolCalls,
+  RunReceiptToolKindCount,
+  RunReceiptWaitingInterval,
+} from './insights-receipt';
+export { RUN_RECEIPT_PHASE_KEYS } from './insights-receipt';
+
 // Knowledge Graph
 export type {
   AddObservationRequest,

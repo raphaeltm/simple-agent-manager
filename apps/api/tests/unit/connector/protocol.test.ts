@@ -117,7 +117,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
     );
     await client.connect(transport);
     const catalog = await client.listTools();
-    expect(catalog.tools).toHaveLength(44);
+    expect(catalog.tools).toHaveLength(45);
     expect(catalog.tools.map((t) => t.name)).toEqual(
       expect.arrayContaining([
         'sam_chat_message_get',
@@ -132,6 +132,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
         'sam_chat_jobs_list',
         'sam_operation_get',
         'sam_usage_get',
+        'sam_run_receipt',
       ])
     );
     expect(
@@ -200,7 +201,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
       requestInit: { headers: { Authorization: `Bearer ${token}` } },
     });
     await client.connect(transport);
-    expect((await client.listTools()).tools).toHaveLength(44);
+    expect((await client.listTools()).tools).toHaveLength(45);
     const result = await client.callTool({ name: 'sam_projects_list', arguments: {} });
     expect(JSON.stringify(result)).toContain('My Project');
     await client.close();
@@ -255,7 +256,7 @@ describe('Connector real MCP protocol and PAT authorization', () => {
       `INSERT INTO platform_settings(key,value,updated_at) VALUES ('connector.writeEnabled','false','2026-10-16T00:00:00Z')`
     );
     const { json } = await rpc('tools/list');
-    expect(json.result.tools).toHaveLength(31);
+    expect(json.result.tools).toHaveLength(32);
     const disabled = await rpc('tools/call', {
       name: 'sam_idea_create',
       arguments: { projectId: 'mine', title: 'Not created' },

@@ -273,6 +273,22 @@ items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 | `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired    |
 | `inbox.sweepBatchSize`     | 10      | 1–50       | Items one five-minute sweep expires or re-notifies (each is a write and an agent notice) |
 
+## Run receipt
+
+Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-apiprojectsprojectidtaskstaskidreceipt)
+(`packages/operations/src/insights-receipt-settings-definition.ts`).
+
+| Setting                                  | Default | Range       | What it limits                                                                     |
+| ---------------------------------------- | ------- | ----------- | ---------------------------------------------------------------------------------- |
+| `insights.receiptToolScanMaxRows`        | 20,000  | 100–200,000 | Tool-call rows one receipt reads; a longer run says its counts are a floor         |
+| `insights.receiptWaitingMaxQuestions`    | 200     | 10–2,000    | Agent questions one receipt reads to measure time waiting on a person              |
+| `insights.receiptComparisonRuns`         | 50      | 3–500       | Recent runs of the same skill or profile read to find the usual durations          |
+| `insights.receiptComparisonWindowDays`   | 30      | 1–365       | Days back the receipt looks for runs to compare with                               |
+| `insights.receiptComparisonMinRuns`      | 3       | 1–50        | Fewest comparable runs before a duration is called slower than usual               |
+| `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                |
+| `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                    |
+| `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown |
+
 ## Node provisioning
 
 This **Operations** setting bounds one durable node-provisioning attempt
