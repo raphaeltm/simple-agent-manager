@@ -37,6 +37,10 @@ download several runs' `workers-timings-*` artifacts and run
   of the 2026-08-11 ai-slop debt burn-down, once production sites reached zero. Their ownership,
   stages, and baselines live in `packages/eslint-plugin-sam/rules.manifest.json`; fixtures run
   with ESLint 9 `RuleTester`.
+- `sam/no-unguarded-outbound-fetch` is in the ratchet stage: `error` in Worker source with a
+  per-file baseline (`packages/eslint-plugin-sam/outbound-fetch-baseline.json`) holding the global-fetch
+  sites that existed when it landed. New unacknowledged sites fail; lower the baseline with
+  `node packages/eslint-plugin-sam/scripts/outbound-fetch-baseline.mjs --write`.
 - `pnpm quality:type-boundaries` is the blocking net-count ratchet. The baseline in
   `scripts/quality/type-boundary-baseline.json` was driven to zero blocking-class debt (0/0/0/0
   across `as-any`, `hono-req-json-generic`, `typed-json-parse`, `local-record-guard`) by the
