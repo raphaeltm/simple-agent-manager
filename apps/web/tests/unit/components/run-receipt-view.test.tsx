@@ -283,4 +283,81 @@ describe('RunReceiptView — disclosures and loading', () => {
     rerender(<RunReceiptView receipt={receipt()} resourceIndex={undefined} cpuHistory="error" />);
     expect(screen.getByText("Couldn't load CPU history just now.")).toBeInTheDocument();
   });
+
+  // Slice U: measured tokens per model; money only as a labelled estimate for API-key accounts.
+  it('shows measured tokens per model and an API-key spend estimate', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({
+          tokens: {
+            state: 'reported',
+            source: 'harness',
+            limited: false,
+            total: { input: 320_000, output: 41_000, cacheRead: 2_100_000, cacheWrite: 0, reasoning: null },
+            spend: { state: 'estimate', usd: 4.12, unpricedModels: [] },
+            models: [
+              {
+                model: 'claude-opus-5-5',
+                input: 300_000,
+                output: 40_000,
+                cacheRead: 2_100_000,
+                cacheWrite: 0,
+                reasoning: null,
+                estimatedSpendUsd: 4.0,
+              },
+              {
+                model: null,
+                input: 20_000,
+                output: 1_000,
+                cacheRead: 0,
+                cacheWrite: 0,
+                reasoning: 500,
+                estimatedSpendUsd: null,
+              },
+            ],
+          },
+        })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByText('2.5M')).toBeInTheDocument();
+    expect(screen.getByText('~$4.12 estimated · Reported by the agent')).toBeInTheDocument();
+    const models = screen.getByTestId('receipt-token-models');
+    expect(within(models).getByText('claude-opus-5-5')).toBeInTheDocument();
+    expect(within(models).getByText('300K in · 40K out · 2.1M cache')).toBeInTheDocument();
+    expect(within(models).getByText('Model not reported')).toBeInTheDocument();
+    expect(within(models).getByText('20K in · 1K out · 500 reasoning')).toBeInTheDocument();
+    expect(screen.queryByText('Not reported')).not.toBeInTheDocument();
+  });
+
+  it('shows tokens without money for a subscription account', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({
+          tokens: {
+            state: 'reported',
+            source: 'ai_proxy',
+            limited: true,
+            total: { input: 900, output: 100, cacheRead: 0, cacheWrite: 0, reasoning: null },
+            spend: { state: 'not_applicable' },
+            models: [
+              {
+                model: 'gpt-5.5',
+                input: 900,
+                output: 100,
+                cacheRead: 0,
+                cacheWrite: 0,
+                reasoning: null,
+                estimatedSpendUsd: null,
+              },
+            ],
+          },
+        })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByText('1K+')).toBeInTheDocument();
+    expect(screen.getByText('Measured by SAM’s AI proxy')).toBeInTheDocument();
+    expect(screen.queryByText(/estimated/)).not.toBeInTheDocument();
+  });
 });
