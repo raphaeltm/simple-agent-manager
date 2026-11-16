@@ -4,13 +4,13 @@ import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definit
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
-import { type InboxSettingName } from './inbox-settings-definition';
 import {
   CONNECTOR_DEFAULTS,
   type ConnectorSettingKey,
   validateConnectorSetting,
 } from './connector-settings-definition';
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
+import { type InboxSettingName } from './inbox-settings-definition';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
 import { type RuntimeSecretRequestSettingName } from './runtime-secret-request-settings-definition';

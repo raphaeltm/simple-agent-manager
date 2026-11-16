@@ -6,13 +6,14 @@
 import {
   type InboxItem,
   type InboxItemResponse,
-  parseInboxRef,
   type ParsedInboxRef,
+  parseInboxRef,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
+import { SECRET_VISIBLE } from './inbox-list-core';
 import { inboxItemFromRow, InboxRowSchema } from './inbox-rows';
 import type { OperationContext } from './types';
 
@@ -56,14 +57,15 @@ async function readStoreRow(
               AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?)
                 OR (a.assignee_kind = 'team' AND (a.claimed_by_user_id IS NULL OR a.claimed_by_user_id = ?)))
               THEN 1 ELSE 0 END AS can_act,
-            COALESCE(a.group_key, a.source_session_id, 'ask:' || a.id) AS stack_key
+            COALESCE(a.project_id || ':' || a.group_key, a.source_session_id, 'ask:' || a.id) AS stack_key
           FROM asks a
           JOIN project_members pm ON pm.project_id = a.project_id AND pm.user_id = ? AND pm.status = 'active'
           WHERE a.id = ? AND a.project_id = ?
-            AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?) OR a.assignee_kind = 'team')
+            AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?)
+              OR (a.assignee_kind = 'team' AND (a.claimed_by_user_id IS NULL OR a.claimed_by_user_id = ?)))
         ) x ${ENRICH}`
       )
-      .bind(...writers.params, me, me, me, ref.id, projectId, me)
+      .bind(...writers.params, me, me, me, ref.id, projectId, me, me)
       .first<Record<string, unknown>>();
   }
   if (ref.store === 'secret') {
@@ -83,12 +85,23 @@ async function readStoreRow(
           FROM runtime_secret_requests r
           JOIN project_members pm ON pm.project_id = r.project_id AND pm.user_id = ? AND pm.status = 'active'
             AND pm.role IN (${readers.sql})
-          WHERE r.id = ? AND r.project_id = ?
+          WHERE r.id = ? AND r.project_id = ? AND ${SECRET_VISIBLE(writers.sql)}
         ) x ${ENRICH}`
       )
-      .bind(Date.now(), ...writers.params, me, ...readers.params, ref.id, projectId)
+      .bind(
+        Date.now(),
+        ...writers.params,
+        me,
+        ...readers.params,
+        ref.id,
+        projectId,
+        me,
+        ...writers.params,
+        ...writers.params
+      )
       .first<Record<string, unknown>>();
   }
+  const writers = roles(ctx, 'task:write');
   return db
     .prepare(
       `SELECT x.*, ${ENRICH_COLUMNS} FROM (
@@ -100,11 +113,12 @@ async function readStoreRow(
             WHEN ap.status = 'pending' THEN 'expired'
             WHEN ap.status IN ('approved', 'executed') THEN 'answered'
             WHEN ap.status = 'denied' THEN 'archived' ELSE 'expired' END AS status,
-          CAST((julianday(ap.created_at) - 2440587.5) * 86400000 AS INTEGER) AS created_at,
-          CAST((julianday(ap.expires_at) - 2440587.5) * 86400000 AS INTEGER) AS expires_at,
+          COALESCE(CAST(ROUND((julianday(ap.created_at) - 2440587.5) * 86400000) AS INTEGER), 0) AS created_at,
+          CAST(ROUND((julianday(ap.expires_at) - 2440587.5) * 86400000) AS INTEGER) AS expires_at,
           NULL AS due_at,
           json_object('targetType', ap.target_type, 'targetId', ap.target_id) AS extra_json,
-          NULL AS links_json, 1 AS can_act,
+          NULL AS links_json,
+          CASE WHEN pm.role IN (${writers.sql}) THEN 1 ELSE 0 END AS can_act,
           COALESCE(ap.requesting_session_id, 'approval:' || ap.id) AS stack_key
         FROM operations_action_approvals ap
         JOIN project_members pm ON pm.project_id = ap.requesting_project_id AND pm.user_id = ?
@@ -113,7 +127,7 @@ async function readStoreRow(
           AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.role = 'superadmin' AND u.status = 'active')
       ) x ${ENRICH}`
     )
-    .bind(new Date().toISOString(), me, ref.id, projectId, me)
+    .bind(new Date().toISOString(), ...writers.params, me, ref.id, projectId, me)
     .first<Record<string, unknown>>();
 }
 
@@ -128,7 +142,8 @@ async function readAttentionItem(
     ref.markerId,
     ctx.actor.userId
   );
-  if (!marker || !marker.canRead || marker.sessionId !== ref.sessionId) return null;
+  // Same people the list shows it to: the chat's creator, plus anyone it is shared with to write.
+  if (!marker || !marker.canWrite || marker.sessionId !== ref.sessionId) return null;
   const extra = await ctx.env.DATABASE.prepare(
     `SELECT p.name AS project_name, t.status AS task_status, t.execution_step AS task_step
        FROM projects p LEFT JOIN tasks t ON t.id = ? AND t.project_id = p.id
@@ -177,9 +192,11 @@ async function readAttentionItem(
 /** Resolve one item the caller may see, or throw the shared not-found. */
 export async function resolveInboxItem(
   ctx: OperationContext,
-  input: { projectId: string; ref: string }
+  input: { projectId: string; ref: string },
+  /** The caller already authorized the project (a write checks `task:write` first). */
+  projectAuthorized = false
 ): Promise<{ item: InboxItem; ref: ParsedInboxRef }> {
-  await authorizeProjectOperation(ctx, input.projectId);
+  if (!projectAuthorized) await authorizeProjectOperation(ctx, input.projectId);
   const ref = parseRefOrNotFound(input.ref);
   let item: InboxItem | null = null;
   if (ref.store === 'attention') {

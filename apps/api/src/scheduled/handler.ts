@@ -10,6 +10,7 @@ import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
 import { refreshGcpPriceTableIfDue } from '../services/gcp-price-table';
 import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
+import { runInboxAskSweep } from '../services/inbox/sweep';
 import {
   runLifecycleLatencyDailyEvaluation,
   runLifecycleLatencyWatchdog,
@@ -33,7 +34,6 @@ import { runScheduledDeploymentReleaseRetention } from './d1-retention';
 import { runDebugPackagePurge } from './debug-package-purge';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { runDeploymentPublishJobSweep } from './deployment-publish-jobs';
-import { runInboxAskSweep } from '../services/inbox/sweep';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';

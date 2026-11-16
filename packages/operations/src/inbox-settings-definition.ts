@@ -58,9 +58,10 @@ export const INBOX_SETTINGS = [
   },
   {
     name: 'inbox.sweepBatchSize',
-    defaultValue: 50,
-    description: 'Inbox items one five-minute sweep expires or re-notifies at most.',
-    range: { min: 1, max: 500 },
+    defaultValue: 10,
+    description:
+      'Inbox items one five-minute sweep expires or re-notifies at most. Each costs a write and an agent notice.',
+    range: { min: 1, max: 50 },
   },
 ] as const;
 

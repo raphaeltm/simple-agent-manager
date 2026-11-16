@@ -200,10 +200,12 @@ export type ParsedInboxRef =
 /** Parse a ref, or null when it is not one this build issues. */
 export function parseInboxRef(ref: string): ParsedInboxRef | null {
   for (const store of INBOX_STORES) {
-    const match = REF_PATTERNS[store].exec(ref);
-    if (!match) continue;
-    if (store === 'attention') return { store, sessionId: match[1]!, markerId: match[2]! };
-    return { store, id: match[1]! };
+    const [, first, second] = REF_PATTERNS[store].exec(ref) ?? [];
+    if (first === undefined) continue;
+    if (store === 'attention') {
+      return second === undefined ? null : { store, sessionId: first, markerId: second };
+    }
+    return { store, id: first };
   }
   return null;
 }

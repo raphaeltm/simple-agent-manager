@@ -329,6 +329,46 @@ describe('connector operations current membership and creator authority', () => 
     // The shared list reads the D1 index only: no Durable Object call per chat.
     expect(mocks.snapshot).not.toHaveBeenCalled();
   });
+  const writes = [
+    {
+      name: 'start',
+      run: (c: OperationContext) =>
+        samChatStart.run(c, { projectId: 'project', message: 'Inspect the code' }),
+    },
+    {
+      name: 'send',
+      run: (c: OperationContext) =>
+        samChatSend.run(c, { projectId: 'project', sessionId: 'chat', content: 'Continue' }),
+    },
+    {
+      name: 'answer',
+      run: (c: OperationContext) =>
+        samAgentAnswer.run(c, {
+          projectId: 'project',
+          sessionId: 'chat',
+          markerId: 'marker',
+          answer: 'Yes',
+        }),
+    },
+    {
+      name: 'stop',
+      run: (c: OperationContext) => samWorkStop.run(c, { projectId: 'project', sessionId: 'chat' }),
+    },
+  ];
+  for (const write of writes)
+    it(`${write.name} denies outsider/viewer/read-only scope and accepts owner`, async () => {
+      await expect(write.run(ctx('outsider'))).rejects.toMatchObject({ code: 'not_found' });
+      await expect(write.run(ctx('viewer'))).rejects.toMatchObject({ code: 'forbidden' });
+      const readOnly = ctx();
+      readOnly.actor.scopes = new Set(['sam.read']);
+      await expect(write.run(readOnly)).rejects.toMatchObject({ code: 'forbidden' });
+      await expect(write.run(ctx())).resolves.toBeDefined();
+    });
+  for (const write of writes.slice(1))
+    it(`${write.name} denies a same-project noncreator`, async () => {
+      await expect(write.run(ctx('colleague'))).rejects.toMatchObject({ code: 'forbidden' });
+      await expect(write.run(ctx())).resolves.toBeDefined();
+    });
   it('cancels an owned queued task before its chat is created and rejects a peer task', async () => {
     sqlite
       .prepare(

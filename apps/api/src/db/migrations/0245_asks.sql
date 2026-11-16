@@ -14,7 +14,10 @@
 -- expired) was queued. NULL on a closed row means a cron sweep retries it for a bounded window,
 -- the pattern runtime_secret_requests.notified_at uses.
 --
--- Additive only: one new table with no FK children. Numbered 0245 to stay clear of 0242/0243
+-- session_summaries gains a partial index for the inbox's question read (chats a person created
+-- that hold an open attention marker), so the read does not walk the person's whole chat history.
+--
+-- Additive only: one new table with no FK children and one new index. Numbered 0245 to stay clear of 0242/0243
 -- proposed by open PRs (#2721, #2753, #2772, #2691).
 CREATE TABLE asks (
   id TEXT PRIMARY KEY,
@@ -59,3 +62,7 @@ CREATE INDEX idx_asks_open_expiry ON asks (expires_at) WHERE status = 'open' AND
 CREATE INDEX idx_asks_unnotified ON asks (resolved_at) WHERE notified_at IS NULL AND status IN ('answered', 'done', 'archived', 'expired');
 -- One open-or-closed row per dedupe key per project, when a key is set.
 CREATE UNIQUE INDEX idx_asks_project_dedupe ON asks (project_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
+
+-- The inbox reads open questions per (project, creator); only rows holding a marker are indexed.
+CREATE INDEX idx_session_summaries_open_attention
+  ON session_summaries (project_id, created_by_user_id) WHERE attention_json IS NOT NULL;

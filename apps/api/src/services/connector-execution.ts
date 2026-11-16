@@ -119,11 +119,12 @@ export async function executeConnectorWrite<T>(
       );
     receiptId = await operationReceiptId(projectId, ctx.actor.userId, 'CONNECTOR', operation, key);
     intentHash = await hashIntent(input);
-    // Forms may contain low-entropy secrets; retain only a keyed intent fingerprint.
-    if (operation === 'sam_agent_answer' && input.formContent !== undefined)
+    // Forms may contain low-entropy secrets; retain only a keyed intent fingerprint. Any write
+    // that carries form content (sam_agent_answer, sam_inbox_answer) is covered.
+    if (input.formContent !== undefined)
       intentHash = await protectedFormReceiptHash(
         getCredentialEncryptionKey(ctx.env),
-        String(input.interactionId),
+        String(input.interactionId ?? input.ref ?? operation),
         intentHash
       );
     const previous = await readReceipt();

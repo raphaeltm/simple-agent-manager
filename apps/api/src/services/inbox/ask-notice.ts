@@ -14,9 +14,6 @@ import { log, serializeError } from '../../lib/logger';
 import * as projectDataService from '../project-data';
 import { safeNotice } from '../sam-notice-builders';
 
-const TITLE_CHARS = 200;
-const ANSWER_CHARS = 4_000;
-
 export function inboxAskDeliveryId(askId: string): string {
   return `inbox-ask:${askId}`;
 }
@@ -29,7 +26,7 @@ function answerText(answerJson: string | null): string | null {
       parsed && typeof parsed === 'object' && 'text' in parsed
         ? (parsed as { text: unknown }).text
         : null;
-    return typeof text === 'string' && text ? text.slice(0, ANSWER_CHARS) : null;
+    return typeof text === 'string' && text ? text : null;
   } catch {
     return null;
   }
@@ -40,8 +37,8 @@ export function buildInboxAskPrompt(
   row: InboxAskNoticeRow,
   outcome: InboxAskNoticeOutcome
 ): string {
-  const title = row.title.slice(0, TITLE_CHARS);
-  const item = `inbox item ${row.id} ("${title}")`;
+  // Title and answer were bounded when written (`inbox.titleMaxChars`, `inbox.answerMaxChars`).
+  const item = `inbox item ${row.id} ("${row.title}")`;
   const answer = answerText(row.answerJson);
   switch (outcome) {
     case 'answered':

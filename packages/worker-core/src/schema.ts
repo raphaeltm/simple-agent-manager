@@ -4331,6 +4331,10 @@ export const sessionSummaries = sqliteTable(
       table.createdByUserId,
       table.updatedAt
     ),
+    /** The inbox's open-question read (migration 0245). */
+    openAttentionIdx: index('idx_session_summaries_open_attention')
+      .on(table.projectId, table.createdByUserId)
+      .where(sql`attention_json IS NOT NULL`),
     archiveRankIdx: index('idx_session_summaries_archive_rank')
       .on(
         sql`${table.messageCount} DESC`,

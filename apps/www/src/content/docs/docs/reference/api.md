@@ -513,15 +513,15 @@ each ask where it is stored: questions and permission requests from the chat ind
 (`session_summaries`), [secret requests](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret),
 Operations approvals, and inbox asks (reviews and tasks agents file). Nothing is copied.
 
-| Method | Endpoint                                                  | Purpose                                         |
-| ------ | --------------------------------------------------------- | ----------------------------------------------- |
-| GET    | `/api/inbox`                                              | Your items across every project you belong to   |
-| GET    | `/api/inbox/count`                                        | `{ needsYou, blocking }`: items you can act on  |
-| GET    | `/api/projects/:projectId/inbox`                          | One project's items (same query parameters)     |
-| GET    | `/api/projects/:projectId/inbox/count`                    | One project's counts                            |
-| GET    | `/api/projects/:projectId/inbox/items/:ref`               | One item; `?context=true` adds the transcript   |
-| POST   | `/api/projects/:projectId/inbox/items/:ref/answer`        | Answer it through the path its store uses       |
-| POST   | `/api/projects/:projectId/inbox/items/:ref/archive`       | Close it; the agent is told you will not act    |
+| Method | Endpoint                                            | Purpose                                        |
+| ------ | --------------------------------------------------- | ---------------------------------------------- |
+| GET    | `/api/inbox`                                        | Your items across every project you belong to  |
+| GET    | `/api/inbox/count`                                  | `{ needsYou, blocking }`: items you can act on |
+| GET    | `/api/projects/:projectId/inbox`                    | One project's items (same query parameters)    |
+| GET    | `/api/projects/:projectId/inbox/count`              | One project's counts                           |
+| GET    | `/api/projects/:projectId/inbox/items/:ref`         | One item; `?context=true` adds the transcript  |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/answer`  | Answer it through the path its store uses      |
+| POST   | `/api/projects/:projectId/inbox/items/:ref/archive` | Close it; the agent is told you will not act   |
 
 The list takes `filter` (`needs_you` by default: open items you can act on; `blocking`, `tasks`,
 `reviews`, or `archived`), `limit` (default `inbox.listPageSize`, at most `inbox.listPageMax`) and
@@ -529,8 +529,10 @@ The list takes `filter` (`needs_you` by default: open items you can act on; `blo
 requests, asks with a due time) come first, then the ones an agent is stopped on, then the rest,
 oldest first; one chat's items stay together (`stackKey`). `skipped` counts stored rows on the page
 that could not be read. You see an ask assigned to you (or an unclaimed team ask), questions in
-chats you created, secret requests your agents made, and, as an active superadmin, Operations
-approvals in projects you belong to. Until questions move into inbox asks, a chat lists only its
+chats you created, secret requests your agents made (and, when the member whose agent asked
+cannot supply secrets, the requests of members who cannot, if you can), and, as an active
+superadmin, Operations approvals in projects you belong to. Opening, answering or archiving an
+item by `ref` follows the same rules; a question is also open to anyone the chat is shared with. Until questions move into inbox asks, a chat lists only its
 newest open question.
 
 Each item has a `ref` naming its store (`ask:<id>`, `attention:<sessionId>:<markerId>`,
@@ -544,6 +546,9 @@ looks like: `options` or `text` (`{ "answer": "…" }`), `interaction` (`{ "opti
 `{ "decline": true }`), `approval` (`{ "decision": "approve" | "deny", "note": "…" }`) or
 `acknowledge` (`{}` or `{ "answer": "comment" }`). Answers go through the existing path for each
 store: the question answer, the permission answer, secret fulfil/decline, and the approval decision.
+Secret values and Operations approval decisions are accepted only from the SAM app, never through
+an app connected to the Connector (`403`). Answering or archiving an item filed from a chat needs
+the same right to wake that chat's agent as answering in the chat.
 
 Archive closes an item for every kind: an inbox ask becomes `archived`, a question is resolved
 with reason `archived`, a permission or approval is denied, and a secret request is declined. Each

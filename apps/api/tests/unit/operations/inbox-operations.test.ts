@@ -6,10 +6,10 @@
  */
 import { readFileSync } from 'node:fs';
 
-import type { OperationContext } from '@simple-agent-manager/operations';
+import { type OperationContext, OperationError } from '@simple-agent-manager/operations';
 import {
-  archiveInboxItem,
   answerInboxItem,
+  archiveInboxItem,
   countInbox,
   createAsk,
   getInboxItem,
@@ -26,6 +26,8 @@ vi.mock('../../../src/services/project-data', async () => ({
   acceptPromptDelivery: edges.acceptPromptDelivery,
 }));
 
+import { inboxItemsSql } from '@simple-agent-manager/operations/internal/inbox-list-core';
+
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
@@ -37,13 +39,48 @@ const P2 = 'proj-2';
 let sqlite: Database.Database;
 let env: Env;
 
-function ctx(userId: string): OperationContext {
+function ctx(userId: string, via: OperationContext['actor']['via'] = 'web'): OperationContext {
   return {
     env,
     ports: createOperationPorts(env),
-    actor: { userId, via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
+    actor: { userId, via, scopes: new Set(['sam.read', 'sam.write']) },
     requestId: 'test',
   };
+}
+
+function secretRequest(id: string, requester = 'owner') {
+  insert('runtime_secret_requests', {
+    id,
+    project_id: P1,
+    env_key: `KEY_${id.toUpperCase()}`,
+    reason: 'Need it',
+    status: 'pending',
+    requester_user_id: requester,
+    requesting_task_id: 'task-1',
+    requesting_authority_task_id: 'task-1',
+    requesting_chat_session_id: 'chat-1',
+    expires_at: Date.now() + 3_600_000,
+    created_at: Date.now(),
+    updated_at: Date.now(),
+  });
+}
+
+function approval(id: string) {
+  insert('operations_action_approvals', {
+    id,
+    action: 'restart_vm_agent',
+    target_type: 'node',
+    target_id: 'node-1',
+    reason: 'It is wedged',
+    requesting_project_id: P1,
+    requesting_task_id: 'task-1',
+    requesting_authority_task_id: 'task-1',
+    requesting_session_id: 'chat-1',
+    requester_user_id: 'owner',
+    status: 'pending',
+    expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+    created_at: new Date().toISOString(),
+  });
 }
 
 function insert(table: string, row: Record<string, unknown>) {
@@ -142,7 +179,12 @@ beforeEach(() => {
     DATABASE: createSqliteD1(sqlite),
     BASE_DOMAIN: 'example.test',
     DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+    ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
   } as unknown as Env;
+  // The runtime-variable upsert converges on this unique index, which the schema helper omits.
+  sqlite.exec(
+    'CREATE UNIQUE INDEX idx_project_runtime_env_project_key ON project_runtime_env_vars (project_id, env_key)'
+  );
 });
 
 afterEach(() => {
@@ -187,7 +229,7 @@ describe('inbox list tenancy', () => {
     const future = new Date(Date.now() + 3_600_000).toISOString();
     insert('operations_action_approvals', {
       id: 'appr',
-      action: 'node.reboot',
+      action: 'restart_vm_agent',
       target_type: 'node',
       target_id: 'node-1',
       reason: 'It is wedged',
@@ -414,9 +456,12 @@ describe('inbox asks writes', () => {
   it('a notice that cannot be queued leaves notified_at NULL and the sweep retries it', async () => {
     ask('notice', { source_session_id: 'chat-1', source_task_id: 'task-1' });
     edges.acceptPromptDelivery.mockRejectedValueOnce(new Error('DO unavailable'));
-    await expect(
-      archiveInboxItem(ctx('owner'), { projectId: P1, ref: 'ask:notice' })
-    ).resolves.toMatchObject({ outcome: 'archived', agentNotified: false });
+    const c = ctx('owner');
+    c.ports.inbox.authorizeAnswerWake = vi.fn().mockResolvedValue(undefined);
+    await expect(archiveInboxItem(c, { projectId: P1, ref: 'ask:notice' })).resolves.toMatchObject({
+      outcome: 'archived',
+      agentNotified: false,
+    });
     expect(askRow('notice').notified_at).toBeNull();
     const resolvedAt = Number(askRow('notice').resolved_at);
     await expect(runInboxAskSweep(env, resolvedAt + 120_000)).resolves.toMatchObject({
@@ -508,5 +553,231 @@ describe('createAsk', () => {
     await expect(
       createAsk(ctx('owner'), { ...base, sourceSessionId: 'chat-2', sourceTaskId: 'task-3' })
     ).resolves.toMatchObject({ created: true });
+  });
+});
+
+describe('inbox answers and archives for every store', () => {
+  it('fulfils a secret from the app, and refuses a value from any other surface', async () => {
+    secretRequest('sec');
+    await expect(
+      answerInboxItem(ctx('owner', 'connector'), {
+        projectId: P1,
+        ref: 'secret:sec',
+        secret: { value: 'sk_test_value' },
+      })
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    expect(
+      sqlite.prepare("SELECT status FROM runtime_secret_requests WHERE id='sec'").get()
+    ).toEqual({
+      status: 'pending',
+    });
+    await expect(
+      answerInboxItem(ctx('owner'), {
+        projectId: P1,
+        ref: 'secret:sec',
+        secret: { value: 'sk_test_value' },
+      })
+    ).resolves.toMatchObject({ outcome: 'fulfilled', agentNotified: true });
+    expect(
+      sqlite.prepare("SELECT status FROM runtime_secret_requests WHERE id='sec'").get()
+    ).toEqual({
+      status: 'fulfilled',
+    });
+    const stored = sqlite
+      .prepare(
+        "SELECT stored_value, is_secret FROM project_runtime_env_vars WHERE env_key='KEY_SEC'"
+      )
+      .get() as { stored_value: string; is_secret: number };
+    expect(stored.is_secret).toBe(1);
+    expect(stored.stored_value).not.toContain('sk_test_value');
+  });
+
+  it('archiving a secret request declines it', async () => {
+    secretRequest('sec');
+    await expect(
+      archiveInboxItem(ctx('owner'), { projectId: P1, ref: 'secret:sec' })
+    ).resolves.toMatchObject({ outcome: 'declined' });
+    expect(
+      sqlite.prepare("SELECT status FROM runtime_secret_requests WHERE id='sec'").get()
+    ).toEqual({
+      status: 'declined',
+    });
+  });
+
+  it('shows a secret request to the requester, or to secret writers when the requester cannot supply it', async () => {
+    secretRequest('mine', 'owner');
+    secretRequest('maintainers', 'colleague');
+    // The owner can supply secrets: only their own request is theirs; the maintainer cannot, so
+    // their request also reaches the members who can.
+    expect(refs(await listInbox(ctx('owner'), {})).sort()).toEqual([
+      'secret:maintainers',
+      'secret:mine',
+    ]);
+    expect(refs(await listInbox(ctx('admin'), {}))).toEqual(['secret:maintainers']);
+    // The colleague sees their own request but cannot act on it (no secret:write).
+    const colleague = await listInbox(ctx('colleague'), { filter: 'blocking' });
+    expect(colleague.items).toMatchObject([{ ref: 'secret:maintainers', canAct: false }]);
+    // A writer is not shown another writer's request, and cannot reach it by ref.
+    await expect(
+      getInboxItem(ctx('admin'), { projectId: P1, ref: 'secret:mine' })
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await expect(
+      archiveInboxItem(ctx('admin'), { projectId: P1, ref: 'secret:mine' })
+    ).rejects.toMatchObject({ code: 'not_found' });
+    expect(
+      sqlite.prepare("SELECT status FROM runtime_secret_requests WHERE id='mine'").get()
+    ).toEqual({
+      status: 'pending',
+    });
+  });
+
+  it('decides an approval only from the app, and archive denies it', async () => {
+    approval('appr');
+    await expect(
+      answerInboxItem(ctx('admin', 'connector'), {
+        projectId: P1,
+        ref: 'approval:appr',
+        decision: 'approve',
+      })
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(
+      archiveInboxItem(ctx('admin', 'connector'), { projectId: P1, ref: 'approval:appr' })
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    expect(
+      sqlite.prepare("SELECT status FROM operations_action_approvals WHERE id='appr'").get()
+    ).toEqual({ status: 'pending' });
+    await expect(
+      archiveInboxItem(ctx('admin'), { projectId: P1, ref: 'approval:appr' })
+    ).resolves.toMatchObject({ outcome: 'denied' });
+    expect(
+      sqlite
+        .prepare("SELECT status, decided_by FROM operations_action_approvals WHERE id='appr'")
+        .get()
+    ).toEqual({ status: 'denied', decided_by: 'admin' });
+  });
+
+  it('archiving a permission declines it through the interaction answer path', async () => {
+    const c = ctx('owner');
+    c.ports.inbox.attentionMarker = vi.fn().mockResolvedValue({
+      id: 'm-perm',
+      sessionId: 'chat-1',
+      taskId: 'task-1',
+      source: 'acp_interaction',
+      reason: 'acp_interaction_pending',
+      options: [],
+      category: null,
+      interactionId: 'interaction-1',
+      interactionKind: 'permission',
+      createdAt: 10,
+      expiresAt: null,
+      resolvedAt: null,
+      topic: 'Chat',
+      canRead: true,
+      canWrite: true,
+    });
+    c.ports.access.requireSessionWriter = vi.fn().mockResolvedValue({});
+    const prepared = { decision: { kind: 'declined' } };
+    c.ports.connector.prepareAgentAnswer = vi.fn().mockResolvedValue(prepared);
+    c.ports.chat.answerAgentInteraction = vi.fn().mockResolvedValue({ accepted: true });
+    await expect(
+      archiveInboxItem(c, { projectId: P1, ref: 'attention:chat-1:m-perm' })
+    ).resolves.toMatchObject({ outcome: 'declined' });
+    expect(c.ports.connector.prepareAgentAnswer).toHaveBeenCalledWith(
+      P1,
+      'chat-1',
+      'interaction-1',
+      expect.objectContaining({ decline: true })
+    );
+    expect(c.ports.chat.answerAgentInteraction).toHaveBeenCalledWith(
+      'owner',
+      P1,
+      'chat-1',
+      'interaction-1',
+      prepared
+    );
+  });
+
+  it('a question a member can only read is not theirs to see or answer', async () => {
+    const c = ctx('colleague');
+    c.ports.inbox.attentionMarker = vi.fn().mockResolvedValue({
+      id: 'm-q',
+      sessionId: 'chat-1',
+      taskId: 'task-1',
+      source: 'request_human_input',
+      reason: 'Owner-only question',
+      options: [],
+      category: null,
+      interactionId: null,
+      interactionKind: null,
+      createdAt: 10,
+      expiresAt: null,
+      resolvedAt: null,
+      topic: 'Chat',
+      canRead: true,
+      canWrite: false,
+    });
+    await expect(
+      getInboxItem(c, { projectId: P1, ref: 'attention:chat-1:m-q' })
+    ).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('archiving an ask filed from a chat needs the agent-wake grant, and a refusal changes nothing', async () => {
+    ask('from-chat', { source_session_id: 'chat-1', source_task_id: 'task-1' });
+    const c = ctx('owner');
+    c.ports.inbox.authorizeAnswerWake = vi
+      .fn()
+      .mockRejectedValue(new OperationError('forbidden', 'Not a writer of this chat'));
+    await expect(
+      archiveInboxItem(c, { projectId: P1, ref: 'ask:from-chat' })
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    expect(askRow('from-chat').status).toBe('open');
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+  });
+
+  it('the closing write is bound to the project it read (a row moved in between is not closed)', async () => {
+    ask('moving');
+    const original = env.DATABASE.prepare.bind(env.DATABASE);
+    let moved = false;
+    vi.spyOn(env.DATABASE, 'prepare').mockImplementation((query: string) => {
+      if (!moved && query.trimStart().startsWith('UPDATE asks')) {
+        moved = true;
+        sqlite.prepare("UPDATE asks SET project_id = 'proj-2' WHERE id = 'moving'").run();
+      }
+      return original(query);
+    });
+    await expect(
+      archiveInboxItem(ctx('owner'), { projectId: P1, ref: 'ask:moving' })
+    ).rejects.toMatchObject({ code: 'conflict' });
+    expect(askRow('moving')).toMatchObject({ status: 'open', project_id: 'proj-2' });
+  });
+});
+
+describe('inbox list query plan', () => {
+  it('reads open questions through the partial index, not the whole chat history', () => {
+    sqlite.exec(
+      'CREATE INDEX idx_session_summaries_project_creator ON session_summaries (project_id, created_by_user_id, updated_at)'
+    );
+    const insertChat = sqlite.prepare(
+      'INSERT INTO session_summaries (id, project_id, created_by_user_id, status, started_at, updated_at, attention_json) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    for (let index = 0; index < 2_000; index += 1)
+      insertChat.run(`h${index}`, P1, 'owner', 'stopped', index, index, null);
+    sqlite.exec('ANALYZE');
+    const c = ctx('owner');
+    const { sql, params } = inboxItemsSql(c, {
+      filter: 'needs_you',
+      now: Date.now(),
+      forCount: true,
+    });
+    const plan = sqlite
+      .prepare(`EXPLAIN QUERY PLAN WITH items AS (${sql}) SELECT COUNT(*) FROM items`)
+      .all(...params) as { detail: string }[];
+    const summaryStep = plan.find(
+      (step) => step.detail.includes('session_summaries') || step.detail.includes(' ss ')
+    );
+    expect(plan.map((step) => step.detail).join('\n')).toContain(
+      'idx_session_summaries_open_attention'
+    );
+    expect(summaryStep).toBeDefined();
   });
 });

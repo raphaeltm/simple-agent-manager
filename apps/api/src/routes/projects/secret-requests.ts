@@ -33,6 +33,9 @@ import {
   getRuntimeSecretRequest,
 } from '../../services/runtime-secret-requests';
 
+/** Longest `expectedExistingVersion` echoed back: the version fingerprint the card was shown. */
+export const EXPECTED_EXISTING_VERSION_MAX_LENGTH = 64;
+
 /** Body overhead allowed on top of the value itself: JSON framing and the confirm flag. */
 const FULFIL_BODY_OVERHEAD_BYTES = 1_024;
 
@@ -68,7 +71,9 @@ export async function readFulfilBody(
   const expected = record.expectedExistingVersion;
   if (
     expected !== undefined &&
-    (typeof expected !== 'string' || expected.length === 0 || expected.length > 64)
+    (typeof expected !== 'string' ||
+      expected.length === 0 ||
+      expected.length > EXPECTED_EXISTING_VERSION_MAX_LENGTH)
   ) {
     throw errors.badRequest('expectedExistingVersion must be the version string the card showed');
   }

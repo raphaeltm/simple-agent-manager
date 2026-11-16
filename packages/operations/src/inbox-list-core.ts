@@ -23,8 +23,8 @@ import type {
 import * as v from 'valibot';
 
 import { OperationError } from './errors';
-import { getInboxLimits } from './inbox-settings';
 import { inboxItemFromRow, InboxRowSchema } from './inbox-rows';
+import { getInboxLimits } from './inbox-settings';
 import type { OperationContext } from './types';
 
 const CursorSchema = v.tuple([
@@ -46,6 +46,17 @@ interface Bound {
   sql: string;
   params: unknown[];
 }
+
+/**
+ * Who sees a pending secret request (`r` joined to the viewer's membership `pm`): the person whose
+ * agent asked, or, when that person cannot supply secrets, every member who can. The same people
+ * are notified (`secretRequestRecipients`, `runtime-secret-request-delivery.ts`). Binds: viewer,
+ * then the secret-writer roles twice.
+ */
+export const SECRET_VISIBLE = (writerRoles: string) =>
+  `(r.requester_user_id = ? OR (pm.role IN (${writerRoles}) AND NOT EXISTS (
+    SELECT 1 FROM project_members rq WHERE rq.project_id = r.project_id
+      AND rq.user_id = r.requester_user_id AND rq.status = 'active' AND rq.role IN (${writerRoles}))))`;
 
 /** Roles that may act, by store; supplied by the worker so the role table has one home. */
 function roleList(roles: readonly string[]): Bound {
@@ -96,7 +107,7 @@ export function inboxItemsSql(
           a.answer_spec_json AS extra_json, a.links_json AS links_json,
           CASE WHEN a.status = 'open' AND pm.role IN (${taskWriters.sql}) THEN 1 ELSE 0 END AS can_act,
           CASE WHEN a.due_at IS NOT NULL THEN 0 WHEN a.blocking = 1 THEN 1 ELSE 2 END AS tier,
-          COALESCE(a.group_key, a.source_session_id, 'ask:' || a.id) AS stack_key
+          COALESCE(a.project_id || ':' || a.group_key, a.source_session_id, 'ask:' || a.id) AS stack_key
         FROM asks a ${member('a.project_id')}
         WHERE ${status}${kind}${scope.sql}
           AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?)
@@ -118,7 +129,7 @@ export function inboxItemsSql(
           CASE WHEN ${valid} THEN ${field('markerId')} END AS marker_id, ss.project_id AS project_id,
           ss.id AS session_id, ss.task_id AS task_id, NULL AS kind, 1 AS blocking,
           NULL AS title, NULL AS body, 'open' AS status,
-          CASE WHEN ${valid} THEN ${field('createdAt')} ELSE ss.updated_at END AS created_at,
+          COALESCE(CASE WHEN ${valid} THEN ${field('createdAt')} END, ss.updated_at) AS created_at,
           CASE WHEN ${valid} THEN ${field('expiresAt')} END AS expires_at, NULL AS due_at,
           ss.attention_json AS extra_json, NULL AS links_json,
           CASE WHEN pm.role IN (${taskWriters.sql}) THEN 1 ELSE 0 END AS can_act,
@@ -142,8 +153,17 @@ export function inboxItemsSql(
           CASE WHEN pm.role IN (${secretWriters.sql}) THEN 1 ELSE 0 END AS can_act,
           1 AS tier, r.requesting_chat_session_id AS stack_key
         FROM runtime_secret_requests r ${member('r.project_id')}
-        WHERE r.status = 'pending' AND r.expires_at > ? AND r.requester_user_id = ?${secretScope.sql}`,
-      params: [...secretWriters.params, me, input.now, me, ...secretScope.params],
+        WHERE r.status = 'pending' AND r.expires_at > ?${secretScope.sql}
+          AND ${SECRET_VISIBLE(secretWriters.sql)}`,
+      params: [
+        ...secretWriters.params,
+        me,
+        input.now,
+        ...secretScope.params,
+        me,
+        ...secretWriters.params,
+        ...secretWriters.params,
+      ],
     });
 
     // Operations approvals are decided by superadmins; only a superadmin who is a member of the
@@ -154,16 +174,17 @@ export function inboxItemsSql(
           ap.requesting_project_id AS project_id, ap.requesting_session_id AS session_id,
           ap.requesting_task_id AS task_id, 'approval' AS kind, 1 AS blocking,
           ap.action AS title, ap.reason AS body, 'open' AS status,
-          CAST((julianday(ap.created_at) - 2440587.5) * 86400000 AS INTEGER) AS created_at,
-          CAST((julianday(ap.expires_at) - 2440587.5) * 86400000 AS INTEGER) AS expires_at,
+          COALESCE(CAST(ROUND((julianday(ap.created_at) - 2440587.5) * 86400000) AS INTEGER), 0) AS created_at,
+          CAST(ROUND((julianday(ap.expires_at) - 2440587.5) * 86400000) AS INTEGER) AS expires_at,
           NULL AS due_at,
           json_object('targetType', ap.target_type, 'targetId', ap.target_id) AS extra_json,
-          NULL AS links_json, 1 AS can_act, 1 AS tier,
+          NULL AS links_json,
+          CASE WHEN pm.role IN (${taskWriters.sql}) THEN 1 ELSE 0 END AS can_act, 1 AS tier,
           COALESCE(ap.requesting_session_id, 'approval:' || ap.id) AS stack_key
         FROM operations_action_approvals ap ${member('ap.requesting_project_id')}
         WHERE ap.status = 'pending' AND ap.expires_at > ?${approvalScope.sql}
           AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.role = 'superadmin' AND u.status = 'active')`,
-      params: [me, nowIso, ...approvalScope.params, me],
+      params: [...taskWriters.params, me, nowIso, ...approvalScope.params, me],
     });
   }
 

@@ -68,11 +68,11 @@ value and **Source** after the reload, nothing was saved: check the value and tr
 
 The **Operations** category includes these chat storage settings:
 
-| Setting                        | Code default | Effect                                                                                                                                     |
-| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                          |
+| Setting                        | Code default | Effect                                                                                                                                              |
+| ------------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                                   |
 | `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows. |
-| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                   |
+| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                            |
 
 Merging requires an updated reporter that sends its durable outbox incarnation. Older reporters,
 and requests with a missing or malformed incarnation, keep individual inserts and provide **zero
@@ -256,17 +256,17 @@ where it says so and the app continues from there.
 Listed under **Chat**. Bounds for the [inbox](/docs/reference/api/#inbox) list and for the inbox
 items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 
-| Setting                    | Default | Range      | What it limits                                                                              |
-| -------------------------- | ------- | ---------- | ------------------------------------------------------------------------------------------- |
-| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                          |
-| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                            |
-| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed               |
-| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                             |
-| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                                    |
-| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                             |
-| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                     |
-| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired       |
-| `inbox.sweepBatchSize`     | 50      | 1–500      | Items one five-minute sweep expires or re-notifies                                          |
+| Setting                    | Default | Range      | What it limits                                                                           |
+| -------------------------- | ------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                       |
+| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                         |
+| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed            |
+| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                          |
+| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                                 |
+| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                          |
+| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                  |
+| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired    |
+| `inbox.sweepBatchSize`     | 10      | 1–50       | Items one five-minute sweep expires or re-notifies (each is a write and an agent notice) |
 
 ## Node provisioning
 

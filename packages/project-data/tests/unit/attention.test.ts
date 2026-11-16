@@ -339,6 +339,83 @@ describe('Attention Markers Module', () => {
       });
     });
 
+    describe('inbox archive claim', () => {
+      function question(options: string[] | null = ['Approve', 'Reject']) {
+        return createAttentionMarker(sql, {
+          sessionId: 'session-1',
+          taskId: 'task-1',
+          workspaceId: 'ws-1',
+          kind: 'needs_input',
+          source: 'request_human_input',
+          metadata: options ? JSON.stringify({ options }) : null,
+        });
+      }
+      const row = (id: string) =>
+        db
+          .prepare(
+            'SELECT resolved_at, resolved_reason, resolved_answer FROM session_attention_markers WHERE id = ?'
+          )
+          .get(id) as {
+          resolved_at: number | null;
+          resolved_reason: string | null;
+          resolved_answer: string | null;
+        };
+
+      it('archives a question with reason archived and no answer, bypassing the options', () => {
+        const marker = question();
+        expect(prepareAttentionAnswer(sql, 'session-1', marker.id, '', 'archive')).toEqual({
+          status: 'ready',
+        });
+        expect(completeAttentionAnswer(sql, 'session-1', marker.id, '', 'archive')).toBe(1);
+        expect(row(marker.id)).toMatchObject({
+          resolved_reason: 'archived',
+          resolved_answer: null,
+        });
+        expect(row(marker.id).resolved_at).not.toBeNull();
+      });
+
+      it('an answer staged first wins over an archive, and an archive staged first wins over an answer', () => {
+        const answered = question();
+        expect(prepareAttentionAnswer(sql, 'session-1', answered.id, 'Approve')).toEqual({
+          status: 'ready',
+        });
+        expect(prepareAttentionAnswer(sql, 'session-1', answered.id, '', 'archive')).toMatchObject({
+          status: 'conflicting_answer',
+        });
+        // A staged answer is not completed by an archive.
+        expect(completeAttentionAnswer(sql, 'session-1', answered.id, '', 'archive')).toBe(0);
+
+        const archived = question();
+        expect(prepareAttentionAnswer(sql, 'session-1', archived.id, '', 'archive')).toEqual({
+          status: 'ready',
+        });
+        expect(prepareAttentionAnswer(sql, 'session-1', archived.id, 'Approve')).toMatchObject({
+          status: 'conflicting_answer',
+        });
+        expect(completeAttentionAnswer(sql, 'session-1', archived.id, 'Approve')).toBe(0);
+        expect(completeAttentionAnswer(sql, 'session-1', archived.id, '', 'archive')).toBe(1);
+        expect(row(archived.id).resolved_reason).toBe('archived');
+      });
+
+      it('refuses a typed answer that would impersonate the archive claim', () => {
+        const marker = question(null);
+        expect(
+          prepareAttentionAnswer(sql, 'session-1', marker.id, '\u0000sam:inbox-archived')
+        ).toMatchObject({ status: 'invalid_option' });
+        expect(row(marker.id).resolved_answer).toBeNull();
+      });
+
+      it('releases only the archive claim', () => {
+        const marker = question();
+        prepareAttentionAnswer(sql, 'session-1', marker.id, '', 'archive');
+        expect(releaseAttentionAnswer(sql, 'session-1', marker.id, 'Approve')).toBe(0);
+        expect(releaseAttentionAnswer(sql, 'session-1', marker.id, '', 'archive')).toBe(1);
+        expect(prepareAttentionAnswer(sql, 'session-1', marker.id, 'Approve')).toEqual({
+          status: 'ready',
+        });
+      });
+    });
+
     it('releases only the matching staged answer after delivery failure', () => {
       const marker = createAttentionMarker(sql, {
         sessionId: 'session-1',

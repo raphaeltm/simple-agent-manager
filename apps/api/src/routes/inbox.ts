@@ -20,6 +20,7 @@ import {
   archiveInboxItem,
   countInbox,
   getInboxItem,
+  INBOX_SETTINGS,
   type InboxAnswerInput,
   listInbox,
   toOperationHttpError,
@@ -34,11 +35,17 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { webOperationContext } from '../operation-ports';
 import { getRuntimeLimits } from '../services/limits';
-import { assertBrowserJsonWrite } from './projects/secret-requests';
+import {
+  assertBrowserJsonWrite,
+  EXPECTED_EXISTING_VERSION_MAX_LENGTH,
+} from './projects/secret-requests';
 
 const session = [requireAuth(), requireApproved()] as const;
 /** Body overhead allowed on top of an answer or secret value: JSON framing and other fields. */
 const ANSWER_BODY_OVERHEAD_BYTES = 64 * 1024;
+/** The most `inbox.answerMaxChars` can be set to (its registry range). */
+const ANSWER_MAX_CHARS_CEILING =
+  INBOX_SETTINGS.find((setting) => setting.name === 'inbox.answerMaxChars')?.range.max ?? 20_000;
 
 type AppContext = Context<{ Bindings: Env }>;
 
@@ -84,10 +91,12 @@ async function count(c: AppContext, projectId: string | undefined) {
   return c.json(await run(() => countInbox(ctx, { projectId })));
 }
 
-const text = (value: unknown, field: string, max: number): string | undefined => {
+// Field lengths are checked by the operation against the admin settings (`inbox.answerMaxChars`);
+// the route bounds only the body.
+const text = (value: unknown, field: string): string | undefined => {
   if (value === undefined) return undefined;
-  if (typeof value !== 'string' || value.length === 0 || value.length > max)
-    throw errors.badRequest(`${field} must be a non-empty string of at most ${max} characters`);
+  if (typeof value !== 'string' || value.length === 0)
+    throw errors.badRequest(`${field} must be a non-empty string`);
   return value;
 };
 
@@ -95,8 +104,12 @@ const text = (value: unknown, field: string, max: number): string | undefined =>
 async function readAnswerBody(c: AppContext): Promise<Omit<InboxAnswerInput, 'projectId' | 'ref'>> {
   let parsed: unknown;
   try {
-    const maxValueBytes = getRuntimeLimits(c.env).maxProjectRuntimeEnvValueBytes;
-    // Escaping can make the JSON up to six times the value's byte length (\uXXXX).
+    // Room for the larger of a secret value and the largest answer the settings allow (up to
+    // four bytes per character); escaping can make JSON up to six times that (\uXXXX).
+    const maxValueBytes = Math.max(
+      getRuntimeLimits(c.env).maxProjectRuntimeEnvValueBytes,
+      ANSWER_MAX_CHARS_CEILING * 4
+    );
     const bytes = await readBoundedRequestBody(
       c.req.raw,
       maxValueBytes * 6 + ANSWER_BODY_OVERHEAD_BYTES
@@ -112,9 +125,9 @@ async function readAnswerBody(c: AppContext): Promise<Omit<InboxAnswerInput, 'pr
     throw errors.badRequest('Request body must be a JSON object');
   const body = parsed as Record<string, unknown>;
   const out: Omit<InboxAnswerInput, 'projectId' | 'ref'> = {
-    answer: text(body.answer, 'answer', 20_000),
-    optionId: text(body.optionId, 'optionId', 200),
-    note: text(body.note, 'note', 1_000),
+    answer: text(body.answer, 'answer'),
+    optionId: text(body.optionId, 'optionId'),
+    note: text(body.note, 'note'),
   };
   if (body.decline !== undefined) {
     if (body.decline !== true) throw errors.badRequest('decline must be true when given');
@@ -146,7 +159,9 @@ async function readAnswerBody(c: AppContext): Promise<Omit<InboxAnswerInput, 'pr
     const expected = record.expectedExistingVersion;
     if (
       expected !== undefined &&
-      (typeof expected !== 'string' || expected.length === 0 || expected.length > 64)
+      (typeof expected !== 'string' ||
+        expected.length === 0 ||
+        expected.length > EXPECTED_EXISTING_VERSION_MAX_LENGTH)
     )
       throw errors.badRequest('secret.expectedExistingVersion must be the version string shown');
     out.secret = {

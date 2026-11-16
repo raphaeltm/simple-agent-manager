@@ -18,7 +18,10 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { createOperationPorts } from '../../operation-ports';
 
-/** A notice that just failed inline is left to its own retry for one tick before the sweep. */
+/**
+ * A notice is retried only once its inline attempt is at least this old, so the sweep does not race
+ * a write that is still queuing it. A racing retry is harmless anyway: it reuses the delivery id.
+ */
 const NOTICE_RETRY_GRACE_MS = 60_000;
 
 const NOTICE_COLUMNS = `id, project_id, kind, title, status, answer_json, source_session_id,
@@ -73,16 +76,22 @@ export async function runInboxAskSweep(env: Env, now = Date.now()): Promise<Inbo
     .bind(now, budget)
     .all<Record<string, unknown>>();
   for (const raw of due.results ?? []) {
-    const row = noticeRow(raw);
-    if (!row) continue;
+    // Claim first, from the key columns alone, so a row the notice cannot be built from still
+    // leaves the candidate set instead of blocking the head of the queue every tick.
+    if (typeof raw.id !== 'string' || typeof raw.project_id !== 'string') continue;
     const claimed = await env.DATABASE.prepare(
       `UPDATE asks SET status = 'expired', resolved_at = ?, updated_at = ?
         WHERE id = ? AND project_id = ? AND status = 'open'`
     )
-      .bind(now, now, row.id, row.projectId)
+      .bind(now, now, raw.id, raw.project_id)
       .run();
     if ((claimed.meta?.changes ?? 0) !== 1) continue;
     expired += 1;
+    const row = noticeRow(raw);
+    if (!row) {
+      log.warn('inbox_ask.sweep_notice_unreadable', { askId: raw.id, projectId: raw.project_id });
+      continue;
+    }
     await notifyClosedAsk(deps, { ...row, status: 'expired' }, 'expired');
   }
   budget -= (due.results ?? []).length;

@@ -219,13 +219,56 @@ describe('inbox capability through the real entry points', () => {
     );
     expect(count.body).toEqual({ needsYou: 1, blocking: 1 });
 
-    // The context read includes the "since" side.
+    // The agent keeps working after asking; the context read shows it on the "since" side.
+    await s.project.persistMessageBatch(s.chatSessionId, [
+      {
+        messageId: 'after-ask-1',
+        role: 'assistant',
+        content: 'While waiting I checked the staging config.',
+        toolMetadata: null,
+        timestamp: new Date(Date.now() + 1_000).toISOString(),
+      },
+    ]);
     const item = await get<{ item: { ref: string }; context: { since: unknown } | null }>(
       `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}?context=true`,
       s.ownerCookie
     );
     expect(item.status).toBe(200);
-    expect(item.body.context?.since).toMatchObject({ messages: [], activityCount: 0 });
+    expect(item.body.context?.since).toMatchObject({
+      messages: [
+        expect.objectContaining({
+          role: 'assistant',
+          content: 'While waiting I checked the staging config.',
+        }),
+      ],
+      truncated: false,
+    });
+
+    // Writes only from the app's own pages: another origin is refused and nothing changes.
+    const foreign = await browserApp().request(
+      `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
+      {
+        method: 'POST',
+        headers: {
+          Cookie: s.ownerCookie,
+          'Content-Type': 'application/json',
+          Origin: 'https://evil.example',
+        },
+        body: '{}',
+      },
+      testEnv
+    );
+    expect(foreign.status).toBe(403);
+    const plain = await browserApp().request(
+      `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
+      {
+        method: 'POST',
+        headers: { Cookie: s.ownerCookie, 'Content-Type': 'text/plain', Origin: ORIGIN },
+        body: '{}',
+      },
+      testEnv
+    );
+    expect(plain.status).toBe(415);
 
     // Archive: the live agent receives the "will not act" prompt, then the marker resolves.
     vi.stubGlobal('fetch', fetchMock);
@@ -254,6 +297,10 @@ describe('inbox capability through the real entry points', () => {
     const { marker } = await s.project.getAttentionRequest(s.chatSessionId, markerId, s.ownerId);
     expect(marker).toMatchObject({ resolvedReason: 'archived', resolvedAnswer: null });
     expect(marker?.resolvedAt).not.toBeNull();
+    // The item leaves the inbox once the index catches up.
+    await syncSummaries(s.project);
+    const after = await get<ListBody>('/api/inbox', s.ownerCookie);
+    expect(after.body.items.map((entry) => entry.ref)).not.toContain(ref);
     // An answer after the archive loses.
     const late = await post(
       `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}/answer`,
@@ -290,6 +337,8 @@ describe('inbox capability through the real entry points', () => {
       .first<{ status: string; notified_at: number | null }>();
     expect(row?.status).toBe('declined');
     expect(row?.notified_at).not.toBeNull();
+    const after = await get<ListBody>(`/api/projects/${s.projectId}/inbox`, s.ownerCookie);
+    expect(after.body.items.map((item) => item.ref)).not.toContain(ref);
   });
 
   it('an ask filed through the internal operation lists, archives and queues the agent notice', async () => {

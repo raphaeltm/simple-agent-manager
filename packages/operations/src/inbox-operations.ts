@@ -16,6 +16,7 @@ import {
   archiveInboxItem,
   createAsk,
   CreateAskInputSchema,
+  prepareInboxAnswer,
 } from './inbox-write-core';
 import { defineOperation } from './types';
 
@@ -32,7 +33,7 @@ export const samInboxList = defineOperation({
   input: v.object({
     projectId: v.optional(id),
     filter: v.optional(v.picklist(INBOX_FILTERS)),
-    limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+    limit: v.optional(v.pipe(v.number(), v.minValue(1), v.integer())),
     cursor: v.optional(v.pipe(v.string(), v.maxLength(2_000))),
   }),
   async run(ctx, input) {
@@ -81,14 +82,22 @@ export const samInboxAnswer = defineOperation({
     answer: v.optional(v.pipe(v.string(), v.minLength(1))),
     ...ConnectorAnswerFields,
     decision: v.optional(v.picklist(['approve', 'deny'])),
-    note: v.optional(v.pipe(v.string(), v.maxLength(1_000))),
+    note: v.optional(v.pipe(v.string(), v.minLength(1))),
     requestKey,
   }),
   run(ctx, input) {
     const { requestKey: _requestKey, ...answer } = input;
     void _requestKey;
-    return ctx.ports.connector.executeWrite(ctx, 'sam_inbox_answer', input, () =>
-      answerInboxItem(ctx, answer)
+    let prepared: Awaited<ReturnType<typeof prepareInboxAnswer>>;
+    return ctx.ports.connector.executeWrite(
+      ctx,
+      'sam_inbox_answer',
+      input,
+      () => answerInboxItem(ctx, answer, prepared),
+      // Before a receipt is reserved, so a rejected answer leaves the requestKey free.
+      async () => {
+        prepared = await prepareInboxAnswer(ctx, answer);
+      }
     );
   },
 });

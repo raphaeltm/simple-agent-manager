@@ -25,7 +25,6 @@ import { resolveProjectEventLimits } from './durable-objects/project-data/projec
 import { normalizeNullableText } from './durable-objects/project-data/project-events-values';
 import { resolveStorageSafetyConfig } from './durable-objects/project-data/storage-safety';
 import type { Env } from './env';
-import { createInboxPort } from './services/inbox/port';
 import { parsePositiveInt } from './lib/route-helpers';
 import { getTrustedApiOrigin } from './lib/trusted-origins';
 import { requireProjectAccess, requireProjectCapability } from './middleware/project-auth';
@@ -59,6 +58,7 @@ import {
 } from './services/credential-limit-events/read';
 import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
+import { createInboxPort } from './services/inbox/port';
 import { resolveProfileAccountBindings } from './services/profile-account-bindings';
 import * as projectData from './services/project-data';
 import { describeRootSearchCoverage } from './services/project-data-search-coverage';

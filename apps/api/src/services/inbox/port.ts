@@ -3,6 +3,7 @@
  * method delegates to the path its store already uses; nothing here answers a store a second way.
  */
 import type { OperationInboxPort } from '@simple-agent-manager/operations';
+import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -33,7 +34,8 @@ function metadataFields(metadata: string | null) {
   };
   if (!metadata) return empty;
   try {
-    const record = JSON.parse(metadata) as Record<string, unknown>;
+    const record = maybeJsonRecord(JSON.parse(metadata) as unknown);
+    if (!record) return empty;
     const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
     return {
       options: Array.isArray(record.options)

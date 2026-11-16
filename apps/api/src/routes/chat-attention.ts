@@ -8,7 +8,10 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
 
 import * as schema from '../db/schema';
-import { parseAttentionOptions } from '../durable-objects/project-data/attention';
+import {
+  ATTENTION_ARCHIVE_CLAIM,
+  parseAttentionOptions,
+} from '../durable-objects/project-data/attention';
 import type { Env } from '../env';
 import { agentWakeRecord } from '../lib/agent-wake-policy';
 import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
@@ -117,7 +120,9 @@ export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>):
         category: parseAttentionCategory(marker.metadata),
         createdAt: marker.createdAt,
         resolvedAt: marker.resolvedAt,
-        resolvedAnswer: marker.resolvedAnswer,
+        // A staged inbox archive is not an answer; it never leaves the API.
+        resolvedAnswer:
+          marker.resolvedAnswer === ATTENTION_ARCHIVE_CLAIM ? null : marker.resolvedAnswer,
         expired,
         canAnswer:
           marker.source === 'request_human_input' &&
@@ -280,13 +285,11 @@ export async function archiveAttention(
     markerId,
     userId
   );
-  const prepared = await projectDataService.prepareAttentionAnswer(
+  const prepared = await projectDataService.prepareAttentionArchive(
     env,
     projectId,
     sessionId,
-    markerId,
-    '',
-    'archive'
+    markerId
   );
   if (prepared.status === 'unsupported_source')
     throw markRejectedBeforeEffects(
@@ -309,26 +312,12 @@ export async function archiveAttention(
       content: attentionArchivedPrompt(viewer.marker?.reason ?? null),
     });
   } catch (cause) {
-    await projectDataService.releaseAttentionAnswer(
-      env,
-      projectId,
-      sessionId,
-      markerId,
-      '',
-      'archive'
-    );
+    await projectDataService.releaseAttentionArchive(env, projectId, sessionId, markerId);
     throw cause instanceof Error ? markRejectedBeforeEffects(cause) : cause;
   }
   // Outcome-unknown from here, exactly as for an answer: keep the claim, never replay.
   await sendPreparedPromptToLiveAgent(env, preparedPrompt, markerId);
-  await projectDataService.completeAttentionAnswer(
-    env,
-    projectId,
-    sessionId,
-    markerId,
-    '',
-    'archive'
-  );
+  await projectDataService.completeAttentionArchive(env, projectId, sessionId, markerId);
   await recordSharedSessionAnswer(env, writer, { markerId, wake: agentWakeRecord(wake) });
   return { agentNotified: true };
 }

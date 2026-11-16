@@ -3424,11 +3424,10 @@ export async function prepareAttentionAnswer(
   projectId: string,
   sessionId: string,
   markerId: string,
-  answer: string,
-  mode: 'answer' | 'archive' = 'answer'
+  answer: string
 ) {
   const stub = await getStub(env, projectId);
-  return stub.prepareAttentionAnswer(sessionId, markerId, answer, mode);
+  return stub.prepareAttentionAnswer(sessionId, markerId, answer);
 }
 
 export async function completeAttentionAnswer(
@@ -3436,11 +3435,10 @@ export async function completeAttentionAnswer(
   projectId: string,
   sessionId: string,
   markerId: string,
-  answer: string,
-  mode: 'answer' | 'archive' = 'answer'
+  answer: string
 ): Promise<number> {
   const stub = await getStub(env, projectId);
-  return stub.completeAttentionAnswer(sessionId, markerId, answer, mode);
+  return stub.completeAttentionAnswer(sessionId, markerId, answer);
 }
 
 export async function releaseAttentionAnswer(
@@ -3448,11 +3446,41 @@ export async function releaseAttentionAnswer(
   projectId: string,
   sessionId: string,
   markerId: string,
-  answer: string,
-  mode: 'answer' | 'archive' = 'answer'
+  answer: string
 ): Promise<number> {
   const stub = await getStub(env, projectId);
-  return stub.releaseAttentionAnswer(sessionId, markerId, answer, mode);
+  return stub.releaseAttentionAnswer(sessionId, markerId, answer);
+}
+
+/** Inbox archive claim for a question; see `ProjectData.prepareAttentionArchive`. */
+export async function prepareAttentionArchive(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+) {
+  const stub = await getStub(env, projectId);
+  return stub.prepareAttentionArchive(sessionId, markerId);
+}
+
+export async function completeAttentionArchive(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.completeAttentionArchive(sessionId, markerId);
+}
+
+export async function releaseAttentionArchive(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.releaseAttentionArchive(sessionId, markerId);
 }
 
 export async function resolveSessionAttentionMarkers(
