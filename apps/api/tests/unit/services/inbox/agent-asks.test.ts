@@ -438,6 +438,91 @@ describe('inbox_write ask', () => {
   });
 });
 
+describe('cross-user isolation and pull request hosts', () => {
+  it("an agent working for one member never sees another member's items or answers", async () => {
+    insert('users', {
+      id: 'colleague',
+      email: 'c@x.test',
+      name: 'c',
+      role: 'user',
+      status: 'active',
+    });
+    insert('project_members', {
+      project_id: P1,
+      user_id: 'colleague',
+      role: 'maintainer',
+      status: 'active',
+    });
+    insert('tasks', {
+      id: 'task-c',
+      project_id: P1,
+      user_id: 'colleague',
+      title: 'C',
+      status: 'in_progress',
+      chat_session_id: 'chat-c',
+    });
+    const colleague: AgentInboxSource = {
+      ...chat1,
+      sessionId: 'chat-c',
+      taskId: 'task-c',
+      userId: 'colleague',
+    };
+    const theirs = await ask(colleague, {
+      title: 'Which region should the deploy use?',
+      blocking: false,
+    });
+    await answerInboxItem(webCtx('colleague'), {
+      projectId: P1,
+      ref: theirs.ref,
+      answer: 'secret plan',
+    });
+    const open = await ask(colleague, {
+      title: 'Pick a colour for the logo',
+      blocking: false,
+      groupKey: 'brand',
+    });
+
+    const mine = await ask(chat1, {
+      title: 'Which region should the deploy use?',
+      groupKey: 'brand',
+    });
+    // Neither the close title nor the shared group reveals the colleague's item.
+    expect(mine.similar).toEqual([]);
+    const list = await listAgentAsks(ctxFor('owner', P1), chat1, { scope: 'project' });
+    expect(list.items.map((item) => item.ref)).toEqual([mine.ref]);
+    await rejects(getAgentAsk(ctxFor('owner', P1), chat1, { ref: theirs.ref }), 'not_found');
+    await rejects(getAgentAsk(ctxFor('owner', P1), chat1, { ref: open.ref }), 'not_found');
+    // Owner control: the colleague's own agent sees both, and the answer.
+    expect(
+      (await getAgentAsk(ctxFor('colleague', P1), colleague, { ref: theirs.ref })).answer
+    ).toBe('secret plan');
+    const theirList = await listAgentAsks(ctxFor('colleague', P1), colleague, { scope: 'project' });
+    expect(theirList.items.map((item) => item.ref)).toEqual([open.ref]);
+  });
+
+  it("a pr link must be the project's repository host and a numbered pull request", async () => {
+    for (const url of [
+      'https://evil.example/acme/one/pull/1',
+      'https://github.com/acme/one/issues/1',
+      'https://github.com/acme/one/pull/1/../../two/pull/2',
+      'https://user@github.com/acme/one/pull/1',
+      'https://github.com:8443/acme/one/pull/1',
+    ]) {
+      await rejects(
+        ask(chat1, { title: 'PR?', links: [{ kind: 'pr', url }] }),
+        'invalid_input',
+        /links\[0\]/
+      );
+    }
+    // Owner control on the same project.
+    const filed = await ask(chat1, {
+      title: 'PR?',
+      links: [{ kind: 'pr', url: 'https://github.com/Acme/One/pull/12/' }],
+    });
+    expect(JSON.parse(String(askRow(filed.id).links_json))).toHaveLength(1);
+  });
+});
+
 describe('inbox_write review', () => {
   it('files a non-blocking review answered "Looks good" or with a reply, never expiring', async () => {
     const filed = await fileAgentReview(ctxFor('owner', P1), chat1, {
