@@ -1,3 +1,5 @@
+Control handoff update: coordinator event cddc79a5-c30a-4bd4-9933-267b7716a7cf requests independent control owner01M7GY0BKP1WESE5Y82PZNN42S run ON only on a build without PR2765. Library01M7GY0PBVYYWCZJJ672HN1ZRX now includes explicit exact-head/owner/mode inputs, single-job preflight/auth recipes, per-view safe evidence paths and ordered inventory construction explanation.31offline tests pass. This task has no further live authorization; no merge. Final ON/OFF table added to PR2765. The originating attempt remains fully cleaned/released; Part2 paused.
+
 # FINAL STATE: diagnostic exhausted; cleanup and release complete
 
 Updated 2026-11-16 01:45 UTC. PR2765 remains OPEN and UNMERGED. The final authorized run is complete: **merging OFF PASS; merging ON NOT_MET**. Do not start another live attempt, merge, provision resources or change production. Coordinator01M7CVZNSP0EHV9BJ72HCFQJSC must decide the next step. Part2 remains explicitly paused pending PR2773 production traffic counters.
