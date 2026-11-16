@@ -50,7 +50,7 @@ account. Prototype: Library `/product/analytics/analytics-prototypes.html?s=acco
   accounts show spend "not reported"; the response carries a `spend` slot U fills.
 - **Budget (rule 60, spec ≤ 6)**: authorization 1 + settings ≤ 1 (per-isolate cache) + one D1
   `batch()` 1 + own limit windows ≤ 1 = ≤ 4.
-- Settings pattern: `insights-flow-settings.ts` + `admin-settings-features-definitions.ts`.
+- Settings pattern: `insights-flow-settings.ts` (renamed `insights-page-settings.ts` here) + `admin-settings-features-definitions.ts`.
 - Web pattern: `FlowTab.tsx` (TanStack Query, `placeholderData`, `LoadError`/`Loading`/`Notice`),
   `lib/api/insights.ts`, `lib/query-options/insights.ts`, route in `App.tsx`.
 
@@ -77,16 +77,16 @@ account. Prototype: Library `/product/analytics/analytics-prototypes.html?s=acco
 
 ## Acceptance criteria
 
-- [ ] Accounts tab shows, per account: runs, merged, limit stalls (count × total duration), current
+- [x] Accounts tab shows, per account: runs, merged, limit stalls (count × total duration), current
       limit windows for the viewer's own accounts, and "not reported" spend for API keys
-- [ ] Runs per day (7d) / week (30d, 90d) by account, stacked, matching Flow's run total
-- [ ] Stall episodes list, newest first, with account, window, runs paused, duration, outcome
-- [ ] Another member's account name or credential id never appears in the response
-- [ ] Foreign-project rows never counted (real SQL engine attack test + owner control)
-- [ ] One malformed row costs only that row
-- [ ] ≤ 6 round trips, measured in a test
-- [ ] Range control switches 7/30/90 without blanking the page; refresh keeps data visible
-- [ ] No horizontal overflow at 375 and 1280; placeholder code for Accounts removed
+- [x] Runs per day (7d) / week (30d, 90d) by account, stacked, matching Flow's run total
+- [x] Stall episodes list, newest first, with account, window, runs paused, duration, outcome
+- [x] Another member's account name or credential id never appears in the response
+- [x] Foreign-project rows never counted (real SQL engine attack test + owner control)
+- [x] One malformed row costs only that row
+- [x] ≤ 6 round trips, measured in a test
+- [x] Range control switches 7/30/90 without blanking the page; refresh keeps data visible
+- [x] No horizontal overflow at 375 and 1280; placeholder code for Accounts removed
 
 ## Implementation notes
 
@@ -103,3 +103,14 @@ account. Prototype: Library `/product/analytics/analytics-prototypes.html?s=acco
   so the scan-cap test overrides the settings port directly.
 - Playwright: Chromium's system libraries were installed per-user (apt-get download + dpkg-deb -x
   into `.tmp/pwlibs`, `LD_LIBRARY_PATH`), no sudo.
+- Not reused: `operations/account-usage.ts` and `team-usage.ts` hold profile→pool bindings and SAM
+  AI daily usage, not per-credential run history. What they reuse is reused here too: the
+  `listOwnCredentialLimitsByReferences` port and the `CredentialLimitChip`.
+- Review round (all five local reviewers, no CRITICAL/HIGH code defects): fixes in 7bf3239e0. New
+  guards proven red: wait→session `EXISTS`, prefer-credential session order, windows privacy
+  predicate, `status = 'rejected'`, waits `observedAt >= since`, production indexes (plan test).
+- Accepted with evidence: the waits statement walks a project's tasks (same as Flow's runs CTE;
+  6–11 ms at 10k tasks per the cloudflare-specialist's EXPLAIN on all migrations); a digest-keyed
+  own credential with a stall but no run in range shows unnamed (errs toward hiding).
+- Staging (both installations busy until ~18:05Z; staging has no limit-wait or rejected-window
+  rows, so the live check covers runs/accounts; stalls are covered by tests).
