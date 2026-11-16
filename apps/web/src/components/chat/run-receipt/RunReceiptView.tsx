@@ -24,8 +24,8 @@ import {
 } from './receipt-format';
 import { cpuPointsForRun, ReceiptCpuLine } from './ReceiptCpuLine';
 
-const sectionHeading =
-  'm-0 mt-5 mb-2 text-[length:var(--sam-type-section-heading-size)] font-[var(--sam-type-section-heading-weight)] text-fg-primary';
+// Sub-headings inside the panel sit below the panel title in the type scale.
+const sectionHeading = 'm-0 mt-5 mb-2 text-sm font-semibold leading-[1.3] text-fg-primary';
 
 function PhaseBar({ phases, live }: Readonly<{ phases: RunReceiptPhase[]; live: boolean }>) {
   const measured = phases.filter((phase) => (phase.durationMs ?? 0) > 0);
@@ -35,10 +35,12 @@ function PhaseBar({ phases, live }: Readonly<{ phases: RunReceiptPhase[]; live: 
     .join(', ');
   return (
     <div>
+      {/* The legend below carries the same durations as text, so the bar is decorative to
+          assistive technology rather than announced twice. */}
       <div
         className="flex h-3 w-full rounded-full bg-[var(--sam-glass-nested-bg)]"
-        role="img"
-        aria-label={`Where the time went: ${summary}`}
+        aria-hidden="true"
+        data-summary={summary}
         data-testid="receipt-phase-bar"
       >
         {/* Flex growth in proportion to each phase, so the segments always fill the bar exactly
@@ -56,7 +58,7 @@ function PhaseBar({ phases, live }: Readonly<{ phases: RunReceiptPhase[]; live: 
             />
           ))}
       </div>
-      <ul className="m-0 mt-2.5 flex list-none flex-wrap gap-x-4 gap-y-1.5 p-0">
+      <ul className="m-0 mt-2.5 grid list-none grid-cols-1 gap-x-4 gap-y-1.5 p-0 min-[400px]:grid-cols-2">
         {phases.map((phase) => (
           <li
             key={phase.key}
@@ -70,6 +72,7 @@ function PhaseBar({ phases, live }: Readonly<{ phases: RunReceiptPhase[]; live: 
             <span>{PHASE_LABEL[phase.key]}</span>
             <span className="font-mono text-fg-muted">
               {formatDuration(phase.durationMs, live)}
+              {phase.limited && phase.durationMs !== null ? '+' : ''}
             </span>
           </li>
         ))}
@@ -82,11 +85,15 @@ function StatTile({
   label,
   value,
   note,
-}: Readonly<{ label: string; value: string; note: string }>) {
+  muted = false,
+}: Readonly<{ label: string; value: string; note: string; muted?: boolean }>) {
   return (
     <div className="min-w-0 rounded-[var(--sam-radius-control)] border border-[var(--sam-hairline)] bg-[var(--sam-glass-nested-bg)] px-3 py-2.5">
       <div className="text-[length:var(--sam-type-caption-size)] text-fg-muted">{label}</div>
-      <div className="mt-0.5 line-clamp-3 break-words text-lg font-semibold leading-tight text-fg-primary">
+      <div
+        className={`mt-0.5 line-clamp-3 break-words text-lg font-semibold leading-tight ${muted ? 'text-fg-muted' : 'text-fg-primary'}`}
+        title={value}
+      >
         {value}
       </div>
       <div className="mt-0.5 break-words text-[length:var(--sam-type-caption-size)] text-fg-muted">
@@ -100,15 +107,23 @@ const SLOW_ICON: Record<string, ReactNode> = {
   machine: <Clock size={18} />,
   setup: <Clock size={18} />,
   waiting: <HelpCircle size={18} />,
-  ci_failing: <AlertTriangle size={18} />,
+  ci_failing: <AlertTriangle size={18} className="text-[var(--sam-color-danger-fg)]" />,
   oom: <MemoryStick size={18} />,
   memory: <MemoryStick size={18} />,
 };
 
+/** What the CPU section shows while its history loads, if it fails, or when there is none. */
+export type CpuHistoryState = 'loading' | 'error' | 'ready';
+
 export function RunReceiptView({
   receipt,
   resourceIndex,
-}: Readonly<{ receipt: RunReceipt; resourceIndex: ResourceTimelineIndex | undefined }>) {
+  cpuHistory = 'ready',
+}: Readonly<{
+  receipt: RunReceipt;
+  resourceIndex: ResourceTimelineIndex | undefined;
+  cpuHistory?: CpuHistoryState;
+}>) {
   const outcome = outcomeLabel(receipt);
   const account = accountTile(receipt.account);
   const { resources, toolCalls } = receipt;
@@ -118,12 +133,16 @@ export function RunReceiptView({
   const reservedCores =
     resources.requestedCpuMillis !== null ? resources.requestedCpuMillis / 1000 : null;
   const pr = receipt.outcome.pullRequest;
+  // The server only returns https pull request URLs; checked again here so a future writer can
+  // never turn this link into a script URL.
+  const prHref = pr && /^https:\/\//i.test(pr.url) ? pr.url : null;
 
   return (
     <div data-testid="run-receipt">
       <div className="flex flex-wrap items-center gap-2">
         <Chip
           tone={outcome.tone}
+          dot={receipt.live}
           icon={pr?.state === 'merged' ? <GitMerge size={13} /> : undefined}
         >
           {outcome.label}
@@ -132,14 +151,17 @@ export function RunReceiptView({
           {outcomeLine(receipt)}
         </span>
       </div>
-      {pr && (
+      {pr && prHref && (
         <a
-          href={pr.url}
+          href={prHref}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-2 block break-words text-[length:var(--sam-type-secondary-size)] text-[var(--sam-color-accent-primary)] underline-offset-2 hover:underline"
+          className="mt-1 flex min-h-11 items-center break-words text-[length:var(--sam-type-secondary-size)] text-[var(--sam-color-accent-primary)] underline underline-offset-2 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
-          {pr.title ? `#${pr.number} ${pr.title}` : `${pr.repository}#${pr.number}`}
+          <span>
+            {pr.title ? `#${pr.number} ${pr.title}` : `${pr.repository}#${pr.number}`}
+            <span className="sr-only"> (opens in a new tab)</span>
+          </span>
         </a>
       )}
 
@@ -150,7 +172,8 @@ export function RunReceiptView({
         <StatTile
           label="Tokens"
           value="Not reported"
-          note="Token use is not recorded yet; SAM never estimates it"
+          note="Token counts are not recorded for runs yet"
+          muted
         />
         <StatTile label="Account" value={account.value} note={account.note} />
         <StatTile
@@ -170,14 +193,29 @@ export function RunReceiptView({
           note={
             toolCalls
               ? toolKindSummary(toolCalls.byKind) || 'No tool calls'
-              : 'Not available for this chat'
+              : receipt.unavailable.includes('toolCalls')
+                ? 'Could not be read just now'
+                : 'Not available for this chat'
           }
         />
       </div>
 
-      <h3 className={sectionHeading}>CPU, with the tool calls behind the peaks</h3>
+      <h3 className={sectionHeading}>CPU and tool calls</h3>
       {points.length >= 2 ? (
-        <ReceiptCpuLine points={points} reservedCores={reservedCores} />
+        <ReceiptCpuLine points={points} reservedCores={reservedCores} from={from} to={to} />
+      ) : cpuHistory === 'loading' ? (
+        // Same height as the chart, so the panel does not jump when it arrives.
+        <div
+          className="h-[7.5rem] animate-pulse rounded-[var(--sam-radius-control)] bg-[var(--sam-glass-nested-bg)]"
+          data-testid="receipt-cpu-loading"
+        >
+          <span className="sr-only">Loading CPU history</span>
+        </div>
+      ) : cpuHistory === 'error' ? (
+        <p className="m-0 flex items-center gap-2 text-[length:var(--sam-type-secondary-size)] text-fg-muted">
+          <Cpu size={16} aria-hidden="true" />
+          Couldn&apos;t load CPU history just now.
+        </p>
       ) : (
         <p className="m-0 flex items-center gap-2 text-[length:var(--sam-type-secondary-size)] text-fg-muted">
           <Cpu size={16} aria-hidden="true" />
@@ -190,7 +228,9 @@ export function RunReceiptView({
       <h3 className={sectionHeading}>What slowed it down</h3>
       {receipt.slowedDown.length === 0 ? (
         <p className="m-0 text-[length:var(--sam-type-secondary-size)] text-fg-muted">
-          Nothing stood out against recent runs.
+          {receipt.unavailable.includes('comparison')
+            ? 'Nothing stood out. No comparison with recent runs was available.'
+            : 'Nothing stood out against recent runs.'}
         </p>
       ) : (
         <ul className="m-0 list-none divide-y divide-[var(--sam-hairline)] p-0">

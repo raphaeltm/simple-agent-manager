@@ -280,7 +280,7 @@ Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-api
 
 | Setting                                  | Default | Range       | What it limits                                                                     |
 | ---------------------------------------- | ------- | ----------- | ---------------------------------------------------------------------------------- |
-| `insights.receiptToolScanMaxRows`        | 20,000  | 100–200,000 | Tool-call rows one receipt reads; a longer run says its counts are a floor         |
+| `insights.receiptMessageScanMaxRows`     | 10,000  | 100–100,000 | Chat messages one receipt reads to count tool calls; a longer run shows a floor    |
 | `insights.receiptWaitingMaxQuestions`    | 200     | 10–2,000    | Agent questions one receipt reads to measure time waiting on a person              |
 | `insights.receiptComparisonRuns`         | 50      | 3–500       | Recent runs of the same skill or profile read to find the usual durations          |
 | `insights.receiptComparisonWindowDays`   | 30      | 1–365       | Days back the receipt looks for runs to compare with                               |

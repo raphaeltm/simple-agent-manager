@@ -6,11 +6,11 @@
  */
 export const INSIGHTS_RECEIPT_SETTINGS = [
   {
-    name: 'insights.receiptToolScanMaxRows',
-    defaultValue: 20_000,
+    name: 'insights.receiptMessageScanMaxRows',
+    defaultValue: 10_000,
     description:
-      'Most tool-call rows one run receipt reads to count tool calls. A longer run says its counts are a floor.',
-    range: { min: 100, max: 200_000 },
+      'Most chat messages one run receipt reads to count tool calls. A longer run says its counts are a floor.',
+    range: { min: 100, max: 100_000 },
   },
   {
     name: 'insights.receiptWaitingMaxQuestions',

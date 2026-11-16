@@ -481,6 +481,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         viewerId={viewerId}
         sessionTools={sessionTools}
         overlays={overlays}
+        taskId={lc.taskEmbed?.id ?? lc.session?.task?.id ?? lc.session?.taskId ?? null}
         linkedWork={linkedWork}
         onAccessChanged={lc.applySessionAccess}
       />

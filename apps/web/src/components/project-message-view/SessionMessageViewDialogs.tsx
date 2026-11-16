@@ -46,6 +46,7 @@ export function SessionMessageViewDialogs({
   viewerId,
   sessionTools,
   overlays,
+  taskId,
   linkedWork,
   onAccessChanged,
 }: Readonly<{
@@ -57,13 +58,14 @@ export function SessionMessageViewDialogs({
   sessionTools: UseSessionToolsResult;
   /** Which rail panel is open (`useSessionOverlays`); memoised, so passing it whole is safe. */
   overlays: SessionOverlays;
+  /** The run behind this chat, resolved the same way the rail decides to offer Receipt. */
+  taskId: string | null;
   /** The chat's linked work, already loaded by the view — the drawer issues no request. */
   linkedWork: SessionLinkedWork;
   onAccessChanged: (access: SessionAccessSummary) => void;
 }>) {
   const { showAutomation, closeAutomation, showRelated, closeRelated, showShare, closeShare } =
     overlays;
-  const taskId = session.task?.id ?? session.taskId ?? null;
   return (
     <>
       {overlays.showReceipt && taskId && (

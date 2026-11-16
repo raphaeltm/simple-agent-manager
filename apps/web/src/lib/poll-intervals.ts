@@ -66,7 +66,7 @@ export const PROJECT_OVERVIEW_POLL_MS = resolveIntervalMs(
  * Refresh of an open Run receipt while its run is still live. A finished run's receipt does not
  * change, so it is not polled; TanStack pauses polling on a hidden tab.
  */
-export const DEFAULT_RUN_RECEIPT_POLL_MS = 30_000;
+export const DEFAULT_RUN_RECEIPT_POLL_MS = 60_000;
 export const RUN_RECEIPT_POLL_MS = resolveIntervalMs(
   import.meta.env.VITE_RUN_RECEIPT_POLL_MS,
   DEFAULT_RUN_RECEIPT_POLL_MS

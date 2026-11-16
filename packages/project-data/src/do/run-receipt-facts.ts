@@ -7,7 +7,7 @@
  * - Tool calls by kind: `chat_messages.tool_metadata` holds the ACP tool call
  *   (`{toolCallId, kind, status, toolName}`, `vm-agent/internal/messagereport`). A call is
  *   persisted more than once as it updates, so calls are counted by distinct `toolCallId`.
- *   The scan reads at most `toolScanMaxRows` tool rows and says when it stopped early.
+ *   The scan reads at most `messageScanMaxRows` messages and says when it stopped early.
  * - Waiting on a person: `session_attention_markers` of kind `needs_input` (the agent asked
  *   a question, `request_human_input`), from creation to resolution. Resolved markers are kept.
  * - The time of the agent's last message, which ends its work and starts any CI wait.
@@ -24,32 +24,32 @@ import type {
 const ACP_SESSION_LIMIT = 10;
 
 /**
- * Inner query reads the window's tool rows in time order up to the cap (served by
- * `idx_chat_messages_session_seq`). `json_valid` guards every `json_extract`: one malformed
- * row would otherwise raise "malformed JSON" and fail the whole read (`.claude/rules/50`).
- * MAX(kind) makes a call whose rows disagree on kind count once, deterministically.
+ * One pass over the window's messages in time order, capped by messages READ, not by tool rows
+ * matched, so a long chat with few tool calls costs at most the cap (served by
+ * idx_chat_messages_session_seq). The CTE is materialized once and feeds both the per-kind
+ * counts and the count of messages read. \`json_valid\` guards every \`json_extract\`: one malformed
+ * row would otherwise raise "malformed JSON" and fail the whole read (\`.claude/rules/50\`).
+ * MAX(kind) makes a call whose rows disagree on kind count once, deterministically. Bind: session,
+ * from, to, cap + 1 (the extra row only tells us the cap was reached), cap (rows counted).
  */
 const TOOL_KIND_SQL = `
-  SELECT kind, COUNT(*) AS calls FROM (
+  WITH w AS MATERIALIZED (
+    SELECT id, role, tool_metadata, created_at, sequence FROM chat_messages
+     WHERE session_id = ? AND created_at >= ? AND created_at <= ?
+     ORDER BY created_at, sequence
+     LIMIT ?
+  ),
+  counted AS (SELECT * FROM w ORDER BY created_at, sequence LIMIT ?)
+  SELECT kind, COUNT(*) AS calls, NULL AS examined FROM (
     SELECT MAX(kind) AS kind FROM (
       SELECT
         COALESCE(CASE WHEN json_valid(tool_metadata) THEN json_extract(tool_metadata, '$.kind') END, 'other') AS kind,
         COALESCE(CASE WHEN json_valid(tool_metadata) THEN json_extract(tool_metadata, '$.toolCallId') END, id) AS call_id
-      FROM (
-        SELECT id, tool_metadata FROM chat_messages
-         WHERE session_id = ? AND role = 'tool' AND created_at >= ? AND created_at <= ?
-         ORDER BY created_at, sequence
-         LIMIT ?
-      )
+      FROM counted WHERE role = 'tool'
     ) GROUP BY call_id
-  ) GROUP BY kind ORDER BY calls DESC, kind`;
-
-const TOOL_ROWS_SCANNED_SQL = `
-  SELECT COUNT(*) AS n FROM (
-    SELECT 1 FROM chat_messages
-     WHERE session_id = ? AND role = 'tool' AND created_at >= ? AND created_at <= ?
-     LIMIT ?
-  )`;
+  ) GROUP BY kind
+  UNION ALL
+  SELECT NULL, NULL, COUNT(*) FROM w`;
 
 function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -61,7 +61,7 @@ export function getRunReceiptFacts(sql: SqlStorage, input: RunReceiptFactsInput)
     sessionFound: false,
     messagesArchived: false,
     acpSessionIds: [],
-    toolCalls: { byKind: [], total: 0, scannedRows: 0, scanLimited: false },
+    toolCalls: { byKind: [], total: 0, examinedMessages: 0, scanLimited: false },
     waitingIntervals: [],
     waitingLimited: false,
     lastAgentMessageAt: null,
@@ -74,26 +74,26 @@ export function getRunReceiptFacts(sql: SqlStorage, input: RunReceiptFactsInput)
   if (!session) return empty;
 
   const messagesArchived = session.archive_state === 'source_deleted';
-  const scanCap = Math.max(1, Math.floor(input.toolScanMaxRows));
+  const scanCap = Math.max(1, Math.floor(input.messageScanMaxRows));
 
   const byKind: RunReceiptToolKindCount[] = [];
   let total = 0;
-  let scannedRows = 0;
+  let examined = 0;
   if (!messagesArchived) {
     for (const row of sql
-      .exec(TOOL_KIND_SQL, input.sessionId, input.fromMs, toMs, scanCap)
+      .exec(TOOL_KIND_SQL, input.sessionId, input.fromMs, toMs, scanCap + 1, scanCap)
       .toArray()) {
+      if (row.kind === null && row.calls === null) {
+        examined = numberOrNull(row.examined) ?? 0;
+        continue;
+      }
       const count = numberOrNull(row.calls);
       if (count === null || count <= 0) continue;
       const kind = typeof row.kind === 'string' && row.kind.length > 0 ? row.kind : 'other';
       byKind.push({ kind: kind.slice(0, 40), count });
       total += count;
     }
-    scannedRows =
-      numberOrNull(
-        sql.exec(TOOL_ROWS_SCANNED_SQL, input.sessionId, input.fromMs, toMs, scanCap).toArray()[0]
-          ?.n
-      ) ?? 0;
+    byKind.sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind));
   }
 
   const waitingCap = Math.max(1, Math.floor(input.waitingMaxIntervals));
@@ -153,7 +153,12 @@ export function getRunReceiptFacts(sql: SqlStorage, input: RunReceiptFactsInput)
     sessionFound: true,
     messagesArchived,
     acpSessionIds,
-    toolCalls: { byKind, total, scannedRows, scanLimited: scannedRows >= scanCap },
+    toolCalls: {
+      byKind,
+      total,
+      examinedMessages: Math.min(examined, scanCap),
+      scanLimited: examined > scanCap,
+    },
     waitingIntervals,
     waitingLimited: waitingRows.length > waitingCap,
     lastAgentMessageAt: numberOrNull(times?.last_agent),

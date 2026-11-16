@@ -23,9 +23,9 @@ interface SessionReceiptDrawerProps {
   onClose: () => void;
 }
 
-function ErrorState({ onRetry }: Readonly<{ onRetry: () => void }>) {
+function ErrorState({ onRetry, retrying }: Readonly<{ onRetry: () => void; retrying: boolean }>) {
   return (
-    <div className="px-1 py-8 text-center" data-testid="run-receipt-error">
+    <div className="px-1 py-8 text-center" role="alert" data-testid="run-receipt-error">
       <p className="m-0 text-sm font-semibold text-fg-primary">Couldn&apos;t load the receipt</p>
       <p className="m-0 mt-1.5 text-[13px] text-fg-muted">
         The rest of the chat is unaffected. Try again in a moment.
@@ -33,9 +33,10 @@ function ErrorState({ onRetry }: Readonly<{ onRetry: () => void }>) {
       <button
         type="button"
         onClick={onRetry}
-        className="mt-3 inline-flex min-h-11 cursor-pointer items-center rounded-md border border-border-default bg-transparent px-3 text-xs font-medium text-fg-primary transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary"
+        disabled={retrying}
+        className="mt-3 inline-flex disabled:cursor-default disabled:opacity-70 min-h-11 cursor-pointer items-center rounded-md border border-border-default bg-transparent px-3 text-xs font-medium text-fg-primary transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary"
       >
-        Try again
+        {retrying ? 'Trying…' : 'Try again'}
       </button>
     </div>
   );
@@ -84,9 +85,13 @@ export function SessionReceiptDrawer({
         {/* Spinner only before the first result; a refetch keeps the receipt on screen
             (`.claude/rules/48-stale-while-revalidate-ui.md`). */}
         {receipt.data ? (
-          <RunReceiptView receipt={receipt.data} resourceIndex={resourceIndex.data} />
+          <RunReceiptView
+            receipt={receipt.data}
+            resourceIndex={resourceIndex.data}
+            cpuHistory={resourceIndex.data ? 'ready' : resourceIndex.isError ? 'error' : 'loading'}
+          />
         ) : receipt.isError ? (
-          <ErrorState onRetry={() => void receipt.refetch()} />
+          <ErrorState onRetry={() => void receipt.refetch()} retrying={receipt.isFetching} />
         ) : (
           <div className="flex items-center justify-center py-10" data-testid="run-receipt-loading">
             <Spinner size="sm" />

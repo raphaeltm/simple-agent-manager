@@ -135,15 +135,13 @@ describe('RunReceiptView', () => {
     render(<RunReceiptView receipt={receipt()} resourceIndex={undefined} />);
     expect(screen.getByText('Merged')).toBeInTheDocument();
     expect(screen.getByText('PR #2771 · CI passed · 40m')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '#2771 Add retry budget' })).toHaveAttribute(
-      'href',
-      'https://github.com/acme/app/pull/2771'
-    );
+    expect(
+      screen.getByRole('link', { name: /#2771 Add retry budget.*opens in a new tab/ })
+    ).toHaveAttribute('href', 'https://github.com/acme/app/pull/2771');
     const bar = screen.getByTestId('receipt-phase-bar');
-    expect(bar).toHaveAttribute(
-      'aria-label',
-      expect.stringContaining('Waiting on a person 8m 20s')
-    );
+    expect(bar).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByText('Waiting on a person')).toBeInTheDocument();
+    expect(screen.getByText('8m 20s')).toBeInTheDocument();
     expect(bar.querySelectorAll('[data-phase]')).toHaveLength(5);
     expect(screen.getByText('Not reported')).toBeInTheDocument();
     expect(screen.getByText('Personal Max')).toBeInTheDocument();
@@ -212,7 +210,7 @@ describe('RunReceiptView', () => {
     expect(screen.getByText('40m so far')).toBeInTheDocument();
     expect(screen.getAllByText('not yet')).toHaveLength(4);
     expect(screen.getByText('No resource history for this run')).toBeInTheDocument();
-    expect(screen.getByText('Not available for this chat')).toBeInTheDocument();
+    expect(screen.getByText('Could not be read just now')).toBeInTheDocument();
     expect(screen.getByText('No CPU history was recorded for this run.')).toBeInTheDocument();
     expect(screen.getByText('Nothing stood out against recent runs.')).toBeInTheDocument();
     expect(screen.getByText('Could not read tool calls just now.')).toBeInTheDocument();
@@ -232,12 +230,40 @@ describe('RunReceiptView', () => {
     ]);
     render(<RunReceiptView receipt={receipt()} resourceIndex={resourceIndex} />);
     const line = screen.getByTestId('receipt-cpu-line');
-    expect(line.querySelectorAll('circle')).toHaveLength(2);
+    expect(screen.getAllByTestId('receipt-cpu-marker')).toHaveLength(2);
     expect(line).toHaveAttribute('aria-label', expect.stringContaining('peaking at 1.9 cores'));
     const figure = line.closest('figure');
     expect(figure).not.toBeNull();
     expect(
       within(figure as HTMLElement).getByText('Peak 1.9 cores of 2.0 requested')
     ).toBeInTheDocument();
+  });
+});
+
+describe('RunReceiptView — disclosures and loading', () => {
+  it('marks a waiting time that hit the question cap as a floor', () => {
+    const base = receipt();
+    render(
+      <RunReceiptView
+        receipt={{
+          ...base,
+          phases: base.phases.map((phase) =>
+            phase.key === 'waiting' ? { ...phase, limited: true } : phase
+          ),
+        }}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByText('8m 20s+')).toBeInTheDocument();
+  });
+
+  it('holds the CPU chart’s space while its history loads, and says so when it fails', () => {
+    const { rerender } = render(
+      <RunReceiptView receipt={receipt()} resourceIndex={undefined} cpuHistory="loading" />
+    );
+    expect(screen.getByTestId('receipt-cpu-loading')).toBeInTheDocument();
+    expect(screen.queryByText('No CPU history was recorded for this run.')).not.toBeInTheDocument();
+    rerender(<RunReceiptView receipt={receipt()} resourceIndex={undefined} cpuHistory="error" />);
+    expect(screen.getByText("Couldn't load CPU history just now.")).toBeInTheDocument();
   });
 });

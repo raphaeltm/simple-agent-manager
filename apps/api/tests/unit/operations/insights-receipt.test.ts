@@ -37,7 +37,7 @@ function facts(overrides: Partial<RunReceiptFacts> = {}): RunReceiptFacts {
         { kind: 'edit', count: 39 },
       ],
       total: 174,
-      scannedRows: 400,
+      examinedMessages: 400,
       scanLimited: false,
     },
     waitingIntervals: [
@@ -334,7 +334,7 @@ describe('runReceipt', () => {
       sessionId: 'chat-task-own',
       fromMs: T0 + 4 * MIN,
       toMs: T0 + 40 * MIN,
-      toolScanMaxRows: 20_000,
+      messageScanMaxRows: 10_000,
       waitingMaxIntervals: 200,
     });
   });
@@ -379,6 +379,40 @@ describe('runReceipt', () => {
       credentialSource: 'user',
       credentialScope: 'profile',
     });
+  });
+
+  it('counts an ask’s waiting time for everyone but shows its title only to its assignee', async () => {
+    mocks.facts.mockResolvedValue(facts({ waitingIntervals: [] }));
+    insert('asks', {
+      id: 'ask-private',
+      project_id: 'p',
+      kind: 'question',
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      title: 'Approve the refund for the private customer?',
+      source_session_id: 'chat-task-own',
+      source_task_id: 'task-own',
+      created_at: T0 + 10 * MIN,
+      updated_at: T0 + 10 * MIN,
+      resolved_at: T0 + 22 * MIN,
+      status: 'answered',
+    });
+    const waitingOf = (r: Awaited<ReturnType<typeof runReceipt>>) =>
+      r.phases.find((phase) => phase.key === 'waiting')?.durationMs;
+
+    const teammate = await runReceipt(ctx('teammate'), { projectId: 'p', taskId: 'task-own' });
+    expect(waitingOf(teammate)).toBe(12 * MIN);
+    expect(teammate.slowedDown.find((item) => item.kind === 'waiting')).toMatchObject({
+      durationMs: 12 * MIN,
+      question: null,
+    });
+    expect(JSON.stringify(teammate)).not.toContain('private customer');
+
+    // Owner control: the assignee sees the question.
+    const owner = await runReceipt(ctx(), { projectId: 'p', taskId: 'task-own' });
+    expect(owner.slowedDown.find((item) => item.kind === 'waiting')?.question).toBe(
+      'Approve the refund for the private customer?'
+    );
   });
 
   it('degrades malformed rows and a failed facts read to missing parts, not a failure', async () => {
@@ -432,6 +466,17 @@ describe('runReceipt', () => {
     const usual = await runReceipt(ctx(), { projectId: 'p', taskId: 'task-own' });
     expect(usual.slowedDown.map((item) => item.kind)).not.toContain('setup');
     expect(usual.slowedDown.map((item) => item.kind)).toContain('waiting');
+  });
+
+  it('marks the waiting phase as a floor when the question cap was reached', async () => {
+    mocks.facts.mockResolvedValue(facts({ waitingLimited: true }));
+    const receipt = await runReceipt(ctx(), { projectId: 'p', taskId: 'task-own' });
+    expect(receipt.phases.find((phase) => phase.key === 'waiting')).toMatchObject({
+      durationMs: 5 * MIN,
+      limited: true,
+    });
+    // Control: other phases are not marked.
+    expect(receipt.phases.find((phase) => phase.key === 'setup')?.limited).toBeUndefined();
   });
 
   it('stays within the receipt I/O budget of 8 round trips', async () => {

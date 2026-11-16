@@ -68,28 +68,43 @@ Max 7.
 
 ## Implementation checklist
 
-- [ ] Shared types `RunReceipt*` in `packages/shared/src/types/insights-receipt.ts`, exported
-- [ ] DO module `packages/project-data/src/do/run-receipt-facts.ts`: tool-call counts by kind
+- [x] Shared types `RunReceipt*` in `packages/shared/src/types/insights-receipt.ts`, exported
+- [x] DO module `packages/project-data/src/do/run-receipt-facts.ts`: tool-call counts by kind
       (bounded scan, distinct toolCallId), `needs_input` intervals, last agent message time,
       acp session id for the chat, all inside a time window; DO method + client wrapper + port
-- [ ] Settings definition `insights-receipt-settings-definition.ts` + registry entry in
+- [x] Settings definition `insights-receipt-settings-definition.ts` + registry entry in
       `admin-settings-features-definitions.ts`
-- [ ] `packages/operations/src/insights-receipt.ts` (`runReceipt`): auth, project-scoped SQL in
+- [x] `packages/operations/src/insights-receipt.ts` (`runReceipt`): auth, project-scoped SQL in
       every predicate, same not-found for missing and foreign tasks, per-row tolerant parsing,
       phases, outcome, account, resources, tool calls, slowed-down (≤3), tokens "not reported"
-- [ ] `sam_run_receipt` read operation registered in the catalog (`insightsOperations`)
-- [ ] REST route `GET /api/projects/:projectId/tasks/:taskId/receipt`
-- [ ] Tests: real SQL engine (`createSqliteD1`), foreign-project attack + owner control, missing
+- [x] `sam_run_receipt` read operation registered in the catalog (`insightsOperations`)
+- [x] REST route `GET /api/projects/:projectId/tasks/:taskId/receipt`
+- [x] Tests: real SQL engine (`createSqliteD1`), foreign-project attack + owner control, missing
       task same not-found, malformed rows tolerated, phase math, slowed-down ranking, budget
-- [ ] DO facts test in workers pool (real DO SQLite)
-- [ ] Web: API client + `useRunReceipt` TanStack hook (identity-scoped key)
-- [ ] Web: `SessionReceiptDrawer` (GlassSheet, phone full sheet), phases segmented bar, stat
+- [x] DO facts test in workers pool (real DO SQLite)
+- [x] Web: API client + `useRunReceipt` TanStack hook (identity-scoped key)
+- [x] Web: `SessionReceiptDrawer` (GlassSheet, phone full sheet), phases segmented bar, stat
       tiles, CPU line + tool markers from the existing timeline query, slowed-down list
-- [ ] Web: rail action "Receipt" for task-backed chats; overlay state; lazy load
-- [ ] Web unit tests (rail action gating, drawer render states)
-- [ ] Playwright visual audit 375 + 1280 with normal/long/empty/error/many data
-- [ ] Docs: user-facing page in `apps/www/src/content/docs/docs/` for the Receipt
+- [x] Web: rail action "Receipt" for task-backed chats; overlay state; lazy load
+- [x] Web unit tests (rail action gating, drawer render states)
+- [x] Playwright visual audit 375 + 1280 with normal/long/empty/error/many data
+- [x] Docs: user-facing page in `apps/www/src/content/docs/docs/` for the Receipt
 - [ ] Staging verification on a real task-backed chat
+
+## Review-driven changes (Phase 5)
+
+- Security (MEDIUM): ask titles follow the inbox's visibility (assignee / team claimant); waiting
+  time still counts for everyone. Test with teammate vs assignee and owner control.
+- Cloudflare (HIGH): comparison query indexed by migration 0251 (`idx_tasks_project_skill_created`,
+  `idx_tasks_project_profile_created`), cap applied before event lookups; EXPLAIN QUERY PLAN test at
+  3,001 tasks, proven red by dropping the index and by removing the `+project_id` asks hint.
+- Cloudflare (MEDIUM): DO read is one pass bounded by messages read (setting renamed
+  `insights.receiptMessageScanMaxRows`, default 10,000, max 100,000); status-event times via
+  `julianday()` (mixed ISO / CURRENT_TIMESTAMP); asks newest-first; `since` bound is a date prefix.
+- Validator/UI: one task-id expression for the rail and the drawer; waiting cap disclosed as `+`;
+  route-level test; drawer read-state test; CPU loading/error states; retry feedback; PR link 44px
+  with new-tab cue; CPU legend and run-anchored axis; light theme + scrolled mobile captures.
+- `insights-receipt.ts` split: reads in `insights-receipt-reads.ts`.
 
 ## Acceptance criteria
 

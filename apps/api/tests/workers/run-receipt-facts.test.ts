@@ -87,7 +87,7 @@ const input = (sessionId: string, overrides: Record<string, unknown> = {}) => ({
   sessionId,
   fromMs: T0,
   toMs: T0 + 10 * MIN,
-  toolScanMaxRows: 1000,
+  messageScanMaxRows: 1000,
   waitingMaxIntervals: 50,
   ...overrides,
 });
@@ -106,8 +106,17 @@ describe('getRunReceiptFacts', () => {
       { kind: 'read', count: 1 },
     ]);
     expect(facts.toolCalls.total).toBe(4);
-    expect(facts.toolCalls.scannedRows).toBe(5);
+    // Eight messages in the window: two user, one assistant, five tool rows.
+    expect(facts.toolCalls.examinedMessages).toBe(8);
     expect(facts.toolCalls.scanLimited).toBe(false);
+    // Exactly at the cap is not a floor.
+    const exact = await getRunReceiptFacts(
+      env as unknown as Env,
+      projectId,
+      input(sessionId, { messageScanMaxRows: 8 })
+    );
+    expect(exact.toolCalls.scanLimited).toBe(false);
+    expect(exact.toolCalls.total).toBe(4);
     expect(facts.waitingIntervals).toEqual([
       { startMs: T0 + 2 * MIN, endMs: T0 + 4 * MIN, reason: 'Use backoff?' },
       { startMs: T0 + 8 * MIN, endMs: null, reason: 'Still there?' },
@@ -117,17 +126,18 @@ describe('getRunReceiptFacts', () => {
     expect(facts.acpSessionIds).toEqual(['acp-new', 'acp-old']);
   });
 
-  it('says when the scan stopped at its cap, and bounds the questions it returns', async () => {
+  it('caps messages read, not tool rows matched, says so, and bounds the questions', async () => {
     const projectId = 'receipt-facts-cap';
     const { sessionId } = await seed(projectId);
     const facts = await getRunReceiptFacts(
       env as unknown as Env,
       projectId,
-      input(sessionId, { toolScanMaxRows: 2, waitingMaxIntervals: 1 })
+      input(sessionId, { messageScanMaxRows: 3, waitingMaxIntervals: 1 })
     );
-    expect(facts.toolCalls.scannedRows).toBe(2);
+    expect(facts.toolCalls.examinedMessages).toBe(3);
     expect(facts.toolCalls.scanLimited).toBe(true);
-    // The first two rows are both call-a.
+    // The first three messages are the user prompt and two rows of call-a: the user message
+    // spends the cap too, so a chat with few tool calls cannot make the read walk the session.
     expect(facts.toolCalls.byKind).toEqual([{ kind: 'execute', count: 1 }]);
     expect(facts.waitingIntervals).toHaveLength(1);
     expect(facts.waitingLimited).toBe(true);

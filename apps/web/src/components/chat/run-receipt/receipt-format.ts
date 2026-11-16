@@ -48,8 +48,11 @@ const TOOL_KIND_LABEL: Record<string, string> = {
   other: 'other',
 };
 
+const TOOL_KIND_MAX_CHARS = 20;
+
 export function toolKindLabel(kind: string): string {
-  return TOOL_KIND_LABEL[kind] ?? kind;
+  const label = TOOL_KIND_LABEL[kind] ?? kind;
+  return label.length > TOOL_KIND_MAX_CHARS ? `${label.slice(0, TOOL_KIND_MAX_CHARS - 1)}…` : label;
 }
 
 /** A missing duration on a live run has not happened yet; on a finished run it was not recorded. */
@@ -90,7 +93,7 @@ export function outcomeLabel(receipt: RunReceipt): {
   if (pr?.state === 'merged') return { label: 'Merged', tone: 'success' };
   if (pr?.state === 'open') return { label: 'PR open', tone: 'info' };
   if (pr?.state === 'closed') return { label: 'PR closed', tone: 'neutral' };
-  if (receipt.live) return { label: 'Running', tone: 'info' };
+  if (receipt.live) return { label: 'Running', tone: 'success' };
   if (receipt.status === 'failed') return { label: 'Failed', tone: 'danger' };
   if (receipt.status === 'cancelled') return { label: 'Cancelled', tone: 'neutral' };
   return { label: 'Finished', tone: 'success' };

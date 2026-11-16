@@ -11,6 +11,7 @@ import {
   assertNoOverflow,
   makeMockUser,
   screenshot,
+  seedTheme,
 } from './audit-helpers';
 
 const PROJECT_ID = 'proj-receipt-1';
@@ -282,6 +283,7 @@ interface MockOptions {
   receiptStatus?: number;
   /** Omit the resource history, so the CPU section falls back to its text. */
   noResources?: boolean;
+  theme?: 'dark' | 'light';
 }
 
 function makeChatSession() {
@@ -340,6 +342,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
   const session = makeChatSession();
   const state = { activity: 'idle', activityAt: NOW, statusError: null, currentPlan: null };
   const receipt = options.receipt ?? makeReceipt();
+  if (options.theme) await seedTheme(page, options.theme);
 
   await page.addInitScript(
     ({ userId }) => {
@@ -520,6 +523,12 @@ async function capture(page: Page, name: string) {
   await screenshot(page, name);
   await assertNoOverflow(page);
   await assertNoClippedOverflow(page);
+  // The panel scrolls inside itself; capture its end too, so every section is seen at 375.
+  const scroller = page.getByTestId('session-receipt-drawer').locator('.overflow-y-auto').first();
+  if ((await scroller.count()) === 1) {
+    await scroller.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+    await screenshot(page, `${name}-end`);
+  }
 }
 
 /** The panel must sit inside the viewport, measured, not just be "visible". */
@@ -540,12 +549,16 @@ test.describe('Run receipt — chat tool rail', () => {
     const view = drawer.getByTestId('run-receipt');
     await expect(view.getByText('Merged')).toBeVisible();
     await expect(view.getByText('PR #2771 · CI passed · 42m')).toBeVisible();
+    await expect(view.getByRole('link', { name: /opens in a new tab/ })).toHaveAttribute(
+      'href',
+      'https://github.com/acme/billing/pull/2771'
+    );
     await expect(view.getByTestId('receipt-phase-bar').locator('[data-phase]')).toHaveCount(5);
     await expect(view.getByText('Not reported')).toBeVisible();
     await expect(view.getByText('Personal Max')).toBeVisible();
     await expect(view.getByText('74 shell · 61 read · 39 edit')).toBeVisible();
     await expect(view.getByTestId('receipt-cpu-line')).toBeVisible();
-    expect(await view.getByTestId('receipt-cpu-line').locator('circle').count()).toBeGreaterThan(2);
+    expect(await view.getByTestId('receipt-cpu-marker').count()).toBeGreaterThan(2);
     await expect(view.getByText('Setup took 3m 10s')).toBeVisible();
     await expect(view.getByText('“Use exponential backoff?”')).toBeVisible();
     await assertInViewport(page);
@@ -576,6 +589,12 @@ test.describe('Run receipt — chat tool rail', () => {
     await expect(drawer.getByText('Nothing stood out against recent runs.')).toBeVisible();
     await expect(drawer.getByText('No CPU history was recorded for this run.')).toBeVisible();
     await capture(page, 'run-receipt-empty');
+  });
+
+  test('reads in the light theme', async ({ page }) => {
+    const drawer = await openReceipt(page, { theme: 'light', receipt: STRESS_RECEIPT });
+    await expect(drawer.getByTestId('run-receipt')).toBeVisible();
+    await capture(page, 'run-receipt-light');
   });
 
   test('a failed read shows a retry, not a blank panel', async ({ page }) => {

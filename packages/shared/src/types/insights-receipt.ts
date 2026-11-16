@@ -18,7 +18,8 @@ export interface RunReceiptFactsInput {
   fromMs: number;
   /** Window end, epoch ms; null = up to now. */
   toMs: number | null;
-  toolScanMaxRows: number;
+  /** Most messages read in the window to count tool calls. */
+  messageScanMaxRows: number;
   waitingMaxIntervals: number;
 }
 
@@ -46,8 +47,8 @@ export interface RunReceiptFacts {
   toolCalls: {
     byKind: RunReceiptToolKindCount[];
     total: number;
-    /** Tool rows read; equals the cap when the scan stopped early. */
-    scannedRows: number;
+    /** Messages read in the window (at most the cap). */
+    examinedMessages: number;
     scanLimited: boolean;
   };
   waitingIntervals: RunReceiptWaitingInterval[];
@@ -78,6 +79,8 @@ export interface RunReceiptPhase {
   key: RunReceiptPhaseKey;
   /** Null when SAM has no record to measure this phase from. */
   durationMs: number | null;
+  /** True when the read stopped at a cap, so the duration is a floor. */
+  limited?: boolean;
 }
 
 /** A part of the receipt that could not be read; the rest is still returned. */
@@ -128,7 +131,7 @@ export interface RunReceiptResources {
 export interface RunReceiptToolCalls {
   total: number;
   byKind: RunReceiptToolKindCount[];
-  /** True when the run had more tool rows than one receipt reads; counts are a floor. */
+  /** True when the run had more messages than one receipt reads; counts are a floor. */
   scanLimited: boolean;
 }
 
