@@ -10,6 +10,7 @@ import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
 import { refreshGcpPriceTableIfDue } from '../services/gcp-price-table';
 import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
+import { runInboxAskSweep } from '../services/inbox/sweep';
 import {
   runLifecycleLatencyDailyEvaluation,
   runLifecycleLatencyWatchdog,
@@ -227,6 +228,8 @@ export async function scheduled(
   const secretRequestSweep = await sweeps.isolate('runtime_secret_request_sweep', () =>
     runRuntimeSecretRequestSweep(env)
   );
+  // Two indexed reads per idle tick; work is capped by inbox.sweepBatchSize.
+  const inboxAskSweep = await sweeps.isolate('inbox_ask_sweep', () => runInboxAskSweep(env));
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
   );
@@ -404,6 +407,8 @@ export async function scheduled(
     secretRequestsExpired: secretRequestSweep?.expired,
     secretRequestAgentsNotified: secretRequestSweep?.agentsNotified,
     secretRequestNoticesRetried: secretRequestSweep?.noticesRetried,
+    inboxAsksExpired: inboxAskSweep?.expired,
+    inboxAskNoticesRetried: inboxAskSweep?.noticesRetried,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
     sessionTaskRepairReused: sessionTaskRepair?.reused,

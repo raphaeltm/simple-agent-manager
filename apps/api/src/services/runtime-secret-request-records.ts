@@ -130,3 +130,13 @@ export function toCollectedProvenance(
     suppliedAt: isoOrNull(row.requestResolvedAt),
   };
 }
+
+/** A person's display name as an agent may see it, for "supplied by" / "declined by" text. */
+export async function resolverDisplayName(db: Db, userId: string): Promise<string | null> {
+  const rows = await db
+    .select({ name: schema.users.name })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .limit(1);
+  return agentSafeDisplayName(rows[0]?.name);
+}
