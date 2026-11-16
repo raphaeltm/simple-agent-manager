@@ -28,11 +28,13 @@ export async function runInsightsBatch<K extends string>(
   const prepared = keys.map((key) =>
     ctx.env.DATABASE.prepare(statements[key].sql).bind(...statements[key].binds)
   );
+  const out: Partial<Record<K, InsightsRows>> = {};
   try {
-    const results = await ctx.env.DATABASE.batch(prepared);
-    return Object.fromEntries(keys.map((key, i) => [key, results[i]?.results ?? []])) as Partial<
-      Record<K, InsightsRows>
-    >;
+    const results = await ctx.env.DATABASE.batch<Record<string, unknown>>(prepared);
+    keys.forEach((key, i) => {
+      out[key] = results[i]?.results ?? [];
+    });
+    return out;
   } catch (error) {
     log.error(`${event}.batch_failed`, {
       projectId,
@@ -40,22 +42,19 @@ export async function runInsightsBatch<K extends string>(
       action: 'retrying_statements_individually',
     });
   }
-  const settled = await Promise.all(
-    keys.map(async (key, i): Promise<[K, InsightsRows | undefined]> => {
+  await Promise.all(
+    keys.map(async (key, i) => {
       const statement = prepared[i];
-      if (!statement) return [key, undefined];
+      if (!statement) return;
       try {
-        const result = await statement.all();
-        return [key, result.results ?? []];
+        const result = await statement.all<Record<string, unknown>>();
+        out[key] = result.results ?? [];
       } catch (error) {
         onSectionFailed(key, error);
-        return [key, undefined];
       }
     })
   );
-  return Object.fromEntries(settled.filter(([, value]) => value !== undefined)) as Partial<
-    Record<K, InsightsRows>
-  >;
+  return out;
 }
 
 /**
