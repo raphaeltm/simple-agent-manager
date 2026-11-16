@@ -112,7 +112,7 @@ const PULL_REQUEST_SQL = `
  */
 function comparisonSql(column: 'skill_id' | 'agent_profile_hint'): string {
   // The inner query is served by idx_tasks_project_skill_created / _profile_created (migration
-  // 0251) and stops at the run cap; the event lookups then run for those rows only.
+  // 0252) and stops at the run cap; the event lookups then run for those rows only.
   return `
   SELECT r.created_at, r.creating_started_at,
          ${FIRST_EVENT_JD_SQL('delegated', 'r.id')} AS delegated_jd,

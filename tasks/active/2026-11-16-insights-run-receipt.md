@@ -95,7 +95,7 @@ Max 7.
 
 - Security (MEDIUM): ask titles follow the inbox's visibility (assignee / team claimant); waiting
   time still counts for everyone. Test with teammate vs assignee and owner control.
-- Cloudflare (HIGH): comparison query indexed by migration 0251 (`idx_tasks_project_skill_created`,
+- Cloudflare (HIGH): comparison query indexed by migration 0252 (`idx_tasks_project_skill_created`,
   `idx_tasks_project_profile_created`), cap applied before event lookups; EXPLAIN QUERY PLAN test at
   3,001 tasks, proven red by dropping the index and by removing the `+project_id` asks hint.
 - Cloudflare (MEDIUM): DO read is one pass bounded by messages read (setting renamed
