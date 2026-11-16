@@ -133,7 +133,8 @@ export async function runReceipt(
   // (asks only) and is named as unavailable, never reported as an exact figure.
   const factsFailed = unavailable.includes('toolCalls');
   if (factsFailed) unavailable.push('waiting');
-  const waitingIsFloor = Boolean(facts?.waitingLimited) || readAsks.length > askLimit || factsFailed;
+  const waitingIsFloor =
+    Boolean(facts?.waitingLimited) || readAsks.length > askLimit || factsFailed;
   const waiting = [
     ...(facts?.waitingIntervals ?? []),
     ...asks.map((ask) => ({
