@@ -156,7 +156,7 @@ export const INBOX_TOOLS = [
   {
     name: 'inbox_attach',
     description:
-      'Watch an open task another chat assigned instead of assigning a duplicate: this chat is woken by its changes too.',
+      'Watch an open task another of your chats assigned instead of assigning a duplicate: this chat is woken when it is taken, handed on, finished, reopened or archived (comments wake the assigning chat; read them with inbox_read get).',
     inputSchema: {
       type: 'object' as const,
       properties: { ref, wakeOnSteps },

@@ -120,8 +120,9 @@ that. A comment wakes it only when it comes from the assignee, the member who to
 someone who can write in the agent's chat; anyone else's comment is kept, and the agent reads it the
 next time it wakes (`decideInboxTaskCommentWake`, `apps/api/src/services/agent-wake-authorization.ts`).
 A comment from someone other than the chat's owner reaches the agent as a teammate's input, not as
-an instruction from the owner. Another agent can watch the same task instead of assigning a
-duplicate (`attach`), and is woken by the same changes.
+an instruction from the owner. Another chat of the same person can watch the task instead of
+assigning a duplicate (`attach`); it is woken when the task is taken, handed on, finished, reopened
+or archived, and reads the comments at those wakes.
 
 A teammate who cannot read the agent's chat still sees the task, its steps, links and discussion,
 never the chat transcript. Task discussion also appears on the project's Comments page for the
@@ -131,7 +132,8 @@ changes are recorded but no longer wake that chat.
 
 Limits are in [Admin settings](/docs/guides/admin-settings/#inbox): open tasks per chat
 (`inbox.openTasksPerChat`), steps per task (`inbox.taskStepsMax`), chats watching one task
-(`inbox.watchersPerItemMax`) and activity rows shown (`inbox.taskActivityMax`).
+(`inbox.watchersPerItemMax`), activity rows shown (`inbox.taskActivityMax`), and how long a finished
+task still wakes its watching chats, so a reopen reaches them (`inbox.closedTaskWatchHours`).
 
 ## Archive
 

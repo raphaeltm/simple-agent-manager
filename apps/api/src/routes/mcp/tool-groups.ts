@@ -133,7 +133,7 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
       comment: { tool: 'inbox_comment', summary: "reply in a task's discussion" },
       attach: {
         tool: 'inbox_attach',
-        summary: 'watch a task another chat assigned instead of assigning a duplicate',
+        summary: 'watch a task another of your chats assigned instead of assigning a duplicate',
       },
       update: { tool: 'inbox_update_item', summary: 'edit the wording or links of your open item' },
       cancel: {
