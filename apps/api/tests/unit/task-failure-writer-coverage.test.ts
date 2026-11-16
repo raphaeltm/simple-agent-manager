@@ -17,7 +17,7 @@ describe('task failure writer coverage', () => {
     ['task run', 'src/routes/tasks/run.ts', 2],
     // 3 since T7: the idea link write between the first message and startTaskRunnerDO fails the
     // task through the same guarded helper rather than leaving an agent running unlinked.
-    ['task submit', 'src/services/submit-task-implementation.ts', 3],
+    ['task submit', 'src/services/submit-vm-task.ts', 3],
     ['chat start', 'src/routes/chat-start.ts', 1],
   ])('%s routes every pre-run failure through the shared guarded helper', (_name, path, calls) => {
     const text = source(path);
