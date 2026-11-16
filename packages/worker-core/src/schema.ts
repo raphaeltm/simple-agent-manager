@@ -869,7 +869,7 @@ export const asks = sqliteTable(
 );
 
 /**
- * The generated brief on a Project Overview (inbox slice I, migration 0253). One row per project,
+ * The generated brief on a Project Overview (inbox slice I, migration 0255). One row per project,
  * the brief's only home. Written by `refreshProjectBriefIfDue` (apps/api), read by
  * `readProjectBrief` (packages/operations). Times are epoch milliseconds.
  */
@@ -3531,7 +3531,7 @@ export const triggerExecutions = sqliteTable(
     finishedSequenceIdx: index('idx_trigger_executions_trigger_finished')
       .on(table.triggerId, table.sequenceNumber)
       .where(sql`status IN ('completed', 'failed')`),
-    /** Newest runs of one trigger without a sort (migration 0253; the Overview brief's facts). */
+    /** Newest runs of one trigger without a sort (migration 0255; the Overview brief's facts). */
     triggerSequenceIdx: index('idx_trigger_executions_trigger_sequence').on(
       table.triggerId,
       table.sequenceNumber,
@@ -4448,7 +4448,7 @@ export const sessionSummaries = sqliteTable(
       table.updatedAt
     ),
     projectIdx: index('idx_session_summaries_project').on(table.projectId, table.updatedAt),
-    /** A task's chat (migration 0253; the Overview brief's failed chats). */
+    /** A task's chat (migration 0255; the Overview brief's failed chats). */
     taskIdx: index('idx_session_summaries_task').on(table.taskId),
     projectCreatorIdx: index('idx_session_summaries_project_creator').on(
       table.projectId,
