@@ -43,12 +43,31 @@ const ReplySchema = v.object({
  * Cardinal number words and multipliers. Ordinals and words like "once" or "single" are ordinary
  * prose and stay allowed; this targets counts, which belong on the tiles.
  */
-const NUMBER_WORDS =
-  /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|hundreds|thousand|thousands|million|millions|dozen|dozens|twice|thrice|half)\b/i;
+const NUMBER_WORDS = new Set(
+  (
+    'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen ' +
+    'fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ' +
+    'ninety hundred hundreds thousand thousands million millions dozen dozens twice thrice half'
+  ).split(' ')
+);
 /** Any decimal digit, in any script. */
 const DIGITS = /\p{Nd}/u;
-const LINK_OR_MARKUP =
-  /(:\/\/|www\.|mailto:|\bhttps?\b|[<>[\]{}`*#|\\]|\.(com|org|net|io|dev|app|ai)\b)/i;
+/** Characters that only appear in markup, links or code. */
+const MARKUP_CHARS = /[<>[\]{}`*#|\\]/;
+/** Text that names a link: a scheme, `www.`, or a common top-level domain. */
+const LINK_TOKENS = [
+  '://',
+  'www.',
+  'mailto:',
+  'http',
+  '.com',
+  '.org',
+  '.net',
+  '.io',
+  '.dev',
+  '.app',
+  '.ai',
+];
 /** Control and invisible format characters (zero-width, bidi overrides). */
 const CONTROL = /[\p{Cc}\p{Cf}]/u;
 
@@ -64,19 +83,78 @@ export type BriefParseResult =
     }
   | { ok: false; reason: string };
 
+type ReplySentence = v.InferOutput<typeof ReplySchema>['sentences'][number];
+
 /** The JSON object in a reply, tolerating a ```json fence around it. Nothing else is accepted. */
 function extractJson(reply: string): unknown {
-  const trimmed = reply
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '')
-    .trim();
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) throw new Error('not a JSON object');
-  return JSON.parse(trimmed);
+  let text = reply.trim();
+  const fence = '```';
+  if (text.startsWith(fence)) {
+    text = text.slice(fence.length);
+    if (text.toLowerCase().startsWith('json')) text = text.slice('json'.length);
+    if (text.endsWith(fence)) text = text.slice(0, -fence.length);
+    text = text.trim();
+  }
+  if (!text.startsWith('{') || !text.endsWith('}')) throw new Error('not a JSON object');
+  return JSON.parse(text);
 }
 
-function cleanText(text: string): string {
-  return text.replace(/\s+/g, ' ');
+function hasNumberWord(words: string): boolean {
+  return words
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .some((word) => NUMBER_WORDS.has(word));
+}
+
+function hasLinkOrMarkup(words: string): boolean {
+  const lower = words.toLowerCase();
+  return MARKUP_CHARS.test(words) || LINK_TOKENS.some((token) => lower.includes(token));
+}
+
+/** Words a sentence may not contain: numbers, links, markup, or too many of them. */
+function proseIsAllowed(words: string): boolean {
+  return (
+    words.length <= BRIEF_SENTENCE_TEXT_MAX_CHARS &&
+    !DIGITS.test(words) &&
+    !hasNumberWord(words) &&
+    !hasLinkOrMarkup(words)
+  );
+}
+
+/**
+ * One sentence of the reply as SAM's own parts, or null when it must be dropped: a handle not
+ * issued for this prompt, a control character, no item named, or prose that is not allowed.
+ */
+function toSentence(
+  sentence: ReplySentence,
+  handles: ReadonlyMap<string, BriefHandle>
+): { parts: OverviewBriefPart[]; cited: BriefHandle[] } | null {
+  if (sentence.parts.length === 0 || sentence.parts.length > BRIEF_SENTENCE_PARTS_MAX) return null;
+  const parts: OverviewBriefPart[] = [];
+  const cited: BriefHandle[] = [];
+  let words = '';
+  for (const part of sentence.parts) {
+    if ('ref' in part) {
+      const handle = handles.get(part.ref.trim());
+      if (!handle) return null;
+      cited.push(handle);
+      parts.push({ ref: handle.ref });
+      continue;
+    }
+    const text = part.text.replace(/\s+/g, ' ');
+    if (CONTROL.test(text)) return null;
+    words += text;
+    const previous = parts.at(-1);
+    if (previous && 'text' in previous) previous.text += text;
+    else if (text) parts.push({ text });
+  }
+  if (cited.length === 0 || !proseIsAllowed(words)) return null;
+  // Trim the sentence's outer whitespace; inner spacing between text and refs is kept.
+  const first = parts.at(0);
+  if (first && 'text' in first) first.text = first.text.trimStart();
+  const last = parts.at(-1);
+  if (last && 'text' in last) last.text = last.text.trimEnd();
+  return { parts: parts.filter((part) => !('text' in part) || part.text.length > 0), cited };
 }
 
 export function parseBriefReply(
@@ -94,68 +172,16 @@ export function parseBriefReply(
   if (!parsed.success) return { ok: false, reason: 'wrong_shape' };
 
   const sentences: StoredBrief['sentences'] = [];
-  const refAsks = new Set<string>();
-  const refRunningChats = new Set<string>();
-  const refAutomations = new Set<string>();
-  const refAccounts = new Set<string>();
+  const cited: BriefHandle[] = [];
   let dropped = 0;
-
-  for (const sentence of parsed.output.sentences) {
-    if (sentences.length >= BRIEF_MAX_SENTENCES) {
+  for (const raw of parsed.output.sentences) {
+    const sentence = sentences.length < BRIEF_MAX_SENTENCES ? toSentence(raw, handles) : null;
+    if (!sentence) {
       dropped++;
       continue;
     }
-    const parts: OverviewBriefPart[] = [];
-    const cited: BriefHandle[] = [];
-    let words = '';
-    let valid = sentence.parts.length > 0 && sentence.parts.length <= BRIEF_SENTENCE_PARTS_MAX;
-    for (const part of sentence.parts) {
-      if (!valid) break;
-      if ('ref' in part) {
-        const handle = handles.get(part.ref.trim());
-        if (!handle) {
-          valid = false;
-          break;
-        }
-        cited.push(handle);
-        parts.push({ ref: handle.ref });
-        continue;
-      }
-      const text = cleanText(part.text);
-      if (CONTROL.test(text)) {
-        valid = false;
-        break;
-      }
-      words += text;
-      if (!text) continue;
-      const previous = parts[parts.length - 1];
-      if (previous && 'text' in previous) previous.text += text;
-      else parts.push({ text });
-    }
-    if (
-      !valid ||
-      cited.length === 0 ||
-      words.length > BRIEF_SENTENCE_TEXT_MAX_CHARS ||
-      DIGITS.test(words) ||
-      NUMBER_WORDS.test(words) ||
-      LINK_OR_MARKUP.test(words)
-    ) {
-      dropped++;
-      continue;
-    }
-    // Trim the sentence's outer whitespace; inner spacing between text and refs is kept.
-    const first = parts[0];
-    if (first && 'text' in first) first.text = first.text.trimStart();
-    const last = parts[parts.length - 1];
-    if (last && 'text' in last) last.text = last.text.trimEnd();
-    const kept = parts.filter((part) => !('text' in part) || part.text.length > 0);
-    sentences.push({ parts: kept });
-    for (const handle of cited) {
-      if (handle.ref.kind === 'ask') refAsks.add(handle.ref.id);
-      if (handle.ref.kind === 'automation') refAutomations.add(handle.ref.id);
-      if (handle.ref.kind === 'account') refAccounts.add(handle.ref.id);
-      if (handle.ref.kind === 'chat' && handle.runningChat) refRunningChats.add(handle.ref.id);
-    }
+    sentences.push({ parts: sentence.parts });
+    cited.push(...sentence.cited);
   }
 
   // A reply that said something but nothing of it survived is a failed generation, not a quiet
@@ -166,13 +192,16 @@ export function parseBriefReply(
   // refused rather than stored and hidden later.
   const brief = { sentences };
   if (!v.safeParse(StoredBriefSchema, brief).success) return { ok: false, reason: 'invalid_brief' };
+  const ids = (predicate: (handle: BriefHandle) => boolean) => [
+    ...new Set(cited.filter(predicate).map((handle) => handle.ref.id)),
+  ];
   return {
     ok: true,
     brief,
-    refAsks: [...refAsks],
-    refRunningChats: [...refRunningChats],
-    refAutomations: [...refAutomations],
-    refAccounts: [...refAccounts],
+    refAsks: ids((h) => h.ref.kind === 'ask'),
+    refRunningChats: ids((h) => h.ref.kind === 'chat' && h.runningChat === true),
+    refAutomations: ids((h) => h.ref.kind === 'automation'),
+    refAccounts: ids((h) => h.ref.kind === 'account'),
     dropped,
   };
 }

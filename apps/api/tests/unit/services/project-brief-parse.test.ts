@@ -103,8 +103,14 @@ describe('parseBriefReply', () => {
     ['a bare domain', sentence({ ref: 'a1' }, { text: ' see evil.com for details' })],
     ['markup', sentence({ ref: 'a1' }, { text: ' <b>now</b>' })],
     ['a markdown link', sentence({ text: '[open](javascript:x) ' }, { ref: 'a1' })],
-    ['a zero-width character', sentence({ ref: 'a1' }, { text: ' wait​ing' })],
-    ['a bidi override', sentence({ ref: 'a1' }, { text: ' ‮gnitiaw' })],
+    [
+      'a zero-width character',
+      sentence({ ref: 'a1' }, { text: ` wait${String.fromCodePoint(0x200b)}ing` }),
+    ],
+    [
+      'a bidi override',
+      sentence({ ref: 'a1' }, { text: ` ${String.fromCodePoint(0x202e)}gnitiaw` }),
+    ],
     [
       'overlong prose',
       sentence({ ref: 'a1' }, { text: ` ${'is waiting for an answer and '.repeat(12)}` }),

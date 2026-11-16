@@ -118,7 +118,7 @@ async function markStale(db: D1Database, projectId: string, now: number): Promis
     .run();
 }
 
-async function callModel(
+function callModel(
   env: Env,
   projectId: string,
   messages: ReturnType<typeof buildBriefPrompt>['messages'],
@@ -139,6 +139,14 @@ async function callModel(
     errorDiagnosticMaxLength: BRIEF_ERROR_MAX_CHARS,
     messages,
   });
+}
+
+/** A short, recordable reason for a failed model call. */
+function failureReason(error: unknown): string {
+  if (error instanceof BriefDeadlineError) return 'deadline';
+  if (error instanceof WorkersAIGatewayError) return `gateway_${error.status}`;
+  if (error instanceof Error && error.name === 'TimeoutError') return 'timeout';
+  return 'model_call_failed';
 }
 
 class BriefDeadlineError extends Error {
@@ -227,11 +235,28 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
       .prepare(`SELECT generation_day, generation_count FROM project_briefs WHERE project_id = ?`)
       .bind(projectId)
       .first<{ generation_day: string | null; generation_count: number }>();
-    return row?.generation_day === utcDay(now) && row.generation_count >= settings.dailyCap
-      ? 'capped'
-      : 'busy';
+    const spent = row?.generation_day === utcDay(now) && row.generation_count >= settings.dailyCap;
+    return spent ? 'capped' : 'busy';
   }
 
+  return generate({ env, projectId, facts, fingerprint, claimedAt: now, startedAt });
+}
+
+interface GenerateInput {
+  env: Env;
+  projectId: string;
+  facts: Awaited<ReturnType<typeof readBriefFacts>>;
+  fingerprint: string;
+  /** The `pending_since` this call's claim wrote; every write below is bound to it. */
+  claimedAt: number;
+  startedAt: number;
+}
+
+/** Call the model under a held claim, and store the validated brief or the failure. */
+async function generate(input: GenerateInput): Promise<'generated' | 'busy' | 'failed'> {
+  const { env, projectId, facts, fingerprint, startedAt } = input;
+  const db = env.DATABASE;
+  const now = input.claimedAt;
   const prompt = buildBriefPrompt(facts);
   let reason: string;
   try {
@@ -273,14 +298,7 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
     }
     reason = parsed.reason;
   } catch (error) {
-    reason =
-      error instanceof BriefDeadlineError
-        ? 'deadline'
-        : error instanceof WorkersAIGatewayError
-          ? `gateway_${error.status}`
-          : error instanceof Error && error.name === 'TimeoutError'
-            ? 'timeout'
-            : 'model_call_failed';
+    reason = failureReason(error);
     log.warn('project_brief.model_call_failed', {
       projectId,
       reason,

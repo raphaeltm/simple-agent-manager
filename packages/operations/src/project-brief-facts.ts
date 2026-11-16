@@ -261,7 +261,7 @@ export async function readBriefFacts(
     });
   }
   const rankedAccounts = [...byAccount.values()].sort(
-    (a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level] || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    (a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level] || a.id.localeCompare(b.id)
   );
 
   const moreNotShown: BriefFactKind[] = [];
@@ -343,13 +343,30 @@ export function briefFactsAreQuiet(facts: BriefFacts): boolean {
  * Sorted, so the same facts in a different row order give the same fingerprint.
  */
 export function briefFactsMaterial(facts: BriefFacts): string {
-  const sorted = (values: string[]) => [...values].sort().join(',');
+  const section = (name: string, values: string[]) =>
+    name + ':' + [...values].sort((a, b) => a.localeCompare(b)).join(',');
+  const flag = (value: boolean) => (value ? '1' : '0');
   return [
-    `asks:${sorted(facts.asks.map((ask) => `${ask.id}:${ask.blocking ? 1 : 0}`))}`,
-    `running:${sorted(facts.runningChats.map((chat) => `${chat.id}:${chat.state}`))}`,
-    `failed:${sorted(facts.failedChats.map((chat) => chat.id))}`,
-    `automations:${sorted(facts.failingAutomations.map((a) => `${a.id}:${a.paused ? 1 : 0}`))}`,
-    `accounts:${sorted(facts.accounts.map((account) => `${account.id}:${account.level}`))}`,
+    section(
+      'asks',
+      facts.asks.map((ask) => ask.id + ':' + flag(ask.blocking))
+    ),
+    section(
+      'running',
+      facts.runningChats.map((chat) => chat.id + ':' + chat.state)
+    ),
+    section(
+      'failed',
+      facts.failedChats.map((chat) => chat.id)
+    ),
+    section(
+      'automations',
+      facts.failingAutomations.map((a) => a.id + ':' + flag(a.paused))
+    ),
+    section(
+      'accounts',
+      facts.accounts.map((account) => account.id + ':' + account.level)
+    ),
   ].join('|');
 }
 

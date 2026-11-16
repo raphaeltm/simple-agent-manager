@@ -1308,6 +1308,7 @@ test.describe('Project Overview brief (inbox slice I)', () => {
   });
 
   test('phone: the brief expands in place to two sentences', async ({ page }, testInfo) => {
+    // Phone-only on purpose: desktop shows the brief open, so there is nothing to expand there.
     test.skip(!isPhone(testInfo), 'the brief folds only on a phone');
     await setupScene(page, {
       scene: 'normal',

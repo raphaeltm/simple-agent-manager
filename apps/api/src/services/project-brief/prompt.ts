@@ -41,6 +41,18 @@ Rules:
 - "moreNotShown" lists kinds where more items exist than you were given. You may say that more are waiting, never how many.
 - If nothing needs attention and nothing is happening, reply {"sentences":[]}.`;
 
+const CHAT_STATE_WORDS = {
+  waiting: 'paused, waiting on a person',
+  starting: 'starting',
+  working: 'working',
+} as const;
+
+const ACCOUNT_LEVEL_WORDS = {
+  rejected: 'out of usage',
+  critical: 'almost out of usage',
+  warning: 'running low',
+} as const;
+
 export function buildBriefPrompt(facts: BriefFacts): BriefPrompt {
   const handles = new Map<string, BriefHandle>();
   const add = (prefix: string, index: number, handle: BriefHandle) => {
@@ -63,12 +75,7 @@ export function buildBriefPrompt(facts: BriefFacts): BriefPrompt {
         runningChat: true,
       }),
       topic: chat.topic,
-      state:
-        chat.state === 'waiting'
-          ? 'paused, waiting on a person'
-          : chat.state === 'starting'
-            ? 'starting'
-            : 'working',
+      state: CHAT_STATE_WORDS[chat.state],
     })),
     failedChats: facts.failedChats.map((chat, i) => ({
       ref: add('f', i, { ref: { kind: 'chat', id: chat.id, label: chat.topic } }),
@@ -82,12 +89,7 @@ export function buildBriefPrompt(facts: BriefFacts): BriefPrompt {
     accountsNearLimit: facts.accounts.map((account, i) => ({
       ref: add('b', i, { ref: { kind: 'account', id: account.id, label: account.label } }),
       account: account.label,
-      level:
-        account.level === 'rejected'
-          ? 'out of usage'
-          : account.level === 'critical'
-            ? 'almost out of usage'
-            : 'running low',
+      level: ACCOUNT_LEVEL_WORDS[account.level],
     })),
     recentlyMerged: facts.mergedPullRequests.map((pull, i) => ({
       ref: add('p', i, {

@@ -92,11 +92,11 @@ function BriefRef({
   projectId,
   briefRef,
   plain,
-}: {
+}: Readonly<{
   projectId: string;
   briefRef: OverviewBriefRef;
   plain: boolean;
-}) {
+}>) {
   const target = plain ? null : refTarget(projectId, briefRef);
   const label = briefRef.label || 'this item';
   const shown = shortLabel(label);
@@ -139,13 +139,13 @@ function Sentences({
   projectId,
   sentences,
   plain,
-}: {
+}: Readonly<{
   projectId: string;
   sentences: OverviewBrief['sentences'];
   plain: boolean;
-}): ReactNode {
+}>): ReactNode {
   return sentences.map((sentence, index) => (
-    <span key={index}>
+    <span key={sentenceKey(sentence)}>
       {index > 0 ? ' ' : ''}
       {sentence.parts.map((part, partIndex) =>
         'ref' in part ? (
@@ -158,15 +158,34 @@ function Sentences({
   ));
 }
 
+/** One sentence folded, two open on a phone; three on desktop. */
+function sentenceLimit(isMobile: boolean, collapsed: boolean): number {
+  if (!isMobile) return BRIEF_SENTENCES_DESKTOP;
+  return collapsed ? 1 : BRIEF_SENTENCES_PHONE_EXPANDED;
+}
+
+function ageLine(age: string, refreshing: boolean, dimmed: boolean): string {
+  if (refreshing) return `Updating · written ${age}`;
+  if (dimmed) return `Written ${age} · out of date`;
+  return `Written ${age}`;
+}
+
+/** A key from the sentence's own content: the list is short and never reordered in place. */
+function sentenceKey(sentence: OverviewBrief['sentences'][number]): string {
+  return sentence.parts
+    .map((part) => ('ref' in part ? `${part.ref.kind}:${part.ref.id}` : part.text))
+    .join('|');
+}
+
 export function ProjectBriefSection({
   projectId,
   brief,
   className,
-}: {
+}: Readonly<{
   projectId: string;
   brief: OverviewBrief | null | undefined;
   className?: string;
-}) {
+}>) {
   const isMobile = useIsMobile();
   const now = useMinuteClock();
   const [expanded, setExpanded] = useState(false);
@@ -189,20 +208,11 @@ export function ProjectBriefSection({
   if (!brief || brief.sentences.length === 0) return null;
 
   const collapsed = isMobile && !expanded;
-  const limit = isMobile
-    ? collapsed
-      ? 1
-      : BRIEF_SENTENCES_PHONE_EXPANDED
-    : BRIEF_SENTENCES_DESKTOP;
-  const sentences = brief.sentences.slice(0, limit);
+  const sentences = brief.sentences.slice(0, sentenceLimit(isMobile, collapsed));
   const dimmed = brief.stale || brief.refreshing;
   const age = formatTimeFromNow(Date.parse(brief.generatedAt), now);
   // Always one line, so going stale or fresh again never moves the sections below.
-  const ageText = brief.refreshing
-    ? `Updating · written ${age}`
-    : dimmed
-      ? `Written ${age} · out of date`
-      : `Written ${age}`;
+  const ageText = ageLine(age, brief.refreshing, dimmed);
   const textClass = `m-0 min-w-0 break-words text-[15px] leading-relaxed text-fg-primary transition-opacity md:leading-normal ${collapsed ? 'line-clamp-1' : ''} ${dimmed ? 'opacity-75' : ''}`;
 
   const body = (
