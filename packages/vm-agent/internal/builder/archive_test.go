@@ -118,3 +118,37 @@ func TestDownloadDigestSizeAndRedirect(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractRestoresDirectoryPermissionsAfterAllEntries(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		headers []*tar.Header
+		modes   map[string]os.FileMode
+	}{
+		{"explicit", []*tar.Header{{Name: "public", Typeflag: tar.TypeDir, Mode: 0755}, {Name: "public/nested", Typeflag: tar.TypeDir, Mode: 0750}, {Name: "public/nested/file", Typeflag: tar.TypeReg, Mode: 0644, Size: 4}}, map[string]os.FileMode{"public": 0755, "public/nested": 0750}},
+		{"late-directory", []*tar.Header{{Name: "public/nested/file", Typeflag: tar.TypeReg, Mode: 0644, Size: 4}, {Name: "public", Typeflag: tar.TypeDir, Mode: 0755}, {Name: "public/nested", Typeflag: tar.TypeDir, Mode: 0750}}, map[string]os.FileMode{"public": 0755, "public/nested": 0750}},
+		{"implicit", []*tar.Header{{Name: "public/nested/file", Typeflag: tar.TypeReg, Mode: 0644, Size: 4}}, map[string]os.FileMode{"public": 0755, "public/nested": 0755}},
+		{"restricted-parent", []*tar.Header{{Name: "public", Typeflag: tar.TypeDir, Mode: 0500}, {Name: "public/nested", Typeflag: tar.TypeDir, Mode: 0750}, {Name: "public/nested/file", Typeflag: tar.TypeReg, Mode: 0644, Size: 4}}, map[string]os.FileMode{"public": 0500, "public/nested": 0750}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			defer os.Chmod(filepath.Join(dir, "public"), 0700)
+			if err := Extract(context.Background(), bytes.NewReader(bundle(t, tc.headers, []byte("test"))), dir, 8<<20); err != nil {
+				t.Fatal(err)
+			}
+			for name, mode := range tc.modes {
+				info, err := os.Stat(filepath.Join(dir, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if info.Mode().Perm() != mode {
+					t.Errorf("%s permissions %o, want %o", name, info.Mode().Perm(), mode)
+				}
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "public/nested/file"))
+			if err != nil || string(data) != "test" {
+				t.Fatalf("file content %q, %v", data, err)
+			}
+		})
+	}
+}

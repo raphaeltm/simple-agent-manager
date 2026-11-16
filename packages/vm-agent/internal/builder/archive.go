@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -74,11 +75,31 @@ func Extract(ctx context.Context, input io.Reader, destination string, max int64
 		return err
 	}
 	defer root.Close()
+	// Keep extraction writable until all children exist; apply archive modes only
+	// after success. Implicit parents match the collector's normal directory mode.
+	directories := map[string]os.FileMode{}
+	rememberParents := func(name string) {
+		for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
+			if _, ok := directories[parent]; !ok {
+				directories[parent] = 0755
+			}
+		}
+	}
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {
 			if limited.N <= 1 {
 				return errors.New("expanded context exceeds maximum bytes")
+			}
+			names := make([]string, 0, len(directories))
+			for name := range directories {
+				names = append(names, name)
+			}
+			sort.Slice(names, func(i, j int) bool { return strings.Count(names[i], "/") > strings.Count(names[j], "/") })
+			for _, name := range names {
+				if err := root.Chmod(name, directories[name]); err != nil {
+					return err
+				}
 			}
 			return nil
 		}
@@ -92,11 +113,13 @@ func Extract(ctx context.Context, input io.Reader, destination string, max int64
 		if header.Size < 0 || header.Size > max || limited.N-header.Size <= 0 {
 			return errors.New("expanded context exceeds maximum bytes")
 		}
+		rememberParents(name)
 		if err = root.MkdirAll(path.Dir(name), 0700); err != nil {
 			return err
 		}
 		switch header.Typeflag {
 		case tar.TypeDir:
+			directories[name] = os.FileMode(header.Mode) & 0777
 			if err = root.MkdirAll(name, 0700); err != nil {
 				return err
 			}

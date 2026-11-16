@@ -18,7 +18,7 @@ func buildComposeServices(ctx context.Context, command string, opts BuildOptions
 	if opts.BuildNetwork != "host" {
 		return nil, fmt.Errorf("unsupported builder network")
 	}
-	base, err := runCompose(ctx, command, opts.WorkspaceDir, nil, "config", "--no-interpolate")
+	base, err := runCompose(ctx, command, opts.WorkspaceDir, env, "config")
 	if err != nil {
 		return nil, err
 	}
