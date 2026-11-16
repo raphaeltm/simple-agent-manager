@@ -71,6 +71,5 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/69-aggregate-capacity-at-final-reservation.md`: Enforce Aggregate Capacity at the Final Atomic Reservation
 - `.claude/rules/71-request-context-must-not-outlive-its-request.md`: A Goroutine That Outlives Its Request Must Not Capture That Request's Context
 - `.claude/rules/72-error-categories-must-match-the-recovery-action.md`: An Error Category Must Name the Recovery Action, Not the Provider's Vocabulary
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 
 <!-- END GENERATED RULE INDEX -->

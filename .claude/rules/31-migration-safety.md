@@ -3,6 +3,14 @@ paths:
   - 'apps/api/**'
   - 'packages/worker-core/**'
   - 'packages/project-data/**'
+  - 'packages/ai-proxy/src/ai-token-budget-counter.ts'
+  - 'packages/repo-hosting/src/github-installation-leak-sweep.ts'
+  - 'infra/resources/database.ts'
+  - 'scripts/deploy/configure-d1-read-replication.sh'
+  - 'scripts/quality/check-do-migration-safety.ts'
+  - 'scripts/quality/check-migration-safety.test.ts'
+  - 'scripts/quality/check-migration-safety.ts'
+  - 'scripts/quality/d1-read-replication-script.test.ts'
 ---
 
 # Migration Safety (ABSOLUTE RULE — DATA LOSS PREVENTION)

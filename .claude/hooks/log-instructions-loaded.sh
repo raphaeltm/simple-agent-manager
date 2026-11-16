@@ -17,10 +17,10 @@ ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 SESSION=$(printf '%s' "$INPUT" | jq -r '.session_id // "unknown"' 2>/dev/null)
 SESSION=$(printf '%s' "$SESSION" | tr -c 'A-Za-z0-9._-' '_')
 FILE=$(printf '%s' "$INPUT" | jq -r '.file_path // empty' 2>/dev/null)
-[ -n "$FILE" ] || exit 0
+[[ -n "$FILE" ]] || exit 0
 
 BYTES=0
-[ -f "$FILE" ] && BYTES=$(wc -c <"$FILE" 2>/dev/null | tr -d ' ')
+[[ -f "$FILE" ]] && BYTES=$(wc -c <"$FILE" 2>/dev/null | tr -d ' ')
 
 OUT_DIR="$ROOT/.tmp/instruction-loads"
 mkdir -p "$OUT_DIR" 2>/dev/null || exit 0

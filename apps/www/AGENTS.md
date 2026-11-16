@@ -66,6 +66,5 @@ Read the rules whose scope covers the files you will change before editing. Clau
 loads them by itself on file access; other harnesses must open them.
 
 - `.claude/rules/04-ui-standards.md`: UI Standards
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 
 <!-- END GENERATED RULE INDEX -->

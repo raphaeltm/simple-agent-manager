@@ -1,6 +1,7 @@
 ---
 paths:
   - 'apps/api/**'
+  - 'packages/project-data/src/do/reconciliation-dead-target.ts'
 ---
 
 # A "Work Is Unrecoverable" Verdict Must Read The Same Record The Resumer Reads

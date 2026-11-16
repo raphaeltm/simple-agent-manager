@@ -3,6 +3,7 @@ paths:
   - 'apps/api/**'
   - 'packages/project-data/**'
   - 'packages/operations/**'
+  - 'packages/shared/src/types/comments.ts'
 ---
 
 # A Capped Selection Must Rank By Its Purpose, And Must Disclose What It Dropped

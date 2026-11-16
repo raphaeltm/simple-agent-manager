@@ -2,6 +2,7 @@
 paths:
   - 'apps/api/**'
   - 'packages/project-data/**'
+  - 'packages/vm-agent/internal/acp/session_host_prompt.go'
 ---
 
 # Capture Handler Prerequisites Before a Long Async Operation

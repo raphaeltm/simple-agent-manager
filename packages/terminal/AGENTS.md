@@ -51,6 +51,5 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/17-ui-visual-testing.md`: Mandatory Playwright Visual Testing for UI Changes
 - `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`: Horizontal Overflow Inside `overflow-x-hidden` Is Invisible to Document-Level Checks
 - `.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`: An Object Literal in a Render Body Can Remount an Entire Subtree
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 
 <!-- END GENERATED RULE INDEX -->

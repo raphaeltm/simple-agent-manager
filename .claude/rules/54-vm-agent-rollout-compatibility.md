@@ -2,6 +2,7 @@
 paths:
   - 'packages/vm-agent/**'
   - 'scripts/deploy/resolve-vm-agent-release.sh'
+  - 'scripts/quality/deploy-reusable-workflow.test.ts'
 ---
 
 # VM Agent Rollout Compatibility

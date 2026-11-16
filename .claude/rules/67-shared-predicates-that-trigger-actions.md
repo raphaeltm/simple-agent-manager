@@ -2,6 +2,10 @@
 paths:
   - 'apps/api/**'
   - 'packages/vm-agent/internal/server/session_snapshot_coordinator.go'
+  - 'packages/operations/src/idea-identity.ts'
+  - 'packages/vm-agent/internal/server/session_snapshot_coordinator_test.go'
+  - 'packages/vm-agent/internal/server/session_snapshot_errors.go'
+  - 'packages/vm-agent/internal/server/workspace_provisioning.go'
 ---
 
 # Never Widen a Shared Predicate That Drives an Action

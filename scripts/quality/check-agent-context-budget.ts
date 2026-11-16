@@ -13,7 +13,7 @@
  *   pnpm quality:agent-context-budget                       report only
  *   pnpm quality:agent-context-budget --check               report and enforce
  *   pnpm quality:agent-context-budget --write               regenerate the rule indexes
- *   pnpm quality:agent-context-budget --observed <log.jsonl> [--accessed a,b,c]
+ *   pnpm quality:agent-context-budget --observed <log.jsonl> [--accessed a,b,c] [--lazy-only]
  *       compare the model with what a real Claude Code session loaded
  *       (logs are written by .claude/hooks/log-instructions-loaded.sh)
  */
@@ -21,10 +21,17 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { checkClaudeHookConfig } from './agent-hook-config';
+import {
+  checkCodexEntryFiles,
+  checkDirectoriesHaveIndex,
+  checkLaunchRuleBaseline,
+  checkRuleReferencesInSource,
+  ruleFilesNamedIn,
+} from './agent-instruction-guards';
 import { compareObservedLoads, parseObservedLog } from './agent-instruction-observed';
 import {
   checkCitationsCovered,
-  checkClaudeHookConfig,
   checkNoDuplicateBodies,
   checkPatterns,
   CODEX_PROJECT_DOC_MAX_BYTES,
@@ -34,12 +41,19 @@ import {
   RULES_DIR_SEGMENT,
   sumBytes,
 } from './agent-instructions';
-import { applyGeneratedBlock, renderDirectoryIndex, renderRootIndex } from './agent-rule-index';
+import {
+  applyGeneratedBlock,
+  renderDirectoryIndex,
+  renderLaunchRuleIndex,
+  renderRootIndex,
+} from './agent-rule-index';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const BUDGET_FILE = 'scripts/quality/agent-context-budget.json';
 const ROOT_INDEX_FILE = '.claude/rules/00-rule-routing.md';
 const CLAUDE_SETTINGS_FILE = '.claude/settings.json';
+// Absolute path: the check must not resolve git through a writable PATH entry.
+const GIT_BIN = '/usr/bin/git';
 
 /**
  * Ceilings are set by hand in agent-context-budget.json, a little above the measured
@@ -54,6 +68,8 @@ interface Budget {
   firstAccessBatchBytes: { default: number; overrides: Record<string, number> };
   /** Largest total of lazily loaded rules any single tracked file can trigger. */
   heaviestFileBytes: number;
+  /** Every rule Claude Code loads at launch, by path. See checkLaunchRuleBaseline. */
+  launchRules: string[];
 }
 
 function parseBudget(value: unknown): Budget {
@@ -80,6 +96,7 @@ function parseBudget(value: unknown): Budget {
       overrides: Object.fromEntries(Object.entries(overrides).map(([dir, n]) => [dir, Number(n)])),
     },
     heaviestFileBytes: Number(record.heaviestFileBytes),
+    launchRules: Array.isArray(record.launchRules) ? record.launchRules.map(String) : [],
   };
 }
 
@@ -89,7 +106,7 @@ const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
 
 function trackedFiles(): string[] {
   const output = execFileSync(
-    'git',
+    GIT_BIN,
     ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
     {
       cwd: ROOT,
@@ -100,7 +117,7 @@ function trackedFiles(): string[] {
   return output
     .split('\0')
     .filter((file) => file.length > 0 && existsSync(resolve(ROOT, file)))
-    .sort();
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function loadModel(files: string[]): InstructionModel {
@@ -218,6 +235,12 @@ function indexTargets(
       expected: applyGeneratedBlock(read(ROOT_INDEX_FILE), renderRootIndex(model)),
     },
   ];
+  if (files.includes('AGENTS.md')) {
+    targets.push({
+      file: 'AGENTS.md',
+      expected: applyGeneratedBlock(read('AGENTS.md'), renderLaunchRuleIndex(model)),
+    });
+  }
   for (const file of files) {
     if (!file.endsWith('/AGENTS.md')) continue;
     const dir = file.slice(0, -'/AGENTS.md'.length);
@@ -229,6 +252,20 @@ function indexTargets(
   return targets;
 }
 
+const SOURCE_FILE = /\.(ts|tsx|js|mjs|cjs|go|sh|css|sql|toml|ya?ml)$/;
+
+/** Rule files named inside tracked source files (not markdown, not the checker itself). */
+function sourceRuleReferences(files: string[]): { file: string; ruleFile: string }[] {
+  const references: { file: string; ruleFile: string }[] = [];
+  for (const file of files) {
+    if (!SOURCE_FILE.test(file) || file.startsWith('scripts/quality/agent-')) continue;
+    const text = read(file);
+    if (!text.includes('.claude/rules/')) continue;
+    for (const ruleFile of ruleFilesNamedIn(text)) references.push({ file, ruleFile });
+  }
+  return references;
+}
+
 function hookFindings(): Finding[] {
   if (!existsSync(resolve(ROOT, CLAUDE_SETTINGS_FILE))) return [];
   return checkClaudeHookConfig(JSON.parse(read(CLAUDE_SETTINGS_FILE))).map((problem) => ({
@@ -238,69 +275,85 @@ function hookFindings(): Finding[] {
   }));
 }
 
-function main(): void {
-  const args = process.argv.slice(2);
-  const flag = (name: string) => args.includes(name);
-  const value = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+function runObserved(model: InstructionModel, logPath: string, args: string[]): never {
+  const accessedIndex = args.indexOf('--accessed');
+  const accessed = accessedIndex < 0 ? [] : (args[accessedIndex + 1] ?? '').split(',');
+  const result = compareObservedLoads(
+    model,
+    parseObservedLog(readFileSync(logPath, 'utf8')),
+    accessed.filter(Boolean),
+    { lazyOnly: args.includes('--lazy-only') }
+  );
+  for (const line of result.summary) console.log(line);
+  for (const mismatch of result.mismatches) console.error(`MISMATCH: ${mismatch}`);
+  process.exit(result.mismatches.length > 0 ? 1 : 0);
+}
 
-  const files = trackedFiles();
-  const model = loadModel(files);
-
-  const observedLog = value('--observed');
-  if (observedLog) {
-    const accessed = (value('--accessed') ?? '').split(',').filter(Boolean);
-    const result = compareObservedLoads(
-      model,
-      parseObservedLog(readFileSync(observedLog, 'utf8')),
-      accessed
-    );
-    for (const line of result.summary) console.log(line);
-    for (const mismatch of result.mismatches) console.error(`MISMATCH: ${mismatch}`);
-    process.exit(result.mismatches.length > 0 ? 1 : 0);
+function writeIndexes(model: InstructionModel, files: string[]): void {
+  for (const target of indexTargets(model, files)) {
+    if (read(target.file) === target.expected) continue;
+    writeFileSync(resolve(ROOT, target.file), target.expected);
+    console.log(`updated ${target.file}`);
   }
+}
 
-  if (flag('--write')) {
-    for (const target of indexTargets(model, files)) {
-      if (read(target.file) !== target.expected) {
-        writeFileSync(resolve(ROOT, target.file), target.expected);
-        console.log(`updated ${target.file}`);
-      }
-    }
-  }
-
-  // Re-read: --write may have changed the always-loaded routing file.
-  const current = flag('--write') ? loadModel(files) : model;
-  const measured = measure(current, files);
-  printReport(current, measured);
-
-  const budget = parseBudget(JSON.parse(read(BUDGET_FILE)) as unknown);
-
-  if (!flag('--check') && !flag('--write')) return;
-
-  const input = { model: current, trackedFiles: files };
-  const findings: Finding[] = [
+function collectFindings(
+  model: InstructionModel,
+  files: string[],
+  measured: Measured,
+  budget: Budget
+): Finding[] {
+  const input = { model, trackedFiles: files };
+  const staleIndexes = indexTargets(model, files)
+    .filter((target) => read(target.file) !== target.expected)
+    .map((target) => ({
+      check: 'index-stale',
+      file: target.file,
+      message: 'generated rule index is out of date; run pnpm quality:agent-context-budget --write',
+    }));
+  return [
     ...checkPatterns(input),
     ...checkCitationsCovered(input),
-    ...checkNoDuplicateBodies(current.rules),
+    ...checkNoDuplicateBodies(model.rules),
+    ...checkLaunchRuleBaseline(model, budget.launchRules),
+    ...checkCodexEntryFiles(files),
+    ...checkDirectoriesHaveIndex(model, files),
+    ...checkRuleReferencesInSource(model, sourceRuleReferences(files)),
     ...hookFindings(),
-    ...indexTargets(current, files)
-      .filter((target) => read(target.file) !== target.expected)
-      .map((target) => ({
-        check: 'index-stale',
-        file: target.file,
-        message:
-          'generated rule index is out of date; run pnpm quality:agent-context-budget --write',
-      })),
+    ...staleIndexes,
     ...budgetFindings(measured, budget),
   ];
+}
 
+function main(): void {
+  const args = process.argv.slice(2);
+  const files = trackedFiles();
+  let model = loadModel(files);
+
+  const observedIndex = args.indexOf('--observed');
+  if (observedIndex >= 0) runObserved(model, args[observedIndex + 1], args);
+
+  const write = args.includes('--write');
+  if (write) {
+    writeIndexes(model, files);
+    // Re-read: the always-loaded routing file has just changed size.
+    model = loadModel(files);
+  }
+
+  const measured = measure(model, files);
+  printReport(model, measured);
+  if (!write && !args.includes('--check')) return;
+
+  const budget = parseBudget(JSON.parse(read(BUDGET_FILE)) as unknown);
+  const findings = collectFindings(model, files, measured, budget);
   if (findings.length === 0) {
     console.log('\nAgent instruction checks passed.');
     return;
   }
   console.error(`\n${findings.length} agent instruction finding(s):`);
-  for (const finding of findings)
+  for (const finding of findings) {
     console.error(`  [${finding.check}] ${finding.file}: ${finding.message}`);
+  }
   process.exit(1);
 }
 

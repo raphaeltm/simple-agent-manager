@@ -2,6 +2,7 @@
 paths:
   - 'apps/api/**'
   - 'packages/project-data/**'
+  - 'packages/ai-proxy/src/ai-token-budget-counter.ts'
 ---
 
 # Durable Objects Do Not Serialize Across `await` — Use a Real Mutex for Critical Sections

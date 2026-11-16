@@ -65,15 +65,12 @@ Read the rules whose scope covers the files you will change before editing. Clau
 loads them by itself on file access; other harnesses must open them.
 
 - `.claude/rules/24-no-duplicate-ui-controls.md`: No Duplicate Implementations
-- `.claude/rules/28-credential-resolution-fallback-tests.md`: Credential Resolution, Fallback, and Rotation Safety Tests
-- `.claude/rules/41-credential-snapshot-resilience.md`: Credential Snapshot/Resolution Must Tolerate a Single Bad Row
 - `.claude/rules/43-long-running-mcp-tools.md`: Long-Running MCP Tools Must Be Async
 - `.claude/rules/50-list-read-row-fault-isolation.md`: List/Snapshot Reads Must Tolerate a Single Malformed Row
 - `.claude/rules/51-runtime-boundary-validation.md`: Runtime boundary validation
 - `.claude/rules/51-server-side-node-class-gates.md`: Server-Side Node-Class / Identity Gates — Never Trust a Client-Supplied Identifier or Agent Abstention
-- `.claude/rules/60-request-io-and-bundle-budgets.md`: Request I/O and Client Bundle Budgets
 - `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md`: Making a Scoping Column Nullable Silently Deletes Every Check That Used It
 - `.claude/rules/65-capped-selection-must-rank-and-disclose.md`: A Capped Selection Must Rank By Its Purpose, And Must Disclose What It Dropped
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+- `.claude/rules/67-shared-predicates-that-trigger-actions.md`: Never Widen a Shared Predicate That Drives an Action
 
 <!-- END GENERATED RULE INDEX -->

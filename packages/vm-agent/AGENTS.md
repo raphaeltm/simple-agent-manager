@@ -55,18 +55,17 @@ loads them by itself on file access; other harnesses must open them.
 
 - `.claude/rules/06-vm-agent-patterns.md`: VM Agent Technical Patterns
 - `.claude/rules/27-vm-agent-staging-refresh.md`: VM Agent Binary Refresh for Staging Tests
-- `.claude/rules/28-credential-resolution-fallback-tests.md`: Credential Resolution, Fallback, and Rotation Safety Tests
 - `.claude/rules/34-vm-agent-callback-auth-agent-side.md`: VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE)
 - `.claude/rules/34-vm-agent-callback-auth.md`: VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE)
-- `.claude/rules/41-credential-snapshot-resilience.md`: Credential Snapshot/Resolution Must Tolerate a Single Bad Row
+- `.claude/rules/43-long-running-mcp-tools.md`: Long-Running MCP Tools Must Be Async
 - `.claude/rules/46-vm-agent-diagnostic-getter-sync.md`: VM Agent Diagnostic Getters Must Synchronize Loop-Mutated Fields
+- `.claude/rules/49-capture-prerequisites-before-async-completion.md`: Capture Handler Prerequisites Before a Long Async Operation
 - `.claude/rules/51-vm-agent-no-host-mime-dependency.md`: VM Agent Behavior Must Not Depend on Host-Provided MIME/OS Databases
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`: Scheduled Handlers: Isolate Every Step, and Never Use a Liveness Timestamp as an Idleness Signal
 - `.claude/rules/54-vm-agent-rollout-compatibility.md`: VM Agent Rollout Compatibility
 - `.claude/rules/61-guards-must-cover-every-runtime.md`: A Guard Added for One Runtime Must Be Enforced for Every Runtime
 - `.claude/rules/67-shared-predicates-that-trigger-actions.md`: Never Widen a Shared Predicate That Drives an Action
 - `.claude/rules/71-request-context-must-not-outlive-its-request.md`: A Goroutine That Outlives Its Request Must Not Capture That Request's Context
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 - `.claude/rules/75-external-api-check-then-act.md`: A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure
 - `.claude/rules/78-snapshot-capture-must-scale-with-the-session.md`: Snapshot Capture Cost Must Scale With the Session, Not the Repository
 

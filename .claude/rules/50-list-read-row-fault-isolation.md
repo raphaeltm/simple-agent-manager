@@ -3,6 +3,7 @@ paths:
   - 'apps/api/**'
   - 'packages/project-data/**'
   - 'packages/operations/**'
+  - 'packages/worker-core/src/row-parsing.ts'
 ---
 
 # List/Snapshot Reads Must Tolerate a Single Malformed Row

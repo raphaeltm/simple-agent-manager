@@ -47,17 +47,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/verify-test-quality.sh",
-            "timeout": 30
-          }
-        ]
-      }
     ]
   }
 }

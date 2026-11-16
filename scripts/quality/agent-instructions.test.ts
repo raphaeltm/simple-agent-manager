@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
+import { checkClaudeHookConfig } from './agent-hook-config';
+import {
+  checkCodexEntryFiles,
+  checkDirectoriesHaveIndex,
+  checkLaunchRuleBaseline,
+  checkRuleReferencesInSource,
+  ruleFilesNamedIn,
+} from './agent-instruction-guards';
 import { compareObservedLoads, parseObservedLog } from './agent-instruction-observed';
 import {
   checkCitationsCovered,
-  checkClaudeHookConfig,
   checkNoDuplicateBodies,
   checkPatterns,
   compilePattern,
@@ -16,6 +23,7 @@ import {
   describeScope,
   INDEX_BEGIN,
   renderDirectoryIndex,
+  renderLaunchRuleIndex,
   renderRootIndex,
 } from './agent-rule-index';
 
@@ -62,6 +70,8 @@ describe('pattern subset', () => {
     ['apps/*/wrangler.toml', 'apps/api/wrangler.toml', true],
     ['apps/*/wrangler.toml', 'apps/api/nested/wrangler.toml', false],
     ['packages/cli', 'packages/cli/cmd/main.go', true],
+    ['src/components/*.tsx', 'src/components/Foo.tsx', true],
+    ['src/components/*.tsx', 'src/components/Foo.tsx/child.tsx', false],
     ['sonar-project.properties', 'sonar-project.properties', true],
     ['sonar-project.properties', 'packages/cli/sonar-project.properties', true],
   ])('%s vs %s -> %s', (pattern, file, expected) => {
@@ -267,7 +277,7 @@ describe('generated indexes', () => {
   it('lists scoped rules, not launch rules, in the root index', () => {
     const index = renderRootIndex(m);
     expect(index).toContain(
-      '`45-do-mutex.md`: Title. Loads for: apps/api, packages/project-data (part)'
+      '`45-do-mutex.md`: Title. Loads for: apps/api; packages/project-data (src/do/index.ts)'
     );
     expect(index).not.toContain('02-gates.md');
   });
@@ -333,7 +343,7 @@ describe('compareObservedLoads', () => {
         trigger: 'apps/web/src/a.tsx',
       })
     );
-    expect(compareObservedLoads(m, log, []).mismatches).toEqual([
+    expect(compareObservedLoads(m, log, [], { lazyOnly: true }).mismatches).toEqual([
       '.claude/rules/45-do-mutex.md loaded for apps/web/src/a.tsx but the model predicts no load',
     ]);
   });
@@ -347,5 +357,126 @@ describe('compareObservedLoads', () => {
       })
     );
     expect(compareObservedLoads(m, log, []).mismatches).toEqual([]);
+  });
+});
+
+describe('checkLaunchRuleBaseline', () => {
+  const gates = rule('.claude/rules/02-gates.md', null);
+  const constitution = rule('.claude/rules/03-constitution.md', null);
+  const recorded = ['.claude/rules/02-gates.md', '.claude/rules/03-constitution.md'];
+
+  it('passes when the launch set is exactly the recorded list', () => {
+    expect(checkLaunchRuleBaseline(model(gates, constitution), recorded)).toEqual([]);
+  });
+
+  it('flags a launch rule that was given paths, which every other check accepts', () => {
+    // Scoping 03-constitution to apps/api/** is a valid, live pattern.
+    const demoted = rule('.claude/rules/03-constitution.md', "paths:\n  - 'apps/api/**'");
+    const m = model(gates, demoted);
+    expect(checkPatterns({ model: m, trackedFiles: ['apps/api/src/index.ts'] })).toEqual([]);
+    expect(checkLaunchRuleBaseline(m, recorded).map((f) => [f.check, f.file])).toEqual([
+      ['launch-rule-removed', '.claude/rules/03-constitution.md'],
+    ]);
+  });
+
+  it('flags a new unconditional rule until it is recorded', () => {
+    const findings = checkLaunchRuleBaseline(model(gates, constitution), [recorded[0]]);
+    expect(findings.map((f) => f.check)).toEqual(['launch-rule-unrecorded']);
+  });
+});
+
+describe('Codex route guards', () => {
+  const scoped = rule('.claude/rules/36-cli.md', "paths:\n  - 'packages/cli/**'");
+  const tracked = [
+    'AGENTS.md',
+    'packages/cli/go.mod',
+    'packages/ui/AGENTS.md',
+    'packages/ui/a.tsx',
+  ];
+
+  it('flags a workspace directory that has scoped rules and no AGENTS.md', () => {
+    const findings = checkDirectoriesHaveIndex(model(scoped), tracked);
+    expect(findings.map((f) => f.file)).toEqual(['packages/cli/AGENTS.md']);
+  });
+
+  it('passes once the directory has an AGENTS.md, and ignores directories with no rules', () => {
+    const withIndex = [...tracked, 'packages/cli/AGENTS.md'];
+    expect(checkDirectoriesHaveIndex(model(scoped), withIndex)).toEqual([]);
+    expect(checkDirectoriesHaveIndex(model(), ['packages/cli/go.mod'])).toEqual([]);
+  });
+
+  it('flags a missing root AGENTS.md and any AGENTS.override.md', () => {
+    expect(checkCodexEntryFiles(['CLAUDE.md']).map((f) => f.file)).toEqual(['AGENTS.md']);
+    expect(checkCodexEntryFiles(['AGENTS.md', 'AGENTS.override.md']).map((f) => f.file)).toEqual([
+      'AGENTS.override.md',
+    ]);
+    expect(checkCodexEntryFiles(['AGENTS.md'])).toEqual([]);
+  });
+
+  it('names the launch rules, not the scoped ones, in the root AGENTS.md block', () => {
+    const block = renderLaunchRuleIndex(model(rule('.claude/rules/02-gates.md', null), scoped));
+    expect(block).toContain('- `.claude/rules/02-gates.md`: Title');
+    expect(block).not.toContain('36-cli.md');
+  });
+});
+
+describe('checkRuleReferencesInSource', () => {
+  const scoped = rule('.claude/rules/50-row-isolation.md', "paths:\n  - 'apps/api/**'");
+  const launch = rule('.claude/rules/02-gates.md', null);
+  const m = model(scoped, launch);
+
+  it('extracts full rule file names and ignores short references', () => {
+    const text = '// see `.claude/rules/50-row-isolation.md` and .claude/rules/50.\n';
+    expect(ruleFilesNamedIn(text)).toEqual(['.claude/rules/50-row-isolation.md']);
+  });
+
+  it('flags source that names a rule which does not load for it', () => {
+    const findings = checkRuleReferencesInSource(m, [
+      {
+        file: 'packages/worker-core/src/row-parsing.ts',
+        ruleFile: '.claude/rules/50-row-isolation.md',
+      },
+    ]);
+    expect(findings.map((f) => f.check)).toEqual(['rule-reference-not-covered']);
+  });
+
+  it('passes for covered files, launch rules and names that are not rule files', () => {
+    expect(
+      checkRuleReferencesInSource(m, [
+        { file: 'apps/api/src/a.ts', ruleFile: '.claude/rules/50-row-isolation.md' },
+        { file: 'packages/ui/src/a.tsx', ruleFile: '.claude/rules/02-gates.md' },
+        { file: 'packages/ui/src/a.tsx', ruleFile: '.claude/rules/99-missing.md' },
+      ])
+    ).toEqual([]);
+  });
+});
+
+describe('hardened checks', () => {
+  it('flags an unknown hook event, a handler without a type, and disableAllHooks', () => {
+    const typo = { hooks: { TypoEvent: [{ hooks: [{}] }] } };
+    const messages = checkClaudeHookConfig(typo).map((p) => p.message);
+    expect(messages.some((m) => m.includes('not a known Claude Code hook event'))).toBe(true);
+    expect(messages.some((m) => m.includes('has no type'))).toBe(true);
+    expect(checkClaudeHookConfig({ disableAllHooks: true })).toHaveLength(1);
+  });
+
+  it('does not read an empty probe log as agreement', () => {
+    const m = model(rule('.claude/rules/02-gates.md', null));
+    expect(compareObservedLoads(m, [], []).mismatches).toHaveLength(1);
+  });
+
+  it('requires launch entries unless only lazy loads are being compared', () => {
+    const scoped = rule('.claude/rules/45-do-mutex.md', "paths:\n  - 'packages/project-data/**'");
+    const m = model(scoped);
+    const log = parseObservedLog(
+      JSON.stringify({
+        memory_type: 'Project',
+        load_reason: 'path_glob_match',
+        file: '.claude/rules/45-do-mutex.md',
+        trigger: 'packages/project-data/src/do/index.ts',
+      })
+    );
+    expect(compareObservedLoads(m, log, []).mismatches).toHaveLength(1);
+    expect(compareObservedLoads(m, log, [], { lazyOnly: true }).mismatches).toEqual([]);
   });
 });

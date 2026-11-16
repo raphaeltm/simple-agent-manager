@@ -5,6 +5,8 @@ paths:
   - 'scripts/deploy/environment-var-overrides.ts'
   - 'scripts/deploy/sync-wrangler-config.ts'
   - 'scripts/deploy/worker-var-defaults.ts'
+  - 'packages/project-data/src/do/tool-payload-cleanup-config-refusal.ts'
+  - 'scripts/deploy/configure-d1-read-replication.sh'
 ---
 
 # A Config Flip Ships Only When the Deployed Value Says So

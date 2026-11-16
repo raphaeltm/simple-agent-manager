@@ -68,13 +68,28 @@ model is in `scripts/quality/agent-instructions.ts`:
   at launch. A rule with `paths` loads when a matching file is read, written or edited.
 - Codex loads the root `AGENTS.md` at launch (32 KiB cap) and nothing else by itself.
 
-`--check` runs in the Code Quality Checks job. It fails when a `paths` pattern matches no
-file, when a rule names source files outside its own scope (the rule was left behind by a
-code move), when two rule files are copies, when a Claude Code hook entry is malformed
-(Claude Code skips such an entry without an error), when a generated rule index is stale,
-or when a ceiling in `scripts/quality/agent-context-budget.json` is exceeded. `--write`
-regenerates the rule index in `.claude/rules/00-rule-routing.md` and the "Rules for this
-directory" section of each `AGENTS.md`.
+`--check` runs in the Code Quality Checks job. It fails when:
+
+- a `paths` pattern matches no file, or uses syntax outside the supported subset;
+- a rule names source files outside its own scope, or a source file names a rule that
+  does not load for it (the rule was left behind by a code move);
+- two rule files are copies;
+- the set of launch rules differs from `launchRules` in
+  `scripts/quality/agent-context-budget.json`, so a rule cannot leave launch context
+  without a reviewed edit to that list;
+- a workspace directory has path-scoped rules and no `AGENTS.md`, or an
+  `AGENTS.override.md` would replace one for Codex;
+- a Claude Code hook entry is malformed, names an unknown event, or all hooks are
+  disabled (Claude Code skips such entries without an error);
+- a generated rule index is stale, or a size ceiling in the budget file is exceeded.
+
+`--write` regenerates the rule index in `.claude/rules/00-rule-routing.md`, the launch-rule
+list in the root `AGENTS.md`, and the "Rules for this directory" section of each nested
+`AGENTS.md`.
+
+What the check does not prove: that a rule's scope is complete for code that never names
+it, that Codex opens the rules its `AGENTS.md` lists, or that an agent follows a rule it
+has loaded.
 
 The static model is only as good as its match with the harness.
 `.claude/hooks/log-instructions-loaded.sh` records every instruction file a Claude Code
@@ -86,7 +101,9 @@ pnpm quality:agent-context-budget --observed .tmp/instruction-loads/<session>.js
 ```
 
 A mismatch means the model is wrong about the harness. Use a fresh session: a rule that
-was already in context at launch is not loaded a second time when its `paths` match.
+was already in context at launch is not loaded a second time when its `paths` match. An
+empty log, or one without `session_start` entries, is reported as a mismatch; pass
+`--lazy-only` to compare lazy loads alone.
 
 ## Runtime workflow state
 

@@ -2,6 +2,7 @@
 paths:
   - 'apps/api/**'
   - 'packages/operations/**'
+  - 'packages/vm-agent/internal/server/mcp_build.go'
 ---
 
 # Long-Running MCP Tools Must Be Async

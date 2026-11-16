@@ -136,3 +136,53 @@ Per-project data (chat sessions, messages, activity events, and canonical `proje
 - Cloudflare Workers SDK (Durable Objects, D1, KV, R2)
 - Tailwind CSS v4 (Web), Astro + Starlight (Marketing site)
 - @mastra/core (AI agent orchestration), workers-ai-provider (Workers AI bridge)
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules
+
+Codex does not load `.claude/rules/` by itself. Two steps before you edit:
+
+1. Open the `AGENTS.md` nearest the files you will change and read the rules its
+   "Rules for this directory" section lists. `.claude/rules/00-rule-routing.md` indexes
+   every path-scoped rule.
+2. The rules below apply to all work. Claude Code has them in context at launch. Read
+   the ones that bear on your task.
+
+- `.claude/rules/01-doc-sync.md`: Documentation Sync & Code Integrity
+- `.claude/rules/02-quality-gates.md`: Quality Gates
+- `.claude/rules/03-constitution.md`: Constitution Validation
+- `.claude/rules/05-preflight.md`: Agent Preflight Behavior
+- `.claude/rules/06-technical-patterns.md`: General Technical Patterns
+- `.claude/rules/07-env-and-urls.md`: Environment Variables & URL Construction
+- `.claude/rules/08-architecture.md`: Architecture & Business Logic
+- `.claude/rules/09-task-tracking.md`: Task Tracking System
+- `.claude/rules/10-e2e-verification.md`: End-to-End Capability Verification
+- `.claude/rules/11-fail-fast-patterns.md`: Fail-Fast Patterns (Constitution Principle XIII)
+- `.claude/rules/13-staging-verification.md`: Staging Deployment and Live Verification
+- `.claude/rules/14-do-workflow-persistence.md`: /do Workflow State Persistence (Anti-Compaction)
+- `.claude/rules/18-file-size-limits.md`: File Size Limits
+- `.claude/rules/19-external-service-integration.md`: External Service Integration Review
+- `.claude/rules/20-cross-origin-cors.md`: Cross-Origin Browser Requests Require Automated CORS
+- `.claude/rules/21-timeout-merge-guard.md`: Timeout Merge Guard
+- `.claude/rules/22-infrastructure-merge-gate.md`: Infrastructure Items Are Merge-Blocking
+- `.claude/rules/23-cross-boundary-contract-tests.md`: Cross-Boundary Contract Tests
+- `.claude/rules/25-review-merge-gate.md`: Merge-Blocking Review Gate
+- `.claude/rules/28-credential-resolution-fallback-tests.md`: Credential Resolution, Fallback, and Rotation Safety Tests
+- `.claude/rules/29-local-first-debugging.md`: Local-First Prototyping and Log-Driven Debugging
+- `.claude/rules/30-never-ship-broken-features.md`: Never Ship Broken Features (ABSOLUTE RULE)
+- `.claude/rules/33-staging-feature-validation.md`: Staging Feature Validation Methodology
+- `.claude/rules/35-vertical-slice-testing.md`: Vertical Slice Testing
+- `.claude/rules/38-agent-feedback-and-memory.md`: Agent Feedback, Memory, and Idea Hygiene
+- `.claude/rules/39-debug-before-redesign.md`: Debug Before Redesign (Mandatory)
+- `.claude/rules/41-credential-snapshot-resilience.md`: Credential Snapshot/Resolution Must Tolerate a Single Bad Row
+- `.claude/rules/42-no-untracked-degrading-placeholders.md`: No Untracked Behavior-Degrading Placeholders
+- `.claude/rules/59-understand-before-adding.md`: Understand the System Before Adding to It
+- `.claude/rules/60-request-io-and-bundle-budgets.md`: Request I/O and Client Bundle Budgets
+- `.claude/rules/62-tests-must-observe-the-real-trigger.md`: A Test Must Reach the Feature the Way Production Does
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+- `.claude/rules/74-proxy-signals-must-match-the-condition.md`: A Gate Must Key On Its Condition, Not On A Signal That Merely Correlates
+- `.claude/rules/76-cost-decisions-must-query-billed-metrics.md`: Cost Decisions Must Query Billed Metrics
+- `.claude/rules/81-work-bounds-must-state-throughput.md`: A Work Bound Must State Its Throughput at the Outer Probable Limit
+
+<!-- END GENERATED RULE INDEX -->

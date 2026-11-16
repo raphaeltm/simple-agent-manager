@@ -3,6 +3,7 @@ paths:
   - 'apps/web/src/components/NavSidebar.tsx'
   - 'apps/web/src/components/MobileNavDrawer.tsx'
   - 'apps/web/src/components/AppShell.tsx'
+  - 'apps/web/src/components/chat/SessionLinkedWorkDrawer.tsx'
 ---
 
 # Desktop–Mobile Navigation Parity

@@ -4,6 +4,7 @@ paths:
   - 'packages/acp-client/**'
   - 'packages/terminal/**'
   - 'packages/ui/**'
+  - 'packages/eslint-plugin-sam/src/rules/no-inline-markdown-components.js'
 ---
 
 # An Object Literal in a Render Body Can Remount an Entire Subtree

@@ -76,8 +76,6 @@ loads them by itself on file access; other harnesses must open them.
 
 - `.claude/rules/51-runtime-boundary-validation.md`: Runtime boundary validation
 - `.claude/rules/51-server-side-node-class-gates.md`: Server-Side Node-Class / Identity Gates — Never Trust a Client-Supplied Identifier or Agent Abstention
-- `.claude/rules/60-request-io-and-bundle-budgets.md`: Request I/O and Client Bundle Budgets
 - `.claude/rules/69-aggregate-capacity-at-final-reservation.md`: Enforce Aggregate Capacity at the Final Atomic Reservation
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 
 <!-- END GENERATED RULE INDEX -->

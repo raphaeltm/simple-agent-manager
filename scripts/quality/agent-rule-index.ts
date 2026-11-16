@@ -15,23 +15,33 @@ export const INDEX_BEGIN =
   '<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->';
 export const INDEX_END = '<!-- END GENERATED RULE INDEX -->';
 
-/** Scope reduced to the areas it touches, so the always-loaded index stays small. */
+/**
+ * Scope reduced to the areas it touches, so the always-loaded index stays small. A
+ * partial area names up to three of its paths; the rule's frontmatter has the rest.
+ */
 export function describeScope(rule: RuleFile): string {
-  const areas = new Set<string>();
+  const whole = new Set<string>();
+  const partial = new Map<string, string[]>();
+  const other: string[] = [];
   for (const pattern of rule.paths ?? []) {
     if (pattern.startsWith('**/') || !pattern.includes('/')) {
-      areas.add(pattern);
+      other.push(pattern);
       continue;
     }
     const segments = pattern.split('/');
     const depth = segments[0] === 'apps' || segments[0] === 'packages' ? 2 : 1;
     const area = segments.slice(0, depth).join('/');
-    areas.add(pattern === `${area}/**` ? area : `${area} (part)`);
+    if (pattern === `${area}/**`) whole.add(area);
+    else partial.set(area, [...(partial.get(area) ?? []), pattern.slice(area.length + 1)]);
   }
-  // A whole-area entry makes the partial one redundant.
-  return [...areas]
-    .filter((area) => !area.endsWith(' (part)') || !areas.has(area.slice(0, -7)))
-    .join(', ');
+  const parts = [...whole];
+  for (const [area, paths] of partial) {
+    if (whole.has(area)) continue;
+    const shown = paths.slice(0, 3).join(', ');
+    const more = paths.length > 3 ? `, +${paths.length - 3} more` : '';
+    parts.push(`${area} (${shown}${more})`);
+  }
+  return [...parts, ...other].join('; ');
 }
 
 function scopedRules(model: InstructionModel): RuleFile[] {
@@ -101,5 +111,35 @@ export function applyGeneratedBlock(document: string, block: string): string {
   if (begin >= 0 && end > begin) {
     return `${document.slice(0, begin)}${block}${document.slice(end + INDEX_END.length)}`;
   }
-  return `${document.replace(/\s*$/, '')}\n\n${block}\n`;
+  return `${document.trimEnd()}\n\n${block}\n`;
+}
+
+/**
+ * Block for the root AGENTS.md, the only project instructions Codex has at launch.
+ * It names the rules Claude Code loads at launch, which Codex would otherwise never see,
+ * and states the route to path-scoped rules.
+ */
+export function renderLaunchRuleIndex(model: InstructionModel): string {
+  const lines = model
+    .claudeLaunchRules()
+    .filter((rule) => !rule.path.endsWith('/00-rule-routing.md'))
+    .sort((a, b) => a.path.localeCompare(b.path))
+    .map((rule) => `- \`${rule.path}\`: ${rule.title}`);
+  return [
+    INDEX_BEGIN,
+    '',
+    '## Rules',
+    '',
+    'Codex does not load `.claude/rules/` by itself. Two steps before you edit:',
+    '',
+    '1. Open the `AGENTS.md` nearest the files you will change and read the rules its',
+    '   "Rules for this directory" section lists. `.claude/rules/00-rule-routing.md` indexes',
+    '   every path-scoped rule.',
+    '2. The rules below apply to all work. Claude Code has them in context at launch. Read',
+    '   the ones that bear on your task.',
+    '',
+    ...lines,
+    '',
+    INDEX_END,
+  ].join('\n');
 }

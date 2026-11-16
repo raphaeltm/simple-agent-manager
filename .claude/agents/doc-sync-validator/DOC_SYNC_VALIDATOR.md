@@ -25,7 +25,7 @@ You are a documentation synchronization validator for the Simple Agent Manager p
 | `apps/www/src/content/docs/docs/architecture/security.md`    | Public security architecture                                  |
 | `AGENTS.md`                                                  | Agent task patterns (non-Claude agents)                       |
 | `.claude/rules/*.md`                                         | Behavioral rules; `paths` frontmatter scopes a rule to files |
-| `apps/*/.claude/rules/*.md`, `packages/*/.claude/rules/*.md` | Path-scoped full behavioral rules (Claude Code)               |
+| `AGENTS.md` beside code (generated "Rules for this directory") | Index of the path-scoped rules for that directory             |
 
 ### Code Sources (documentation must match)
 

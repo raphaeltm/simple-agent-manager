@@ -72,17 +72,14 @@ Read the rules whose scope covers the files you will change before editing. Clau
 loads them by itself on file access; other harnesses must open them.
 
 - `.claude/rules/06-api-patterns.md`: API Technical Patterns
-- `.claude/rules/07-env-and-urls.md`: Environment Variables & URL Construction
 - `.claude/rules/24-no-duplicate-ui-controls.md`: No Duplicate Implementations
 - `.claude/rules/26-project-chat-first.md`: Project Chat First
 - `.claude/rules/27-vm-agent-staging-refresh.md`: VM Agent Binary Refresh for Staging Tests
-- `.claude/rules/28-credential-resolution-fallback-tests.md`: Credential Resolution, Fallback, and Rotation Safety Tests
 - `.claude/rules/31-migration-safety.md`: Migration Safety (ABSOLUTE RULE — DATA LOSS PREVENTION)
 - `.claude/rules/32-cf-api-debugging.md`: Cloudflare API Debugging (Use This Before Guessing)
 - `.claude/rules/34-vm-agent-callback-auth-agent-side.md`: VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE)
 - `.claude/rules/34-vm-agent-callback-auth.md`: VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE)
 - `.claude/rules/40-sentinel-rows-excluded-from-counts.md`: Internal/Sentinel Rows Must Be Excluded From Business-Logic Counts
-- `.claude/rules/41-credential-snapshot-resilience.md`: Credential Snapshot/Resolution Must Tolerate a Single Bad Row
 - `.claude/rules/43-long-running-mcp-tools.md`: Long-Running MCP Tools Must Be Async
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md`: Storage Migrations Must Enumerate Every Writer of the Migrated Data
 - `.claude/rules/45-durable-object-concurrency-mutex.md`: Durable Objects Do Not Serialize Across `await` — Use a Real Mutex for Critical Sections
@@ -96,7 +93,6 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/55-runaway-cost-emergency-ops.md`: Runaway-Cost Emergency Operations
 - `.claude/rules/57-write-only-cross-boundary-state.md`: Cross-Boundary State With Multiple Consumers Must Be Reconciled, Not Just Reported
 - `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`: A "Work Is Unrecoverable" Verdict Must Read The Same Record The Resumer Reads
-- `.claude/rules/60-request-io-and-bundle-budgets.md`: Request I/O and Client Bundle Budgets
 - `.claude/rules/61-guards-must-cover-every-runtime.md`: A Guard Added for One Runtime Must Be Enforced for Every Runtime
 - `.claude/rules/61-per-cycle-budget-counters.md`: Per-Cycle Budget Counters Must Reset on Success
 - `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md`: Making a Scoping Column Nullable Silently Deletes Every Check That Used It
@@ -109,7 +105,6 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`: A Config Flip Ships Only When the Deployed Value Says So
 - `.claude/rules/71-tightening-a-column-can-delete-a-capability.md`: A New Required Column Can Silently Delete a Capability for Every Existing Row
 - `.claude/rules/72-error-categories-must-match-the-recovery-action.md`: An Error Category Must Name the Recovery Action, Not the Provider's Vocabulary
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 - `.claude/rules/75-external-api-check-then-act.md`: A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure
 - `.claude/rules/77-library-extension-points-typed-and-exercised.md`: Implement a Library Extension Point Against the Library's Types, and Test It Through the Library
 - `.claude/rules/78-snapshot-capture-must-scale-with-the-session.md`: Snapshot Capture Cost Must Scale With the Session, Not the Repository

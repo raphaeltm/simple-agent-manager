@@ -41,7 +41,6 @@ pnpm --filter @simple-agent-manager/tail-worker dev        # Local dev (limited 
 Read the rules whose scope covers the files you will change before editing. Claude Code
 loads them by itself on file access; other harnesses must open them.
 
-- `.claude/rules/07-env-and-urls.md`: Environment Variables & URL Construction
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+No path-scoped rules apply to this directory.
 
 <!-- END GENERATED RULE INDEX -->

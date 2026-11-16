@@ -5,6 +5,10 @@ paths:
   - 'packages/vm-agent/internal/deploy/artifact_client.go'
   - 'packages/vm-agent/internal/deploy/compose.go'
   - 'packages/vm-agent/internal/server/health.go'
+  - 'packages/ai-proxy/src/ai-monthly-cost-cron.ts'
+  - 'packages/app-deployment/src/scheduled/**'
+  - 'packages/repo-hosting/src/github-installation-leak-sweep.ts'
+  - 'packages/agent-email/src/recovery.ts'
 ---
 
 # Scheduled Handlers: Isolate Every Step, and Never Use a Liveness Timestamp as an Idleness Signal

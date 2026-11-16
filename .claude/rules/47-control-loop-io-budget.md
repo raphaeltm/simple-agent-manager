@@ -2,6 +2,10 @@
 paths:
   - 'apps/api/**'
   - 'packages/project-data/**'
+  - 'packages/ai-proxy/src/ai-monthly-cost-cron.ts'
+  - 'packages/app-deployment/src/scheduled/**'
+  - 'packages/repo-hosting/src/github-installation-leak-sweep.ts'
+  - 'packages/agent-email/src/recovery.ts'
 ---
 
 # Control Loops Need Explicit I/O Budgets

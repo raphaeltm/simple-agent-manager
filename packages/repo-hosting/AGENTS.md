@@ -53,11 +53,10 @@ stay in `apps/api/tests/`.
 Read the rules whose scope covers the files you will change before editing. Claude Code
 loads them by itself on file access; other harnesses must open them.
 
-- `.claude/rules/28-credential-resolution-fallback-tests.md`: Credential Resolution, Fallback, and Rotation Safety Tests
-- `.claude/rules/41-credential-snapshot-resilience.md`: Credential Snapshot/Resolution Must Tolerate a Single Bad Row
+- `.claude/rules/31-migration-safety.md`: Migration Safety (ABSOLUTE RULE — DATA LOSS PREVENTION)
+- `.claude/rules/47-control-loop-io-budget.md`: Control Loops Need Explicit I/O Budgets
 - `.claude/rules/51-runtime-boundary-validation.md`: Runtime boundary validation
-- `.claude/rules/60-request-io-and-bundle-budgets.md`: Request I/O and Client Bundle Budgets
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+- `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`: Scheduled Handlers: Isolate Every Step, and Never Use a Liveness Timestamp as an Idleness Signal
 - `.claude/rules/75-external-api-check-then-act.md`: A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure
 
 <!-- END GENERATED RULE INDEX -->

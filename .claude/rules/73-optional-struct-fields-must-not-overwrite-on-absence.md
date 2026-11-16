@@ -1,11 +1,3 @@
----
-paths:
-  - '**/*.go'
-  - '**/*.ts'
-  - '**/*.tsx'
-  - 'apps/api/src/db/migrations/0200_skills_optional_agent_type.sql'
----
-
 # A Zero-Valued Optional Field Must Not Overwrite Existing State
 
 ## When This Applies
