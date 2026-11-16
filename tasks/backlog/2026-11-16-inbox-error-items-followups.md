@@ -56,6 +56,12 @@ failed-wake item was finished in the same PR):
     counted it; the automation item inherits that, so cancelling runs can file "failed its last N
     runs". The streak for the item (and arguably auto-pause) should skip cancelled runs.
 
+11. A failing automation files one task item (and an `error` notification) for each failed run as
+    well as its automation item at the threshold: on staging2 three failed runs of one automation
+    made three "stopped before it finished" items plus "Automation … failed its last 3 runs". Decide
+    whether a run of an automation should file only through its automation item (the threshold
+    then governs when the person hears), and stack or suppress the run items accordingly.
+
 ## Acceptance Criteria
 
 - [ ] Human prompt deliveries that fail terminally on an awake chat file one `delivery` error item
@@ -66,3 +72,4 @@ failed-wake item was finished in the same PR):
 - [ ] An Instant first-prompt failure files one item and closes on the next successful prompt
 - [ ] A VM-agent failure callback files and notifies inline even when the workspace is already gone
 - [ ] Cancelled automation runs do not count toward the automation item's failure streak
+- [ ] Decide and implement how failed automation runs relate to the automation item (one alert per failure, not two)
