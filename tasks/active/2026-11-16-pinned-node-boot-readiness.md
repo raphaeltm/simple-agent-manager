@@ -19,12 +19,32 @@ Rules: 39 (debug first), 62 (real trigger), 67 (shared predicate unchanged), 74 
 ## Checklist and acceptance
 
 - [x] Read idea and updates; confirm null and missing-ready failure paths.
-- [ ] Guard pinned boot with existing configurable readiness deadline; preserve admission and ownership checks.
-- [ ] Distinguish reported mismatch, missing-version deadline and missing-ready deadline messages.
-- [ ] Real startup tests: null version -> wait -> matching heartbeat but no /ready -> wait -> /ready -> workspace_creation.
-- [ ] Controls: reported mismatch refused, never-ready timeout terminal, missing/deleted node still refused.
-- [ ] Remove new wait guard temporarily and prove divergence test red; restore and pass.
+- [x] Guard pinned boot with existing configurable readiness deadline; preserve admission and ownership checks.
+- [x] Distinguish reported mismatch, missing-version deadline and missing-ready deadline messages.
+- [x] Real startup tests: null version -> wait -> matching heartbeat but no /ready -> wait -> /ready -> workspace_creation.
+- [x] Controls: reported mismatch refused, never-ready timeout terminal, missing/deleted node still refused.
+- [x] Remove new wait guard temporarily and prove divergence test red; restore and pass.
 - [ ] Sync relevant public docs; lint, typecheck, tests, build.
 - [ ] Local specialist and task completion reviews; resolve findings.
 - [ ] Both staging lease status checks, queue/reserve/deploy, real node and immediately pinned task, confirm running after readiness, delete workspace/node, release.
 - [ ] Ready PR, full CI, best-effort CodeRabbit, merge authorized, production deploy and smoke; complete idea with PR/commit and report feature.selfhost-landing.
+
+## Validation evidence
+
+- Existing selection unit suite: 43/43 passed.
+- Real startup Worker suite: 11/11 passed (one file collected), including authenticated SELF /heartbeat + /ready and actual workspace allocation. Added late-ready and mismatch-during-wait controls after Cloudflare review.
+- Mutation: removed only the new readiness wait block; running-null-version divergence failed (`completed: true` instead of false), while both initial differing-build controls still passed (1 failed, 2 passed, 8 skipped). Restored guard; final green rerun underway.
+- Baseline lint: 22 tasks passed; typecheck: 36 tasks passed. Full build: 18 tasks passed. Full root tests rerunning after an overlapping Astro build caused a shared-dist ERR_MODULE_NOT_FOUND; no code defect found in that collision.
+- Cloudflare review P2: delayed alarm after late readiness could bypass deadline. Fixed by enforcing persisted deadline even when readiness is now present; reviewer rechecked and approved. Constitution PASS; docs PASS, LOW clarification applied to existing configuration docs.
+- Staging remains pending, not waived. Both lease statuses checked. Reserve run 43918326968 succeeded but intentionally wrote no reservation because the primary holder predates queue. Wake accepted at18:26:35Z to recheck/reserve after holder expiry. No test resources or deployments started yet.
+
+## Expanded producer trace
+
+`POST /api/projects/:id/tasks/submit` -> `submitTaskImplementation` rejected preferred status creating before runner; an immediate new-node pin could not reach the readiness wait. New route regression proves this: only creating case red (26 others pass). Accept owned creating/running at submission; stopped/deleted/foreign/missing remain refused before task effects. Rule18 required splitting preexisting783-line module: shared validation/runtime resolution remains submit-task-implementation.ts, VM stage moves unchanged to submit-vm-task.ts (separate refactor commit8e80ced19). Both under500 lines. Source-scan consumers and allocation inventory updated to moved location; real route+runner regressions remain behavioral.
+
+- [x] Confirm outer submit status gate with pre-fix HTTP400 regression.
+- [x] Split oversized source module preserving behavior before changing status condition.
+- [x] Accept creating/running on real submission producer; retain foreign/deleted/stopped controls.
+- [ ] Update moved static source consumers and allocation inventory; rerun affected tests.
+
+Post-mutation restored Worker suite11/11 passed. Full root test attempt2: web419/420 files passed, single inbox test timed out waiting for count; isolated6/6 passed. Also Vitest teardown import error in retired-trial; latest full test attempt running without concurrent build. API suite was canceled by sibling web failure, so it needs the final full run.

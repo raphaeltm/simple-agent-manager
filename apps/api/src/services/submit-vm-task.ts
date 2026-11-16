@@ -1,7 +1,7 @@
 /** VM submission after shared input validation and runtime resolution. */
 import {
   recordWorkStartIdeaLink,
-  requireOpenIdeaForWorkStart,
+  type requireOpenIdeaForWorkStart,
 } from '@simple-agent-manager/operations';
 import {
   collectStoredResourceRequirementLayers,
@@ -9,7 +9,7 @@ import {
   firstResourceRequirementLayer,
   firstResourceRequirementLayerJson,
   mergeResourceRequirementLayers,
-  normalizeResourceRequirementsInput,
+  type normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,
 } from '@simple-agent-manager/scheduler-core';
 import type { SubmitTaskResponse, VMSize } from '@simple-agent-manager/shared';
@@ -37,11 +37,11 @@ import {
 import { resolveProjectAgentDefault } from '../services/project-agent-defaults';
 import * as projectDataService from '../services/project-data';
 import { validateRunAgentConfiguration } from '../services/run-agent-configuration';
-import { resolveSkillProfile } from '../services/skills';
+import { type resolveSkillProfile } from '../services/skills';
 import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { startTaskRunnerDO } from '../services/task-runner-do';
 import { getTaskTitleConfig } from '../services/task-title';
-import { buildArchivedForkContext } from './archived-chat-fork';
+import { type buildArchivedForkContext } from './archived-chat-fork';
 import { type SamDispatchReservation } from './sam-dispatch-reservation';
 import { getInitialTaskTitle, schedulePostSubmitWork } from './task-submit-title';
 

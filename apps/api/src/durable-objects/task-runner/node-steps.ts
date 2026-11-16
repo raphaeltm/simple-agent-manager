@@ -5,9 +5,7 @@
  * `node_agent_ready` in `./node-agent-ready-step`; both are re-exported here so
  * the DO's step table keeps one import site. See rule 18.
  */
-import {
-  resolveEffectiveNodeHostMemoryReserveMb,
-} from '@simple-agent-manager/scheduler-core';
+import { resolveEffectiveNodeHostMemoryReserveMb } from '@simple-agent-manager/scheduler-core';
 
 import { log } from '../../lib/logger';
 import {
@@ -21,9 +19,7 @@ import {
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
-import {
-  trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-admission-sql';
+import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-admission-sql';
 import { shouldProvisionSpreadNode } from './capacity-pool-node-limit';
 import {
   findNodeWithCapacity,
@@ -143,29 +139,33 @@ export async function handleNodeSelection(
     }
     const waitingForVersion =
       !agentVersion && !!normalizeAgentVersion(rc.env.VM_AGENT_REQUIRED_VERSION);
-    if (node.status === 'creating' || !node.agentReadyAt || waitingForVersion) {
+    const awaitingReadiness = node.status === 'creating' || !node.agentReadyAt || waitingForVersion;
+    if (awaitingReadiness || state.agentReadyStartedAt !== null) {
       // Stay in selection: each alarm must revalidate ownership, placement and
       // reservation capacity before adopting a user-pinned node. Never replace it.
       state.agentReadyStartedAt ??= Date.now();
       const deadline = state.agentReadyStartedAt + rc.getAgentReadyTimeoutMs();
       const reason = waitingForVersion
         ? 'agent has not reported a version yet'
-        : 'agent has not become ready yet';
+        : awaitingReadiness
+          ? 'agent has not become ready yet'
+          : 'agent readiness deadline exceeded';
       if (Date.now() >= deadline) {
-        throw Object.assign(
-          new Error(`Specified node not ready by deadline: ${reason}`),
-          { permanent: true }
-        );
+        throw Object.assign(new Error(`Specified node not ready by deadline: ${reason}`), {
+          permanent: true,
+        });
       }
-      log.info('task_runner_do.preferred_node_waiting', {
-        taskId: state.taskId,
-        nodeId: node.id,
-        reason,
-        deadline,
-      });
-      await rc.ctx.storage.put('state', state);
-      await rc.ctx.storage.setAlarm(Math.min(deadline, Date.now() + rc.getAgentPollIntervalMs()));
-      return;
+      if (awaitingReadiness) {
+        log.info('task_runner_do.preferred_node_waiting', {
+          taskId: state.taskId,
+          nodeId: node.id,
+          reason,
+          deadline,
+        });
+        await rc.ctx.storage.put('state', state);
+        await rc.ctx.storage.setAlarm(Math.min(deadline, Date.now() + rc.getAgentPollIntervalMs()));
+        return;
+      }
     }
     if (!nodeSatisfiesTaskResources(node, state)) {
       throw Object.assign(new Error('Specified node does not satisfy the requested resources'), {

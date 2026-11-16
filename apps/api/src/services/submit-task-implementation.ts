@@ -209,8 +209,8 @@ export async function submitTaskImplementation(
     if (!node) {
       throw errors.notFound('Node');
     }
-    if (node.status !== 'running') {
-      throw errors.badRequest('Node must be in running status');
+    if (!['creating', 'running'].includes(node.status)) {
+      throw errors.badRequest('Node must be in creating or running status');
     }
   }
 

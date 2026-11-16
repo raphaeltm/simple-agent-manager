@@ -34,10 +34,10 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     ],
   },
   {
-    filePath: 'apps/api/src/services/submit-task-implementation.ts',
+    filePath: 'apps/api/src/services/submit-vm-task.ts',
     table: 'tasks',
-    owner: 'submitTaskImplementation',
-    role: 'shared user task submission service',
+    owner: 'submitVmTask',
+    role: 'VM task submission after shared input validation',
     canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
     requiredEvidence: CANONICAL_TASK_START,
   },
