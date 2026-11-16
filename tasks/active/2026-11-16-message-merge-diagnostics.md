@@ -67,3 +67,8 @@ Next socket-scope PR is authorized by parent evente6e46d8f but MUST be separate 
 ### Sonar complexity followup — 2026-11-16 01:11UTC
 
 After the handoff, Sonar reported Quality Gate PASS with0.0% duplication, but also CRITICAL typescript:S3776 on stage cognitivecomplexity26>15. Extracted only the newly added diagnostic reason chains into recordContinuationBreak and recordOpeningBreak, preserving eligibility, calltiming, precedence and all merge/SQL conditions. Incremental specialist review PASS. ESLint/Prettier/project-data build PASS; direct real-workerd four affected suites48/48PASS(75.22s), including13counter cases and existingmerge/upgrade/rowusagecoverage. Two earlier wrapper runs were deliberately terminated143 without results and are not claimed as PASS. Current code changes require fresh exacthead CI/Sonar before merge. No new scope/behavior or stagingresources.
+
+
+### Final Sonar refactor followup — 2026-11-16 01:19UTC
+
+The first helper extraction reduced stage complexity to17 but did not clear S3776, and its boolean diagnostic parameter triggered S2301. Extracted existing append accumulation into stageContentAppend(id,content,offset), and opening diagnostics now derive their predicate from the message before latestPosition mutates. Specialist review PASS: insert/update choice, content, offsets, revisions and reason precedence preserved. ESLint/project-data build PASS; final four-suite real-workerd rerun48/48PASS. Fresh exacthead CI/Sonar must still pass before merge.

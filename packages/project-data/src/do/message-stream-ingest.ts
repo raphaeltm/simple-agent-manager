@@ -262,22 +262,7 @@ export class MessageStreamBatch {
       open.bytes + contentBytes <= this.config.maxRowBytes
     ) {
       if (this.metrics) this.metrics.coalesced++;
-      const existing = this.inserts.get(open.id);
-      if (existing) existing.content += message.content;
-      else {
-        const update = this.updates.get(open.id);
-        if (update) {
-          update.content += message.content;
-          update.revision += message.content.length;
-        } else
-          this.updates.set(open.id, {
-            id: open.id,
-            sessionId: this.sessionId,
-            content: message.content,
-            offset: open.length,
-            revision: open.length + message.content.length,
-          });
-      }
+      this.stageContentAppend(open.id, message.content, open.length);
       open.length += message.content.length;
       open.bytes += contentBytes;
       open.lastSequence = sequence;
@@ -292,7 +277,7 @@ export class MessageStreamBatch {
     ).byteLength;
     const newest =
       !this.latestPosition || compareMessagePositions(message, this.latestPosition) >= 0;
-    if (eligible) this.recordOpeningBreak(newest, bytes);
+    if (eligible) this.recordOpeningBreak(message, bytes);
     if (newest) this.latestPosition = message;
     this.state.open =
       eligible && newest && bytes <= this.config.maxRowBytes
@@ -312,6 +297,25 @@ export class MessageStreamBatch {
     return message.id;
   }
 
+  private stageContentAppend(id: string, content: string, offset: number): void {
+    const existing = this.inserts.get(id);
+    if (existing) existing.content += content;
+    else {
+      const update = this.updates.get(id);
+      if (update) {
+        update.content += content;
+        update.revision += content.length;
+      } else
+        this.updates.set(id, {
+          id,
+          sessionId: this.sessionId,
+          content,
+          offset,
+          revision: offset + content.length,
+        });
+    }
+  }
+
   private recordContinuationBreak(
     message: StoredBatchMessage,
     sequence: number | undefined,
@@ -326,7 +330,9 @@ export class MessageStreamBatch {
       breakMerge(this.metrics, 'size_cap');
   }
 
-  private recordOpeningBreak(newest: boolean, bytes: number): void {
+  private recordOpeningBreak(message: StoredBatchMessage, bytes: number): void {
+    const newest =
+      !this.latestPosition || compareMessagePositions(message, this.latestPosition) >= 0;
     if (!newest) breakMerge(this.metrics, 'out_of_order');
     else if (bytes > this.config.maxRowBytes) breakMerge(this.metrics, 'size_cap');
   }
