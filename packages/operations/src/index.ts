@@ -115,6 +115,11 @@ export {
   type PhaseDurationStatsResult,
   type PhaseTimingRow,
 } from './insights-phase-timings';
+export { runReceipt, type RunReceiptInput } from './insights-receipt';
+export {
+  INSIGHTS_RECEIPT_SETTINGS,
+  type InsightsReceiptSettingName,
+} from './insights-receipt-settings-definition';
 export { getPlatformOperationLimits } from './limits';
 export {
   getFileContext,

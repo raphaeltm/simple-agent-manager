@@ -33,7 +33,7 @@
   "devDependencies": {
     "@astrojs/check": "catalog:",
     "@axe-core/playwright": "4.14.0",
-    "@playwright/test": "1.62.1",
+    "@playwright/test": "1.65.0",
     "@vitest/coverage-v8": "catalog:",
     "esbuild": "0.28.1",
     "sharp": "0.35.5",

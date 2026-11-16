@@ -1,5 +1,8 @@
 import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-deployment';
-import type { InsightsFlowSettingName } from '@simple-agent-manager/operations';
+import type {
+  InsightsFlowSettingName,
+  InsightsReceiptSettingName,
+} from '@simple-agent-manager/operations';
 
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
@@ -35,6 +38,7 @@ export type AdminSettingName =
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
   | InboxSettingName
+  | InsightsReceiptSettingName
   | InsightsFlowSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName

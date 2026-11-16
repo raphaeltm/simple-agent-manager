@@ -34,6 +34,7 @@ import type { ConnectorAnswerChoice } from './connector-answer-input';
 import type { ConnectorReadSettingName } from './connector-read-settings-definition';
 import type { InboxSettingName } from './inbox-settings-definition';
 import type { InsightsFlowSettingName } from './insights-flow-settings';
+import type { InsightsReceiptSettingName } from './insights-receipt-settings-definition';
 import type {
   AgentActivityTask,
   LimitKey,
@@ -84,6 +85,7 @@ export type OperationSettingName =
   | 'collaboration.ideaAgentNoteMinIntervalSeconds'
   | 'collaboration.ideaUpdatePageSize'
   | InboxSettingName
+  | InsightsReceiptSettingName
   | InsightsFlowSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;

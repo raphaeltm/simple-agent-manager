@@ -287,7 +287,23 @@ schedule (`apps/api/src/services/inbox/sweep.ts`, every five minutes):
 A changed setting applies to questions asked afterwards; an open question keeps the deadline it was
 given, and its reminders follow the current percentages.
 
-## Insights
+## Run receipt
+
+Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-apiprojectsprojectidtaskstaskidreceipt)
+(`packages/operations/src/insights-receipt-settings-definition.ts`).
+
+| Setting                                  | Default | Range       | What it limits                                                                     |
+| ---------------------------------------- | ------- | ----------- | ---------------------------------------------------------------------------------- |
+| `insights.receiptMessageScanMaxRows`     | 10,000  | 100–100,000 | Chat messages one receipt reads to count tool calls; a longer run shows a floor    |
+| `insights.receiptWaitingMaxQuestions`    | 200     | 10–2,000    | Agent questions one receipt reads to measure time waiting on a person              |
+| `insights.receiptComparisonRuns`         | 50      | 3–500       | Recent runs of the same skill or profile read to find the usual durations          |
+| `insights.receiptComparisonWindowDays`   | 30      | 1–365       | Days back the receipt looks for runs to compare with                               |
+| `insights.receiptComparisonMinRuns`      | 3       | 1–50        | Fewest comparable runs before a duration is called slower than usual               |
+| `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                |
+| `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                    |
+| `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown |
+
+## Insights flow
 
 Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow tab
 (`packages/operations/src/insights-flow-settings.ts`).
