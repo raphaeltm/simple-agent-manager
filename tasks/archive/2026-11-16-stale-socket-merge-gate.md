@@ -111,7 +111,17 @@ row.
 - [x] Discrimination recorded (below)
 - [x] Docs: `api.md` sessions/ws section, `admin-settings.md` legacy note, `chat.ts` route comment, `useProjectWebSocket` JSDoc; dead `ProjectWebSocketEvent` type removed
 - [x] Backlog task for the pre-admission residual: `tasks/backlog/2026-11-16-legacy-chat-pre-admission-append-gap.md`
-- [ ] Staging2 verification (Phase 6)
+- [x] Staging2 verification (Phase 6)
+
+### Staging2 evidence (2026-11-16, run 43787757440 on `0f104be17`)
+
+One Artifacts project, one Instant Claude Code session, real browser WebSockets, merging on (reset to
+default afterwards). Turn 1 with a legacy project socket: 2 assistant rows (merged), 0 transcript
+frames to that socket, lifecycle frames received. Turn 3 with a legacy session socket on the session:
+196 assistant rows (merging off for that session), 34 `messages.batch`, 0 `message.append`, no close,
+received text hash equal to stored. Cleanup: session stopped, project deleted, settings at default,
+signed out. The 4409 resync close is covered by the held-batch real-workerd test only (its window
+cannot be timed live).
 
 ### Discrimination record (each guard removed once, restored byte-identical)
 
