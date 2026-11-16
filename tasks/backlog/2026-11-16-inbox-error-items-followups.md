@@ -50,6 +50,12 @@ failed-wake item was finished in the same PR):
    neither until the next sweep tick (up to 5 minutes later, which then files and notifies). Seen on
    staging2 2026-11-16 (task 01M7JG20EKZ14CF6TW7XY4M1H9: failed 15:42:18Z, item at the 15:45Z tick).
 
+10. A run whose task the person cancelled is recorded as a `failed` execution
+    (`trigger-execution-sync.ts`: every non-completed terminal status maps to `failed`, with a NULL
+    error message), so it counts toward the failure streak. The existing auto-pause has always
+    counted it; the automation item inherits that, so cancelling runs can file "failed its last N
+    runs". The streak for the item (and arguably auto-pause) should skip cancelled runs.
+
 ## Acceptance Criteria
 
 - [ ] Human prompt deliveries that fail terminally on an awake chat file one `delivery` error item
@@ -59,3 +65,4 @@ failed-wake item was finished in the same PR):
 - [ ] Inbox guide states which error items close by themselves and which close when you write
 - [ ] An Instant first-prompt failure files one item and closes on the next successful prompt
 - [ ] A VM-agent failure callback files and notifies inline even when the workspace is already gone
+- [ ] Cancelled automation runs do not count toward the automation item's failure streak
