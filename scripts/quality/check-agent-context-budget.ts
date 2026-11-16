@@ -309,18 +309,21 @@ function hookCommands(hooks: unknown): string[] {
   return commands;
 }
 
-function missingScriptFindings(file: string, hooks: unknown): Finding[] {
-  return hookCommands(hooks)
-    .flatMap(hookCommandScripts)
-    .filter((script) => !existsSync(resolve(ROOT, script)))
+/**
+ * `files` holds what git can see (tracked plus untracked, not ignored). A script that exists
+ * only locally, for example under an ignored directory, is missing from every clean checkout.
+ */
+function missingScriptFindings(file: string, hooks: unknown, files: Set<string>): Finding[] {
+  return [...new Set(hookCommands(hooks).flatMap(hookCommandScripts))]
+    .filter((script) => !files.has(script))
     .map((script) => ({
       check: 'hook-config',
       file,
-      message: `a hook runs ${script}, which does not exist; the hook would fail on every run`,
+      message: `a hook runs ${script}, which is not in the repository (missing, or ignored by .gitignore); the hook would fail on every run`,
     }));
 }
 
-function hookFindings(): Finding[] {
+function hookFindings(files: Set<string>): Finding[] {
   const findings: Finding[] = [];
   const toFinding = (file: string) => (problem: { event: string; message: string }) => ({
     check: 'hook-config',
@@ -330,7 +333,7 @@ function hookFindings(): Finding[] {
   if (existsSync(resolve(ROOT, CLAUDE_SETTINGS_FILE))) {
     const settings = JSON.parse(read(CLAUDE_SETTINGS_FILE)) as unknown;
     findings.push(...checkClaudeHookConfig(settings).map(toFinding(CLAUDE_SETTINGS_FILE)));
-    findings.push(...missingScriptFindings(CLAUDE_SETTINGS_FILE, hooksOf(settings)));
+    findings.push(...missingScriptFindings(CLAUDE_SETTINGS_FILE, hooksOf(settings), files));
   }
   if (existsSync(resolve(ROOT, CODEX_CONFIG_FILE))) {
     let config: unknown;
@@ -347,12 +350,12 @@ function hookFindings(): Finding[] {
       ];
     }
     findings.push(...checkCodexHookConfig(config).map(toFinding(CODEX_CONFIG_FILE)));
-    findings.push(...missingScriptFindings(CODEX_CONFIG_FILE, hooksOf(config)));
+    findings.push(...missingScriptFindings(CODEX_CONFIG_FILE, hooksOf(config), files));
   }
   if (existsSync(resolve(ROOT, CODEX_HOOKS_FILE))) {
     const config = JSON.parse(read(CODEX_HOOKS_FILE)) as unknown;
     findings.push(...checkCodexHookConfig(config).map(toFinding(CODEX_HOOKS_FILE)));
-    findings.push(...missingScriptFindings(CODEX_HOOKS_FILE, hooksOf(config)));
+    findings.push(...missingScriptFindings(CODEX_HOOKS_FILE, hooksOf(config), files));
   }
   return findings;
 }
@@ -386,12 +389,14 @@ function collectFindings(
   budget: Budget
 ): Finding[] {
   const input = { model, trackedFiles: files };
+  const visible = new Set(files);
   const staleIndexes = indexTargets(model, files)
-    .filter((target) => readGenerated(target.file) !== target.expected)
+    .filter((target) => !visible.has(target.file) || readGenerated(target.file) !== target.expected)
     .map((target) => ({
       check: 'index-stale',
       file: target.file,
-      message: 'generated rule index is out of date; run pnpm quality:agent-context-budget --write',
+      message:
+        'generated rule index is out of date, or ignored by .gitignore; run pnpm quality:agent-context-budget --write and commit it',
     }));
   return [
     ...checkPatterns(input),
@@ -403,7 +408,7 @@ function collectFindings(
     ...checkCodexChainSizes(agentsFileSizes(files), CODEX_PROJECT_DOC_MAX_BYTES),
     ...checkDirectoriesHaveIndex(model, files),
     ...checkRuleReferencesInSource(model, sourceRuleReferences(files)),
-    ...hookFindings(),
+    ...hookFindings(new Set(files)),
     ...staleIndexes,
     ...budgetFindings(measured, budget),
   ];
