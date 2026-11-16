@@ -7,7 +7,11 @@ import {
   env,
   waitOnExecutionContext,
 } from 'cloudflare:test';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
 
 import { holdTaskForProviderLimit } from '../../src/durable-objects/task-runner/provider-limit-admission';
 import type {
@@ -17,6 +21,7 @@ import type {
 import type { Env } from '../../src/env';
 import { scheduled } from '../../src/scheduled/handler';
 import { __resetAdminSettingsCacheForTest } from '../../src/services/admin-settings';
+import { resumeProviderLimitTask } from '../../src/services/provider-limit-recovery';
 import {
   seedInstallation,
   seedProject,
@@ -51,6 +56,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
   __resetAdminSettingsCacheForTest();
   await env.DATABASE.prepare("UPDATE tasks SET status='completed' WHERE id=?")
     .bind(fixture.taskId)
@@ -195,6 +201,54 @@ describe('provider-limit admission and queued watchdog through the real schedule
   it('does not fail an old provider-limit hold released before the watchdog tick', async () => {
     await seedElapsedHold();
     await releaseHold();
+    await tick();
+    expect((await task())!.status).toBe('queued');
+    await expectNoFailure();
+  });
+
+  it('still expires a released hold if runnable orchestration then makes no progress', async () => {
+    await seedElapsedHold();
+    await releaseHold();
+    const releasedAt = (await task())!.updated_at;
+    await tick();
+    expect((await task())!.status).toBe('queued');
+    // Mock Date only; real timers keep Worker RPC and waitUntil cleanup live.
+    vi.setSystemTime(Date.now() + DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS + 60_000);
+    await releaseHold();
+    expect((await task())!.updated_at).toBe(releasedAt);
+    await tick();
+    expect((await task())!.status).toBe('failed');
+    expect((await task())!.error_message).toContain('queued');
+  });
+
+  it('does not fail an old blocked admission hold explicitly resumed by its owner before first launch', async () => {
+    await seedElapsedHold();
+    const project = bindings.PROJECT_DATA.get(bindings.PROJECT_DATA.idFromName(fixture.projectId));
+    const chatSessionId = await project.createSession(null, 'Held before first launch');
+    await env.DATABASE.prepare(
+      `UPDATE tasks SET chat_session_id=?, admission_state='provider_limit_blocked',
+       provider_limit_wait_json=json_set(provider_limit_wait_json, '$.phase', 'blocked') WHERE id=?`
+    )
+      .bind(chatSessionId, fixture.taskId)
+      .run();
+    const row = await drizzle(env.DATABASE, { schema })
+      .select()
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, fixture.taskId))
+      .get();
+    const nudge = vi.fn(async () => true);
+    const ownerBindings = {
+      ...bindings,
+      TASK_RUNNER: {
+        idFromName: bindings.TASK_RUNNER.idFromName.bind(bindings.TASK_RUNNER),
+        get: () => ({ nudge }),
+      },
+    } as unknown as Env;
+    expect(await resumeProviderLimitTask(ownerBindings, row!, fixture.userId)).toMatchObject({
+      status: 'waking',
+    });
+    expect(nudge).toHaveBeenCalledOnce();
+    expect((await task())!.provider_limit_wait_json).toBeNull();
     await tick();
     expect((await task())!.status).toBe('queued');
     await expectNoFailure();
