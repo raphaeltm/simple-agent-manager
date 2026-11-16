@@ -312,7 +312,7 @@ export function LatencyPane({ latency }: { latency: InstallationLifecycleLatency
 export function SpendPane({ compute }: { compute: InstallationComputeSpend | null }) {
   const providers = [
     ...new Set((compute?.weeks ?? []).flatMap((week) => week.byProvider.map((p) => p.provider))),
-  ].sort();
+  ].sort((a, b) => a.localeCompare(b));
   const color = (provider: string) =>
     adminChartSeries[Math.max(0, providers.indexOf(provider)) % adminChartSeries.length];
   const max = Math.max(0, ...(compute?.weeks ?? []).map((week) => week.totalUsd));
