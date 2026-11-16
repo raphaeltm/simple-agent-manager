@@ -375,6 +375,7 @@ it('executes the lease lifecycle and failure-path tests in CI', () => {
         '--test',
         fileURLToPath(new URL('../deploy/staging-lease.test.mjs', import.meta.url)),
         fileURLToPath(new URL('../deploy/staging-lease-queue.test.mjs', import.meta.url)),
+        fileURLToPath(new URL('../deploy/staging-migration-guard.test.mjs', import.meta.url)),
       ],
       { stdio: 'pipe' }
     )
@@ -399,6 +400,36 @@ describe('job-level broad permission overrides', () => {
     expect(leaseStep.env.LEASE_PRIMARY_ONLY_AUDIT).toBe(
       '${{ inputs.activation_only || inputs.agent_email_dns_audit || inputs.github_trigger_audit }}'
     );
+  });
+});
+
+describe('Durable Object migration guard', () => {
+  it('runs before a place is reserved, for primary-staging deploys only', () => {
+    const workflow = parse(stagingWorkflow);
+    const steps = workflow.jobs.queue.steps as {
+      run?: string;
+      if?: string;
+      env?: Record<string, string>;
+    }[];
+    const guard = steps.findIndex(
+      (step) => step.run === 'node scripts/deploy/staging-migration-guard.mjs'
+    );
+    const queue = steps.findIndex(
+      (step) => step.run === 'node scripts/deploy/staging-lease.mjs queue'
+    );
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(queue);
+    expect(steps[guard].if).toContain("(inputs.environment || 'staging') == 'staging'");
+    expect(steps[guard].if).toContain("inputs.lease_action == 'deploy'");
+    // Same deploy conditions as the deploy job, so the guard cannot drift from what deploys.
+    const deployCondition = String(workflow.jobs.deploy.if).replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+    expect(steps[guard].if).toContain(deployCondition);
+    expect(steps[guard].env).toEqual({
+      LEASE_ENVIRONMENT: "${{ inputs.environment || 'staging' }}",
+      LEASE_ACTION: "${{ inputs.lease_action || 'deploy' }}",
+    });
+    // Production paths are untouched: the guard lives only in the staging workflow.
+    expect(reusableWorkflow).not.toContain('staging-migration-guard');
   });
 });
 

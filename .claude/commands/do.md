@@ -225,6 +225,10 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    one that is free or has the shorter queue and use that name in every command
    below. They share the `staging` credentials but nothing else. staging2 sign-in is
    workload identity only; see "Two Staging Installations" in the full reference.
+   A branch that adds a Durable Object migration tag `origin/main` lacks is refused
+   on primary `staging`: use `staging2`, and if the branch has not merged when you
+   are done, tear `staging2` down and redeploy `main` before releasing (full
+   reference, "Branches that add a Durable Object migration").
 
 2. **Reserve first, then deploy only on your turn.** Reserving takes seconds and
    deploys nothing:
