@@ -219,7 +219,7 @@ async function runBatch(
     ctx.env.DATABASE.prepare(statements[key].sql).bind(...statements[key].binds)
   );
   try {
-    const results = await ctx.env.DATABASE.batch<Record<string, unknown>>(prepared);
+    const results = await ctx.env.DATABASE.batch(prepared);
     return Object.fromEntries(keys.map((key, i) => [key, results[i]?.results ?? []]));
   } catch (error) {
     log.error('insights_flow.batch_failed', {
@@ -229,14 +229,15 @@ async function runBatch(
     });
   }
   const settled = await Promise.all(
-    prepared.map(async (statement, i) => {
-      const key = keys[i] as BatchKey;
+    keys.map(async (key, i): Promise<[BatchKey, Rows | undefined]> => {
+      const statement = prepared[i];
+      if (!statement) return [key, undefined];
       try {
-        const result = await statement.all<Record<string, unknown>>();
-        return [key, result.results ?? []] as const;
+        const result = await statement.all();
+        return [key, result.results ?? []];
       } catch (error) {
         sectionFailed(projectId, SECTION_OF[key], error, unavailable);
-        return [key, undefined] as const;
+        return [key, undefined];
       }
     })
   );
@@ -342,7 +343,7 @@ async function readRework(
     const statement = reworkStatement(w, windowDays, links);
     const row = await ctx.env.DATABASE.prepare(statement.sql)
       .bind(...statement.binds)
-      .first<Record<string, unknown>>();
+      .first();
     const merged = numberOr0(row?.merged);
     const reworked = numberOr0(row?.reworked);
     return {
