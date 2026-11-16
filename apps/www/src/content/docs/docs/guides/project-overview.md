@@ -1,13 +1,35 @@
 ---
 title: Project Overview
-description: See what is running in a project, how much your agent accounts have left, which automations need fixing and what happened recently, and start a task without leaving the page.
+description: The page a project opens on. See what needs you, what is running, how much your agent accounts have left, which automations need fixing and what happened recently, and start a task without leaving the page.
 ---
 
-The **Overview** is the first item in a project's navigation, on desktop and on a phone. It
-answers "what is going on here?" in one screen, and lets you start more work from the bottom of the
-page. The project still opens in **Chat**; the Overview is one tap away.
+The **Overview** is where a project opens, and the first item in its navigation on a desktop and on
+a phone. It answers "what needs me, and what is going on here?" in one screen, and lets you start
+more work from the bottom of the page.
+
+**Chat is one tap away**: **Chat** in the project navigation on a desktop, or the **Chat** button at
+the right of the app bar on a phone. Links that point at one chat (a notification about a chat,
+**Open chat** on an inbox item or a receipt, a row in Running now) still open that chat directly.
+
+## Layout
+
+- **On a phone**, top to bottom: **Needs you**, **Running now**, **Budgets**, **Automations** and
+  **Recently**, with the task box pinned at the bottom.
+- **On a desktop**: **Needs you** on the left with the task box under it, and the other sections in
+  a column on the right.
 
 ## What it shows
+
+### Needs you
+
+The first items of this project's [Inbox](/docs/guides/inbox/): the questions, permission requests,
+secrets, approvals, reviews and problems waiting for you, in the same order as the Inbox. A phone
+shows three, a desktop five; the number next to the heading counts them all, and **All** opens the
+project Inbox.
+
+Tap an item to open it in the Inbox. Answer it there: a one-line receipt confirms it and the next
+item opens. **Back** returns you to the Overview, where the count is already lower. When nothing is
+waiting, the section is a single line, **Nothing needs you.**
 
 ### Running now
 
@@ -15,10 +37,12 @@ Chats in this project that an agent is working on now. Each row shows the chat's
 long it has been running and the profile it runs with, for example **1h 20m · Opus 5.5 Build**.
 
 - **Starting** means SAM is still finding or preparing a machine for it.
-- **Waiting on you** (amber) means the agent asked you something in that chat and is paused until
-  you answer. A chat someone else started says **Waiting for an answer**.
+- **Paused on this** (amber) means the agent is stopped on something you need to answer, which is
+  in **Needs you**: the Inbox uses the same words. A chat paused on someone else's answer says
+  **Waiting for an answer**.
 
-Sleeping chats and chats whose agent has finished its turn are not listed. Tap a row to open the
+Sleeping chats and chats whose agent has finished its turn are not listed, unless the agent is
+paused on a question or a secret request. Tap a row to open the
 chat, or **Chats** to see them all. When more are running than fit, the section says how many more.
 
 ### Budgets
