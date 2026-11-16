@@ -16,6 +16,8 @@
  *   name never leaves the database (`routes/chat-agent-credential.ts`). The token columns are
  *   never selected.
  */
+import { CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES } from '@simple-agent-manager/shared';
+
 import type { FlowStatement, FlowWindow } from './insights-flow-sql';
 import { runsCte } from './insights-flow-sql';
 
@@ -75,7 +77,8 @@ const WAIT_JSON = `CASE WHEN json_valid(t.provider_limit_wait_json) THEN t.provi
  */
 export function stallWaitsStatement(w: FlowWindow, viewerId: string, cap: number): FlowStatement {
   return {
-    sql: `SELECT t.id AS task_id, t.status, t.completed_at, t.updated_at, t.provider_limit_wait_json AS wait_json,
+    sql: `SELECT t.id AS task_id, t.status, t.completed_at, t.updated_at, t.admission_state,
+           t.provider_limit_wait_json AS wait_json,
            json_extract(${WAIT_JSON}, '$.credentialKey') AS ref,
            s.agent_credential_source AS source, s.agent_type AS agent_type,
            ${CREDENTIAL_COLUMNS},
@@ -118,5 +121,20 @@ export function rejectedWindowsStatement(
      ORDER BY l.observed_at DESC, l.credential_reference, l.window_type
      LIMIT ?`,
     binds: [viewerId, viewerId, viewerId, w.projectId, viewerId, w.sinceMs, cap + 1],
+  };
+}
+
+/**
+ * The viewer's own credentials whose reference is longer than a limit key, so the limit writers
+ * store it as a `sha256:` digest that `credentialJoin` cannot match (ids from the 2026-06
+ * composable-credentials backfill). The operation hashes these to recognise the viewer's own
+ * account in waits and windows that carry only the digest. Never another member's rows, never the
+ * token columns. Binds: viewer, the reference length a digest key replaces.
+ */
+export function ownLongCredentialsStatement(viewerId: string): FlowStatement {
+  return {
+    sql: `SELECT id, name, kind FROM cc_credentials
+           WHERE owner_id = ? AND length('cc_credentials:' || id) > ?`,
+    binds: [viewerId, CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES],
   };
 }

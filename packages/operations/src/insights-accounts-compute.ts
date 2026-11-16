@@ -132,13 +132,15 @@ export interface StallInterval {
 }
 
 /**
- * A task's latest limit wait as an interval. Its end is when SAM resumed or let the owner resume
- * it (`ownerOverride.grantedAt`, else `nextRetryAt`), or, for a blocked wait, when the run ended
- * (still going: now). Capped at now and never before its start.
+ * A task's latest limit wait as an interval. A wait still in force (the task's admission state
+ * says it is waiting on a provider limit) runs until now, even past a retry SAM has not yet made:
+ * `nextRetryAt` is a scheduled attempt, not a resume. Otherwise it ended when SAM resumed it or
+ * the owner started it anyway (`ownerOverride.grantedAt`, else `nextRetryAt`), or, for a blocked
+ * wait, when the run ended (still going: now). Capped at now and never before its start.
  */
 export function waitInterval(
   wait: ProviderLimitWait,
-  task: { id: string; terminal: boolean; endedAtMs: number | null },
+  task: { id: string; terminal: boolean; endedAtMs: number | null; waitingNow: boolean },
   nowMs: number
 ): StallInterval | null {
   if (!wait.credentialKey) return null;
@@ -148,16 +150,19 @@ export function waitInterval(
   if (wait.phase === 'blocked') {
     end = task.terminal ? (task.endedAtMs ?? nowMs) : nowMs;
     outcome = 'blocked';
+  } else if (
+    wait.phase === 'waiting' &&
+    !task.terminal &&
+    (task.waitingNow || wait.nextRetryAt > nowMs)
+  ) {
+    end = nowMs;
+    outcome = 'ongoing';
   } else {
     end = wait.ownerOverride?.grantedAt ?? wait.nextRetryAt;
     // A run that ended before its wait did was never resumed: say so rather than "resumed".
     const endedFirst = task.terminal && task.endedAtMs !== null && task.endedAtMs < end;
     if (endedFirst) end = task.endedAtMs as number;
-    outcome = endedFirst
-      ? 'ended'
-      : wait.phase === 'waiting' && !task.terminal && end > nowMs
-        ? 'ongoing'
-        : 'resumed';
+    outcome = endedFirst ? 'ended' : 'resumed';
   }
   end = Math.max(start, Math.min(end, nowMs));
   return {

@@ -142,10 +142,13 @@ export function AccountCard({
   account,
   color,
   now,
+  stallsUnavailable = false,
 }: {
   account: InsightsAccount;
   color: string;
   now: number;
+  /** The stall read failed: say so rather than "Never". */
+  stallsUnavailable?: boolean;
 }) {
   const title = accountTitle(account);
   return (
@@ -172,8 +175,8 @@ export function AccountCard({
         <Stat label="Merged" value={String(account.merged)} />
         <Stat
           label="Limit pauses"
-          value={pausedValue(account)}
-          note={account.stalls.ongoing ? 'Paused now' : undefined}
+          value={stallsUnavailable ? 'Not loaded' : pausedValue(account)}
+          note={!stallsUnavailable && account.stalls.ongoing ? 'Paused now' : undefined}
         />
       </div>
       {account.spend && <Row label="Spend">{spendText(account.spend)}</Row>}
@@ -339,7 +342,14 @@ export function StallList({
   accounts: ReadonlyMap<string, InsightsAccount>;
 }) {
   if (episodes.items.length === 0) {
-    return <Empty>No agent waited on a usage limit in this range.</Empty>;
+    return (
+      <div className="flex min-w-0 flex-col gap-2">
+        <Empty>No agent waited on a usage limit in this range.</Empty>
+        {episodes.truncated && (
+          <p className="m-0 text-[12.5px] text-fg-muted">Older limit waits were not examined.</p>
+        )}
+      </div>
+    );
   }
   return (
     <div className="flex min-w-0 flex-col gap-2">

@@ -317,8 +317,11 @@ test.describe('Insights', () => {
     await expect(page.getByText('Some numbers could not be loaded: limit stalls.')).toBeVisible();
     await expect(page.getByText('Limit stalls could not be loaded.')).toBeVisible();
     await expect(page.getByText('No agent waited on a usage limit in this range.')).toHaveCount(0);
-    // Liveness: the accounts still show.
-    await expect(page.getByTestId('insights-account-cred:cc-max')).toBeVisible();
+    // Liveness: the accounts still show, and their pause counts say they were not loaded.
+    const own = page.getByTestId('insights-account-cred:cc-max');
+    await expect(own).toBeVisible();
+    await expect(own).toContainText('Not loaded');
+    await expect(own).not.toContainText('Never');
     await capture(page, 'insights-accounts-partial');
   });
 

@@ -131,7 +131,8 @@ describe('waitInterval', () => {
     }),
     ...overrides,
   });
-  const live = { id: 't', terminal: false, endedAtMs: null };
+  const live = { id: 't', terminal: false, endedAtMs: null, waitingNow: false };
+  const stillWaiting = { ...live, waitingNow: true };
 
   it('runs from the rejection to the scheduled resume, capped at now', () => {
     const w = wait();
@@ -146,20 +147,34 @@ describe('waitInterval', () => {
     });
   });
 
+  it('a wait still in force past its retry time is still waiting, not resumed', () => {
+    const w = wait();
+    // SAM has not made the retry yet: the task is still parked on the limit.
+    expect(waitInterval(w, stillWaiting, w.nextRetryAt + 30 * MIN)).toMatchObject({
+      endMs: w.nextRetryAt + 30 * MIN,
+      outcome: 'ongoing',
+    });
+    // Control: the park was cleared, so the wait ended at the retry.
+    expect(waitInterval(w, live, w.nextRetryAt + 30 * MIN)).toMatchObject({
+      endMs: w.nextRetryAt,
+      outcome: 'resumed',
+    });
+  });
+
   it('ends when the owner started anyway, or when the run ended first', () => {
     const override = wait({
       phase: 'released',
       ownerOverride: { credentialKey: 'k', grantedAt: T0 + 3 * MIN },
     });
     expect(waitInterval(override, live, T0 + 60 * MIN)?.endMs).toBe(T0 + 3 * MIN);
-    const ended = { id: 't', terminal: true, endedAtMs: T0 + 7 * MIN };
+    const ended = { id: 't', terminal: true, endedAtMs: T0 + 7 * MIN, waitingNow: false };
     // The run ended before the wait did: it was never resumed.
     expect(waitInterval(wait(), ended, T0 + 60 * MIN)).toMatchObject({
       endMs: T0 + 7 * MIN,
       outcome: 'ended',
     });
     // Control: a run that ended after its wait was resumed first.
-    const late = { id: 't', terminal: true, endedAtMs: T0 + 90 * MIN };
+    const late = { id: 't', terminal: true, endedAtMs: T0 + 90 * MIN, waitingNow: false };
     expect(waitInterval({ ...wait(), phase: 'released' }, late, T0 + 120 * MIN)?.outcome).toBe(
       'resumed'
     );
@@ -172,7 +187,11 @@ describe('waitInterval', () => {
       outcome: 'blocked',
     });
     expect(
-      waitInterval(blocked, { id: 't', terminal: true, endedAtMs: T0 + 20 * MIN }, T0 + 90 * MIN)
+      waitInterval(
+        blocked,
+        { id: 't', terminal: true, endedAtMs: T0 + 20 * MIN, waitingNow: false },
+        T0 + 90 * MIN
+      )
     ).toMatchObject({ endMs: T0 + 20 * MIN, outcome: 'blocked' });
   });
 

@@ -91,6 +91,7 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
                 account={account}
                 color={colorOf.get(account.key) ?? 'var(--sam-person-auto)'}
                 now={now}
+                stallsUnavailable={stallsFailed}
               />
             ))}
           </div>

@@ -14,11 +14,11 @@
  * - spend: "not reported" for API keys until per-run usage is recorded (slice U).
  *
  * Round trips (rule 60, budget 6 in the Insights spec): authorization 1; settings 0 or 1 (the
- * per-isolate admin-settings cache); one D1 `batch()` carrying three statements 1; the viewer's own
+ * per-isolate admin-settings cache); one D1 `batch()` carrying four statements 1; the viewer's own
  * limit windows 0 or 1 (one statement per 100 of their own accounts, so 1 in practice). At most 4;
  * measured at 3 in `insights-accounts.test.ts`. If the batch fails as a whole, each statement is
- * retried on its own so one bad section cannot blank the page; that rare degraded path costs three
- * more (at most 7 on a cold settings cache) and is logged.
+ * retried on its own so one bad section cannot blank the page; that rare degraded path costs four
+ * more (at most 8 on a cold settings cache) and is logged.
  */
 import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import {
@@ -47,6 +47,7 @@ import {
 } from './insights-accounts-compute';
 import {
   accountRunsStatement,
+  ownLongCredentialsStatement,
   rejectedWindowsStatement,
   stallWaitsStatement,
 } from './insights-accounts-sql';
@@ -64,12 +65,17 @@ export interface ProjectAccountsInput {
 }
 
 const EVENT = 'insights_accounts';
-type BatchKey = 'runs' | 'waits' | 'windows';
+type BatchKey = 'runs' | 'waits' | 'windows' | 'ownLong';
 const SECTION_OF: Record<BatchKey, InsightsAccountsSection> = {
   runs: 'runs',
   waits: 'stalls',
   windows: 'stalls',
+  // Only used to name the viewer's own digest-keyed accounts; losing it hides names, not data.
+  ownLong: 'usage',
 };
+/** The largest epoch milliseconds a `Date` can hold: a larger stored value is a malformed row. */
+const MAX_DATE_MS = 8_640_000_000_000_000;
+const epochMs = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(MAX_DATE_MS));
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 
 const str = v.nullish(v.string());
@@ -95,6 +101,7 @@ const WaitRowSchema = v.object({
   status: v.string(),
   completed_at: str,
   updated_at: str,
+  admission_state: str,
   wait_json: v.string(),
 });
 const WindowRowSchema = v.object({
@@ -102,8 +109,13 @@ const WindowRowSchema = v.object({
   ref: v.pipe(v.string(), v.minLength(1)),
   window_type: v.string(),
   window_minutes: flag,
-  observed_at: v.number(),
-  resets_at: flag,
+  observed_at: epochMs,
+  resets_at: v.nullish(epochMs),
+});
+const OwnLongCredentialSchema = v.object({
+  id: v.pipe(v.string(), v.minLength(1)),
+  name: v.string(),
+  kind: v.string(),
 });
 
 interface MetaRow {
@@ -153,6 +165,7 @@ export async function projectAccounts(
       runs: accountRunsStatement(w, viewerId),
       waits: stallWaitsStatement(w, viewerId, cap),
       windows: rejectedWindowsStatement(w, viewerId, cap),
+      ownLong: ownLongCredentialsStatement(viewerId),
     },
     (key, error) => {
       log.error('insights_accounts.section_failed', {
@@ -165,10 +178,40 @@ export async function projectAccounts(
     }
   );
 
+  // The viewer's own credentials that waits and windows know only by digest key.
+  const ownByDigest = new Map<string, AccountMeta>();
+  const ownLong = parseInsightsRows(
+    rows.ownLong,
+    OwnLongCredentialSchema,
+    EVENT,
+    'own_long',
+    projectId
+  );
+  await Promise.all(
+    ownLong.map(async (row) => {
+      const reference = `cc_credentials:${row.id}`;
+      const key = await credentialLimitReferenceKey(reference);
+      if (!key) return;
+      ownByDigest.set(key, {
+        limitKey: key,
+        reference,
+        source: null,
+        agentType: null,
+        kind: row.kind,
+        credOwn: 1,
+        sessionOwn: 1,
+        ownName: row.name,
+      });
+    })
+  );
+
   const metaByKey = new Map<string, AccountMeta>();
   const remember = (m: AccountMeta) => {
     const key = m.limitKey ?? `none:${m.source ?? ''}:${m.agentType ?? ''}`;
-    metaByKey.set(key, mergeMeta(metaByKey.get(key), m));
+    const own = m.limitKey ? ownByDigest.get(m.limitKey) : undefined;
+    // A row's own identity fields win; the digest lookup fills what the SQL join could not.
+    const resolved = own ? mergeMeta(m, own) : m;
+    metaByKey.set(key, mergeMeta(metaByKey.get(key), resolved));
     return key;
   };
 
@@ -203,7 +246,13 @@ export async function projectAccounts(
     const ended = Date.parse(row.completed_at ?? row.updated_at ?? '');
     const interval = waitInterval(
       wait,
-      { id: row.task_id, terminal, endedAtMs: Number.isFinite(ended) ? ended : null },
+      {
+        id: row.task_id,
+        terminal,
+        endedAtMs: Number.isFinite(ended) ? ended : null,
+        // Every park writes this state and every release clears it: the live "still waiting".
+        waitingNow: row.admission_state === 'provider_limit_waiting',
+      },
       nowMs
     );
     if (!interval) continue;
