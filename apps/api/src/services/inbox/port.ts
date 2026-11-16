@@ -4,6 +4,7 @@
  */
 import { OperationError, type OperationInboxPort } from '@simple-agent-manager/operations';
 import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -24,6 +25,8 @@ import {
   fulfillRuntimeSecretRequest,
 } from '../runtime-secret-requests';
 import { ensureSessionRecovery } from '../session-recovery';
+import { clearTriggerPageCaches } from '../trigger-cache';
+import { triggerStatusUpdates } from '../trigger-status';
 import { readAskContext } from './ask-context';
 import { deliverInboxAskNotice } from './ask-notice';
 
@@ -173,6 +176,35 @@ export function createInboxPort(env: Env): OperationInboxPort {
         );
       }
       return { newTaskId: result.newTaskId };
+    },
+
+    async resumeTrigger(userId, projectId, triggerId) {
+      const database = db();
+      if (!(await hasProjectCapability(database, projectId, userId, 'task:write')))
+        throw new OperationError('forbidden', 'You cannot resume automations in this project');
+      const trigger = await database
+        .select()
+        .from(schema.triggers)
+        .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)))
+        .get();
+      if (!trigger) throw new OperationError('not_found', 'Automation not found');
+      if (trigger.status !== 'paused')
+        throw new OperationError('conflict', `This automation is ${trigger.status}, not paused`);
+      // The trigger PATCH route's status change, as a compare-and-set on `paused`.
+      const updated = await database
+        .update(schema.triggers)
+        .set({ ...triggerStatusUpdates(trigger, 'active'), updatedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(schema.triggers.id, triggerId),
+            eq(schema.triggers.projectId, projectId),
+            eq(schema.triggers.status, 'paused')
+          )
+        )
+        .returning({ id: schema.triggers.id });
+      if (updated.length !== 1)
+        throw new OperationError('conflict', 'The automation changed while it was being resumed');
+      clearTriggerPageCaches(projectId);
     },
 
     async wakeChat(userId, projectId, sessionId) {
