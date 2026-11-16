@@ -58,6 +58,13 @@ const TABS: Array<{ id: TabId; label: string; icon: ReactNode }> = [
 
 export function AgentContextPage() {
   const { projectId } = useProjectContext();
+  // Keyed on the project so a switch starts from a clean slate: refetches keep the tab mounted
+  // (rule 48), so without the key the previous project's policies would stay visible and its
+  // controls would send their ids under the new project.
+  return <AgentContextPageContent key={projectId} projectId={projectId} />;
+}
+
+function AgentContextPageContent({ projectId }: { projectId: string }) {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [filter, setFilter] = useState('');
 

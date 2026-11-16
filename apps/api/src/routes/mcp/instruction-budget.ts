@@ -11,6 +11,7 @@
  * Everything here is pure over rows that were already read, so `handleGetInstructions` can
  * run it inside a try/catch and fall back to the unbudgeted rendering if it ever throws.
  */
+import type { PolicyCategory } from '@simple-agent-manager/shared';
 import { formatPolicyDirectiveLine, formatPolicyIndexLine } from '@simple-agent-manager/shared';
 
 import type { KnowledgeEntityIndexEntry } from '../../durable-objects/project-data/knowledge';
@@ -19,6 +20,7 @@ import { log } from '../../lib/logger';
 import { resolveAdminSettingDetailsMany } from '../../services/admin-settings';
 import {
   INSTRUCTION_BUDGET_DEFAULTS,
+  INSTRUCTION_BUDGET_SETTINGS,
   type InstructionBudgetKey,
 } from '../../services/admin-settings-instructions-definitions';
 import {
@@ -46,7 +48,21 @@ export async function resolveInstructionBudgets(env: Env): Promise<InstructionBu
     );
     BUDGET_KEYS.forEach((key, index) => {
       const value = Number(details[index]?.value);
-      if (Number.isFinite(value) && value >= 0) budgets[key] = Math.trunc(value);
+      // The registry validates writes, but a value outside the definition's range (a row
+      // written by another path) must not reach selection: a minimum relevance of 0 would
+      // show every on-demand policy in full. Out of range falls back to the default.
+      const range = INSTRUCTION_BUDGET_SETTINGS.find(
+        (d) => d.name === `instructions.${key}`
+      )?.range;
+      if (Number.isInteger(value) && range && value >= range.min && value <= range.max) {
+        budgets[key] = value;
+      } else if (details[index] !== undefined) {
+        log.warn('mcp.get_instructions.budget_setting_out_of_range', {
+          setting: `instructions.${key}`,
+          value: details[index]?.value ?? null,
+          action: 'using_default',
+        });
+      }
     });
   } catch (err) {
     log.warn('mcp.get_instructions.budget_settings_unavailable', {
@@ -70,15 +86,24 @@ const MIN_TERM_LENGTH = 4;
  */
 const DISTINCTIVE_TERM_MAX_SHARE = 0.2;
 
+// The weights define the unit of `instructions.onDemandPolicyMinRelevance` (its description
+// says "2 per title word, 1 per body word"), so they stay constants: that setting is the
+// tunable. Likewise MIN_TERM_LENGTH and DISTINCTIVE_TERM_MAX_SHARE are algorithm parameters,
+// not admin controls; the per-policy pin and the minimum relevance are what admins adjust.
 const TITLE_TERM_WEIGHT = 2;
 const BODY_TERM_WEIGHT = 1;
 
-const CATEGORY_TIER: Record<string, number> = {
+/** Tie-break by force of category. Typed so a new category fails to compile here. */
+const CATEGORY_TIER: Record<PolicyCategory, number> = {
   rule: 0,
   constraint: 1,
   delegation: 2,
   preference: 3,
 };
+
+function categoryTier(category: string): number {
+  return CATEGORY_TIER[category as PolicyCategory] ?? Object.keys(CATEGORY_TIER).length;
+}
 
 export function extractTerms(text: string): Set<string> {
   const terms = new Set<string>();
@@ -156,7 +181,7 @@ export function selectPolicies(
       .sort(
         (a, b) =>
           b.score - a.score ||
-          (CATEGORY_TIER[a.policy.category] ?? 9) - (CATEGORY_TIER[b.policy.category] ?? 9) ||
+          categoryTier(a.policy.category) - categoryTier(b.policy.category) ||
           b.policy.updatedAt - a.policy.updatedAt ||
           (a.policy.id < b.policy.id ? -1 : a.policy.id > b.policy.id ? 1 : 0)
       );
@@ -298,6 +323,9 @@ export function combinePolicyBlock(
  *    not fit, so everything is sent, a warning is logged, and one line in `instructions`
  *    says so. Nothing is ever dropped silently: the knowledge and on-demand indexes stay.
  */
+/** Renders per trim step before falling back to the floor. */
+const TRIM_PASSES = 4;
+
 export function applyInstructionBudgets(input: {
   projectId: string;
   policies: BudgetedPolicy[];
@@ -340,6 +368,9 @@ export function applyInstructionBudgets(input: {
   if (result.text.length > budgets.totalMaxChars) {
     const floor = attempt(0, 0, []);
     if (floor.text.length > budgets.totalMaxChars) {
+      // Trimming optional content cannot reach the budget here, so it would only discard
+      // context. Knowledge and on-demand text keep their own budgets, and their indexes
+      // still disclose anything those budgets left out.
       requiredOverBudget = true;
       const pinnedChars = (
         formatPolicyDirectivesFor(
@@ -348,8 +379,9 @@ export function applyInstructionBudgets(input: {
       ).length;
       const note =
         `Size note: this project's ${result.selection.pinnedCount} pinned policies (${pinnedChars} characters) ` +
-        `and the other required sections exceed the instruction size budget (${budgets.totalMaxChars} characters), ` +
-        'so they are all sent in full. Nothing was left out.';
+        `and the other required sections exceed the instruction size budget (${budgets.totalMaxChars} characters). ` +
+        'Every pinned policy is sent in full; knowledge and on-demand policies keep their own size budgets, ' +
+        'and their indexes list anything those left out.';
       result = attempt(budgets.knowledgeMaxChars, budgets.onDemandPolicyMaxChars, [note]);
       log.warn('mcp.get_instructions.required_over_budget', {
         projectId: input.projectId,
@@ -362,12 +394,20 @@ export function applyInstructionBudgets(input: {
       });
     } else {
       trimmedForTotal = true;
-      const knowledgeChars = result.knowledge.directives?.length ?? 0;
-      let over = result.text.length - budgets.totalMaxChars;
-      result = attempt(Math.max(0, knowledgeChars - over), budgets.onDemandPolicyMaxChars, []);
-      over = result.text.length - budgets.totalMaxChars;
-      if (over > 0) {
-        result = attempt(0, Math.max(0, result.selection.onDemandFullChars - over), []);
+      // Knowledge first, then on-demand text. Each step shrinks its own cap by the measured
+      // overflow and re-renders; disclosure lines can add a little, so a step may need a second
+      // pass. Bounded: at most TRIM_PASSES renders per step, then the floor, which fits.
+      let knowledgeMax = result.knowledge.directives?.length ?? 0;
+      for (let i = 0; i < TRIM_PASSES && result.text.length > budgets.totalMaxChars; i++) {
+        knowledgeMax = Math.max(0, knowledgeMax - (result.text.length - budgets.totalMaxChars));
+        result = attempt(knowledgeMax, budgets.onDemandPolicyMaxChars, []);
+        if (knowledgeMax === 0) break;
+      }
+      let onDemandMax = result.selection.onDemandFullChars;
+      for (let i = 0; i < TRIM_PASSES && result.text.length > budgets.totalMaxChars; i++) {
+        onDemandMax = Math.max(0, onDemandMax - (result.text.length - budgets.totalMaxChars));
+        result = attempt(0, onDemandMax, []);
+        if (onDemandMax === 0) break;
       }
       if (result.text.length > budgets.totalMaxChars) result = floor;
     }

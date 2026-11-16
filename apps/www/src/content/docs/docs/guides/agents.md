@@ -146,9 +146,9 @@ SAM picks the account for a run in this order, most specific first (`explainReso
 
 1. The account you chose for this chat ([Using another account for one chat](#using-another-account-for-one-chat)).
 1. Your account for this profile.
-1. Your account for this project.
-1. Your default account for the agent.
-1. SAM's platform account, where the agent has one.
+2. Your account for this project.
+3. Your default account for the agent.
+4. SAM's platform account, where the agent has one.
 
 Pins are per person. Yours change which of your accounts runs your work; they never change a
 teammate's.

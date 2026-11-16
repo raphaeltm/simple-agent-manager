@@ -239,7 +239,8 @@ the task/session context, the project record, a mode-specific `instructions[]` a
 project's stored knowledge and policies.
 
 Knowledge and policies are delivered as **rendered markdown only** — `knowledgeDirectives` and
-`policyDirectives`, produced by `formatKnowledgeDirectives()` and `formatPolicyDirectives()`.
+`policyDirectives`, produced by `formatKnowledgeDirectives()` and `formatPolicyDirectives()` after
+the size budgets described in [Inject modes and size budgets](#inject-modes-and-size-budgets).
 Each field is omitted entirely when there is nothing to render; a failed Durable Object read
 also degrades to "omitted" rather than erroring the bootstrap.
 
@@ -294,8 +295,9 @@ Every policy has an **inject mode** (`project_policies.inject_mode`, ProjectData
   `selectPolicies()` (`apps/api/src/routes/mcp/instruction-budget.ts`) scores each on-demand
   policy by distinctive words it shares with the task title, description, session topic and
   idea title (2 per title word, 1 per body word; a word in more than a fifth of the project's
-  policies does not count), ranks by score, category, recency and id, caps each category, and
-  fills the `instructions.onDemandPolicyMaxChars` budget without cutting a policy part-way.
+  policies, and in more than one, does not count), ranks by score, category, recency and id, caps each category, and
+  fills the `instructions.onDemandPolicyMaxChars` budget (policy lines only) without cutting a
+  policy part-way.
 
 ```text
 ### On-demand policies (3): 1 shown in full above because they match this task, 2 listed here by title only
@@ -315,11 +317,13 @@ out.
 `applyInstructionBudgets()` then checks the serialized payload against
 `instructions.totalMaxChars`. When it is over, knowledge is trimmed first and on-demand policy
 text second, but only if that brings the payload under the total. When pinned policies and the
-other required sections exceed it by themselves, everything is sent, `instructions[]` gains one
-line saying so, and `mcp.get_instructions.required_over_budget` is logged. Every call logs
+other required sections exceed it by themselves, trimming could not reach the total, so every
+pinned policy is sent in full, knowledge and on-demand text keep their own budgets,
+`instructions[]` gains one line saying so, and `mcp.get_instructions.required_over_budget` is
+logged. Every call logs
 `mcp.get_instructions.size` with the section sizes and counts. If the budget pass throws,
-`renderWithinBudgets()` (`instruction-payload.ts`) falls back to the unbudgeted rendering. The
-five budgets are admin settings: see [Admin settings](/docs/guides/admin-settings/#agent-instructions).
+`renderWithinBudgets()` (`instruction-payload.ts`) falls back to the unbudgeted rendering. Mission child tasks (`dispatch-description.ts`) still inherit every active policy in full,
+whatever its inject mode. The five budgets are admin settings: see [Admin settings](/docs/guides/admin-settings/#agent-instructions).
 
 Knowledge observations do **not** currently carry their `observationId` in this payload, so
 `knowledge_write` method `update`, `knowledge_write` method `remove`, and `knowledge_write` method `confirm` need an id obtained from

@@ -62,23 +62,23 @@ knowledge values.
 
 ## Implementation checklist
 
-- [ ] shared: `POLICY_INJECT_MODES`, `PolicyInjectMode`, `injectMode` on policy types; shared
+- [x] shared: `POLICY_INJECT_MODES`, `PolicyInjectMode`, `injectMode` on policy types; shared
       policy-line renderer used by API and web (one implementation)
-- [ ] DO migration `080-policy-inject-mode` (additive), row schema, create/update/list carry it
-- [ ] Client + DO RPC signatures carry `injectMode`
-- [ ] MCP `add_policy`/`update_policy` accept `injectMode` (definitions + handlers); tool-group
+- [x] DO migration `080-policy-inject-mode` (additive), row schema, create/update/list carry it
+- [x] Client + DO RPC signatures carry `injectMode`
+- [x] MCP `add_policy`/`update_policy` accept `injectMode` (definitions + handlers); tool-group
       summaries mention it
-- [ ] REST POST/PATCH accept `injectMode`; Valibot schemas
-- [ ] Settings definitions file + registry + `AdminSettingName`
-- [ ] Pure selection module: rank on-demand policies, budget, per-category cap, index rendering
-- [ ] Knowledge size budget with disclosure in index lead-in
-- [ ] Total guard + warning line + log; size telemetry log
-- [ ] Instruction trim of CI-wait paragraph (list removed sentences and where they live in the PR)
-- [ ] Web Policies tab: inject-mode control + injected size per policy + summary, phone usable
-- [ ] Docs: `apps/www/.../architecture/overview.md`, `reference/api.md` or wherever get_instructions
+- [x] REST POST/PATCH accept `injectMode`; Valibot schemas
+- [x] Settings definitions file + registry + `AdminSettingName`
+- [x] Pure selection module: rank on-demand policies, budget, per-category cap, index rendering
+- [x] Knowledge size budget with disclosure in index lead-in
+- [x] Total guard + warning line + log; size telemetry log
+- [x] Instruction trim of CI-wait paragraph (list removed sentences and where they live in the PR)
+- [x] Web Policies tab: inject-mode control + injected size per policy + summary, phone usable
+- [x] Docs: `apps/www/.../architecture/overview.md`, `reference/api.md` or wherever get_instructions
       is described; admin settings docs if they list settings
-- [ ] Tests (below)
-- [ ] Playwright visual audit (375 + 1280), screenshots posted
+- [x] Tests (below)
+- [x] Playwright visual audit (375 + 1280), screenshots posted
 
 ## Tests
 
@@ -95,11 +95,19 @@ knowledge values.
 
 ## Acceptance criteria
 
-- [ ] With every policy pinned, policyDirectives is byte-identical to today's at any budget
-- [ ] Every applying policy id appears exactly once (full or indexed)
-- [ ] Unpinned policies listed with counts and fetch instructions; relevant ones in full
-- [ ] Pinned-over-budget: sent in full, warning log, one instructions line
-- [ ] Knowledge budgeted with index kept and dropped count disclosed
-- [ ] Project admin can change inject mode from the Policies tab on a phone; injected size shown
-- [ ] No policy or knowledge value changed
-- [ ] Measured sizes reported: before, after all pinned, staging partial-unpin simulation
+- [x] With every policy pinned, policyDirectives is byte-identical to today's at any budget
+- [x] Every applying policy id appears exactly once (full or indexed)
+- [x] Unpinned policies listed with counts and fetch instructions; relevant ones in full
+- [x] Pinned-over-budget: sent in full, warning log, one instructions line
+- [x] Knowledge budgeted with index kept and dropped count disclosed
+- [x] Project admin can change inject mode from the Policies tab on a phone; injected size shown
+- [x] No policy or knowledge value changed
+- [ ] Measured sizes reported (pending staging, Phase 6): before, after all pinned, staging partial-unpin simulation
+
+## Review outcomes (Phase 5)
+
+- constitution-validator: no HIGH. Fixed: budget values clamped to each setting's range (default on out-of-range), constants documented, typed category tiers.
+- ui-ux-specialist: no HIGH. Fixed: honest copy for inactive/expired policies, only text dimmed on inactive cards, aria-disabled (focus kept) with stable labels, optimistic accepted mode, per-project key reset, solid `sam-raised` selected state with a check icon, policy title in the group label, shorter header.
+- doc-sync-validator: no HIGH. Fixed: over-budget wording, rollback wording, distinctive-word wording, idea title in relevance text, settings table row, reverted unrelated list renumbering, mission-dispatch note, stale policy instruction sentence.
+- task-completion-validator: WARN. Fixed: checklist, tests for size/warn logs, fallback, on-demand trim and floor branches, range clamp; note wording. Mission dispatch still inherits every policy in full (fails toward more text; documented).
+- cloudflare-specialist: no HIGH. Fixed: note wording, trim cliff (bounded passes), DO-side injectMode guard. Kept: optional content stays in the over-budget branch (coordinator's stated expectation, documented); unit mix documented.

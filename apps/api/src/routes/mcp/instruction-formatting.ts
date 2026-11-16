@@ -104,8 +104,8 @@ export function buildPolicyInstructions(hasPolicies: boolean, isConversation: bo
       'Before saving a policy, decide whether it is standing or one-shot. If it is tied to a specific workflow, ' +
         'wave, migration, or dated piece of work — anything that will be finished later — pass `scope: "task"` and an ' +
         '`expiresAt` (epoch ms) to `policies_write` method `add` so it stops being injected once that work is done. Only genuinely ' +
-        'permanent guidance should be saved with the default `scope: "always"`. Policies without an expiry are loaded ' +
-        'into every future session in this project forever, so an un-expiring one-shot policy is a real cost.'
+        'permanent guidance should be saved with the default `scope: "always"`. A pinned policy without an expiry (every new ' +
+        'policy is pinned) is loaded into every future session in this project forever, so an un-expiring one-shot policy is a real cost.'
     );
   }
 

@@ -109,3 +109,65 @@ describe('Policies tab inject mode', () => {
     );
   });
 });
+
+describe('Policies tab inject mode: honest states', () => {
+  beforeEach(() => {
+    mocks.updatePolicy.mockReset().mockResolvedValue({ updated: true, policyId: 'pol-1' });
+  });
+
+  it('says an inactive or expired policy is not sent to agents', () => {
+    const inactive = policy({ active: false });
+    const expired = policy({ id: 'pol-2', title: 'Expired one', expiresAt: 1 });
+    render(
+      <PoliciesTab
+        policies={[inactive, expired]}
+        allPolicies={[inactive, expired]}
+        projectId="proj"
+        onRefresh={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Not sent to agents: this policy is inactive.')).toBeTruthy();
+    expect(screen.getByText('Not sent to agents: this policy has expired.')).toBeTruthy();
+  });
+
+  it('shows the accepted mode even when the refetch that follows fails to change the row', async () => {
+    const p = policy();
+    // The refresh resolves but the parent still passes the old row (its read failed silently).
+    render(
+      <PoliciesTab
+        policies={[p]}
+        allPolicies={[p]}
+        projectId="proj"
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'On demand' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'On demand' }).getAttribute('aria-pressed')).toBe(
+        'true'
+      )
+    );
+  });
+
+  it('keeps focus usable while saving: buttons are aria-disabled, not disabled', async () => {
+    let resolve: (v: unknown) => void = () => {};
+    mocks.updatePolicy.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    const p = policy();
+    render(
+      <PoliciesTab
+        policies={[p]}
+        allPolicies={[p]}
+        projectId="proj"
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+    const onDemand = screen.getByRole('button', { name: 'On demand' });
+    fireEvent.click(onDemand);
+    expect(onDemand.hasAttribute('disabled')).toBe(false);
+    expect(onDemand.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Pinned' }));
+    expect(mocks.updatePolicy).toHaveBeenCalledTimes(1);
+    resolve({ updated: true, policyId: 'pol-1' });
+    await waitFor(() => expect(onDemand.getAttribute('aria-disabled')).toBe('false'));
+  });
+});

@@ -9,11 +9,13 @@ vi.mock('../../../../src/services/admin-settings', () => ({
   resolveAdminSettingDetailsMany: vi.fn(),
 }));
 
+import type { Env } from '../../../../src/env';
 import {
   applyInstructionBudgets,
   type BudgetedPolicy,
   fitKnowledge,
   formatOnDemandPolicyIndex,
+  resolveInstructionBudgets,
   selectPolicies,
 } from '../../../../src/routes/mcp/instruction-budget';
 import {
@@ -22,6 +24,7 @@ import {
   formatPolicyDirectives,
   type KnowledgeEntry,
 } from '../../../../src/routes/mcp/instruction-formatting';
+import { resolveAdminSettingDetailsMany } from '../../../../src/services/admin-settings';
 import { INSTRUCTION_BUDGET_DEFAULTS } from '../../../../src/services/admin-settings-instructions-definitions';
 
 let seq = 0;
@@ -263,7 +266,7 @@ describe('applyInstructionBudgets', () => {
     expect(out.telemetry.requiredOverBudget).toBe(true);
     for (const p of pinned) expect(out.text).toContain(p.id);
     expect(out.text).toContain('pinned policies');
-    expect(out.text).toContain('Nothing was left out.');
+    expect(out.text).toContain('Every pinned policy is sent in full');
     // Trimming knowledge could not have reached the budget, so it was not trimmed.
     expect(out.telemetry.observationsDroppedForBudget).toBe(0);
   });
@@ -295,5 +298,232 @@ describe('applyInstructionBudgets', () => {
         sizeNotes: [],
       })
     );
+  });
+});
+
+describe('resolveInstructionBudgets', () => {
+  const env = {} as Env;
+  const keys = Object.keys(INSTRUCTION_BUDGET_DEFAULTS);
+
+  it('uses stored values that are inside each setting range', async () => {
+    vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce(
+      [90_000, 5_000, 0, 3, 4].map((value) => ({ value })) as never
+    );
+    expect(await resolveInstructionBudgets(env)).toEqual({
+      totalMaxChars: 90_000,
+      knowledgeMaxChars: 5_000,
+      onDemandPolicyMaxChars: 0,
+      onDemandPolicyMaxPerCategory: 3,
+      onDemandPolicyMinRelevance: 4,
+    });
+  });
+
+  it('falls back to the default for a value outside its range, such as a minimum relevance of 0', async () => {
+    vi.mocked(resolveAdminSettingDetailsMany).mockResolvedValueOnce(
+      [5, 5_000, 12_000, 5, 0].map((value) => ({ value })) as never
+    );
+    const budgets = await resolveInstructionBudgets(env);
+    expect(budgets.onDemandPolicyMinRelevance).toBe(
+      INSTRUCTION_BUDGET_DEFAULTS.onDemandPolicyMinRelevance
+    );
+    expect(budgets.totalMaxChars).toBe(INSTRUCTION_BUDGET_DEFAULTS.totalMaxChars);
+    expect(budgets.knowledgeMaxChars).toBe(5_000);
+  });
+
+  it('degrades to the defaults when settings cannot be read', async () => {
+    vi.mocked(resolveAdminSettingDetailsMany).mockRejectedValueOnce(new Error('D1 down'));
+    expect(await resolveInstructionBudgets(env)).toEqual(INSTRUCTION_BUDGET_DEFAULTS);
+    expect(keys).toHaveLength(5);
+  });
+});
+
+describe('selectPolicies in a small project', () => {
+  it('treats every word as distinctive when there are fewer than five policies', () => {
+    const tunnel = policy({ title: 'Tunnel backoff', injectMode: 'on_demand' });
+    const selection = selectPolicies([tunnel, policy()], 'tunnel', LIMITS);
+    expect(selection.onDemandInFullCount).toBe(1);
+  });
+});
+
+describe('applyInstructionBudgets trim steps and logs', () => {
+  const render = (parts: {
+    policyDirectives: string | null;
+    knowledgeDirectives: string | null;
+    sizeNotes: string[];
+  }) => JSON.stringify({ instructions: ['fixed', ...parts.sizeNotes], ...parts }, null, 2);
+  const filler = Array.from({ length: 40 }, () => policy());
+
+  it('moves on-demand text to the index when trimming knowledge alone is not enough', () => {
+    const onDemand = Array.from({ length: 6 }, (_, i) =>
+      policy({
+        title: `Tunnel rule ${i}`,
+        category: 'rule',
+        content: 't'.repeat(600),
+        injectMode: 'on_demand',
+      })
+    );
+    const policies = [...onDemand, ...filler];
+    const budgets = {
+      ...INSTRUCTION_BUDGET_DEFAULTS,
+      onDemandPolicyMaxChars: 100_000,
+      onDemandPolicyMaxPerCategory: 10,
+    };
+    const unbounded = applyInstructionBudgets({
+      projectId: 'p',
+      policies,
+      knowledge: [],
+      entityIndex: [],
+      totalEntities: 0,
+      taskText: 'tunnel',
+      render,
+      budgets: { ...budgets, totalMaxChars: 2_000_000 },
+    });
+    expect(unbounded.telemetry.onDemandInFullCount).toBe(6);
+    const total = unbounded.text.length - 1_500;
+    const out = applyInstructionBudgets({
+      projectId: 'p',
+      policies,
+      knowledge: [],
+      entityIndex: [],
+      totalEntities: 0,
+      taskText: 'tunnel',
+      render,
+      budgets: { ...budgets, totalMaxChars: total },
+    });
+    expect(out.text.length).toBeLessThanOrEqual(total);
+    expect(out.telemetry.trimmedForTotal).toBe(true);
+    expect(out.telemetry.onDemandInFullCount).toBeGreaterThan(0);
+    expect(out.telemetry.onDemandInFullCount).toBeLessThan(6);
+    for (const p of policies) expect(out.text.split(p.id).length - 1).toBe(1);
+  });
+
+  it('falls back to the floor (pinned + indexes) when the trim steps cannot fit', () => {
+    const onDemand = [
+      policy({
+        title: 'Tunnel rule',
+        category: 'rule',
+        content: 't'.repeat(3_000),
+        injectMode: 'on_demand',
+      }),
+    ];
+    const policies = [...onDemand, ...filler];
+    const budgets = { ...INSTRUCTION_BUDGET_DEFAULTS, onDemandPolicyMaxChars: 100_000 };
+    const floorOnly = applyInstructionBudgets({
+      projectId: 'p',
+      policies,
+      knowledge: [],
+      entityIndex: [],
+      totalEntities: 0,
+      taskText: 'tunnel',
+      render,
+      budgets: { ...budgets, onDemandPolicyMaxChars: 0, totalMaxChars: 2_000_000 },
+    });
+    const out = applyInstructionBudgets({
+      projectId: 'p',
+      policies,
+      knowledge: [],
+      entityIndex: [],
+      totalEntities: 0,
+      taskText: 'tunnel',
+      render,
+      budgets: { ...budgets, totalMaxChars: floorOnly.text.length + 10 },
+    });
+    expect(out.text).toBe(floorOnly.text);
+    expect(out.telemetry.requiredOverBudget).toBe(false);
+    expect(out.text).toContain(`(rule, id: ${onDemand[0]!.id})`);
+  });
+
+  it('logs a warning naming the pinned size when required sections exceed the total', async () => {
+    const { log } = await import('../../../../src/lib/logger');
+    const warn = vi.spyOn(log, 'warn');
+    const pinned = Array.from({ length: 10 }, () => policy({ content: 'z'.repeat(800) }));
+    applyInstructionBudgets({
+      projectId: 'proj-x',
+      policies: pinned,
+      knowledge: [],
+      entityIndex: [],
+      totalEntities: 0,
+      taskText: '',
+      render,
+      budgets: { ...INSTRUCTION_BUDGET_DEFAULTS, totalMaxChars: 1_000 },
+    });
+    expect(warn).toHaveBeenCalledWith(
+      'mcp.get_instructions.required_over_budget',
+      expect.objectContaining({
+        projectId: 'proj-x',
+        pinnedCount: 10,
+        budget: 1_000,
+        action: 'sent_in_full',
+      })
+    );
+    warn.mockRestore();
+  });
+});
+
+describe('renderWithinBudgets', () => {
+  const render = (parts: {
+    policyDirectives: string | null;
+    knowledgeDirectives: string | null;
+    sizeNotes: string[];
+  }) => JSON.stringify(parts);
+
+  it('logs the size telemetry on every call', async () => {
+    const { log } = await import('../../../../src/lib/logger');
+    const { renderWithinBudgets } = await import('../../../../src/routes/mcp/instruction-payload');
+    vi.mocked(resolveAdminSettingDetailsMany).mockRejectedValueOnce(new Error('unavailable'));
+    const info = vi.spyOn(log, 'info');
+    const policies = [policy(), policy({ injectMode: 'on_demand' })];
+    const text = await renderWithinBudgets({
+      env: {} as Env,
+      projectId: 'proj-t',
+      contextType: 'task',
+      policies,
+      knowledge: [],
+      entityIndex: [],
+      totalEntities: 0,
+      taskText: '',
+      render,
+    });
+    expect(info).toHaveBeenCalledWith(
+      'mcp.get_instructions.size',
+      expect.objectContaining({
+        projectId: 'proj-t',
+        contextType: 'task',
+        totalChars: text.length,
+        policyCount: 2,
+        pinnedCount: 1,
+        onDemandCount: 1,
+        totalBudget: INSTRUCTION_BUDGET_DEFAULTS.totalMaxChars,
+      })
+    );
+    info.mockRestore();
+  });
+
+  it('falls back to the unbudgeted rendering, every policy in full, when the budget pass throws', async () => {
+    const { log } = await import('../../../../src/lib/logger');
+    const { renderWithinBudgets } = await import('../../../../src/routes/mcp/instruction-payload');
+    vi.mocked(resolveAdminSettingDetailsMany).mockRejectedValueOnce(new Error('unavailable'));
+    const error = vi.spyOn(log, 'error');
+    // A malformed on-demand row (no title) makes relevance scoring throw.
+    const broken = policy({ injectMode: 'on_demand', title: undefined as never });
+    const ok = policy();
+    const text = await renderWithinBudgets({
+      env: {} as Env,
+      projectId: 'proj-f',
+      contextType: 'task',
+      policies: [broken, ok],
+      knowledge: [],
+      entityIndex: [],
+      totalEntities: 0,
+      taskText: 'anything',
+      render,
+    });
+    expect(error).toHaveBeenCalledWith(
+      'mcp.get_instructions.budget_failed',
+      expect.objectContaining({ projectId: 'proj-f', action: 'rendered_without_budgets' })
+    );
+    const parsed = JSON.parse(text) as { policyDirectives: string };
+    expect(parsed.policyDirectives).toBe(formatPolicyDirectives([broken, ok]));
+    error.mockRestore();
   });
 });

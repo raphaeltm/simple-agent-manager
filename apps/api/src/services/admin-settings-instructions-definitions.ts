@@ -4,9 +4,12 @@
  * Read once per `get_instructions` call through `resolveAdminSettingDetailsMany`, which uses
  * the per-isolate settings cache, so a warm isolate adds no D1 round trip (rule 60).
  *
- * Rollback: set every value to its maximum. Pinned policies are never trimmed by any of
- * these, and every policy is pinned until a project admin unpins it, so at maximum budgets
- * the payload matches the pre-budget rendering (tests/workers/get-instructions-budget.test.ts).
+ * Rollback: while every policy is pinned, setting the three character budgets to their maximum
+ * gives the pre-budget rendering (tests/workers/get-instructions-budget.test.ts). Pinned policies
+ * are never trimmed by any of these; to undo an unpin, pin the policy again.
+ *
+ * Units: the section budgets count characters of rendered text, the total counts characters of
+ * the serialized JSON payload.
  */
 import { type AdminSettingDefinition, integerDefinition } from './admin-setting-definitions';
 
@@ -26,7 +29,7 @@ export const INSTRUCTION_BUDGET_DEFAULTS = {
 export type InstructionBudgetKey = keyof typeof INSTRUCTION_BUDGET_DEFAULTS;
 export type InstructionBudgetSettingName = `instructions.${InstructionBudgetKey}`;
 
-/** Large enough to reproduce the unbudgeted payload for any project today. */
+/** Validation ceiling only; far above any project's payload today. */
 const MAX_CHARS = 2_000_000;
 
 export const INSTRUCTION_BUDGET_SETTINGS: AdminSettingDefinition[] = [
@@ -34,7 +37,7 @@ export const INSTRUCTION_BUDGET_SETTINGS: AdminSettingDefinition[] = [
     'instructions.totalMaxChars',
     INSTRUCTION_BUDGET_DEFAULTS.totalMaxChars,
     'Collaboration',
-    'Characters of serialized get_instructions text agents receive at session start. When over, knowledge is trimmed first, then on-demand policy text, but only if that brings the payload under this size. Pinned policies and the task are never trimmed: if they alone exceed it, everything is sent and the payload says the pinned policies exceed the budget.',
+    'Characters of serialized get_instructions text agents receive at session start. When over, knowledge is trimmed first, then on-demand policy text, but only if that brings the payload under this size. Pinned policies and the task are never trimmed: if they alone exceed it, they are sent in full, knowledge and on-demand text keep their own budgets, and the payload says the pinned policies exceed the budget.',
     { min: 10_000, max: MAX_CHARS }
   ),
   integerDefinition(
@@ -62,7 +65,7 @@ export const INSTRUCTION_BUDGET_SETTINGS: AdminSettingDefinition[] = [
     'instructions.onDemandPolicyMinRelevance',
     INSTRUCTION_BUDGET_DEFAULTS.onDemandPolicyMinRelevance,
     'Collaboration',
-    'Relevance score an on-demand policy needs to be shown in full: 2 per distinctive title word and 1 per distinctive body word that also appears in the task title, description or session topic.',
+    'Relevance score an on-demand policy needs to be shown in full: 2 per distinctive title word and 1 per distinctive body word that also appears in the task title, description, session topic or idea title.',
     { min: 1, max: 100 }
   ),
 ];

@@ -144,3 +144,34 @@ describe('policy inject mode writes', () => {
     expect(parsePolicyRow({ ...base, inject_mode: 'on_demand' }).injectMode).toBe('on_demand');
   });
 });
+
+describe('policy inject mode DO guard', () => {
+  it('refuses an unknown inject mode on create and update without writing', () => {
+    const { db, sql } = migratedDb();
+    try {
+      expect(() =>
+        createPolicy(
+          sql,
+          ENV,
+          'rule',
+          'R',
+          'C',
+          'explicit',
+          null,
+          0.9,
+          'always',
+          null,
+          'sometimes' as never
+        )
+      ).toThrow('injectMode must be one of');
+      expect(listPolicies(sql, null, true, 10, 0).total).toBe(0);
+      const { id } = createPolicy(sql, ENV, 'rule', 'R', 'C', 'explicit', null, 0.9);
+      expect(() => updatePolicy(sql, id, { injectMode: 'never' as never })).toThrow(
+        'injectMode must be one of'
+      );
+      expect(getPolicy(sql, id)?.injectMode).toBe('pinned');
+    } finally {
+      db.close();
+    }
+  });
+});

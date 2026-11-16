@@ -11,7 +11,11 @@ import type {
   PolicyScope,
   PolicySource,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_POLICY_INJECT_MODE, DEFAULT_POLICY_MAX_PER_PROJECT } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_POLICY_INJECT_MODE,
+  DEFAULT_POLICY_MAX_PER_PROJECT,
+  isPolicyInjectMode,
+} from '@simple-agent-manager/shared';
 
 import { parseCountCnt, parsePolicyRow } from './row-schemas';
 import type { Env } from './types';
@@ -58,6 +62,16 @@ const SELECT_APPLIES_NOW_SQL = `SELECT * FROM project_policies
      ORDER BY category ASC, created_at ASC
      LIMIT ?`;
 
+/**
+ * Final server-side guard on the inject mode, like the scope/expiry guard: every caller
+ * (MCP, REST, /sam) validates first, and this is the choke point a future writer cannot bypass.
+ */
+function assertInjectMode(value: string | undefined): void {
+  if (value !== undefined && !isPolicyInjectMode(value)) {
+    throw new Error(`injectMode must be one of: pinned, on_demand`);
+  }
+}
+
 // ─── Policy CRUD ────────────────────────────────────────────────────────────
 
 export function createPolicy(
@@ -71,14 +85,15 @@ export function createPolicy(
   confidence: number,
   scope: PolicyScope = 'always',
   expiresAt: number | null = null,
-  injectMode: PolicyInjectMode = DEFAULT_POLICY_INJECT_MODE,
+  injectMode: PolicyInjectMode = DEFAULT_POLICY_INJECT_MODE
 ): { id: string; now: number } {
   const now = Date.now();
+  assertInjectMode(injectMode);
 
   // Final server-side guard on the scope/expiry invariant — see updatePolicy.
   if (scope === 'task' && expiresAt === null) {
     throw new Error(
-      "a task-scoped policy must set expiresAt so it cannot outlive the work it was captured for (use scope 'always' for a standing policy)",
+      "a task-scoped policy must set expiresAt so it cannot outlive the work it was captured for (use scope 'always' for a standing policy)"
     );
   }
 
@@ -94,10 +109,7 @@ export function createPolicy(
   // could never write a policy again. Sizing that ceiling against a real retention
   // or hard-delete path is tracked in
   // tasks/backlog/2026-08-23-policy-row-retention-bound.md (rule 42 — tracked, not silent).
-  const count = parseCountCnt(
-    sql.exec(COUNT_APPLIES_NOW_SQL, now).toArray()[0],
-    'policy_count',
-  );
+  const count = parseCountCnt(sql.exec(COUNT_APPLIES_NOW_SQL, now).toArray()[0], 'policy_count');
   if (count >= getMaxPolicies(env)) {
     throw new Error(`Maximum active policies per project (${getMaxPolicies(env)}) reached`);
   }
@@ -106,16 +118,24 @@ export function createPolicy(
   sql.exec(
     `INSERT INTO project_policies (id, category, title, content, source, source_session_id, confidence, active, scope, expires_at, inject_mode, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
-    id, category, title, content, source, sourceSessionId, confidence, scope, expiresAt, injectMode, now, now,
+    id,
+    category,
+    title,
+    content,
+    source,
+    sourceSessionId,
+    confidence,
+    scope,
+    expiresAt,
+    injectMode,
+    now,
+    now
   );
   return { id, now };
 }
 
 export function getPolicy(sql: SqlStorage, policyId: string) {
-  const rows = sql.exec(
-    'SELECT * FROM project_policies WHERE id = ?',
-    policyId,
-  ).toArray();
+  const rows = sql.exec('SELECT * FROM project_policies WHERE id = ?', policyId).toArray();
   if (rows.length === 0) return null;
   return parsePolicyRow(rows[0]);
 }
@@ -125,7 +145,7 @@ export function listPolicies(
   category: string | null,
   activeOnly: boolean,
   limit: number,
-  offset: number,
+  offset: number
 ): { policies: ReturnType<typeof parsePolicyRow>[]; total: number } {
   let countQuery = 'SELECT COUNT(*) as cnt FROM project_policies';
   let listQuery = 'SELECT * FROM project_policies';
@@ -148,10 +168,7 @@ export function listPolicies(
 
   listQuery += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
 
-  const total = parseCountCnt(
-    sql.exec(countQuery, ...params).toArray()[0],
-    'policy_list_count',
-  );
+  const total = parseCountCnt(sql.exec(countQuery, ...params).toArray()[0], 'policy_list_count');
 
   const rows = sql.exec(listQuery, ...params, limit, offset).toArray();
   const policies = rows.map((row) => parsePolicyRow(row));
@@ -171,10 +188,11 @@ export function updatePolicy(
     scope?: PolicyScope;
     expiresAt?: number | null;
     injectMode?: PolicyInjectMode;
-  },
+  }
 ): boolean {
   const existing = getPolicy(sql, policyId);
   if (!existing) return false;
+  assertInjectMode(updates.injectMode);
 
   const now = Date.now();
 
@@ -187,7 +205,7 @@ export function updatePolicy(
     updates.expiresAt !== undefined ? updates.expiresAt : existing.expiresAt;
   if (effectiveScope === 'task' && effectiveExpiresAt === null) {
     throw new Error(
-      "a task-scoped policy must set expiresAt so it cannot outlive the work it was captured for (use scope 'always' for a standing policy)",
+      "a task-scoped policy must set expiresAt so it cannot outlive the work it was captured for (use scope 'always' for a standing policy)"
     );
   }
 
@@ -206,13 +224,13 @@ export function updatePolicy(
     updates.title ?? existing.title,
     updates.content ?? existing.content,
     updates.category ?? existing.category,
-    updates.active !== undefined ? (updates.active ? 1 : 0) : (existing.active ? 1 : 0),
+    updates.active !== undefined ? (updates.active ? 1 : 0) : existing.active ? 1 : 0,
     updates.confidence ?? existing.confidence,
     updates.scope ?? existing.scope,
     updates.expiresAt !== undefined ? updates.expiresAt : existing.expiresAt,
     updates.injectMode ?? existing.injectMode,
     now,
-    policyId,
+    policyId
   );
   return true;
 }
@@ -222,10 +240,7 @@ export function removePolicy(sql: SqlStorage, policyId: string): boolean {
   if (!existing) return false;
 
   const now = Date.now();
-  sql.exec(
-    'UPDATE project_policies SET active = 0, updated_at = ? WHERE id = ?',
-    now, policyId,
-  );
+  sql.exec('UPDATE project_policies SET active = 0, updated_at = ? WHERE id = ?', now, policyId);
   return true;
 }
 
@@ -242,7 +257,7 @@ export function removePolicy(sql: SqlStorage, policyId: string): boolean {
 export function getActivePolicies(
   sql: SqlStorage,
   env: Env,
-  now: number = Date.now(),
+  now: number = Date.now()
 ): ReturnType<typeof parsePolicyRow>[] {
   const max = getMaxPolicies(env);
   const rows = sql.exec(SELECT_APPLIES_NOW_SQL, now, max).toArray();

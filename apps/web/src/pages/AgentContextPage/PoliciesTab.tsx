@@ -288,7 +288,7 @@ function PolicyCard({
 
   return (
     <>
-      <article className={`${GLASS_CARD} group p-3 ${!policy.active ? 'opacity-60' : ''}`}>
+      <article className={`${GLASS_CARD} group p-3`}>
         {editing ? (
           <PolicyEditForm
             policy={policy}
@@ -299,7 +299,8 @@ function PolicyCard({
         ) : (
           <>
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div className="min-w-0 flex-1">
+              {/* Only the text is dimmed for an inactive policy; controls stay solid (SAM Glass). */}
+              <div className={`min-w-0 flex-1 ${!policy.active ? 'opacity-60' : ''}`}>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Badge className={categoryColors[policy.category]}>{policy.category}</Badge>
                   <Badge
@@ -401,7 +402,7 @@ export function PoliciesTab({ policies, allPolicies, projectId, onRefresh }: Pol
     <div className="space-y-2.5">
       <SectionHeader
         title="Policies"
-        description="Durable project instructions and preferences. Instruction-only until platform enforcement exists. Pinned policies are sent in full to every agent session; on-demand ones are listed by title and sent in full only when they match the task."
+        description="Durable project instructions and preferences. Instruction-only until platform enforcement exists."
       />
       {allPolicies.length > 0 && <PolicyInjectSummary policies={allPolicies} />}
       {policies.map((policy) => (
