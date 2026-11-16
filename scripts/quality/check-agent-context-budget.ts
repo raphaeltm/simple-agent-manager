@@ -25,7 +25,6 @@ import { resolve } from 'node:path';
 import TOML from '@iarna/toml';
 
 import { CODEX_RULE_SCOPES_FILE, renderCodexRuleScopes } from './agent-codex-rule-scopes';
-
 import {
   checkClaudeHookConfig,
   checkCodexHookConfig,
