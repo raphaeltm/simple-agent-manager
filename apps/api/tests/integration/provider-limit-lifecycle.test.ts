@@ -44,6 +44,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
+import { inboxErrorsPort } from '../../src/project-data-ports/inbox-errors';
 import { taskCallbackRoute } from '../../src/routes/tasks/callback';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
@@ -51,14 +52,16 @@ import {
   __resetAdminSettingsCacheForTest,
   updateAdminSettings,
 } from '../../src/services/admin-settings';
+import { fileTaskFailure, runInboxSystemErrorSweep } from '../../src/services/inbox/system-errors';
 import { preserveProviderLimitWait } from '../../src/services/provider-limit-reconciliation';
 import {
   queueWorkspaceSessionSleep,
   sleepWorkspaceSession,
 } from '../../src/services/session-sleep';
+import { markTaskFailedIfNonTerminal } from '../../src/services/task-failure';
 import { ensurePoolsWithStarterMachines } from '../helpers/capacity-pool-picks';
 import { createSleepProjectDataFixture } from '../helpers/session-sleep-project-data-fixture';
-import { createMemoryKv, createSchemaTables } from '../helpers/sqlite-d1';
+import { applySqliteMigration, createMemoryKv, createSchemaTables } from '../helpers/sqlite-d1';
 
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'workspace-1', scope: 'workspace' })),
@@ -1034,6 +1037,101 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     expect(d1.prepare('SELECT status FROM tasks WHERE id=?').get(TASK)).toEqual({
       status: 'in_progress',
     });
+  });
+
+  it('a usage-limit wait files no inbox error item, and its block supersedes an open failed-wake item', async () => {
+    // Inbox slice E on the real callback route: waiting for a provider usage limit is not a
+    // failed start. The shipped asks migrations, not the drizzle mirror.
+    for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
+      applySqliteMigration(d1, new URL(`../../src/db/migrations/${file}`, import.meta.url));
+    d1.prepare(
+      "INSERT OR IGNORE INTO users (id,email,name,role,status) VALUES (?, 'u1@x.test', 'One', 'user', 'active')"
+    ).run(USER);
+    d1.prepare(
+      "UPDATE projects SET user_id = ?, name = 'One', repository = 'o/one' WHERE id = ?"
+    ).run(USER, PROJECT);
+    d1.prepare(
+      "INSERT OR REPLACE INTO project_members (project_id,user_id,role,status) VALUES (?, ?, 'owner', 'active')"
+    ).run(PROJECT, USER);
+    const notified = vi.fn().mockResolvedValue({ id: 'n-1' });
+    Object.assign(env, {
+      NOTIFICATION: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          createNotification: notified,
+          claimNotificationDeduplication: vi.fn().mockResolvedValue(true),
+        }),
+      },
+    });
+    const errorAsk = (key: string) =>
+      d1.prepare("SELECT status FROM asks WHERE kind = 'error' AND dedupe_key = ?").get(key) as
+        { status: string } | undefined;
+
+    // A failed wake earlier in this chat, filed by the real ProjectData port.
+    const wakeItem = await inboxErrorsPort.fileWakeFailure(env as never, {
+      projectId: PROJECT,
+      sessionId: CHAT,
+      taskId: TASK,
+      createdByUserId: USER,
+      topic: 'Ship it',
+    });
+    expect(wakeItem?.created).toBe(true);
+
+    // Distinct rejected prompts: the first waits, the budget then exhausts into a block.
+    for (let incident = 0; incident < 4; incident++) {
+      if (incident) {
+        const row = d1
+          .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+          .get(TASK) as { value: string };
+        vi.setSystemTime(JSON.parse(row.value).nextRetryAt + 1);
+        d1.prepare('UPDATE agent_sessions SET id=?').run(`limit-agent-${incident}`);
+      }
+      expect(
+        (await callback({ toStatus: 'failed', errorMessage: 'provider_limit_reached' })).status
+      ).toBe(200);
+      // While it only waits, nothing is filed for the task, inline or by the sweep.
+      expect(d1.prepare('SELECT status FROM tasks WHERE id=?').get(TASK)).toEqual({
+        status: 'in_progress',
+      });
+    }
+    expect(
+      JSON.parse(
+        (
+          d1
+            .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+            .get(TASK) as {
+            value: string;
+          }
+        ).value
+      )
+    ).toMatchObject({ phase: 'blocked' });
+
+    // Liveness: a genuine failure of another task in the same sweep tick is filed.
+    d1.prepare(
+      "INSERT INTO tasks (id, project_id, user_id, title, status, chat_session_id, updated_at) VALUES ('task-genuine', ?, ?, 'Genuine', 'in_progress', 'chat-genuine', ?)"
+    ).run(PROJECT, USER, new Date().toISOString());
+    await markTaskFailedIfNonTerminal(env.DATABASE, 'task-genuine', 'Task runner startup failed');
+    const stats = await runInboxSystemErrorSweep(env);
+    expect(stats.filed).toBe(1);
+    expect(errorAsk('error:task:task-genuine')).toMatchObject({ status: 'open' });
+    expect(errorAsk(`error:task:${TASK}`)).toBeUndefined();
+    expect(await fileTaskFailure(env, PROJECT, TASK)).toBeNull();
+
+    // The blocked task sleeps and the block is presented to the chat (the real path that
+    // resolves the wake_failed marker): it supersedes the failed-wake item too.
+    expect(d1.prepare('SELECT status FROM asks WHERE id = ?').get(wakeItem?.id)).toEqual({
+      status: 'open',
+    });
+    await sleepTheTask();
+    expect(await preserveProviderLimitWait(env, TASK, Date.now())).toBe(true);
+    expect(
+      d1
+        .prepare('SELECT status, dedupe_key AS key, answer_json AS answer FROM asks WHERE id = ?')
+        .get(wakeItem?.id)
+    ).toEqual({ status: 'done', key: null, answer: '{"resolution":"superseded"}' });
+    expect(listActiveAttentionMarkers(sql, CHAT)).toEqual([
+      expect.objectContaining({ kind: 'provider_limit_blocked' }),
+    ]);
   });
 
   it.each(['stale', 'expired', 'unrelated', 'future', 'ambiguous', 'auth'] as const)(

@@ -187,7 +187,13 @@ export async function fileSystemError(
   }
 }
 
-export type SystemErrorResolution = 'recovered' | 'retried' | 'resumed' | 'cancelled';
+/**
+ * Why an error item closed, stored as `answer_json.resolution`. `superseded`: a newer state of the
+ * same thing took over (a chat's failed wake, once the chat is blocked on a provider usage limit;
+ * written by ProjectData `closeWakeErrorAskForProviderLimit`).
+ */
+export type SystemErrorResolution =
+  'recovered' | 'retried' | 'resumed' | 'cancelled' | 'superseded';
 
 /**
  * The thing recovered: close its open item (`done`) and release the dedupe key, on an open or an

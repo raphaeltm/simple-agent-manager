@@ -588,16 +588,23 @@ the task, chat or automation:
 | An automation failed `inbox.automationFailureThreshold` runs in a row, or was paused after them | minute cron scan of failed runs (`automation-errors.ts`)                                        | `resume` when paused                                  |
 | A chat slept without a fresh snapshot, so unsaved work may be lost                              | the sleep fallback (`session-sleep-fallback.ts`)                                                | `open_chat`                                           |
 | Your answer to a permission, form or link request was never confirmed delivered                 | the interaction store (`interaction-store-attention.ts`)                                        | `open_chat`                                           |
+| A chat could not be woken to take a message waiting for it                                      | ProjectData's wake failure (`wake-failure.ts`, `project-data-ports/inbox-errors.ts`)            | `wake` (VM chats), `open_chat`                        |
+| Your inbox answer never reached the agent after the inbox sweep's retries                       | the inbox sweep (`system-errors.ts:fileUndeliveredAskAnswers`)                                  | `open_chat`                                           |
 
 Normal endings never file one: a cancellation, a stop by you or a parent agent, an expected
-question expiry, completion, a superseded wake, or a status you set yourself. A repeat failure of
+question expiry, completion, a superseded wake, an archived chat, or a status you set yourself. A
+task waiting for a provider usage limit is not failed and files nothing; once the wait is blocked,
+it also closes the chat's failed-wake item (`answer_json.resolution` `superseded`,
+`provider-limit-attention.ts`). A repeat failure of
 the same thing updates the open item (`failureCount`, title, body, `updatedAt`) instead of filing
 another. When the thing recovers (a retry starts, the task is run again, the automation runs
-cleanly or is resumed) the item closes by itself (`status` `done`). Titles and bodies are SAM's own
+cleanly or is resumed, the chat wakes, or you write in the chat) the item closes by itself
+(`status` `done`). Titles and bodies are SAM's own
 sentences, never the raw error. `answerSpec` is `{ type: "actions", actions: [{ id, label }] }`,
 first action primary; `open_chat` is handled by the app (open the item's chat) and the server
 refuses it. Answering `{ "action": "retry" }` or `{ "action": "resume" }` returns `outcome`
-`retried` or `resumed` and closes the item; a refused fix returns `409` and leaves it open.
+`retried` or `resumed` and closes the item; `{ "action": "wake" }` returns `wake_requested` and
+the item closes when the chat wakes. A refused fix returns `409` and leaves it open.
 Archiving an error item tells no agent.
 
 ### Shared chat access

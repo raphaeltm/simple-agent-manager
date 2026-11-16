@@ -78,13 +78,16 @@ Failure points (writers of `tasks.status='failed'`, 16 of them):
 - [x] Permission/form/URL request notification, once per request, linking the inbox item (`notifyInteractionRequested`)
 - [x] Tests: real writers + sweep, exclusions with liveness, tenancy on real SQL, canary secret, actions, recovery, automations, wake read/close, Workers interaction tests
 - [x] Docs: api reference (system error items), notifications guide, admin settings
-- [ ] Rebase onto main after slice G (#2780) merges (part 6 is built on G's reader)
-- [ ] Staging verification (staging2 queue: F1 → C → G → E)
+- [x] Rebase onto main after slice G (#2780) merges (part 6 is built on G's reader): takeover task 01M7JC1MTRFT8PWRQ8BNFP8D6W, merge commit a7b01b35c (tree = slice E rebased on main 30ae952ae; no force-push)
+- [x] Provider-limit block supersedes an open failed-wake item (`closeWakeErrorAskForProviderLimit`), and a usage-limit wait files nothing, both through the real callback route (`provider-limit-lifecycle.test.ts`)
+- [x] API reference: failed-wake and undelivered-inbox-answer rows, wake action, provider-limit behaviour
+- [ ] Re-run reviewers on the rebased head (security-auditor, cloudflare-specialist, test-engineer, task-completion-validator)
+- [ ] Staging verification on the rebased head: real failed start + real failing/paused automation, Retry/Resume from the inbox closes each, phone viewport
 
 ## Notes
 
 - Round trips: task filing ≈ settings + member + task check + insert (+ dedupe read + update on repeat); cron steps: one indexed scan + bounded filings + one UPDATE (tasks); automations: one scan + one streak read per automation (≤ batch) + one read per open item (≤ 4×batch). Chat list: the question reader gained a UNION ALL arm (same round trip); ranking EXISTS gained an OR arm.
-- Undelivered answers: InteractionStore `delivery_unconfirmed` (permissions) and asks whose notice the inbox sweep gave up on (`fileUndeliveredAskAnswers`). Not covered: durable prompt outbox terminal failures to an awake chat (`max_attempts_exceeded`) for human chat messages; agent-facing `pendingAttention` no longer lists the (unanswerable) wake marker; account map no longer shows wake failures (same as questions after slice G).
+- Undelivered answers: InteractionStore `delivery_unconfirmed` (permissions) and asks whose notice the inbox sweep gave up on (`fileUndeliveredAskAnswers`). Not covered (tracked in `tasks/backlog/2026-11-16-inbox-error-items-followups.md`): durable prompt outbox terminal failures to an awake chat (`max_attempts_exceeded`) for human chat messages; agent-facing `pendingAttention` no longer lists the (unanswerable) wake marker; account map no longer shows wake failures (same as questions after slice G).
 
 ## Acceptance criteria
 
