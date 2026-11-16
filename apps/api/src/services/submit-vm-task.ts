@@ -1,8 +1,5 @@
 /** VM submission after shared input validation and runtime resolution. */
-import {
-  recordWorkStartIdeaLink,
-  type requireOpenIdeaForWorkStart,
-} from '@simple-agent-manager/operations';
+import { type requireOpenIdeaForWorkStart } from '@simple-agent-manager/operations';
 import {
   collectStoredResourceRequirementLayers,
   createPersistedTaskResourcePlanJson,
@@ -13,8 +10,7 @@ import {
   ResourceRequirementsValidationError,
 } from '@simple-agent-manager/scheduler-core';
 import type { SubmitTaskResponse, VMSize } from '@simple-agent-manager/shared';
-import { CHAT_CONTEXT_SUMMARY_SOURCE } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type * as v from 'valibot';
 
@@ -24,7 +20,6 @@ import { log } from '../lib/logger';
 import { markTaskSubmitOperation, type TaskSubmitOperation } from '../lib/task-submit-diagnostics';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
-import { operationDeps } from '../operation-ports';
 import { type SubmitTaskSchema } from '../schemas';
 import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { capacityPlacementSnapshotDbValues } from '../services/capacity-placement-snapshot';
@@ -43,9 +38,14 @@ import { startTaskRunnerDO } from '../services/task-runner-do';
 import { getTaskTitleConfig } from '../services/task-title';
 import { type buildArchivedForkContext } from './archived-chat-fork';
 import { type SamDispatchReservation } from './sam-dispatch-reservation';
+import {
+  enforcePlatformQuota,
+  linkVmTaskSourceIdea,
+  persistVmTaskSession,
+} from './submit-vm-task-effects';
 import { getInitialTaskTitle, schedulePostSubmitWork } from './task-submit-title';
 
-type SubmitVmTaskInput = {
+export type SubmitVmTaskInput = {
   env: Env;
   user: { id: string; name: string | null; email: string };
   projectId: string;
@@ -98,7 +98,6 @@ export async function submitVmTask(input: SubmitVmTaskInput): Promise<SubmitTask
     taskId,
     now,
     branchName,
-    sourceIdea,
     resolvedProfile,
   } = input;
   const userId = user.id;
@@ -193,20 +192,7 @@ export async function submitVmTask(input: SubmitVmTaskInput): Promise<SubmitTask
     credentialAttributionProjectId,
     credentialAttributionSource,
   } = placementResolution;
-  if (quotaCredentialSource === 'platform') {
-    const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
-    if (quotaEnforcementEnabled) {
-      const { checkQuotaForUser } = await import('./compute-quotas');
-      setOperation('compute_quota');
-      const quotaCheck = await checkQuotaForUser(db, userId);
-      if (!quotaCheck.allowed) {
-        throw errors.forbidden(
-          `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
-            'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
-        );
-      }
-    }
-  }
+  await enforcePlatformQuota(input, db, quotaCredentialSource);
   const {
     vmSize,
     vmSizeSource,
@@ -295,86 +281,8 @@ export async function submitVmTask(input: SubmitVmTaskInput): Promise<SubmitTask
     createdAt: now,
   });
 
-  // Persist the chat before starting its runner; failures must not orphan queued tasks.
-  let sessionId: string;
-  try {
-    // Require a real session rather than manufacturing a fallback identity.
-    setOperation('session_create');
-    sessionId = await projectDataService.createSession(
-      env,
-      projectId,
-      null, // workspaceId — linked later by TaskRunner DO when workspace is created
-      taskTitle,
-      taskId,
-      userId,
-      ...(samReservation ? ([samReservation.sessionId] as const) : ([] as const))
-    );
-
-    setOperation('task_session_link');
-    // Make the returned session immediately discoverable before the runner alarm starts.
-    await db
-      .update(schema.tasks)
-      .set({ chatSessionId: sessionId })
-      .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)));
-
-    // Context notes appear ahead of the prompt in chat, outside the task description.
-    if (body.contextSummary) {
-      setOperation('context_summary_persist');
-      await projectDataService.persistMessage(
-        env,
-        projectId,
-        sessionId,
-        'system',
-        body.contextSummary,
-        { source: CHAT_CONTEXT_SUMMARY_SOURCE }
-      );
-    }
-
-    setOperation('initial_message_persist');
-    // Require initial-message persistence before returning.
-    await projectDataService.persistMessage(
-      env,
-      projectId,
-      sessionId,
-      'user',
-      message,
-      null,
-      ...(samReservation ? ([samReservation.initialMessageId] as const) : ([] as const))
-    );
-  } catch (err) {
-    markTaskSubmitOperation(err, getOperation());
-    if (samReservation) throw err;
-    // Fail instead of leaving a queued task without its required transcript.
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    setOperation('session_failure_task_update');
-    await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Session creation failed: ${errorMsg}`);
-    log.error('task_submit.session_failed', { taskId, projectId, error: errorMsg });
-    throw err; // Re-throw to return 500 to the frontend
-  }
-
-  // Link the source idea before the runner can deliver the agent's first prompt.
-  if (sourceIdea) {
-    setOperation('source_idea_link');
-    try {
-      await recordWorkStartIdeaLink(operationDeps(env), projectId, {
-        ideaId: sourceIdea.ideaId,
-        sessionId,
-        taskMode,
-      });
-    } catch (err) {
-      if (samReservation) throw err;
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Idea link failed: ${errorMsg}`);
-      await projectDataService.stopSession(env, projectId, sessionId).catch((e) => {
-        log.error('task_submit.orphaned_session_stop_failed', {
-          projectId,
-          sessionId,
-          error: String(e),
-        });
-      });
-      throw err;
-    }
-  }
+  const sessionId = await persistVmTaskSession(input, db, taskTitle);
+  await linkVmTaskSourceIdea(input, sessionId, taskMode);
 
   schedulePostSubmitWork({
     via,

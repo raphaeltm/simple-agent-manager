@@ -145,11 +145,12 @@ export async function handleNodeSelection(
       // reservation capacity before adopting a user-pinned node. Never replace it.
       state.agentReadyStartedAt ??= Date.now();
       const deadline = state.agentReadyStartedAt + rc.getAgentReadyTimeoutMs();
-      const reason = waitingForVersion
-        ? 'agent has not reported a version yet'
-        : awaitingReadiness
-          ? 'agent has not become ready yet'
-          : 'agent readiness deadline exceeded';
+      let reason = 'agent readiness deadline exceeded';
+      if (waitingForVersion) {
+        reason = 'agent has not reported a version yet';
+      } else if (awaitingReadiness) {
+        reason = 'agent has not become ready yet';
+      }
       if (Date.now() >= deadline) {
         throw Object.assign(new Error(`Specified node not ready by deadline: ${reason}`), {
           permanent: true,

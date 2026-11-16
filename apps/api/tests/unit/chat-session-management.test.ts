@@ -12,10 +12,12 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/services/submit-vm-task.ts'),
-  'utf8'
-);
+const taskSubmitSource = [
+  'src/services/submit-vm-task-effects.ts',
+  'src/services/submit-vm-task.ts',
+]
+  .map((path) => readFileSync(resolve(process.cwd(), path), 'utf8'))
+  .join('\n');
 const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
 const taskRunnerDoSource = [
   'index.ts',
