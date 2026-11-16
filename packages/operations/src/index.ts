@@ -91,6 +91,13 @@ export {
   loadAskNoticeRow,
   notifyClosedAsk,
 } from './inbox-write-core';
+export { projectFlow, type ProjectFlowInput } from './insights-flow';
+export {
+  getInsightsFlowLimits,
+  INSIGHTS_FLOW_SETTINGS,
+  type InsightsFlowLimits,
+  type InsightsFlowSettingName,
+} from './insights-flow-settings';
 export {
   DEFAULT_PHASE_STATS_SAMPLE_LIMIT,
   DEFAULT_PHASE_STATS_WINDOW_DAYS,
@@ -166,6 +173,7 @@ export { projectOverviewGet, type ProjectOverviewInput } from './project-overvie
 export {
   ensurePullRequest,
   getPullRequestStates,
+  openingHeadExistsSql,
   parseProjectPullRequestUrl,
   type PullRequestSnapshot,
   upsertPullRequestSnapshot,

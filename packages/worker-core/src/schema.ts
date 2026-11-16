@@ -1443,9 +1443,41 @@ export const pullRequestChecks = sqliteTable(
     checkKey: text('check_key').notNull(),
     state: text('state', { enum: ['pending', 'success', 'failure', 'neutral'] }).notNull(),
     updatedAt: text('updated_at').notNull(),
+    /** When this check first reported a failure on this commit; never cleared by a rerun (migration 0251). */
+    firstFailedAt: text('first_failed_at'),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.projectId, table.repository, table.headSha, table.checkKey] }),
+  })
+);
+
+/**
+ * Every head commit SAM saw for a pull request (migration 0251), written by
+ * `upsertPullRequestSnapshot`. `fromOpen` = this head came in GitHub's `pull_request.opened`
+ * event, so it is the commit the pull request opened with. Insights reads it for "CI passed on
+ * the first try"; old-head check deletes keep that commit's checks.
+ */
+export const pullRequestHeads = sqliteTable(
+  'pull_request_heads',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    headSha: text('head_sha').notNull(),
+    firstSeenAt: text('first_seen_at').notNull(),
+    fromOpen: integer('from_open', { mode: 'boolean' }).notNull().default(false),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.projectId, table.repository, table.prNumber, table.headSha],
+    }),
+    projectRepoHead: index('idx_pull_request_heads_project_repo_head').on(
+      table.projectId,
+      table.repository,
+      table.headSha
+    ),
   })
 );
 
