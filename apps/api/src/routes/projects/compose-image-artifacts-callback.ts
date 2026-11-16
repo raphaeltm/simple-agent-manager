@@ -5,7 +5,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
+import { parseWithSchema } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { AppError, errors } from '../../middleware/error';
 import {
@@ -86,12 +86,7 @@ async function verifyArtifactPolicy(
     'Invalid token scope for compose image artifact upload'
   );
 
-  let requestBody: Record<string, unknown>;
-  try {
-    requestBody = await readRequestJsonRecord(c.req.raw, `${logPrefix}.body`);
-  } catch {
-    throw errors.badRequest('Artifact request body is required');
-  }
+  const requestBody = verified.body;
 
   let policyFields: InferOutput<typeof artifactPolicyBodySchema>;
   try {

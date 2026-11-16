@@ -1,7 +1,7 @@
 import { redactCredentialTokens } from '@simple-agent-manager/worker-core';
 import { ulid } from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
-import { and, asc, desc, eq, gt, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import { publishJobTransitionPredicate } from './publish-job-transitions';
@@ -132,6 +132,8 @@ export async function createDeploymentPublishJob(
 
 export interface AppendDeploymentPublishJobEventInput {
   expectedAttempt?: number;
+  /** Source collector authority ends at verified context handoff. */
+  sourceCollector?: boolean;
   expectedExecutor?: 'cloudflare';
   publishJobId: string;
   projectId: string;
@@ -183,6 +185,13 @@ export async function appendDeploymentPublishJobEvent(
       ? eq(schema.deploymentPublishJobs.status, input.expectedStatus)
       : undefined,
     notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES]),
+    input.sourceCollector && terminal
+      ? or(
+          ne(schema.deploymentPublishJobs.executor, 'cloudflare'),
+          eq(schema.deploymentPublishJobs.contextShadow, true),
+          inArray(schema.deploymentPublishJobs.status, ['queued', 'collecting'])
+        )
+      : undefined,
     publishJobTransitionPredicate(status, input.currentStep, terminal)
   );
   if (input.eventType === 'publish.job.heartbeat') {

@@ -167,6 +167,46 @@ describe('async build_and_publish MCP tools', () => {
     expect(collectContext).toHaveBeenCalled();
     expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
   });
+  it('rejects profile-less Cloudflare requests before queuing but retains the node path', async () => {
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      taskAgentProfileId: null,
+    });
+    executorSetting.mockResolvedValue('cloudflare');
+    const rejected = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+    expect(rejected.error?.message).toContain('agent profile');
+    expect(mockCreateDeploymentPublishJob).not.toHaveBeenCalled();
+    expect(collectContext).not.toHaveBeenCalled();
+    executorSetting.mockResolvedValue('node');
+    expect(
+      (await handleBuildAndPublish(2, { environment: 'staging' }, tokenData(), env())).error
+    ).toBeUndefined();
+    expect(mockStartBuildPublishJobOnVm).toHaveBeenCalled();
+  });
+  it.each(['context_ready', 'starting', 'building', 'succeeded'])(
+    'returns the same job after a late source timeout in %s',
+    async (status) => {
+      executorSetting.mockResolvedValue('cloudflare');
+      currentStatus = status;
+      collectContext.mockRejectedValueOnce(new Error('source acceptance timed out after handoff'));
+      mockAppendDeploymentPublishJobEvent.mockImplementation(
+        async (_db, input) => input.eventType !== 'publish.job.start_failed'
+      );
+      const result = await handleBuildAndPublish(1, { environment: 'staging' }, tokenData(), env());
+      expect(result.error).toBeUndefined();
+      expect(JSON.parse(result.result?.content?.[0]?.text as string)).toMatchObject({
+        publishJobId: 'job-1',
+        status,
+        executor: 'cloudflare',
+      });
+      expect(mockAppendDeploymentPublishJobEvent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ eventType: 'publish.job.start_failed', sourceCollector: true })
+      );
+      expect(cancelAccepted).not.toHaveBeenCalled();
+      expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
+    }
+  );
   it('never falls back to the source after explicit Cloudflare collection fails', async () => {
     executorSetting.mockResolvedValue('cloudflare');
     collectContext.mockRejectedValueOnce(

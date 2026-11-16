@@ -37,7 +37,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.deploymentPublishJobs]);
+  createSchemaTables(sqlite, [schema.deploymentPublishJobs, schema.platformSettings]);
   sqlite
     .prepare(
       `INSERT INTO deployment_publish_jobs(id,project_id,environment_id,workspace_id,node_id,requested_by,environment_name,status,executor,context_shadow,agent_profile_id,attempt,task_id) VALUES('job','project','env','ws','node','user','staging','building','cloudflare',0,'profile',1,'task')`
@@ -53,7 +53,7 @@ function request(body: unknown, project = 'project') {
   app.post('/:id/compose-publish-release', async (c) => {
     const v = await verifyPublishCallback(c, 'compose_publish_release', 'scope');
     await v.assertCurrent();
-    await c.req.raw.json();
+    expect(v.body).toBeDefined();
     return c.json({ jobId: v.job?.id });
   });
   return app.request(
@@ -92,5 +92,62 @@ describe('publish-job release authorization uses real signatures and SQLite owne
     expect((await request(release, 'foreign')).status).toBe(403);
     sqlite.prepare("UPDATE deployment_publish_jobs SET status='canceled'").run();
     expect((await request(release)).status).toBe(410);
+  });
+});
+
+describe('publish callback actual byte bounds', () => {
+  for (const contentLength of [undefined, '1']) {
+    it(`rejects overflowing UTF8 stream with declared length ${contentLength}`, async () => {
+      sqlite
+        .prepare(
+          "INSERT INTO platform_settings(key,value,updated_at,updated_by) VALUES('deployments.publishCallbackMaxBodyBytes','1024',?,NULL)"
+        )
+        .run(new Date().toISOString());
+      const app = new Hono<{ Bindings: Env }>();
+      app.onError((e, c) =>
+        c.json({ error: e.message }, e instanceof AppError ? e.statusCode : 500)
+      );
+      app.post('/:id/events', async (c) => {
+        await verifyPublishCallback(c, 'deployment_publish_job_event', 'scope');
+        return c.json({ ok: true });
+      });
+      const raw = new TextEncoder().encode(JSON.stringify({ message: '界'.repeat(400) }));
+      let offset = 0;
+      const body = new ReadableStream({
+        pull(controller) {
+          if (offset === raw.length) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(raw.slice(offset, offset + 17));
+          offset = Math.min(raw.length, offset + 17);
+        },
+      });
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+      if (contentLength) headers['content-length'] = contentLength;
+      const req = new Request('http://localhost/project/events', {
+        method: 'POST',
+        headers,
+        body,
+        duplex: 'half',
+      } as RequestInit);
+      expect((await app.request(req, undefined, env)).status).toBe(413);
+    });
+  }
+  it('preserves invalid JSON as400 and authenticates before reading', async () => {
+    const app = new Hono<{ Bindings: Env }>();
+    app.onError((e, c) => c.json({ error: e.message }, e instanceof AppError ? e.statusCode : 500));
+    app.post('/:id/events', async (c) => {
+      await verifyPublishCallback(c, 'deployment_publish_job_event', 'scope');
+      return c.json({ ok: true });
+    });
+    const response = await app.request(
+      '/project/events',
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: '{' },
+      env
+    );
+    expect(response.status).toBe(400);
+    const unauth = await app.request('/project/events', { method: 'POST', body: '{' }, env);
+    expect(unauth.status).toBe(401);
   });
 });

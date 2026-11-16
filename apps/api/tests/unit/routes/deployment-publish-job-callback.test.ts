@@ -42,7 +42,8 @@ const { appendMock, recordDeploymentPublishJobLifecycleEventBestEffort, signalCa
     signalCallbackMock: vi.fn(async () => undefined),
   }));
 
-vi.mock('drizzle-orm', () => ({
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('drizzle-orm')>()),
   and: (...conds: unknown[]) => ({ op: 'and', conds }),
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
 }));

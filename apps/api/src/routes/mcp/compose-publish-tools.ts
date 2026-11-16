@@ -117,6 +117,12 @@ export async function handleBuildAndPublish(
     node?.runtime === 'cf-container'
       ? 'cloudflare'
       : await resolveAdminSetting(env, 'deployments.buildExecutor');
+  if (executor === 'cloudflare' && !policyResult.taskAgentProfileId)
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Cloudflare publishing requires a task agent profile.'
+    );
   if (executor === 'node')
     scheduleBuildContextShadow(
       env,
@@ -303,6 +309,7 @@ export async function handleBuildAndPublish(
       status: 'failed',
       currentStep: 'start',
       level: 'error',
+      sourceCollector: executor === 'cloudflare',
       eventType: 'publish.job.start_failed',
       message,
       errorMessage: message,
@@ -310,6 +317,32 @@ export async function handleBuildAndPublish(
       terminal: true,
       retryable: true,
     });
+    if (!changed && executor === 'cloudflare') {
+      const [current] = await db
+        .select()
+        .from(schema.deploymentPublishJobs)
+        .where(eq(schema.deploymentPublishJobs.id, job.id))
+        .limit(1);
+      if (current)
+        return jsonRpcSuccess(requestId, {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                publishJobId: job.id,
+                executor,
+                status: current.status,
+                environment,
+                environmentId: current.environmentId,
+                pollTool: 'deployments_read',
+                pollMethod: 'publish_status',
+                instructions:
+                  'The job has already advanced. Follow this job to completion; do not submit a duplicate.',
+              }),
+            },
+          ],
+        });
+    }
     if (changed)
       await recordDeploymentPublishJobLifecycleEventBestEffort(env, {
         projectId,

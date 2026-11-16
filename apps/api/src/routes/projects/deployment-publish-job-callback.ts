@@ -7,7 +7,7 @@ import { createCloudflareBuildPorts } from '../../app-deployment-ports/cloudflar
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
+import { parseWithSchema } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import {
   appendDeploymentPublishJobEvent,
@@ -61,6 +61,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     db,
     assertCurrent,
     job: authenticatedJob,
+    body: requestBody,
   } = await verifyPublishCallback(
     c,
     'deployment_publish_job_event',
@@ -81,13 +82,6 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     .limit(1);
   if (!job) {
     throw errors.notFound('Publish job');
-  }
-
-  let requestBody: Record<string, unknown>;
-  try {
-    requestBody = await readRequestJsonRecord(c.req.raw, 'deployment_publish_job_event.body');
-  } catch {
-    throw errors.badRequest('Invalid publish job event body');
   }
 
   let event: InferOutput<typeof publishJobEventSchema>;
@@ -137,6 +131,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   const accepted = await appendDeploymentPublishJobEvent(db, {
     publishJobId,
     expectedAttempt: authenticatedJob?.attempt,
+    sourceCollector: !authenticatedJob,
     expectedExecutor: authenticatedJob ? 'cloudflare' : undefined,
     projectId,
     environmentId: job.environmentId,

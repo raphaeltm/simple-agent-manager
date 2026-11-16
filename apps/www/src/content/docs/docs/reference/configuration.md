@@ -2064,6 +2064,7 @@ Edit runtime controls in **Admin → Settings**. Instant sessions always use Clo
 | `deployments.builderCapacityBackoffMs`    | 30,000    | Delay before retrying platform capacity errors                                                      |
 | `deployments.builderDrainLimit`           | 6         | Maximum queued jobs considered per cron tick                                                        |
 | `deployments.builderDaemonReadyTimeoutMs` | 60,000    | DinD readiness deadline                                                                             |
+| `deployments.publishCallbackMaxBodyBytes` | 1,048,576 | Maximum actual JSON bytes for authenticated publish events, image artifacts and release callbacks, for source and builder tokens. |
 | `deployments.builderCallbackTimeoutMs`    | 30,000    | Control-plane HTTP timeout; also controls bootstrap HTTP shutdown                                   |
 | `deployments.builderCallbackAttempts`     | 3         | Maximum attempts for retryable callbacks                                                            |
 | `deployments.builderCallbackRetryDelayMs` | 5,000     | Delay between retryable callbacks                                                                   |

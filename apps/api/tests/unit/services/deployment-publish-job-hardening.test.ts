@@ -464,3 +464,76 @@ describe('Cloudflare queue and attempt fences', () => {
     ).toBe(true);
   });
 });
+
+describe('source collector terminal authority ends at context handoff', () => {
+  for (const status of [
+    'context_ready',
+    'starting',
+    'building',
+    'uploading',
+    'recording_release',
+  ]) {
+    it(`rejects delayed source failure in ${status}, allows the builder verdict`, async () => {
+      seed('job', status);
+      sqlite
+        .prepare("UPDATE deployment_publish_jobs SET executor='cloudflare',context_shadow=0")
+        .run();
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          sourceCollector: true,
+          status: 'failed',
+          currentStep: 'source_failed',
+          terminal: true,
+        })
+      ).toBe(false);
+      expect(row().status).toBe(status);
+      expect(
+        sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()
+      ).toEqual({ n: 0 });
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          expectedExecutor: 'cloudflare',
+          status: 'failed',
+          terminal: true,
+        })
+      ).toBe(true);
+    });
+  }
+  for (const status of ['queued', 'collecting'])
+    it(`keeps prehandoff source failure in ${status}`, async () => {
+      seed('job', status);
+      sqlite
+        .prepare("UPDATE deployment_publish_jobs SET executor='cloudflare',context_shadow=0")
+        .run();
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          sourceCollector: true,
+          status: 'failed',
+          terminal: true,
+        })
+      ).toBe(true);
+    });
+  it('retains legacy and shadow source failures', async () => {
+    for (const [id, executor, shadow] of [
+      ['node', 'node', 0],
+      ['shadow', 'cloudflare', 1],
+    ] as const) {
+      seed(id);
+      sqlite
+        .prepare('UPDATE deployment_publish_jobs SET executor=?,context_shadow=? WHERE id=?')
+        .run(executor, shadow, id);
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          publishJobId: id,
+          sourceCollector: true,
+          status: 'failed',
+          terminal: true,
+        })
+      ).toBe(true);
+    }
+  });
+});

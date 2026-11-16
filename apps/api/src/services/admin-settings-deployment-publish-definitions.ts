@@ -19,6 +19,13 @@ import {
 
 export const DEPLOYMENT_PUBLISH_SETTINGS = [
   integerDefinition(
+    'deployments.publishCallbackMaxBodyBytes',
+    1024 * 1024,
+    'Operations',
+    'Maximum actual JSON bytes for authenticated publish event, image artifact and release callbacks, for source and builder tokens.',
+    { min: 1024, max: 16 * 1024 * 1024 }
+  ),
+  integerDefinition(
     'deployments.builderCallbackTimeoutMs',
     30000,
     'Operations',

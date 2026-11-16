@@ -3,10 +3,30 @@ import { decodeJwt } from 'jose';
 
 import type { Env } from '../../env';
 import { extractBearerToken } from '../../lib/auth-helpers';
-import { errors } from '../../middleware/error';
+import { readRequestJsonRecord, RequestBodyTooLargeError } from '../../lib/runtime-validation';
+import { AppError, errors } from '../../middleware/error';
+import { resolveAdminSetting } from '../../services/admin-settings-resolution';
 import { verifyPublishJobToken } from '../../services/publish-job-token';
 import type { WorkspaceDeletionCallbackKind } from '../../services/workspace-deletion-callback-signal';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
+
+async function readPublishBody(c: Context<{ Bindings: Env }>, context: string) {
+  try {
+    return await readRequestJsonRecord(
+      c.req.raw,
+      context,
+      Number(await resolveAdminSetting(c.env, 'deployments.publishCallbackMaxBodyBytes'))
+    );
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError)
+      throw new AppError(
+        413,
+        'PAYLOAD_TOO_LARGE',
+        'Publish callback body exceeds the configured byte limit'
+      );
+    throw errors.badRequest('Publish callback JSON object required');
+  }
+}
 
 /** Only the existing events, artifact, and release sinks opt in. Context upload
  * and registry credentials remain source-workspace-only. The unverified scope
@@ -23,11 +43,10 @@ export async function verifyPublishCallback(
   } catch {
     /* verifier returns 401 */
   }
-  if (!jobScope)
-    return {
-      ...(await verifyWorkspacePublishCallback(c, logPrefix, scopeErrorMessage)),
-      job: null,
-    };
+  if (!jobScope) {
+    const verified = await verifyWorkspacePublishCallback(c, logPrefix, scopeErrorMessage);
+    return { ...verified, job: null, body: await readPublishBody(c, logPrefix) };
+  }
   const token = extractBearerToken(authorization);
   const { db, job } = await verifyPublishJobToken(c.env, token);
   if (
@@ -35,13 +54,7 @@ export async function verifyPublishCallback(
     (c.req.param('jobId') && job.id !== c.req.param('jobId'))
   )
     throw errors.forbidden('Publish job identity does not match route');
-  const body: unknown = await c.req.raw
-    .clone()
-    .json()
-    .catch(() => null);
-  if (!body || typeof body !== 'object' || Array.isArray(body))
-    throw errors.badRequest('Publish callback body required');
-  const fields = body as Record<string, unknown>;
+  const fields = await readPublishBody(c, logPrefix);
   if (logPrefix !== 'deployment_publish_job_event') {
     if (fields.environmentId !== job.environmentId || fields.environment !== job.environmentName)
       throw errors.forbidden('Publish job environment does not match');
@@ -72,6 +85,7 @@ export async function verifyPublishCallback(
     userId: job.requestedBy,
     db,
     job,
+    body: fields,
     // A successful release links its release before provisioning. Its job stays
     // nonterminal until the builder's final event; no workspace read is involved.
     assertCurrent: async () => {
