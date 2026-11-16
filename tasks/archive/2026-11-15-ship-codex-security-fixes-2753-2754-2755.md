@@ -65,29 +65,37 @@ from its own `sam/` branch, closing the bot PR with a link.
 - Instant containers rewrite their helper on every agent start, so no old helper survives a new image.
 - Accepted LOW residuals (go-specialist re-review): a reused bearer with a changed helper replaces the host file by rename, so a later forced re-mint can only reach the current inode, not an older pinned one (needs a deliberate digest rotation plus a template change); a digest reinstalled from a helper that survived a partial deletion revives a bearer no container holds; cross-process test-ID collisions in /tmp only affect two concurrent `go test` runs on one machine.
 - Coverage of `recoverWorkspaceRuntime` and snapshot restore is at the seam (they pass the runtime's workspace ID into `PrepareWorkspace`) plus the bootstrap layer (real Docker bind mounts); there is no single test from recovery through Docker.
-- [ ] Staging: fresh agent binary, clone/fetch/push, after restart/rebuild, Instant session, cross-workspace refusal, cleanup
+- [x] Staging: fresh agent binary, clone/fetch/push, after restart/rebuild, Instant session, cross-workspace refusal, cleanup (staging2, deploy 43799334260; evidence in PR #2759)
 
 ### #2754
 
-- [ ] Fix 7 broken tests (fixtures, expectations), reconsider `userStatus === null`
-- [ ] `suspended`/`invited` reject without revoke; `removed`/deleted user revoke
-- [ ] Drop per-tool capability map and dispatcher hook
-- [ ] Real-SQL tests for membership/status branches
-- [ ] Update `security.md` MCP token acceptance conditions
-- [ ] File backlog follow-up: stop/revoke removed member workspaces on offboarding
-- [ ] Staging: remove member B, B's agent MCP fails; active member's still works
+- [x] Fix 7 broken tests (fixtures, expectations), reconsider `userStatus === null`
+- [x] `suspended`/`invited` reject without revoke; `removed`/deleted user revoke
+- [x] Drop per-tool capability map and dispatcher hook
+- [x] Real-SQL tests for membership/status branches
+- [x] Update `security.md` MCP token acceptance conditions
+- [x] File backlog follow-up: stop/revoke removed member workspaces on offboarding (`tasks/backlog/2026-11-15-stop-removed-member-workspaces-on-offboarding.md`)
+- [x] Staging: remove member B, B's agent MCP fails; active member's still works (staging2, deploy 43809005915: member call before removal OK, after removal rejected; admin control OK)
+- [x] CodeRabbit Major fixed: pending owners rejected (kept) while signup approval is required, same predicate as REST (2d9dd31ff)
 
 ### #2753
 
-- [ ] Fix 2 failing tests
-- [ ] Migration 0242: no demotion; marker only; duplicates surfaced; test second superadmin survives
-- [ ] "Only real user" guard + tests (sole user suspended, sole user non-admin)
-- [ ] Election try/catch fails closed without blocking login
-- [ ] Document recovery path in self-hosting and admin docs
-- [ ] Staging: existing user sign-in works; D1 superadmins unchanged before/after
+- [x] Fix 2 failing tests
+- [x] Migration (finally `0246_first_superadmin_election.sql`): no demotion; marker only; duplicates surfaced; test second superadmin survives
+- [x] "Only real user" guard + tests (sole user suspended, sole user non-admin)
+- [x] Election try/catch fails closed without blocking login
+- [x] Document recovery path in self-hosting and admin docs
+- [x] Staging: existing user sign-in works; D1 superadmins unchanged before/after (staging2, deploy 43812594179; evidence in PR #2772)
 
 ## Acceptance Criteria
 
-- [ ] Each PR merged separately with specialist review evidence, staging evidence, CodeRabbit request-and-wait, and green production deploy
-- [ ] Bot PRs closed with links to replacements
-- [ ] PR URL, merge SHA and deploy result published on `feature.codex-security-fixes`
+- [x] Each PR merged separately with specialist review evidence, staging evidence, CodeRabbit request-and-wait, and green production deploy (#2759: merge a0e3baa96, Deploy Production 43810024219 success; #2772: merge b06a660e9, CodeRabbit rate-limited and recorded; #2771 merges last, carrying this archive. Its merge SHA and deploy result are published on `feature.codex-security-fixes`)
+- [x] Bot PRs closed with links to replacements
+- [x] PR URL, merge SHA and deploy result published on `feature.codex-security-fixes`
+
+## Outcome (2026-11-16)
+
+- #2755 → PR #2759, merged a0e3baa964887fdfdfbe0324ce621069ca81638e, production deploy 43810024219 succeeded.
+- #2753 → PR #2772, merged b06a660e9e2443942a8e367967178992ddf813c1. The migration was renumbered to 0246 after main gained 0245.
+- #2754 → PR #2771. CodeRabbit's Major finding (pending owners while approval is required) was fixed before merge, and staging2 was re-verified on the merged head.
+- Primary staging stayed blocked all night by the #2721 DO migration tag v23, so all three PRs were verified on staging2.
