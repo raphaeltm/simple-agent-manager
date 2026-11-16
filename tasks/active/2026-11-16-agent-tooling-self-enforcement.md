@@ -45,35 +45,44 @@ the right context or is enforced programmatically. Guard first, removal second.
 ## Implementation checklist
 
 ### Part 1: rule 73 check
-- [ ] Go analyzer (go/ast) for options/patch structs whose non-string field is copied without a guard
-- [ ] Fixture tests: original incident shape fails, fixed shape passes, controls (guarded, string, explicit-false)
-- [ ] Measure hits on the current tree (vm-agent, cli, harness); decide advisory vs blocking per policy f9ae7f88
-- [ ] Wire into CI (Code Quality Checks) and a pnpm script
-- [ ] Decide and record: TypeScript counterpart feasibility (measured), SQL override-column shape
-- [ ] Launch decision for rule 73: blocking check + full path scope (Go, TS, TSX, SQL migrations, DO migrations) + fresh Claude probe; otherwise keep at launch
-- [ ] Record the procedure in `.claude/rules/00-rule-routing.md`
+- [x] Go analyzer (go/ast) for options/patch structs whose non-string field is copied without a guard
+- [x] Fixture tests: original incident shape fails, fixed shape passes, controls (guarded, string, explicit-false)
+- [x] Measure hits on the current tree (vm-agent, cli, harness); decide advisory vs blocking per policy f9ae7f88
+- [x] Wire into CI (Code Quality Checks) and a pnpm script
+- [x] Decide and record: TypeScript counterpart feasibility (measured), SQL override-column shape
+- [ ] Launch decision for rule 73: blocking check + full path scope (Go, TS, TSX, SQL migrations, DO migrations) + fresh Claude probe; otherwise keep at launch (check + scope done; probes 01M7HYQHAH3787PH8A0TCV6296, 01M7HYQVK025M14GN4QG9G8WTF pending)
+- [x] Record the procedure in `.claude/rules/00-rule-routing.md`
 
 ### Part 2: Codex rule delivery
-- [ ] Generated static rule-scope lookup written by `--write`, stale lookup fails `--check`
-- [ ] Dependency-free hook (no node_modules): SessionStart (startup/resume/compact) + PreToolUse (apply_patch, Bash) injects applicable rule bodies, bounded, with a log
-- [ ] Hook never blocks or crashes a session; tests drive the real script
-- [ ] `.codex/config.toml` entries valid per current schema; `agent-hook-config.ts` validates Codex entries
-- [ ] Codex probe (profile Sol) on the branch: existing file, new file, shell-only, negative control; no truncation
-- [ ] Add `.codex/**` to the CI agent-instructions filter
+- [x] Generated static rule-scope lookup written by `--write`, stale lookup fails `--check`
+- [x] Dependency-free hook (no node_modules): SessionStart (startup/resume/compact) + PreToolUse (apply_patch, Bash) injects applicable rule bodies, bounded, with a log
+- [x] Hook never blocks or crashes a session; tests drive the real script
+- [x] `.codex/config.toml` entries valid per current schema; `agent-hook-config.ts` validates Codex entries
+- [ ] Codex probe (profile Sol) on the branch: existing file, new file, shell-only, negative control; no truncation (round 1 done: hooks inert in SAM sessions, project untrusted; round 2 01M7HY7P831WQG19HADM5JS85X pending)
+- [x] Add `.codex/**` to the CI agent-instructions filter
 
 ### Part 3: Stop gate
-- [ ] Rewrite: merge-base + committed + staged + untracked changes; package-aware boundary paths incl. `packages/project-data/src/do`; source-only (no docs); no `stop_hook_active` bypass of real findings (bounded re-block); no SIGPIPE exit; documented output only
-- [ ] Tests drive the real script against fixture git repos, one case per defect with a control
-- [ ] Measure false positives on recent merged PRs; choose block vs feedback per finding class
-- [ ] Enable in `.claude/settings.json` and `.codex/config.toml`; verify it fires in a real session of each harness
+- [x] Rewrite: merge-base + committed + staged + untracked changes; package-aware boundary paths incl. `packages/project-data/src/do`; source-only (no docs); no `stop_hook_active` bypass of real findings (bounded re-block); no SIGPIPE exit; documented output only
+- [x] Tests drive the real script against fixture git repos, one case per defect with a control
+- [x] Measure false positives on recent merged PRs; choose block vs feedback per finding class
+- [ ] Enable in `.claude/settings.json` and `.codex/config.toml`; verify it fires in a real session of each harness (enabled; Claude probe C1 and Codex round 2 run D pending; Codex entry inert in SAM until the project is trusted)
 
 ### Docs
-- [ ] `scripts/quality/README.md`, `.claude/rules/00-rule-routing.md`, `AGENTS.md` notes as needed
+- [x] `scripts/quality/README.md`, `.claude/rules/00-rule-routing.md`, `AGENTS.md` notes as needed
 
 ## Acceptance criteria
-- [ ] Rule-73 check fails on the reintroduced incident shape and passes on current code, with controls
-- [ ] Measured hit count on current tree stated; rollout mode justified
+- [x] Rule-73 check fails on the reintroduced incident shape and passes on current code, with controls
+- [x] Measured hit count on current tree stated; rollout mode justified
 - [ ] Launch decision for 73 stated with its evidence (or 73 stays at launch)
 - [ ] Codex hook evidence from a real Codex session, or the exact reason it could not be obtained
-- [ ] Stop gate runs in every Claude Code and Codex session; per-class block/feedback decision with numbers
+- [ ] Stop gate runs in every Claude Code session and in Codex sessions that trust the project; per-class block/feedback decision with numbers (numbers done; real-session evidence pending)
 - [ ] All existing checks pass; `pnpm quality:agent-context-budget --check` passes
+
+## Notes
+
+- Main rejects direct pushes (ruleset), so this task file lives on the PR branch from the start.
+- Codex round 1 (01M7HXMSG7M18TYKAEKHTBZEF0, control 01M7HXMZJ1H5N67FY2MP36HM72): the vm-agent's
+  ~/.codex/config.toml has no trust entry for the repository, so Codex skips the project .codex
+  layer: no repository hook (rule delivery or Stop gate) runs in SAM-managed Codex sessions.
+  Making it run needs a vm-agent change that trusts repository hooks: a security-design decision
+  for Raphaël (policy 1b930820), not made in this PR.

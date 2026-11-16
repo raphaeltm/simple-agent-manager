@@ -115,7 +115,8 @@ empty log, or one without `session_start` entries, is reported as a mismatch; pa
 ### Test-quality Stop gate
 
 `.claude/hooks/verify-test-quality.mjs` runs at the end of every turn in Claude Code
-(`.claude/settings.json`) and Codex (`.codex/config.toml`). It reads every change on the
+(`.claude/settings.json`) and in Codex sessions that trust the project (`.codex/config.toml`;
+SAM-managed Codex sessions do not, see "Codex rule delivery" below). It reads every change on the
 branch (commits since the merge base with `origin/main`, staged, unstaged and untracked
 files) and reports two classes:
 
@@ -130,7 +131,9 @@ a web hook changed without a web test (#2774). With a false positive in half the
 is feedback: the turn continues once with the findings, and the agent adds a test or says
 why none is needed. `shallow-test` flagged 0 of 300, so it blocks, capped so a false
 positive can never trap a session. Revisit both with fresh measurements before changing
-`FINDING_MODES`. The gate cannot prove a test is a vertical slice; review still decides
+`FINDING_MODES`. Coverage is judged per area, not per file: any changed test in the area's test locations
+(for `apps/api` that is `apps/api/tests/` and colocated tests) counts for every changed
+source file in it. The gate cannot prove a test is a vertical slice; review still decides
 that (`.claude/rules/35-vertical-slice-testing.md`).
 
 ### Codex rule delivery

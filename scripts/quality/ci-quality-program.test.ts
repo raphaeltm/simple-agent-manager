@@ -241,5 +241,7 @@ describe('agent instruction check selection', () => {
       'code-quality',
     ]);
     expect(jobsRunning('pnpm quality:agent-tooling:test', results)).toEqual(['code-quality']);
+    // Rule 73 left launch context on the strength of this blocking check.
+    expect(jobsRunning('pnpm quality:go-optional-fields', results)).toEqual(['code-quality']);
   });
 });
