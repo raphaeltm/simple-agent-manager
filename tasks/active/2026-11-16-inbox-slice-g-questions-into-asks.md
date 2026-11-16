@@ -105,13 +105,30 @@ exist at deploy time stay answerable and archivable until they resolve or expire
 - [x] Idea for removing marker-era question code after overlap: `01M7HC7CN5WY6GEP9G0PP4DG7B`
 
 - [x] Reconciliation check-in hold, idea status, team/account-map reads, Connector lists (from the inventory)
-- [ ] Staging: real Claude Code + Codex agents on a VM (and an Instant check): ask, answer from inbox and card, archive, expiry on a shortened setting, sleeping chat wakes
+- [x] Rebased on main after F1 (#2775): the Project Overview reads open question asks as "waiting" (`open_questions` CTE, project-bound; commit 3e738055a, both guards proven discriminating)
+- [x] Staging (staging2, run 43838856327, 2026-11-16 09:39–09:55Z): real Claude Code agents on a VM and on Instant: ask, answer from inbox and card, concurrent answers (one wins), invalid option 400, archive, expiry on a 1-minute setting, sleeping VM chat woke from an inbox answer. Codex: not testable on staging2 (only Claude Code keys are provisioned there); covered by the harness-agnostic MCP path and its tests
 
 ## Notes
 
 - Reviews: security-auditor, cloudflare-specialist, test-engineer, task-completion-validator all ADDRESSED (see PR #2780).
 - 07:08Z: paused for the account's 5-hour window (77%, resets 09:10Z); resume wake 09:12Z. Remaining: rebase on F1 (#2775) if merged and adapt its overview query (`.tmp/adapt-f1.py` locally, otherwise: count open question asks in RUNNING_SQL has_attention/row filter/WAITING_ON_VIEWER_SQL), staging2 live checks, merge, deploy.
 - Main rejected the direct task-file push (repository rules), so this file lives on the branch only.
+
+### Staging evidence (staging2, 2026-11-16)
+
+Project `01M7HTM8747B16PHS25TQ6WBZA` (Artifacts, Claude Code), user `staging2-agent-user`.
+
+| Check | Runtime | Result |
+| --- | --- | --- |
+| Question filed as one `asks` row; inbox `store: "ask"`; chat list `needs_input` with the ask id; card GET; Project Overview `waiting`, `waitingOnViewer: true` | Instant | pass |
+| Concurrent answers (inbox `eu` vs card `us`) | Instant | card won 200; inbox 409 "A different answer is already being delivered"; replay 200 `alreadyResolved`; agent replied `GOT I: us` |
+| Archive from inbox | Instant | 200 `archived`, `agentNotified`; later answer 409; agent told and replied |
+| Answer from inbox to a SLEEPING chat | VM | chat slept (snapshot), question still shown on it; answer woke it; agent replied `GOT A: eu` |
+| Answer from card; invalid option | VM | `medium` 400; `large` 200; agent replied `GOT B: large` |
+| Expiry, `inbox.questionTimeoutMinutes` and `questionMaxWaitMinutes` = 1 (reset to defaults after) | Instant | card `expired: true` at the deadline; sweep set `status='expired'` at 09:53:09Z; task failed "Human input request expired after timeout" (marker-era outcome) |
+| D1 rows | both | 3 answered, 1 archived, 1 expired; every row `notified_at` set; schedule columns as configured |
+
+Found while testing (filed): manual sleep 500 on a slow hibernate (`tasks/backlog/2026-11-16-manual-sleep-hibernate-timeout-500.md`); capacity-pool test at the 5 s timeout (`tasks/backlog/2026-11-16-capacity-pool-query-plan-test-near-timeout.md`). A transient upstream `402 AI inference failed` on the VM agent's first turn cleared on retry. Cleanup: both chats stopped, VM node deleted, lease released (run 43844057826).
 
 ## Rule 44 inventory
 
@@ -157,7 +174,7 @@ removal tracked in the follow-up idea filed with this PR.
 - [x] A new request_human_input question is one `asks` row; no marker, no `attention_json` change
 - [x] Chat card, chat list needs-input state and the inbox show it as before (tests; staging pending)
 - [x] Answer via chat card and via inbox: one wins under concurrency; same outcomes as today
-- [ ] Answer to a sleeping chat wakes it and the agent receives the answer once; archive likewise (tests prove one wake-capable delivery; live wake: staging)
+- [x] Answer to a sleeping chat wakes it and the agent receives the answer once; archive likewise (tests prove one wake-capable delivery; live wake verified on staging2: VM chat 70624ba1 slept, inbox answer at 09:47:55Z, awake and replying at 09:49:25Z)
 - [x] Expiry and reminders keep today's schedule; expired ask ends `expired`
 - [x] Marker-era questions stay answerable/archivable until resolved or expired
 - [x] Tenancy guards on `asks` proven on real SQL with discriminating attack/owner pairs
