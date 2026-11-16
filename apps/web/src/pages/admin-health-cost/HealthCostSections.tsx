@@ -88,7 +88,7 @@ export function StatTiles({
   // Currencies are never added together: SAM keeps no exchange rates.
   const currencies = compute?.currencies ?? [];
   const totalText = currencies.length
-    ? currencies.map((c) => formatMoney(c.total, c.currency)).join(' + ')
+    ? currencies.map((c) => formatMoney(c.total, c.currency)).join(' · ')
     : formatMoney(0, 'USD');
   const providerNote = currencies
     .flatMap((c) =>
@@ -196,9 +196,14 @@ function SpendChart({
   // At most about six week labels, so 26 weeks stay legible on a phone.
   const labelStep = Math.max(1, Math.ceil(weekCount / 6));
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-testid={`spend-chart-${spend.currency}`}>
+    <div
+      className="flex min-w-0 flex-col gap-3 [&+&]:border-0 [&+&]:border-t [&+&]:border-solid [&+&]:border-[var(--sam-hairline)] [&+&]:pt-3"
+      data-testid={`spend-chart-${spend.currency}`}
+    >
       {labelled && (
-        <h3 className="m-0 px-4 text-xs font-medium text-fg-muted">Priced in {spend.currency}</h3>
+        <h3 className="m-0 px-4 text-[13px] font-semibold text-fg-secondary">
+          Priced in {spend.currency}
+        </h3>
       )}
       <ol
         className="m-0 flex h-44 list-none items-end gap-2 px-4"
@@ -208,8 +213,9 @@ function SpendChart({
           const detail = week.byProvider
             .map((p) => `${providerLabel(p.provider)} ${money(p.amount)}`)
             .join(', ');
-          // The last column's labels are wider than it on a phone: keep them inside the pane.
-          const edge = index === lastIndex ? 'self-end' : '';
+          // On a phone the end columns are narrower than their labels: keep them inside the pane.
+          const edge =
+            index === lastIndex ? 'max-sm:self-end' : index === 0 ? 'max-sm:self-start' : '';
           return (
             <li
               key={week.weekStart}
@@ -265,7 +271,7 @@ function SpendChart({
         ))}
       </div>
       {/* Every week's numbers, for touch and keyboard readers the hover title does not reach. */}
-      <details className="px-4 text-xs text-fg-muted" data-testid="spend-table">
+      <details className="px-4 text-xs text-fg-muted" data-testid={`spend-table-${spend.currency}`}>
         <summary className="inline-flex min-h-11 cursor-pointer items-center sm:min-h-0">
           Show weeks as a table{labelled ? ` (${spend.currency})` : ''}
         </summary>

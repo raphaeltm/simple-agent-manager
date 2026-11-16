@@ -172,7 +172,7 @@ describe('AdminHealthCost', () => {
     mocks.getInstallationHealth.mockResolvedValue(health());
     renderPage();
 
-    const table = await screen.findByTestId('spend-table');
+    const table = await screen.findByTestId('spend-table-USD');
     const rows = within(table).getAllByRole('row');
     expect(rows).toHaveLength(3); // header + two weeks
     expect(rows[1]).toHaveTextContent('Nov 9$100Hetzner $100');
@@ -211,10 +211,12 @@ describe('AdminHealthCost', () => {
     renderPage();
 
     const compute = await screen.findByTestId('stat-compute');
-    expect(within(compute).getByText('€1,234 + $56.50')).toBeInTheDocument();
+    expect(within(compute).getByText('€1,234 · $56.50')).toBeInTheDocument();
     expect(compute).toHaveTextContent('Hetzner €1,234 · Google Cloud $56.50');
     expect(compute).not.toHaveTextContent('without a price');
     expect(screen.getByTestId('spend-chart-EUR')).toHaveTextContent('Priced in EUR');
+    expect(screen.getByTestId('spend-table-EUR')).toHaveTextContent('€300');
+    expect(screen.getByTestId('spend-table-USD')).toHaveTextContent('$20.00');
     expect(
       screen.getByLabelText('Week of Nov 16: $20.00 (Google Cloud $20.00)')
     ).toBeInTheDocument();
