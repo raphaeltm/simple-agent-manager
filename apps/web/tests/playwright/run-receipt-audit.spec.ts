@@ -93,7 +93,8 @@ function makeReceipt(overrides: Partial<RunReceipt> = {}): RunReceipt {
         mergedAt: new Date(START + 42 * MIN).toISOString(),
       },
       checks: 'success',
-      ciFirstTry: 'not_recorded',
+      // The first push failed and a later one passed: the line says both.
+      ciFirstTry: 'failed',
       terminalReason: null,
     },
     account: {
@@ -151,7 +152,7 @@ const STRESS_RECEIPT = makeReceipt({
       mergedAt: null,
     },
     checks: 'failure',
-    ciFirstTry: 'not_recorded',
+    ciFirstTry: 'failed',
     terminalReason: null,
   },
   account: {
@@ -548,7 +549,7 @@ test.describe('Run receipt — chat tool rail', () => {
     const drawer = await openReceipt(page);
     const view = drawer.getByTestId('run-receipt');
     await expect(view.getByText('Merged')).toBeVisible();
-    await expect(view.getByText('PR #2771 · CI passed · 42m')).toBeVisible();
+    await expect(view.getByText('PR #2771 · CI passed · first push failed · 42m')).toBeVisible();
     await expect(view.getByRole('link', { name: /opens in a new tab/ })).toHaveAttribute(
       'href',
       'https://github.com/acme/billing/pull/2771'
@@ -575,6 +576,7 @@ test.describe('Run receipt — chat tool rail', () => {
     const drawer = await openReceipt(page, { receipt: STRESS_RECEIPT });
     await expect(drawer.getByText('PR open')).toBeVisible();
     await expect(drawer.getByText('20000+')).toBeVisible();
+    await expect(drawer.getByText(/^PR #123456 · CI failing · first push failed · /)).toBeVisible();
     await expect(drawer.getByText('CI is failing on the latest commit')).toBeVisible();
     await expect(drawer.getByText(/<script>alert\(1\)<\/script>/)).toBeVisible();
     await assertInViewport(page);
