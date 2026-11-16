@@ -126,12 +126,6 @@ export function countInboxItemWatchers(sql: SqlStorage, projectId: string, itemI
   return typeof row?.count === 'number' ? row.count : 0;
 }
 
-const INBOX_WATCH_IDS_SQL = `SELECT k.subscription_id FROM project_event_subscription_match_keys k
-  WHERE k.project_id = ? AND k.field_name = 'subjectId' AND k.field_value = ?
-    AND EXISTS (SELECT 1 FROM project_event_subscription_match_keys src
-                 WHERE src.subscription_id = k.subscription_id AND src.field_name = 'source'
-                   AND src.field_value = ?)`;
-
 /**
  * Keep an item's watches able to wake for as long as the task needs them (inbox slice H1).
  *
@@ -162,7 +156,11 @@ export function renewInboxItemWatches(
               expires_at = ?,
               updated_at = ?
         WHERE project_id = ? AND lifecycle_state = 'active'
-          AND id IN (${INBOX_WATCH_IDS_SQL})
+          AND id IN (SELECT k.subscription_id FROM project_event_subscription_match_keys k
+            WHERE k.project_id = ? AND k.field_name = 'subjectId' AND k.field_value = ?
+              AND EXISTS (SELECT 1 FROM project_event_subscription_match_keys src
+                           WHERE src.subscription_id = k.subscription_id
+                             AND src.field_name = 'source' AND src.field_value = ?))
         RETURNING id`,
       input.now + input.lifetimeMs,
       input.open ? null : input.now + input.closedGraceMs,
