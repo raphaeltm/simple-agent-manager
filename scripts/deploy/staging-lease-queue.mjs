@@ -13,6 +13,9 @@
 
 export const LEASE_TASK = 'staging-lease';
 export const RECORD_PAGE_SIZE = 100;
+// Pages read before giving up. Only reservations accumulate between snapshots, so 500 records
+// is far beyond any realistic queue; past it every call fails closed.
+export const RECORD_MAX_PAGES = 5;
 export const OLD_WORKFLOW_NOTICE =
   'Staging lease queue (version 2). Update this branch from origin/main to reserve, deploy or release; workflow copies from before the queue refuse this record by design.';
 
@@ -149,7 +152,13 @@ function baseState(parsed) {
 // A reservation by a branch already queued keeps its place and extends its expiry. It also records
 // when it was made, so a branch that missed its turn and reserves again rejoins at the back.
 export function applyReservation(state, entry) {
-  if (state.holder?.branch === entry.branch) return;
+  // Only a live hold makes the reservation redundant; a holder whose lease ran out queues again.
+  const holder = state.holder;
+  if (
+    holder?.branch === entry.branch &&
+    Date.parse(holder.expiresAt) > Date.parse(entry.reservedAt)
+  )
+    return;
   const existing = state.queue.find((queued) => queued.branch === entry.branch);
   if (!existing) {
     state.queue.push({ ...entry });
@@ -162,13 +171,20 @@ export function applyReservation(state, entry) {
   if (entry.taskId) existing.taskId = entry.taskId;
 }
 
-// records: newest first, as GitHub lists deployments.
-export function foldRecords(records, environment, pageSize = RECORD_PAGE_SIZE) {
+// records: newest first, as GitHub lists deployments. `complete` is true when they are the whole
+// history. Throws an error with `incomplete: true` when more history is needed.
+//
+// Known limit: a reservation becomes visible to everyone at once in id order is assumed. If
+// GitHub listed a newer record before an older one created within the same milliseconds, a
+// snapshot's seenThrough could pass the older one before it was visible, and it would be skipped.
+// The lease job lists seconds after its own queue job wrote, which bounds this to reservations
+// created in the instant the lease job reads; the affected agent sees itself missing in `status`.
+export function foldRecords(records, environment, complete = false) {
   if (!Array.isArray(records)) throw new Error('Unreadable deployment list; refusing lease change');
   const events = [];
   const warnings = [];
   let base = null;
-  let covered = records.length < pageSize; // a short page is the whole history
+  let covered = complete;
   for (const record of records) {
     const parsed = parseRecord(record, environment);
     if (base) {
@@ -178,6 +194,7 @@ export function foldRecords(records, environment, pageSize = RECORD_PAGE_SIZE) {
       }
       // Older than the snapshot but unseen by it: a reservation made while it was being written.
       if (parsed.type === 'reservation' || parsed.type === 'invalid') events.push(parsed);
+      else warnings.push(`Ignored lease record ${parsed.id} written while snapshot ${base.id} was`);
       continue;
     }
     if (parsed.type === 'reservation' || parsed.type === 'invalid') {
@@ -190,10 +207,13 @@ export function foldRecords(records, environment, pageSize = RECORD_PAGE_SIZE) {
       break;
     }
   }
-  if (!covered)
-    throw new Error(
-      `Lease history does not fit in the newest ${pageSize} records; refusing lease change`
+  if (!covered) {
+    const error = new Error(
+      `Lease history does not fit in the newest ${records.length} records; refusing lease change`
     );
+    error.incomplete = true;
+    throw error;
+  }
   const state = base ? base.state : baseState(null);
   for (const event of events.sort((a, b) => a.id - b.id)) {
     if (event.id <= state.seenThrough) continue;
@@ -285,6 +305,15 @@ function freeSnapshot(turns, keep, now) {
   };
 }
 
+// The queue job saw the branch's turn at `checkedAt` and let the run through; waiting for a runner
+// or for the concurrency group must not cost it the turn. Bounded to a few grace periods back.
+function hadTurn(state, branch, checkedAt, now, graceMinutes) {
+  const checked = checkedAt ? Date.parse(checkedAt) : NaN;
+  if (!Number.isFinite(checked) || checked > now || checked < now - 3 * graceMinutes * MINUTE)
+    return false;
+  return hasTurn(resolveTurns(state, checked, graceMinutes), branch);
+}
+
 export function hasTurn(turns, branch) {
   return !turns.holder && turns.live[0]?.branch === branch && turns.live[0].status === 'turn';
 }
@@ -329,6 +358,7 @@ export function decideLease({
   graceMinutes,
   holdMinutes,
   environment,
+  turnCheckedAt = null,
 }) {
   if (!['deploy', 'acquire', 'release'].includes(action)) throw new Error('Unknown lease action');
   const turns = resolveTurns(state, now, graceMinutes);
@@ -359,7 +389,11 @@ export function decideLease({
       holder: { ...turns.holder, sha, taskId: taskId || turns.holder.taskId, expiresAt },
     };
   }
-  if (turns.live.length > 0 && !hasTurn(turns, branch))
+  if (
+    turns.live.length > 0 &&
+    !hasTurn(turns, branch) &&
+    !hadTurn(state, branch, turnCheckedAt, now, graceMinutes)
+  )
     throw new Error(refusal(turns, branch, environment));
   return {
     holder: { branch, taskId, sha, acquiredAt: iso(now), expiresAt },

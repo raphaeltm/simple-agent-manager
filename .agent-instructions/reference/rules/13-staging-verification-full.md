@@ -167,7 +167,10 @@ Staging deployment is **manual** — it does NOT run automatically on PRs. You m
    the slot again queues behind everyone already waiting. **If you release early,
    message the next task in the queue** (`send_durable_message` to its SAM task ID
    from `status`) so it can take its turn before its scheduled wake. Successful
-   deployment completion is not a release.
+   deployment completion is not a release. Release only after your own deploy run
+   has finished: the next holder's deploy waits for an in-flight one in the
+   `staging-apply-<installation>` group, but your live checks are no longer
+   protected once you release.
 
    Records are GitHub deployments with task `staging-lease`, keyed by installation.
    A malformed snapshot or an unknown record version fails closed (no one can

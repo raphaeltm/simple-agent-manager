@@ -11,6 +11,7 @@ import { pathToFileURL } from 'node:url';
 import {
   LEASE_TASK,
   OLD_WORKFLOW_NOTICE,
+  RECORD_MAX_PAGES,
   RECORD_PAGE_SIZE,
   applyReservation,
   decideLease,
@@ -74,13 +75,31 @@ function validateRequest({ environment, branch, sha, action, primaryOnlyAudit })
     );
 }
 
+// Reads newest-first pages until the state is covered: one gh api call in the normal case.
+async function readRecords(api, environment) {
+  const records = [];
+  for (let page = 1; ; page += 1) {
+    const query = new URLSearchParams({
+      environment,
+      task: LEASE_TASK,
+      per_page: String(RECORD_PAGE_SIZE),
+      page: String(page),
+    });
+    const batch = await api('GET', `/deployments?${query}`);
+    if (!Array.isArray(batch)) throw new Error('Unreadable deployment list; refusing lease change');
+    records.push(...batch);
+    const complete = batch.length < RECORD_PAGE_SIZE;
+    try {
+      return { records, ...foldRecords(records, environment, complete) };
+    } catch (error) {
+      if (!error.incomplete || complete || page >= RECORD_MAX_PAGES) throw error;
+    }
+  }
+}
+
 async function readState(api, environment) {
-  const query = new URLSearchParams({
-    environment,
-    task: LEASE_TASK,
-    per_page: String(RECORD_PAGE_SIZE),
-  });
-  return foldRecords(await api('GET', `/deployments?${query}`), environment);
+  const { state, warnings } = await readRecords(api, environment);
+  return { state, warnings };
 }
 
 async function createRecord(api, { environment, sha, description, payload }) {
@@ -120,7 +139,18 @@ export async function runQueue({
   validateRequest({ environment, branch, sha, action, primaryOnlyAudit });
   const { state, warnings } = await readState(api, environment);
   const plan = planQueue({ state, branch, action, now, graceMinutes: timing.graceMinutes });
-  if (action === 'release') return { proceed: true, warnings, lines: ['Release requested.'] };
+  if (action === 'release') {
+    // Only a branch with something to release enters the serialized group, so a stray release
+    // cannot displace an entitled run waiting there.
+    const has = plan.holds || state.queue.some((entry) => entry.branch === branch);
+    return {
+      proceed: has,
+      warnings,
+      lines: [
+        has ? 'Release requested.' : `Nothing held or queued by ${branch}; nothing to release.`,
+      ],
+    };
+  }
   if (plan.holds) {
     return {
       proceed: action !== 'reserve',
@@ -182,6 +212,7 @@ export async function runLease({
   primaryOnlyAudit = false,
   timing,
   now = Date.now(),
+  turnCheckedAt = null,
 }) {
   validateRequest({ environment, branch, sha, action, primaryOnlyAudit });
   if (action === 'reserve') throw new Error('Reservations are made by the queue job');
@@ -196,6 +227,7 @@ export async function runLease({
     environment,
     graceMinutes: timing.graceMinutes,
     holdMinutes: (action === 'deploy' ? timing.deploy : 0) + timing.hold,
+    turnCheckedAt,
   });
   if (!next) return { written: false, warnings, message: `Nothing held or queued by ${branch}.` };
   const payload = {
@@ -237,15 +269,16 @@ export async function runLease({
 
 // Read-only view for agents: one gh api call.
 export async function leaseStatus({ api, environment, now = Date.now(), graceMinutes }) {
-  const query = new URLSearchParams({
-    environment,
-    task: LEASE_TASK,
-    per_page: String(RECORD_PAGE_SIZE),
-  });
-  const records = await api('GET', `/deployments?${query}`);
-  const { state, warnings } = foldRecords(records, environment);
-  const newest = records.find((record) => record.payload?.kind === 'snapshot');
-  const grace = graceMinutes ?? newest?.payload?.graceMinutes ?? 10;
+  const { records, state, warnings } = await readRecords(api, environment);
+  const payloadOf = (record) => {
+    try {
+      return typeof record.payload === 'string' ? JSON.parse(record.payload) : record.payload;
+    } catch {
+      return null;
+    }
+  };
+  const newest = records.map(payloadOf).find((payload) => payload?.kind === 'snapshot');
+  const grace = graceMinutes ?? newest?.graceMinutes ?? 10;
   const turns = resolveTurns(state, now, grace);
   return {
     environment,
@@ -311,10 +344,18 @@ async function main(command, argument) {
     return;
   }
   if (command === 'queue') {
-    const result = await runQueue({ ...workflowRequest(), timing: queueTiming(process.env) });
+    const checkedAt = Date.now();
+    const result = await runQueue({
+      ...workflowRequest(),
+      timing: queueTiming(process.env),
+      now: checkedAt,
+    });
     report([...result.warnings, ...result.lines]);
     if (process.env.GITHUB_OUTPUT)
-      appendFileSync(process.env.GITHUB_OUTPUT, `proceed=${result.proceed}\n`);
+      appendFileSync(
+        process.env.GITHUB_OUTPUT,
+        `proceed=${result.proceed}\nchecked_at=${iso(checkedAt)}\n`
+      );
     if (result.refused) process.exitCode = 1;
     return;
   }
@@ -322,6 +363,8 @@ async function main(command, argument) {
     const result = await runLease({
       ...workflowRequest(),
       timing: { ...leaseTiming(process.env), ...queueTiming(process.env) },
+      // When the queue job saw this branch's turn; runner or group waits must not forfeit it.
+      turnCheckedAt: process.env.LEASE_TURN_CHECKED_AT || null,
     });
     report([...result.warnings, result.message]);
     return;

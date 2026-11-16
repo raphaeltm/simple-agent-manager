@@ -26,6 +26,7 @@ function store() {
       if (endpoint.startsWith('/deployments?')) {
         const query = new URLSearchParams(endpoint.split('?')[1]);
         assert.equal(query.get('task'), LEASE_TASK);
+        if ((query.get('page') ?? '1') !== '1') return [];
         return records.filter((r) => r.environment === query.get('environment'));
       }
       return records.find((r) => endpoint === `/deployments/${r.id}`);

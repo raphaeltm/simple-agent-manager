@@ -51,8 +51,11 @@ First night of use (idea notes, 2026-11-16):
   (`reserve` always appends, renewing the TTL); lets the run into the `lease` job only if the branch
   holds the lease or it is its turn; otherwise fails (deploy/acquire) or succeeds (reserve) with the
   position in the step summary.
-- `lease` job keeps group `deploy-<env>` (same name as old workflows' group, so transition writes
-  serialize); deploy/storage-activation/agent-email audit move to group `staging-apply-<env>`.
+- `lease` job uses group `staging-lease-<env>` (not the `deploy-<env>` group old copies hold, so their
+  pending runs cannot displace an entitled one); deploy/storage-activation/agent-email audit move to
+  group `staging-apply-<env>`. A release enters the group only if the branch holds or is queued.
+- The lease job honours the turn the queue job saw (`checked_at`, bounded to 3 grace periods), so a
+  runner or group wait cannot cost the head its turn. An expired holder may re-reserve.
 - Release removes the branch's hold and its reservation; re-acquiring means queueing at the back.
 - Old workflows: any v2 record on top fails their lease job closed — no deploy, acquire, release.
   Payload `notice` tells them to update from main.
@@ -72,7 +75,8 @@ First night of use (idea notes, 2026-11-16):
 - [x] Permissions/gating test updated
 - [x] Docs: `.claude/commands/do.md`, `.agents/skills/do/SKILL.md`, `.claude/rules/13-staging-verification.md`,
       `.agent-instructions/reference/rules/13-staging-verification-full.md`
-- [ ] Live proof on staging2 with two branches (reserve/acquire/release, no full deploys)
+- [x] Live proof with two branches (reserve/acquire/release, no full deploys) — on primary `staging`, staging2 was held
+- [ ] One real deploy through queue → lease → deploy on staging2 (output wiring)
 - [ ] Note on idea, channel `feature.ship-faster`
 
 ## Checklist — Part 2 (PR 2, after PR 1 merges)

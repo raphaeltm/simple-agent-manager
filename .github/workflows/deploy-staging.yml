@@ -80,9 +80,10 @@ on:
 
 # No workflow-level concurrency group: GitHub keeps one pending run per group and cancels the
 # previous pending run, which silently lost waiting agents their place. The `queue` job records
-# places outside any group; only runs whose turn it is enter the serialized `lease` job
-# (group deploy-<installation>, the name older workflow copies also use), and mutating jobs share
-# staging-apply-<installation>. See scripts/deploy/staging-lease-queue.mjs.
+# places outside any group; only runs that hold the lease, have their turn, or have something to
+# release enter the serialized `lease` job (group staging-lease-<installation>; deliberately not
+# the deploy-<installation> name older workflow copies use, so their runs cannot displace an
+# entitled pending run), and mutating jobs share staging-apply-<installation>. See scripts/deploy/staging-lease-queue.mjs.
 
 env:
   PLAYWRIGHT_VERSION: 1.59.1
@@ -109,6 +110,7 @@ jobs:
       id-token: none
     outputs:
       proceed: ${{ steps.queue.outputs.proceed }}
+      checked_at: ${{ steps.queue.outputs.checked_at }}
       credential_environment: ${{ steps.target.outputs.credential_environment }}
       installation: ${{ steps.target.outputs.installation }}
       base_domain: ${{ steps.target.outputs.base_domain }}
@@ -140,8 +142,9 @@ jobs:
           LEASE_EXPECTED_DEPLOY_MINUTES: ${{ inputs.lease_action == 'acquire' && '0' || vars.STAGING_LEASE_EXPECTED_DEPLOY_MINUTES || '30' }}
         run: node scripts/deploy/staging-lease.mjs queue
 
-  # Serialized per installation. Only runs that hold the lease or whose turn it is get here, so a
-  # pending run in this group can only be displaced by another run of the same entitled branch.
+  # Serialized per installation. Only runs that hold the lease, have their turn, or have something
+  # to release get here, so a pending run in this group can only be displaced by another run of a
+  # branch that is itself the holder or in the queue.
   lease:
     needs: queue
     if: ${{ needs.queue.outputs.proceed == 'true' }}
@@ -149,7 +152,7 @@ jobs:
     environment: staging
     timeout-minutes: 2
     concurrency:
-      group: deploy-${{ inputs.environment || 'staging' }}
+      group: staging-lease-${{ inputs.environment || 'staging' }}
       cancel-in-progress: false
     permissions:
       contents: read
@@ -163,6 +166,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Acquire, renew or release the verification lease
         env:
+          LEASE_TURN_CHECKED_AT: ${{ needs.queue.outputs.checked_at }}
           GH_TOKEN: ${{ github.token }}
           LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
           LEASE_ACTION: ${{ inputs.lease_action || 'deploy' }}

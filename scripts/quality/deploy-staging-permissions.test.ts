@@ -321,9 +321,10 @@ describe('lease workflow gating', () => {
     expect(workflow.jobs.queue.needs).toBeUndefined();
     expect(workflow.jobs.lease.needs).toBe('queue');
     expect(workflow.jobs.lease.if).toBe("${{ needs.queue.outputs.proceed == 'true' }}");
-    // Same group name as older workflow copies, so transition writes serialize with them.
+    // Not the deploy-<installation> group older workflow copies hold for their whole run: their
+    // pending runs must not displace an entitled pending lease job.
     expect(workflow.jobs.lease.concurrency).toEqual({
-      group: "deploy-${{ inputs.environment || 'staging' }}",
+      group: "staging-lease-${{ inputs.environment || 'staging' }}",
       'cancel-in-progress': false,
     });
     for (const name of LEASE_JOBS)
@@ -352,7 +353,10 @@ describe('lease workflow gating', () => {
     const queue = step('queue', 'node scripts/deploy/staging-lease.mjs queue');
     const lease = step('lease', 'node scripts/deploy/staging-lease.mjs lease');
     expect(queue.id).toBe('queue');
-    expect(lease.env).toEqual(queue.env);
+    const { LEASE_TURN_CHECKED_AT: checkedAt, ...leaseEnv } = lease.env;
+    expect(leaseEnv).toEqual(queue.env);
+    expect(checkedAt).toBe('${{ needs.queue.outputs.checked_at }}');
+    expect(workflow.jobs.queue.outputs.checked_at).toBe('${{ steps.queue.outputs.checked_at }}');
     expect(workflow.jobs.queue.outputs.proceed).toBe('${{ steps.queue.outputs.proceed }}');
     expect(workflow.on.workflow_dispatch.inputs.lease_action.options).toEqual([
       'deploy',
