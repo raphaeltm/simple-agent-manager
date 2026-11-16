@@ -14,8 +14,8 @@ Keep existing configurable timeout and resolve defaults through production read 
 - [x] Verify genuine stuck queued control fails with observed-state error, no unsupported provisioning diagnosis.
 - [x] Verify races before terminal reload and between reload/write; no terminal hooks or cleanup after rejected write.
 - [x] Investigate sleeping production task and record separate defect on idea if distinct.
-- [ ] Run lint, typecheck, tests, build and worker regression/isolation suites.
-- [ ] Local cloudflare-specialist, test-engineer, completion, constitution and doc-sync reviews.
+- [x] Run lint, typecheck, tests, build and worker regression/isolation suites.
+- [x] Local cloudflare-specialist, test-engineer, completion, constitution and doc-sync reviews.
 - [ ] Draft PR, ready CI/CodeRabbit, staging lease/live checks/release, merge normal gates.
 - [ ] Production deploy and basic smoke; idea note and durable Inbox coordinator message.
 
@@ -28,3 +28,5 @@ After fix: new8 cases + existing scheduled-stuck-tasks worker suite29/29 passed;
 Cloudflare reviewer PASS: zero added D1/DO/fetch round trips, unchanged candidate/page bounds and sweep isolation. Constitution and doc sync PASS. Completion reviewer implementation checks PASS except evidence/checklist synchronization; full release still pending.
 The existing queued threshold resolves through production parseMs(legacy Worker binding, shared default1200000ms); tests supply no threshold. No admin-setting/new tunable is introduced.
 Sleeping investigation: idea note01M7JQB48DDNJM3MVRY2CHA7EE. No provider-limit continuation schedule was present; VM classifier omits observed5-hour wording and only classifies terminal errors. Typed ACP outcome remains unverified. Separate follow-up, no VM change. UNIQUE workspace-chat wake conflict remains separately tracked.
+
+Final local validation: root lint22 tasks, typecheck36 tasks, test39 tasks and build18 tasks all exit0. API1054 files passed/3 skipped,15940 tests passed/4 skipped; web420 files/5302 tests passed. Final new worker10/10 and existing watchdog21 cases passed. All five local reviewers PASS implementation gate. Release lifecycle remains pending below and in PR2815/.do-state.md.
