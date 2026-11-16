@@ -2731,6 +2731,16 @@ export const MIGRATIONS: Migration[] = [
       sql.exec('ALTER TABLE chat_sessions ADD COLUMN stream_ingest_state TEXT');
     },
   },
+  {
+    name: '079-chat-session-sequence-watermark',
+    run(sql) {
+      // NULL means the pre-migration transcript has not been measured yet.
+      // Lazy initialization avoids scanning every historical session on deploy.
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN last_message_sequence INTEGER');
+      // Detect writes from an older build after a rollback/rolling upgrade.
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN last_message_sequence_count INTEGER');
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

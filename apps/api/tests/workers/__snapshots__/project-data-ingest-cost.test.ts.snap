@@ -1,0 +1,313 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`message ingest row cost in real workerd > attributes archive reclaim reads with unrelated comments 1`] = `
+[
+  {
+    "read": 1,
+    "statement": "SELECT * FROM project_data_archive_source_intents WHERE session_id = ?",
+    "written": 0,
+  },
+  {
+    "read": 0,
+    "statement": "SELECT 1 AS present FROM do_meta WHERE key = ? AND value = ?",
+    "written": 0,
+  },
+  {
+    "read": 100125,
+    "statement": "DELETE FROM chat_messages WHERE rowid IN ( SELECT rowid FROM chat_messages WHERE session_id = ? LIMIT ?)",
+    "written": 25,
+  },
+  {
+    "read": 1,
+    "statement": "SELECT ( EXISTS (SELECT 1 FROM chat_messages WHERE session_id = ?) OR EXISTS (SELECT 1 FROM chat_messages_grouped WHERE session_id = ?) OR EXISTS (SELECT 1 FROM tool_payload_archives WHERE session_id = ?) ) AS present",
+    "written": 0,
+  },
+]
+`;
+
+exports[`message ingest row cost in real workerd > profiles long-session batches with production indexes 1`] = `
+[
+  {
+    "enabled": false,
+    "label": "steady",
+    "read": 14,
+    "statements": [
+      {
+        "read": 0,
+        "statement": "SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT id FROM chat_messages WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "written": 3,
+      },
+      {
+        "read": 1,
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "written": 4,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 2,
+        "statement": "UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND kind = ? AND resolved_at IS NULL RETURNING id",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT value FROM do_meta WHERE key = ?",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "written": 0,
+      },
+      {
+        "read": 8,
+        "statement": "UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "written": 2,
+      },
+      {
+        "read": 1,
+        "statement": "INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "written": 1,
+      },
+    ],
+    "written": 10,
+  },
+  {
+    "enabled": false,
+    "label": "user",
+    "read": 14,
+    "statements": [
+      {
+        "read": 0,
+        "statement": "SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT id FROM chat_messages WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "written": 4,
+      },
+      {
+        "read": 1,
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "written": 4,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 2,
+        "statement": "UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND resolved_at IS NULL RETURNING id",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT value FROM do_meta WHERE key = ?",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "written": 0,
+      },
+      {
+        "read": 8,
+        "statement": "UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "written": 2,
+      },
+      {
+        "read": 1,
+        "statement": "INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "written": 1,
+      },
+    ],
+    "written": 11,
+  },
+  {
+    "enabled": true,
+    "label": "steady",
+    "read": 20,
+    "statements": [
+      {
+        "read": 0,
+        "statement": "SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT id, workspace_id, task_id, created_by_user_id, status, message_count FROM chat_sessions WHERE id = ? LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 3,
+        "statement": "SELECT id, created_at, sequence FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, sequence DESC, id DESC LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT id FROM chat_messages WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 2,
+        "statement": "UPDATE chat_messages SET content = content || ? WHERE id = ? AND session_id = ? RETURNING id",
+        "written": 1,
+      },
+      {
+        "read": 1,
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "written": 4,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 2,
+        "statement": "UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND kind = ? AND resolved_at IS NULL RETURNING id",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT value FROM do_meta WHERE key = ?",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "written": 0,
+      },
+      {
+        "read": 8,
+        "statement": "UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "written": 2,
+      },
+      {
+        "read": 1,
+        "statement": "INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "written": 1,
+      },
+    ],
+    "written": 8,
+  },
+  {
+    "enabled": true,
+    "label": "user",
+    "read": 18,
+    "statements": [
+      {
+        "read": 0,
+        "statement": "SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT id, workspace_id, task_id, created_by_user_id, status, message_count FROM chat_sessions WHERE id = ? LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 3,
+        "statement": "SELECT id, created_at, sequence FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, sequence DESC, id DESC LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT id FROM chat_messages WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "written": 4,
+      },
+      {
+        "read": 1,
+        "statement": "UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "written": 4,
+      },
+      {
+        "read": 1,
+        "statement": "SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "written": 0,
+      },
+      {
+        "read": 2,
+        "statement": "UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND resolved_at IS NULL RETURNING id",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT value FROM do_meta WHERE key = ?",
+        "written": 0,
+      },
+      {
+        "read": 0,
+        "statement": "SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "written": 0,
+      },
+      {
+        "read": 8,
+        "statement": "UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "written": 2,
+      },
+      {
+        "read": 1,
+        "statement": "INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "written": 1,
+      },
+    ],
+    "written": 11,
+  },
+]
+`;
