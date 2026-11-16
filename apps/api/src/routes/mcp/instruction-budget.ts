@@ -279,7 +279,10 @@ export interface BudgetedPayload {
   };
 }
 
-export function combinePolicyBlock(full: string | null, onDemandIndex: string | null): string | null {
+export function combinePolicyBlock(
+  full: string | null,
+  onDemandIndex: string | null
+): string | null {
   if (!onDemandIndex) return full;
   return `${full ?? '## Project Policies — you MUST follow these\n'}\n${onDemandIndex}`;
 }
@@ -338,9 +341,11 @@ export function applyInstructionBudgets(input: {
     const floor = attempt(0, 0, []);
     if (floor.text.length > budgets.totalMaxChars) {
       requiredOverBudget = true;
-      const pinnedChars = (formatPolicyDirectivesFor(result.selection.full.filter(
-        (p) => p.injectMode !== 'on_demand'
-      )) ?? '').length;
+      const pinnedChars = (
+        formatPolicyDirectivesFor(
+          result.selection.full.filter((p) => p.injectMode !== 'on_demand')
+        ) ?? ''
+      ).length;
       const note =
         `Size note: this project's ${result.selection.pinnedCount} pinned policies (${pinnedChars} characters) ` +
         `and the other required sections exceed the instruction size budget (${budgets.totalMaxChars} characters), ` +

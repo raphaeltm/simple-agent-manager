@@ -19,7 +19,9 @@ export interface PolicyDirectiveLineInput {
  * A policy's shelf life as a short inline annotation. Date-only keeps it to a few
  * tokens; it renders once per policy in every session.
  */
-export function formatPolicyLifecycle(entry: Pick<PolicyDirectiveLineInput, 'scope' | 'expiresAt'>): string {
+export function formatPolicyLifecycle(
+  entry: Pick<PolicyDirectiveLineInput, 'scope' | 'expiresAt'>
+): string {
   if (entry.expiresAt === null || entry.expiresAt === undefined) return '';
   const date = new Date(entry.expiresAt).toISOString().slice(0, 10);
   return entry.scope === 'task' ? ` (task-scoped, expires ${date})` : ` (expires ${date})`;
@@ -38,6 +40,8 @@ export function formatPolicyDirectiveLine(entry: PolicyDirectiveLineInput): stri
  * One on-demand policy that is not shown in full: title and id only. The agent fetches
  * the body with `policies_read` method `get` before acting in its area.
  */
-export function formatPolicyIndexLine(entry: PolicyDirectiveLineInput & { category: string }): string {
+export function formatPolicyIndexLine(
+  entry: PolicyDirectiveLineInput & { category: string }
+): string {
   return `- **${entry.title}**${formatPolicyLifecycle(entry)} (${entry.category}, id: ${entry.id})`;
 }

@@ -506,6 +506,21 @@ These **Operations** settings control automatic links between chats, ideas, libr
 
 If you lower the cap on read and view links below what a target already has, nothing is removed straight away: each new read or view link to that target then removes at most one batch of them, until the target is back under the cap. Reading the same thing again doesn't count as a new link.
 
+## Agent instructions
+
+These **Collaboration** settings bound the size of the `get_instructions` payload every agent
+reads at session start. Pinned policies and the task are never trimmed by them. Every policy is
+pinned until a project admin unpins it in **Agent context → Policies**. To return to the
+unbudgeted payload, set each to its maximum.
+
+| Setting                                     | Default | Range            | What it controls                                                                                                                                                                            |
+| ------------------------------------------- | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instructions.totalMaxChars`                | 60,000  | 10,000–2,000,000 | Serialized payload size. Over it, knowledge then on-demand policy text are trimmed if that is enough; otherwise everything is sent with a note saying the pinned policies exceed the budget |
+| `instructions.knowledgeMaxChars`            | 20,000  | 1,000–2,000,000  | Knowledge block including the entity index. Lowest-ranked observations go first and the index states how many                                                                               |
+| `instructions.onDemandPolicyMaxChars`       | 12,000  | 0–2,000,000      | Full text of on-demand policies that match the task. Every on-demand policy is still listed by title and id                                                                                 |
+| `instructions.onDemandPolicyMaxPerCategory` | 5       | 0–200            | On-demand policies of one category shown in full in one session                                                                                                                             |
+| `instructions.onDemandPolicyMinRelevance`   | 2       | 1–100            | Score an on-demand policy needs to be shown in full: 2 per distinctive title word and 1 per distinctive body word found in the task                                                         |
+
 ## Workflows
 
 These limit [workflows](/docs/guides/workflows/), under the **Operations** category. Every value is a whole number from 1 to the maximum shown.

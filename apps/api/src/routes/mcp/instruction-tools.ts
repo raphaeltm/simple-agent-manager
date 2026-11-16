@@ -20,15 +20,15 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
-import { buildEventingInstructions } from './instruction-eventing-guidance';
 import type { BudgetedPolicy, InstructionPayloadParts } from './instruction-budget';
+import { buildEventingInstructions } from './instruction-eventing-guidance';
 import {
   buildKnowledgeInstructions,
   buildPolicyInstructions,
   serializeRejection,
 } from './instruction-formatting';
-import { renderWithinBudgets } from './instruction-payload';
 import { buildInstructionIdeaSlice, type InstructionIdeaContext } from './instruction-idea-context';
+import { renderWithinBudgets } from './instruction-payload';
 
 export { handleRequestHumanInput } from './human-input-tool';
 

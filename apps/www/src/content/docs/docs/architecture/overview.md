@@ -266,7 +266,7 @@ the default) or `task` (a one-shot policy captured for a specific piece of work)
 `task`-scoped policy must set `expiresAt`, enforced at every write boundary by
 `validatePolicyLifecycle()` in `packages/shared/src/constants/policies.ts` — which is what
 stops a constraint captured for one workflow from being injected forever. When a policy has an
-expiry, `formatPolicyLifecycle()` renders it inline between the title and the id:
+expiry, `formatPolicyLifecycle()` (`packages/shared/src/policy-directive-format.ts`) renders it inline between the title and the id:
 
 ```text
 - **Use profile X for the reliability wave** (task-scoped, expires 2026-09-30) (id: d55af478-5234-4178-8f9c-47dfd5647de2): ...
@@ -280,6 +280,46 @@ row is deliberately retained and stays `active`, so `policies_read` method `get`
 Policies tab can still show a human that the policy existed and when it stopped applying. A
 policy with no `expiresAt` never expires, which is the behaviour of every policy created before
 lifecycle controls existed.
+
+#### Inject modes and size budgets
+
+Every policy has an **inject mode** (`project_policies.inject_mode`, ProjectData DO migration
+`080-policy-inject-mode`):
+
+- `pinned` — injected in full into every session. This is the default for every existing policy
+  and every new one, so the policy text a session receives does not change until a project admin
+  unpins a policy. Pinned policies are never trimmed by any budget.
+- `on_demand` — always listed by title, category and id in a disclosed index at the end of
+  `policyDirectives`, and injected in full only when it matches the session's task.
+  `selectPolicies()` (`apps/api/src/routes/mcp/instruction-budget.ts`) scores each on-demand
+  policy by distinctive words it shares with the task title, description, session topic and
+  idea title (2 per title word, 1 per body word; a word in more than a fifth of the project's
+  policies does not count), ranks by score, category, recency and id, caps each category, and
+  fills the `instructions.onDemandPolicyMaxChars` budget without cutting a policy part-way.
+
+```text
+### On-demand policies (3): 1 shown in full above because they match this task, 2 listed here by title only
+These still apply. Before you act in an area one of them covers, call `policies_read` method `get` with its id and follow it. Rules and constraints among them are binding.
+- **Daily journal posts stay technical** (preference, id: 215c8350-b530-4065-a444-52b9e080770b)
+```
+
+`policies_write` method `add` and method `update` accept `injectMode`; an update that omits it
+leaves the mode unchanged. In the app, **Agent context → Policies** shows each policy's mode and
+the characters it adds to every session, and lets a project admin pin or unpin it.
+
+Knowledge keeps its ranking (`getAllHighConfidenceKnowledge()`) and gets a size budget on top:
+`fitKnowledge()` drops the lowest-ranked observations until the block fits
+`instructions.knowledgeMaxChars`, keeps the entity index, and the index says how many were left
+out.
+
+`applyInstructionBudgets()` then checks the serialized payload against
+`instructions.totalMaxChars`. When it is over, knowledge is trimmed first and on-demand policy
+text second, but only if that brings the payload under the total. When pinned policies and the
+other required sections exceed it by themselves, everything is sent, `instructions[]` gains one
+line saying so, and `mcp.get_instructions.required_over_budget` is logged. Every call logs
+`mcp.get_instructions.size` with the section sizes and counts. If the budget pass throws,
+`renderWithinBudgets()` (`instruction-payload.ts`) falls back to the unbudgeted rendering. The
+five budgets are admin settings: see [Admin settings](/docs/guides/admin-settings/#agent-instructions).
 
 Knowledge observations do **not** currently carry their `observationId` in this payload, so
 `knowledge_write` method `update`, `knowledge_write` method `remove`, and `knowledge_write` method `confirm` need an id obtained from
@@ -632,13 +672,13 @@ CI runs lint, typecheck, tests, and build on pull requests and on canonical-repo
 
 ## Key Design Decisions
 
-| Decision                             | Rationale                                                                                                                                                                                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Single Worker as API + reverse proxy | Simplifies infrastructure — one Worker handles everything                                                                                                                                                                                  |
-| Hybrid D1 + Durable Objects          | D1 for cross-project reads, DOs for high-throughput project-scoped writes                                                                                                                                                                  |
+| Decision                             | Rationale                                                                                                                                                                                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Single Worker as API + reverse proxy | Simplifies infrastructure — one Worker handles everything                                                                                                                                                                                         |
+| Hybrid D1 + Durable Objects          | D1 for cross-project reads, DOs for high-throughput project-scoped writes                                                                                                                                                                         |
 | BYOC + platform-credential fallback  | Users/self-hosters may bring their own cloud tokens; projects may attach compute credentials; an installation administrator may also enable a platform credential so users can provision with zero config (resolution: project → user → platform) |
-| Callback-driven provisioning         | VMs POST `/ready` when bootstrapped — no polling                                                                                                                                                                                           |
-| Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                                                                                                                                                                                           |
-| Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes                                                                                                                                                                       |
-| No credentials in cloud-init         | Bootstrap tokens for secure credential injection                                                                                                                                                                                           |
-| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                                                                                  |
+| Callback-driven provisioning         | VMs POST `/ready` when bootstrapped — no polling                                                                                                                                                                                                  |
+| Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                                                                                                                                                                                                  |
+| Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes                                                                                                                                                                              |
+| No credentials in cloud-init         | Bootstrap tokens for secure credential injection                                                                                                                                                                                                  |
+| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                                                                                         |
