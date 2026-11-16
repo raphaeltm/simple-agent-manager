@@ -28,36 +28,49 @@ import {
   claimSessionSnapshotRecovery,
   completeSessionSnapshotRecovery,
 } from '../../src/services/session-snapshots';
+import { seedSnapshotGeneration, type SnapshotSeedMode } from '../helpers/session-snapshot-seed';
 import { applySqliteMigration, createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
-const mocks = vi.hoisted(() => ({
-  cleanupTaskRun: vi.fn(),
-  createNotification: vi.fn(),
-  deleteNodeResourcesStrict: vi.fn(),
-  destroyVmAgentContainer: vi.fn(),
-  failSession: vi.fn(),
-  finishBlockedSessionSleep: vi.fn(),
-  getAcpSession: vi.fn(),
-  getSession: vi.fn(),
-  getSessionState: vi.fn(),
-  hibernateAgentSessionOnNode: vi.fn(),
-  markIdle: vi.fn(),
-  markVmAgentContainerActiveWorkStarted: vi.fn(),
-  persistMessage: vi.fn(),
-  scheduleWorkspaceDeletion: vi.fn(),
-  sleepSession: vi.fn(),
-  sleepVmAgentContainer: vi.fn(),
-  startTaskRunnerDO: vi.fn(),
-  stopComputeTracking: vi.fn(),
-  stopSession: vi.fn(),
-  stopWorkspaceOnNode: vi.fn(),
-  transitionAcpSession: vi.fn(),
-}));
+// The sleep side's edges, each a vi.fn the tests drive; `forward` builds the module mocks from
+// them so a mocked module reaches the same spy the test asserts on.
+const { mocks, forward } = vi.hoisted(() => {
+  const names = [
+    'cleanupTaskRun',
+    'createNotification',
+    'deleteNodeResourcesStrict',
+    'destroyVmAgentContainer',
+    'failSession',
+    'finishBlockedSessionSleep',
+    'getAcpSession',
+    'getSession',
+    'getSessionState',
+    'hibernateAgentSessionOnNode',
+    'markIdle',
+    'markVmAgentContainerActiveWorkStarted',
+    'persistMessage',
+    'scheduleWorkspaceDeletion',
+    'sleepSession',
+    'sleepVmAgentContainer',
+    'startTaskRunnerDO',
+    'stopComputeTracking',
+    'stopSession',
+    'stopWorkspaceOnNode',
+    'transitionAcpSession',
+  ] as const;
+  const spies = Object.fromEntries(names.map((name) => [name, vi.fn()])) as Record<
+    (typeof names)[number],
+    ReturnType<typeof vi.fn>
+  >;
+  const forwardTo = (...keys: Array<(typeof names)[number]>) =>
+    Object.fromEntries(
+      keys.map((key) => [key, (...args: unknown[]) => spies[key](...args)])
+    ) as Record<string, (...args: unknown[]) => unknown>;
+  return { mocks: spies, forward: forwardTo };
+});
 
 vi.mock('../../src/services/node-agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
-  hibernateAgentSessionOnNode: (...args: unknown[]) => mocks.hibernateAgentSessionOnNode(...args),
-  stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),
+  ...forward('hibernateAgentSessionOnNode', 'stopWorkspaceOnNode'),
   cancelAgentSessionOnNode: () => Promise.resolve({ success: false, status: 409 }),
 }));
 
@@ -68,47 +81,41 @@ vi.mock('../../src/services/project-data', async () => ({
     '../../src/services/project-data'
   )),
   finishConfirmedSessionSleep: vi.fn(async () => true),
-  finishBlockedSessionSleep: (...args: unknown[]) => mocks.finishBlockedSessionSleep(...args),
-  failSession: (...args: unknown[]) => mocks.failSession(...args),
-  getAcpSession: (...args: unknown[]) => mocks.getAcpSession(...args),
-  getSession: (...args: unknown[]) => mocks.getSession(...args),
-  getSessionState: (...args: unknown[]) => mocks.getSessionState(...args),
-  persistMessage: (...args: unknown[]) => mocks.persistMessage(...args),
-  sleepSession: (...args: unknown[]) => mocks.sleepSession(...args),
-  stopSession: (...args: unknown[]) => mocks.stopSession(...args),
-  transitionAcpSession: (...args: unknown[]) => mocks.transitionAcpSession(...args),
+  ...forward(
+    'finishBlockedSessionSleep',
+    'failSession',
+    'getAcpSession',
+    'getSession',
+    'getSessionState',
+    'persistMessage',
+    'sleepSession',
+    'stopSession',
+    'transitionAcpSession'
+  ),
 }));
 
-vi.mock('../../src/services/compute-usage', () => ({
-  stopComputeTracking: (...args: unknown[]) => mocks.stopComputeTracking(...args),
-}));
+vi.mock('../../src/services/compute-usage', () => forward('stopComputeTracking'));
 
 vi.mock('../../src/services/task-runner-do', () => ({
-  startTaskRunnerDO: (...args: unknown[]) => mocks.startTaskRunnerDO(...args),
+  ...forward('startTaskRunnerDO'),
   ensureTaskRunnerStarted: vi.fn(async () => false),
 }));
 
-vi.mock('../../src/services/nodes', () => ({
-  deleteNodeResourcesStrict: (...args: unknown[]) => mocks.deleteNodeResourcesStrict(...args),
-}));
+vi.mock('../../src/services/nodes', () => forward('deleteNodeResourcesStrict'));
 
-vi.mock('../../src/services/task-runner', () => ({
-  cleanupTaskRun: (...args: unknown[]) => mocks.cleanupTaskRun(...args),
-}));
+vi.mock('../../src/services/task-runner', () => forward('cleanupTaskRun'));
 
-vi.mock('../../src/services/vm-agent-container', () => ({
-  destroyVmAgentContainer: (...args: unknown[]) => mocks.destroyVmAgentContainer(...args),
-  markVmAgentContainerActiveWorkStarted: (...args: unknown[]) =>
-    mocks.markVmAgentContainerActiveWorkStarted(...args),
-  sleepVmAgentContainer: (...args: unknown[]) => mocks.sleepVmAgentContainer(...args),
-}));
+vi.mock('../../src/services/vm-agent-container', () =>
+  forward(
+    'destroyVmAgentContainer',
+    'markVmAgentContainerActiveWorkStarted',
+    'sleepVmAgentContainer'
+  )
+);
 
 const START = new Date('2026-10-04T08:00:00.000Z');
 const TICK_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const BASE_COMMIT = 'a'.repeat(40);
-const HOME_SHA256 = 'ab'.repeat(32);
-const WIP_SHA256 = 'cd'.repeat(32);
 
 const PROJECT = 'project-1';
 /** The person who started the chat. Not the workspace user, so the assignee choice is observable. */
@@ -253,61 +260,9 @@ describe('sleep-loss inbox item through the real bounded sleep fallback', () => 
     chatSessionId: string,
     workspaceId: string,
     generation: string,
-    mode: 'complete' | 'home-skipped'
+    mode: SnapshotSeedMode
   ) {
-    const prefix = `session-snapshots/${chatSessionId}/${generation}`;
-    const wip = true;
-    const home = mode === 'complete';
-    if (home) r2Objects.set(`${prefix}/home.tar`, { size: 4, sha256: HOME_SHA256 });
-    if (wip) r2Objects.set(`${prefix}/wip.bundle`, { size: 9, sha256: WIP_SHA256 });
-    r2Objects.set(`${prefix}/manifest.json`, { size: 512, sha256: null });
-    const status = mode === 'complete' ? 'available' : 'degraded';
-    const degradation = mode === 'complete' ? 'none' : mode;
-    sqlite
-      .prepare(
-        `UPDATE session_snapshots
-         SET status = ?, degradation = ?, snapshot_generation = ?, capture_generation = NULL,
-             capture_error = NULL, base_commit = ?,
-             home_r2_key = ?, home_sha256 = ?, wip_r2_key = ?, wip_sha256 = ?,
-             manifest_r2_key = ?, manifest_json = ?, expires_at = ?
-         WHERE chat_session_id = ?`
-      )
-      .run(
-        status,
-        degradation,
-        generation,
-        BASE_COMMIT,
-        home ? `${prefix}/home.tar` : null,
-        home ? HOME_SHA256 : null,
-        `${prefix}/wip.bundle`,
-        WIP_SHA256,
-        `${prefix}/manifest.json`,
-        JSON.stringify({
-          version: 1,
-          chatSessionId,
-          workspaceId,
-          agentSessionId: workspaceId.replace('ws-', 'agent-'),
-          acpSessionId: 'acp-1',
-          agentType: 'claude-code',
-          baseCommit: BASE_COMMIT,
-          git: {
-            branch: 'sam/feature',
-            upstream: 'origin/sam/feature',
-            remote: 'origin',
-            detached: false,
-          },
-          status,
-          degradation,
-          skipped: mode === 'complete' ? [] : [{ path: '$HOME', reason: 'budget exhausted' }],
-          artifacts: {
-            ...(home ? { home: { sizeBytes: 4, sha256: HOME_SHA256 } } : {}),
-            wip: { sizeBytes: 9, sha256: WIP_SHA256 },
-          },
-          createdAt: new Date().toISOString(),
-        }),
-        new Date(Date.now() + 7 * DAY_MS).toISOString(),
-        chatSessionId
-      );
+    seedSnapshotGeneration(sqlite, r2Objects, chatSessionId, workspaceId, generation, mode);
   }
 
   /** An idle checkpoint taken before the sleep episode began (the exact-restore recovery point). */

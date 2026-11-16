@@ -247,6 +247,49 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     );
   }
 
+  /** Distinct rejected prompts, each after the previous wait's retry time (4 exhaust the budget). */
+  async function rejectDistinctIncidents(agentPrefix: string, afterEach?: () => void) {
+    for (let incident = 0; incident < 4; incident++) {
+      if (incident) {
+        const row = d1
+          .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+          .get(TASK) as { value: string };
+        vi.setSystemTime(JSON.parse(row.value).nextRetryAt + 1);
+        d1.prepare('UPDATE agent_sessions SET id=?').run(`${agentPrefix}-${incident}`);
+      }
+      expect(
+        (await callback({ toStatus: 'failed', errorMessage: 'provider_limit_reached' })).status
+      ).toBe(200);
+      afterEach?.();
+    }
+  }
+
+  /** The inbox tables (shipped migrations), the owner as an active member, a notification spy. */
+  function seedInboxOwner() {
+    for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
+      applySqliteMigration(d1, new URL(`../../src/db/migrations/${file}`, import.meta.url));
+    d1.prepare(
+      "INSERT OR IGNORE INTO users (id,email,name,role,status) VALUES (?, 'u1@x.test', 'One', 'user', 'active')"
+    ).run(USER);
+    d1.prepare(
+      "UPDATE projects SET user_id = ?, name = 'One', repository = 'o/one' WHERE id = ?"
+    ).run(USER, PROJECT);
+    d1.prepare(
+      "INSERT OR REPLACE INTO project_members (project_id,user_id,role,status) VALUES (?, ?, 'owner', 'active')"
+    ).run(PROJECT, USER);
+    const notified = vi.fn().mockResolvedValue({ id: 'n-1' });
+    Object.assign(env, {
+      NOTIFICATION: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          createNotification: notified,
+          claimNotificationDeduplication: vi.fn().mockResolvedValue(true),
+        }),
+      },
+    });
+    return notified;
+  }
+
   async function sleepTheTask() {
     const sweep = await runSessionSleepSweep(env);
     expect(sweep.slept).toBe(1);
@@ -974,18 +1017,7 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
 
   it('preserves an exhausted unknown-reset block after its runtime was deleted', async () => {
     // Distinct real callback incidents exhaust the existing consecutive budget.
-    for (let incident = 0; incident < 4; incident++) {
-      if (incident) {
-        const row = d1
-          .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
-          .get(TASK) as { value: string };
-        vi.setSystemTime(JSON.parse(row.value).nextRetryAt + 1);
-        d1.prepare('UPDATE agent_sessions SET id=?').run(`blocked-agent-${incident}`);
-      }
-      expect(
-        (await callback({ toStatus: 'failed', errorMessage: 'provider_limit_reached' })).status
-      ).toBe(200);
-    }
+    await rejectDistinctIncidents('blocked-agent');
     const before = d1
       .prepare(
         'SELECT admission_state,admission_reason,provider_limit_wait_json FROM tasks WHERE id=?'
@@ -1042,27 +1074,7 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
   it('a usage-limit wait files no inbox error item, and its block supersedes an open failed-wake item', async () => {
     // Inbox slice E on the real callback route: waiting for a provider usage limit is not a
     // failed start. The shipped asks migrations, not the drizzle mirror.
-    for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
-      applySqliteMigration(d1, new URL(`../../src/db/migrations/${file}`, import.meta.url));
-    d1.prepare(
-      "INSERT OR IGNORE INTO users (id,email,name,role,status) VALUES (?, 'u1@x.test', 'One', 'user', 'active')"
-    ).run(USER);
-    d1.prepare(
-      "UPDATE projects SET user_id = ?, name = 'One', repository = 'o/one' WHERE id = ?"
-    ).run(USER, PROJECT);
-    d1.prepare(
-      "INSERT OR REPLACE INTO project_members (project_id,user_id,role,status) VALUES (?, ?, 'owner', 'active')"
-    ).run(PROJECT, USER);
-    const notified = vi.fn().mockResolvedValue({ id: 'n-1' });
-    Object.assign(env, {
-      NOTIFICATION: {
-        idFromName: (name: string) => name,
-        get: () => ({
-          createNotification: notified,
-          claimNotificationDeduplication: vi.fn().mockResolvedValue(true),
-        }),
-      },
-    });
+    const notified = seedInboxOwner();
     const errorAsk = (key: string) =>
       d1.prepare("SELECT status FROM asks WHERE kind = 'error' AND dedupe_key = ?").get(key) as
         { status: string } | undefined;
@@ -1077,22 +1089,12 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     expect(wakeItem?.created).toBe(true);
 
     // Distinct rejected prompts: the first waits, the budget then exhausts into a block.
-    for (let incident = 0; incident < 4; incident++) {
-      if (incident) {
-        const row = d1
-          .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
-          .get(TASK) as { value: string };
-        vi.setSystemTime(JSON.parse(row.value).nextRetryAt + 1);
-        d1.prepare('UPDATE agent_sessions SET id=?').run(`limit-agent-${incident}`);
-      }
-      expect(
-        (await callback({ toStatus: 'failed', errorMessage: 'provider_limit_reached' })).status
-      ).toBe(200);
-      // While it only waits, nothing is filed for the task, inline or by the sweep.
+    // While it only waits, nothing is filed for the task, inline or by the sweep.
+    await rejectDistinctIncidents('limit-agent', () =>
       expect(d1.prepare('SELECT status FROM tasks WHERE id=?').get(TASK)).toEqual({
         status: 'in_progress',
-      });
-    }
+      })
+    );
     expect(
       JSON.parse(
         (
@@ -1141,27 +1143,7 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
   });
 
   it('a genuine agent_prompt_failed callback files one task error item inline, linked from its notification', async () => {
-    for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
-      applySqliteMigration(d1, new URL(`../../src/db/migrations/${file}`, import.meta.url));
-    d1.prepare(
-      "INSERT OR IGNORE INTO users (id,email,name,role,status) VALUES (?, 'u1@x.test', 'One', 'user', 'active')"
-    ).run(USER);
-    d1.prepare(
-      "UPDATE projects SET user_id = ?, name = 'One', repository = 'o/one' WHERE id = ?"
-    ).run(USER, PROJECT);
-    d1.prepare(
-      "INSERT OR REPLACE INTO project_members (project_id,user_id,role,status) VALUES (?, ?, 'owner', 'active')"
-    ).run(PROJECT, USER);
-    const notified = vi.fn().mockResolvedValue({ id: 'n-1' });
-    Object.assign(env, {
-      NOTIFICATION: {
-        idFromName: (name: string) => name,
-        get: () => ({
-          createNotification: notified,
-          claimNotificationDeduplication: vi.fn().mockResolvedValue(true),
-        }),
-      },
-    });
+    const notified = seedInboxOwner();
 
     d1.prepare("UPDATE tasks SET title = 'Ship it' WHERE id = ?").run(TASK);
     // The exact report a staging VM agent sent when its agent could not start.
