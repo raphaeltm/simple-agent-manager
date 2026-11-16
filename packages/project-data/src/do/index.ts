@@ -2814,26 +2814,42 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  prepareAttentionAnswer(sessionId: string, markerId: string, answer: string) {
-    return attention.prepareAttentionAnswer(this.sql, sessionId, markerId, answer);
+  prepareAttentionAnswer(
+    sessionId: string,
+    markerId: string,
+    answer: string,
+    mode: attention.AttentionClaimMode = 'answer'
+  ) {
+    return attention.prepareAttentionAnswer(this.sql, sessionId, markerId, answer, mode);
   }
 
-  releaseAttentionAnswer(sessionId: string, markerId: string, answer: string): number {
-    return attention.releaseAttentionAnswer(this.sql, sessionId, markerId, answer);
+  releaseAttentionAnswer(
+    sessionId: string,
+    markerId: string,
+    answer: string,
+    mode: attention.AttentionClaimMode = 'answer'
+  ): number {
+    return attention.releaseAttentionAnswer(this.sql, sessionId, markerId, answer, mode);
   }
 
   async completeAttentionAnswer(
     sessionId: string,
     markerId: string,
-    answer: string
+    answer: string,
+    mode: attention.AttentionClaimMode = 'answer'
   ): Promise<number> {
-    const count = attention.completeAttentionAnswer(this.sql, sessionId, markerId, answer);
+    const count = attention.completeAttentionAnswer(this.sql, sessionId, markerId, answer, mode);
     if (count > 0) {
       await this.recalculateAlarm();
       this.scheduleSummarySync();
       this.broadcastEvent(
         'attention.resolved',
-        { sessionId, markerId, count, reason: 'structured_answer' },
+        {
+          sessionId,
+          markerId,
+          count,
+          reason: mode === 'archive' ? 'archived' : 'structured_answer',
+        },
         sessionId
       );
     }

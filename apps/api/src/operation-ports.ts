@@ -25,6 +25,7 @@ import { resolveProjectEventLimits } from './durable-objects/project-data/projec
 import { normalizeNullableText } from './durable-objects/project-data/project-events-values';
 import { resolveStorageSafetyConfig } from './durable-objects/project-data/storage-safety';
 import type { Env } from './env';
+import { createInboxPort } from './services/inbox/port';
 import { parsePositiveInt } from './lib/route-helpers';
 import { getTrustedApiOrigin } from './lib/trusted-origins';
 import { requireProjectAccess, requireProjectCapability } from './middleware/project-auth';
@@ -149,6 +150,7 @@ export function createOperationPorts(env: Env): OperationPorts {
       resolveDetailsMany: (...a) => resolveAdminSettingDetailsMany(env, ...a),
       connectorReadLimits: () => getConnectorReadLimits(env),
     },
+    inbox: createInboxPort(env),
     access: {
       requireProjectAccess: (projectId, userId) => requireProjectAccess(db(), projectId, userId),
       requireProjectCapability: (projectId, userId, capability) =>

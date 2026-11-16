@@ -33,6 +33,7 @@ import { runScheduledDeploymentReleaseRetention } from './d1-retention';
 import { runDebugPackagePurge } from './debug-package-purge';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { runDeploymentPublishJobSweep } from './deployment-publish-jobs';
+import { runInboxAskSweep } from '../services/inbox/sweep';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
@@ -227,6 +228,8 @@ export async function scheduled(
   const secretRequestSweep = await sweeps.isolate('runtime_secret_request_sweep', () =>
     runRuntimeSecretRequestSweep(env)
   );
+  // Two indexed reads per idle tick; work is capped by inbox.sweepBatchSize.
+  const inboxAskSweep = await sweeps.isolate('inbox_ask_sweep', () => runInboxAskSweep(env));
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
   );
@@ -404,6 +407,8 @@ export async function scheduled(
     secretRequestsExpired: secretRequestSweep?.expired,
     secretRequestAgentsNotified: secretRequestSweep?.agentsNotified,
     secretRequestNoticesRetried: secretRequestSweep?.noticesRetried,
+    inboxAsksExpired: inboxAskSweep?.expired,
+    inboxAskNoticesRetried: inboxAskSweep?.noticesRetried,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
     sessionTaskRepairReused: sessionTaskRepair?.reused,

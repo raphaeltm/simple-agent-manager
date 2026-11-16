@@ -10,7 +10,6 @@
  * never logged or returned.
  */
 import type { RuntimeSecretRequestResponse } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Hono } from 'hono';
 
@@ -24,7 +23,7 @@ import { errors } from '../../middleware/error';
 import { hasProjectCapability, requireProjectCapability } from '../../middleware/project-auth';
 import { getRuntimeLimits } from '../../services/limits';
 import {
-  agentSafeDisplayName,
+  resolverDisplayName as actorName,
   toRuntimeSecretRequest,
 } from '../../services/runtime-secret-request-records';
 import {
@@ -34,12 +33,10 @@ import {
   getRuntimeSecretRequest,
 } from '../../services/runtime-secret-requests';
 
-type Db = ReturnType<typeof drizzle<typeof schema>>;
-
 /** Body overhead allowed on top of the value itself: JSON framing and the confirm flag. */
 const FULFIL_BODY_OVERHEAD_BYTES = 1_024;
 
-async function readFulfilBody(
+export async function readFulfilBody(
   request: Request,
   maxValueBytes: number
 ): Promise<{ value: string; replaceExisting: boolean; expectedExistingVersion: string | null }> {
@@ -82,15 +79,6 @@ async function readFulfilBody(
   };
 }
 
-async function actorName(db: Db, userId: string): Promise<string | null> {
-  const rows = await db
-    .select({ name: schema.users.name })
-    .from(schema.users)
-    .where(eq(schema.users.id, userId))
-    .limit(1);
-  return agentSafeDisplayName(rows[0]?.name);
-}
-
 /**
  * Both actions change state on a session cookie. Requiring a JSON content type makes any
  * cross-origin call a preflighted request, which the credentialed CORS allowlist refuses, so a
@@ -98,12 +86,15 @@ async function actorName(db: Db, userId: string): Promise<string | null> {
  * a request on someone's behalf with a "simple" form or text/plain POST. The exact-origin check
  * above covers the allowlisted non-app hosts too.
  */
-function assertBrowserJsonWrite(c: {
-  req: { raw: Request; header: (name: string) => string | undefined };
-  env: Env;
-}): void {
+export function assertBrowserJsonWrite(
+  c: {
+    req: { raw: Request; header: (name: string) => string | undefined };
+    env: Env;
+  },
+  label = 'secret request'
+): void {
   // Only the app's own pages may answer a request; see `lib/browser-write-origin.ts`.
-  requireExactBrowserOrigin(c, 'secret request');
+  requireExactBrowserOrigin(c, label);
   assertJsonRequest(c.req.raw);
 }
 

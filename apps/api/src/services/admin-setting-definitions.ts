@@ -4,6 +4,7 @@ import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definit
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
+import { type InboxSettingName } from './inbox-settings-definition';
 import {
   CONNECTOR_DEFAULTS,
   type ConnectorSettingKey,
@@ -32,6 +33,7 @@ export type AdminSettingName =
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
+  | InboxSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName

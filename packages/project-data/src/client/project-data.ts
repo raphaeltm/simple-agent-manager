@@ -3424,10 +3424,11 @@ export async function prepareAttentionAnswer(
   projectId: string,
   sessionId: string,
   markerId: string,
-  answer: string
+  answer: string,
+  mode: 'answer' | 'archive' = 'answer'
 ) {
   const stub = await getStub(env, projectId);
-  return stub.prepareAttentionAnswer(sessionId, markerId, answer);
+  return stub.prepareAttentionAnswer(sessionId, markerId, answer, mode);
 }
 
 export async function completeAttentionAnswer(
@@ -3435,10 +3436,11 @@ export async function completeAttentionAnswer(
   projectId: string,
   sessionId: string,
   markerId: string,
-  answer: string
+  answer: string,
+  mode: 'answer' | 'archive' = 'answer'
 ): Promise<number> {
   const stub = await getStub(env, projectId);
-  return stub.completeAttentionAnswer(sessionId, markerId, answer);
+  return stub.completeAttentionAnswer(sessionId, markerId, answer, mode);
 }
 
 export async function releaseAttentionAnswer(
@@ -3446,10 +3448,11 @@ export async function releaseAttentionAnswer(
   projectId: string,
   sessionId: string,
   markerId: string,
-  answer: string
+  answer: string,
+  mode: 'answer' | 'archive' = 'answer'
 ): Promise<number> {
   const stub = await getStub(env, projectId);
-  return stub.releaseAttentionAnswer(sessionId, markerId, answer);
+  return stub.releaseAttentionAnswer(sessionId, markerId, answer, mode);
 }
 
 export async function resolveSessionAttentionMarkers(
