@@ -550,6 +550,10 @@ describe('human tasks through the real entry points', () => {
     expect(
       (await post(itemPath(s, ref, '/steps/7'), s.colleagueCookie, { done: true })).status
     ).toBe(400);
+    // A segment that is not a whole number never addresses a step (`parseInt('0junk')` is 0).
+    expect(
+      (await post(itemPath(s, ref, '/steps/0junk'), s.colleagueCookie, { done: true })).status
+    ).toBe(400);
 
     await deliverWakes(s, s.chatSessionId);
     const archived = await post(itemPath(s, ref, '/archive'), s.colleagueCookie, {});
