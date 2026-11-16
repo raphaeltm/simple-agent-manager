@@ -325,6 +325,31 @@ async function setupMocks(page: Page, scenario: MockScenario) {
   return { retiredRequests };
 }
 
+/**
+ * Load the page with one mock scenario, let it settle, capture it and check overflow.
+ * `settle` is a fixed wait in ms, or 'empty-state' to wait for the settled empty messages
+ * (failed queries take longer than a fixed wait to resolve).
+ */
+async function captureScene(
+  page: Page,
+  scenario: MockScenario,
+  shot: string,
+  opts: { settle: number | 'empty-state'; theme?: 'light'; noCrash?: boolean }
+) {
+  if (opts.theme) await seedTheme(page, opts.theme);
+  await setupMocks(page, scenario);
+  await page.goto('/admin/analytics');
+  if (opts.settle === 'empty-state') {
+    await expect(page.locator('text=/No .* data available yet/').first()).toBeVisible();
+  } else {
+    await page.waitForTimeout(opts.settle);
+  }
+  if (opts.noCrash) await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  if (opts.theme) await expectTheme(page, opts.theme);
+  await screenshot(page, shot);
+  await assertNoHorizontalOverflow(page);
+}
+
 /** Kept sections render, retired ones are gone, and the page never asks for them. */
 async function expectOnlyKeptSections(page: Page) {
   const { retiredRequests } = await setupMocks(page, NORMAL);
@@ -374,20 +399,14 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
   });
 
   test('normal data — all charts render', async ({ page }) => {
-    await setupMocks(page, NORMAL);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-    await expect(page.getByText('Something went wrong')).toHaveCount(0);
-    await screenshot(page, 'admin-analytics-normal-mobile');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, NORMAL, 'admin-analytics-normal-mobile', {
+      settle: 800,
+      noCrash: true,
+    });
   });
 
   test('empty state — all sections show empty messages', async ({ page }) => {
-    await setupMocks(page, EMPTY);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(600);
-    await screenshot(page, 'admin-analytics-empty-mobile');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, EMPTY, 'admin-analytics-empty-mobile', { settle: 600 });
 
     // All empty state texts should be visible
     const emptyMessages = page.locator('text=/No .* data available yet/');
@@ -396,59 +415,36 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
   });
 
   test('many items — 30+ events, 90 day DAU, many AI models', async ({ page }) => {
-    await setupMocks(page, MANY_ITEMS);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-    await screenshot(page, 'admin-analytics-many-items-mobile');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, MANY_ITEMS, 'admin-analytics-many-items-mobile', { settle: 800 });
   });
 
   test('long event names — no overflow from untruncated text', async ({ page }) => {
-    await setupMocks(page, LONG_TEXT);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(700);
-    await screenshot(page, 'admin-analytics-long-text-mobile');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, LONG_TEXT, 'admin-analytics-long-text-mobile', { settle: 700 });
   });
 
   test('error state — page still renders with empty states', async ({ page }) => {
-    await setupMocks(page, API_ERROR);
-    await page.goto('/admin/analytics');
-    // When APIs fail, individual sections show empty state messages. Wait for the
-    // failed queries to settle instead of racing a fixed timeout against them.
-    await expect(page.locator('text=/No .* data available yet/').first()).toBeVisible();
-    await screenshot(page, 'admin-analytics-error-mobile');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, API_ERROR, 'admin-analytics-error-mobile', { settle: 'empty-state' });
   });
 
   test('light theme — normal charts and tables', async ({ page }) => {
-    await seedTheme(page, 'light');
-    await setupMocks(page, NORMAL);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-    await expectTheme(page, 'light');
-    await screenshot(page, 'admin-analytics-light-normal-mobile');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, NORMAL, 'admin-analytics-light-normal-mobile', {
+      theme: 'light',
+      settle: 800,
+    });
   });
 
   test('light theme — many rows and large numbers', async ({ page }) => {
-    await seedTheme(page, 'light');
-    await setupMocks(page, MANY_ITEMS);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-    await expectTheme(page, 'light');
-    await screenshot(page, 'admin-analytics-light-many-items-mobile');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, MANY_ITEMS, 'admin-analytics-light-many-items-mobile', {
+      theme: 'light',
+      settle: 800,
+    });
   });
 
   test('light theme — empty and error states', async ({ page }) => {
-    await seedTheme(page, 'light');
-    await setupMocks(page, API_ERROR);
-    await page.goto('/admin/analytics');
-    await expect(page.locator('text=/No .* data available yet/').first()).toBeVisible();
-    await expectTheme(page, 'light');
-    await screenshot(page, 'admin-analytics-light-error-mobile');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, API_ERROR, 'admin-analytics-light-error-mobile', {
+      theme: 'light',
+      settle: 'empty-state',
+    });
   });
 
   test('period selector toggle — all four buttons accessible and toggleable', async ({ page }) => {
@@ -573,73 +569,46 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
   });
 
   test('normal data — full layout', async ({ page }) => {
-    await setupMocks(page, NORMAL);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-    await expect(page.getByText('Something went wrong')).toHaveCount(0);
-    await screenshot(page, 'admin-analytics-normal-desktop');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, NORMAL, 'admin-analytics-normal-desktop', {
+      settle: 800,
+      noCrash: true,
+    });
   });
 
   test('empty state', async ({ page }) => {
-    await setupMocks(page, EMPTY);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(600);
-    await screenshot(page, 'admin-analytics-empty-desktop');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, EMPTY, 'admin-analytics-empty-desktop', { settle: 600 });
   });
 
   test('many items — desktop', async ({ page }) => {
-    await setupMocks(page, MANY_ITEMS);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-    await screenshot(page, 'admin-analytics-many-items-desktop');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, MANY_ITEMS, 'admin-analytics-many-items-desktop', { settle: 800 });
   });
 
   test('long event names — bar charts do not overflow page', async ({ page }) => {
-    await setupMocks(page, LONG_TEXT);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(700);
-    await screenshot(page, 'admin-analytics-long-text-desktop');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, LONG_TEXT, 'admin-analytics-long-text-desktop', { settle: 700 });
   });
 
   test('error state', async ({ page }) => {
-    await setupMocks(page, API_ERROR);
-    await page.goto('/admin/analytics');
-    await expect(page.locator('text=/No .* data available yet/').first()).toBeVisible();
-    await screenshot(page, 'admin-analytics-error-desktop');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, API_ERROR, 'admin-analytics-error-desktop', { settle: 'empty-state' });
   });
 
   test('light theme — normal data', async ({ page }) => {
-    await seedTheme(page, 'light');
-    await setupMocks(page, NORMAL);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-    await expectTheme(page, 'light');
-    await screenshot(page, 'admin-analytics-light-normal-desktop');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, NORMAL, 'admin-analytics-light-normal-desktop', {
+      theme: 'light',
+      settle: 800,
+    });
   });
 
   test('light theme — empty state', async ({ page }) => {
-    await seedTheme(page, 'light');
-    await setupMocks(page, EMPTY);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(600);
-    await expectTheme(page, 'light');
-    await screenshot(page, 'admin-analytics-light-empty-desktop');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, EMPTY, 'admin-analytics-light-empty-desktop', {
+      theme: 'light',
+      settle: 600,
+    });
   });
 
   test('light theme — many rows', async ({ page }) => {
-    await seedTheme(page, 'light');
-    await setupMocks(page, MANY_ITEMS);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(800);
-    await expectTheme(page, 'light');
-    await screenshot(page, 'admin-analytics-light-many-items-desktop');
-    await assertNoHorizontalOverflow(page);
+    await captureScene(page, MANY_ITEMS, 'admin-analytics-light-many-items-desktop', {
+      theme: 'light',
+      settle: 800,
+    });
   });
 });
