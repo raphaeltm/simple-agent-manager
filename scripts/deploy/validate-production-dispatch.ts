@@ -10,6 +10,8 @@ export interface ValidationEnv {
   githubRepository?: string;
   githubToken?: string;
   targetCommitSha?: string;
+  /** Automatic path only: head SHA of the CI run whose completion triggered this run. */
+  triggeringCommitSha?: string;
   emergencyOverrideReason?: string;
   overrideReasonMinLength?: string;
   canonicalRepository?: string;
@@ -96,6 +98,27 @@ function redact(value: string): string {
     .replace(/Bearer\s+[\w.~+/=-]{12,}/gi, 'Bearer [REDACTED]');
 }
 
+function githubHeaders(token: string): Record<string, string> {
+  return {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token}`,
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+}
+
+function nextPageUrl(response: Response, what: string): string | undefined {
+  const nextLink = response.headers
+    .get('link')
+    ?.split(',')
+    .map((link) => link.trim())
+    .find((link) => link.endsWith('rel="next"'))
+    ?.match(/^<([^>]+)>/)?.[1];
+  if (nextLink && !nextLink.startsWith('https://api.github.com/')) {
+    throw new Error(`GitHub ${what} pagination returned an untrusted next-page URL`);
+  }
+  return nextLink;
+}
+
 async function listCiRuns(
   env: Required<Pick<ValidationEnv, 'githubRepository' | 'githubToken'>>,
   sha: string
@@ -105,31 +128,18 @@ async function listCiRuns(
   const runs: WorkflowRun[] = [];
 
   while (url) {
-    const response = await fetch(url, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${env.githubToken}`,
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-    });
+    const response = await fetch(url, { headers: githubHeaders(env.githubToken) });
 
     if (!response.ok) {
       throw new Error(`Failed to query CI workflow runs for ${sha}: HTTP ${response.status}`);
     }
 
     const body = (await response.json()) as GithubActionsRunsResponse;
-    runs.push(...(body.workflow_runs ?? []));
-
-    const nextLink = response.headers
-      .get('link')
-      ?.split(',')
-      .map((link) => link.trim())
-      .find((link) => link.endsWith('rel="next"'))
-      ?.match(/^<([^>]+)>/)?.[1];
-    if (nextLink && !nextLink.startsWith('https://api.github.com/')) {
-      throw new Error('GitHub CI pagination returned an untrusted next-page URL');
+    if (!Array.isArray(body.workflow_runs)) {
+      throw new Error(`GitHub returned no workflow_runs list for ${sha}`);
     }
-    url = nextLink;
+    runs.push(...body.workflow_runs);
+    url = nextPageUrl(response, 'CI');
   }
 
   return runs;
@@ -140,13 +150,7 @@ async function getCurrentMainTip(
 ): Promise<string> {
   const response = await fetch(
     `https://api.github.com/repos/${env.githubRepository}/git/ref/heads/main`,
-    {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${env.githubToken}`,
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-    }
+    { headers: githubHeaders(env.githubToken) }
   );
 
   if (!response.ok) {
@@ -157,29 +161,72 @@ async function getCurrentMainTip(
   return normalizeSha(body.object?.sha);
 }
 
-async function requireCurrentMainTip(env: ValidationEnv, sha: string): Promise<void> {
-  if (!env.githubRepository || !env.githubToken) {
-    throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are required to verify main provenance.');
+interface GithubDeployment {
+  id: number;
+  sha?: string;
+  payload?: unknown;
+}
+
+interface GithubDeploymentStatus {
+  state?: string;
+}
+
+/** A deployment written by this workflow's `mark-production-deployment` job. */
+export function isProductionDeployMarker(deployment: GithubDeployment): boolean {
+  const payload = deployment.payload;
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    (payload as { workflow?: unknown }).workflow === 'deploy.yml' &&
+    (payload as { dry_run?: unknown }).dry_run === false
+  );
+}
+
+/**
+ * The SHA production is running, read from the newest `deploy.yml` marker whose latest
+ * status is `success` (the same rule `release.yml` uses). Returns undefined when no marker
+ * exists. Throws on any API error so the caller fails closed.
+ */
+export async function getLatestProductionDeployedSha(
+  env: Required<Pick<ValidationEnv, 'githubRepository' | 'githubToken'>>
+): Promise<string | undefined> {
+  let url: string | undefined =
+    `https://api.github.com/repos/${env.githubRepository}/deployments?environment=production&per_page=100`;
+
+  while (url) {
+    const response = await fetch(url, { headers: githubHeaders(env.githubToken) });
+    if (!response.ok) {
+      throw new Error(`Failed to list production deployments: HTTP ${response.status}`);
+    }
+    const deployments = (await response.json()) as unknown;
+    if (!Array.isArray(deployments)) {
+      throw new Error('GitHub returned a non-list production deployments response');
+    }
+
+    for (const deployment of deployments as GithubDeployment[]) {
+      if (!isProductionDeployMarker(deployment)) continue;
+      const statusResponse = await fetch(
+        `https://api.github.com/repos/${env.githubRepository}/deployments/${deployment.id}/statuses?per_page=1`,
+        { headers: githubHeaders(env.githubToken) }
+      );
+      if (!statusResponse.ok) {
+        throw new Error(
+          `Failed to read production deployment ${deployment.id} status: HTTP ${statusResponse.status}`
+        );
+      }
+      const statuses = (await statusResponse.json()) as unknown;
+      if (!Array.isArray(statuses)) {
+        throw new Error(`GitHub returned a non-list status response for deployment ${deployment.id}`);
+      }
+      if ((statuses as GithubDeploymentStatus[])[0]?.state === 'success') {
+        return normalizeSha(deployment.sha);
+      }
+    }
+
+    url = nextPageUrl(response, 'deployments');
   }
 
-  let mainTip: string;
-  try {
-    mainTip = await getCurrentMainTip({
-      githubRepository: env.githubRepository,
-      githubToken: env.githubToken,
-    });
-  } catch (error) {
-    const message = redact(error instanceof Error ? error.message : String(error));
-    throw new Error(
-      `${message}. Unable to prove trusted main provenance; deployment failed closed before production mutation.`
-    );
-  }
-
-  if (sha !== mainTip) {
-    throw new Error(
-      `target_commit_sha ${sha} does not match the current trusted main tip ${mainTip}. Deployment failed closed before production mutation.`
-    );
-  }
+  return undefined;
 }
 
 function append(path: string | undefined, content: string): void {
@@ -282,25 +329,88 @@ export async function validateProductionDispatch(env: ValidationEnv): Promise<{
   return { sha, ciVerified: false, emergencyOverride: true };
 }
 
-export async function validateAutomaticProductionDispatch(env: ValidationEnv): Promise<{
-  sha: string;
-  ciVerified: true;
-  emergencyOverride: false;
-}> {
+export type AutomaticDeployDecision =
+  | 'deploy'
+  | 'skip-tip-already-deployed'
+  | 'skip-tip-ci-not-successful';
+
+export interface AutomaticDispatchResult {
+  /** The SHA to deploy; set only when decision is `deploy`, and then always the main tip. */
+  sha?: string;
+  mainTip: string;
+  triggeringSha: string;
+  decision: AutomaticDeployDecision;
+}
+
+/**
+ * Automatic path, run after the `deploy-production` queue. GitHub keeps one pending run
+ * per concurrency group, and overlapping main CI runs finish out of order, so the run that
+ * reaches this point may have been triggered by an older commit. The triggering SHA is
+ * therefore only a wake-up signal: the candidate is always the current main tip, which is
+ * deployed only when it has its own successful `CI` push run on main in this repository.
+ * When the tip's CI is not (yet) successful the run ends without deploying; the tip's own
+ * CI completion triggers a later run. Any API error throws (fail closed).
+ */
+export async function validateAutomaticProductionDispatch(
+  env: ValidationEnv
+): Promise<AutomaticDispatchResult> {
   if (env.githubEventName !== 'workflow_run') {
     throw new Error('Automatic production deployment validation requires a workflow_run event.');
   }
+  const triggeringSha = normalizeSha(env.triggeringCommitSha);
+  if (!env.githubRepository || !env.githubToken) {
+    throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are required to verify main provenance.');
+  }
+  const github = { githubRepository: env.githubRepository, githubToken: env.githubToken };
 
-  const sha = normalizeSha(env.targetCommitSha);
-  await requireCurrentMainTip(env, sha);
+  let mainTip: string;
+  let successfulRun: WorkflowRun | undefined;
+  let deployedSha: string | undefined;
+  try {
+    mainTip = await getCurrentMainTip(github);
+    successfulRun = selectSuccessfulCiRun(
+      await listCiRuns(github, mainTip),
+      mainTip,
+      env.githubRepository
+    );
+    deployedSha = successfulRun ? await getLatestProductionDeployedSha(github) : undefined;
+  } catch (error) {
+    const message = redact(error instanceof Error ? error.message : String(error));
+    throw new Error(
+      `${message}. Unable to verify the main tip, its CI or the deployed SHA; deployment failed closed before production mutation.`
+    );
+  }
 
-  append(env.githubOutput, `deploy_sha=${sha}\n`);
+  const header = `## Automatic production deployment gate\n\n- Triggering CI commit: \`${triggeringSha}\`\n- Current main tip (read after the deployment queue): \`${mainTip}\`\n`;
+
+  if (!successfulRun) {
+    append(
+      env.githubStepSummary,
+      `${header}- Decision: not deployed. The main tip has no successful \`CI\` push run yet; its own CI completion triggers its deployment.\n`
+    );
+    console.log(
+      `::notice title=Production deploy not needed::Main tip ${mainTip} has no successful CI run yet; its own CI completion will trigger its deployment.`
+    );
+    return { mainTip, triggeringSha, decision: 'skip-tip-ci-not-successful' };
+  }
+
+  if (deployedSha === mainTip) {
+    append(
+      env.githubStepSummary,
+      `${header}- Decision: not deployed. Production already runs the main tip.\n`
+    );
+    console.log(
+      `::notice title=Production deploy not needed::Production already runs main tip ${mainTip}.`
+    );
+    return { mainTip, triggeringSha, decision: 'skip-tip-already-deployed' };
+  }
+
+  append(env.githubOutput, `deploy_sha=${mainTip}\n`);
   append(
     env.githubStepSummary,
-    `## Automatic production deployment gate\n\n- Target commit: \`${sha}\`\n- Main provenance: verified current \`main\` tip after the production deployment queue\n- CI gate: verified by trusted successful \`workflow_run\` event\n`
+    `${header}- CI gate: verified (${successfulRun.html_url ?? `run ${successfulRun.id}`})\n- Previously deployed: \`${deployedSha ?? 'none recorded'}\`\n- Decision: deploy the main tip\n`
   );
-
-  return { sha, ciVerified: true, emergencyOverride: false };
+  return { sha: mainTip, mainTip, triggeringSha, decision: 'deploy' };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -310,6 +420,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       githubRepository: process.env.GITHUB_REPOSITORY,
       githubToken: process.env.GITHUB_TOKEN,
       targetCommitSha: process.env.TARGET_COMMIT_SHA,
+      triggeringCommitSha: process.env.TRIGGERING_COMMIT_SHA,
       emergencyOverrideReason: process.env.EMERGENCY_OVERRIDE_REASON,
       overrideReasonMinLength: process.env.PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH,
       canonicalRepository: process.env.CANONICAL_REPOSITORY,
