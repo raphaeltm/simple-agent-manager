@@ -261,17 +261,31 @@ where it says so and the app continues from there.
 Listed under **Chat**. Bounds for the [inbox](/docs/reference/api/#inbox) list and for the inbox
 items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 
-| Setting                    | Default | Range      | What it limits                                                                           |
-| -------------------------- | ------- | ---------- | ---------------------------------------------------------------------------------------- |
-| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                       |
-| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                         |
-| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed            |
-| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                          |
-| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                                 |
-| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                          |
-| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                  |
-| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired    |
-| `inbox.sweepBatchSize`     | 10      | 1–50       | Items one five-minute sweep expires or re-notifies (each is a write and an agent notice) |
+| Setting                    | Default | Range      | What it limits                                                                         |
+| -------------------------- | ------- | ---------- | -------------------------------------------------------------------------------------- |
+| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                     |
+| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                       |
+| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed          |
+| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                        |
+| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                               |
+| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                        |
+| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                |
+| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired  |
+| `inbox.sweepBatchSize`     | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries) |
+
+A question an agent asks with `request_human_input` is an inbox item, and these settings set its
+schedule (`apps/api/src/services/inbox/sweep.ts`, every five minutes):
+
+| Setting                                 | Default | Range   | What it controls                                                                     |
+| --------------------------------------- | ------- | ------- | ------------------------------------------------------------------------------------ |
+| `inbox.questionTimeoutMinutes`          | 120     | 1–1,440 | Minutes a question stays open once its notification reached you; then the task stops |
+| `inbox.questionFirstReminderPercent`    | 25      | 0–99    | Point in that window (percent) where the push is sent again; 0 turns it off          |
+| `inbox.questionSecondReminderPercent`   | 75      | 0–99    | Point in that window (percent) where the push is sent a last time; 0 turns it off    |
+| `inbox.questionUndeliveredGraceMinutes` | 120     | 1–1,440 | Extra minutes, with the push resent, when no device confirmed the notification       |
+| `inbox.questionMaxWaitMinutes`          | 1,440   | 1–4,320 | Most minutes a question stays open even when its notification never arrived          |
+
+A changed setting applies to questions asked afterwards; an open question keeps the deadline it was
+given, and its reminders follow the current percentages.
 
 ## Run receipt
 
@@ -470,6 +484,11 @@ trigger are configured, files them as incidents for that project's agents to inv
   **Lifecycle latency regression: _entity_ _state_** when the p95 is over the state's budget, or more
   than `lifecycleLatency.regressionPercent` of its p95 over the previous 7 days. Every run logs a
   `lifecycle_latency.daily_summary` line with those numbers for every watched state.
+- **Phase timings are stored.** The phase durations the VM agent reports for provisioning,
+  workspace setup, sleep and wake, and the TaskRunner's step durations, are written to
+  `lifecycle_phase_timings` (migration `0250_lifecycle_phase_timings.sql`) by
+  `recordLifecycleTimings` and `recordRunnerPhase`, one row per phase, as well as being logged.
+  The daily check purges them with the same `lifecycleLatency.retentionDays`.
 
 Watched states and their **Operations** budgets, in minutes. Set a budget to 0 to turn off both the
 watchdog and the daily check for that state.
@@ -496,7 +515,7 @@ The rest control the checks themselves:
 | `lifecycleLatency.observationsPerSourcePerTick` | 200     | 10–1,000   | Rows in watched states sampled per table in one run, oldest first. A truncated sample is logged and does not close episodes it could not see |
 | `lifecycleLatency.regressionPercent`            | 200     | 101–10,000 | How far above its previous 7-day p95 a state's 24-hour p95 must be to count as a regression                                                  |
 | `lifecycleLatency.minSamples`                   | 5       | 1–10,000   | Fewest finished episodes in a window before the daily check judges it                                                                        |
-| `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes are kept                                                                                                              |
+| `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes and stored phase timings are kept                                                                                     |
 | `lifecycleLatency.evaluationSampleLimit`        | 2,000   | 10–20,000  | Most recent finished episodes the daily check reads per state                                                                                |
 
 ## Linked work

@@ -4,9 +4,9 @@
  * inbox keeps no copy (`packages/operations/src/inbox-list-core.ts`).
  *
  * Stores:
- * - `ask`: D1 `asks` (reviews, human tasks, errors; questions from slice G)
- * - `attention`: a question or permission held as a ProjectData attention marker, read from the
- *   `session_summaries.attention_json` index until slices G and J move them into `asks`
+ * - `ask`: D1 `asks` (questions since slice G, reviews, human tasks, errors)
+ * - `attention`: a permission (until slice J), or a question asked before slice G, held as a
+ *   ProjectData attention marker and read from the `session_summaries.attention_json` index
  * - `secret`: D1 `runtime_secret_requests`
  * - `approval`: D1 `operations_action_approvals`
  */

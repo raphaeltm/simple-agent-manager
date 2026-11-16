@@ -188,10 +188,9 @@ notifies again.
 | `NOTIFICATION_PAGE_SIZE`                | `50`                        | Default page size for notification list                                                   |
 | `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` | `3600000` (1 hr)            | Per-sweep superadmin alert throttle; also how long an archive-breaker alert claim is held |
 | `CRON_FAILURE_NOTIFICATION_KV_PREFIX`   | `cron-failure-notification` | KV prefix used for coarse throttle markers and atomic deduplication keys                  |
-| `HUMAN_INPUT_TIMEOUT_MS`                | `7200000` (2 hr)            | Initial needs-input response window                                                       |
-| `HUMAN_INPUT_ESCALATION_FRACTIONS`      | `0.25,0.75`                 | Fractions of the initial window at which reminders fire                                   |
-| `HUMAN_INPUT_UNDELIVERED_GRACE_MS`      | `7200000` (2 hr)            | Extension when no push delivery was confirmed                                             |
-| `HUMAN_INPUT_MAX_WAIT_MS`               | `86400000` (24 hr)          | Hard maximum needs-input marker lifetime                                                  |
+| `HUMAN_INPUT_ESCALATION_FRACTIONS`      | `0.25,0.75`                 | Reminder points, questions asked before the inbox move only                               |
+| `HUMAN_INPUT_UNDELIVERED_GRACE_MS`      | `7200000` (2 hr)            | Undelivered grace, questions asked before the inbox move only                             |
+| `HUMAN_INPUT_MAX_WAIT_MS`               | `86400000` (24 hr)          | Hard limit, questions asked before the inbox move only                                    |
 | `WEB_PUSH_TTL_SECONDS`                  | `86400`                     | Push-service message TTL                                                                  |
 | `WEB_PUSH_VAPID_TTL_SECONDS`            | `43200`                     | VAPID authorization-token lifetime                                                        |
 | `WEB_PUSH_DELIVERY_TIMEOUT_MS`          | `10000`                     | Per-attempt push-service timeout                                                          |
@@ -204,3 +203,10 @@ notifies again.
 | `WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER`   | `8`                         | Maximum retained browser endpoints per user                                               |
 | `WEB_PUSH_USER_AGENT_MAX_LENGTH`        | `512`                       | Maximum stored browser description length                                                 |
 | `RATE_LIMIT_PUSH_SUBSCRIPTION`          | `30`                        | Subscription mutations per user per hour                                                  |
+
+A question an agent asks with `request_human_input` follows the schedule in the admin settings
+`inbox.questionTimeoutMinutes`, `inbox.questionFirstReminderPercent`,
+`inbox.questionSecondReminderPercent`, `inbox.questionUndeliveredGraceMinutes` and
+`inbox.questionMaxWaitMinutes` (see [Admin settings](/docs/guides/admin-settings/)). The three
+`HUMAN_INPUT_*` variables above apply only to questions asked before that change, until they are
+answered or expire.

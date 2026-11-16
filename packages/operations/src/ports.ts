@@ -420,6 +420,10 @@ export interface InboxAskNoticeRow {
   answerJson: string | null;
   sourceSessionId: string | null;
   sourceTaskId: string | null;
+  /** The asking agent's workspace (questions); the expiry outcome stops its task run. */
+  sourceWorkspaceId: string | null;
+  /** Epoch ms the ask was filed. */
+  createdAt: number | null;
   resolvedByUserId: string | null;
   assigneeUserId: string | null;
 }

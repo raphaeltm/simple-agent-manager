@@ -1,5 +1,5 @@
 {
-  "claudeLaunchBytes": 220000,
+  "claudeLaunchBytes": 210000,
   "codexLaunchBytes": 32768,
   "firstAccessBatchBytes": {
     "default": 16384,
@@ -39,7 +39,6 @@
     ".claude/rules/59-understand-before-adding.md",
     ".claude/rules/60-request-io-and-bundle-budgets.md",
     ".claude/rules/62-tests-must-observe-the-real-trigger.md",
-    ".claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md",
     ".claude/rules/74-proxy-signals-must-match-the-condition.md",
     ".claude/rules/76-cost-decisions-must-query-billed-metrics.md",
     ".claude/rules/81-work-bounds-must-state-throughput.md"

@@ -1,4 +1,4 @@
-import { maybeJsonRecord, parsePositiveInt } from '@simple-agent-manager/worker-core';
+import { maybeJsonRecord, parsePositiveInt, preferAttention, readOpenQuestionAttention } from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -54,7 +54,8 @@ export async function projectsList(
       status: schema.projects.status,
       role: schema.projectMembers.role,
       runningWork: sql<number>`(select count(*) from tasks t where t.project_id = ${schema.projects.id} and t.status in ('queued','delegated','in_progress'))`,
-      needsAttention: sql<number>`(select count(*) from session_summaries ss where ss.project_id = ${schema.projects.id} and ss.created_by_user_id = ${ctx.actor.userId} and ss.attention_json is not null)`,
+      // Chats waiting on the viewer: an attention marker, or an open question in `asks` (slice G).
+      needsAttention: sql<number>`(select count(*) from session_summaries ss where ss.project_id = ${schema.projects.id} and ss.created_by_user_id = ${ctx.actor.userId} and (ss.attention_json is not null or exists (select 1 from asks a where a.source_session_id = ss.id and a.project_id = ss.project_id and a.kind = 'question' and a.status = 'open' and (a.expires_at is null or a.expires_at > ${Date.now()}))))`,
     })
     .from(schema.projects)
     .innerJoin(
@@ -134,14 +135,27 @@ export async function chatsList(
     .limit(limit + 1);
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
-  const taskStates = await chatTaskStates(db, page);
+  const [taskStates, questions] = await Promise.all([
+    chatTaskStates(db, page),
+    // Open questions live in D1 `asks` (inbox slice G); only the chat's creator sees attention.
+    readOpenQuestionAttention(ctx.env.DATABASE, {
+      chats: page
+        .filter((row) => row.createdByUserId === ctx.actor.userId)
+        .map((row) => ({ projectId: row.projectId, sessionId: row.id })),
+      assigneeUserId: ctx.actor.userId,
+      now: Date.now(),
+    }),
+  ]);
   return {
     chats: page.map(({ attention, ...row }) => ({
       ...row,
       operational: taskStates.get(row.id) ?? null,
       attention:
-        row.createdByUserId === ctx.actor.userId && attention
-          ? (JSON.parse(attention) as unknown)
+        row.createdByUserId === ctx.actor.userId
+          ? preferAttention(
+              attention ? (JSON.parse(attention) as unknown) : null,
+              questions.get(row.id)
+            )
           : null,
       link: operationLink(ctx, row.projectId, row.id),
     })),

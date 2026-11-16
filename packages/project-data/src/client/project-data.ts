@@ -3401,38 +3401,31 @@ export async function syncProviderLimitAttention(
   );
 }
 
-export async function createAttentionMarker(
+/** A question filed as a D1 `asks` row: answers SAM's check-in, shows live (inbox slice G). */
+export async function recordQuestionAsked(
   env: Env,
   projectId: string,
-  opts: {
-    sessionId: string;
-    taskId: string | null;
-    workspaceId: string | null;
-    kind: string;
-    source: string;
-    sourceNotificationId?: string | null;
-    notificationUserId?: string | null;
-    reason?: string | null;
-    metadata?: string | null;
-    expiresAt?: number | null;
-    nextEscalationAt?: number | null;
-    maxExpiresAt?: number | null;
-  }
-): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
-  const stub = await getStub(env, projectId);
-  return stub.createAttentionMarker(opts);
+  input: Parameters<ProjectData['recordQuestionAsked']>[0]
+): Promise<void> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'recordQuestionAsked',
+    (stub) => stub.recordQuestionAsked(input),
+    'mutation'
+  );
 }
 
-export async function linkAttentionNotification(
+/** The task outcome of an expired question held in D1 `asks` (inbox slice G). */
+export async function expireQuestionAsk(
   env: Env,
   projectId: string,
-  markerId: string,
-  notificationUserId: string,
-  notificationId: string
-): Promise<boolean> {
+  input: Parameters<ProjectData['expireQuestionAsk']>[0]
+): Promise<{ outcome: 'expired' | 'answered_in_chat' }> {
   const stub = await getStub(env, projectId);
-  return stub.linkAttentionNotification(markerId, notificationUserId, notificationId);
+  return stub.expireQuestionAsk(input);
 }
+
 
 export async function prepareAttentionAnswer(
   env: Env,

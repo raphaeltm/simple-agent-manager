@@ -27,6 +27,7 @@ import {
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { expectJsonRecord } from '@simple-agent-manager/worker-core';
 import { normalizeSearchQuery } from '@simple-agent-manager/worker-core';
+import { preferAttention, readOpenQuestionAttention } from '@simple-agent-manager/worker-core';
 import { DurableObject } from 'cloudflare:workers';
 
 import { measureArchiveSql } from '../archive/sql-metrics';
@@ -113,7 +114,9 @@ import {
   type ProviderLimitAttentionResult,
   syncProviderLimitAttention,
 } from './provider-limit-attention';
+import * as questionAsks from './question-asks';
 import * as reconciliation from './reconciliation';
+import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
 import { getRunReceiptFacts } from './run-receipt-facts';
@@ -1000,7 +1003,47 @@ export class ProjectData extends DurableObject<Env> {
       },
       nudgeDeliveries: (chatSessionId) =>
         promptDelivery.nudgePromptDeliveriesForTarget(this.sql, chatSessionId),
+      closeQuestionAsks: (sessionId, messageId, messageCreatedAt) =>
+        this.closeQuestionAsks(sessionId, messageId, messageCreatedAt),
     };
+  }
+
+  /** A person's chat message answers the chat's open questions in D1 `asks` (inbox slice G). */
+  private async closeQuestionAsks(
+    sessionId: string,
+    messageId: string | null,
+    messageCreatedAt: number
+  ): Promise<number> {
+    const closed = await questionAsks.closeQuestionAsksForHumanMessage(
+      this.env,
+      { projectId: this.getProjectId(), sessionId, messageId, messageCreatedAt },
+      (type, payload, targetSessionId) => this.broadcastEvent(type, payload, targetSessionId)
+    );
+    if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
+    return closed;
+  }
+
+  /** The chats' open questions from D1 `asks`, merged into their attention (inbox slice G). */
+  private async withQuestionAttention(
+    sessions: Record<string, unknown>[]
+  ): Promise<Record<string, unknown>[]> {
+    const projectId = this.getProjectId();
+    const sessionIds = sessions
+      .map((session) => session.id)
+      .filter((id): id is string => typeof id === 'string');
+    if (!projectId || sessionIds.length === 0) return sessions;
+    const questions = await readOpenQuestionAttention(this.env.DATABASE, {
+      projectId,
+      sessionIds,
+      now: Date.now(),
+    });
+    if (questions.size === 0) return sessions;
+    return sessions.map((session) => {
+      const question = typeof session.id === 'string' ? questions.get(session.id) : undefined;
+      return question
+        ? { ...session, attention: preferAttention(session.attention, question) }
+        : session;
+    });
   }
 
   /**
@@ -1027,6 +1070,8 @@ export class ProjectData extends DurableObject<Env> {
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
       broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
+      closeQuestionAsks: (sessionId, messageId, messageCreatedAt) =>
+        this.closeQuestionAsks(sessionId, messageId, messageCreatedAt),
     };
   }
 
@@ -1072,17 +1117,26 @@ export class ProjectData extends DurableObject<Env> {
       taskId,
       createdByUserId
     );
+    const sessions = await this.withQuestionAttention(result.sessions);
     return {
-      sessions: result.sessions.map((s) => this.addBaseDomain(s)),
+      sessions: sessions.map((s) => this.addBaseDomain(s)),
       total: result.total,
       hasMore: result.hasMore,
     };
   }
 
   async getSessionsByTaskIds(taskIds: string[]): Promise<Array<Record<string, unknown>>> {
-    return sessionReads.getSessionsByTaskIds(this.sql, taskIds).map((s) => this.addBaseDomain(s));
+    const sessions = await this.withQuestionAttention(
+      sessionReads.getSessionsByTaskIds(this.sql, taskIds)
+    );
+    return sessions.map((s) => this.addBaseDomain(s));
   }
 
+  /**
+   * One session. Its `attention` is the ProjectData marker summary only: this read sits on many
+   * control loops, and nothing renders a single session's attention; the list reads above merge
+   * open questions from D1 `asks` (inbox slice G).
+   */
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const result = sessionReads.getSession(this.sql, sessionId);
     return result ? this.addBaseDomain(result) : null;
@@ -2611,8 +2665,21 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /** Batched: the work linked to many ideas at once, for the Ideas list. */
-  getIdeaWorkSnapshots(ideaIds: string[], caps: ideaWork.IdeaWorkLinkCaps) {
-    return ideaWork.getIdeaWorkSnapshots(this.sql, ideaIds, caps);
+  async getIdeaWorkSnapshots(ideaIds: string[], caps: ideaWork.IdeaWorkLinkCaps) {
+    const snapshots = ideaWork.getIdeaWorkSnapshots(this.sql, ideaIds, caps);
+    const projectId = this.getProjectId();
+    const sessionIds = ideaWork.ideaQuestionSessionIds(snapshots);
+    if (projectId && sessionIds.length > 0) {
+      ideaWork.mergeQuestionAsks(
+        snapshots,
+        await readOpenQuestionAttention(this.env.DATABASE, {
+          projectId,
+          sessionIds,
+          now: Date.now(),
+        })
+      );
+    }
+    return snapshots;
   }
 
   async cacheCommands(
@@ -2772,19 +2839,95 @@ export class ProjectData extends DurableObject<Env> {
     });
   }
 
+  /**
+   * An agent asked a question that is now a D1 `asks` row (inbox slice G): it answers SAM's open
+   * check-in, as a question marker did, and the chat list shows it live. Nothing is stored here.
+   */
+  async recordQuestionAsked(input: {
+    sessionId: string;
+    askId: string;
+    createdAt: number;
+    expiresAt: number | null;
+    reason: string | null;
+    options: string[];
+  }): Promise<void> {
+    const resolved = attention.resolveAttentionMarkersByKind(
+      this.sql,
+      input.sessionId,
+      'reconciliation_checkin',
+      null,
+      'agent',
+      'human_input_requested'
+    );
+    if (resolved > 0) {
+      await this.recalculateAlarm();
+      this.scheduleSummarySync();
+    }
+    this.broadcastEvent(
+      'attention.created',
+      {
+        sessionId: input.sessionId,
+        markerId: input.askId,
+        kind: 'needs_input',
+        createdAt: input.createdAt,
+        expiresAt: input.expiresAt,
+        reason: input.reason,
+        options: input.options,
+      },
+      input.sessionId
+    );
+  }
+
+  /**
+   * The outcome of an expired question held in D1 `asks` (the inbox sweep expired the row): the
+   * same task outcome a question marker's expiry has. A chat message from the person after the
+   * question answered it, so then the task is left alone.
+   */
+  async expireQuestionAsk(input: {
+    askId: string;
+    sessionId: string;
+    taskId: string | null;
+    workspaceId: string | null;
+    createdAt: number;
+  }): Promise<{ outcome: 'expired' | 'answered_in_chat' }> {
+    const answeredInChat = questionAsks.humanMessageSince(
+      this.sql,
+      input.sessionId,
+      input.createdAt
+    );
+    if (!answeredInChat) {
+      await attentionExpiry.failExpiredQuestionAsk(
+        this.sql,
+        this.env,
+        {
+          id: input.askId,
+          sessionId: input.sessionId,
+          taskId: input.taskId,
+          workspaceId: input.workspaceId,
+          createdAt: input.createdAt,
+        },
+        async (sessionId, errorMessage) => {
+          await this.failSession(sessionId, errorMessage);
+        },
+        { projectId: this.getProjectId(), scheduleSummarySync: () => this.scheduleSummarySync() }
+      );
+    }
+    if (releaseQuestionHold(this.sql, input.sessionId)) await this.recalculateAlarm();
+    this.broadcastEvent(
+      'attention.resolved',
+      {
+        sessionId: input.sessionId,
+        markerId: input.askId,
+        reason: answeredInChat ? 'human_message' : 'expired',
+      },
+      input.sessionId
+    );
+    return { outcome: answeredInChat ? 'answered_in_chat' : 'expired' };
+  }
+
   async createAttentionMarker(
     opts: attention.CreateAttentionMarkerOpts
   ): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
-    if (opts.kind === 'needs_input' && opts.source === 'request_human_input') {
-      attention.resolveAttentionMarkersByKind(
-        this.sql,
-        opts.sessionId,
-        'reconciliation_checkin',
-        null,
-        'agent',
-        'human_input_requested'
-      );
-    }
     const result = attention.createAttentionMarker(this.sql, opts);
     await this.recalculateAlarm();
     // The D1 session index (Connector inbox, chat list badges) copies the attention summary; a
@@ -2804,19 +2947,6 @@ export class ProjectData extends DurableObject<Env> {
       opts.sessionId
     );
     return result;
-  }
-
-  linkAttentionNotification(
-    markerId: string,
-    notificationUserId: string,
-    notificationId: string
-  ): boolean {
-    return attention.linkAttentionNotification(
-      this.sql,
-      markerId,
-      notificationUserId,
-      notificationId
-    );
   }
 
   prepareAttentionAnswer(sessionId: string, markerId: string, answer: string) {
