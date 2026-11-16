@@ -3,6 +3,7 @@ import { Button, Select } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { useAgentModelCallsAvailable } from '../../hooks/usePlatformCapabilities';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import {
   agentModelCatalogQueryOptions,
@@ -44,16 +45,22 @@ export function AgentModelAccessField({
   fallbackProfile,
 }: AgentModelAccessFieldProps) {
   const queryScope = useQueryScope();
-  const catalogQuery = useQuery(agentModelCatalogQueryOptions(queryScope));
+  // Without Workers AI (a self-hosted install) there are no models to pick from: say so
+  // instead of asking for a catalog that answers FEATURE_UNAVAILABLE.
+  const { available, known } = useAgentModelCallsAvailable();
+  const catalogQuery = useQuery({
+    ...agentModelCatalogQueryOptions(queryScope),
+    enabled: available && known,
+  });
   const projectSettingsQuery = useQuery({
     ...projectAgentModelSettingsQueryOptions(queryScope, projectId),
-    enabled: Boolean(projectId && queryScope),
+    enabled: Boolean(projectId && queryScope) && available && known,
   });
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const catalogById = indexCatalog(catalogQuery.data?.models ?? []);
   const defaultModelIds = catalogQuery.data?.defaultModelIds ?? [];
-  const resolving = catalogQuery.isLoading || projectSettingsQuery.isLoading;
+  const resolving = !known || catalogQuery.isLoading || projectSettingsQuery.isLoading;
   // An inherited selection is only known once the catalog's defaults and the project's own
   // choice have loaded; until then the picker waits instead of opening with nothing turned on.
   // A project-settings error falls back to the defaults rather than waiting forever.
@@ -84,6 +91,14 @@ export function AgentModelAccessField({
   // it must not itself commit a custom override (`onChange` fires only on Save),
   // so a cancel leaves `value` — and therefore the dropdown — exactly as it was.
   const mode = pickerOpen ? 'custom' : value === null ? 'inherit' : 'custom';
+
+  if (!available) {
+    return (
+      <p className="m-0 min-w-0 break-words text-xs text-fg-muted">
+        AI model calls are not available on this installation (they need Cloudflare Workers AI).
+      </p>
+    );
+  }
 
   function handleModeChange(nextMode: 'inherit' | 'custom') {
     if (nextMode === 'inherit') {

@@ -20,6 +20,19 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'user-1' }));
+// Agent model calls exist on this installation unless a test says otherwise.
+const capabilityState = vi.hoisted(() => ({ agentModelCalls: true }));
+vi.mock('../../../../src/lib/api/platform-capabilities', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../../src/lib/api/platform-capabilities')>();
+  return {
+    ...actual,
+    getPlatformCapabilities: async () => ({
+      ...actual.ASSUMED_PLATFORM_CAPABILITIES,
+      agentModelCalls: capabilityState.agentModelCalls,
+    }),
+  };
+});
 vi.mock('../../../../src/lib/api/agent-models', () => ({
   getAgentModelCatalog: mocks.getAgentModelCatalog,
   getProjectAgentModelSettings: mocks.getProjectAgentModelSettings,
@@ -60,6 +73,26 @@ describe('AgentModelAccessField', () => {
   beforeEach(() => {
     mocks.getAgentModelCatalog.mockReset();
     mocks.getProjectAgentModelSettings.mockReset();
+  });
+
+  it('without Workers AI, says model calls are unavailable and never asks for the catalog', async () => {
+    capabilityState.agentModelCalls = false;
+    try {
+      renderField({ initialValue: null });
+      expect(
+        await screen.findByText(/AI model calls are not available on this installation/)
+      ).toBeInTheDocument();
+      expect(mocks.getAgentModelCatalog).not.toHaveBeenCalled();
+      expect(mocks.getProjectAgentModelSettings).not.toHaveBeenCalled();
+    } finally {
+      capabilityState.agentModelCalls = true;
+    }
+  });
+
+  it('with Workers AI, loads the catalog once the capabilities answer arrives', async () => {
+    renderField({ initialValue: null });
+    await waitFor(() => expect(mocks.getAgentModelCatalog).toHaveBeenCalled());
+    expect(screen.getByRole('combobox')).toBeInTheDocument();
   });
 
   it('profile context: select options read "Same as project" / "Choose models" — no "Inherit" jargon, nothing to truncate', async () => {

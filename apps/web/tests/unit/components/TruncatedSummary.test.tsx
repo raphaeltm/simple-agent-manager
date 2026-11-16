@@ -4,6 +4,13 @@ import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TruncatedSummary } from '../../../src/components/chat/TruncatedSummary';
 
+// Cloudflare behaviour: every platform service present. The absent case runs through the real
+// capabilities query in platform-capabilities-ui.test.tsx.
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
+
 // ---------------------------------------------------------------------------
 // Mock GlobalAudioContext so TruncatedSummary can render without a real provider
 // ---------------------------------------------------------------------------
