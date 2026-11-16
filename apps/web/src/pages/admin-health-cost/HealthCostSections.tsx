@@ -298,6 +298,10 @@ export function SpendPane({ compute }: { compute: InstallationComputeSpend | nul
   const color = (provider: string) =>
     adminChartSeries[Math.max(0, providers.indexOf(provider)) % adminChartSeries.length];
   const max = Math.max(0, ...(compute?.weeks ?? []).map((week) => week.totalUsd));
+  const weekCount = compute?.weeks.length ?? 0;
+  const lastIndex = weekCount - 1;
+  // At most about six week labels, so 26 weeks stay legible on a phone.
+  const labelStep = Math.max(1, Math.ceil(weekCount / 6));
   return (
     <Pane className="flex min-w-0 flex-col gap-3 pb-4" data-testid="spend-pane">
       <PaneHead title="Compute spend per week" right="at each machine's recorded price" />
@@ -311,7 +315,7 @@ export function SpendPane({ compute }: { compute: InstallationComputeSpend | nul
             className="m-0 flex h-44 list-none items-end gap-2 px-4"
             aria-label="Compute spend per week"
           >
-            {compute.weeks.map((week) => {
+            {compute.weeks.map((week, index) => {
               const detail = week.byProvider
                 .map((p) => `${providerLabel(p.provider)} ${formatUsd(p.usd)}`)
                 .join(', ');
@@ -322,8 +326,12 @@ export function SpendPane({ compute }: { compute: InstallationComputeSpend | nul
                   aria-label={`Week of ${weekLabel(week.weekStart)}: ${formatUsd(week.totalUsd)}${detail ? ` (${detail})` : ''}`}
                   title={`${weekLabel(week.weekStart)}: ${formatUsd(week.totalUsd)}${detail ? ` · ${detail}` : ''}`}
                 >
-                  <span className="font-mono text-[11px] text-fg-muted" aria-hidden="true">
-                    {week.totalUsd > 0 ? formatUsd(week.totalUsd) : ''}
+                  {/* Only the latest week carries its value; the rest are in each label. */}
+                  <span
+                    className="whitespace-nowrap font-mono text-[11px] text-fg-muted"
+                    aria-hidden="true"
+                  >
+                    {index === lastIndex && week.totalUsd > 0 ? formatUsd(week.totalUsd) : ' '}
                   </span>
                   <div
                     className="flex w-full max-w-9 flex-col-reverse overflow-hidden rounded-t-[4px]"
@@ -344,7 +352,9 @@ export function SpendPane({ compute }: { compute: InstallationComputeSpend | nul
                     ))}
                   </div>
                   <span className="whitespace-nowrap text-[11px] text-fg-muted" aria-hidden="true">
-                    {weekLabel(week.weekStart)}
+                    {index % labelStep === 0 || index === lastIndex
+                      ? weekLabel(week.weekStart)
+                      : ' '}
                   </span>
                 </li>
               );

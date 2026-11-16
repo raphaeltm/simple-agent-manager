@@ -198,7 +198,8 @@ describe('AdminHealthCost', () => {
       })
     );
     expect(await screen.findByText('$88.00')).toBeInTheDocument();
-    expect(screen.getByText(/Last 7 days/)).toBeInTheDocument();
+    expect(screen.getByText(/This installation · Last 7 days/)).toBeInTheDocument();
+    expect(screen.getByText('Compute · Last 7 days')).toBeInTheDocument();
   });
 
   it('names a section that could not be read and still shows the others', async () => {
