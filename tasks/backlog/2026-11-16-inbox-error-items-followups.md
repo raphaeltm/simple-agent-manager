@@ -39,6 +39,17 @@ failed-wake item was finished in the same PR):
    `blockConcurrencyWhile` (one D1 UPDATE beside the existing D1 read there); moving both reads out
    of the lock is a separate refactor of `syncProviderLimitAttention`.
 
+8. An Instant start whose first prompt fails (for example a 402 from the AI Gateway) does not fail
+   the task: it stays `in_progress` / `awaiting_followup` with `error_message = 'agent_prompt_failed'`
+   so the chat can retry, and the sweep files only for `tasks.status = 'failed'`, so no item is
+   filed. Seen on staging2 2026-11-16 (task 01M7JFQRE7AV4VHK1Z2076SHBC). Slice F2's "Couldn't start
+   · In Needs you" cannot rely on an item for this case until it is covered. Needs a decision on
+   what closes such an item (the next successful prompt).
+9. The VM-agent task callback sends its failure notification (and files inline) only after
+   `revalidateWorkspace()`, which throws once the failed workspace is torn down, so a VM failure gets
+   neither until the next sweep tick (up to 5 minutes later, which then files and notifies). Seen on
+   staging2 2026-11-16 (task 01M7JG20EKZ14CF6TW7XY4M1H9: failed 15:42:18Z, item at the 15:45Z tick).
+
 ## Acceptance Criteria
 
 - [ ] Human prompt deliveries that fail terminally on an awake chat file one `delivery` error item
@@ -46,3 +57,5 @@ failed-wake item was finished in the same PR):
 - [ ] Decide and implement items for terminal sleep failures and deleted-workspace closures
 - [ ] Automations that fail to start (dropped runs) file an item, with a test through admission
 - [ ] Inbox guide states which error items close by themselves and which close when you write
+- [ ] An Instant first-prompt failure files one item and closes on the next successful prompt
+- [ ] A VM-agent failure callback files and notifies inline even when the workspace is already gone
