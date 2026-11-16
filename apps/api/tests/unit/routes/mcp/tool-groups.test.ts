@@ -178,9 +178,10 @@ describe('tools/list catalogue', () => {
     expect(byName.get('pause_mission')?.annotations?.destructiveHint).toBe(true);
   });
 
-  it('cuts the ordinary catalogue to at most 85 tools', async () => {
+  it('cuts the ordinary catalogue to at most 87 tools', async () => {
     const tools = await listed('task');
-    expect(tools.length).toBeLessThanOrEqual(85);
+    // 87: inbox slice D added inbox_read and inbox_write (spec section 5).
+    expect(tools.length).toBeLessThanOrEqual(87);
     expect(tools.length).toBeGreaterThan(70);
   });
 

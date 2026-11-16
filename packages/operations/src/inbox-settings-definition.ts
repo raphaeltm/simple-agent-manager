@@ -44,6 +44,20 @@ export const INBOX_SETTINGS = [
     range: { min: 1, max: 500 },
   },
   {
+    name: 'inbox.similarMatchesMax',
+    defaultValue: 3,
+    description:
+      'Similar open items an agent is shown when it files an ask or a review, so it can point the person at one instead of filing a duplicate. 0 turns the check off.',
+    range: { min: 0, max: 20 },
+  },
+  {
+    name: 'inbox.similarScanMax',
+    defaultValue: 50,
+    description:
+      'Newest open items of the project compared when an agent files, to find similar ones. Each filing reads at most this many rows.',
+    range: { min: 1, max: 500 },
+  },
+  {
     name: 'inbox.answerMaxChars',
     defaultValue: 4_000,
     description: 'Characters of a typed inbox answer or comment.',
