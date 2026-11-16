@@ -114,6 +114,9 @@ let inboxItems: Record<string, unknown>[];
 let inboxNextCursor: string | null;
 /** When set, the next inbox list read waits on this promise (controlled refetch ordering). */
 let inboxGate: Promise<void> | null;
+/** When set, the profile list read waits on this promise; `profileItems` is what it returns. */
+let profilesGate: Promise<void> | null;
+let profileItems: unknown[];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -138,7 +141,7 @@ function route(path: string, method: string): Response {
         agents: [{ id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true }],
       });
     case `/api/projects/${PROJECT_ID}/agent-profiles`:
-      return json(200, { items: [PROFILE] });
+      return json(200, { items: profileItems });
     case `/api/projects/${PROJECT_ID}/agent-profiles/picker`:
       return json(200, { usage: [], hiddenProfileIds: [], usageWindowDays: 30 });
     case `/api/projects/${PROJECT_ID}/skills`:
@@ -335,6 +338,8 @@ describe('Project Overview', () => {
     inboxItems = [];
     inboxNextCursor = null;
     inboxGate = null;
+    profilesGate = null;
+    profileItems = [PROFILE];
     viewport.isMobile = false;
     overviewBody = overview([EXISTING]);
     submitResponse = {
@@ -360,6 +365,9 @@ describe('Project Overview', () => {
           path,
           body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
         });
+        if (profilesGate && path === `/api/projects/${PROJECT_ID}/agent-profiles`) {
+          await profilesGate;
+        }
         if (inboxGate && path === `/api/projects/${PROJECT_ID}/inbox`) {
           const gate = inboxGate;
           inboxGate = null;
@@ -803,6 +811,29 @@ describe('Project Overview', () => {
       await waitFor(() =>
         expect(document.activeElement).toBe(screen.getByRole('button', { name: /Question 2\?/ }))
       );
+    });
+
+    it('the task box does not offer to create a profile while the profiles are still loading', async () => {
+      let release = () => {};
+      profilesGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      renderOverview();
+      // Liveness: the page and the box are up, the agents are known.
+      await screen.findByRole('region', { name: 'Running now' });
+      await screen.findByPlaceholderText(/Start a task/);
+      expect(screen.queryByText('Create a profile to start')).not.toBeInTheDocument();
+      await act(async () => {
+        release();
+      });
+      await screen.findByText('Opus 5.5 Build', { selector: 'button *' });
+      expect(screen.queryByText('Create a profile to start')).not.toBeInTheDocument();
+    });
+
+    it('still offers to create a profile when the project really has none (control)', async () => {
+      profileItems = [];
+      renderOverview();
+      expect(await screen.findByText('Create a profile to start')).toBeInTheDocument();
     });
   });
 });

@@ -154,6 +154,7 @@ export function OverviewTaskBox({
       projectId={projectId}
       agents={composer.configuredAgents}
       agentProfiles={composer.agentProfiles}
+      profilesLoading={profileChoice.profilesLoading}
       selectedProfileId={composer.selectedProfileId}
       onProfileChange={profileChoice.setSelectedProfileId}
       profilePicker={profileChoice.profilePicker}
