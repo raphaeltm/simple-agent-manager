@@ -991,17 +991,21 @@ export type {
   CreatePolicyRequest,
   ListPoliciesResponse,
   PolicyCategory,
+  PolicyInjectMode,
   PolicyScope,
   PolicySource,
   ProjectPolicy,
   UpdatePolicyRequest,
 } from './policy';
 export {
+  DEFAULT_POLICY_INJECT_MODE,
   isPolicyCategory,
+  isPolicyInjectMode,
   isPolicyScope,
   isPolicySource,
   POLICY_CATEGORIES,
   POLICY_DEFAULTS,
+  POLICY_INJECT_MODES,
   POLICY_SCOPES,
   POLICY_SOURCES,
 } from './policy';

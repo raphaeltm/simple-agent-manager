@@ -154,7 +154,10 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
         summary:
           'save a rule or preference a human stated. Work-specific one-shot rules need scope "task" and expiresAt',
       },
-      update: { tool: 'update_policy', summary: 'change a policy, or give it an expiry' },
+      update: {
+        tool: 'update_policy',
+        summary: 'change a policy, give it an expiry, or set its inject mode (pinned or on_demand)',
+      },
       remove: { tool: 'remove_policy', summary: 'deactivate a policy' },
     },
   },
