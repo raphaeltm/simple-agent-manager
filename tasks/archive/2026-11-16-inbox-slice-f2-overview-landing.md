@@ -92,3 +92,10 @@ Library `/design/project-overview-inbox-2026-11-15/`.
   (focus-mode, nested-session-sidebar, wake-failed-session-sidebar). nested-session-sidebar and
   focus-mode are quarantined (not selected by CI) and fail locally on the first-run wizard overlay
   regardless of this change.
+
+## Outcome
+
+- Staging (primary, real Claude Code VM agents) passed end to end; evidence on PR #2793 (comment 6924359246).
+- Fixed while verifying: inbox answers invalidate the Overview read (ce75226fc); the task box waits for profiles before offering to create one (3769843b3).
+- Deferred to a follow-up (slice E not in production): "Couldn't start: <title> · In Needs you"; exact plan on feature.inbox (event 4a9cd154-374c-43da-9fab-39904a9bcf73).
+- Staging infra found: staging2 AI Gateway unified billing exhausted (code 2052); Hetzner 412 placement for cx33 fsn1 on staging2. Reported on feature.inbox.
