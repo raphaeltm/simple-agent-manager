@@ -68,11 +68,11 @@ value and **Source** after the reload, nothing was saved: check the value and tr
 
 The **Operations** category includes these chat storage settings:
 
-| Setting                        | Code default | Effect                                                                                                                                     |
-| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                          |
+| Setting                        | Code default | Effect                                                                                                                                              |
+| ------------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                                   |
 | `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows. |
-| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                   |
+| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                            |
 
 Merging requires an updated reporter that sends its durable outbox incarnation. Older reporters,
 and requests with a missing or malformed incarnation, keep individual inserts and provide **zero
@@ -94,9 +94,9 @@ effective settings and actual reporter versions before forecasting fleet savings
 rollout through successive row-usage windows.
 
 Existing message rows and their comment anchors remain unchanged. Tool, user, system, thinking,
-plan and typed-card rows keep their existing storage format. A connected browser that does not
-advertise incremental append support disables merging for the sessions it watches; a legacy
-project-wide connection disables it for the project. Refresh old tabs to restore eligibility.
+plan and typed-card rows keep their existing storage format. A browser built before merging
+existed disables merging only for a chat it has open, until that chat is closed or the tab is
+refreshed. Its session-list connection does not affect merging.
 
 To roll back, save `false` for `chat.messageMergingEnabled`. The next batch seals any open merged
 row and stores new chunks individually; retry receipts remain available. Previously merged rows
