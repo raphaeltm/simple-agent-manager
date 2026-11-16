@@ -21,6 +21,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   getUserId: () => 'user-1',
+  getAuth: () => ({ user: { id: 'user-1', role: 'user' } }),
 }));
 
 vi.mock('../../../src/middleware/node-auth', () => ({

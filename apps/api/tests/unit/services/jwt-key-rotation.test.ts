@@ -40,8 +40,8 @@ import {
   LEGACY_JWT_KEY_ID,
   parsePreviousJwtKeyUntil,
 } from '../../../src/services/jwt-keys';
-import { signPublishJobToken } from '../../../src/services/publish-job-token';
 import { verifyPlatformJwt } from '../../../src/services/jwt-verify';
+import { signPublishJobToken } from '../../../src/services/publish-job-token';
 import {
   getWorkloadJWKS,
   signWorkloadIdentityToken,

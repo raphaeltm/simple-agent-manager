@@ -164,11 +164,11 @@ export {
   notificationsListQueryOptions,
   timelineProgressNotificationsQueryOptions,
 } from './notifications';
-export { projectOverviewQueryKeys, projectOverviewQueryOptions } from './project-overview';
 export {
   platformCapabilitiesQueryKeys,
   platformCapabilitiesQueryOptions,
 } from './platform-capabilities';
+export { projectOverviewQueryKeys, projectOverviewQueryOptions } from './project-overview';
 export {
   instantRuntimeEnabledQueryOptions,
   projectArtifactsEnabledQueryOptions,

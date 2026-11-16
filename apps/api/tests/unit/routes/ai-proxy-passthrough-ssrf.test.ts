@@ -397,6 +397,17 @@ describe('every passthrough route goes through the guarded fetch', () => {
 });
 
 describe('a redirect chain longer than the hop limit (outbound.maxRedirects, default 3)', () => {
+  let settings: ReturnType<typeof createAdminSettingsEnv>;
+  beforeEach(() => {
+    __resetAdminSettingsCacheForTest();
+    settings = createAdminSettingsEnv();
+    database = settings.env.DATABASE;
+  });
+  afterEach(() => {
+    settings.sqlite.close();
+    database = {};
+    __resetAdminSettingsCacheForTest();
+  });
   it.each([
     ['OpenAI chat', CHAT_PATH, 'openai'],
     ['Anthropic messages', '/ai/proxy/ws-token/anthropic/v1/messages', 'anthropic'],
