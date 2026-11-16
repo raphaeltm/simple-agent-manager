@@ -8,7 +8,11 @@
  * - A month projects from what is already spent plus the recent daily rate, not from the running
  *   month-to-date average.
  */
-import { calculateCloudflareMetricCost, cloudflareDaysInMonth } from './pricing';
+import {
+  calculateCloudflareMetricCost,
+  cloudflareDaysInMonth,
+  dailyCloudflareMetricCosts,
+} from './pricing';
 import {
   BYTES_PER_GB,
   BYTES_PER_GIB,
@@ -191,7 +195,8 @@ export function projectCloudflareMetric(
       projectedUsage,
       pricing,
       remainingDays,
-      recentDailyAverage
+      recentDailyAverage,
+      daysInMonth
     ),
     recentDailyAverage,
     monthToDateDailyAverage,
@@ -215,8 +220,21 @@ function projectedCost(
   projectedUsage: number,
   pricing: CloudflareCostMetricPricing,
   remainingDays: number,
-  recentDailyAverage: number
+  recentDailyAverage: number,
+  daysInMonth: number
 ): number {
+  if (pricing.kind === 'snapshot') {
+    // Storage is billed on the month's average level: what the observed days already accrued,
+    // plus the latest level for each remaining day. Pricing only the latest level would drop the
+    // cost of a large store that shrank late in the month.
+    const accrued = dailyCloudflareMetricCosts(values, pricing, daysInMonth).reduce(
+      (total, cost) => total + cost,
+      0
+    );
+    return (
+      accrued + (calculateCloudflareMetricCost(last(values), pricing) / daysInMonth) * remainingDays
+    );
+  }
   if (pricing.kind !== 'dailyAllowance')
     return calculateCloudflareMetricCost(projectedUsage, pricing);
   const spentBillable = values.reduce(

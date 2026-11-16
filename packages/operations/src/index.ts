@@ -137,7 +137,6 @@ export {
   utcWeekStart,
 } from './insights-installation';
 export {
-  cloudflareReadStartDay,
   readCloudflareCost,
   summarizeCloudflareCost,
 } from './insights-installation-cloudflare';

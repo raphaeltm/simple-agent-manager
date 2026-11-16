@@ -180,7 +180,7 @@ export async function installationHealth(
     section(
       'cloudflare',
       () =>
-        readCloudflareCost(ctx, nowMs, {
+        readCloudflareCost(ctx, {
           seriesDays: limits['insights.healthCloudflareSeriesDays'],
           topLines: limits['insights.healthCloudflareTopLines'],
           projectionDays: limits['insights.healthCloudflareProjectionDays'],

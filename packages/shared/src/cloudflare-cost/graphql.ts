@@ -206,16 +206,22 @@ export function parseCloudflareCostResponse(payload: unknown, limit: number): Cl
       'Cloudflare GraphQL response did not include the requested account'
     );
   const rows: CloudflareCostRows = {
-    durableObjectPeriodic: arrayOf(account.durableObjectsPeriodicGroups),
-    durableObjectInvocations: arrayOf(account.durableObjectsInvocationsAdaptiveGroups),
-    workersInvocations: arrayOf(account.workersInvocationsAdaptive),
-    kvOperations: arrayOf(account.kvOperationsAdaptiveGroups),
-    kvStorage: arrayOf(account.kvStorageAdaptiveGroups),
-    workersAi: arrayOf(account.aiInferenceAdaptiveGroups),
-    r2Storage: arrayOf(account.r2StorageAdaptiveGroups),
-    d1Analytics: arrayOf(account.d1AnalyticsAdaptiveGroups),
-    d1Storage: arrayOf(account.d1StorageAdaptiveGroups),
-    containers: arrayOf(account.containersUsageAdaptiveGroups),
+    durableObjectPeriodic: arrayOf(
+      account.durableObjectsPeriodicGroups,
+      'durableObjectsPeriodicGroups'
+    ),
+    durableObjectInvocations: arrayOf(
+      account.durableObjectsInvocationsAdaptiveGroups,
+      'durableObjectsInvocationsAdaptiveGroups'
+    ),
+    workersInvocations: arrayOf(account.workersInvocationsAdaptive, 'workersInvocationsAdaptive'),
+    kvOperations: arrayOf(account.kvOperationsAdaptiveGroups, 'kvOperationsAdaptiveGroups'),
+    kvStorage: arrayOf(account.kvStorageAdaptiveGroups, 'kvStorageAdaptiveGroups'),
+    workersAi: arrayOf(account.aiInferenceAdaptiveGroups, 'aiInferenceAdaptiveGroups'),
+    r2Storage: arrayOf(account.r2StorageAdaptiveGroups, 'r2StorageAdaptiveGroups'),
+    d1Analytics: arrayOf(account.d1AnalyticsAdaptiveGroups, 'd1AnalyticsAdaptiveGroups'),
+    d1Storage: arrayOf(account.d1StorageAdaptiveGroups, 'd1StorageAdaptiveGroups'),
+    containers: arrayOf(account.containersUsageAdaptiveGroups, 'containersUsageAdaptiveGroups'),
   };
   for (const [name, dataset] of Object.entries(rows)) {
     if ((dataset as unknown[]).length >= limit) {
@@ -228,6 +234,12 @@ export function parseCloudflareCostResponse(payload: unknown, limit: number): Cl
   return rows;
 }
 
-function arrayOf<T>(value: T[] | null | undefined): T[] {
-  return Array.isArray(value) ? value : [];
+/**
+ * A dataset is a list. `null` or absent means "no rows"; any other shape is a malformed answer
+ * and fails the request, so it can never be read as zero usage and stored over real days.
+ */
+function arrayOf<T>(value: T[] | null | undefined, name: string): T[] {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value;
+  throw new CloudflareCostQueryError('failed', `Cloudflare GraphQL dataset ${name} is not a list`);
 }

@@ -4,11 +4,7 @@
  * series, from rows on a real SQL engine.
  */
 import type { OperationContext } from '@simple-agent-manager/operations';
-import {
-  cloudflareReadStartDay,
-  readCloudflareCost,
-  summarizeCloudflareCost,
-} from '@simple-agent-manager/operations';
+import { readCloudflareCost, summarizeCloudflareCost } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -145,7 +141,7 @@ describe('readCloudflareCost', () => {
       VALUES ('cloudflare', 'permission_denied', ${NOW}, ${NOW - 86_400_000}, 'Authentication error', 0);
     `);
 
-    const card = await readCloudflareCost(ctx, NOW, OPTIONS);
+    const card = await readCloudflareCost(ctx, OPTIONS);
 
     expect(card.status).toBe('permission_denied');
     expect(card.error).toBe('Authentication error');
@@ -156,8 +152,35 @@ describe('readCloudflareCost', () => {
     expect(card.missingDays).toBe(13);
   });
 
-  it('reads back from the previous month so a month-end day is still found', () => {
-    expect(cloudflareReadStartDay(Date.parse('2026-11-01T01:00:00Z'), 30)).toBe('2026-10-01');
-    expect(cloudflareReadStartDay(NOW, 62)).toBe('2026-09-15');
+  it('anchors the read on the latest stored day, so a stale snapshot shows its whole series', async () => {
+    // Stored through Sep 13 only (the snapshot stopped), with a 62-day series.
+    const insert = sqlite.prepare(
+      `INSERT INTO installation_cost_daily VALUES ('cloudflare', ?, 'r2StorageGb', 174, 'GB', 0.08, 1)`
+    );
+    for (let offset = 0; offset < 62; offset++)
+      insert.run(new Date(Date.UTC(2026, 8, 13) - offset * 86_400_000).toISOString().slice(0, 10));
+
+    const card = await readCloudflareCost(ctx, { ...OPTIONS, seriesDays: 62 });
+
+    expect(card.throughDay).toBe('2026-09-13');
+    expect(card.daily).toHaveLength(62);
+    expect(card.daily.every((entry) => entry.costUsd !== null)).toBe(true);
+    expect(card.missingDays).toBe(0);
+  });
+
+  it('skips a row with an impossible date instead of failing the card', async () => {
+    sqlite.exec(`
+      INSERT INTO installation_cost_daily VALUES
+        ('cloudflare', '2026-11-14', 'r2StorageGb', 174, 'GB', 0.08, 1),
+        ('cloudflare', '2026-11-99', 'r2StorageGb', 174, 'GB', 50, 1),
+        ('cloudflare', '2026-11-15', 'r2StorageGb', 174, 'GB', 0.08, 1);
+    `);
+    const card = await readCloudflareCost(ctx, OPTIONS);
+    expect(card.throughDay).toBe('2026-11-15');
+    expect(card.monthToDateUsd).toBeCloseTo(0.16, 9);
+
+    sqlite.exec(`DELETE FROM installation_cost_daily WHERE day <> '2026-11-99'`);
+    const onlyBad = await readCloudflareCost(ctx, OPTIONS);
+    expect(onlyBad).toMatchObject({ month: null, throughDay: null, productLines: [] });
   });
 });

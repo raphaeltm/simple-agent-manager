@@ -4,8 +4,8 @@
  * the latest stored day, projected with the same shared analysis `pnpm quality:cloudflare-cost`
  * uses (rule 76.4: spent so far plus the recent daily rate, not the running average).
  *
- * One round trip: a D1 batch reading the sync status and every row since the earlier of the
- * previous month's first day and the start of the daily series. At most ~62 days × 19 lines.
+ * One round trip: a D1 batch reading the sync status and every row from the earlier of the latest
+ * stored day's month start and the start of the daily series. At most ~62 days × 19 lines.
  * A malformed row is skipped and logged rather than failing the card (`.claude/rules/50`).
  */
 import {
@@ -54,17 +54,16 @@ function isoTime(value: unknown): string | null {
   return typeof value === 'number' && Number.isFinite(value) ? new Date(value).toISOString() : null;
 }
 
-/** Earliest day the card needs: the previous month's 1st or the series start, whichever is first. */
-export function cloudflareReadStartDay(nowMs: number, seriesDays: number): string {
-  const now = new Date(nowMs);
-  const previousMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1);
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return isoDay(Math.min(previousMonth, today - seriesDays * DAY_MS));
+/** `YYYY-MM-DD` that names a real UTC calendar day (`2026-11-99` does not). */
+function isCalendarDay(day: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  const parsed = new Date(`${day}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day;
 }
 
 function parseCostRow(raw: Record<string, unknown>): CostRow | null {
   const { day, product_line: key, usage_quantity: usage, estimated_cost_usd: cost } = raw;
-  if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  if (typeof day !== 'string' || !isCalendarDay(day)) return null;
   if (!isCloudflareCostMetricKey(key)) return null;
   if (typeof usage !== 'number' || !Number.isFinite(usage)) return null;
   if (typeof cost !== 'number' || !Number.isFinite(cost)) return null;
@@ -187,15 +186,20 @@ export function summarizeCloudflareCost(
 
 export async function readCloudflareCost(
   ctx: OperationContext,
-  nowMs: number,
   options: { seriesDays: number; topLines: number; projectionDays: number }
 ): Promise<InstallationCloudflareCost> {
+  // The window is anchored on the latest stored day, not on today, so a snapshot that stopped
+  // updating still shows its whole month and series. Only well-formed days can be the anchor.
   const [rowsResult, syncResult] = await ctx.env.DATABASE.batch<Record<string, unknown>>([
     ctx.env.DATABASE.prepare(
-      `SELECT day, product_line, usage_quantity, estimated_cost_usd
-         FROM installation_cost_daily
-        WHERE source = ? AND day >= ?`
-    ).bind(SOURCE, cloudflareReadStartDay(nowMs, options.seriesDays)),
+      `WITH latest AS (
+         SELECT MAX(day) AS d FROM installation_cost_daily WHERE source = ? AND date(day) = day
+       )
+       SELECT day, product_line, usage_quantity, estimated_cost_usd
+         FROM installation_cost_daily, latest
+        WHERE source = ? AND latest.d IS NOT NULL AND day <= latest.d
+          AND day >= MIN(date(latest.d, 'start of month'), date(latest.d, ?))`
+    ).bind(SOURCE, SOURCE, `-${Math.max(0, Math.floor(options.seriesDays) - 1)} days`),
     ctx.env.DATABASE.prepare(
       `SELECT status, last_attempt_at, last_success_at, error_message
          FROM installation_cost_sync WHERE source = ?`

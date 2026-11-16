@@ -174,6 +174,26 @@ describe('GET /api/admin/health-cost', () => {
     }
   });
 
+  it('lets only one of two overlapping refreshes call Cloudflare', async () => {
+    sqlite
+      .prepare(`UPDATE installation_cost_sync SET last_attempt_at = ? WHERE source = 'cloudflare'`)
+      .run(Date.now() - 3_600_000);
+    const fetchSpy = vi.fn(async () => new Response('{}', { status: 500 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    const configured = { ...env, CF_API_TOKEN: 'token', CF_ACCOUNT_ID: 'account' } as Env;
+    try {
+      const responses = await Promise.all(
+        [1, 2].map(() =>
+          app().request('/api/admin/health-cost/cloudflare/refresh', { method: 'POST' }, configured)
+        )
+      );
+      expect(responses.map((res) => res.status).sort()).toEqual([200, 429]);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('refuses the Cloudflare refresh to a non-superadmin without running it', async () => {
     const res = await app().request(
       '/api/admin/health-cost/cloudflare/refresh',

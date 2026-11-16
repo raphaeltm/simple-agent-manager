@@ -245,6 +245,47 @@ describe('runCloudflareCostSnapshot', () => {
     expect(row('2026-10-01', 'doRowsWritten')?.fetched_at).toBe(1);
   });
 
+  it('recomputes the cost of a stored later day when an earlier day is corrected', async () => {
+    // Nov 14 and 15 stored with DO rows written; the allowance (50M) is used up on Nov 14.
+    const insert = sqlite.prepare(
+      `INSERT INTO installation_cost_daily VALUES ('cloudflare', ?, 'doRowsWritten', ?, 'rows', ?, 7)`
+    );
+    insert.run('2026-11-14', 40_000_000, 0);
+    insert.run('2026-11-15', 20_000_000, 10);
+    // Late analytics: Nov 14 grows to 60M, and this response has no data for Nov 15 at all.
+    payload = {
+      data: {
+        viewer: {
+          accounts: [
+            {
+              durableObjectsPeriodicGroups: [
+                {
+                  dimensions: { date: '2026-11-14' },
+                  sum: { activeTime: 0, duration: 0, rowsRead: 0, rowsWritten: 60_000_000 },
+                },
+              ],
+            },
+          ],
+        },
+      },
+      errors: null,
+    };
+
+    await runCloudflareCostSnapshot(env, NOW);
+
+    expect(row('2026-11-14', 'doRowsWritten')).toMatchObject({
+      usage_quantity: 60_000_000,
+      estimated_cost_usd: 10,
+      fetched_at: NOW,
+    });
+    // Nov 15 keeps its stored usage and fetch time, but now pays for all 20M rows.
+    expect(row('2026-11-15', 'doRowsWritten')).toMatchObject({
+      usage_quantity: 20_000_000,
+      estimated_cost_usd: 20,
+      fetched_at: 7,
+    });
+  });
+
   it('never overwrites stored usage with a response that has no data for those days', async () => {
     await runCloudflareCostSnapshot(env, NOW);
     const stored = rows();
@@ -262,7 +303,7 @@ describe('runCloudflareCostSnapshot', () => {
     await runCloudflareCostSnapshot(env, NOW);
     const ctx = { env } as unknown as OperationContext;
 
-    const card = await readCloudflareCost(ctx, NOW, {
+    const card = await readCloudflareCost(ctx, {
       seriesDays: 30,
       topLines: 5,
       projectionDays: 7,
@@ -450,7 +491,10 @@ describe('buildDailyCostRows', () => {
         ].map((key) => [key, entry.metrics[key] ?? 0])
       ),
     })) as Parameters<typeof buildDailyCostRows>[0];
-    const costs = buildDailyCostRows(fetched, new Map())
+    const costs = buildDailyCostRows(fetched, new Map(), {
+      firstDay: '2026-11-01',
+      lastDay: '2026-11-03',
+    })
       .filter((r) => r.productLine === 'doRowsWritten')
       .map((r) => r.costUsd);
 

@@ -19,7 +19,7 @@ import { errors } from '../middleware/error';
 import { webOperationContext } from '../operation-ports';
 import { resolveAdminSetting } from '../services/admin-settings-resolution';
 import {
-  lastCloudflareCostAttemptAt,
+  claimCloudflareCostRefresh,
   runCloudflareCostSnapshot,
 } from '../services/cloudflare-cost-snapshot';
 
@@ -43,22 +43,26 @@ adminHealthCostRoutes.post(
   requireSuperadmin(),
   async (c) => {
     const userId = getUserId(c);
-    // One analytics request per interval, so repeated presses cannot burn the Cloudflare API
-    // token's GraphQL rate limit, which Admin Analytics shares.
+    // One analytics request per interval, claimed atomically, so repeated or overlapping presses
+    // cannot burn the Cloudflare API token's GraphQL rate limit, which Admin Analytics shares.
     const minSeconds = Number(
       await resolveAdminSetting(c.env, 'insights.cloudflareCostRefreshMinSeconds')
     );
-    const lastAttemptAt = await lastCloudflareCostAttemptAt(c.env);
-    const waitMs = lastAttemptAt === null ? 0 : lastAttemptAt + minSeconds * 1000 - Date.now();
-    if (waitMs > 0) {
-      log.info('admin.cloudflare_cost_refresh_throttled', { userId, waitMs, action: 'rejected' });
+    const nowMs = Date.now();
+    const claim = await claimCloudflareCostRefresh(c.env, nowMs, minSeconds * 1000);
+    if (!claim.claimed) {
+      log.info('admin.cloudflare_cost_refresh_throttled', {
+        userId,
+        waitMs: claim.waitMs,
+        action: 'rejected',
+      });
       throw errors.tooManyRequests(
-        `Cloudflare cost was refreshed moments ago. Try again in ${Math.ceil(waitMs / 1000)} seconds.`
+        `Cloudflare cost was refreshed moments ago. Try again in ${Math.ceil(claim.waitMs / 1000)} seconds.`
       );
     }
     log.info('admin.cloudflare_cost_refresh_requested', { userId });
     // Cloudflare failures come back as a recorded status; the card shows them. Only a settings or
     // D1 failure underneath throws, and the app error handler answers that as a 500.
-    return c.json(await runCloudflareCostSnapshot(c.env));
+    return c.json(await runCloudflareCostSnapshot(c.env, nowMs));
   }
 );

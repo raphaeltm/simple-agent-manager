@@ -588,7 +588,8 @@ shared `installationHealth` operation (`packages/operations/src/insights-install
   the highest projected cost, everything else summed, and the daily cost for the last 30 days.
   The projection is what is already spent plus the average of the last
   `insights.healthCloudflareProjectionDays` days (7) for each remaining day, not the month's
-  running average, so an early spike does not inflate it. It is an estimate
+  running average, so an early spike does not inflate it. Storage (D1, KV, R2) projects as what
+  the observed days already accrued plus the latest stored level for each remaining day. It is an estimate
   from Cloudflare's billed usage analytics at list prices, not an invoice: it covers every Worker
   on the Cloudflare account (not only this installation's), and leaves out the $5 Workers Paid
   subscription, R2 operations, and container CPU and disk. The month shown is the month of the

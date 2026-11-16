@@ -59,6 +59,8 @@ interface DailyCostRow {
   usage: number;
   unit: string;
   costUsd: number;
+  /** Stored day this fetch had no data for: update its cost only, keep usage and fetch time. */
+  costOnly: boolean;
 }
 
 function isoDay(ms: number): string {
@@ -124,13 +126,17 @@ async function readStoredUsage(
 }
 
 /**
- * One row per fetched day with data per product line, each costed against its calendar month:
- * the month's earlier days (fetched, else stored, else zero when never collected) consume the
- * monthly allowance first.
+ * Rows to write, each costed against its calendar month: the month's earlier days (fetched, else
+ * stored, else zero when never collected) consume the monthly allowance first.
+ * - A fetched day with data gets a full row.
+ * - A stored day inside the window that this fetch returned nothing for keeps its usage, but its
+ *   cost is recomputed (`costOnly`), because a corrected earlier day can move how much of the
+ *   allowance is left for it.
  */
 export function buildDailyCostRows(
   fetched: CloudflareDailyUsage[],
-  prefix: Map<string, Map<CloudflareCostMetricKey, number>>
+  stored: Map<string, Map<CloudflareCostMetricKey, number>>,
+  window: { firstDay: string; lastDay: string }
 ): DailyCostRow[] {
   const pricing = createCloudflarePricing();
   // A day with no usage at all is a day Cloudflare returned nothing for: storage alone (D1, R2,
@@ -140,32 +146,35 @@ export function buildDailyCostRows(
     CLOUDFLARE_COST_METRIC_KEYS.some((key) => entry.metrics[key] !== 0)
   );
   const fetchedByDay = new Map(withData.map((entry) => [entry.date, entry]));
-  const months = [...new Set(withData.map((entry) => entry.date.slice(0, 7)))];
+  const inWindow = (day: string) => day >= window.firstDay && day <= window.lastDay;
+  const writtenDays = [
+    ...new Set([...fetchedByDay.keys(), ...[...stored.keys()].filter(inWindow)]),
+  ].sort();
   const rows: DailyCostRow[] = [];
-  for (const month of months) {
-    const monthDays = withData.filter((entry) => entry.date.startsWith(month));
-    const lastDay = monthDays[monthDays.length - 1]?.date;
+  for (const month of [...new Set(writtenDays.map((day) => day.slice(0, 7)))]) {
+    const lastDay = writtenDays.filter((day) => day.startsWith(month)).at(-1);
     if (!lastDay) continue;
-    const dayCount = Number(lastDay.slice(8, 10));
     const days = Array.from(
-      { length: dayCount },
+      { length: Number(lastDay.slice(8, 10)) },
       (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`
     );
     const daysInMonth = cloudflareDaysInMonth(lastDay);
     for (const key of CLOUDFLARE_COST_METRIC_KEYS) {
       const metric = pricing.metrics[key];
       const values = days.map(
-        (day) => fetchedByDay.get(day)?.metrics[key] ?? prefix.get(day)?.get(key) ?? 0
+        (day) => fetchedByDay.get(day)?.metrics[key] ?? stored.get(day)?.get(key) ?? 0
       );
       const costs = dailyCloudflareMetricCosts(values, metric, daysInMonth);
       days.forEach((day, index) => {
-        if (!fetchedByDay.has(day)) return;
+        const isFetched = fetchedByDay.has(day);
+        if (!isFetched && !(inWindow(day) && stored.get(day)?.has(key))) return;
         rows.push({
           day,
           productLine: key,
           usage: values[index] ?? 0,
           unit: metric.unit,
           costUsd: costs[index] ?? 0,
+          costOnly: !isFetched,
         });
       });
     }
@@ -205,32 +214,40 @@ function syncStatement(
   );
 }
 
+const FULL_UPDATE = `usage_quantity = excluded.usage_quantity,
+         usage_unit = excluded.usage_unit,
+         estimated_cost_usd = excluded.estimated_cost_usd,
+         fetched_at = excluded.fetched_at`;
+const COST_ONLY_UPDATE = 'estimated_cost_usd = excluded.estimated_cost_usd';
+
 function upsertStatements(
   env: Env,
   rows: DailyCostRow[],
   fetchedAt: number
 ): D1PreparedStatement[] {
   const perStatement = Math.floor(D1_MAX_BOUND_PARAMETERS / UPSERT_COLUMNS);
-  return chunk(rows, perStatement).map((batch) =>
-    env.DATABASE.prepare(
-      `INSERT INTO installation_cost_daily
+  const groups: [DailyCostRow[], string][] = [
+    [rows.filter((row) => !row.costOnly), FULL_UPDATE],
+    [rows.filter((row) => row.costOnly), COST_ONLY_UPDATE],
+  ];
+  return groups.flatMap(([group, update]) =>
+    chunk(group, perStatement).map((batch) =>
+      env.DATABASE.prepare(
+        `INSERT INTO installation_cost_daily
          (source, day, product_line, usage_quantity, usage_unit, estimated_cost_usd, fetched_at)
        VALUES ${batch.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ')}
-       ON CONFLICT(source, day, product_line) DO UPDATE SET
-         usage_quantity = excluded.usage_quantity,
-         usage_unit = excluded.usage_unit,
-         estimated_cost_usd = excluded.estimated_cost_usd,
-         fetched_at = excluded.fetched_at`
-    ).bind(
-      ...batch.flatMap((row) => [
-        CLOUDFLARE_COST_SOURCE,
-        row.day,
-        row.productLine,
-        row.usage,
-        row.unit,
-        row.costUsd,
-        fetchedAt,
-      ])
+       ON CONFLICT(source, day, product_line) DO UPDATE SET ${update}`
+      ).bind(
+        ...batch.flatMap((row) => [
+          CLOUDFLARE_COST_SOURCE,
+          row.day,
+          row.productLine,
+          row.usage,
+          row.unit,
+          row.costUsd,
+          fetchedAt,
+        ])
+      )
     )
   );
 }
@@ -296,9 +313,10 @@ export async function runCloudflareCostSnapshot(
         firstDay,
         lastDay
       );
-      const rows = buildDailyCostRows(fetched, prefix);
+      const rows = buildDailyCostRows(fetched, prefix, { firstDay, lastDay });
       rowStatements = upsertStatements(env, rows, nowMs);
-      result = { status: 'ok', firstDay, lastDay, rowsWritten: rows.length, error: null };
+      const rowsWritten = rows.filter((row) => !row.costOnly).length;
+      result = { status: 'ok', firstDay, lastDay, rowsWritten, error: null };
     } catch (error) {
       const permission = error instanceof CloudflareCostQueryError && error.kind === 'permission';
       result = {
@@ -322,12 +340,30 @@ export async function runCloudflareCostSnapshot(
   return result;
 }
 
-/** When the last snapshot attempt started, for the refresh route's minimum interval. */
-export async function lastCloudflareCostAttemptAt(env: Env): Promise<number | null> {
+/**
+ * Claims the refresh interval for one Refresh now press: a single conditional write that succeeds
+ * only when the last attempt is older than `minIntervalMs`, so two overlapping presses cannot
+ * both start a Cloudflare request. Returns how long to wait when the claim is refused.
+ */
+export async function claimCloudflareCostRefresh(
+  env: Env,
+  nowMs: number,
+  minIntervalMs: number
+): Promise<{ claimed: true } | { claimed: false; waitMs: number }> {
+  // A new row's status is a placeholder the card reads as "not fetched yet"; the run replaces it.
+  const claim = await env.DATABASE.prepare(
+    `INSERT INTO installation_cost_sync (source, status, last_attempt_at) VALUES (?, 'refreshing', ?)
+     ON CONFLICT(source) DO UPDATE SET last_attempt_at = excluded.last_attempt_at
+       WHERE installation_cost_sync.last_attempt_at <= ?`
+  )
+    .bind(CLOUDFLARE_COST_SOURCE, nowMs, nowMs - minIntervalMs)
+    .run();
+  if ((claim.meta?.changes ?? 0) > 0) return { claimed: true };
   const row = await env.DATABASE.prepare(
     `SELECT last_attempt_at FROM installation_cost_sync WHERE source = ?`
   )
     .bind(CLOUDFLARE_COST_SOURCE)
     .first<{ last_attempt_at: unknown }>();
-  return typeof row?.last_attempt_at === 'number' ? row.last_attempt_at : null;
+  const last = typeof row?.last_attempt_at === 'number' ? row.last_attempt_at : nowMs;
+  return { claimed: false, waitMs: Math.max(1_000, last + minIntervalMs - nowMs) };
 }
