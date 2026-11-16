@@ -1,4 +1,9 @@
 import {
+  DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT,
+  DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
+  MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
+} from '@simple-agent-manager/project-data/scheduled';
+import {
   DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
   DEFAULT_WORKSPACE_BUILD_QUEUE_TIMEOUT_MINUTES,
   DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
@@ -12,11 +17,16 @@ import {
   DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
   DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
   DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
+  DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
+  DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
+  DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
   DEFAULT_WEBHOOK_QUEUE_MAX_PENDING,
   DEFAULT_WEBHOOK_QUEUE_TTL_SECONDS,
   DEFAULT_WEBHOOK_SIGNATURE_TOLERANCE_SECONDS,
   DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
+  NODE_PROVISIONING_ATTEMPT_DEADLINE_MAX_MS,
+  NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS,
 } from '@simple-agent-manager/shared';
 
 import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
@@ -27,6 +37,14 @@ import {
   oauthDefinition,
 } from './admin-setting-definitions';
 import { agentModelSettingDefinitions } from './agent-models/settings-definition';
+import {
+  DEFAULT_CAPACITY_POOL_REFRESH_DEADLINE_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_FAILURE_COOLDOWN_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_LEASE_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_PASS_BUDGET_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_RETRY_BASE_MS,
+  DEFAULT_CAPACITY_POOL_REFRESH_RETRY_MAX_MS,
+} from './capacity-pool-refresh-defaults';
 import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settings-definition';
 import { DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS } from './default-capacity-pool-candidates-common';
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
@@ -54,6 +72,30 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     { min: 1, max: 86400000 }
   ),
   integerDefinition(
+    'operations.nodeProviderDeletionRequestTimeoutMs',
+    DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS,
+    'Operations',
+    'Time budget in milliseconds for one cleanup attempt that starts a provider VM deletion without waiting for it (log capture, provider auth, ownership re-read, lookup and the delete request).',
+    { min: 1000, max: 60000 }
+  ),
+  integerDefinition(
+    'operations.nodeProviderDeletionConfirmMaxMs',
+    DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS,
+    'Operations',
+    'How long in milliseconds a started provider VM deletion may stay unconfirmed before the node is reported blocked and an operator alert is raised.',
+    { min: 60000, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.nodeProvisioningAttemptDeadlineMs',
+    DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS,
+    'Operations',
+    'Milliseconds one durable node-provisioning attempt may spend before its provider create starts and on the node DNS record afterwards; past it the attempt is cut and the next attempt (NODE_PROVISIONING_RETRY_INTERVAL_MS, 30 s by default) resumes it. A create that has started is never cut or repeated: the next attempt adopts the VM. 5000 restores the behaviour from before this setting.',
+    {
+      min: NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS,
+      max: NODE_PROVISIONING_ATTEMPT_DEADLINE_MAX_MS,
+    }
+  ),
+  integerDefinition(
     'operations.nodeLifetimeForceSleepAfterMs',
     DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
     'Operations',
@@ -66,6 +108,20 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Minutes an open agent turn may go with no new message and no background-work progress before it no longer keeps its session awake, so the session can sleep. Applies to sessions whose task is still running. 0 turns the bound off.',
     { min: 0, max: 10080 }
+  ),
+  integerDefinition(
+    'operations.projectDataArchiveMinStorageUsagePercent',
+    DEFAULT_PROJECT_DATA_ARCHIVE_MIN_STORAGE_USAGE_PERCENT,
+    'Operations',
+    "Percent of its storage limit a project's chat store must reach before the automatic archive sweep moves its ended chats to archive storage. Archiving costs billed row writes and only frees room in that store, so projects below this are left alone. 0 archives every project.",
+    { min: 0, max: 100 }
+  ),
+  integerDefinition(
+    'operations.projectDataArchiveStorageTelemetryMaxAgeHours',
+    DEFAULT_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS,
+    'Operations',
+    'Hours after which a project storage measurement is too old to hold the archive sweep back. A project with no measurement, or only an older one, is archived as if it were under pressure.',
+    { min: 1, max: MAX_PROJECT_DATA_ARCHIVE_STORAGE_TELEMETRY_MAX_AGE_HOURS }
   ),
   integerDefinition(
     'operations.nodeLifetimeAdmissionCutoffPercent',
@@ -90,10 +146,52 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     { min: 1, max: 30000 }
   ),
   integerDefinition(
+    'operations.capacityPoolRefreshPassBudgetMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_PASS_BUDGET_MS,
+    'Operations',
+    'Shared wall time for catalog work across all sources and scopes per pass.',
+    { min: 1, max: 120000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshRetryBaseMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_RETRY_BASE_MS,
+    'Operations',
+    'Initial delay for unfinished catalog publication; cron also reconciles missed continuations.',
+    { min: 1, max: 300000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshRetryMaxMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_RETRY_MAX_MS,
+    'Operations',
+    'Maximum backoff delay for unfinished catalog publication.',
+    { min: 1, max: 900000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshDeadlineMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_DEADLINE_MS,
+    'Operations',
+    'Maximum elapsed time for one catalog refresh before an actionable error retains the committed catalog.',
+    { min: 1, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshLeaseMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_LEASE_MS,
+    'Operations',
+    'Crash-recovery lease for a claimed catalog continuation or discovery sweep.',
+    { min: 1, max: 900000 }
+  ),
+  integerDefinition(
+    'operations.capacityPoolRefreshFailureCooldownMs',
+    DEFAULT_CAPACITY_POOL_REFRESH_FAILURE_COOLDOWN_MS,
+    'Operations',
+    'Minimum cooldown before daily discovery may restart a failed catalog recovery episode.',
+    { min: 60000, max: 604800000 }
+  ),
+  integerDefinition(
     'operations.capacityPoolPublishBudgetMs',
     DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BUDGET_MS,
     'Operations',
-    'Time budget in milliseconds for writing a changed compute pool catalog in one refresh. SAM keeps writing batches until the catalog is complete or this time is used, then resumes on the next refresh. A pool cannot place new VMs until its catalog is complete. 0 writes one batch per refresh.',
+    'Time budget in milliseconds for writing a changed compute pool catalog in one refresh. SAM keeps writing batches until the catalog is complete or this time is used, then resumes on the next refresh. Established pools retain their committed catalog while replacements are staged. 0 writes one batch per refresh.',
     { min: 0, max: 120000 }
   ),
   integerDefinition(

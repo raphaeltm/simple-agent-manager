@@ -253,6 +253,7 @@ async function repairOwnerApprovedRecovery(
       projectId: task.projectId,
       profileId,
       skillId: task.skillId,
+      runConfigurationId: task.agentConfigurationId,
     });
     const reference = await getSelectedAgentCredentialReference(
       db,
@@ -377,7 +378,7 @@ async function pendingRecoveryScopeIsCurrent(
        JOIN agent_sessions a ON a.id=? AND a.workspace_id=s.workspace_id AND a.user_id=s.user_id
        JOIN workspaces w ON w.id=s.workspace_id
        WHERE t.id=? AND t.project_id=? AND t.user_id=? AND t.chat_session_id=?
-         AND t.status=? AND t.workspace_id IS ? AND t.agent_profile_hint IS ? AND t.skill_id IS ?
+         AND t.status=? AND t.workspace_id IS ? AND t.agent_profile_hint IS ? AND t.skill_id IS ? AND t.agent_configuration_id IS ?
          AND t.admission_state='provider_limit_recovery_pending' AND t.provider_limit_wait_json IS ?
          AND s.updated_at=? AND s.recovery_status IS ? AND s.recovery_task_id IS ? AND s.recovery_attempt_id IS ?
          AND s.runtime='vm' AND s.sleep_status='sleeping' AND s.sleeping_at IS NOT NULL
@@ -402,6 +403,7 @@ async function pendingRecoveryScopeIsCurrent(
       task.workspaceId,
       task.agentProfileHint,
       task.skillId,
+      task.agentConfigurationId,
       receipt,
       snapshot.updated_at,
       snapshot.recovery_status,
@@ -431,7 +433,7 @@ async function blockRevokedOwnerApproval(
        WHERE id=? AND provider_limit_wait_json IS ? AND admission_state='provider_limit_recovery_pending'
          AND project_id=? AND user_id=? AND chat_session_id IS ?
          AND status IN ('sleeping','queued','delegated') AND status=? AND workspace_id IS ?
-         AND agent_profile_hint IS ? AND skill_id IS ?
+         AND agent_profile_hint IS ? AND skill_id IS ? AND agent_configuration_id IS ?
          AND (SELECT ${OWNER_RECOVERY_PROGRESS_SQL} FROM session_snapshots progress_snapshot
            WHERE progress_snapshot.id=? AND progress_snapshot.project_id=tasks.project_id
              AND progress_snapshot.chat_session_id IS tasks.chat_session_id
@@ -449,6 +451,7 @@ async function blockRevokedOwnerApproval(
       task.workspaceId,
       task.agentProfileHint,
       task.skillId,
+      task.agentConfigurationId,
       wait.ownerOverride?.snapshotId ?? null,
       recoveryProgress
     )
@@ -552,6 +555,7 @@ function pendingApprovalMatchesTask(
     approval.credentialKey !== null &&
     approval.credentialKey === wait.credentialKey &&
     approval.skillId === task.skillId &&
+    (approval.runConfigurationId ?? null) === task.agentConfigurationId &&
     approval.agentType &&
     approval.expiresAt === wait.deadlineAt &&
     wait.deadlineAt > now &&
@@ -568,7 +572,7 @@ function profileMatchesApproval(
 ): boolean {
   return (
     (profileId === null || profile !== null) &&
-    (profile === null || profile.agentType === approval?.agentType)
+    (profile === null || profile.agentType === null || profile.agentType === approval?.agentType)
   );
 }
 

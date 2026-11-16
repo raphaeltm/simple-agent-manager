@@ -25,6 +25,7 @@ const ProviderLimitPinTaskSchema = v.pipe(
     taskStatus: nullableString,
     taskStartedAt: nullableString,
     agent_profile_hint: nullableString,
+    agent_configuration_id: nullableString,
     skill_id: nullableString,
     admission_state: nullableString,
     provider_limit_wait_json: nullableString,
@@ -45,6 +46,7 @@ const ProviderLimitPinTaskSchema = v.pipe(
         row.taskStatus,
         row.taskStartedAt,
         row.agent_profile_hint,
+        row.agent_configuration_id,
         row.skill_id,
         row.admission_state,
         row.provider_limit_wait_json,
@@ -88,7 +90,7 @@ export async function assertProviderLimitCredentialPin(
 ): Promise<void> {
   const key = await credentialLimitReferenceKey(reference);
   const tasks = await env.DATABASE.prepare(
-    `SELECT t.id, t.admission_state, t.provider_limit_wait_json,t.agent_profile_hint,t.skill_id,
+    `SELECT t.id, t.admission_state, t.provider_limit_wait_json,t.agent_profile_hint,t.agent_configuration_id,t.skill_id,
       t.status AS taskStatus, t.started_at AS taskStartedAt,
       w.id AS workspaceId, w.user_id AS userId, w.project_id AS projectId,
       w.chat_session_id AS chatSessionId, w.status, w.node_id AS nodeId, n.status AS nodeStatus,
@@ -154,6 +156,7 @@ async function assertTaskCredentialPin(
         projectId: runtime.workspace.projectId,
         profileId: runtimeProfileId,
         skillId: runtime.skillId,
+        runConfigurationId: task.agent_configuration_id,
       })
     : null;
   const current =
@@ -261,8 +264,9 @@ function isScopedApprovalInvalid(
       runtimeProfileId === undefined ||
       runtimeSkillId !== approval.skillId ||
       task.skill_id !== approval.skillId ||
+      task.agent_configuration_id !== (approval.runConfigurationId ?? null) ||
       (profile?.profileId ?? null) !== approval.profileId ||
-      (profile !== null && profile.agentType !== approval.agentType))
+      (profile !== null && profile.agentType !== null && profile.agentType !== approval.agentType))
   );
 }
 
@@ -272,7 +276,7 @@ function scopedPinPredicate(task: ProviderLimitPinTask, request: ProviderLimitPi
     sql: `FROM tasks t JOIN workspaces w ON w.id=t.workspace_id
       JOIN agent_sessions a ON a.workspace_id=w.id AND a.user_id=w.user_id
       WHERE t.id=? AND t.provider_limit_wait_json IS ? AND t.status=? AND t.started_at IS ?
-        AND t.agent_profile_hint IS ? AND t.skill_id IS ? AND t.admission_state IS ?
+        AND t.agent_profile_hint IS ? AND t.skill_id IS ? AND t.agent_configuration_id IS ? AND t.admission_state IS ?
         AND t.user_id=w.user_id AND t.project_id=w.project_id
         AND w.id=? AND w.user_id=? AND w.project_id IS ? AND w.chat_session_id IS ?
         AND w.status=? AND w.node_id IS ? AND w.callback_generation IS ?
@@ -297,6 +301,7 @@ function scopedPinPredicate(task: ProviderLimitPinTask, request: ProviderLimitPi
       task.taskStartedAt,
       task.agent_profile_hint,
       task.skill_id,
+      task.agent_configuration_id,
       task.admission_state,
       task.workspaceId,
       task.userId,

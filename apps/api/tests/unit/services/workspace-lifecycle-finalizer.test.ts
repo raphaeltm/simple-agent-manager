@@ -251,6 +251,8 @@ beforeEach(() => {
   createSchemaTables(sqlite, [
     schema.workspaces,
     schema.nodes,
+    schema.capacityPools,
+    schema.capacityPoolCandidates,
     schema.tasks,
     schema.agentSessions,
     schema.computeUsage,

@@ -185,7 +185,8 @@ never switches to another model, profile, or credential to get around a limit.
 
 **Already started, then went to sleep at the limit?** The owner can choose **Resume anyway**
 on the waiting notice after resetting the same account's limit or enabling extra usage. SAM
-restores the saved session and delivers its queued message using the same account and profile.
+restores the saved session and delivers its queued message using the same account and profile,
+including an account chosen specifically for that run.
 Your choice applies to the current wait only and can use extra credits. If the account or profile
 changed, review the selection first. If the provider rejects again, SAM pauses again. An expired
 or unavailable saved workspace cannot be forced to restore.
@@ -753,7 +754,7 @@ Picking a profile from the list doesn't help when its name has no spaces but has
 than a letter a–z or A–Z, a digit, or `_` (such as `-`, `.`, `é`, or `д`): the list inserts
 `@code-reviewer`, which these releases read as `@code`, so type `@"code-reviewer"` instead.
 Update to v2026.10.15 or later. Until then, write the `@` so a word doesn't directly follow it, for
-example `bob at example.com` or `@ dataclass`. The hosted service was fixed on 14 October.
+example `bob at example.com` or `@ dataclass`.
 :::
 
 ## The chat runs a different agent than its profile

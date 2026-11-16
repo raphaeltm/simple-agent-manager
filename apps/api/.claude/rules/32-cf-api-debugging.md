@@ -4,6 +4,8 @@
 
 The `CF_TOKEN` environment variable contains a Cloudflare API token scoped to the SAM staging account. **Use it.** Before navigating the admin UI, before deploying just to check if something worked, before guessing — query the infrastructure directly.
 
+The IDs below are for the primary staging (`sammy.party`). The second staging (`sammy2.party`) is in the same account with the same token; its resources are named `sam2-*-staging2` (D1 `sam2-staging2`, Worker `sam2-api-staging2`). See "Two Staging Installations" in `.agent-instructions/reference/rules/13-staging-verification-full.md`.
+
 This is the fastest way to debug staging issues. A `curl` call takes seconds. A deploy cycle takes 7 minutes. Use the API first.
 
 ## Account & Resource IDs

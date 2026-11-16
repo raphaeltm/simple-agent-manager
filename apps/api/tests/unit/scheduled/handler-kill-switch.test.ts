@@ -1,19 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CAPACITY_POOL_CONTINUATION_CRON } from '../../../src/services/capacity-pool-refresh-defaults';
+
 const {
+  capacityPoolContinuationMock,
   capacityPoolReconciliationMock,
   enabledMock,
   isolateMock,
   logInfoMock,
   sessionSleepLifecycleRepairMock,
   sessionSleepMock,
+  providerOrphanMock,
+  persistErrorMock,
 } = vi.hoisted(() => ({
+  capacityPoolContinuationMock: vi.fn(),
   capacityPoolReconciliationMock: vi.fn(),
   enabledMock: vi.fn(),
   isolateMock: vi.fn(async () => undefined),
   logInfoMock: vi.fn(),
   sessionSleepLifecycleRepairMock: vi.fn(),
   sessionSleepMock: vi.fn(),
+  providerOrphanMock: vi.fn(),
+  persistErrorMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../src/services/operational-kill-switch', () => ({
@@ -35,6 +43,16 @@ vi.mock('../../../src/scheduled/session-sleep-lifecycle-repair', () => ({
 vi.mock('../../../src/scheduled/capacity-pool-reconciliation', () => ({
   runScheduledCapacityPoolReconciliation: capacityPoolReconciliationMock,
 }));
+vi.mock('../../../src/scheduled/capacity-pool-continuation', () => ({
+  runScheduledCapacityPoolContinuations: capacityPoolContinuationMock,
+}));
+vi.mock('../../../src/scheduled/provider-orphan-reconciliation', () => ({
+  runProviderOrphanReconciliation: providerOrphanMock,
+}));
+vi.mock('../../../src/services/observability', () => ({ persistError: persistErrorMock }));
+vi.mock('../../../src/scheduled/failed-sweep-notifications', () => ({
+  notifyFailedSweeps: vi.fn().mockResolvedValue({ notifiedSweeps: 0, notificationsSent: 0 }),
+}));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
@@ -48,7 +66,10 @@ const context = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 const env = { DATABASE: {}, OBSERVABILITY_DATABASE: {}, KV: {} } as never;
 
 describe('scheduled operational sweep kill switch', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    isolateMock.mockImplementation(async () => undefined);
+  });
 
   it('stops every operational sweep while disabled', async () => {
     enabledMock.mockResolvedValue(false);
@@ -63,6 +84,79 @@ describe('scheduled operational sweep kill switch', () => {
     });
   });
 
+  it('applies the same operational brake to the one-minute continuation', async () => {
+    enabledMock.mockResolvedValue(false);
+    isolateMock.mockImplementation(async (_name, callback) => callback());
+
+    await scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context);
+
+    expect(enabledMock).toHaveBeenCalledWith(env, 'cron');
+    expect(isolateMock.mock.calls.map(([name]) => name)).toEqual(['capacity_pool_continuation']);
+    expect(capacityPoolContinuationMock).not.toHaveBeenCalled();
+    expect(capacityPoolReconciliationMock).not.toHaveBeenCalled();
+    expect(context.waitUntil).not.toHaveBeenCalled();
+    expect(logInfoMock).toHaveBeenCalledWith('cron.skipped_disabled', {
+      cron: CAPACITY_POOL_CONTINUATION_CRON,
+      type: 'capacity-pool-continuation',
+      switch: 'cron',
+    });
+  });
+
+  it('contains a failed one-minute kill-switch read and records the failed tick instead of success', async () => {
+    enabledMock.mockRejectedValue(new Error('Kill switch unavailable'));
+    isolateMock.mockImplementation(async (_name, callback) => {
+      try {
+        return await callback();
+      } catch {
+        return undefined;
+      }
+    });
+    await expect(
+      scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context)
+    ).resolves.toBeUndefined();
+    expect(capacityPoolContinuationMock).not.toHaveBeenCalled();
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        type: 'capacity-pool-continuation',
+        resumed: null,
+        failed: 1,
+      })
+    );
+  });
+
+  it('reports one-minute continuation outcomes without running unrelated sweeps', async () => {
+    enabledMock.mockResolvedValue(true);
+    capacityPoolContinuationMock.mockResolvedValue({ resumed: 3, failed: 1 });
+    isolateMock.mockImplementation(async (_name, callback) => callback());
+    await scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context);
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        type: 'capacity-pool-continuation',
+        resumed: 3,
+        failed: 1,
+      })
+    );
+    expect(capacityPoolReconciliationMock).not.toHaveBeenCalled();
+  });
+
+  it('dispatches only the isolated catalog continuation on the one-minute trigger', async () => {
+    enabledMock.mockResolvedValue(true);
+
+    await scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context);
+
+    expect(isolateMock.mock.calls.map(([name]) => name)).toEqual(['capacity_pool_continuation']);
+    const callback = isolateMock.mock.calls[0]?.[1];
+    expect(callback).toEqual(expect.any(Function));
+    await callback?.();
+    expect(capacityPoolContinuationMock).toHaveBeenCalledExactlyOnceWith(env);
+    expect(capacityPoolReconciliationMock).not.toHaveBeenCalled();
+    expect(sessionSleepMock).not.toHaveBeenCalled();
+    expect(sessionSleepLifecycleRepairMock).not.toHaveBeenCalled();
+    expect(context.waitUntil).not.toHaveBeenCalled();
+  });
+
   it('resumes the complete sweep block after re-enable', async () => {
     enabledMock.mockResolvedValue(true);
 
@@ -70,6 +164,7 @@ describe('scheduled operational sweep kill switch', () => {
 
     expect(isolateMock).toHaveBeenCalled();
     const sweepNames = isolateMock.mock.calls.map(([name]) => name);
+    expect(sweepNames).not.toContain('capacity_pool_continuation');
     expect(sweepNames).toContain('deployment_publish_jobs');
     expect(sweepNames).toContain('node_cleanup');
     expect(sweepNames).toContain('capacity_pool_reconciliation');
@@ -168,4 +263,76 @@ describe('scheduled operational sweep kill switch', () => {
       })
     );
   });
+});
+
+describe('provider orphan failure reporting', () => {
+  it.each([
+    { errors: 1, skipped: true, accountErrors: 0 },
+    { errors: 2, skipped: false, accountErrors: 0 },
+    { errors: 0, skipped: true, accountErrors: 0 },
+    // Failures confined to user/project accounts are logged, never a failed platform sweep.
+    { errors: 0, skipped: false, accountErrors: 3 },
+  ])(
+    'reports errors=$errors accountErrors=$accountErrors skipped=$skipped and runs the following sweep',
+    async ({ errors, skipped, accountErrors }) => {
+      const { createSweepIsolator: realCreate } = await vi.importActual<
+        typeof import('../../../src/scheduled/sweep-isolation')
+      >('../../../src/scheduled/sweep-isolation');
+      const { createSweepIsolator } = await import('../../../src/scheduled/sweep-isolation');
+      const real = realCreate(env);
+      const isolate = real.isolate.bind(real);
+      const followingSweep = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(createSweepIsolator).mockReturnValueOnce({
+        ...real,
+        isolate: (name, fn) =>
+          name === 'provider_orphan_reconciliation'
+            ? isolate(name, fn)
+            : name === 'capacity_pool_reconciliation'
+              ? isolate(name, followingSweep)
+              : Promise.resolve(undefined),
+      });
+      enabledMock.mockResolvedValue(true);
+      providerOrphanMock.mockResolvedValue({
+        errors,
+        accountErrors,
+        scanned: 3,
+        destroyed: 1,
+        deletionRequested: 2,
+        skipped,
+        skipReason: skipped ? 'credential-resolution-failed' : null,
+      });
+      persistErrorMock.mockClear();
+
+      await scheduled(controller, env, context);
+
+      expect(providerOrphanMock).toHaveBeenCalledWith(env);
+      expect(followingSweep).toHaveBeenCalledOnce();
+      if (errors > 0) {
+        expect(persistErrorMock).toHaveBeenCalledWith(
+          {},
+          expect.objectContaining({
+            context: {
+              recoveryType: 'cron_sweep_failure',
+              sweep: 'provider_orphan_reconciliation',
+            },
+          }),
+          env
+        );
+      } else {
+        expect(persistErrorMock).not.toHaveBeenCalled();
+      }
+      expect(logInfoMock).toHaveBeenCalledWith(
+        'cron.completed',
+        expect.objectContaining({
+          failedSweeps: errors ? ['provider_orphan_reconciliation'] : [],
+          failedSweepCount: errors ? 1 : 0,
+          providerOrphansScanned: 3,
+          providerOrphansDestroyed: 1,
+          providerOrphansDeletionRequested: 2,
+          providerOrphanErrors: errors,
+          providerOrphanAccountErrors: accountErrors,
+        })
+      );
+    }
+  );
 });

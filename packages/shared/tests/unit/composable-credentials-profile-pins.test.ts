@@ -1,11 +1,11 @@
 /**
- * Profile pins: the most specific tier of agent credential resolution.
+ * Profile pins and run accounts: the most specific tiers of agent credential resolution.
  *
- *   profile pin → project pin → user default → platform
+ *   run account → profile pin → project pin → user default → platform
  *
  * Each case builds a realistic snapshot that also contains a project pin, a
- * default and a platform default, so a test can only pass when the profile
- * tier is what decided.
+ * default and a platform default (and, for run accounts, a profile pin), so a test
+ * can only pass when the tier under test is what decided.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -61,17 +61,23 @@ function fullSnapshot(overrides?: {
   profilePinActive?: boolean;
   profileConfigActive?: boolean;
   profileCredentialActive?: boolean;
+  runConfigActive?: boolean;
+  runCredentialActive?: boolean;
 }): CompositionSnapshot {
   return {
     credentials: [
       credential('cred-default'),
       credential('cred-project'),
       credential('cred-max', ME, overrides?.profileCredentialActive ?? true),
+      credential('cred-run', ME, overrides?.runCredentialActive ?? true),
+      credential('cred-codex'),
     ],
     configurations: [
       configuration('cfg-default', 'cred-default'),
       configuration('cfg-project', 'cred-project'),
       configuration('cfg-max', 'cred-max', CLAUDE, overrides?.profileConfigActive ?? true),
+      configuration('cfg-run', 'cred-run', CLAUDE, overrides?.runConfigActive ?? true),
+      configuration('cfg-codex', 'cred-codex', CODEX),
     ],
     attachments: [
       attachment('att-default', 'cfg-default', { scope: 'user', userId: ME }),
@@ -261,5 +267,88 @@ describe('profile pins in resolveEnvironment', () => {
       ['user', 'skipped', 'paused'],
       ['platform', 'used', null],
     ]);
+  });
+});
+
+const runCtx = (runConfigurationId: string) => ({ ...profileCtx, runConfigurationId });
+
+describe('run accounts in explainResolution', () => {
+  it('the chosen account wins over the profile pin, project pin and default', () => {
+    const trace = explainResolution(fullSnapshot(), CLAUDE, runCtx('cfg-run'));
+    expect(trace.resolved?.source).toBe('run-override');
+    expect(trace.resolved?.credential?.id).toBe('cred-run');
+    expect(trace.steps.map((step) => [step.tier, step.state])).toEqual([
+      ['run', 'used'],
+      ['profile', 'not-reached'],
+      ['project', 'not-reached'],
+      ['user', 'not-reached'],
+      ['platform', 'not-reached'],
+    ]);
+  });
+
+  it('control: without a choice the profile pin decides', () => {
+    expect(resolveEnvironment(fullSnapshot(), CLAUDE, profileCtx)?.source).toBe(
+      'profile-attachment'
+    );
+  });
+
+  it('applies without a profile', () => {
+    const resolved = resolveEnvironment(fullSnapshot(), CLAUDE, {
+      userId: ME,
+      projectId: PROJECT,
+      runConfigurationId: 'cfg-run',
+    });
+    expect(resolved?.credential?.id).toBe('cred-run');
+  });
+
+  it.each([
+    ['a paused configuration', { runConfigActive: false }, 'cfg-run', 'configuration-inactive'],
+    ['a paused credential', { runCredentialActive: false }, 'cfg-run', 'credential-inactive'],
+    ['a missing configuration', {}, 'cfg-gone', 'configuration-missing'],
+  ] as const)('%s halts instead of falling back', (_name, overrides, id, reason) => {
+    const trace = explainResolution(fullSnapshot(overrides), CLAUDE, runCtx(id));
+    expect(trace.resolved).toBeNull();
+    expect(trace.halted).toBe(true);
+    expect(trace.steps[0]).toMatchObject({ tier: 'run', state: 'halted', reason });
+  });
+
+  it('another person’s configuration halts even when a snapshot holds it', () => {
+    const snapshot = fullSnapshot();
+    snapshot.credentials.push(credential('cred-theirs', OTHER));
+    snapshot.configurations.push(configuration('cfg-theirs', 'cred-theirs', CLAUDE, true, OTHER));
+    const trace = explainResolution(snapshot, CLAUDE, runCtx('cfg-theirs'));
+    expect(trace.resolved).toBeNull();
+    expect(trace.halted).toBe(true);
+    expect(trace.steps[0]).toMatchObject({ reason: 'configuration-missing' });
+  });
+
+  it('my configuration over another person’s credential halts', () => {
+    const snapshot = fullSnapshot();
+    snapshot.credentials.push(credential('cred-theirs', OTHER));
+    snapshot.configurations.push(configuration('cfg-mine-theirs', 'cred-theirs'));
+    const trace = explainResolution(snapshot, CLAUDE, runCtx('cfg-mine-theirs'));
+    expect(trace.resolved).toBeNull();
+    expect(trace.steps[0]).toMatchObject({ reason: 'credential-missing' });
+  });
+
+  it('an account for another agent is skipped, so that agent keeps its usual account', () => {
+    // Chosen for Claude; a Codex session in the same workspace resolves as before.
+    const trace = explainResolution(fullSnapshot(), CODEX, runCtx('cfg-run'));
+    expect(trace.halted).toBe(false);
+    expect(trace.steps[0]).toMatchObject({
+      tier: 'run',
+      state: 'skipped',
+      reason: 'agent-type-mismatch',
+      pinnedAgentType: 'claude-code',
+    });
+  });
+
+  it('never applies to compute consumers', () => {
+    const trace = explainResolution(
+      fullSnapshot(),
+      { kind: 'compute', provider: 'hetzner' },
+      runCtx('cfg-run')
+    );
+    expect(trace.steps.some((step) => step.tier === 'run')).toBe(false);
   });
 });

@@ -1,7 +1,5 @@
 import type { NativeVMConfig } from '@simple-agent-manager/providers';
-import {
-  emptyCapacityPoolMessage,
-} from '@simple-agent-manager/scheduler-core';
+import { emptyCapacityPoolMessage } from '@simple-agent-manager/scheduler-core';
 import type {
   CapacityPlacementSnapshot,
   CapacityWorkloadRole,
@@ -12,7 +10,7 @@ import type {
   VMLocation,
   VMSize,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
@@ -98,8 +96,6 @@ export type CanonicalVmAllocationResult =
 export function placementProjectDefaultsFromRow(project: {
   id: string;
   defaultVmSize?: string | null;
-  defaultProvider?: string | null;
-  defaultLocation?: string | null;
   defaultWorkspaceProfile?: string | null;
   defaultDevcontainerConfigName?: string | null;
   defaultAgentType?: string | null;
@@ -108,8 +104,6 @@ export function placementProjectDefaultsFromRow(project: {
   return {
     id: project.id,
     defaultVmSize: project.defaultVmSize ?? null,
-    defaultProvider: project.defaultProvider ?? null,
-    defaultLocation: project.defaultLocation ?? null,
     defaultWorkspaceProfile: project.defaultWorkspaceProfile ?? null,
     defaultDevcontainerConfigName: project.defaultDevcontainerConfigName ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
@@ -390,7 +384,6 @@ function directPlacementProjectDefaults(projectId: string | null): PlacementProj
   return {
     id: projectId ?? '',
     defaultVmSize: DEFAULT_VM_SIZE,
-    defaultLocation: DEFAULT_VM_LOCATION,
   };
 }
 

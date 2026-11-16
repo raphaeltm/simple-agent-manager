@@ -164,11 +164,21 @@ export interface ResolutionContext {
    * A profile pin for any other agent type is skipped, not used.
    */
   profileAgentType?: string;
+  /**
+   * Account (configuration id) the person chose for this one run. Enables the run tier,
+   * which applies to agent consumers only and is checked before the profile pin.
+   */
+  runConfigurationId?: string;
 }
 
 /** Where the resolved configuration/credential came from. */
 export type ResolutionSource =
-  'profile-attachment' | 'project-attachment' | 'user-attachment' | 'platform' | 'platform-proxy';
+  | 'run-override'
+  | 'profile-attachment'
+  | 'project-attachment'
+  | 'user-attachment'
+  | 'platform'
+  | 'platform-proxy';
 
 /** The output of the generalized resolver. */
 export interface ResolvedEnvironment {
@@ -183,7 +193,7 @@ export interface ResolvedEnvironment {
 // =============================================================================
 
 /** The tiers in the order the resolver checks them. */
-export type ResolutionTier = 'profile' | 'project' | 'user' | 'platform';
+export type ResolutionTier = 'run' | 'profile' | 'project' | 'user' | 'platform';
 
 /**
  * - used: this tier supplied the result.

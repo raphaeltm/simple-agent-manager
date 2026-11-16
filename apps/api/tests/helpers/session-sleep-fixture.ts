@@ -122,6 +122,8 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
     schema.vmTaskAdmissions,
     schema.vmProvisioningLeases,
     schema.nodes,
+    schema.capacityPools,
+    schema.capacityPoolCandidates,
     schema.workspaces,
     schema.tasks,
     schema.sessionSummaries,
@@ -171,8 +173,8 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
     .run(START.getTime(), START.getTime());
   sqlite
     .prepare(
-      `INSERT INTO agent_sessions (id, workspace_id, status, agent_type, created_at)
-         VALUES ('agent-1', 'workspace-1', 'running', 'openai-codex', ?)`
+      `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at)
+         VALUES ('agent-1', 'workspace-1', 'user-1', 'running', 'openai-codex', ?)`
     )
     .run(START.toISOString());
   // Recovery may replace workspace/node/runtime while retaining the same owner and project.

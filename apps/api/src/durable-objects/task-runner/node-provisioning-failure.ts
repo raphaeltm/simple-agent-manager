@@ -5,10 +5,10 @@
  * Split out of `node-provisioning-step.ts` (rule 18). Decides what a failed
  * provider allocation means for the attempt chain, in this order:
  *
- *   1. A core quota with a smaller permitted offering left from the same source
- *      → descend to it (`node-provisioning-core-quota.ts`). No cooldown: a
- *      smaller server may still fit, for this task and for every other task in
- *      the domain.
+ *   1. A quota with a permitted offering it does not rule out left in the same
+ *      tier → descend to it (`node-provisioning-quota-descent.ts`): a smaller
+ *      Hetzner type under a core quota; for a GCP quota bucket (one metric in one
+ *      region) a smaller type, another family or another region. No cooldown.
  *   2. The source refused the create outright (a provider account limit, or a
  *      `quota_exceeded` from any provider) and the plan has a later provider
  *      tier → record the domain cooldown where the error is an account limit,
@@ -42,18 +42,20 @@ import {
 } from '../../services/vm-admission-control';
 import { scheduleAdmissionWait } from './node-provisioning-admission';
 import {
-  coreLimitLabel,
-  coreQuotaExclusionReason,
-  type CoreQuotaRejection,
-  coreQuotaRejection,
-  nextEligibleAttemptIndex,
-} from './node-provisioning-core-quota';
-import {
   exhaustionPolicyQueues,
   exhaustionTerminalMessage,
   firstAttemptIndexAfterTier,
   type ProvisioningExhaustionPlan,
 } from './node-provisioning-exhaustion';
+import {
+  coreLimitLabel,
+  nextEligibleAttemptIndex,
+  quotaDescentReason,
+  quotaExclusionReason,
+  quotaExhaustedReason,
+  type QuotaRejection,
+  quotaRejectionFor,
+} from './node-provisioning-quota-descent';
 import { discardProviderRejectedNode } from './node-provisioning-rejected-node';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -73,10 +75,10 @@ export interface ProvisioningAttemptFailure {
   primaryAdmissionIdentity: VmTaskAdmissionIdentity | null;
   createdNode: { id: string };
   /**
-   * Core-quota rejections recorded so far in this attempt chain. A new one is
-   * appended here so the step loop skips every offering it rules out.
+   * Quota rejections recorded so far in this attempt chain (Hetzner core quota, GCP quota
+   * bucket). A new one is appended here so the step loop skips every offering it rules out.
    */
-  coreQuotaRejections: CoreQuotaRejection[];
+  quotaRejections: QuotaRejection[];
 }
 
 /**
@@ -97,7 +99,7 @@ export async function handleProvisioningAttemptFailure(
     admissionIdentity,
     primaryAdmissionIdentity,
     createdNode,
-    coreQuotaRejections,
+    quotaRejections,
   } = failure;
   const attempt = exhaustionPlan.attempts[i];
   const diagnosticAttempt = diagnosticAttempts[i];
@@ -105,12 +107,12 @@ export async function handleProvisioningAttemptFailure(
 
   const providerError = err instanceof ProviderError ? err : null;
   const accountLimit = providerError ? classifyHetznerAccountLimit(providerError) : null;
-  const rejection = coreQuotaRejection(accountLimit, attempt);
+  const rejection = quotaRejectionFor(providerError, attempt);
   if (rejection) {
-    coreQuotaRejections.push(rejection);
-    recordCoreQuotaExclusions(exhaustionPlan, diagnosticAttempts, i, coreQuotaRejections);
+    quotaRejections.push(rejection);
+    recordQuotaExclusions(exhaustionPlan, diagnosticAttempts, i, quotaRejections);
   }
-  const nextIndex = nextEligibleAttemptIndex(exhaustionPlan, i, coreQuotaRejections);
+  const nextIndex = nextEligibleAttemptIndex(exhaustionPlan, i, quotaRejections);
   const sameTierNextIndex =
     nextIndex !== null && exhaustionPlan.attempts[nextIndex]?.tierIndex === attempt.tierIndex
       ? nextIndex
@@ -122,40 +124,46 @@ export async function handleProvisioningAttemptFailure(
   const sourceRefused = accountLimit !== null || providerError?.category === 'quota_exceeded';
   const providerMessage = providerError ? providerError.message : null;
 
-  diagnosticAttempt.outcome = isCapacityFailure || accountLimit ? 'capacity-exhausted' : 'failed';
+  diagnosticAttempt.outcome =
+    isCapacityFailure || accountLimit || rejection ? 'capacity-exhausted' : 'failed';
   // Name the provider's own cause. A fixed string here is what made the originating
   // incident's `placement_explanation_json` say only "Provider allocation failed" — true,
   // and useless for working out that Hetzner could not place a cx53 in fsn1.
   const providerDetail = providerError ? `: ${providerError.message}` : '';
   diagnosticAttempt.reason =
-    accountLimit && providerError
-      ? accountLimitAttemptReason(
-          accountLimit,
-          providerError,
-          rejection,
-          sameTierNextIndex !== null
-        )
-      : diagnosticAttempt.outcome === 'capacity-exhausted'
-        ? `Provider offering has no available capacity${providerDetail}`
-        : `Provider allocation failed${providerDetail}`;
+    rejection && providerError && sameTierNextIndex !== null
+      ? quotaDescentReason(rejection, providerError.message)
+      : accountLimit && providerError
+        ? `Provider account ${accountLimitLabel(accountLimit)} reached. Provider error: ${providerError.message}`
+        : rejection && providerError
+          ? quotaExhaustedReason(rejection, providerError.message)
+          : diagnosticAttempt.outcome === 'capacity-exhausted'
+            ? `Provider offering has no available capacity${providerDetail}`
+            : `Provider allocation failed${providerDetail}`;
   await persistPlacementDiagnostics(state, rc, {
     attempts: diagnosticAttempts,
     selectedNodeId: null,
   });
 
-  // 1. A smaller offering may still fit under the core quota: descend without a
-  //    domain cooldown, keeping this task's provisioning lease for the next attempt.
+  // 1. An offering the quota does not rule out remains in this tier (a smaller Hetzner type
+  //    under a core quota; for GCP a smaller type, another family or another region): descend
+  //    without a domain cooldown, keeping this task's provisioning lease for the next attempt.
   if (rejection && sameTierNextIndex !== null) {
     await discardProviderRejectedNode(state, rc, createdNode.id);
     const nextAttempt = exhaustionPlan.attempts[sameTierNextIndex];
-    log.info('task_runner_do.node_provisioning.core_quota_descent', {
+    log.info('task_runner_do.node_provisioning.quota_descent', {
       taskId: state.taskId,
       policy: exhaustionPlan.policy,
+      quotaKind: rejection.kind,
+      quotaMetric: rejection.kind === 'gcp-bucket' ? rejection.bucket.metric : null,
+      quotaRegion: rejection.kind === 'gcp-bucket' ? rejection.bucket.region : null,
+      coreClass: rejection.kind === 'hetzner-cores' ? rejection.limit.coreClass : null,
       fromProviderInstanceType: attempt.providerInstanceType,
-      fromVcpuCount: rejection.vcpuCount,
+      fromLocation: attempt.location,
+      fromVcpuCount: attempt.candidate?.providerInstanceVcpuCount ?? null,
       toProviderInstanceType: nextAttempt?.providerInstanceType ?? null,
+      toLocation: nextAttempt?.location ?? null,
       toVcpuCount: nextAttempt?.candidate?.providerInstanceVcpuCount ?? null,
-      coreClass: rejection.limit.coreClass,
       capacityPoolId: state.config.capacityPoolSelection?.poolId ?? null,
       providerCode: providerError?.providerCode,
     });
@@ -367,34 +375,19 @@ export async function terminalizeExhaustedPlan(
 }
 
 /** Give every not-yet-tried attempt the new rejection rules out a reason saying why. */
-function recordCoreQuotaExclusions(
+function recordQuotaExclusions(
   plan: ProvisioningExhaustionPlan,
   diagnosticAttempts: PlacementAttemptDiagnostic[],
   failedIndex: number,
-  rejections: readonly CoreQuotaRejection[]
+  rejections: readonly QuotaRejection[]
 ): void {
   for (let index = failedIndex + 1; index < plan.attempts.length; index++) {
     const attempt = plan.attempts[index];
     const diagnostic = diagnosticAttempts[index];
     if (!attempt || !diagnostic || diagnostic.outcome !== 'not-attempted') continue;
-    const reason = coreQuotaExclusionReason(attempt, rejections);
+    const reason = quotaExclusionReason(attempt, rejections);
     if (reason) diagnostic.reason = reason;
   }
-}
-
-function accountLimitAttemptReason(
-  limit: HetznerAccountLimit,
-  error: ProviderError,
-  rejection: CoreQuotaRejection | null,
-  descending: boolean
-): string {
-  if (rejection && descending) {
-    return (
-      `Provider account ${coreLimitLabel(limit)} reached for this ${rejection.vcpuCount}-vCPU ` +
-      `offering; trying offerings that need fewer cores. Provider error: ${error.message}`
-    );
-  }
-  return `Provider account ${accountLimitLabel(limit)} reached. Provider error: ${error.message}`;
 }
 
 function accountLimitLabel(limit: HetznerAccountLimit): string {

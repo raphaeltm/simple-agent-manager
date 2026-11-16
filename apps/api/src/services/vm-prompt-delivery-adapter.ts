@@ -401,7 +401,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       chatSessionId,
       input.sourceTaskGuard,
       () => runSideEffectGuard(input),
-      options
+      { ...options, isSessionActive: input.isSessionActive }
     );
   }
 

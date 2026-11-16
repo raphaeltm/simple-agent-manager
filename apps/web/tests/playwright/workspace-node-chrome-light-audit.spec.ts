@@ -37,7 +37,6 @@ const MOCK_PROJECT = {
   githubInstallationId: 'inst-theme-1',
   defaultVmSize: 'medium',
   defaultAgentType: 'openai-codex',
-  defaultProvider: 'hetzner',
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-06-06T09:00:00.000Z',

@@ -76,6 +76,7 @@ export function providerLimitRecoveryApprovalCondition(
         json_remove(${approval.receipt},'$.ownerOverride.firstInjection')
     AND ${task}.agent_profile_hint IS json_extract(${approval.receipt},'$.ownerOverride.profileId')
     AND ${task}.skill_id IS json_extract(${approval.receipt},'$.ownerOverride.skillId')
+    AND ${task}.agent_configuration_id IS json_extract(${approval.receipt},'$.ownerOverride.runConfigurationId')
     AND (json_extract(${approval.receipt},'$.ownerOverride.profileId') IS NULL OR
       EXISTS (SELECT 1 FROM agent_profiles approved_profile
         WHERE approved_profile.id=json_extract(${approval.receipt},'$.ownerOverride.profileId')

@@ -31,6 +31,8 @@ function agentName(agentType: string): string {
 
 function tierTitle(tier: CCResolutionTier, runAgentType: string): string {
   switch (tier) {
+    case 'run':
+      return 'Your account for this chat';
     case 'profile':
       return 'Your account for this profile';
     case 'project':

@@ -5,6 +5,36 @@ description: SAM REST API endpoints for managing workspaces, nodes, and credenti
 
 The SAM API runs on a Cloudflare Worker at `api.{domain}`. All authenticated endpoints require a valid BetterAuth session cookie.
 
+## Incremental chat message appends
+
+The workspace callback `POST /api/workspaces/:id/messages` accepts the optional
+`X-SAM-Outbox-Incarnation` UUID header. Updated reporters persist one random UUID with their
+SQLite outbox, retaining it across reopen, retries and session changes; recreating the database
+creates a new UUID. The JSON message body is unchanged. The header is transport identity, not an
+authentication claim: normal callback authentication and workspace/session fencing still apply.
+The server keys retry progress by the authenticated workspace, its current callback generation
+(including the valid initial NULL generation), and the incarnation. Missing or malformed headers
+use ordinary individual-row persistence. Older Workers ignore the header.
+
+Chat clients connecting to `GET /api/projects/:projectId/sessions/ws` can add
+`messageAppend=message-append-v1` to advertise canonical message append support. The existing
+optional `sessionId` still limits the subscription. Clients without this capability keep the
+individual-row stream and disable merging for the sessions their connection watches.
+
+With merging enabled, `messages.batch` introduces a canonical row under its first chunk's ID.
+Later `message.append` events carry `{ id, sessionId, content, offset, revision }`: `content` is
+only the new suffix, `offset` is its starting UTF-16 string offset, and `revision` equals
+`offset + content.length`. The row's ID, timestamp and sequence remain fixed. Tool/card metadata
+continues through the existing message events.
+
+Apply an append only when its base content reaches `offset`. Ignore a duplicate when its exact
+suffix is already present. A missing base or conflicting/gapped suffix requires an authoritative
+read before displaying it; the base may be behind the newest page. Reconnect catch-up must include
+the cached tail row, which can grow without changing its cursor, then drain all newer pages.
+Keep the longer matching prefix when an older REST snapshot races with live appends. REST reads
+return the complete canonical row, and comments reference its stable ID. Existing historical IDs
+remain valid.
+
 :::note
 This reference covers the most commonly used endpoints. For the complete list of all API routes, see the [source code](https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/api/src/routes).
 :::
@@ -279,7 +309,7 @@ the instance has no machines of its own.
 ### First-run setup (`/api/setup/*`)
 
 The `POST` routes require `SETUP_TOKEN`; `GET /api/setup/status` is public. Every route returns
-`410 SETUP_CLOSED` once setup is complete.
+`410 SETUP_CLOSED` once setup is complete, which includes any install with an active superadmin.
 
 - `GET /api/setup/status` — public. `{ completed, open, forced, tokenConfigured }`.
 - `POST /api/setup/verify` — body `{ token }`. Returns the integration `status` and
@@ -930,6 +960,8 @@ Optional `sourceIdeaId` starts the work from an open idea in the same project. I
 
 Optional `model` (string, up to 200 characters) and `effort` (`auto`, `low`, `medium`, `high`, `xhigh` or `max`) set the agent's model and effort for this task only, over the skill, profile and project defaults. A blank `model` or a `null` either one inherits. The effort must be one the resolved agent supports, or the request returns `400` before anything is created: Claude Code supports every level, Codex every level except `max`, and other agents only `auto`.
 
+Optional `agentConfigurationId` runs this task on one of the caller's own agent accounts (a `cc_configurations` id) instead of the account its profile would use. The account must be active and for the agent the task runs, or the request returns `400` before anything is created (`validateRunAgentConfiguration`). It is stored on the task, checked before the profile's account whenever the run's credential is resolved, and a paused or deleted account stops the run rather than falling back to another.
+
 ### `GET /api/projects/:id/agent-profiles/picker`
 
 Returns the caller's own new-chat picker state for the project: `{ usage, hiddenProfileIds, usageWindowDays }`. `usage` lists `{ profileId, lastUsedAt, chatCount }` for profiles the caller started new chats with in the last `usageWindowDays` days (admin setting `chat.profileUsageWindowDays`, default 30), most recent first. Only chats the caller started by hand count; dispatched, triggered, recovered and idea drafts do not. Any active project member can read their own state.
@@ -1020,7 +1052,7 @@ Start an [Instant](/docs/guides/instant-sessions/) chat session. Returns **`202`
 
 Because the launch is asynchronous, the response does **not** carry `agentSessionId`, `acpSessionId`, or launch `timings` — poll the session or connect to its stream for live state.
 
-Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`. Optional `model` and `effort` behave as they do there too.
+Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`. Optional `model`, `effort` and `agentConfigurationId` behave as they do there too.
 
 This endpoint is Instant-only. It returns `409` (`Selected profile resolves to VM runtime; use task submission instead.`) whenever the runtime resolves to VM — because the profile pins `vm`, because the caller has their own or a project cloud credential, or because `CF_CONTAINER_ENABLED` is not `true` for the deployment. Use `POST /api/projects/:id/tasks/submit` for VM work.
 

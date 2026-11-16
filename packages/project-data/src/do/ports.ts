@@ -220,6 +220,7 @@ export interface SnapshotWakeClaimInput {
   workspaceId: string;
   taskId: string;
   recoveryAttemptId?: string | null;
+  allowRestored?: boolean;
 }
 
 export interface SleepSnapshotLookupInput {
@@ -300,6 +301,8 @@ export interface VmPromptDeliveryAdapterInput {
   claim: PromptDeliveryClaim;
   allowLegacyVm: boolean;
   requestTimeoutMs: number;
+  /** Synchronous persisted ProjectData link check; avoids a self-RPC after wake activation. */
+  isSessionActive?: (workspaceId: string) => boolean;
   /**
    * Authoritative target already resolved by a shared runtime-liveness adapter.
    * This is used by reconciliation so a suspect D1 health mirror cannot undo
@@ -445,6 +448,9 @@ export interface StalledTaskClassifierConfig {
 }
 
 export interface OperationsPort {
+  messageMergeConfig?(env: Env): Promise<import('./message-stream-ingest').MessageMergeConfig>;
+  /** Cached admin setting, refreshed only at object initialization and usage-window flush. */
+  rowUsageIntervalMs?(env: Env): Promise<number>;
   /** Record an archive circuit-breaker opening and notify operators once; never throws. */
   alertArchiveBreakerOpened(env: Env, opening: ProjectDataArchiveBreakerOpening): Promise<void>;
   /** Operational master brake for DO alarms; true means the alarm was deferred. */

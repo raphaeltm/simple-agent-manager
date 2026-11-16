@@ -95,6 +95,45 @@ export const DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = 20_000;
 export const DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS = 5_000;
 
 /**
+ * Per-candidate wall-time budget of a cleanup-cron teardown that starts a provider deletion
+ * without waiting for it (two-phase deletion; admin setting
+ * `operations.nodeProviderDeletionRequestTimeoutMs`). It covers the pre-teardown node log capture
+ * (its own timeout is 5 s, `nodeLogCaptureTimeoutMs`), provider auth, the ownership re-read and the
+ * provider's instance lookup (GCP: up to 8 zone GETs plus an aggregated list, measured ~3.3 s with
+ * no hit, twice on the current-credential path), and the DELETE. No operation wait is inside it.
+ */
+export const DEFAULT_NODE_PROVIDER_DELETION_REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * How long a started provider deletion may stay unconfirmed before the node is reported blocked
+ * (`teardown_deletion_unconfirmed`) and alerted (admin setting
+ * `operations.nodeProviderDeletionConfirmMaxMs`). GCP deletes of SAM VMs finished in 20 s to
+ * 2.4 min in production and staging, so 30 min is several times the slowest observed.
+ */
+export const DEFAULT_NODE_PROVIDER_DELETION_CONFIRM_MAX_MS = 30 * 60 * 1000;
+
+/**
+ * Default wall-clock budget for one durable node-provisioning attempt (admin setting
+ * `operations.nodeProvisioningAttemptDeadlineMs`, read by
+ * `resolveNodeProvisioningAttemptDeadlineMs()` in the API worker). A GCP create measured
+ * 9-12 s (europe-west1, e2-medium, 2026-11-11) and Hetzner 1-2 s; 60 s is 5x the GCP worst case,
+ * the owner's choice (2026-11-14) because provisioning is asynchronous. Sizing and what the
+ * budget cuts: `apps/api/src/durable-objects/node-lifecycle-provisioning-attempt.ts`.
+ */
+export const DEFAULT_NODE_PROVISIONING_ATTEMPT_DEADLINE_MS = 60_000;
+
+/**
+ * Admin-setting bounds for the attempt budget. The minimum is the default per-request timeout
+ * (5 s): an escape hatch that restores the behaviour from before the setting existed (it makes
+ * every GCP attempt reach its DNS step already cut). The maximum keeps at least three attempt
+ * cycles inside the default 15-minute intent age: 180 s + the 20 s default tunnel budget + one
+ * 30 s retry tick = 230 s per cycle, and the age check runs only between attempts, so the last
+ * attempt can end up to one cycle past the age.
+ */
+export const NODE_PROVISIONING_ATTEMPT_DEADLINE_MIN_MS = 5_000;
+export const NODE_PROVISIONING_ATTEMPT_DEADLINE_MAX_MS = 180_000;
+
+/**
  * Default maximum workspace candidates processed per cleanup phase per sweep (rule 47).
  * Override via WORKSPACE_CLEANUP_SWEEP_LIMIT env var.
  */

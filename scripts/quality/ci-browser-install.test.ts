@@ -496,7 +496,7 @@ function ciPathFilters(): Record<string, string[]> {
   return parse(filters) as Record<string, string[]>;
 }
 
-const CI_BROWSER_JOBS = ['workspace-quality-surfaces', 'marketing-site', 'playwright-visual'];
+const CI_BROWSER_JOBS = ['workspace-quality-surfaces', 'playwright-visual'];
 const BROWSER_INSTALL_JOBS = [
   ...CI_BROWSER_JOBS.map((job) => `ci.yml:${job}`),
   'deploy-installer.yml:deploy',
@@ -548,10 +548,12 @@ describe('workflow browser install wiring', () => {
       'browser-install: ${{ steps.filter.outputs.browser-install }}'
     );
     const jobs = workflowJobs('ci.yml');
+    // Every CI job that installs Chromium runs when the helper changes, so each install
+    // path is exercised against a real runner.
     for (const name of CI_BROWSER_JOBS)
       expect(jobs[name]?.if, name).toContain("needs.changes.outputs.browser-install == 'true'");
     expect(
-      jobs['ci-workflow']?.steps?.find((step) => step.name === 'Validate CI workflow wiring')?.run
+      jobs['code-quality']?.steps?.find((step) => step.name === 'CI workflow wiring tests')?.run
     ).toContain('ci-browser-install.test.ts');
   });
 

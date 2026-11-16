@@ -1,3 +1,5 @@
+import { hasAmbiguousLabel } from '@simple-agent-manager/providers';
+
 /**
  * Provider-side labels applied to every SAM-created cloud server.
  *
@@ -112,4 +114,19 @@ export function buildNodeProviderLabels(params: {
     labels[SAM_RUNTIME_INCARNATION_LABEL_KEY] = params.runtimeIncarnationId;
   }
   return labels;
+}
+
+/**
+ * True when provider-reported labels carry every expected ownership label exactly once and with
+ * the exact value. Destructive paths call this on a fresh provider read immediately before the
+ * delete boundary: provider-side filtering is never trusted, a duplicated key (ambiguous tag
+ * encoding) never matches, and an absent label never authorizes a destroy.
+ */
+export function nodeProviderLabelsMatch(
+  actual: Record<string, string>,
+  expected: Record<string, string>
+): boolean {
+  return Object.entries(expected).every(
+    ([key, value]) => !hasAmbiguousLabel(actual, key) && actual[key] === value
+  );
 }

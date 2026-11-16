@@ -19,22 +19,24 @@ export async function runDeploymentPublishJobSweep(
     // and one lifecycle delivery; neither network operation blocks the sweep.
     waitUntil(
       Promise.all([
-        ports.lifecycle.recordPublishJobLifecycleEventBestEffort({
-          projectId: job.projectId,
-          publishJobId: job.id,
-          environmentId: job.environmentId,
-          status: 'failed',
-          terminal: true,
-          currentStep: job.currentStep,
-          workspaceId: job.workspaceId,
-          nodeId: job.nodeId,
-          taskId: job.taskId,
-          source: 'scheduled.deployment_publish_jobs',
-          occurredAt: job.completedAt ?? job.updatedAt,
-        }),
+        job.contextShadow
+          ? Promise.resolve()
+          : ports.lifecycle.recordPublishJobLifecycleEventBestEffort({
+              projectId: job.projectId,
+              publishJobId: job.id,
+              environmentId: job.environmentId,
+              status: 'failed',
+              terminal: true,
+              currentStep: job.currentStep,
+              workspaceId: job.workspaceId,
+              nodeId: job.nodeId,
+              taskId: job.taskId,
+              source: 'scheduled.deployment_publish_jobs',
+              occurredAt: job.completedAt ?? job.updatedAt,
+            }),
         cancelDeploymentPublishJobOnVmBestEffort(ports, job, settings.cancelTimeoutMs),
       ])
     );
   }
-  return { failed: jobs.length };
+  return { failed: jobs.filter((job) => !job.contextShadow).length };
 }

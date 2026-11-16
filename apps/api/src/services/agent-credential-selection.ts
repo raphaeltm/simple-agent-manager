@@ -40,7 +40,8 @@ export type AgentCredentialSelection =
   | {
       kind: 'credential';
       reference: string;
-      tier: 'profile' | 'project' | 'user';
+      /** `run`: the account chosen for this run (`tasks.agent_configuration_id`). */
+      tier: 'run' | 'profile' | 'project' | 'user';
       credentialId: string | null;
     }
   /** A pin (profile or project) is unusable, so the run refuses rather than falls back. */
@@ -57,9 +58,10 @@ export type AgentCredentialSelection =
   | { kind: 'none' };
 
 const TIER_BY_SOURCE: Record<
-  'profile-attachment' | 'project-attachment' | 'user-attachment',
-  'profile' | 'project' | 'user'
+  'run-override' | 'profile-attachment' | 'project-attachment' | 'user-attachment',
+  'run' | 'profile' | 'project' | 'user'
 > = {
+  'run-override': 'run',
   'profile-attachment': 'profile',
   'project-attachment': 'project',
   'user-attachment': 'user',

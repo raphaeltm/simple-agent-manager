@@ -8,7 +8,7 @@ user-invocable: false
 
 ## Installer first-owner binding
 
-`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN`, which authorizes provider configuration rather than user login.
+`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN` (a plain-text var masked in deploy logs, accepted only until setup completes or an active superadmin exists), which authorizes provider configuration rather than user login.
 
 ## GitHub Environment Secrets (GitHub Settings -> Environments -> production)
 
@@ -532,7 +532,7 @@ by the read-only cron-liveness check.
 - `GCP_WIF_POOL_ID`, `GCP_WIF_PROVIDER_ID`, `GCP_SERVICE_ACCOUNT_ID` — Default identifiers used by WIF setup.
 - `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` — Maximum UTF-8 service-account JSON upload/paste size (default: `65536`).
 - `GCP_DEFAULT_ZONE` — Default Compute zone (default: `us-central1-a`).
-- `GCP_IMAGE_FAMILY`, `GCP_IMAGE_PROJECT`, `GCP_DISK_SIZE_GB` — Compute VM image and disk defaults.
+- `GCP_IMAGE_FAMILY`, `GCP_IMAGE_PROJECT` — Compute VM image defaults. Boot disk size is not an env var: it is the admin settings `gcpCatalog.bootDiskGbPerVcpu` (default 20) and `gcpCatalog.bootDiskMinGb` (default 50).
 - `GCP_TOKEN_CACHE_TTL_SECONDS` — Maximum short-lived access-token cache TTL (default: `3300`; capped by the provider-returned expiry).
 - `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS` — WIF SAM identity-token lifetime (default: `600`).
 - `GCP_OPERATION_POLL_TIMEOUT_MS` — GCP asynchronous operation timeout (default: `300000`).
@@ -641,7 +641,7 @@ by the read-only cron-liveness check.
 - `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS` — Background prompt target/recovery preparation and owner-approved recovery repair wait budget, also used for VM submit/receipt calls (default: `5000`). Owner repair timeout retains the pending consent/claim; late completion stays fenced and cannot acknowledge the timed-out sweep.
 - `TASK_LIVENESS_MAX_ACP_SESSIONS` — Maximum task-scoped ACP sessions inspected per liveness probe (default: 5)
 - `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS` — Timeout for stale-VM-node health probes used by ProjectData idle cleanup and stuck-task reconciliation; a timeout is inconclusive and preserves the task/workspace (default: 5000)
-- `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning allocation/reconciliation request budget, also used for background readiness and workspace dispatch (default: 5000).
+- `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning per-request budget for Cloudflare calls during allocation/reconciliation, also used for background readiness and workspace dispatch (default: 5000). The attempt's cancellation budget is the admin setting `operations.nodeProvisioningAttemptDeadlineMs` (default 60000, range 5000–180000, never below this value); it cuts pre-create steps and the node DNS record only, not a started create, its publish, readiness or dispatch.
 - `NODE_PROVISIONING_RETRY_INTERVAL_MS` — Delay between durable direct provisioning attempts (default: 30000).
 - `NODE_PROVISIONING_MAX_AGE_MS` — Maximum age of a durable direct provisioning intent before retries stop (default: 900000 / 15 min).
 - `NODE_PROVISIONING_MAX_ATTEMPTS` — Maximum durable direct provisioning attempts before retries stop (default: 30). Either allocation age or attempt exhaustion starts a separate bounded diagnostic publication phase using the same retry interval and attempt limit. The age limit applies only to allocation/reconciliation; the unresolved intent is retained. Empty provider inventory never authorizes another create or proves cleanup. All four `NODE_PROVISIONING_*` overrides are optional positive integers; invalid or unset values use their defaults.
@@ -770,6 +770,9 @@ configurable.
 - `CONTAINER_USER` — Optional `docker exec -u` override; when unset, auto-detects effective devcontainer user
 
 ### Workspace Builds
+
+- `BUILD_CONTEXT_MAX_ACTIVE_PER_WORKSPACE` — VM-agent/Instant process environment limit on concurrent context collection and upload per workspace (default `1`; nonpositive values fall back to the default). Excess probes receive 409 immediately; they are not queued or retried and normal node builds continue. At the 2 GiB default bundle limit this permits at most 2 GiB of compressed spool per workspace; increasing concurrency multiplies that bound.
+- `BUILD_CONTEXT_CALLBACK_MAX_ATTEMPTS` / `BUILD_CONTEXT_CALLBACK_RETRY_DELAY` — VM-agent/Instant init and complete callbacks use bounded attempts (default `3`) with cancellable delay (`5s`). Retry transport failures, incomplete init JSON and HTTP 502/503/504; other errors including 409 remain failures. Each attempt uses `HTTP_CALLBACK_TIMEOUT` inside the overall publish context. Nonpositive retry settings fall back to defaults. Exact committed owner/attempt/key/size/SHA receipts are idempotent without timestamp/history changes; canceled/terminal jobs cannot be replayed.
 
 - `DEPLOY_PUBLISH_HEARTBEAT_INTERVAL` — VM publish-job heartbeat interval (default `1m`), independent of slow Docker build/save/upload progress. Each callback is bounded by `HTTP_CALLBACK_TIMEOUT`; API stall recovery starts only after a heartbeat has been recorded. Keep the API stall setting above interval plus callback/network grace. The API default deadline is `30m`, above the VM `DEPLOY_BUILD_PUBLISH_TIMEOUT` default `20m`; operators increasing the VM timeout must also raise the API deadline.
 

@@ -1,0 +1,27 @@
+{
+  "at": "2026-11-09T23:06:40.947272+00:00",
+  "fixtureTasks": [],
+  "fixtureWorkspaces": [],
+  "fixtureNodes": [
+    {
+      "id": "01M717D5K1E7TTFZ30WPYP5YE7",
+      "status": "deleted",
+      "runtime": "cf-container",
+      "runtime_termination_confirmed_at": "2026-11-09T23:00:38.719Z",
+      "provider_instance_id": null,
+      "cleanup_blocked_reason": null
+    }
+  ],
+  "activeVMs": [],
+  "fixtureSnapshots": [],
+  "fixtureProfiles": [],
+  "fixtureEnvironments": [],
+  "fixtureJobs": [],
+  "fixtureReleases": [],
+  "settings": [
+    {
+      "key": "deployments.buildContextCollectionMode",
+      "value": "\"off\""
+    }
+  ]
+}

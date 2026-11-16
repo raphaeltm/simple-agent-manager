@@ -21,9 +21,63 @@ Every PR that changes code MUST:
 | Environment    | Base Domain                | App URL                                | API URL                                |
 | -------------- | -------------------------- | -------------------------------------- | -------------------------------------- |
 | **Staging**    | `sammy.party`              | `https://app.sammy.party`              | `https://api.sammy.party`              |
+| **Staging 2**  | `sammy2.party`             | `https://app.sammy2.party`             | `https://api.sammy2.party`             |
 | **Production** | `simple-agent-manager.org` | `https://app.simple-agent-manager.org` | `https://api.simple-agent-manager.org` |
 
 **Staging is `sammy.party`, NOT `simple-agent-manager.org`.** When verifying PRs, always test against the staging domain.
+
+## Two Staging Installations
+
+There are two staging installations. Both run with the `staging` GitHub Environment's
+credentials, in the same Cloudflare account. Each has its own Workers, D1, KV, R2, Pages, DNS
+zone, Pulumi stack, users and data. They share the Pulumi state bucket (separate stacks), the
+account's workers.dev subdomain and the Hetzner account.
+
+| Installation | App                        | API                        | Prefix / stack      |
+| ------------ | -------------------------- | -------------------------- | ------------------- |
+| `staging`    | `https://app.sammy.party`  | `https://api.sammy.party`  | `sam` / `staging`   |
+| `staging2`   | `https://app.sammy2.party` | `https://api.sammy2.party` | `sam2` / `staging2` |
+
+**Choosing one.** Read the lease of both (`task=staging-lease`, environments `staging` and
+`staging2`) and take whichever is free. Each installation has its own lease, its own deploy
+concurrency group and its own data, so two agents can verify at the same time. Deploy with
+`gh workflow run deploy-staging.yml --ref <branch> -f environment=staging2 -f sam_task_id=<id>`
+(omit `environment` for `staging`). Storage activation and the agent-email DNS audit are
+primary-only, and so is the signed GitHub-trigger audit (staging2 has no GitHub App). The
+shared deployment engine (`use_shared_engine`) is not supported for staging2. A `staging2` GitHub Environment exists only because lease records are kept per
+installation; it holds no secrets and must not get any (staging2's jobs run with `staging`).
+
+**Signing in to staging2.** Use workload identity; no separate token exists for staging2. (The
+staging smoke token is also registered there, as the admin, so the deploy's smoke tests and pool
+seeding can sign in; agents should use workload identity.) Audience
+`https://api.sammy2.party/api/auth/workload-identity-login`; targets `staging2-agent-admin`
+(superadmin) or `staging2-agent-user` (ordinary user). Add the returned cookie for
+`.sammy2.party`. The issuer and allowed source project/user are the same as for `staging`.
+
+**What a fresh staging2 has.** The deploy bootstraps it on every run
+(`scripts/deploy/bootstrap-staging-installation.ts`, secondary installations only): the two users
+above, a platform cloud credential copied from `staging` (a platform GCP credential, or a GCP
+service-account key owned by one of staging's agent test accounts, otherwise any other enabled
+platform cloud credential, today Hetzner; staging's GCP credential today is workload identity, which only trusts
+`sammy.party`'s issuer, so staging2 uses Hetzner), the staging smoke token registered for
+the admin, and the shared compute pool's machines (the same ones `staging`'s pool has active, or, when the
+providers differ, the two cheapest machines per role with at least 2 vCPU and 8 GB).
+Both users are opted into the SAM AI proxy for each copied agent key
+(`providerMode: sam`), the only way a platform key is used. Today that is Claude Code, so
+start sessions with the Claude Code agent (for example set the project's default agent);
+the installation default agent has no key. There is no GitHub App: use Artifacts-backed
+projects. The shared pool is capped at 2 nodes on first seeding, because the Hetzner account
+is shared with staging and production.
+
+**Querying staging2 directly.** Same account and `$CF_TOKEN` as staging. Look the D1 id up by
+name (`sam2-staging2`): `GET /accounts/$CF_ACCOUNT_ID/d1/database?name=sam2-staging2`.
+
+**Teardown.** Actions → Teardown → `staging2` → `DELETE`. It touches only `sam2-*` resources,
+the `staging2` Pulumi stack and the `sammy2.party` zone's workspace and node records. Delete test workspaces and
+nodes first; teardown does not delete VMs. The next deploy rebuilds staging2 from nothing.
+
+Adding a third: one entry in `scripts/deploy/staging-installations.mjs` plus a zone in the
+staging Cloudflare account that the staging deploy token can edit.
 
 ## Why This Exists
 
@@ -35,32 +89,105 @@ Local tests run against Miniflare mocks. CI runs unit tests in isolation. Neithe
 
 All checks — including **SonarCloud Code Analysis** — MUST pass before merge. SonarCloud provides valuable feedback on code quality, duplication, and potential bugs. Treat its findings the same as any other CI failure: investigate, fix, and only merge when green.
 
-GitHub may label some checks as informational, advisory, or not strictly required by branch protection. If the check is red or reports failure, agents must still treat it as a real merge blocker. Failed Preflight Evidence, SonarCloud, lint-adjacent, quality, or evidence checks must be inspected and resolved before merge. Do not summarize them away as "non-blocking" unless the repository explicitly documents that exact check as non-blocking or a human explicitly approves the exception in the PR.
+GitHub may label some checks as informational, advisory, or not strictly required by branch protection. If the check is red or reports failure, agents must still treat it as a real merge blocker. Failed PR Evidence, SonarCloud, lint-adjacent, quality, or evidence checks must be inspected and resolved before merge. Do not summarize them away as "non-blocking" unless the repository explicitly documents that exact check as non-blocking or a human explicitly approves the exception in the PR.
 
 ### 1. Staging Deployment Must Be Green
 
 Staging deployment is **manual** — it does NOT run automatically on PRs. You must trigger it yourself:
 
-1. **Check for existing active runs** before triggering:
+1. **Read the environment lease** (the workflow enforces the same check atomically):
 
    ```bash
-   gh run list --workflow=deploy-staging.yml --status=in_progress --status=queued --json databaseId,status,createdAt,headBranch
+   gh api --method GET repos/raphaeltm/simple-agent-manager/deployments \
+     -f environment=staging -f task=staging-lease -f per_page=1 \
+     --jq '.[0] | {id, payload}'
    ```
 
-   If there are active or queued runs, wait at least **5 minutes** from the most recent run's `createdAt` before triggering yours.
+   Use your selected environment name in every command. The latest `staging-lease`
+   deployment payload is authoritative; ordinary deployment statuses and a quiet
+   Actions queue do not release the slot. A held foreign branch with a future
+   `expiresAt` owns live verification even after its deploy finishes. Schedule a
+   one-time SAM wake at that exact UTC expiry (`schedules_write`, method `create`,
+   `message_session` action for your session), persist the accepted schedule ID,
+   and continue independent work or end the turn. On wake re-read once and retry
+   if free; if renewed, schedule a new wake. Do not poll, wait five minutes, or
+   negotiate the slot in chat.
 
-2. **Trigger the deployment:**
+   No record means free (first-use bootstrap). A malformed latest record or API
+   error fails closed: ownership cannot be established safely. Inspect/fix the
+   record through the normal reviewed workflow; never delete history to bypass
+   another branch's lease.
+
+2. **Acquire by deploying your branch**, with your SAM task ID:
 
    ```bash
-   gh workflow run deploy-staging.yml --ref <your-branch>
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging -f sam_task_id=<your-task-id> -f lease_hold_minutes=30
    ```
 
-3. **Watch for completion:**
+   The serialized lease job reads, acquires and reads back the lease before any
+   deploy/audit job. A foreign active lease fails immediately with holder branch,
+   task and expiry. Same-branch redeploys renew it. Expiry is acquisition time plus
+   expected deployment time plus live-check hold. GitHub Environment variables
+   `STAGING_LEASE_EXPECTED_DEPLOY_MINUTES` (default 30),
+   `STAGING_LEASE_DEFAULT_HOLD_MINUTES` (default 30), and
+   `STAGING_LEASE_MAX_HOLD_MINUTES` (default 120) configure durations; positive
+   integer holds above the cap are rejected. Expected deploy time may be zero.
+   Choose a hold covering your checks; renew before expiry if needed. Failed or
+   cancelled runs retain the lease until release/expiry, so failures cannot expose
+   checks to an overwrite.
+
+   To reserve or renew without deploying, use `-f lease_action=acquire`. This
+   holds for just the requested live-check duration (no deploy allowance), and
+   also permits bounded lease lifecycle verification without full redeploys.
+   Audit-only runs acquire/renew through the same gate. Storage activation and
+   the agent-email DNS audit currently support only the primary `staging` slot;
+   unsupported combinations are rejected before lease acquisition. Lease writes must go
+   through this workflow; direct `gh api` writes bypass serialization.
+
+3. **Watch the run and verify live**, then **release early** from the holder branch:
+
    ```bash
-   sleep 5
-   gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=1 --json databaseId,status
+   gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=3 \
+     --json databaseId,status,conclusion,headSha
    gh run watch <run-id>
+   # After live checks and test-resource cleanup:
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging -f lease_action=release -f sam_task_id=<your-task-id>
    ```
+
+   Confirm the release job passed and the newest payload has `state: released`.
+   Release shares the same environment concurrency group and refuses a foreign
+   holder. Expiry permits another branch to acquire automatically. Do not mistake
+   successful deployment completion for a release. Only the lease job receives
+   `deployments: write`; agents can inspect records with their existing `gh api`
+   read access. Leases are keyed by environment name for future staging slots.
+
+For container-backed Instant verification, `wrangler deploy` success means the
+rollout started, not that every instance serves the new image. The shared staging
+and production workflow has a separate **Wait for container rollout completion**
+step. It compares rollout identities before/after deploy, pins the single new
+rollout and requires all its steps completed through 100% at the pinned target.
+The application list can retain the previous version after completion; that
+disagreement is diagnostic and does not veto the completed rollout.
+Multiple new rollouts fail as ambiguous. An unchanged or metadata-only deployment
+awaits any existing pending rollout; a first direct creation needs no rollout.
+Application GET can report the old version during rollout, so version equality
+alone cannot prove a no-op. API errors, unreadable status and timeout fail the
+step. This closes the window where deploy reports success mid-rollout; it does
+not prove every running instance's binary. The unexplained post-rollout version
+transition remains tracked in idea01M7BQJ14BKVMPMKRA2GCSP8MJ. Keep gradual rollouts: even one 100% step has a mixed-image window while
+instances are replaced. After workflow success, verify the new Instant node's
+recorded `agent_version` matches the deployed `VM_AGENT_REQUIRED_VERSION` before
+counting a VM-agent trial as evidence. The authenticated `/ready` callback logs
+`instant_session.agent_version_mismatch` with nodeId, expectedVersion and
+reportedVersion without rejecting readiness; `/health` only reports liveness.
+
+Deploy-only GitHub Environment overrides (not Worker runtime settings):
+`CONTAINER_ROLLOUT_TIMEOUT_MS` defaults to 1200000 (20 minutes), and
+`CONTAINER_ROLLOUT_POLL_INTERVAL_MS` defaults to 10000. Both require positive
+integer milliseconds. Timeout diagnostics include application, rollout and last
+status. These settings do not change the rollout strategy.
 
 If the deployment fails:
 
@@ -103,13 +230,13 @@ After staging deployment succeeds, use Playwright to test the live app:
 
    Staging trusts:
 
-   | Value | |
-   | --- | --- |
-   | Issuer | `https://api.simple-agent-manager.org/oidc` |
-   | Source project | `01KHRJGANBBWGDY1NZ0KVF0D4J` (SAM) |
-   | Source user | `4bw1FJlXCOgSGq0TsQgpiMAhQKjGOSXx` (chats owned by this user) |
-   | Target | `toWzGjNW3IyUkCVItRQv3qSn0wI8c22y` (the staging smoke-test user) |
-   | Audience | `https://api.sammy.party/api/auth/workload-identity-login` |
+   | Value          |                                                                  |
+   | -------------- | ---------------------------------------------------------------- |
+   | Issuer         | `https://api.simple-agent-manager.org/oidc`                      |
+   | Source project | `01KHRJGANBBWGDY1NZ0KVF0D4J` (SAM)                               |
+   | Source user    | `4bw1FJlXCOgSGq0TsQgpiMAhQKjGOSXx` (chats owned by this user)    |
+   | Target         | `toWzGjNW3IyUkCVItRQv3qSn0wI8c22y` (the staging smoke-test user) |
+   | Audience       | `https://api.sammy.party/api/auth/workload-identity-login`       |
 
    a. Exchange a token (one `exec_with_secrets` call; the token never appears in output):
 
@@ -126,8 +253,17 @@ After staging deployment succeeds, use Playwright to test the live app:
    for `.sammy.party` and open the app:
 
    ```js
-   await page.context().addCookies([{ name: '__Secure-better-auth.session_token', value: 'VALUE',
-     domain: '.sammy.party', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
+   await page.context().addCookies([
+     {
+       name: '__Secure-better-auth.session_token',
+       value: 'VALUE',
+       domain: '.sammy.party',
+       path: '/',
+       httpOnly: true,
+       secure: true,
+       sameSite: 'Lax',
+     },
+   ]);
    await page.goto('https://app.sammy.party');
    ```
 

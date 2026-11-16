@@ -78,7 +78,27 @@ describe('SessionTreeItem — flat rendering', () => {
       connectorClientName: 'Claude',
     });
     renderItem(makeSession({ taskId: task.id }), { taskInfoMap: new Map([[task.id, task]]) });
-    expect(screen.getByText('via Claude')).toBeInTheDocument();
+    // On the meta line beside the kind ("Task via Claude"), not among the title-line buttons.
+    const provenance = screen.getByTestId('session-connector');
+    expect(provenance).toHaveTextContent('via Claude');
+    expect(provenance.parentElement).toHaveTextContent('Task via Claude');
+    expect(provenance.parentElement).toHaveAttribute('title', 'Task started from Claude');
+  });
+
+  it('keeps the connector off the title line, so its buttons stay at the row edge', () => {
+    const task = makeTaskInfo({
+      id: 'task-connector',
+      triggeredBy: 'connector',
+      connectorClientName: 'Claude Desktop (Acme Corp workspace connector)',
+    });
+    renderItem(makeSession({ taskId: task.id, topic: 'Long connector' }), {
+      taskInfoMap: new Map([[task.id, task]]),
+    });
+    const title = screen.getByText('Long connector');
+    const titleLine = title.parentElement?.parentElement as HTMLElement;
+    // Liveness: the provenance rendered, and not beside the title.
+    expect(screen.getByTestId('session-connector')).toBeInTheDocument();
+    expect(titleLine.children[2]).not.toHaveTextContent(/via/);
   });
   it('renders the session topic', () => {
     renderItem(makeSession({ topic: 'My conversation' }));

@@ -110,6 +110,7 @@ describe('provider wait credential pin at the authenticated secret injection rou
     ['malformed hold value', { provider_limit_wait_json: { secret: key.secret } }],
     ['malformed workspace identity', { callbackGeneration: 123 }],
     ['malformed task state', { admission_state: 123 }],
+    ['malformed run account', { agent_configuration_id: {} }],
   ])('withholds the secret for %s in a D1 pin row', async (_label, mutation) => {
     pin('cc_credentials:pinned');
     changePinRows((row) => ({ ...row, ...mutation }));
@@ -161,6 +162,29 @@ describe('provider wait credential pin at the authenticated secret injection rou
       sqlite.prepare('UPDATE tasks SET provider_limit_wait_json=?').run(JSON.stringify(approved));
       return JSON.stringify(approved);
     }
+
+    it.each([false, true])(
+      'fences the explicit run-account identity at secret injection, changed=%s',
+      async (changed) => {
+        const approved = JSON.parse(scopedApproval());
+        approved.ownerOverride.runConfigurationId = 'run-account-b';
+        sqlite
+          .prepare('UPDATE tasks SET provider_limit_wait_json=?,agent_configuration_id=?')
+          .run(JSON.stringify(approved), changed ? 'run-account-c' : 'run-account-b');
+        const response = await inject();
+        expect(response.status, await response.clone().text()).toBe(changed ? 409 : 200);
+        const body = await response.text();
+        if (changed) {
+          expect(body).not.toContain(key.secret);
+          const row = sqlite
+            .prepare('SELECT provider_limit_wait_json AS value FROM tasks')
+            .get() as { value: string };
+          expect(JSON.parse(row.value).ownerOverride).toBeUndefined();
+        } else {
+          expect(body).toContain(key.secret);
+        }
+      }
+    );
 
     it.each(['2', -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null])(
       'withholds the secret for malformed D1 credential generation %s',

@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
@@ -95,7 +97,6 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
   }
 
   const nestedPermissionValues = [
-    ...jobPermissionValues(stagingConfig),
     ...(reusableConfig && Object.hasOwn(reusableConfig, 'permissions')
       ? [reusableConfig.permissions]
       : []),
@@ -105,6 +106,26 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
     errors.push('nested or reusable permission overrides are forbidden');
   }
 
+  const stagingJobs = asRecord(stagingConfig?.jobs) || {};
+  for (const [name, job] of Object.entries(stagingJobs)) {
+    const permissions = permissionMap(asRecord(job)?.permissions);
+    if (name === 'lease') {
+      if (
+        !isExactPermissionMap(permissions, {
+          ...REQUIRED_STAGING_PERMISSIONS,
+          deployments: 'write',
+        })
+      ) {
+        errors.push('lease job must have only deployment write and checkout read authority');
+      }
+    } else if (Object.hasOwn(asRecord(job) || {}, 'permissions')) {
+      errors.push('nested or reusable permission overrides are forbidden');
+    }
+    if (permissions && 'pull-requests' in permissions)
+      errors.push(`unexpected permission grant: pull-requests: ${permissions['pull-requests']}`);
+  }
+  // Only the serialized lease job receives a GitHub token. The reusable
+  // deployment and all audit jobs retain the root read-only permissions.
   const permissionValues = [stagingConfig?.permissions, ...nestedPermissionValues];
   for (const value of permissionValues) {
     const permissions = permissionMap(value);
@@ -126,17 +147,18 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
     }
   }
 
-  const combinedWorkflows = `${staging}\n${reusable}`;
+  const combinedWorkflows = `${staging.replace(block(staging, /^ {2}lease:\s*$/m, /^ {2}[a-zA-Z0-9_-]+:\s*$/m), '')}\n${reusable}`;
   for (const consumer of PR_WRITE_CONSUMERS) {
     if (consumer.test(combinedWorkflows)) {
       errors.push(`pull-request write consumer is present: ${consumer.source}`);
     }
   }
 
-  const deployCall = block(staging, /^  deploy:\s*$/m, /^  [a-zA-Z0-9_-]+:\s*$/m);
+  const deployCall = block(staging, /^ {2}deploy:\s*$/m, /^ {2}[a-zA-Z0-9_-]+:\s*$/m);
   for (const requiredCallLine of [
     'uses: ./.github/workflows/deploy-reusable.yml',
-    'environment: staging',
+    'environment: ${{ needs.lease.outputs.credential_environment }}',
+    'installation: ${{ needs.lease.outputs.installation }}',
     'skip_agent: false',
     'dry_run: ${{ inputs.dry_run || false }}',
     'secrets: inherit',
@@ -146,7 +168,7 @@ function stagingPermissionContractErrors(staging: string, reusable: string): str
     }
   }
 
-  const dryRunInput = block(reusable, /^      dry_run:\s*$/m, /^      [a-zA-Z0-9_-]+:\s*$/m);
+  const dryRunInput = block(reusable, /^ {6}dry_run:\s*$/m, /^ {6}[a-zA-Z0-9_-]+:\s*$/m);
   for (const requiredInputLine of ['required: false', 'type: boolean', 'default: false']) {
     if (!dryRunInput.includes(requiredInputLine)) {
       errors.push(`reusable dry-run input lost contract line: ${requiredInputLine}`);
@@ -163,7 +185,7 @@ describe('staging deployment permission contract', () => {
 
   it('rejects the historical workflow-wide pull-request write authority', () => {
     const historicalGrant = stagingWorkflow.replace(
-      /permissions:\n(?:  [a-z-]+: [a-z-]+\n)+/,
+      /permissions:\n(?: {2}[a-z-]+: [a-z-]+\n)+/,
       'permissions:\n  contents: read\n  pull-requests: write\n'
     );
 
@@ -196,7 +218,7 @@ describe('staging deployment permission contract', () => {
       ? permissionLine
       : `    permissions:\n${permissionLine}`;
     const alternateSpelling = stagingWorkflow.replace(
-      /^  smoke-tests:\s*$/m,
+      /^ {2}smoke-tests:\s*$/m,
       (jobHeader) => `${jobHeader}\n${permissionBlock}`
     );
 
@@ -205,7 +227,7 @@ describe('staging deployment permission contract', () => {
 
   it('rejects a reusable job override that silently removes checkout authority', () => {
     const checkoutBreakingOverride = reusableWorkflow.replace(
-      /^  deploy:\s*$/m,
+      /^ {2}deploy:\s*$/m,
       '  deploy:\n    permissions:\n      deployments: none\n      id-token: none'
     );
 
@@ -216,7 +238,7 @@ describe('staging deployment permission contract', () => {
 
   it('accepts the exact root permission map regardless of key order', () => {
     const reorderedRoot = stagingWorkflow.replace(
-      /permissions:\n(?:  [a-z-]+: [a-z-]+\n)+/,
+      /permissions:\n(?: {2}[a-z-]+: [a-z-]+\n)+/,
       'permissions:\n  id-token: none\n  contents: read\n  deployments: none\n'
     );
 
@@ -236,7 +258,7 @@ describe('staging deployment permission contract', () => {
 
   it('rejects broad write-all authority', () => {
     const broadGrant = stagingWorkflow.replace(
-      /permissions:\n(?:  [a-z-]+: [a-z-]+\n)+/,
+      /permissions:\n(?: {2}[a-z-]+: [a-z-]+\n)+/,
       'permissions: write-all\n'
     );
 
@@ -276,5 +298,80 @@ describe('staging deployment permission contract', () => {
     expect(stagingPermissionContractErrors(stagingWorkflow, commentingAction)).toContain(
       'pull-request write consumer is present: \\b(?:pull-request-comment|comment-on-pr)\\b'
     );
+  });
+});
+
+describe('lease workflow gating', () => {
+  it('serializes acquire, deploy and release per environment, and gates all consumers', () => {
+    const workflow = parse(stagingWorkflow);
+    expect(workflow.concurrency.group).toBe("deploy-${{ inputs.environment || 'staging' }}");
+    expect(workflow.concurrency['cancel-in-progress']).toBe(false);
+    expect(workflow.jobs.lease.permissions.deployments).toBe('write');
+    for (const [name, job] of Object.entries(workflow.jobs) as [
+      string,
+      Record<string, unknown>,
+    ][]) {
+      if (name === 'lease') continue;
+      expect([job.needs].flat()).toContain('lease');
+      expect(job.if).toContain('inputs.lease_action');
+      if (String(job.if).includes('always()'))
+        expect(job.if).toContain("needs.lease.result == 'success'");
+    }
+  });
+});
+
+it('executes the lease lifecycle and failure-path tests in CI', () => {
+  expect(() =>
+    execFileSync(
+      process.execPath,
+      ['--test', fileURLToPath(new URL('../deploy/staging-lease.test.mjs', import.meta.url))],
+      { stdio: 'pipe' }
+    )
+  ).not.toThrow();
+});
+
+describe('job-level broad permission overrides', () => {
+  it.each(['write-all', 'read-all', '{}', 'null'])('rejects non-lease permissions: %s', (value) => {
+    const changed = stagingWorkflow.replace(
+      /^ {2}smoke-tests:\s*$/m,
+      `  smoke-tests:\n    permissions: ${value}`
+    );
+    expect(stagingPermissionContractErrors(changed, reusableWorkflow)).toContain(
+      'nested or reusable permission overrides are forbidden'
+    );
+  });
+  it('wires the legacy audit compatibility check into the lease preflight', () => {
+    const workflow = parse(stagingWorkflow);
+    const leaseStep = workflow.jobs.lease.steps.find(
+      (step: { run?: string }) => step.run === 'node scripts/deploy/staging-lease.mjs'
+    );
+    expect(leaseStep.env.LEASE_PRIMARY_ONLY_AUDIT).toBe(
+      '${{ inputs.activation_only || inputs.agent_email_dns_audit || inputs.github_trigger_audit }}'
+    );
+  });
+});
+
+describe('installation targeting', () => {
+  it('runs the lease job in the staging Environment with no secrets, validating the target first', () => {
+    const workflow = parse(stagingWorkflow);
+    expect(workflow.jobs.lease.environment).toBe('staging');
+    expect(JSON.stringify(workflow.jobs.lease)).not.toContain('secrets.');
+    expect(workflow.jobs.lease.steps[1].run).toBe(
+      'node scripts/deploy/staging-installations.mjs workflow-target'
+    );
+  });
+
+  it('keeps primary-only audits off secondary installations', () => {
+    const workflow = parse(stagingWorkflow);
+    for (const name of ['storage-activation', 'agent-email-dns-audit']) {
+      expect(workflow.jobs[name].if).toContain("needs.lease.outputs.installation == ''");
+      expect(workflow.jobs[name].environment).toBe(
+        '${{ needs.lease.outputs.credential_environment }}'
+      );
+    }
+    const lease = workflow.jobs.lease.steps.find(
+      (step: { run?: string }) => step.run === 'node scripts/deploy/staging-lease.mjs'
+    );
+    expect(lease.env.LEASE_PRIMARY_ONLY_AUDIT).toContain('inputs.github_trigger_audit');
   });
 });

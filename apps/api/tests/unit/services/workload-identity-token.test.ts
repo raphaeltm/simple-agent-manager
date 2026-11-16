@@ -10,7 +10,7 @@ import {
   jwtVerify,
   SignJWT,
 } from 'jose';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -44,7 +44,11 @@ beforeEach(() => {
   createSchemaTables(sqlite, [schema.platformSettings, schema.platformCredentials]);
   env = { ...env, DATABASE: createSqliteD1(sqlite) };
 });
-afterEach(() => sqlite.close());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  sqlite.close();
+});
 describe('workload identity JWTs', () => {
   it('verifies through published JWKS with bounded lifetime, stable subject and unique token ID', async () => {
     const first = await signWorkloadIdentityToken(env, claims, 'vault.example');
@@ -70,6 +74,34 @@ describe('workload identity JWTs', () => {
       })
     ).rejects.toThrow();
   });
+  it.each([300, 120])(
+    'keeps the configured %i-second lifetime across a clock boundary',
+    async (ttl) => {
+      sqlite
+        .prepare(
+          "INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,'2026-11-14T00:00:00Z')"
+        )
+        .run('operations.workloadIdentityTokenTtlSeconds', String(ttl));
+      const beforeBoundary = new Date('2026-11-14T00:00:00.999Z');
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(beforeBoundary);
+      const setIssuedAt = SignJWT.prototype.setIssuedAt;
+      vi.spyOn(SignJWT.prototype, 'setIssuedAt').mockImplementation(function (value) {
+        const result = setIssuedAt.call(this, value);
+        // Cross the second boundary exactly between the formerly independent clock reads.
+        vi.setSystemTime(new Date(beforeBoundary.getTime() + 2));
+        return result;
+      });
+
+      const token = await signWorkloadIdentityToken(env, claims, 'external-service');
+      const { payload } = await jwtVerify(token, createLocalJWKSet(await getWorkloadJWKS(env)), {
+        issuer: 'https://api.example.test/oidc',
+        audience: 'external-service',
+      });
+      expect(payload.iat).toBe(Math.floor(beforeBoundary.getTime() / 1000));
+      expect(payload.exp! - payload.iat!).toBe(ttl);
+    }
+  );
   it.each([
     'workspace-terminal',
     'workspace-callback',

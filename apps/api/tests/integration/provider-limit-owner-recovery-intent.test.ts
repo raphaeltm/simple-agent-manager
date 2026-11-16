@@ -78,6 +78,35 @@ describe('durable owner-approved provider recovery', () => {
     return task().provider_limit_wait_json;
   }
 
+  it('repairs an interrupted owner release with the same explicit run account', async () => {
+    d1.exec("UPDATE tasks SET agent_configuration_id='run-account-b'");
+    boundary.selected.mockImplementation(async (...args) =>
+      (args[5] as { runConfigurationId?: string } | null)?.runConfigurationId === 'run-account-b'
+        ? 'cc_credentials:account-1'
+        : 'cc_credentials:default-account-a'
+    );
+    const receipt = await interruptAfterRelease();
+    const retained = claim();
+    await preserveProviderLimitWait(env, 'task-1', Date.now());
+    expect(task().admission_state).toBeNull();
+    expect(task().provider_limit_wait_json).toBe(receipt);
+    expect(claim()).toEqual(retained);
+    expect(boundary.nudge).toHaveBeenCalledOnce();
+  });
+
+  it('blocks changed run-account consent before repairing a retained claim', async () => {
+    d1.exec("UPDATE tasks SET agent_configuration_id='run-account-b'");
+    await interruptAfterRelease();
+    const retained = claim();
+    d1.exec("UPDATE tasks SET agent_configuration_id='run-account-c'");
+    await preserveProviderLimitWait(env, 'task-1', Date.now());
+    expect(task().admission_state).toBe('provider_limit_blocked');
+    expect(wait().ownerOverride).toBeUndefined();
+    expect(claim()).toEqual(retained);
+    expect(boundary.nudge).not.toHaveBeenCalled();
+    expect(boundary.start).not.toHaveBeenCalled();
+  });
+
   it('retains the same approval across a transient canonical profile lookup failure', async () => {
     const receipt = await interruptAfterRelease();
     const before = claim();

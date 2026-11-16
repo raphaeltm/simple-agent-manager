@@ -294,13 +294,15 @@ function persistRetentionCheckpoint(
        next_retention_at = CASE WHEN ? = 1
          THEN COALESCE(project_event_wake_scheduler_state.next_retention_at, ?)
          ELSE ? END,
-       updated_at = ?`,
+       updated_at = ?
+     WHERE ? = 0 OR project_event_wake_scheduler_state.next_retention_at IS NULL`,
     projectId,
     nextRetentionAt,
     now,
     preserveExisting ? 1 : 0,
     nextRetentionAt,
     nextRetentionAt,
-    now
+    now,
+    preserveExisting ? 1 : 0
   );
 }

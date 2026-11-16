@@ -59,6 +59,10 @@ export default defineConfig({
         kvNamespaces: ['KV', 'OAUTH_KV'],
         r2Buckets: ['R2', 'PROJECT_DATA_ARCHIVE_R2'],
         durableObjects: withReliabilityStorageObjects({
+          LEGACY_MESSAGE_STORAGE_FIXTURE: {
+            className: 'LegacyMessageStorageFixture',
+            useSQLite: true,
+          },
           PROJECT_DATA: {
             className: 'ProjectDataTestDouble',
             useSQLite: true,
@@ -138,11 +142,9 @@ export default defineConfig({
     globals: true,
     include: ['tests/workers/**/*.test.ts'],
     // Executed by vitest.sam-runtime.config.ts in the same test:workers command.
-    exclude: [
-      'tests/workers/sam-session-do.test.ts',
-      'tests/workers/sam-grounding-runtime.test.ts',
-      'tests/workers/sam-live-stream.test.ts',
-    ],
+    // Loaded inline (not as top-of-file imports) so the reviewed test-key lines above keep
+    // their line numbers; scripts/quality/gitleaks-reviewed-baseline.json pins them.
+    exclude: (await import('./tests/workers/support/native-runtime-suites')).NATIVE_RUNTIME_SUITES,
     setupFiles: ['./tests/workers/setup-d1-migrations.ts'],
     provide: {
       D1_MIGRATIONS_JSON: JSON.stringify(d1Migrations),
@@ -156,6 +158,12 @@ export default defineConfig({
     // CI must exercise the suite deterministically instead of starting dozens
     // of runtimes concurrently and losing the pool to worker exits.
     fileParallelism: false,
+    // Files run one at a time, so a shard's wall time is the sum of its files.
+    // `--shard=i/n` splits by measured per-file time (tests/workers/shard-timings.json)
+    // instead of by path hash. See tests/workers/support/shard-plan.ts.
+    sequence: {
+      sequencer: (await import('./tests/workers/support/timing-balanced-sequencer')).default,
+    },
   },
   // Test-only producer bridge. This constant is absent from production builds.
   define: {

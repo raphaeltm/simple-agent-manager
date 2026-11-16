@@ -88,8 +88,6 @@ const PROJECT = {
   userId: 'user-test-1',
   githubInstallationId: 'inst-1',
   defaultVmSize: 'large',
-  defaultProvider: null,
-  defaultLocation: null,
   resourceRequirementsJson: '{"minMemoryGb":4}',
   workspaceIdleTimeoutMs: 1800000,
   createdAt: '2026-01-01T00:00:00Z',

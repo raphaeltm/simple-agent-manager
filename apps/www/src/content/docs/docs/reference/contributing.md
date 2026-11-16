@@ -51,7 +51,7 @@ refactor: extract validation utilities
 ## Pull Requests
 
 1. Keep the PR focused and small.
-2. Ensure the relevant checks pass.
+2. Ensure the relevant checks pass. Draft pull requests run only quick checks (lint, build and type check, code quality, secret scan, PR evidence); the full test suite starts when the PR is marked ready for review.
 3. Update docs when user-facing behavior changes.
 4. Fill the pull request template completely, including the Agent Preflight section.
 

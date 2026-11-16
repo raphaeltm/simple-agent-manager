@@ -55,6 +55,7 @@ import {
 } from '../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../services/project-agent-defaults';
 import * as projectDataService from '../services/project-data';
+import { validateRunAgentConfiguration } from '../services/run-agent-configuration';
 import { resolveSkillProfile } from '../services/skills';
 import { submitInstantTask } from '../services/submit-instant-task';
 import { validateSubmitContextAndAttachments } from '../services/submit-task-input-validation';
@@ -266,7 +267,8 @@ export async function submitTaskImplementation(
     body.agentProfileId || body.skillId
       ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, env)
       : null;
-  const preferredProvider = resolvedProfile?.provider ?? project.defaultProvider;
+  // Only an explicit task provider narrows the credential; otherwise the compute pool decides.
+  const preferredProvider = body.provider;
   // REST preserves its explicit-Instant-only contract; automatic Connector/SAM starts
   // may use runtime selection, but VM-only fields always request VM placement.
   const connectorStart = via === 'connector' || via === 'pat' || via === 'sam';
@@ -323,6 +325,7 @@ export async function submitTaskImplementation(
       taskMode: body.taskMode,
       agentType: body.agentType,
       agentOverrides: { model: body.model, effort: body.effort },
+      agentConfigurationId: body.agentConfigurationId,
       attachments: validatedAttachments,
       triggeredBy: via === 'connector' || via === 'pat' ? 'connector' : 'user',
       connectorClientName: clientName,
@@ -484,6 +487,13 @@ export async function submitTaskImplementation(
     model: resolvedProfile?.model ?? projectAgentDefaults.model,
     effort: resolvedProfile?.effort,
   });
+  // Before any task effect, against the same agent the runner launches.
+  setOperation('run_account');
+  const agentConfigurationId = await validateRunAgentConfiguration(db, {
+    userId,
+    configurationId: body.agentConfigurationId,
+    agentType: launchAgentType,
+  });
 
   // Start new task work on its generated output branch so VM-agent completion
   // pushes cannot land on the repository default branch. A fork does not check out
@@ -519,6 +529,7 @@ export async function submitTaskImplementation(
     agentProfileHint: resolvedProfile?.profileId ?? null,
     skillId: resolvedProfile?.skillId ?? null,
     skillHint: body.skillId ?? null,
+    agentConfigurationId,
     taskMode,
     outputBranch: branchName,
     requestedVmSize: vmSize,

@@ -5,11 +5,26 @@ import {
   classifyReconciliationLoop,
   getStalledTaskClassifierConfig,
 } from '../scheduled/stalled-task-classifier';
+import { resolveAdminSetting } from '../services/admin-settings';
 import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
 import { workerEnv } from './worker-env';
 
 /** Operational brakes, the stalled-task loop classifier and operator alerts. */
 export const operationsPort: OperationsPort = {
+  messageMergeConfig: async (env) => {
+    const [enabled, maxRowBytes, recentIds] = await Promise.all([
+      resolveAdminSetting(workerEnv(env), 'chat.messageMergingEnabled'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageMergeMaxRowBytes'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageMergeRecentIds'),
+    ]);
+    return {
+      enabled: enabled === true,
+      maxRowBytes: Number(maxRowBytes),
+      recentIds: Number(recentIds),
+    };
+  },
+  rowUsageIntervalMs: async (env) =>
+    Number(await resolveAdminSetting(workerEnv(env), 'operations.projectDataRowUsageIntervalMs')),
   alertArchiveBreakerOpened: (env, opening) =>
     alertProjectDataArchiveBreakerOpened(workerEnv(env), opening),
   deferAlarmWhenDisabled: (env, storage, durableObject) =>

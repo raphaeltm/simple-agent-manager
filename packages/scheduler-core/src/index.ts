@@ -15,9 +15,7 @@ export {
   type EffectiveDefaultCapacityPoolScopeInput,
   higherPrecedenceDefaultCapacityPoolScopes,
 } from './capacity-pool-precedence';
-export {
-  DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS,
-} from './capacity-pool-selection-defaults';
+export { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-selection-defaults';
 export {
   CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
   capacityCandidateBaseId,
@@ -27,12 +25,8 @@ export {
   isEditorVisibleCapacityCandidateRole,
   PRIMARY_CAPACITY_WORKLOAD_ROLE,
 } from './capacity-pool-workload-roles';
-export {
-  type WorkspaceAdmissionEnv,
-} from './env';
-export {
-  legacyNodeVcpuEstimate,
-} from './legacy-node-pool-compatibility';
+export { type WorkspaceAdmissionEnv } from './env';
+export { legacyNodeVcpuEstimate } from './legacy-node-pool-compatibility';
 export {
   type ConcreteCapacitySnapshot,
   normalizeConcreteSnapshot,
@@ -89,6 +83,7 @@ export {
   type PlacementCredentialAttributionInput,
   type PlacementCredentialLookup,
   type PlacementCredentialProjectPolicy,
+  type PlacementCredentialResolutionFailure,
   type PlacementCredentialSourceResult,
   type PlacementEntryPoint,
   type PlacementExplicitOverrides,

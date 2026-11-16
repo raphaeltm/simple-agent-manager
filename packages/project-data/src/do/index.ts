@@ -11,6 +11,7 @@
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
+  CHAT_MESSAGE_APPEND_CAPABILITY,
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
   type IdeaUpdateNote,
@@ -30,6 +31,10 @@ import { DurableObject } from 'cloudflare:workers';
 
 import { measureArchiveSql } from '../archive/sql-metrics';
 import { estimateArchiveWrites } from '../archive/write-budget';
+import {
+  assertExactWriteAllowed,
+  isProjectDataArchiveExactRoutingEnabled,
+} from '../client/project-data-archive-routing';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import * as agentMessageChannels from './agent-message-channels';
@@ -68,6 +73,11 @@ import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messageContext from './message-context';
 import * as messagePersistence from './message-persistence';
+import {
+  DEFAULT_MESSAGE_MERGE_CONFIG,
+  type MessageIngestSource,
+  sealMessageStream,
+} from './message-stream-ingest';
 import * as messages from './messages';
 import { runMigrations } from './migrations';
 import * as missionState from './missions';
@@ -108,6 +118,7 @@ import {
 } from './provider-limit-attention';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
+import { instrumentRowUsage, RowUsage } from './row-usage';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import { withoutSamNotice } from './sam-notice-metadata';
 import * as sessionAccess from './session-access';
@@ -159,12 +170,15 @@ export type { Env } from './types';
 
 export class ProjectData extends DurableObject<Env> {
   private sql: SqlStorage;
+  private readonly rowUsage: RowUsage;
+  private readonly meteredStorage: DurableObjectStorage;
   /** Attributes SQLite rows to the alarm section that read/wrote them (`alarm-sections.ts`). */
   private readonly sqlRowMeter: SqlRowMeter;
   /** Which alarm sections are due; restored from `do_meta` so gating survives eviction. */
   private alarmSections = new ProjectDataAlarmSectionScheduler();
   /** The scheduler memory as last written, so an unchanged recalculation writes nothing. */
   private persistedAlarmSchedule: string | null = null;
+  private alarmSchedulingFailed = false;
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
   private wakeReadyLock: Promise<unknown> = Promise.resolve();
@@ -177,15 +191,42 @@ export class ProjectData extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    const metered = createRowMeteredSqlStorage(ctx.storage.sql);
+    this.rowUsage = new RowUsage(
+      () => this.cachedProjectId,
+      () => {
+        ctx.waitUntil(this.#refreshRowUsageInterval());
+      }
+    );
+    this.meteredStorage = this.rowUsage.storage(ctx.storage);
+    const metered = createRowMeteredSqlStorage(this.rowUsage.sql(ctx.storage.sql));
     this.sql = metered.sql;
     this.sqlRowMeter = metered.meter;
-    ctx.blockConcurrencyWhile(async () => {
-      this.ctx.storage.transactionSync(() => {
-        runMigrations(this.sql);
-      });
-      this.restoreAlarmSections();
-    });
+    ctx.blockConcurrencyWhile(() =>
+      this.rowUsage.run('other', async () => {
+        this.meteredStorage.transactionSync(() => {
+          runMigrations(this.sql);
+        });
+        this.restoreAlarmSections();
+        // Section memory is persisted before the alarm write. An interrupted write
+        // can leave complete memory but no alarm (or an alarm later than required).
+        // Validate once per instance without rewriting a healthy stored alarm.
+        const expectedAlarm = earliestAlarmTime([this.alarmSections.nextDueAt()]);
+        const actualAlarm = await this.meteredStorage.getAlarm();
+        this.alarmSchedulingFailed =
+          expectedAlarm !== null && (actualAlarm === null || actualAlarm > expectedAlarm);
+        await this.#refreshRowUsageInterval();
+      })
+    );
+  }
+
+  async #refreshRowUsageInterval(): Promise<void> {
+    try {
+      const interval = await projectDataPorts().operations.rowUsageIntervalMs?.(this.env);
+      if (interval !== undefined) this.rowUsage.intervalMs = interval;
+    } catch {
+      // Diagnostics must never change RPC success/error behavior during a settings outage.
+      log.warn('row_usage.settings_unavailable');
+    }
   }
 
   private restoreAlarmSections(): void {
@@ -332,7 +373,7 @@ export class ProjectData extends DurableObject<Env> {
       message: ReturnType<typeof messages.persistMessage>;
     } | null = null;
     try {
-      created = this.ctx.storage.transactionSync(() => {
+      created = this.meteredStorage.transactionSync(() => {
         const session = sessions.createReservedTaskSession(this.sql, this.env, input);
         const message = messages.persistMessage(
           this.sql,
@@ -630,7 +671,12 @@ export class ProjectData extends DurableObject<Env> {
       this.scheduleSummarySync();
       this.broadcastEvent(
         'session.updated',
-        { sessionId, workspaceId, taskId, status: 'active' },
+        {
+          sessionId,
+          workspaceId,
+          taskId,
+          status: sessionReads.getSession(this.sql, sessionId)?.status,
+        },
         sessionId
       );
     }
@@ -657,16 +703,68 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async signalSessionWakeReady(input: sessionWakeReady.SessionWakeReadyInput): Promise<number> {
+  /** null rejects authority; a nonnegative count (including a duplicate zero) acknowledges it. */
+  async signalSessionWakeReady(
+    input: sessionWakeReady.SessionWakeReadyInput
+  ): Promise<number | null> {
     // Authority reads must be serialized with dedup writes: an older RPC suspended in D1
     // cannot overwrite a newer fence and make its duplicate appear novel.
     const run = this.wakeReadyLock.then(async () => {
       this.ensureProjectId(input.projectId);
-      if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return 0;
-      const now = Date.now();
-      const released = this.ctx.storage.transactionSync(() =>
-        sessionWakeReady.applySessionWakeReady(this.sql, input, now)
+      if (isProjectDataArchiveExactRoutingEnabled(this.env))
+        await assertExactWriteAllowed(
+          this.env,
+          input.projectId,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
+      messages.assertTranscriptWriteAllowed(
+        this.sql,
+        input.chatSessionId,
+        'signalSessionWakeReady'
       );
+      const activationGuard = sessionWakeReady.captureSessionWakeActivation(this.sql, input);
+      if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return null;
+      const now = Date.now();
+      const { activated, released } = this.meteredStorage.transactionSync(() => {
+        // A source intent may have been prepared while the D1 authority read awaited.
+        messages.assertTranscriptWriteAllowed(
+          this.sql,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
+        const activated = sessionWakeReady.activateSessionWakeReady(
+          this.sql,
+          input,
+          activationGuard,
+          now
+        );
+        return {
+          activated,
+          released: sessionWakeReady.isSessionWakeReadyLocallyAccepted(this.sql, input)
+            ? sessionWakeReady.applySessionWakeReady(this.sql, input, now)
+            : null,
+        };
+      });
+      if (activated) {
+        this.ctx.waitUntil(
+          sessionWakeReady.recordSessionWakeActivation(input, now, (event) =>
+            this.admitProjectEvent(event)
+          )
+        );
+        this.scheduleSummarySync();
+        this.broadcastEvent(
+          'session.updated',
+          {
+            sessionId: input.chatSessionId,
+            workspaceId: input.workspaceId,
+            taskId: input.fence.runtime === 'vm' ? input.fence.taskId : undefined,
+            status: 'active',
+          },
+          input.chatSessionId
+        );
+      }
+      if (released === null) return null;
       // Re-arm even on duplicate: a previous RPC may have committed SQLite before alarm I/O failed.
       await this.recalculateAlarm();
       return released;
@@ -801,17 +899,31 @@ export class ProjectData extends DurableObject<Env> {
       timestamp: string;
       sequence?: number;
       origin?: string | null;
-    }>
+    }>,
+    source?: MessageIngestSource
   ): Promise<messagePersistence.MessageBatchPersistenceResult> {
-    return this.withArchiveTranscriptLock(() =>
-      messagePersistence.persistMessageBatchWithSideEffects(
+    return this.withArchiveTranscriptLock(async () => {
+      const config = source
+        ? ((await projectDataPorts().operations.messageMergeConfig?.(this.env)) ??
+          DEFAULT_MESSAGE_MERGE_CONFIG)
+        : DEFAULT_MESSAGE_MERGE_CONFIG;
+      const legacyClient = this.ctx.getWebSockets().some((ws) => {
+        const tags = this.ctx.getTags(ws);
+        const sessionTag = tags.find((tag) => tag.startsWith('session:'));
+        return (
+          (!sessionTag || sessionTag === `session:${sessionId}`) &&
+          !tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY)
+        );
+      });
+      return messagePersistence.persistMessageBatchWithSideEffects(
         this.sql,
         this.env,
         this.messagePersistenceHooks(),
         sessionId,
-        batchMessages
-      )
-    );
+        batchMessages,
+        { source, config: { ...config, enabled: config.enabled && !legacyClient } }
+      );
+    });
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
@@ -822,7 +934,7 @@ export class ProjectData extends DurableObject<Env> {
 
   async registerTaskWait(input: taskWaits.RegisterTaskWaitInput) {
     const config = resolveTaskWaitConfig(this.env);
-    const created = this.ctx.storage.transactionSync(() =>
+    const created = this.meteredStorage.transactionSync(() =>
       taskWaits.createTaskWait(this.sql, config, {
         ...input,
         id: crypto.randomUUID(),
@@ -862,7 +974,7 @@ export class ProjectData extends DurableObject<Env> {
       this.env,
       {
         getProjectId: () => this.getProjectId(),
-        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        transactionSync: (callback) => this.meteredStorage.transactionSync(callback),
         acceptPromptDelivery: (input) =>
           durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input),
         recalculateAlarm: () => this.recalculateAlarm(),
@@ -874,7 +986,7 @@ export class ProjectData extends DurableObject<Env> {
   private durabilityHooks(): durability.DurabilityFoundationHooks {
     return {
       getProjectId: () => this.getProjectId(),
-      transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+      transactionSync: (callback) => this.meteredStorage.transactionSync(callback),
       waitUntil: (promise) => this.ctx.waitUntil(promise),
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
@@ -906,6 +1018,7 @@ export class ProjectData extends DurableObject<Env> {
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
+      transactionSync: (fn) => this.meteredStorage.transactionSync(fn),
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
       broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
@@ -1048,7 +1161,7 @@ export class ProjectData extends DurableObject<Env> {
     input: archiveSharding.ArchiveSourceAbandonIntentInput
   ): Promise<archiveSharding.ArchiveSourceAbandonIntentResult> {
     return this.withArchiveTranscriptLock(async () =>
-      this.ctx.storage.transactionSync(() =>
+      this.meteredStorage.transactionSync(() =>
         archiveSharding.abandonArchiveSourceIntent(this.sql, input)
       )
     );
@@ -1075,7 +1188,7 @@ export class ProjectData extends DurableObject<Env> {
     targetAggregateSha256: string;
     now: number;
   }): boolean {
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       archiveSharding.markSourceTargetSealed(this.sql, input)
     );
   }
@@ -1088,7 +1201,7 @@ export class ProjectData extends DurableObject<Env> {
     r2ManifestKey: string;
     now: number;
   }): boolean {
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       archiveSharding.markSourceRecoveryManifestPersisted(this.sql, input)
     );
   }
@@ -1101,7 +1214,7 @@ export class ProjectData extends DurableObject<Env> {
         archiveSharding.reclaimArchiveSourcePage(
           sql,
           input,
-          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+          this.meteredStorage.transactionSync.bind(this.meteredStorage)
         )
       )
     );
@@ -1126,7 +1239,7 @@ export class ProjectData extends DurableObject<Env> {
             ...input,
             hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
           },
-          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+          this.meteredStorage.transactionSync.bind(this.meteredStorage)
         )
       )
     );
@@ -1150,7 +1263,7 @@ export class ProjectData extends DurableObject<Env> {
             ...input,
             hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
           },
-          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+          this.meteredStorage.transactionSync.bind(this.meteredStorage)
         )
       )
     );
@@ -1282,7 +1395,9 @@ export class ProjectData extends DurableObject<Env> {
     input: archiveSharding.ArchiveTargetPrepareInput
   ): Promise<archiveSharding.ArchiveTargetPrepareResult> {
     return this.withArchiveTranscriptLock(async () =>
-      this.ctx.storage.transactionSync(() => archiveSharding.prepareArchiveTarget(this.sql, input))
+      this.meteredStorage.transactionSync(() =>
+        archiveSharding.prepareArchiveTarget(this.sql, input)
+      )
     );
   }
 
@@ -1295,7 +1410,7 @@ export class ProjectData extends DurableObject<Env> {
           sql,
           input,
           this.env,
-          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+          this.meteredStorage.transactionSync.bind(this.meteredStorage)
         )
       )
     );
@@ -1326,7 +1441,7 @@ export class ProjectData extends DurableObject<Env> {
       archiveSharding.abandonArchiveTargetSessionPage(
         this.sql,
         input,
-        this.ctx.storage.transactionSync.bind(this.ctx.storage)
+        this.meteredStorage.transactionSync.bind(this.meteredStorage)
       )
     );
   }
@@ -1367,7 +1482,7 @@ export class ProjectData extends DurableObject<Env> {
     input: archiveSharding.ArchiveTargetAbandonInput
   ): Promise<archiveSharding.ArchiveTargetAbandonResult> {
     return this.withArchiveTranscriptLock(async () =>
-      this.ctx.storage.transactionSync(() =>
+      this.meteredStorage.transactionSync(() =>
         archiveSharding.abandonArchiveTargetSession(this.sql, {
           ...input,
           hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
@@ -1399,7 +1514,7 @@ export class ProjectData extends DurableObject<Env> {
     now: number;
   }): Promise<boolean> {
     return this.withArchiveTranscriptLock(async () =>
-      this.ctx.storage.transactionSync(() =>
+      this.meteredStorage.transactionSync(() =>
         archiveSharding.markArchiveTargetRehomeExported(this.sql, input)
       )
     );
@@ -1579,7 +1694,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   createCommentThread(input: comments.CreateCommentThreadInput) {
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       comments.createCommentThread(this.sql, this.env, input)
     );
     if (result.changed) this.broadcastCommentThread(result.thread, 'thread_created');
@@ -1587,7 +1702,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   createCommentReply(input: comments.CreateCommentReplyInput) {
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       comments.createCommentReply(this.sql, this.env, input)
     );
     if (result.changed) this.broadcastCommentThread(result.thread, 'reply_created');
@@ -1599,7 +1714,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   updateCommentThreadStatus(input: comments.UpdateCommentStatusInput) {
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       comments.updateCommentThreadStatus(this.sql, this.env, input)
     );
     if (result.changed) {
@@ -1652,7 +1767,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   createSessionAccessGrant(input: Omit<sessionAccess.CreateSessionAccessGrantInput, 'now'>) {
-    const result = this.ctx.storage.transactionSync(() => {
+    const result = this.meteredStorage.transactionSync(() => {
       const created = sessionAccess.createSessionAccessGrant(this.sql, input);
       if (created.status === 'created' || created.status === 'renewed') {
         activity.recordActivityEventInternal(
@@ -1697,7 +1812,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   revokeSessionAccessGrant(input: Omit<sessionAccess.RevokeSessionAccessGrantInput, 'now'>) {
-    const result = this.ctx.storage.transactionSync(() => {
+    const result = this.meteredStorage.transactionSync(() => {
       const revoked = sessionAccess.revokeSessionAccessGrant(this.sql, input);
       if (revoked.status === 'revoked') {
         activity.recordActivityEventInternal(
@@ -1729,7 +1844,7 @@ export class ProjectData extends DurableObject<Env> {
 
   /** A member left or was removed from the project: revoke grants they hold or issued as owner. */
   revokeSessionAccessForDepartedMember(input: { userId: string }) {
-    const revoked = this.ctx.storage.transactionSync(() => {
+    const revoked = this.meteredStorage.transactionSync(() => {
       const results = sessionAccess.revokeSessionAccessForDepartedMember(this.sql, input.userId);
       for (const entry of results) {
         activity.recordActivityEventInternal(
@@ -1761,7 +1876,7 @@ export class ProjectData extends DurableObject<Env> {
    * clients so their composers lock without waiting for a refetch.
    */
   private processExpiredSessionAccess(): void {
-    const expired = this.ctx.storage.transactionSync(() => {
+    const expired = this.meteredStorage.transactionSync(() => {
       const results = sessionAccess.processExpiredSessionAccessGrants(this.sql);
       for (const entry of results) {
         activity.recordActivityEventInternal(
@@ -1817,10 +1932,47 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.AdmitProjectEventInput
   ): projectEvents.ProjectEventAdmissionResult {
     this.ensureProjectId(input.projectId);
-    const result = this.ctx.storage.transactionSync(() =>
+    const now = Date.now();
+    const previousRetentionAt = projectEvents.readSchedulerState(
+      this.sql,
+      input.projectId
+    ).nextRetentionAt;
+    const previousWakeAt = projectEvents.computeProjectEventMaterializationAlarmTime(
+      this.sql,
+      this.env,
+      input.projectId,
+      now
+    );
+    const result = this.meteredStorage.transactionSync(() =>
       projectEvents.admitProjectEvent(this.sql, this.env, this.getProjectId(), input)
     );
-    this.rescheduleProjectEventAlarm(input.projectId);
+    const nextRetentionAt = projectEvents.readSchedulerState(
+      this.sql,
+      input.projectId
+    ).nextRetentionAt;
+    const nextWakeAt = projectEvents.computeProjectEventMaterializationAlarmTime(
+      this.sql,
+      this.env,
+      input.projectId,
+      now
+    );
+    // Duplicate/unmatched admissions generally leave both schedules unchanged.
+    // Retain the cold-start and new-wake paths without rewriting alarm memory
+    // or paying for setAlarm again on every webhook. Also repair missing section
+    // memory (for example when wakes are enabled with already matched events).
+    const missingSchedule =
+      (nextRetentionAt !== null &&
+        this.alarmSections.nextDueAt('project_event_retention') === null) ||
+      (nextWakeAt !== null &&
+        this.alarmSections.nextDueAt('project_event_wake_materialization') === null);
+    if (
+      previousRetentionAt !== nextRetentionAt ||
+      previousWakeAt !== nextWakeAt ||
+      missingSchedule ||
+      this.alarmSchedulingFailed
+    ) {
+      this.rescheduleProjectEventAlarm(input.projectId);
+    }
     return result;
   }
 
@@ -1878,7 +2030,7 @@ export class ProjectData extends DurableObject<Env> {
           scheduleCreatorSharedAccess(input.creator)
         );
     // No await separates the check above from this write, so the grant it read is still current.
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       eventSchedules.createSchedule(
         this.sql,
         this.env,
@@ -1940,7 +2092,7 @@ export class ProjectData extends DurableObject<Env> {
     if (input.operation !== 'reschedule' && input.operation !== 'cancel')
       throw new projectEvents.ProjectEventValidationError('Invalid schedule mutation');
     await requireScheduleMember(this.env, input.projectId, input.userId);
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       input.operation === 'reschedule'
         ? eventSchedules.rescheduleSchedule(
             this.sql,
@@ -2006,7 +2158,7 @@ export class ProjectData extends DurableObject<Env> {
       action,
       OWNER_ONLY_SCHEDULE
     );
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       standingWatches.createWatch(
         this.sql,
         this.env,
@@ -2065,7 +2217,7 @@ export class ProjectData extends DurableObject<Env> {
         input.request
       );
     }
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       input.operation === 'update'
         ? standingWatches.updateWatch(
             this.sql,
@@ -2105,11 +2257,11 @@ export class ProjectData extends DurableObject<Env> {
     await requireChannelActorAuthority(this.env, prepared.projectId, prepared.actor);
     // Commit bounded maintenance progress independently; a capacity rejection in
     // the following admission transaction must not rewind the catalog walk.
-    this.ctx.storage.transactionSync(() => {
+    this.meteredStorage.transactionSync(() => {
       requireChannelActorChat(this.sql, prepared.actor);
       eventChannels.cleanupEmptyChannels(this.sql, this.env, prepared.projectId, Date.now());
     });
-    const result = this.ctx.storage.transactionSync(() => {
+    const result = this.meteredStorage.transactionSync(() => {
       requireChannelActorChat(this.sql, prepared.actor);
       return eventChannels.publishChannel(this.sql, this.env, this.getProjectId(), prepared);
     });
@@ -2126,11 +2278,11 @@ export class ProjectData extends DurableObject<Env> {
     await requireChannelActorAuthority(this.env, prepared.projectId, prepared.actor);
     // Same two-step shape as publishProjectEventChannel: bounded catalog
     // maintenance commits on its own, then the send is one transaction.
-    this.ctx.storage.transactionSync(() => {
+    this.meteredStorage.transactionSync(() => {
       requireChannelActorChat(this.sql, prepared.actor);
       eventChannels.cleanupEmptyChannels(this.sql, this.env, prepared.projectId, Date.now());
     });
-    const result = this.ctx.storage.transactionSync(() => {
+    const result = this.meteredStorage.transactionSync(() => {
       requireChannelActorChat(this.sql, prepared.actor);
       return agentMessageChannels.sendAgentChannelMessage(
         this.sql,
@@ -2161,7 +2313,7 @@ export class ProjectData extends DurableObject<Env> {
     input: eventChannels.ProjectEventChannelHistoryInput
   ): eventChannels.ProjectEventChannelHistory {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       eventChannels.channelHistory(this.sql, this.env, this.getProjectId(), input)
     );
   }
@@ -2171,7 +2323,7 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<eventChannels.FollowProjectEventChannelResult> {
     this.ensureProjectId(input.projectId);
     await requireChannelActorAuthority(this.env, input.projectId, input.actor);
-    const result = this.ctx.storage.transactionSync(() => {
+    const result = this.meteredStorage.transactionSync(() => {
       requireChannelActorChat(this.sql, input.actor);
       return eventChannels.followChannel(this.sql, this.env, this.getProjectId(), input);
     });
@@ -2184,7 +2336,7 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<eventChannels.FollowProjectEventChannelResult> {
     this.ensureProjectId(input.projectId);
     await requireChannelActorAuthority(this.env, input.projectId, input.actor);
-    const result = this.ctx.storage.transactionSync(() => {
+    const result = this.meteredStorage.transactionSync(() => {
       requireChannelActorChat(this.sql, input.actor);
       return eventChannels.catchUpChannel(this.sql, this.env, this.getProjectId(), input);
     });
@@ -2196,7 +2348,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.CreateProjectEventSubscriptionInput
   ): projectEvents.ProjectEventSubscriptionMutationResult {
     this.ensureProjectId(input.projectId);
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       projectEvents.createProjectEventSubscription(this.sql, this.env, this.getProjectId(), input)
     );
     this.recalculateAlarm().catch((err) =>
@@ -2212,7 +2364,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.ListProjectEventSubscriptionsInput
   ): projectEvents.ProjectEventSubscriptionListResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.listProjectEventSubscriptions(this.sql, this.env, this.getProjectId(), input)
     );
   }
@@ -2221,7 +2373,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.GetProjectEventSubscriptionInput
   ): projectEvents.ProjectEventSubscriptionMutationResult['subscription'] | null {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.getProjectEventSubscription(this.sql, this.env, this.getProjectId(), input)
     );
   }
@@ -2230,7 +2382,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.CancelProjectEventSubscriptionInput
   ): projectEvents.ProjectEventSubscriptionMutationResult {
     this.ensureProjectId(input.projectId);
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       projectEvents.cancelProjectEventSubscription(this.sql, this.env, this.getProjectId(), input)
     );
     this.rescheduleProjectEventAlarm(input.projectId);
@@ -2241,7 +2393,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.ExpireProjectEventSubscriptionsInput
   ): projectEvents.ProjectEventExpireSubscriptionsResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.expireProjectEventSubscriptions(this.sql, this.env, this.getProjectId(), input)
     );
   }
@@ -2250,7 +2402,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.CreateProjectEventDeliveryBatchInput
   ): projectEvents.ProjectEventDeliveryBatchMutationResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.createProjectEventDeliveryBatch(this.sql, this.env, this.getProjectId(), input)
     );
   }
@@ -2259,7 +2411,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.ListProjectEventSubscriptionEventsInput
   ): projectEvents.ProjectEventSubscriptionEventListResult | null {
     this.ensureProjectId(input.projectId);
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       projectEvents.listProjectEventSubscriptionEvents(
         this.sql,
         this.env,
@@ -2275,7 +2427,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.GetProjectEventInput
   ): projectEvents.ProjectEventSubscriptionEvent | null {
     this.ensureProjectId(input.projectId);
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       projectEvents.getProjectEvent(this.sql, this.env, this.getProjectId(), input)
     );
     this.rescheduleProjectEventAlarm(input.projectId);
@@ -2286,7 +2438,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.AckProjectEventDeliveryInput
   ): projectEvents.ProjectEventDeliveryAckResult | null {
     this.ensureProjectId(input.projectId);
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       projectEvents.ackProjectEventDelivery(this.sql, this.env, this.getProjectId(), input)
     );
     this.rescheduleProjectEventAlarm(input.projectId);
@@ -2297,7 +2449,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.ListProjectEventDeliveryBatchesInput
   ): projectEvents.ProjectEventDeliveryBatchListResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.listProjectEventDeliveryBatches(this.sql, this.env, this.getProjectId(), input)
     );
   }
@@ -2306,7 +2458,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.RecordProjectEventDeliveryAttemptInput
   ): projectEvents.ProjectEventDeliveryAttemptMutationResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.recordProjectEventDeliveryAttempt(
         this.sql,
         this.env,
@@ -2320,7 +2472,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.ListProjectEventDeliveryAttemptsInput
   ): projectEvents.ProjectEventDeliveryAttemptListResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.listProjectEventDeliveryAttempts(this.sql, this.env, this.getProjectId(), input)
     );
   }
@@ -2329,7 +2481,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.GetProjectEventRecentStatusInput
   ): projectEvents.ProjectEventRecentStatus {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.getProjectEventRecentStatus(this.sql, this.env, this.getProjectId(), input)
     );
   }
@@ -2338,7 +2490,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.ValidateProjectEventWakeRecoveryAuthorityInput
   ): boolean {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.validateProjectEventWakeRecoveryAuthority(
         this.sql,
         this.env,
@@ -2352,7 +2504,7 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.RunProjectEventRetentionInput
   ): projectEvents.ProjectEventRetentionResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    return this.meteredStorage.transactionSync(() =>
       projectEvents.runProjectEventRetention(this.sql, this.env, this.getProjectId(), input)
     );
   }
@@ -2368,14 +2520,14 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   createFileCommentThread(input: libraryFileComments.CreateFileCommentThreadInput) {
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       libraryFileComments.createFileCommentThread(this.sql, this.env, input)
     );
     return { thread: result.thread, idempotent: result.idempotent };
   }
 
   createFileCommentReply(input: libraryFileComments.CreateFileCommentReplyInput) {
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       libraryFileComments.createFileCommentReply(this.sql, this.env, input)
     );
     return {
@@ -2386,7 +2538,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   updateFileCommentThreadStatus(input: libraryFileComments.UpdateFileCommentStatusInput) {
-    const result = this.ctx.storage.transactionSync(() =>
+    const result = this.meteredStorage.transactionSync(() =>
       libraryFileComments.updateFileCommentThreadStatus(this.sql, this.env, input)
     );
     return { thread: result.thread, idempotent: result.idempotent };
@@ -2462,7 +2614,7 @@ export class ProjectData extends DurableObject<Env> {
     agentType: string,
     cmds: Array<{ name: string; description: string }>
   ): Promise<void> {
-    this.ctx.storage.transactionSync(() => {
+    this.meteredStorage.transactionSync(() => {
       commands.saveCachedCommands(this.sql, agentType, cmds);
     });
   }
@@ -3017,14 +3169,14 @@ export class ProjectData extends DurableObject<Env> {
 
   async runGroupedFtsCleanup(): Promise<groupedFtsCleanup.ProjectDataGroupedFtsCleanupResult | null> {
     const config = storageSafety.resolveStorageSafetyConfig(this.env);
-    await this.ctx.storage.sync();
+    await this.meteredStorage.sync();
     const result = await groupedFtsCleanup.runProjectDataGroupedFtsCleanup(
       this.sql,
       this.env,
       this.getProjectId(),
       config,
       {
-        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        transactionSync: (callback) => this.meteredStorage.transactionSync(callback),
         allowStart: true,
         classifyStatus: (databaseSizeBytes) =>
           storageSafety.classifyStorageUsage(databaseSizeBytes, config),
@@ -3053,7 +3205,7 @@ export class ProjectData extends DurableObject<Env> {
         transactionBytes: recoveryConfig.transactionBytes,
       },
       storageSafety.resolveStorageSafetyConfig(this.env),
-      { transactionSync: (callback) => this.ctx.storage.transactionSync(callback) }
+      { transactionSync: (callback) => this.meteredStorage.transactionSync(callback) }
     );
   }
 
@@ -3067,7 +3219,7 @@ export class ProjectData extends DurableObject<Env> {
         this.getProjectId(),
         input,
         {
-          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+          transactionSync: (callback) => this.meteredStorage.transactionSync(callback),
         }
       )
     );
@@ -3087,8 +3239,8 @@ export class ProjectData extends DurableObject<Env> {
   protected runStorageSafetyAlarmLocked(): Promise<storageSafety.ProjectDataStorageAlarmResult> {
     return this.withToolPayloadCleanupLock(() =>
       storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId(), {
-        sync: () => this.ctx.storage.sync(),
-        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        sync: () => this.meteredStorage.sync(),
+        transactionSync: (callback) => this.meteredStorage.transactionSync(callback),
       })
     );
   }
@@ -3097,7 +3249,7 @@ export class ProjectData extends DurableObject<Env> {
     const projectId = this.getProjectId();
     if (!projectId) return;
     const now = Date.now();
-    const candidates = this.ctx.storage.transactionSync(() =>
+    const candidates = this.meteredStorage.transactionSync(() =>
       projectEvents.selectProjectEventWakeMaterializationCandidates(
         this.sql,
         this.env,
@@ -3106,7 +3258,7 @@ export class ProjectData extends DurableObject<Env> {
       )
     );
     if (candidates.length === 0) {
-      this.ctx.storage.transactionSync(() =>
+      this.meteredStorage.transactionSync(() =>
         projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, projectId, now)
       );
       return;
@@ -3118,7 +3270,7 @@ export class ProjectData extends DurableObject<Env> {
         candidate.sourceTaskGuard
       );
       if (!sourceAuthorized) {
-        this.ctx.storage.transactionSync(() =>
+        this.meteredStorage.transactionSync(() =>
           projectEvents.cancelProjectEventWakeForRevokedSourceTask(
             this.sql,
             projectId,
@@ -3127,7 +3279,7 @@ export class ProjectData extends DurableObject<Env> {
         );
         continue;
       }
-      const result = this.ctx.storage.transactionSync(() =>
+      const result = this.meteredStorage.transactionSync(() =>
         projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, projectId, now, {
           subscriptionId: candidate.subscriptionId,
           ignoreSchedulerCheckpoint: true,
@@ -3151,7 +3303,7 @@ export class ProjectData extends DurableObject<Env> {
       }
       if (result.status === 'materialized' || result.status === 'disabled') return;
     }
-    this.ctx.storage.transactionSync(() =>
+    this.meteredStorage.transactionSync(() =>
       projectEvents.markSchedulerSuccess(this.sql, projectId, now, 'materialization', deferredUntil)
     );
   }
@@ -3160,7 +3312,7 @@ export class ProjectData extends DurableObject<Env> {
     const projectId = this.getProjectId();
     if (!projectId) return;
     if (!projectEvents.isProjectEventRetentionDue(this.sql, this.env, projectId)) return;
-    this.ctx.storage.transactionSync(() =>
+    this.meteredStorage.transactionSync(() =>
       projectEvents.runProjectEventRetention(this.sql, this.env, this.getProjectId(), {
         projectId,
         refreshAccounting: false,
@@ -3173,7 +3325,7 @@ export class ProjectData extends DurableObject<Env> {
     err: unknown
   ): void {
     try {
-      this.ctx.storage.transactionSync(() =>
+      this.meteredStorage.transactionSync(() =>
         projectEvents.recordSchedulerFailure(this.sql, this.env, this.getProjectId(), phase, err)
       );
     } catch (checkpointErr) {
@@ -3192,7 +3344,7 @@ export class ProjectData extends DurableObject<Env> {
     if (
       await projectDataPorts().operations.deferAlarmWhenDisabled(
         this.env,
-        this.ctx.storage,
+        this.meteredStorage,
         'ProjectData'
       )
     )
@@ -3216,7 +3368,8 @@ export class ProjectData extends DurableObject<Env> {
       ),
       gating,
       this.sqlRowMeter,
-      this.alarmSections
+      this.alarmSections,
+      (section, work) => this.rowUsage.run(`alarm:${section}`, work, true)
     );
     try {
       await tick.run('runtime_heartbeat_timeouts', async () => {
@@ -3404,6 +3557,9 @@ export class ProjectData extends DurableObject<Env> {
           return new Response('Invalid sessionId format', { status: 400 });
         tags.push(`session:${sessionId}`);
       }
+      if (url.searchParams.get('messageAppend') === CHAT_MESSAGE_APPEND_CAPABILITY)
+        tags.push(CHAT_MESSAGE_APPEND_CAPABILITY);
+      else sealMessageStream(this.sql, sessionId ?? undefined);
       this.ctx.acceptWebSocket(pair[1], tags);
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
@@ -3854,15 +4010,21 @@ export class ProjectData extends DurableObject<Env> {
   private async recalculateAlarm(
     consumed?: ReadonlyMap<ProjectDataAlarmSection, number>
   ): Promise<void> {
-    const times = computeProjectDataAlarmSectionTimes(this.sql, this.env);
-    this.alarmSections.observe(times, consumed);
-    this.persistAlarmSections();
-    // The scheduler's memory already holds every fresh time (min-folded) plus the retry floor of
-    // any section that just threw; reading fresh times directly would bypass that floor and
-    // re-arm a failing overdue section at `now` on every tick.
-    const alarmTime = earliestAlarmTime([this.alarmSections.nextDueAt()]);
-    if (alarmTime !== null) await this.ctx.storage.setAlarm(alarmTime);
-    else await this.ctx.storage.deleteAlarm();
+    // Clear before attempting the write: an older successful call must not erase
+    // a newer failure while scheduling calls overlap.
+    this.alarmSchedulingFailed = false;
+    try {
+      const times = computeProjectDataAlarmSectionTimes(this.sql, this.env);
+      this.alarmSections.observe(times, consumed);
+      this.persistAlarmSections();
+      // Preserve remembered times and the retry floor of a section that just threw.
+      const alarmTime = earliestAlarmTime([this.alarmSections.nextDueAt()]);
+      if (alarmTime !== null) await this.meteredStorage.setAlarm(alarmTime);
+      else await this.meteredStorage.deleteAlarm();
+    } catch (error) {
+      this.alarmSchedulingFailed = true;
+      throw error;
+    }
   }
 
   private async scheduleHeartbeatAlarm(): Promise<void> {
@@ -4029,3 +4191,6 @@ export class ProjectData extends DurableObject<Env> {
     await sessionSummarySync.syncSessionSummariesToD1(this.sql, this.env, projectId);
   }
 }
+
+// Prototype methods remain visible to workerd RPC; instance properties are not RPC methods.
+instrumentRowUsage(ProjectData.prototype, (instance) => instance['rowUsage']);

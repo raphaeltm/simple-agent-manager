@@ -74,15 +74,14 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS = "300000"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
 # Compact format stays off until the staged rollout and production mutation approval.
 PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
-# Tripled with the sweep cadence on 2026-09-27 (was 800000): the same ~33k estimate units per
-# tick at 3x the ticks. Real candidates reserve ~21.5k units (six production samples, 17.8k-27.1k),
-# so 72 ticks/day use ~1.55M; 800000 would have stopped the drain at ~37/day. Cost
-# (`pnpm quality:cloudflare-cost`, rule 76): DO rows written were projected at 32.8M of the 50M/month
-# included allowance, and the extra ticks add ~0.4-0.6M billed rows/day, so the expected cost is
-# $0; spending the whole allowance at the worst measured ratio would be ~$13/month over it.
-# The GitHub `production` Environment pins this var and must be changed in lockstep; the deploy
-# log prints any override that differs (.claude/rules/70).
-PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "2400000"
+# Raised with the 9-minute cadence on 2026-11-14: 72k raw rows/hour needs ~5.33M
+# reservations/day at the measured fixture shape; 6M leaves ~12.6% headroom.
+# Reservation units are not billed rows. At 1.38-2.57 measured writes/raw row,
+# expected writes are ~2.4M-4.4M/day for ~2.75 days, excluding inflow.
+# If billed writes equalled reserved units, 6M would cost ~$6/day at $1/M,
+# $3.60/day above 2.4M. This comparison is not a measured billed-write cap.
+# The GitHub production Environment pins this var and must change in lockstep (rule 70).
+PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "6000000"
 # Safety multiplier applied to the row inventory `estimateArchiveWrites` already counts, NOT
 # an independent amplification factor. MEASURED 2026-09-14 in production two ways:
 #   - `project_data_archive_write_budget` sampled an hour apart: 726,408 reserved across 11
@@ -96,24 +95,19 @@ PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "2400000"
 #
 # 2 exceeds the worst observed ratio of 1.23 by ~63%. Under the 800000 allowance and hourly
 # cadence of 2026-09-14 that moved the budget's ceiling to ~47/day, so the one-candidate-per-tick
-# limit (~4,849 messages each) was the binding constraint at 24/day. Since 2026-09-27 the same factor
-# against ~10,250-unit candidates and the 2400000 allowance gives ~111/day, above the 72 ticks the
-# cadence claims, so the cadence still binds. Two caveats before trusting this number further: n
-# is small (2 budget samples, 4 telemetry buckets), and largest-first selection keeps pulling
-# differently-shaped candidates as the backlog drains, so the ratio can move. Re-measure before
-# changing this again — the condition it stands for is "rows this migration will actually
-# write", and only telemetry says what that is (.claude/rules/74).
+# limit (~4,849 messages each) was the binding constraint at 24/day. The 2026-11-14
+# full fixture needs 6476 reservations per 2100 raw rows at factor 2; the 6M allowance
+# supports the targeted 72k rows/hour. Inventory shape can change as the backlog drains;
+# re-measure before changing the factor (.claude/rules/74).
 PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "2"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT = "100"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
-# The sweep claims a tick every 18 min (80 a day). Until 2026-11-12 a tick archived exactly one
-# session, because _WALL_TIME_MS (10 s) was below one small session's fixed cost; since then a
-# tick keeps working for _WALL_TIME_MS. 18 min rather than 20: the */5 cron reaches the archive
-# step 1m15s-3m30s into each invocation, and at whole multiples claims kept missing their tick by
-# seconds (37 hourly claims averaged 62.7 min apart). 18 is never due on the third five-minute
-# tick and is due on the fourth unless the archive step starts over two minutes earlier than at
-# the previous claim (the observed spread is 2m15s), which pushes that one claim to 25 minutes.
+# A 9-minute cadence rounds to about 10 minutes on the */5 cron (144 claims/day),
+# versus about 20 minutes at the previous 18-minute interval. Archive-step timing
+# jitter can defer a claim. At ~12k copied rows/tick this targets ~72k rows/hour,
+# draining 4.75M in ~66 hours instead of ~132, excluding inflow.
+# The per-tick wall bound remains 60 s; the cadence doubles opportunities, not tick work.
 # Per-tick work is bounded by _WALL_TIME_MS and _SWEEP_SESSIONS; daily volume by
 # _DAILY_WRITE_BUDGET. Load review: tasks/active/2026-11-12-projectdata-archive-drain.md and the
 # archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.
@@ -122,7 +116,7 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 # this sweep, while the SAM root ProjectData DO sat ~550 MB under Cloudflare's hard 10 GiB cap
 # (it hit the cap on 2026-10-02). This drain is storage protection, not a cost lever: do not slow
 # it to save money.
-PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "1080000"
+PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "540000"
 # Most sessions one tick may copy. A candidate refused by the write budget or by the root object
 # takes no slot, so this caps work done, not candidates looked at. It also sets the
 # reclaimable-migration limit and the candidate over-fetch LIMIT
@@ -469,13 +463,14 @@ binding = "AI"
 # because they break Vitest — Cloudflare issue #9343).
 
 # Cron triggers:
+# - Every minute: lightweight durable compute-catalog continuation only
 # - Every 5 minutes: provisioning timeout checks, warm node cleanup, stuck task recovery
 # - Hourly at :30: monthly AI cost aggregation per user (Gateway logs → KV cache)
 # - Daily at 03:00 UTC: analytics event forwarding to external platforms (Phase 4)
 # NOTE: Cron strings are matched exactly in scheduled/handler.ts:scheduled() to dispatch
 # between the different jobs. If you change them here, update the comparisons there.
 [triggers]
-crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *"]
+crons = ["* * * * *", "*/5 * * * *", "30 * * * *", "0 3 * * *"]
 
 # Secrets (set via wrangler secret bulk):
 # - BOOTSTRAP_OWNER_EMAIL (optional — immutable verified first-owner identity for installer deployments)

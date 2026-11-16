@@ -21,6 +21,7 @@ import {
   validatePlatformIntegrationInput,
   validateSetupCanComplete,
 } from '../services/platform-config-validation';
+import { requestWaitUntil, scheduleSecurityAlert } from '../services/security-alerts';
 
 const setupRoutes = new Hono<{ Bindings: Env }>();
 type SetupContext = Context<{ Bindings: Env }>;
@@ -34,13 +35,14 @@ const SetupRequestBodySchema = v.object({
   config: v.optional(v.unknown()),
 });
 
+/**
+ * The rate-limit bucket for setup-token attempts. Cloudflare's edge sets CF-Connecting-IP and
+ * overwrites any client copy; X-Forwarded-For and User-Agent are whatever the caller sends, so
+ * rotating them would hand out a fresh attempt budget per request. Requests without the header
+ * (never the case behind Cloudflare) share one bucket.
+ */
 function clientIdentifier(c: SetupContext): string {
-  return (
-    c.req.header('CF-Connecting-IP') ??
-    c.req.header('X-Forwarded-For') ??
-    c.req.header('User-Agent') ??
-    'unknown'
-  );
+  return c.req.header('CF-Connecting-IP') ?? 'unknown';
 }
 
 function setupClosed(): AppError {
@@ -167,7 +169,8 @@ setupRoutes.post('/complete', async (c) => {
   if (!completion.ok) {
     throw errors.badRequest('Setup cannot be completed', { errors: completion.errors });
   }
-  await completeSetupWithConfig(c.env, config);
+  const changes = await completeSetupWithConfig(c.env, config);
+  scheduleSecurityAlert(c.env, requestWaitUntil(c), { kind: 'setup-completed', changes });
   return c.json({ completed: true, status: await getPlatformConfigStatus(c.env) });
 });
 

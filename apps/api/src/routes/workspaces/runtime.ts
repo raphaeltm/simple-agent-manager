@@ -10,6 +10,7 @@ import {
   getAgentDefinition,
   HARNESS_CAPABILITIES,
   isValidAgentType,
+  MESSAGE_OUTBOX_INCARNATION_HEADER,
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
@@ -55,6 +56,7 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { assertProviderLimitCredentialPin } from '../../services/provider-limit-credential-pin';
+import { refuseHaltedRunAccount } from '../../services/run-agent-configuration';
 import {
   isAiProxyEnabled,
   PROXY_ELIGIBLE_AGENTS,
@@ -787,6 +789,20 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     profile
   );
   let credentialProviderMode = 'direct';
+
+  // An account chosen for this run that can no longer be used (paused, removed) must stop
+  // the run here. Without this, "no credential" would continue to the platform proxy or a
+  // fallback below and run the chat on an account nobody chose for it.
+  if (!credentialData && profile?.runConfigurationId) {
+    await refuseHaltedRunAccount(db, {
+      workspaceId,
+      userId: workspace.userId,
+      projectId: workspace.projectId,
+      agentType: body.agentType,
+      encryptionKey,
+      profile,
+    });
+  }
 
   // SECURITY: Never return raw platform-managed credentials to tenant workspaces.
   // Platform credentials are control-plane secrets and must only be used via
@@ -1578,12 +1594,22 @@ runtimeRoutes.post('/:id/messages', async (c) => {
     messageCount: body.messages.length,
   };
   let result: MessageBatchPersistenceRouteResult;
+  const outboxIncarnation = c.req.header(MESSAGE_OUTBOX_INCARNATION_HEADER);
   try {
     result = await projectDataService.persistMessageBatch(
       c.env,
       currentWorkspace.projectId,
       sessionId,
-      toProjectDataMessages(body)
+      toProjectDataMessages(body),
+      {
+        workspaceId,
+        callbackGeneration: currentWorkspace.callbackGeneration ?? null,
+        // This is transport identity, not an auth claim. Missing/malformed IDs
+        // retain the legacy per-message path instead of guessing about replay.
+        outboxIncarnation: v.is(v.pipe(v.string(), v.uuid()), outboxIncarnation)
+          ? outboxIncarnation.toLowerCase()
+          : undefined,
+      }
     );
   } catch (err) {
     return handleMessagePersistenceError(c, context, err);

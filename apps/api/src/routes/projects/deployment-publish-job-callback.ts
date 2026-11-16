@@ -133,7 +133,12 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   if (accepted === false)
     throw errors.conflict('Publish job is terminal or release does not match');
   await assertCurrent();
-  if (eventType !== 'publish.job.heartbeat' && status && status !== job.status) {
+  if (
+    !job.contextShadow &&
+    eventType !== 'publish.job.heartbeat' &&
+    status &&
+    status !== job.status
+  ) {
     c.executionCtx.waitUntil(
       recordDeploymentPublishJobLifecycleEventBestEffort(c.env, {
         projectId,

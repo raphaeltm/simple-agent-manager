@@ -288,4 +288,18 @@ describe('publish callback routes with real SQL', () => {
       expect.objectContaining({ status: 'building' })
     );
   });
+  it('shadow rows cannot submit/link releases or emit public publish events', async () => {
+    sqlite.exec('UPDATE deployment_publish_jobs SET context_shadow=1');
+    expect((await submit()).status).toBe(409);
+    expect(releases()).toHaveLength(0);
+    const event = {
+      status: 'context_ready',
+      eventType: 'publish.context.collected',
+      message: 'collected',
+    };
+    expect((await request('deployment-publish-jobs/job/events', event)).status).toBe(200);
+    expect(lifecycle).not.toHaveBeenCalled();
+    sqlite.exec("UPDATE deployment_publish_jobs SET context_shadow=0, status='building'");
+    expect((await submit()).status).toBe(200);
+  });
 });

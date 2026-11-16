@@ -44,6 +44,15 @@ export function newestPersistedCursor(
   return undefined;
 }
 
+/** Include the cached tail: a canonical message can grow without moving its cursor. */
+function tailRefreshCursor(messages: readonly ChatMessageResponse[]): string | undefined {
+  const tail = newestPersistedMessage(messages);
+  if (!tail) return undefined;
+  // Positive persisted sequences leave room for a lower bound. Overlap is
+  // deduplicated by ID; later pages continue from their exact final position.
+  return formatMessageCursor({ ...tail, sequence: tail.sequence - 1 });
+}
+
 /** Cursor for the oldest persisted message in `messages`, if one is loaded. */
 export function oldestPersistedCursor(
   messages: readonly ChatMessageResponse[]
@@ -89,7 +98,7 @@ export async function refreshCachedTranscript(
   cached: ChatSessionDetailResponse,
   signal?: AbortSignal
 ): Promise<ChatSessionDetailResponse | null> {
-  const after = newestPersistedCursor(cached.messages);
+  const after = tailRefreshCursor(cached.messages);
   if (!after) return null;
   const { last, newer } = await readForward(sessionId, after, (cursor) =>
     getChatSession(projectId, sessionId, { signal, after: cursor })
@@ -113,7 +122,7 @@ export async function readMessagesAfter(
   loaded: readonly ChatMessageResponse[],
   signal?: AbortSignal
 ): Promise<ChatMessageResponse[]> {
-  const after = newestPersistedCursor(loaded);
+  const after = tailRefreshCursor(loaded);
   if (!after) return (await fetchNewestPage(projectId, sessionId, signal)).messages;
   const { newer } = await readForward(sessionId, after, (cursor) =>
     listChatMessages(projectId, sessionId, {

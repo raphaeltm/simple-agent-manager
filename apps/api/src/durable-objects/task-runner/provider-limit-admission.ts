@@ -28,13 +28,14 @@ export async function holdTaskForProviderLimit(
   )
     return false;
   const row = await rc.env.DATABASE.prepare(
-    'SELECT provider_limit_wait_json, agent_profile_hint, skill_id FROM tasks WHERE id = ?'
+    'SELECT provider_limit_wait_json, agent_profile_hint, skill_id, agent_configuration_id FROM tasks WHERE id = ?'
   )
     .bind(state.taskId)
     .first<{
       provider_limit_wait_json: string | null;
       agent_profile_hint: string | null;
       skill_id: string | null;
+      agent_configuration_id: string | null;
     }>();
   const previous = parseProviderLimitWait(row?.provider_limit_wait_json);
   const now = Date.now();
@@ -85,14 +86,15 @@ export async function holdTaskForProviderLimit(
     if (!intent) return false;
   }
 
-  // Same profile context as the agent-key callback, so admission checks the limit
-  // of the account the run will actually start on (a personal profile pin included).
+  // Same credential context as the agent-key callback, so admission checks the limit
+  // of the account the run will actually start on (a run account or profile pin included).
   const db = drizzle(rc.env.DATABASE, { schema });
   const profile = await resolveProfileCredentialContext(db, {
     userId: state.userId,
     projectId: state.projectId,
     profileId: row?.agent_profile_hint ?? state.config.agentProfileHint,
     skillId: row?.skill_id ?? null,
+    runConfigurationId: row?.agent_configuration_id ?? null,
   });
   const reference = await getSelectedAgentCredentialReference(
     db,
@@ -114,10 +116,11 @@ export async function holdTaskForProviderLimit(
     (approval.expiresAt <= now ||
       approval.profileId !== (row?.agent_profile_hint ?? null) ||
       approval.skillId !== (row?.skill_id ?? null) ||
+      (approval.runConfigurationId ?? null) !== (row?.agent_configuration_id ?? null) ||
       approval.agentType !==
         (state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode') ||
       (approval.profileId !== null && profile?.profileId !== approval.profileId) ||
-      (profile !== null && profile.agentType !== approval.agentType));
+      (profile !== null && profile.agentType !== null && profile.agentType !== approval.agentType));
   if (
     key !== null &&
     previous?.phase === 'released' &&

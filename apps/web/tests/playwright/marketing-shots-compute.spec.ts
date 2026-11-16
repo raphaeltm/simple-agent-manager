@@ -200,8 +200,6 @@ const PROJECT = {
   githubInstallationId: 'inst-northwind',
   defaultVmSize: null,
   defaultAgentType: null,
-  defaultProvider: 'hetzner',
-  defaultLocation: 'fsn1',
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   resourceRequirementsJson: JSON.stringify({ minVcpu: 2, minMemoryGb: 4, minDiskGb: 40 }),

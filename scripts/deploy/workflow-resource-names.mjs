@@ -2,6 +2,8 @@
 import { createHash } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 
+import { resolveInstallation } from './staging-installations.mjs';
+
 const MAX_ENVIRONMENT_LENGTH = 63;
 const MAX_PREFIX_LENGTH = 40;
 const MAX_GATEWAY_ID_LENGTH = 64;
@@ -128,7 +130,53 @@ export function resolvePrefix({ explicitPrefix, baseDomain }) {
 }
 
 export function resolveResourceNames(env, mode) {
-  const environment = env.DEPLOY_ENVIRONMENT ?? env.INPUT_ENVIRONMENT;
+  const credentialEnvironment = env.DEPLOY_ENVIRONMENT ?? env.INPUT_ENVIRONMENT;
+  const requestedInstallation = env.INSTALLATION?.trim();
+  if (requestedInstallation && !credentialEnvironment) {
+    throw new Error('An installation needs the environment that supplies its credentials.');
+  }
+  const primary = resolvePrimaryResourceNames(env, mode, credentialEnvironment);
+  if (!credentialEnvironment) {
+    return primary;
+  }
+  const target = resolveInstallation({
+    environment: validateDeploymentEnvironment(credentialEnvironment),
+    installation: requestedInstallation,
+    primary: { baseDomain: primary.base_domain, prefix: primary.prefix, stack: primary.stack },
+  });
+  if (!target.secondary) {
+    return {
+      ...primary,
+      installation: primary.environment,
+      credential_environment: primary.environment,
+      secondary: 'false',
+    };
+  }
+
+  // A secondary installation shares the primary's Pulumi backend (the R2 keys are scoped to it)
+  // under its own stack, and takes every other name from its own domain and prefix.
+  const secondary = resolvePrimaryResourceNames(
+    {
+      BASE_DOMAIN: target.entry.baseDomain,
+      RESOURCE_PREFIX: target.entry.resourcePrefix,
+      PULUMI_STATE_BUCKET: primary.pulumi_state_bucket,
+    },
+    mode,
+    target.installation,
+    target.entry.stack
+  );
+  return {
+    ...secondary,
+    installation: target.installation,
+    credential_environment: credentialEnvironment,
+    secondary: 'true',
+    zone_name: target.entry.baseDomain,
+    primary_stack: primary.stack,
+    primary_prefix: primary.prefix,
+  };
+}
+
+function resolvePrimaryResourceNames(env, mode, environment, explicitStack) {
   const requiresBaseDomain = mode === 'deploy' || mode === 'teardown' || mode === 'marketing';
   const baseDomain = env.BASE_DOMAIN ? validateBaseDomain(env.BASE_DOMAIN) : undefined;
   if (requiresBaseDomain && !baseDomain) {
@@ -138,11 +186,12 @@ export function resolveResourceNames(env, mode) {
     explicitPrefix: env.RESOURCE_PREFIX,
     baseDomain,
   });
-  const stack = environment ? stackNameForEnvironment(environment) : undefined;
-  const pulumiStateBucket = validateBucketName(
-    env.PULUMI_STATE_BUCKET || `${prefix}-pulumi-state`
-  );
+  const stack = explicitStack ?? (environment ? stackNameForEnvironment(environment) : undefined);
+  const pulumiStateBucket = validateBucketName(env.PULUMI_STATE_BUCKET || `${prefix}-pulumi-state`);
   const aiGateway = validateGatewayId(env.AI_GATEWAY_ID || prefix);
+  if (explicitStack) {
+    validateDeploymentEnvironment(explicitStack);
+  }
 
   const outputs = {
     prefix,
@@ -168,6 +217,7 @@ export function resolveResourceNames(env, mode) {
     outputs.pages_project = outputs.web_pages_project;
     outputs.www_project = `${prefix}-www`;
     outputs.analytics_dataset = `${prefix}_analytics`;
+    outputs.assets_bucket = `${prefix}-${stack}-assets`;
     if (baseDomain) {
       outputs.api_url = `https://api.${baseDomain}`;
       outputs.app_url = `https://app.${baseDomain}`;
@@ -212,10 +262,13 @@ function main() {
   writeGitHubOutputs(outputs);
 
   if (mode === 'deploy' || mode === 'pulumi') {
-    console.log(`Stack: ${outputs.stack} for environment: ${outputs.environment}`);
+    console.log(
+      `Stack: ${outputs.stack} for installation: ${outputs.installation ?? outputs.environment} (credentials: ${outputs.credential_environment ?? outputs.environment})`
+    );
     console.log(`Resource prefix: ${outputs.prefix}`);
   } else if (mode === 'teardown') {
     console.log('### Resource Names');
+    console.log(`- Installation: ${outputs.installation ?? outputs.environment}`);
     console.log(`- Stack: ${outputs.stack}`);
     console.log(`- API Worker: ${outputs.api_worker}`);
     console.log(`- Tail Worker: ${outputs.tail_worker}`);

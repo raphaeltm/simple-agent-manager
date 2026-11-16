@@ -1,6 +1,13 @@
-/** Scheduling hint from a committed wake; delivery admission remains authoritative. */
+/** Exact committed wake activation and delivery scheduling; prompt admission remains authoritative. */
+import type { AdmitProjectEventInput } from '@simple-agent-manager/shared';
+import { log } from '@simple-agent-manager/worker-core';
+
+import { buildSessionLifecycleEventInput } from '../client/project-data-lifecycle-event-inputs';
 import { nudgePromptDeliveriesForTarget } from './prompt-delivery';
-import type { Env } from './types';
+import {
+  beginSessionWakeActivation,
+  commitSessionWakeActivation,
+} from './session-wake-activation-guard';
 
 export interface SessionWakeReadyInput {
   projectId: string;
@@ -9,40 +16,81 @@ export interface SessionWakeReadyInput {
   agentSessionId: string;
   /** Producer timestamp immediately after the committed runtime-ready transition. */
   runtimeReadyAt?: number;
+  /** Resolver capture; legacy producers can validate the current committed runtime directly. */
+  expectedRuntime?: { nodeId: string; workspaceCallbackGeneration: string | null };
   fence:
     | { runtime: 'vm'; taskId: string; recoveryAttemptId: string }
     | { runtime: 'cf-container'; nodeId: string; runtimeIncarnationId: string };
 }
 
-/** Validate the exact committed recovery, never infer readiness from a browser delta. */
-export async function isSessionWakeReadyCurrent(
-  env: Pick<Env, 'DATABASE'>,
+export { isSessionWakeReadyCurrent } from './session-wake-ready-authority';
+
+/** Capture before D1 I/O: a concurrent stop, relink or later sleep must win. */
+export function captureSessionWakeActivation(
+  sql: SqlStorage,
   input: SessionWakeReadyInput
-): Promise<boolean> {
-  const common = `SELECT 1 AS ready FROM workspaces w
-    JOIN nodes n ON n.id = w.node_id
-    JOIN agent_sessions a ON a.workspace_id = w.id
-    WHERE w.id = ? AND w.project_id = ? AND w.chat_session_id = ?
-      AND a.id = ? AND a.status = 'running' AND w.status = 'running'
-      AND n.status = 'running' AND w.runtime_deletion_confirmed_at IS NULL`;
-  const values = [input.workspaceId, input.projectId, input.chatSessionId, input.agentSessionId];
-  const fence = input.fence;
-  const query =
-    fence.runtime === 'vm'
-      ? env.DATABASE.prepare(
-          `${common} AND n.runtime = 'vm'
-        AND EXISTS (SELECT 1 FROM session_snapshots s JOIN tasks t ON t.id = s.recovery_task_id
-          WHERE s.chat_session_id = w.chat_session_id AND s.project_id = w.project_id
-            AND s.recovery_status = 'restored' AND s.recovery_workspace_id = w.id
-            AND s.recovery_task_id = ? AND s.recovery_attempt_id = ?
-            AND t.project_id = w.project_id AND t.chat_session_id = w.chat_session_id
-            AND t.status IN ('in_progress', 'awaiting_followup'))`
-        ).bind(...values, fence.taskId, fence.recoveryAttemptId)
-      : env.DATABASE.prepare(
-          `${common} AND n.runtime = 'cf-container'
-        AND n.id = ? AND n.runtime_incarnation_id = ?`
-        ).bind(...values, fence.nodeId, fence.runtimeIncarnationId);
-  return (await query.first<{ ready: number }>())?.ready === 1;
+): string | null {
+  if (input.fence.runtime !== 'vm') return null;
+  return beginSessionWakeActivation(
+    sql,
+    input.chatSessionId,
+    input.workspaceId,
+    JSON.stringify(input.fence)
+  );
+}
+
+/** Exact D1 handoff already checked; the local lifecycle still has to match its capture. */
+export function activateSessionWakeReady(
+  sql: SqlStorage,
+  input: SessionWakeReadyInput,
+  guard: string | null,
+  now: number
+): boolean {
+  return commitSessionWakeActivation(sql, input.chatSessionId, input.workspaceId, guard, now);
+}
+
+/** A successful transport must not turn rejected local lifecycle authority into readiness. */
+export function isSessionWakeReadyLocallyAccepted(
+  sql: SqlStorage,
+  input: SessionWakeReadyInput
+): boolean {
+  const row = sql
+    .exec('SELECT status, workspace_id FROM chat_sessions WHERE id = ?', input.chatSessionId)
+    .toArray()[0];
+  return (
+    row?.workspace_id === input.workspaceId &&
+    (row.status === 'active' ||
+      (row.status === 'sleeping' && input.fence.runtime === 'cf-container'))
+  );
+}
+
+/** Preserve the existing lifecycle event at activation rather than workspace linkage. */
+export async function recordSessionWakeActivation(
+  input: SessionWakeReadyInput,
+  now: number,
+  admit: (event: AdmitProjectEventInput) => unknown
+): Promise<void> {
+  try {
+    admit(
+      await buildSessionLifecycleEventInput({
+        projectId: input.projectId,
+        sessionId: input.chatSessionId,
+        lifecycle: 'woke',
+        status: 'active',
+        taskId: input.fence.runtime === 'vm' ? input.fence.taskId : null,
+        workspaceId: input.workspaceId,
+        source: 'project_data.snapshot_recovery_wake_session',
+        occurredAt: now,
+      })
+    );
+  } catch (error) {
+    log.warn('project_data.session_lifecycle_event_failed', {
+      projectId: input.projectId,
+      sessionId: input.chatSessionId,
+      lifecycle: 'woke',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 /** Synchronous after authority read: dedup + attempt marker + deadline update share one transaction. */
@@ -51,17 +99,7 @@ export function applySessionWakeReady(
   input: SessionWakeReadyInput,
   now: number
 ): number {
-  const session = sql
-    .exec('SELECT status, workspace_id FROM chat_sessions WHERE id = ?', input.chatSessionId)
-    .toArray()[0];
-  if (
-    !(
-      session?.status === 'active' ||
-      (session?.status === 'sleeping' && input.fence.runtime === 'cf-container')
-    ) ||
-    session.workspace_id !== input.workspaceId
-  )
-    return 0;
+  if (!isSessionWakeReadyLocallyAccepted(sql, input)) return 0;
   const token = JSON.stringify(input.fence);
   const previous = sql
     .exec('SELECT fence FROM session_wake_readiness WHERE session_id = ?', input.chatSessionId)

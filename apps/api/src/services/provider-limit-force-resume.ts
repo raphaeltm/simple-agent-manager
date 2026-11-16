@@ -110,6 +110,7 @@ export async function forceResumeSavedProviderLimitTask(
       grantedAt: grantNow,
       profileId,
       skillId: task.skillId,
+      runConfigurationId: task.agentConfigurationId,
       agentType: snapshot.agent_type,
       expiresAt: wait.deadlineAt,
       recoveryPending: true,
@@ -123,7 +124,7 @@ export async function forceResumeSavedProviderLimitTask(
     `UPDATE tasks SET agent_profile_hint=?,provider_limit_wait_json=?,admission_state='provider_limit_recovery_pending',admission_reason=NULL,
        admission_next_retry_at=NULL,updated_at=?
      WHERE id=? AND project_id=? AND user_id=? AND chat_session_id=?
-       AND status=? AND workspace_id IS ? AND agent_profile_hint IS ? AND skill_id IS ?
+       AND status=? AND workspace_id IS ? AND agent_profile_hint IS ? AND skill_id IS ? AND agent_configuration_id IS ?
        AND admission_state='provider_limit_waiting' AND provider_limit_wait_json IS ?
        AND EXISTS (SELECT 1 FROM project_members m JOIN users u ON u.id=m.user_id
          WHERE m.project_id=tasks.project_id AND m.user_id=tasks.user_id AND m.status='active'
@@ -150,6 +151,7 @@ export async function forceResumeSavedProviderLimitTask(
       task.workspaceId,
       task.agentProfileHint,
       task.skillId,
+      task.agentConfigurationId,
       task.providerLimitWaitJson,
       wait.sourceAgentSessionId,
       snapshot.id,
@@ -386,6 +388,7 @@ async function resolveSavedProviderLimitSelection(
     projectId: task.projectId,
     profileId,
     skillId: task.skillId,
+    runConfigurationId: task.agentConfigurationId,
   });
   const reference = await getSelectedAgentCredentialReference(
     db,
@@ -400,7 +403,7 @@ async function resolveSavedProviderLimitSelection(
     snapshot.agent_profile_id !== profileId ||
     profileId === undefined ||
     (task.agentProfileHint !== null && !profile) ||
-    (profile && profile.agentType !== snapshot.agent_type) ||
+    (profile && profile.agentType !== null && profile.agentType !== snapshot.agent_type) ||
     (await credentialLimitReferenceKey(snapshot.agent_credential_reference)) !==
       wait.credentialKey ||
     (await credentialLimitReferenceKey(reference)) !== wait.credentialKey

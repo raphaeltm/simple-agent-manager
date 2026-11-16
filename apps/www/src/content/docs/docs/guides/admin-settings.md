@@ -64,6 +64,50 @@ because the change may already have been saved. The same message appears when SA
 for example a client secret that doesn't belong to its client ID. If the setting still shows its old
 value and **Source** after the reload, nothing was saved: check the value and try again.
 
+## Streamed message storage
+
+The **Operations** category includes these chat storage settings:
+
+| Setting                        | Code default | Effect                                                                                                                                     |
+| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                          |
+| `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows. |
+| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                   |
+
+Merging requires an updated reporter that sends its durable outbox incarnation. Older reporters,
+and requests with a missing or malformed incarnation, keep individual inserts and provide **zero
+merge savings** until the runtime is replaced. Both VM and Instant use the same reporter binary.
+A new reporter remains compatible with an older Worker: the extra header is ignored and the JSON
+body is unchanged.
+
+The row cap applies to newly merged message rows, not oversized individual messages. Retry-state
+admission uses the same value as a soft budget: existing replay frontiers are retained when the
+budget is lowered, and later descriptor growth can exceed it. It is not a hard cap on the whole
+session metadata row.
+
+Managed VM replacement is gradual. Code defaults start lifetime drain at 24 hours
+(`NODE_ABSOLUTE_MAX_LIFETIME_MS`), force-sleep a still-running turn after another 30 minutes
+(`operations.nodeLifetimeForceSleepAfterMs`), and retain an empty warm node for 30 minutes
+(`NODE_WARM_TIMEOUT_MS`). These are defaults, not measured deployment values or a strict rollout
+deadline: configured overrides, sweep scheduling and cleanup failures affect completion. Check the
+effective settings and actual reporter versions before forecasting fleet savings. Measure the
+rollout through successive row-usage windows.
+
+Existing message rows and their comment anchors remain unchanged. Tool, user, system, thinking,
+plan and typed-card rows keep their existing storage format. A connected browser that does not
+advertise incremental append support disables merging for the sessions it watches; a legacy
+project-wide connection disables it for the project. Refresh old tabs to restore eligibility.
+
+To roll back, save `false` for `chat.messageMergingEnabled`. The next batch seals any open merged
+row and stores new chunks individually; retry receipts remain available. Previously merged rows
+remain readable and commentable. Settings use the normal admin cache refresh interval.
+
+Initial rollout keeps the code default off. Production activation requires explicit acceptance of
+the storage contract: very long replies can have different grouped-row splits, raw search can match
+words formerly split between chunks. Before indexing, raw fallback uses one hit and snippet per canonical row, so repeated matches in absorbed chunks consolidate. A late timestamped row can appear at a merged reply's
+boundary instead of splitting that reply. Text bytes are preserved. The late-timestamp boundary
+change preserves the text as one item. Genuine in-order tool calls and the grouping size limit can still split Markdown across items.
+
 ## Undo a change
 
 **Reset override** removes the value saved in the app. The setting then goes back to its GitHub
@@ -82,7 +126,7 @@ nobody can sign in:
 2. Every deploy creates a new `SETUP_TOKEN`. In the deploy's log, the **Sync Wrangler Config (API +
    Tail Worker)** step (on a first install, **Re-sync Wrangler Config (add tail_consumers)**) prints
    a Cloudflare dashboard link ("Setup token is available in Cloudflare dashboard
-   variables: …"). Copy the token there, and open `/setup` with it (as in
+   variables: …"). The log itself masks the token. Copy it from that page, and open `/setup` with it (as in
    [Verification](/docs/guides/self-hosting/#verification)).
 3. Enter working sign-in credentials.
 4. Once you can sign in again, delete `SETUP_FORCE` and deploy again. While it's set, `/setup`
@@ -94,7 +138,7 @@ nobody can sign in:
 For each setting SAM uses the first of these that exists:
 
 1. A value saved in the app, here or on the older **Admin → Integrations** page, which changes the
-   same settings (**Source: database**).
+   same settings (**Source: database**; Integrations labels it **stored in SAM** and can **Clear** it).
 2. The matching Worker variable, set through your GitHub Environment (**Source: environment**).
 3. An older KV value: the cron and alarm switches (**Source: kv**).
 4. The code default (**Source: default**).
@@ -207,6 +251,18 @@ where it says so and the app continues from there.
 | `secrets.expirySweepBatchSize`   | 10                  | 1–25          | Expired or unnotified requests one five-minute sweep handles (each one notifies its agent)                                                                                                                              |
 | `secrets.notifyRetryMinutes`     | 60                  | 15–1,440      | Minutes during which the sweep retries telling an agent about its request's outcome if the first notice could not be queued                                                                                             |
 
+## Node provisioning
+
+This **Operations** setting bounds one durable node-provisioning attempt
+(`resolveNodeProvisioningAttemptDeadlineMs()`, armed by `NodeLifecycleProvisioning.run()`). It cuts
+the work before the provider create starts and the node's DNS record afterwards. A create that has
+started is never cut or repeated: if it outlives the attempt, the next attempt (after
+`NODE_PROVISIONING_RETRY_INTERVAL_MS`, 30 seconds by default) adopts the VM by its labels.
+
+| Setting                                        | Default | Range         | What it controls                                                                                                                                                   |
+| ---------------------------------------------- | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `operations.nodeProvisioningAttemptDeadlineMs` | 60,000  | 5,000–180,000 | Milliseconds one attempt may run before it is cut and resumed. A Google Cloud create takes 9–12 seconds and a Hetzner create 1–2. 5,000 restores the old behaviour |
+
 ## Eviction recovery
 
 These **Operations** settings bound automatic retries after an eviction wake fails to start. Retries preserve the snapshot and source ownership checks.
@@ -219,14 +275,40 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 
 ## Compute pool refresh
 
-This **Operations** setting bounds how long one refresh spends writing a changed compute pool
-catalog. A pool cannot place new machines until its catalog is fully written, so a refresh keeps
-writing 200-row batches until the catalog is complete or the budget is used, then resumes on the
-next refresh.
+These **Operations** settings bound catalog refresh work and recovery. A pool keeps using its last
+validated, published catalog while a replacement is prepared. Each source's validated replacement
+is published together; a new pool stays pending until its first validated publication. A successful,
+explicitly validated bundled catalog can publish known offerings without a complete live inventory;
+failed fallbacks and partial API catalogs remain private. Only a complete provider inventory can
+mark missing machines unavailable. Retaining the catalog never overrides disabled accounts,
+machines you remove or current permissions. See
+[Compute pools](/docs/guides/compute-pools/#how-refresh-treats-your-choices).
 
-| Setting                                  | Default | Range     | What it controls                                                                           |
-| ---------------------------------------- | ------- | --------- | ------------------------------------------------------------------------------------------ |
-| `operations.capacityPoolPublishBudgetMs` | 20,000  | 0–120,000 | Milliseconds per source per refresh for writing a changed catalog; 0 writes one batch only |
+| Setting                                           | Default    | Range              | What it controls                                                                                            |
+| ------------------------------------------------- | ---------- | ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `operations.capacityPoolPublishBudgetMs`          | 20,000     | 0–120,000          | Milliseconds per source per pass for publishing a changed catalog; 0 writes one batch (200 rows by default) |
+| `operations.capacityPoolRefreshPassBudgetMs`      | 20,000     | 1–120,000          | Shared milliseconds per pass across sources and scopes; SAM stops starting more work when this is spent     |
+| `operations.capacityPoolRefreshRetryBaseMs`       | 15,000     | 1–300,000          | Initial eligibility delay after incomplete publication                                                      |
+| `operations.capacityPoolRefreshRetryMaxMs`        | 300,000    | 1–900,000          | Maximum eligibility backoff; its effective value is at least the base delay                                 |
+| `operations.capacityPoolRefreshDeadlineMs`        | 7,200,000  | 1–86,400,000       | Recovery budget from the first claim, excluding queue time (2 hours by default)                             |
+| `operations.capacityPoolRefreshLeaseMs`           | 180,000    | 1–900,000          | Milliseconds before a crashed claim can be retried; its effective value is at least the shared pass budget  |
+| `operations.capacityPoolRefreshFailureCooldownMs` | 21,600,000 | 60,000–604,800,000 | Milliseconds before daily discovery may revive an exhausted refresh (6 hours by default)                    |
+
+A dedicated continuation check runs every minute and picks up eligible saved work independently
+of the daily discovery gate. A 15-second eligibility delay therefore does not promise a retry
+within 15 seconds. Repeated failures back off up to five minutes before the next eligible tick. Saved progress survives process restarts and missed notifications; a crashed
+claim must also wait for its lease to expire. An in-flight operation can finish after a pass's
+time budget. Provider requests share the remaining deadline and attempt to abort on timeout;
+D1 batches already underway must finish. The pass budget also stops SAM starting more work.
+
+The recovery deadline starts with the first claim; time waiting in the discovery queue does not
+spend it. If that budget is exhausted, the pool summary and Admin Errors show an actionable error,
+operators receive a notification, and SAM retains the last committed catalog. Daily discovery can
+start another episode after the failure cooldown; it does not restart the failed episode every
+minute. Check the compute account and select **Refresh** in Infrastructure settings to retry sooner. Increasing the deadline setting applies to
+future attempts; it does not extend a deadline already saved for an unfinished attempt. Larger
+catalogs, more accounts and slower provider or database responses can exhaust the budget; the
+deadline is a recovery limit, not a completion guarantee.
 
 ## Dead wake claims
 
@@ -263,6 +345,28 @@ admins can set a whole number from 0 to 99, and 0 turns the cutoff off. SAM star
 another VM, creating one if it needs to. Restarting a stopped workspace on its own VM is still
 allowed. VMs you added yourself, and VMs no task created, have no lifetime limit and no cutoff.
 
+## Archiving ended chats
+
+Each project keeps its chats in one store with a hard size limit. A scheduled sweep moves ended
+chats out of that store into archive storage, where they stay readable and searchable. Moving a
+chat costs billed Cloudflare Durable Object row writes on both sides, and the only thing it buys is
+room in the project's store, so the sweep leaves a project alone until its store is filling up.
+
+`operations.projectDataArchiveMinStorageUsagePercent` sets how full a project's store must be, as a
+percent of its limit, before the sweep archives that project's ended chats. The default is 50;
+admins can set a whole number from 0 to 100, and 0 archives every project regardless of size. The
+sweep reads the size from the store's periodic storage measurement (hourly by default,
+`PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS`). A project that has never been
+measured, or whose last measurement is older than
+`operations.projectDataArchiveStorageTelemetryMaxAgeHours` (default 24 hours, 1 to 720), is archived
+as if it were full, because an old reading cannot show that the store has room. The sweep does not
+look at whether measurement is switched on, only at the stored reading and its age. So if storage
+measurement is turned off (`PROJECT_DATA_STORAGE_TELEMETRY_ENABLED=false`), a reading taken before
+that still holds its project back until it passes the max age; after that no project has a usable
+reading, every project is archived, and this setting has no effect. Chats already being
+moved always finish, and an archive run a superadmin starts for one named project through the
+admin archive route is not held back by this setting.
+
 ## Stale agent turns
 
 An agent's turn can stop producing anything without ending: the VM keeps reporting the turn as
@@ -293,6 +397,15 @@ Two related settings control warning and alert frequency: `operations.nodeCleanu
 Active workspaces and provider ownership checks remain protected. When SAM can't retire a blocked VM at the deadline (often, but not always, because it can't prove who owns the server), it keeps the VM and records an error in **Admin → Errors**, at most once per node per `operations.nodeCleanupOwnershipAlertIntervalMs` (one day by default): **VM may still exist at provider: _provider_ _server id_; cleanup requires ownership/operator resolution**. Before deleting anything, open the node and read its **Cleanup blocked since…** reasons. Delete the server in that provider's console only when the reason is `provenance` (or `strict_provider_ownership_or_deletion_failure`) and you have checked that it belongs to your installation and runs nothing you need. If the reasons include `active_workspace` or `warm_placement_claim`, or the node hosts app deployments, resolve that first instead. Once the server is gone, the node's owner can remove the node with **I already deleted this server** on its page, after selecting **Delete Node** first if the node shows **Stopped**; see [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node). That button refuses nodes on the installation's own cloud account, and the app has no other way to remove such a node yet.
 
 Blocked nodes show the time and reason in their error message on the node list and detail page, as **Cleanup blocked since** _time_ followed by reason codes; [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away) explains each one.
+
+## Provider deletion in the cleanup cron
+
+The cleanup cron starts a VM deletion and confirms it on a later run instead of waiting for it, for providers whose delete runs as a long operation (GCP today). Two settings bound it:
+
+- `operations.nodeProviderDeletionRequestTimeoutMs` is the time one cleanup attempt may take to start a deletion or read its result: the log capture before teardown, provider sign-in, the ownership check and the delete request. The default is 15,000 milliseconds (15 seconds); admins can set a whole number from 1,000 to 60,000. A cleanup phase starts an attempt only while at least a third of this value (and never more than half the phase budget) remains, so a long value cannot stop cleanup from starting.
+- `operations.nodeProviderDeletionConfirmMaxMs` is how long a started deletion may stay unconfirmed. After it, the node shows the cleanup reason `teardown_deletion_unconfirmed` and SAM records **VM may still exist at provider** in **Admin → Errors**, then checks again hourly. The default is 1,800,000 milliseconds (30 minutes); admins can set a whole number from 60,000 to 86,400,000.
+
+An idle GCP node is normally removed within two cron runs (about 10 minutes) of its first cleanup attempt: the first run sends the delete, the next confirms it from GCP's own record and removes the node.
 
 ## Lifecycle latency monitoring
 
@@ -655,16 +768,18 @@ The GitHub route returns `504 GITHUB_TIMEOUT` when its overall deadline expires.
 
 These control the live Google Cloud catalog described in [Google Cloud](/docs/guides/google-cloud/#machine-types-zones-and-prices).
 
-| Setting                                     | Default                                         | Allowed range     | Applies to                                                                                               |
-| ------------------------------------------- | ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------- |
-| `gcpCatalog.machineTypes`                   | e2-medium; e2, n2d, t2d standard up to 16 vCPUs | 1–100 exact names | Machine types SAM offers from Google Cloud, in every zone that has them. Arm (ARM64) types are skipped.  |
-| `gcpCatalog.priceTableTtlMinutes`           | 1440                                            | 60–10080          | How old the stored Google Cloud price list may get before the background step refreshes it.              |
-| `gcpCatalog.priceRetryMinutes`              | 60                                              | 5–1440            | Wait after a failed price refresh before trying again.                                                   |
-| `gcpCatalog.priceMaxPages`                  | 20                                              | 1–200             | Most pages of price data read in one refresh; needing more fails rather than storing a partial list.     |
-| `gcpCatalog.priceRequestTimeoutMs`          | 30000                                           | 1000–120000       | Each request for a page of Google Cloud price data.                                                      |
-| `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Credentials tried per refresh, platform first; a retry continues with the next ones.                     |
-| `gcpCatalog.priceRefreshBudgetMs`           | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                          |
-| `gcpCatalog.apiIssueTtlMinutes`             | 10080                                           | 60–43200          | How long a Google API problem Google reported stays shown on a credential; a successful check clears it. |
+| Setting                                     | Default                                         | Allowed range     | Applies to                                                                                                                                                     |
+| ------------------------------------------- | ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gcpCatalog.machineTypes`                   | e2-medium; e2, n2d, t2d standard up to 16 vCPUs | 1–100 exact names | Machine types SAM offers from Google Cloud, in every zone that has them. Arm (ARM64) types are skipped.                                                        |
+| `gcpCatalog.priceTableTtlMinutes`           | 1440                                            | 60–10080          | How old the stored Google Cloud price list may get before the background step refreshes it.                                                                    |
+| `gcpCatalog.priceRetryMinutes`              | 60                                              | 5–1440            | Wait after a failed price refresh before trying again.                                                                                                         |
+| `gcpCatalog.priceMaxPages`                  | 20                                              | 1–200             | Most pages of price data read in one refresh; needing more fails rather than storing a partial list.                                                           |
+| `gcpCatalog.priceRequestTimeoutMs`          | 30000                                           | 1000–120000       | Each request for a page of Google Cloud price data.                                                                                                            |
+| `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Credentials tried per refresh, platform first; a retry continues with the next ones.                                                                           |
+| `gcpCatalog.priceRefreshBudgetMs`           | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                                                                                |
+| `gcpCatalog.apiIssueTtlMinutes`             | 10080                                           | 60–43200          | How long a Google API problem Google reported stays shown on a credential; a successful check clears it.                                                       |
+| `gcpCatalog.bootDiskGbPerVcpu`              | 20                                              | 1–256             | GB of boot disk a new Google Cloud node gets per vCPU, used by the catalog, prices and new nodes from the next catalog refresh; running nodes keep their disk. |
+| `gcpCatalog.bootDiskMinGb`                  | 50                                              | 10–4096           | Smallest boot disk, in GB, a new Google Cloud node gets whatever its vCPU count; same refresh rule.                                                            |
 
 ### Provider fallback
 

@@ -181,9 +181,9 @@ export interface Env
   CREDENTIAL_ENCRYPTION_KEY?: string; // AES-GCM user credential encryption
   GITHUB_WEBHOOK_SECRET?: string; // GitHub webhook HMAC verification
   BOOTSTRAP_OWNER_EMAIL?: string; // Installer-only first-admin binding; must match a verified login email
-  SETUP_TOKEN?: string; // Plaintext first-run setup token, dashboard-readable while setup is incomplete
+  SETUP_TOKEN?: string; // Plaintext first-run setup token, dashboard-readable, masked in deploy logs; accepted until setup completes or an active superadmin exists
   SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
-  SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per identifier/window (default: 10)
+  SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per client IP (CF-Connecting-IP) per window (default: 10)
   SETUP_RATE_LIMIT_WINDOW_SECONDS?: string; // Setup-token attempt window in seconds (default: 900)
   PLATFORM_CONFIG_CACHE_MS?: string; // Per-isolate resolved-platform-config cache TTL in ms; 0 disables (default: 60000)
   // Guided agent credential setup via Cloudflare Sandbox
@@ -429,7 +429,7 @@ export interface Env
   NODE_UNHEALTHY_RETRY_MS?: string; // Retry failed unhealthy-node provider deletion (default: 60000)
   NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS?: string; // Per-node budget for chat notices and sleep requests (default: 5000)
   NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS?: string; // Stopped-node phase wall-time budget (default: 20000)
-  NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS?: string; // Stopped-node provider/DNS budget per candidate (default: 5000)
+  NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS?: string; // Per-candidate provider/DNS budget for unhealthy release, deployment cleanup and orphan reconciliation (default: 5000); handoff/stranded teardown uses operations.nodeProviderDeletionRequestTimeoutMs
   WORKSPACE_CLEANUP_SWEEP_LIMIT?: string; // Max workspace candidates per cleanup phase per cron run (default: 50)
   // Provider-side orphan reconciliation
   PROVIDER_ORPHAN_RECONCILIATION_ENABLED?: string; // Set 'false' to disable the provider-side reconciler (default: enabled)
@@ -1228,7 +1228,6 @@ export interface Env
   GCP_DEFAULT_ZONE?: string;
   GCP_IMAGE_FAMILY?: string;
   GCP_IMAGE_PROJECT?: string;
-  GCP_DISK_SIZE_GB?: string;
   // GCP deployment (project-level OIDC for Defang)
   GCP_DEPLOY_WIF_POOL_ID?: string;
   GCP_DEPLOY_WIF_PROVIDER_ID?: string;

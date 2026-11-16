@@ -2707,6 +2707,30 @@ export const MIGRATIONS: Migration[] = [
       for (const statement of ARCHIVE_WRITE_GENERATION_TRIGGERS) sql.exec(statement);
     },
   },
+  {
+    name: '077-project-event-storage-cost-indexes',
+    run: (sql) => {
+      // Matching reads subscription match keys, never these event dimensions.
+      // Keep delivery uniqueness, event identity, received time, channel history,
+      // and the credential-window expression index.
+      sql.exec('DROP INDEX IF EXISTS idx_project_events_project_source_type');
+      sql.exec('DROP INDEX IF EXISTS idx_project_events_project_subject');
+      sql.exec('DROP INDEX IF EXISTS idx_project_events_project_severity');
+      sql.exec('DROP INDEX IF EXISTS idx_project_events_audience');
+      // SQLite checks this FK with event_id alone when deleting an event.
+      // A project_id-leading index scans every match for each deleted event.
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_matches_event_id
+        ON project_event_matches(event_id)`);
+    },
+  },
+  {
+    name: '078-message-stream-ingest-state',
+    run(sql) {
+      // NULL is the grandfathered representation: every old row remains readable,
+      // commentable and archivable. Only newly created canonical rows may grow.
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN stream_ingest_state TEXT');
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

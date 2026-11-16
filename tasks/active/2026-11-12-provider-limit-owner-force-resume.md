@@ -130,3 +130,18 @@ Final correction validation: consolidated native447/15files PASS; owner-intent61
 ## Connector-main compatibility refresh
 
 New main d65360dcd (#2710) relocated the current credential-selection helper. CI synthetic merge of0821 exposed TS2305 in two feature imports. Incorporate that shipped main without conflicts, target agent-credential-selection from force-resume/reconciliation and update the harness mock. Security review confirms identical profile/credential precedence, inactive-pin halt and platform exclusion; the shared legacy picker now avoids unnecessary secret decryption. No authorization or recovery behavior changes. API dependency build and focused145/6tests pass; fresh final-head CI/review still required. Dependency2658 owns the active exclusive staging trial; a ready credential-teardown fix may take next priority, so our combined window requires explicit FREE and readiness rather than an empty reservation.
+
+## November 16 current-main port
+
+Catalog2693 merged96be6b24; force-resume remains a separate draft/full-SHA review and staging run. The current-main merge preserves receipt reconciliation without wake and the active-session memo. It uses main's stronger archive lease/cursor regressions.
+
+- [x] Preserve the explicit per-run account through owner grant, durable repair, admission and final secret injection; fence run-configuration changes in the receipt and SQL CAS.
+- [x] Regression tests cover profile/no-profile run account over defaults, account changes/unavailability, interrupted release and secret release.
+- [x] Preserve all applied migration bytes. The required migration-ordering check rejects the duplicate0238 prefix; the unpublished force index moves to0243 (0242 is reserved by an existing staging-only trial). Update real migration/query-plan fixtures and validate clean/current-main late upgrade.
+- [ ] Final exact-head specialist/CI/CodeRabbit and standalone staging evidence; final coordinator approval remains required.
+
+Prior combined4c73 evidence is historical only, and no feature fixture or combined deployment occurred.
+
+Port validation: affected native400/14files, real Workers29/2files, UI12/1file, API/web typecheck and API lint pass. The final0243 filename passes migration ordering/safety and8 real SQLite clean/current-main late-upgrade/query-plan tests. Removing runConfigurationId from owner selection makes both new public profile/no-profile cases fail409 versus202; the source was restored and the full passing native run includes the fix. Local security and completion/constitution/docs reviews found no remaining code blocker; release validation remains pending.
+
+0240 is not reused: main already applied0241 and git history contains the former Cloudflare builder0240 identifier (7fe6f4900). Reviewer independently confirmed the unpublished0238 force index never applied in production or primary staging; applied main migration bytes remain unchanged. Reviewer production aggregates at2026-11-16T00:30:23Z measured9,918 task rows and14 matching the new partial-index predicate (14 in_progress, zero pending sleeping). Full-table aggregate scans read19,836/19,843 rows in33.3/10.1ms D1 duration. These are scan observations, not measured CREATE INDEX duration. Building the index scans the task table and inserts matching entries; production index build time and table-specific byte size remain unmeasured. Whole production DB size was498,798,592bytes/151tables.

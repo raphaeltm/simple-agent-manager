@@ -56,6 +56,59 @@ describe('callback provider hold owner force resume', () => {
     expect(boundary.start).not.toHaveBeenCalled();
   }
 
+  it.each([true, false])(
+    'retains the run account over the default with profile=%s',
+    async (hasProfile) => {
+      d1.exec("UPDATE tasks SET agent_configuration_id='run-account-b'");
+      if (!hasProfile) {
+        d1.exec(
+          'UPDATE tasks SET agent_profile_hint=NULL; UPDATE agent_sessions SET agent_profile_id=NULL'
+        );
+      }
+      boundary.selected.mockImplementation(async (...args) => {
+        const context = args[5] as { runConfigurationId?: string } | null;
+        return context?.runConfigurationId === 'run-account-b'
+          ? 'cc_credentials:account-1'
+          : 'cc_credentials:default-account-a';
+      });
+      const originalClaim = claim();
+      const response = await resume();
+      expect(response.status, await response.clone().text()).toBe(202);
+      expect(wait().ownerOverride).toMatchObject({
+        credentialKey: 'cc_credentials:account-1',
+        runConfigurationId: 'run-account-b',
+        profileId: hasProfile ? 'profile-1' : null,
+      });
+      expect(task().agent_configuration_id).toBe('run-account-b');
+      expect(claim()).toEqual(originalClaim);
+      expect(boundary.nudge).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('refuses a run account change during owner credential resolution without granting consent', async () => {
+    d1.exec("UPDATE tasks SET agent_configuration_id='run-account-b'");
+    boundary.selected.mockImplementation(async () => {
+      d1.exec("UPDATE tasks SET agent_configuration_id='run-account-c'");
+      return 'cc_credentials:account-1';
+    });
+    await expectRefused();
+    expect(task().agent_configuration_id).toBe('run-account-c');
+  });
+
+  it('does not grant consent when the selected run account is unavailable', async () => {
+    d1.exec("UPDATE tasks SET agent_configuration_id='unavailable-run-account'");
+    boundary.selected.mockResolvedValue(null);
+    await expectRefused();
+    expect(boundary.selected).toHaveBeenCalledWith(
+      expect.anything(),
+      'user-1',
+      'claude-code',
+      expect.anything(),
+      'project-1',
+      expect.objectContaining({ runConfigurationId: 'unavailable-run-account' })
+    );
+  });
+
   it('resolves a scoped profile name to the same saved profile before granting consent', async () => {
     d1.exec("UPDATE tasks SET agent_profile_hint='Claude'");
     const response = await resume();

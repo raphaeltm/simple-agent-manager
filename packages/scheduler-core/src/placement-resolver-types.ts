@@ -49,8 +49,6 @@ export type PlacementProfileVmSizeSource = Extract<
 export interface PlacementProjectDefaults {
   id: string;
   defaultVmSize?: string | null;
-  defaultProvider?: string | null;
-  defaultLocation?: string | null;
   defaultWorkspaceProfile?: string | null;
   defaultDevcontainerConfigName?: string | null;
   defaultAgentType?: string | null;
@@ -64,8 +62,6 @@ export interface PlacementProfileDefaults {
   vmSizeOverride?: string | null;
   skillVmSizeOverride?: string | null;
   agentProfileVmSizeOverride?: string | null;
-  provider?: string | null;
-  vmLocation?: string | null;
   workspaceProfile?: string | null;
   runtime?: AgentProfileRuntime | null;
   devcontainerConfigName?: string | null;
@@ -74,6 +70,11 @@ export interface PlacementProfileDefaults {
   resourceRequirementsSource?: PlacementProfileVmSizeSource | null;
 }
 
+/**
+ * Per-request overrides. Provider and location are only ever explicit: projects, agent profiles
+ * and skills no longer carry them, so without an explicit value the effective compute pool and
+ * the hardware requirements decide where a VM runs.
+ */
 export interface PlacementExplicitOverrides {
   vmSize?: VMSize | null;
   vmSizeSource?: ResourceRequirementsSource;
@@ -220,6 +221,8 @@ export interface TaskStartCapacityCandidate {
 }
 
 export interface TaskStartCapacityPoolSelection {
+  catalogRefreshPending?: boolean;
+  catalogPublished?: boolean;
   rollout?: PlacementRolloutDiagnostic;
   poolId: string;
   scope: CapacityPoolScope;
@@ -287,3 +290,13 @@ export type PlacementResolutionErrorCode =
   | 'invalid-resource-requirements'
   | 'invalid-credential-attribution'
   | 'no-eligible-capacity-candidate';
+
+/** Preserve the placement producer's cause so wake callers can choose a recovery action. */
+export interface PlacementCredentialResolutionFailure {
+  error: string;
+  errorKind: 'placement' | 'credentials';
+  placementErrorCode?: PlacementResolutionErrorCode;
+  capacityPoolEffectiveState?: TaskStartCapacityPoolSelection['effectiveState'];
+  capacityPoolRefreshPending?: boolean;
+  capacityPoolCatalogPublished?: boolean;
+}

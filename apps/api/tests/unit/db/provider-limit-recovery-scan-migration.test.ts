@@ -1,4 +1,4 @@
-/** Real migration chain: archive 0237 remains applied when recovery scan 0238 is installed. */
+/** Real migration chain: archive 0237 remains applied when recovery scan 0243 is installed. */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 const directory = join(process.cwd(), 'src/db/migrations');
 const archiveMigration = '0237_archive_reclaim_pending.sql';
-const recoveryMigration = '0238_provider_limit_recovery_scan_index.sql';
+const recoveryMigration = '0243_provider_limit_recovery_scan_index.sql';
 const migrations = readdirSync(directory)
   .filter((file) => file.endsWith('.sql'))
   .sort();
@@ -44,6 +44,25 @@ function expectArchiveAndRecoverySchema(db: Database.Database) {
 }
 
 describe('provider recovery scan migration after applied archive reclaim migration', () => {
+  it('installs the unpublished recovery index after every applied current-main migration', () => {
+    const db = new Database(':memory:');
+    try {
+      for (const filename of migrations.filter((name) => name !== recoveryMigration)) {
+        db.exec(readFileSync(join(directory, filename), 'utf8'));
+      }
+      const before = db.prepare('PRAGMA table_info(tasks)').all();
+      expect(before).toContainEqual(expect.objectContaining({ name: 'agent_configuration_id' }));
+      expect(definition(db, 'idx_tasks_recovery_scan_updated_id')).toBeUndefined();
+      db.exec(readFileSync(join(directory, recoveryMigration), 'utf8'));
+      expectArchiveAndRecoverySchema(db);
+      expect(db.prepare('PRAGMA table_info(tasks)').all()).toEqual(before);
+      expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(db.pragma('quick_check', { simple: true })).toBe('ok');
+    } finally {
+      db.close();
+    }
+  });
+
   it('supports a clean installation with both archive schema and the additive recovery scan index', () => {
     const db = new Database(':memory:');
     try {

@@ -84,6 +84,7 @@ export async function admitGitHubWebhookProjectEvents(
     return { processed: false, deliveryId, eventType, admittedEvents: [], reason: 'no_repository' };
   }
 
+  // System-owned leftover projects are excluded by the lookup itself.
   const projects = await findProjectsForGitHubRepository(env, {
     repositoryFullName,
     repositoryId,

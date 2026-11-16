@@ -46,6 +46,7 @@ import {
   MESSAGE_COMMENT_REPLY_COUNT_SQL,
   MESSAGE_COMMENT_THREAD_COUNT_SQL,
 } from './anchored-comment-scope';
+import { insertArchiveSearchDocumentBatch } from './archive-search-writes';
 import * as compactArchive from './compact-archive';
 import { resolveMaterializationPassConfig } from './materialization';
 import * as messages from './messages';
@@ -704,9 +705,18 @@ function validateTargetState(value: unknown): ProjectDataArchiveTargetState {
 
 function readSessionAnchor(sql: SqlStorage, sessionId: string): ProjectDataArchiveRow | null {
   const columns = CHAT_SESSION_ANCHOR_COLUMNS.join(', ');
-  const query = `SELECT ${columns} FROM chat_sessions WHERE id = ?`;
+  const query = `SELECT ${columns}, stream_ingest_state FROM chat_sessions WHERE id = ?`;
   const row = sql.exec(query, sessionId).toArray()[0] ?? null;
-  return row ? toArchiveRow(row, CHAT_SESSION_ANCHOR_COLUMNS) : null;
+  // Optional ingest metadata is transported without changing the historical
+  // terminal-hash column set. NULL legacy sessions retain identical envelopes.
+  return row
+    ? toArchiveRow(
+        row,
+        row.stream_ingest_state == null
+          ? CHAT_SESSION_ANCHOR_COLUMNS
+          : [...CHAT_SESSION_ANCHOR_COLUMNS, 'stream_ingest_state']
+      )
+    : null;
 }
 
 function countRows(sql: SqlStorage, query: string, ...params: Array<string | number>): number {
@@ -1599,10 +1609,14 @@ export function prepareArchiveTarget(
   }
 
   const row: ProjectDataArchiveRow = { ...input.sessionRow };
-  const placeholders = CHAT_SESSION_ANCHOR_COLUMNS.map(() => '?').join(', ');
-  const insertSessionQuery = `INSERT INTO chat_sessions (${CHAT_SESSION_ANCHOR_COLUMNS.join(', ')})
+  const insertColumns =
+    row.stream_ingest_state == null
+      ? CHAT_SESSION_ANCHOR_COLUMNS
+      : [...CHAT_SESSION_ANCHOR_COLUMNS, 'stream_ingest_state'];
+  const placeholders = insertColumns.map(() => '?').join(', ');
+  const insertSessionQuery = `INSERT INTO chat_sessions (${insertColumns.join(', ')})
      VALUES (${placeholders})`;
-  sql.exec(insertSessionQuery, ...CHAT_SESSION_ANCHOR_COLUMNS.map((column) => row[column] ?? null));
+  sql.exec(insertSessionQuery, ...insertColumns.map((column) => row[column] ?? null));
   sql.exec(
     `INSERT INTO project_data_archive_target_sessions (
        session_id, project_id, migration_id, owner_name, generation, source_owner_name,
@@ -2837,6 +2851,34 @@ type PendingArchiveSearchDocument = {
   createdAt: number;
 };
 
+// Every projection writer (including resumable repair) uses one of these two
+// deterministic identities. Seek the existing UNIQUE(projection_id) index instead
+// of scanning all documents of the session once for every grouped row.
+export const ARCHIVE_SEARCH_EQUIVALENT_DOCUMENT_SQL = `SELECT 1 AS present
+  FROM project_data_archive_search_documents
+  WHERE projection_id IN (?, ?) AND session_id = ? AND document_id = ? AND content = ?
+  LIMIT 1`;
+
+function hasEquivalentArchiveSearchDocument(
+  sql: SqlStorage,
+  sessionId: string,
+  documentId: string,
+  content: string
+): boolean {
+  return (
+    sql
+      .exec(
+        ARCHIVE_SEARCH_EQUIVALENT_DOCUMENT_SQL,
+        `raw:${sessionId}:${documentId}`,
+        `grouped:${sessionId}:${documentId}`,
+        sessionId,
+        documentId,
+        content
+      )
+      .toArray().length > 0
+  );
+}
+
 function clearArchiveSearchProjection(sql: SqlStorage, sessionId: string, pageRows: number): void {
   let cursor = 0;
   for (;;) {
@@ -3036,8 +3078,10 @@ function commitCompactSearchProjectionChunk(
       'Compact archive projection chunk order does not match copy order'
     );
   }
+  // At most one already byte/row-bounded archive chunk; the writer pages SQL binds.
+  const documents: PendingArchiveSearchDocument[] = [];
   const commitDocument = (document: PendingArchiveSearchDocument) => {
-    insertArchiveSearchDocument(sql, input.sessionId, document);
+    documents.push(document);
     chain.update({
       projection_id: document.projectionId,
       document_id: document.documentId,
@@ -3104,15 +3148,12 @@ function commitCompactSearchProjectionChunk(
         strictInteger(groupedRow.rowid, 'archive_search.grouped_rowid'),
         content
       );
-      const equivalent = sql
-        .exec(
-          `SELECT 1 AS present FROM project_data_archive_search_documents
-           WHERE session_id = ? AND document_id = ? AND content = ? LIMIT 1`,
-          input.sessionId,
-          documentId,
-          content
-        )
-        .toArray()[0];
+      const equivalent = hasEquivalentArchiveSearchDocument(
+        sql,
+        input.sessionId,
+        documentId,
+        content
+      );
       if (!equivalent) {
         commitDocument({
           projectionId: `grouped:${input.sessionId}:${documentId}`,
@@ -3126,6 +3167,9 @@ function commitCompactSearchProjectionChunk(
     nextOrdinal++;
   }
 
+  insertArchiveSearchDocumentBatch(sql, input.sessionId, documents, (document) =>
+    insertArchiveSearchDocument(sql, input.sessionId, document)
+  );
   if (phase === 'grouped' && input.tableName === 'chat_messages_grouped' && !input.hasMore) {
     const documentCount = countRows(
       sql,
@@ -3288,17 +3332,7 @@ async function rebuildArchiveSearchProjection(
   forEachGroupedRowPaged(sql, sessionId, pageRows, (row) => {
     const documentId = strictString(row.id, 'archive_search.grouped_id');
     const content = strictString(row.content, 'archive_search.grouped_content');
-    const equivalent = sql
-      .exec(
-        `SELECT 1 AS present
-         FROM project_data_archive_search_documents
-         WHERE session_id = ? AND document_id = ? AND content = ?
-         LIMIT 1`,
-        sessionId,
-        documentId,
-        content
-      )
-      .toArray()[0];
+    const equivalent = hasEquivalentArchiveSearchDocument(sql, sessionId, documentId, content);
     if (equivalent) return;
     insertArchiveSearchDocument(
       sql,
@@ -3410,9 +3444,20 @@ function verifyArchiveSearchProjection(
       .toArray();
     for (const row of rows) {
       lastRowid = strictInteger(row.rowid, 'archive_search.rowid');
+      const projectionId = strictString(row.projection_id, 'archive_search.projection_id');
+      const documentId = strictString(row.document_id, 'archive_search.document_id');
+      if (
+        projectionId !== `raw:${sessionId}:${documentId}` &&
+        projectionId !== `grouped:${sessionId}:${documentId}`
+      ) {
+        throw new ProjectDataArchiveInvariantError(
+          'archive_search_projection_identity_mismatch',
+          'Archive search projection has a noncanonical document identity'
+        );
+      }
       hasher.update({
-        projection_id: strictString(row.projection_id, 'archive_search.projection_id'),
-        document_id: strictString(row.document_id, 'archive_search.document_id'),
+        projection_id: projectionId,
+        document_id: documentId,
         session_id: strictString(row.session_id, 'archive_search.session_id'),
         role: strictString(row.role, 'archive_search.role'),
         content: strictString(row.content, 'archive_search.content'),
@@ -3707,15 +3752,7 @@ async function repairArchiveSearchProjectionStep(
   for (const row of groupedRows) {
     const documentId = strictString(row.id, 'archive_search.grouped_id');
     const content = strictString(row.content, 'archive_search.grouped_content');
-    const equivalent = sql
-      .exec(
-        `SELECT 1 AS present FROM project_data_archive_search_documents
-         WHERE session_id = ? AND document_id = ? AND content = ? LIMIT 1`,
-        sessionId,
-        documentId,
-        content
-      )
-      .toArray()[0];
+    const equivalent = hasEquivalentArchiveSearchDocument(sql, sessionId, documentId, content);
     if (!equivalent) {
       commitDocument({
         projectionId: `grouped:${sessionId}:${documentId}`,

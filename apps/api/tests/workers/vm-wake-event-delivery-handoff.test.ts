@@ -18,6 +18,7 @@
  * steps write; it plays no part in the race. One case replaces step 4 with the woken agent
  * reading its own subscription through MCP, the consumer that no delivery hold covers.
  */
+import { processPromptDeliveryAlarm } from '@simple-agent-manager/project-data/internal/do/durability-foundation';
 import { resolveDurableExecutionConfig } from '@simple-agent-manager/project-data/internal/do/durable-execution-config';
 import {
   claimDuePromptDeliveries,
@@ -25,13 +26,17 @@ import {
 } from '@simple-agent-manager/project-data/internal/do/prompt-delivery';
 import { runPromptDeliveryClaim } from '@simple-agent-manager/project-data/internal/do/prompt-delivery-runner';
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
-import { env, runInDurableObject, SELF } from 'cloudflare:test';
+import { env, evictDurableObject, runInDurableObject, SELF } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
+import { runScheduledCapacityPoolReconciliation } from '../../src/scheduled/capacity-pool-reconciliation';
+import { candidatePublicationCursorKey } from '../../src/services/default-capacity-pool-candidates-publication';
+import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
+import { clearCapacityCatalogCache } from '../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../src/services/encryption';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
 import { validateProjectEventWakeRecoveryAuthority } from '../../src/services/project-data';
@@ -52,7 +57,7 @@ import {
   withAgentMessageChannels,
   withProjectDataEnv,
 } from './helpers/agent-message-channels';
-import { seedWorkspace } from './helpers/seed-d1';
+import { seedSignedInUser, seedWorkspace } from './helpers/seed-d1';
 
 const config = resolveDurableExecutionConfig({});
 const RUNTIME_IDENTITY = 'replacement-runtime';
@@ -103,14 +108,19 @@ function pauseAlarms(storage: DurableObjectStorage): void {
 }
 
 type Fixture = Awaited<ReturnType<typeof sleepingConversationWokenByAgentDm>>;
+type DeliveryFixture = Omit<Fixture, 'subscriptionId'> & {
+  subscriptionId?: string;
+  humanContent?: string;
+  originalMessageId?: string;
+};
 
 /**
  * Agent B's conversation slept the way the VM sleep path leaves it: a complete snapshot,
  * the runtime deleted with proof, the task `sleeping`. Then agent A messages B.
  */
-async function sleepingConversationWokenByAgentDm() {
+async function sleepingConversation() {
   const project = await twoAgentProject();
-  const { a, b, stub, projectId, memberId } = project;
+  const { b, stub, projectId, memberId } = project;
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
   const node = await env.DATABASE.prepare('SELECT node_id FROM workspaces WHERE id = ?')
@@ -177,7 +187,12 @@ async function sleepingConversationWokenByAgentDm() {
     owner: { userId: memberId, projectId },
   });
   await sqlRows(stub, "UPDATE chat_sessions SET status = 'sleeping' WHERE id = ?", b.sessionId);
+  return { ...project, nodeId };
+}
 
+async function sleepingConversationWokenByAgentDm() {
+  const project = await sleepingConversation();
+  const { a, b, stub, projectId } = project;
   okBody(
     await a.tool('send_durable_message', {
       targetTaskId: b.taskId,
@@ -192,11 +207,14 @@ async function sleepingConversationWokenByAgentDm() {
   const subscriptionId = (JSON.parse(wake.metadata ?? '{}') as { subscriptionId?: string })
     .subscriptionId;
   expect(subscriptionId).toEqual(expect.any(String));
-  return { ...project, nodeId, deliveryId: wake.id, subscriptionId: subscriptionId! };
+  return { ...project, deliveryId: wake.id, subscriptionId: subscriptionId! };
 }
 
 /** One pass of the production delivery claim runner for whatever is due at `now`. */
-async function runDueDelivery(f: Fixture, now = Date.now()): Promise<PromptDeliveryResult | null> {
+async function runDueDelivery(
+  f: DeliveryFixture,
+  now = Date.now()
+): Promise<PromptDeliveryResult | null> {
   return runInDurableObject(f.stub, async (instance, state) => {
     const [claim] = claimDuePromptDeliveries(state.storage.sql, config, now);
     if (!claim) return null;
@@ -229,7 +247,7 @@ async function runDueDelivery(f: Fixture, now = Date.now()): Promise<PromptDeliv
  * the snapshot's recovery workspace (`recordSessionSnapshotRecoveryWorkspace`), and the
  * runner parked at `agent_session`.
  */
-async function provisionReplacementWorkspace(f: Fixture): Promise<string> {
+async function provisionReplacementWorkspace(f: DeliveryFixture): Promise<string> {
   const workspaceId = `w2-${f.b.taskId}`;
   await seedWorkspace(workspaceId, f.nodeId, f.memberId, {
     projectId: f.projectId,
@@ -260,7 +278,7 @@ async function provisionReplacementWorkspace(f: Fixture): Promise<string> {
 type NodeCall = { method: string; path: string; body: Record<string, unknown> | null };
 
 /** VM agent double for the replacement workspace; the snapshot restore waits for release. */
-function installReplacementVm(f: Fixture, workspaceId: string) {
+function installReplacementVm(f: DeliveryFixture, workspaceId: string) {
   const calls: NodeCall[] = [];
   const restore = { started: false, released: false };
   const base = getNodeBackendBaseUrl(f.nodeId, wakeEnv());
@@ -322,7 +340,7 @@ async function snapshotClaim(chatSessionId: string) {
     }>();
 }
 
-async function batchState(f: Fixture): Promise<string | undefined> {
+async function batchState(f: DeliveryFixture): Promise<string | undefined> {
   const [row] = await sqlRows<{ state: string }>(
     f.stub,
     'SELECT state FROM project_event_delivery_batches WHERE id = ?',
@@ -331,7 +349,7 @@ async function batchState(f: Fixture): Promise<string | undefined> {
   return row?.state;
 }
 
-async function inboxRow(f: Fixture) {
+async function inboxRow(f: DeliveryFixture) {
   const [row] = await sqlRows<{
     delivery_state: string;
     delivery_attempts: number;
@@ -383,13 +401,15 @@ function authorityRevocations(warn: ReturnType<typeof vi.spyOn>): Record<string,
  * Wake B through the real runner, fast-forward provisioning, start the real
  * `agent_session` alarm and stop it inside the VM restore. Returns the in-flight alarm.
  */
-async function wakeToHeldRestore(f: Fixture) {
+async function wakeToHeldRestore(f: DeliveryFixture, alreadyQueued = false) {
   // Agent-message notices steer by default. A steer never wakes a runtime, so the sleeping
   // chat hands it straight to the queue, whose next claim starts the wake.
-  const steered = await runDueDelivery(f);
-  expect(steered).toMatchObject({ kind: 'steer_fallback', reason: 'session_not_awake' });
-  expect(await inboxRow(f)).toMatchObject({ delivery_intent: 'queue' });
-  const claimed = await runDueDelivery(f);
+  if (!alreadyQueued) {
+    const steered = await runDueDelivery(f);
+    expect(steered).toMatchObject({ kind: 'steer_fallback', reason: 'session_not_awake' });
+    expect(await inboxRow(f)).toMatchObject({ delivery_intent: 'queue' });
+  }
+  const claimed = await runDueDelivery(f, Date.now() + config.retryMaxMs);
   expect(claimed).toMatchObject({
     kind: 'retry',
     reason: 'not_ready',
@@ -402,9 +422,11 @@ async function wakeToHeldRestore(f: Fixture) {
     currentStep: 'node_selection',
     config: {
       resumeSnapshotChatSessionId: f.b.sessionId,
-      recoverySourceTaskId: f.b.taskId,
+      recoverySourceTaskId: f.subscriptionId ? f.b.taskId : null,
       recoveryAttemptId: claim?.recovery_attempt_id,
-      projectEventWakeGuard: { batchId: f.deliveryId, subscriptionId: f.subscriptionId },
+      projectEventWakeGuard: f.subscriptionId
+        ? { batchId: f.deliveryId, subscriptionId: f.subscriptionId }
+        : null,
     },
   });
 
@@ -428,6 +450,520 @@ async function withEventWakes(run: (f: Fixture) => Promise<void>): Promise<void>
     await withProjectDataEnv(f.stub, EVENT_WAKE_FLAGS, () => run(f));
   });
 }
+
+async function withHumanFollowup(run: (f: DeliveryFixture) => Promise<void>): Promise<void> {
+  await withAgentMessageChannels(
+    async () => {
+      const f = await sleepingConversation();
+      await withProjectDataEnv(
+        f.stub,
+        { ...EVENT_WAKE_FLAGS, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' },
+        async () => {
+          const cookie = await seedSignedInUser(f.memberId);
+          const humanContent = 'Continue the original work and report the next result.';
+          const response = await SELF.fetch(
+            `https://api.test.example.com/api/projects/${f.projectId}/sessions/${f.b.sessionId}/prompt`,
+            {
+              method: 'POST',
+              headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content: humanContent }),
+            }
+          );
+          expect(response.status).toBe(202);
+          const accepted = await response.json<{
+            accepted: boolean;
+            deliveryId: string;
+            messageId: string;
+          }>();
+          expect(accepted.accepted).toBe(true);
+          const wakes = await inboxRows(f.stub);
+          expect(wakes).toHaveLength(1);
+          expect(wakes[0]).toMatchObject({
+            id: accepted.deliveryId,
+            source_kind: 'user_followup',
+            sender_type: 'human',
+          });
+          expect(
+            await sqlRows(
+              f.stub,
+              'SELECT sender_id, delivery_intent FROM session_inbox WHERE id = ?',
+              accepted.deliveryId
+            )
+          ).toEqual([{ sender_id: f.memberId, delivery_intent: 'queue' }]);
+          await run({
+            ...f,
+            deliveryId: accepted.deliveryId,
+            originalMessageId: accepted.messageId,
+            humanContent,
+          });
+        }
+      );
+    },
+    { DURABLE_PROMPT_DELIVERY_ENABLED: 'true' }
+  );
+}
+
+/** The persisted identity accepted before placement runs; retries must not recreate it. */
+async function acceptedIdentity(f: DeliveryFixture) {
+  const rows = await sqlRows(
+    f.stub,
+    `SELECT id, prompt_message_id, target_session_id, source_task_id, content, expires_at,
+            source_kind, sender_type, sender_id
+       FROM session_inbox WHERE id = ?`,
+    f.deliveryId
+  );
+  expect(rows).toHaveLength(1);
+  return rows[0]!;
+}
+
+/** A live provider inventory, read through the real provider/catalog HTTP boundary. */
+function installCatalogProvider() {
+  const passthrough = globalThis.fetch;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request = input instanceof Request ? input : new Request(String(input), init);
+    if (!request.url.startsWith('https://api.hetzner.cloud/v1/server_types')) {
+      return passthrough(input, init);
+    }
+    return Response.json({
+      server_types: [
+        { id: 1, name: 'cx23', description: 'CX23', cores: 2, memory: 4, disk: 40 },
+        { id: 2, name: 'cx33', description: 'CX33', cores: 4, memory: 8, disk: 80 },
+        { id: 3, name: 'cx43', description: 'CX43', cores: 8, memory: 16, disk: 160 },
+      ].map((type) => ({
+        ...type,
+        architecture: 'x86',
+        cpu_type: 'shared',
+        deprecated: false,
+        prices: ['nbg1', 'fsn1'].map((location) => ({
+          location,
+          price_hourly: { net: '0.0099', gross: '0.0099' },
+          price_monthly: { net: '6.99', gross: '6.99' },
+        })),
+      })),
+      meta: { pagination: { next_page: null } },
+    });
+  });
+  clearCapacityCatalogCache();
+}
+
+async function blockWakeCatalog(f: DeliveryFixture, kind: 'bootstrap' | 'catalog-unavailable') {
+  if (kind === 'bootstrap') {
+    // The initial publication has not certified any catalog yet. Rows may already have
+    // staged/materialized an initial prefix, but none is authority to place a VM.
+    await env.DATABASE.prepare(
+      `UPDATE capacity_pools SET configuration_state = 'migration-pending',
+         migration_state = 'pending', catalog_published_at = NULL,
+         selection_digest = NULL, last_reconciled_at = NULL
+       WHERE scope = 'user' AND owner_user_id = ? AND is_default = 1`
+    )
+      .bind(f.memberId)
+      .run();
+  } else {
+    await env.DATABASE.prepare(
+      `UPDATE capacity_pool_candidates SET catalog_availability = 'last-known-unavailable'
+       WHERE pool_id IN (SELECT id FROM capacity_pools
+         WHERE scope = 'user' AND owner_user_id = ? AND is_default = 1)`
+    )
+      .bind(f.memberId)
+      .run();
+  }
+  installCatalogProvider();
+  const interrupted = await ensureDefaultCapacityPoolsForExistingCredentials(
+    drizzle(env.DATABASE, { schema }) as never,
+    {
+      userId: f.memberId,
+      projectId: f.projectId,
+      includeInstallation: false,
+      env: wakeEnv(),
+      candidatePublishBatchSize: 1,
+      candidatePublishBudgetMs: 0,
+    }
+  );
+  expect(interrupted.user?.pool.migrationState).toBe('pending');
+  const progress = await env.DATABASE.prepare(
+    'SELECT state, next_attempt_at, deadline_at FROM capacity_pool_refreshes WHERE pool_id = ?'
+  )
+    .bind(interrupted.user!.pool.id)
+    .first<{ state: string; next_attempt_at: number; deadline_at: number }>();
+  expect(progress?.state).toBe('pending');
+  expect(progress!.next_attempt_at).toBeLessThan(progress!.deadline_at);
+  const cursorRow = await env.DATABASE.prepare('SELECT value FROM platform_settings WHERE key = ?')
+    .bind(
+      candidatePublicationCursorKey(interrupted.user!.pool.id, interrupted.user!.sources[0]!.id)
+    )
+    .first<{ value: string }>();
+  const cursor = JSON.parse(cursorRow!.value) as {
+    digest: string;
+    published: number;
+    complete: boolean;
+  };
+  expect(cursor).toMatchObject({ published: 1, complete: false });
+  // Completed publications retain staged proofs. Only this interrupted digest is the prefix
+  // under test; older trustworthy catalogs must not be mistaken for exposed replacement rows.
+  const staged = await env.DATABASE.prepare(
+    'SELECT COUNT(*) AS count FROM capacity_pool_candidate_staging WHERE pool_id = ? AND digest = ?'
+  )
+    .bind(interrupted.user!.pool.id, cursor.digest)
+    .first<{ count: number }>();
+  expect(staged?.count).toBe(1);
+  if (f.subscriptionId) {
+    expect(await runDueDelivery(f)).toMatchObject({
+      kind: 'steer_fallback',
+      reason: 'session_not_awake',
+    });
+  }
+  const waiting = await runDueDelivery(f);
+  expect(waiting).toMatchObject({
+    kind: 'retry',
+    reason: 'not_ready',
+    error: expect.stringContaining('session_recovery_placement_transient'),
+  });
+  expect(await inboxRow(f)).toMatchObject({ delivery_state: 'retry_wait' });
+  if (f.subscriptionId) expect(await batchState(f)).toBe('pending');
+  expect(await taskRow(f.b.taskId)).toMatchObject({ status: 'sleeping' });
+  expect(await snapshotClaim(f.b.sessionId)).toMatchObject({
+    recovery_status: null,
+    recovery_task_id: null,
+    recovery_attempt_id: null,
+  });
+}
+
+async function publishRecoveredCatalog(f: DeliveryFixture) {
+  const job = await env.DATABASE.prepare(
+    `SELECT next_attempt_at FROM capacity_pool_refreshes
+     WHERE scope = 'user' AND owner_user_id = ?`
+  )
+    .bind(f.memberId)
+    .first<{ next_attempt_at: number }>();
+  expect(job).not.toBeNull();
+  const dueAt = job!.next_attempt_at + 1;
+  await env.DATABASE.prepare(
+    `INSERT INTO platform_settings (key, value, updated_at)
+     VALUES ('capacityPools.scheduledReconciliation.lastRun.v1', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  )
+    .bind(new Date(dueAt).toISOString(), new Date(dueAt).toISOString())
+    .run();
+  // Simulate a fresh process: neither the provider cache nor an in-memory continuation survives.
+  clearCapacityCatalogCache();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(dueAt);
+  try {
+    const scheduled = await runScheduledCapacityPoolReconciliation(wakeEnv());
+    expect(scheduled).toMatchObject({
+      skipped: false,
+      skipReason: null,
+      usersEnsured: 0,
+      nextEligibleAt: new Date(dueAt + 24 * 60 * 60 * 1000).toISOString(),
+    });
+  } finally {
+    clock.mockRestore();
+  }
+  const recovered = await env.DATABASE.prepare(
+    `SELECT pool.migration_state, pool.catalog_published_at, refresh.state
+     FROM capacity_pools pool JOIN capacity_pool_refreshes refresh ON refresh.pool_id = pool.id
+     WHERE pool.scope = 'user' AND pool.owner_user_id = ?`
+  )
+    .bind(f.memberId)
+    .first();
+  expect(recovered).toMatchObject({
+    migration_state: 'complete',
+    catalog_published_at: expect.any(String),
+    state: 'complete',
+  });
+}
+
+describe('catalog blockers preserve the accepted VM wake', () => {
+  it('keeps a previously published pool usable while a replacement publication is pending', async () => {
+    await withEventWakes(async (f) => {
+      const identity = await acceptedIdentity(f);
+      await env.DATABASE.prepare(
+        `UPDATE capacity_pools SET migration_state = 'pending'
+         WHERE scope = 'user' AND owner_user_id = ? AND is_default = 1`
+      )
+        .bind(f.memberId)
+        .run();
+
+      const { alarm, vm } = await wakeToHeldRestore(f);
+      expect(await acceptedIdentity(f)).toEqual(identity);
+      vm.releaseRestore();
+      await alarm;
+      expect(await taskRow(f.b.taskId)).toMatchObject({ status: 'in_progress' });
+      expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toMatchObject({
+        kind: 'accepted',
+      });
+      expect(vm.prompts()).toHaveLength(1);
+      expect(vm.prompts()[0]?.body?.deliveryId).toBe(identity.id);
+      expect(await batchState(f)).toBe('delivered');
+      expect(vm.stops()).toEqual([]);
+    });
+  });
+
+  it.each(['bootstrap', 'catalog-unavailable', 'human-user_followup'] as const)(
+    'retries %s across ProjectData eviction, then delivers the original accepted prompt once after publication',
+    async (kind) => {
+      const withAcceptedWake = kind === 'human-user_followup' ? withHumanFollowup : withEventWakes;
+      await withAcceptedWake(async (f) => {
+        const identity = await acceptedIdentity(f);
+        if (f.humanContent) {
+          expect(identity).toMatchObject({
+            source_kind: 'user_followup',
+            sender_type: 'human',
+            sender_id: f.memberId,
+            source_task_id: null,
+            content: f.humanContent,
+            prompt_message_id: f.originalMessageId,
+          });
+        }
+        // The production incident's persisted reservation fits ordinary offerings easily.
+        await env.DATABASE.prepare('UPDATE tasks SET resolved_reservation_json = ? WHERE id = ?')
+          .bind(
+            JSON.stringify({
+              version: 3,
+              cpuMillis: 400,
+              memoryMb: 820,
+              diskMb: 2048,
+              exclusiveNode: false,
+              source: 'task',
+              sourceId: f.b.taskId,
+            }),
+            f.b.taskId
+          )
+          .run();
+        await blockWakeCatalog(f, kind === 'human-user_followup' ? 'catalog-unavailable' : kind);
+
+        // Each pass reconstructs the production adapter and reads durable D1 + SQLite,
+        // including more waits than the submission attempt cap. No human sends Continue.
+        for (let retry = 1; retry <= config.maxAttempts + 1; retry++) {
+          expect(await runDueDelivery(f, Date.now() + retry * config.retryMaxMs)).toMatchObject({
+            kind: 'retry',
+            reason: 'not_ready',
+          });
+        }
+        expect(await acceptedIdentity(f)).toEqual(identity);
+        expect(await inboxRow(f)).toMatchObject({
+          delivery_state: 'retry_wait',
+          delivery_attempts: config.maxAttempts - 1,
+        });
+        await evictDurableObject(f.stub);
+        await runInDurableObject(f.stub, async (instance, state) => {
+          pauseAlarms(state.storage);
+          await state.storage.deleteAlarm();
+          Object.assign((instance as unknown as { env: Env }).env, EVENT_WAKE_FLAGS);
+        });
+        expect(await acceptedIdentity(f)).toEqual(identity);
+        if (f.subscriptionId) expect(await batchState(f)).toBe('pending');
+        expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toMatchObject({
+          kind: 'retry',
+          reason: 'not_ready',
+        });
+
+        await publishRecoveredCatalog(f);
+        const { alarm, vm } = await wakeToHeldRestore(f, true);
+        try {
+          // A second claim while the first runtime restores joins that same snapshot attempt.
+          const claim = await snapshotClaim(f.b.sessionId);
+          expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toMatchObject({
+            kind: 'retry',
+            reason: 'not_ready',
+          });
+          expect(await snapshotClaim(f.b.sessionId)).toEqual(claim);
+          const claimedAttempts = await env.DATABASE.prepare(
+            'SELECT recovery_attempts FROM session_snapshots WHERE chat_session_id = ?'
+          )
+            .bind(f.b.sessionId)
+            .first<{ recovery_attempts: number }>();
+          expect(claimedAttempts?.recovery_attempts).toBe(1);
+          expect(vm.prompts()).toEqual([]);
+          expect(await taskRow(f.b.taskId)).toMatchObject({ status: 'delegated' });
+          expect(
+            await sqlRows(f.stub, 'SELECT status FROM chat_sessions WHERE id = ?', f.b.sessionId)
+          ).toEqual([{ status: 'sleeping' }]);
+        } finally {
+          // A failed midpoint invariant must still release the controlled VM request, or
+          // the outstanding runner alarm can mask the assertion during Workers teardown.
+          vm.releaseRestore();
+          await alarm;
+        }
+        expect(await taskRow(f.b.taskId)).toMatchObject({ status: 'in_progress' });
+        expect(
+          await sqlRows(f.stub, 'SELECT status FROM chat_sessions WHERE id = ?', f.b.sessionId)
+        ).toEqual([{ status: 'active' }]);
+        expect(await runDueDelivery(f, Date.now() + config.retryMaxMs)).toMatchObject({
+          kind: 'accepted',
+        });
+        expect(await acceptedIdentity(f)).toEqual(identity);
+        expect(vm.prompts()).toHaveLength(1);
+        expect(vm.prompts()[0]?.body?.deliveryId).toBe(identity.id);
+        expect(await runDueDelivery(f, Date.now() + config.retryMaxMs * 2)).toBeNull();
+        if (f.subscriptionId) expect(await batchState(f)).toBe('delivered');
+        if (f.humanContent) expect(vm.prompts()[0]?.body?.prompt).toBe(f.humanContent);
+        expect(vm.stops()).toEqual([]);
+        const rows = await sqlRows(
+          f.stub,
+          'SELECT id FROM chat_messages WHERE id = ?',
+          identity.prompt_message_id
+        );
+        expect(rows).toHaveLength(1);
+        const attempts = await env.DATABASE.prepare(
+          'SELECT recovery_attempts FROM session_snapshots WHERE chat_session_id = ?'
+        )
+          .bind(f.b.sessionId)
+          .first<{ recovery_attempts: number }>();
+        // A committed successful restore resets the failed-attempt budget.
+        expect(attempts?.recovery_attempts).toBe(0);
+      });
+    }
+  );
+
+  it.each(['cancelled', 'expired', 'archived', 'membership-revoked'] as const)(
+    'does not resurrect a %s accepted wake when publication recovers',
+    async (terminal) => {
+      await withEventWakes(async (f) => {
+        const identity = await acceptedIdentity(f);
+        await blockWakeCatalog(f, 'bootstrap');
+        if (terminal === 'cancelled') {
+          await env.DATABASE.prepare("UPDATE tasks SET status = 'cancelled' WHERE id = ?")
+            .bind(f.b.taskId)
+            .run();
+        } else if (terminal === 'expired') {
+          await sqlRows(
+            f.stub,
+            'UPDATE session_inbox SET expires_at = ? WHERE id = ?',
+            Date.now() - 1,
+            f.deliveryId
+          );
+          await runInDurableObject(f.stub, async (instance, state) => {
+            const pending: Promise<unknown>[] = [];
+            processPromptDeliveryAlarm(
+              state.storage.sql,
+              {
+                ...(instance as unknown as { env: Env }).env,
+                DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+              },
+              {
+                getProjectId: () => f.projectId,
+                transactionSync: (callback) => state.storage.transactionSync(callback),
+                waitUntil: (promise) => pending.push(promise),
+                recalculateAlarm: async () => undefined,
+                scheduleSummarySync: () => undefined,
+                broadcastEvent: () => undefined,
+                armIdleCleanup: () => undefined,
+                nudgeDeliveries: () => 0,
+              }
+            );
+            await Promise.all(pending);
+          });
+          const markers = await sqlRows(
+            f.stub,
+            `SELECT reason, metadata FROM session_attention_markers
+             WHERE session_id = ? AND kind = 'wake_failed'`,
+            f.b.sessionId
+          );
+          expect(markers).toHaveLength(1);
+          expect(markers[0]?.reason).toBe('ttl_expired');
+          expect(JSON.parse(String(markers[0]?.metadata))).toMatchObject({
+            deliveryId: f.deliveryId,
+          });
+        } else if (terminal === 'archived') {
+          await sqlRows(
+            f.stub,
+            "UPDATE chat_sessions SET status = 'archived' WHERE id = ?",
+            f.b.sessionId
+          );
+        } else {
+          await env.DATABASE.prepare(
+            'DELETE FROM project_members WHERE project_id = ? AND user_id = ?'
+          )
+            .bind(f.projectId, f.memberId)
+            .run();
+        }
+        await publishRecoveredCatalog(f);
+        const result = await runDueDelivery(f, Date.now() + config.retryMaxMs);
+        if (terminal !== 'expired') {
+          expect(result).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+          expect(await inboxRow(f)).toMatchObject({ delivery_state: 'failed' });
+          expect(await taskRow(f.b.taskId)).toMatchObject({
+            status: terminal === 'cancelled' ? 'cancelled' : 'sleeping',
+          });
+        } else {
+          expect(result).toBeNull();
+          expect(await inboxRow(f)).toMatchObject({ delivery_state: 'expired' });
+          expect(await taskRow(f.b.taskId)).toMatchObject({ status: 'sleeping' });
+        }
+        expect(await snapshotClaim(f.b.sessionId)).toMatchObject({
+          recovery_task_id: null,
+          recovery_attempt_id: null,
+        });
+        expect((await acceptedIdentity(f)).id).toBe(identity.id);
+      });
+    }
+  );
+
+  it.each([
+    { change: 'source-disabled', reason: 'placement_sources_disabled' },
+    { change: 'credential-revoked', reason: 'placement_credentials_missing' },
+    { change: 'offerings-removed', reason: 'placement_pool_empty' },
+  ])(
+    'immediately respects $change while keeping a published catalog',
+    async ({ change, reason }) => {
+      await withEventWakes(async (f) => {
+        await env.DATABASE.prepare(
+          `UPDATE capacity_pools SET migration_state = 'pending'
+         WHERE scope = 'user' AND owner_user_id = ? AND is_default = 1`
+        )
+          .bind(f.memberId)
+          .run();
+        if (change === 'source-disabled') {
+          await env.DATABASE.prepare(
+            "UPDATE capacity_sources SET status = 'disabled' WHERE owner_user_id = ?"
+          )
+            .bind(f.memberId)
+            .run();
+        } else if (change === 'credential-revoked') {
+          await env.DATABASE.prepare('UPDATE credentials SET is_active = 0 WHERE user_id = ?')
+            .bind(f.memberId)
+            .run();
+        } else {
+          await env.DATABASE.prepare(
+            `UPDATE capacity_pool_candidates SET status = 'deleted'
+           WHERE pool_id IN (SELECT id FROM capacity_pools WHERE owner_user_id = ?)`
+          )
+            .bind(f.memberId)
+            .run();
+        }
+        expect(await runDueDelivery(f)).toMatchObject({ kind: 'steer_fallback' });
+        expect(await runDueDelivery(f)).toMatchObject({
+          kind: 'failed',
+          reason: 'wake_refused',
+          error: expect.stringContaining(reason),
+        });
+        expect(await inboxRow(f)).toMatchObject({ delivery_state: 'failed' });
+        expect(await snapshotClaim(f.b.sessionId)).toMatchObject({ recovery_task_id: null });
+      });
+    }
+  );
+
+  it('reports requirements no published offering can satisfy as a terminal actionable failure', async () => {
+    await withEventWakes(async (f) => {
+      await env.DATABASE.prepare(
+        `UPDATE tasks SET resource_requirements_json = ?, resource_requirements_source = 'task',
+           requested_vm_size_source = 'session-recovery'
+         WHERE id = ?`
+      )
+        .bind(JSON.stringify({ minVcpu: 9999, minMemoryGb: 9999 }), f.b.taskId)
+        .run();
+      expect(await runDueDelivery(f)).toMatchObject({ kind: 'steer_fallback' });
+      expect(await runDueDelivery(f)).toMatchObject({
+        kind: 'failed',
+        reason: 'wake_refused',
+        error: expect.stringContaining('placement_unsatisfiable'),
+      });
+      expect(await inboxRow(f)).toMatchObject({ delivery_state: 'failed' });
+      expect(await taskRow(f.b.taskId)).toMatchObject({ status: 'sleeping' });
+      expect(await snapshotClaim(f.b.sessionId)).toMatchObject({ recovery_task_id: null });
+    });
+  });
+});
 
 describe('VM wake handoff with its own queued event delivery', () => {
   it('holds the wake prompt until the handoff commits, then delivers it into the live runtime', async () => {
