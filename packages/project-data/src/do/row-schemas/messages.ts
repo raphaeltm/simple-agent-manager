@@ -149,7 +149,10 @@ function inboxItemPayload(payload: Record<string, unknown>): Record<string, unkn
   const item = maybeJsonRecord(payload.inboxItem);
   const ref = item?.ref;
   const sessionId = item?.sessionId;
-  return typeof ref === 'string' && ref.startsWith('ask:') && typeof sessionId === 'string' && sessionId
+  return typeof ref === 'string' &&
+    ref.startsWith('ask:') &&
+    typeof sessionId === 'string' &&
+    sessionId
     ? { inboxItem: { ref, sessionId } }
     : undefined;
 }

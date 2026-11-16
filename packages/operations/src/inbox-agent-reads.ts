@@ -57,7 +57,10 @@ function iso(ms: number | null): string | null {
   return ms === null ? null : new Date(ms).toISOString();
 }
 
-function answerFields(answerJson: string | null): { answer: string | null; cancelReason: string | null } {
+function answerFields(answerJson: string | null): {
+  answer: string | null;
+  cancelReason: string | null;
+} {
   if (!answerJson) return { answer: null, cancelReason: null };
   try {
     const record = maybeJsonRecord(JSON.parse(answerJson) as unknown);
@@ -100,7 +103,8 @@ function agentItemFromRow(row: unknown, sessionId: string): InboxAgentItem {
 /** The `asks` id of an `ask:<id>` ref; any other ref names nothing an agent can read here. */
 export function agentAskId(ref: string): string {
   const parsed = parseInboxRef(ref);
-  if (!parsed || parsed.store !== 'ask') throw new OperationError('not_found', AGENT_ITEM_NOT_FOUND);
+  if (!parsed || parsed.store !== 'ask')
+    throw new OperationError('not_found', AGENT_ITEM_NOT_FOUND);
   return parsed.id;
 }
 
@@ -120,7 +124,10 @@ export async function listAgentAsks(
   input: AgentListInput
 ): Promise<{ items: InboxAgentItem[]; hasMore: boolean; skipped: number }> {
   const limits = await getInboxLimits(ctx);
-  const limit = Math.min(Math.max(1, Math.trunc(input.limit ?? limits.listPageSize)), limits.listPageMax);
+  const limit = Math.min(
+    Math.max(1, Math.trunc(input.limit ?? limits.listPageSize)),
+    limits.listPageMax
+  );
   const chatOnly = (input.scope ?? 'chat') === 'chat';
   const result = await ctx.env.DATABASE.prepare(
     `SELECT ${AGENT_ITEM_COLUMNS} FROM asks
@@ -179,7 +186,20 @@ export async function getAgentAsk(
   }
 }
 
-const STOP_WORDS = new Set(['the', 'and', 'for', 'should', 'this', 'that', 'with', 'you', 'can', 'are', 'what', 'which']);
+const STOP_WORDS = new Set([
+  'the',
+  'and',
+  'for',
+  'should',
+  'this',
+  'that',
+  'with',
+  'you',
+  'can',
+  'are',
+  'what',
+  'which',
+]);
 
 /** Lower-case words of three or more letters, without filler words. */
 function titleWords(title: string): Set<string> {
@@ -213,7 +233,13 @@ export const SIMILAR_TITLE_THRESHOLD = 0.6;
 export async function findSimilarAsks(
   ctx: OperationContext,
   limits: InboxLimits,
-  input: { projectId: string; sessionId: string; title: string; groupKey?: string; excludeId: string }
+  input: {
+    projectId: string;
+    sessionId: string;
+    title: string;
+    groupKey?: string;
+    excludeId: string;
+  }
 ): Promise<InboxSimilarItem[]> {
   if (limits.similarMatchesMax <= 0) return [];
   let rows: Record<string, unknown>[];

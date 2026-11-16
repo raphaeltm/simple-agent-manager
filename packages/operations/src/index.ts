@@ -63,7 +63,6 @@ export {
   validateIdeaStatusTransition,
 } from './idea-transitions';
 export { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from './idea-update-core';
-export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
 export {
   type AgentAskInput,
   AgentAskInputSchema,
@@ -86,6 +85,7 @@ export {
   listAgentAsks,
   titleSimilarity,
 } from './inbox-agent-reads';
+export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
 export { getInboxItem, resolveInboxItem } from './inbox-item-core';
 export { countInbox, listInbox } from './inbox-list-core';
 export {

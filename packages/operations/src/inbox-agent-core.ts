@@ -21,13 +21,13 @@ import {
 import * as v from 'valibot';
 
 import { OperationError } from './errors';
-import { createAsk } from './inbox-ask-create-core';
 import {
   AGENT_ITEM_NOT_FOUND,
-  type AgentInboxSource,
   agentAskId,
+  type AgentInboxSource,
   findSimilarAsks,
 } from './inbox-agent-reads';
+import { createAsk } from './inbox-ask-create-core';
 import { questionSchedule } from './inbox-question-schedule';
 import { inboxTitle } from './inbox-rows';
 import { getInboxLimits, type InboxLimits } from './inbox-settings';
@@ -129,7 +129,9 @@ async function checkedLinks(
   if (links.length === 0) return links;
   const problems = await ctx.ports.inbox.checkLinkTargets(projectId, links);
   const refused = problems
-    .map((problem, index) => (problem ? `links[${index}] (${links[index]?.kind}): ${problem}` : null))
+    .map((problem, index) =>
+      problem ? `links[${index}] (${links[index]?.kind}): ${problem}` : null
+    )
     .filter((problem): problem is string => problem !== null);
   if (refused.length > 0) throw new OperationError('invalid_input', refused.join('; '));
   return links;
@@ -141,7 +143,10 @@ function askAnswerSpec(input: v.InferOutput<typeof AgentAskInputSchema>) {
     ...new Set((input.options ?? []).map((option) => clean(option)).filter(Boolean)),
   ];
   if (input.options !== undefined && input.answer !== undefined)
-    throw new OperationError('invalid_input', 'Give options or answer, not both: one answer shape per ask');
+    throw new OperationError(
+      'invalid_input',
+      'Give options or answer, not both: one answer shape per ask'
+    );
   if (input.options !== undefined && options.length === 0)
     throw new OperationError('invalid_input', 'options must hold at least one choice');
   if (options.length > 0) return { type: 'options' as const, options, allowText: false };
@@ -192,7 +197,9 @@ async function file(
       >['category'],
       groupKey: item.groupKey,
       // Scoped to the chat, so two chats cannot collide on one key.
-      dedupeKey: item.idempotencyKey ? `agent:${source.sessionId}:${item.idempotencyKey}` : undefined,
+      dedupeKey: item.idempotencyKey
+        ? `agent:${source.sessionId}:${item.idempotencyKey}`
+        : undefined,
       expiresAt: schedule?.expiresAt,
       nextEscalationAt: schedule?.nextEscalationAt ?? undefined,
       maxExpiresAt: schedule?.maxExpiresAt,
@@ -250,7 +257,8 @@ export async function fileAgentAsk(
   const input = v.parse(AgentAskInputSchema, rawInput);
   const limits = await getInboxLimits(ctx);
   const why = clean(input.why);
-  const rawTitle = input.title !== undefined ? input.title : why ? inboxTitle(why, limits.titleMaxChars) : '';
+  const rawTitle =
+    input.title !== undefined ? input.title : why ? inboxTitle(why, limits.titleMaxChars) : '';
   const title = checkedTitle(rawTitle, limits);
   const answerSpec = askAnswerSpec(input);
   const links = await checkedLinks(ctx, source.projectId, input.links, limits);
@@ -386,7 +394,15 @@ export async function cancelAgentAsk(
         AND status = 'open'
       RETURNING kind, blocking`
   )
-    .bind(JSON.stringify({ cancelReason: reason }), now, now, now, askId, source.projectId, source.sessionId)
+    .bind(
+      JSON.stringify({ cancelReason: reason }),
+      now,
+      now,
+      now,
+      askId,
+      source.projectId,
+      source.sessionId
+    )
     .first<{ kind: string; blocking: number }>();
   if (!closed) return explainNoMatch(ctx, source, askId);
   if (closed.kind === 'question' && closed.blocking === 1) {
