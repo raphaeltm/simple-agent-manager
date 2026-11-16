@@ -52,8 +52,8 @@ catalogs:
       specifier: 6.1.1
       version: 6.1.1
     '@vitest/coverage-v8':
-      specifier: 4.1.7
-      version: 4.1.7
+      specifier: 5.1.0
+      version: 5.1.0
     '@xterm/addon-fit':
       specifier: 0.10.0
       version: 0.10.0
@@ -354,7 +354,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -375,7 +375,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
       wrangler:
         specifier: 'catalog:'
         version: 4.149.0(@cloudflare/workers-types@5.20260707.1)(@types/node@26.5.0)
@@ -393,7 +393,7 @@ importers:
         version: 1.65.0
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       astro:
         specifier: 6.4.8
         version: 6.4.8(@types/node@26.5.0)(aws4fetch@1.0.20)(idb-keyval@6.3.0)(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.56.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
@@ -405,7 +405,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@7.3.6(@types/node@26.5.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@7.3.6(@types/node@26.5.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
       wrangler:
         specifier: 'catalog:'
         version: 4.149.0(@cloudflare/workers-types@5.20260707.1)(@types/node@26.5.0)
@@ -417,13 +417,13 @@ importers:
         version: 5.20260707.1
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
       wrangler:
         specifier: 'catalog:'
         version: 4.149.0(@cloudflare/workers-types@5.20260707.1)(@types/node@26.5.0)
@@ -562,7 +562,7 @@ importers:
         version: 6.1.1(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -586,7 +586,7 @@ importers:
         version: 8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
       wrangler:
         specifier: 'catalog:'
         version: 4.149.0(@cloudflare/workers-types@5.20260707.1)(@types/node@26.5.0)
@@ -623,7 +623,7 @@ importers:
         version: 1.65.0
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
@@ -660,13 +660,13 @@ importers:
         version: 22.19.7
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@22.19.7)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@22.19.7)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@22.19.7)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@22.19.7)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/acp-client:
     dependencies:
@@ -712,7 +712,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -730,7 +730,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/agent-email:
     dependencies:
@@ -761,7 +761,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -770,7 +770,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/ai-proxy:
     dependencies:
@@ -795,7 +795,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -804,7 +804,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/app-deployment:
     dependencies:
@@ -844,7 +844,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -853,13 +853,13 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
 
   packages/cloud-init:
     devDependencies:
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       tsup:
         specifier: 8.5.1
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.28)(tsx@4.23.1)(typescript@5.9.3)(yaml@2.9.0)
@@ -868,7 +868,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
       yaml:
         specifier: 2.9.0
         version: 2.9.0
@@ -880,7 +880,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -889,7 +889,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/operations:
     dependencies:
@@ -923,7 +923,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -932,7 +932,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/project-data:
     dependencies:
@@ -966,7 +966,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -978,7 +978,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@22.19.7)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@22.19.7)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@22.19.7)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@22.19.7)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/providers:
     dependencies:
@@ -997,7 +997,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -1006,7 +1006,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/repo-hosting:
     dependencies:
@@ -1043,7 +1043,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -1052,7 +1052,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/scheduler-core:
     dependencies:
@@ -1071,7 +1071,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -1083,7 +1083,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/shared:
     dependencies:
@@ -1108,7 +1108,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -1117,7 +1117,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
 
   packages/terminal:
     dependencies:
@@ -1148,7 +1148,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -1166,7 +1166,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/ui:
     devDependencies:
@@ -1214,7 +1214,7 @@ importers:
         version: 6.1.1(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       astro:
         specifier: 6.4.8
         version: 6.4.8(@types/node@26.5.0)(aws4fetch@1.0.20)(idb-keyval@6.3.0)(jiti@2.7.0)(lightningcss@1.33.0)(rollup@4.56.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
@@ -1247,7 +1247,7 @@ importers:
         version: 8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   packages/worker-core:
     dependencies:
@@ -1272,7 +1272,7 @@ importers:
         version: 8.72.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 'catalog:'
-        version: 4.1.7(vitest@4.1.5)
+        version: 5.1.0(vitest@4.1.5)
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)
@@ -1281,7 +1281,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+        version: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   tools/og-image:
     dependencies:
@@ -5134,11 +5134,11 @@ packages:
       '@vitest/browser':
         optional: true
 
-  '@vitest/coverage-v8@4.1.7':
-    resolution: {integrity: sha512-qsYPeXc5Q9dFLd1i8Ap+Bx8sQgcp+rFVQo4R0dDsWNBzl26ldVF1qOO+RL24K7FDrR6pA+50XedRLSoSG24bVQ==}
+  '@vitest/coverage-v8@5.1.0':
+    resolution: {integrity: sha512-OY9aShBQG5KOIw2zCo9fDoCHI9RHliNHJ//nM7m6jGg41Hyke9JOGWmeMlK74xYErsxMoK8mIB3gAeEyFVA7LA==}
     peerDependencies:
-      '@vitest/browser': 4.1.7
-      vitest: 4.1.7
+      '@vitest/browser': 5.1.0
+      vitest: 5.1.0
     peerDependenciesMeta:
       '@vitest/browser':
         optional: true
@@ -5148,6 +5148,14 @@ packages:
 
   '@vitest/expect@4.1.5':
     resolution: {integrity: sha512-PWBaRY5JoKuRnHlUHfpV/KohFylaDZTupcXN1H9vYryNLOnitSw60Mw9IAE2r67NbwwzBw/Cc/8q9BK3kIX8Kw==}
+
+  '@vitest/istanbul-lib-coverage@2.1.0':
+    resolution: {integrity: sha512-WOjuS+xcjSIy7ruYBQ+9BUcV7XZQ0FyVcbWbWxW9TRx/kLGx5SQaeFRIFDJxjNplb6YsT7SpKo2zuXXUo91OIQ==}
+    engines: {node: '>=22'}
+
+  '@vitest/istanbul-lib-report@2.1.0':
+    resolution: {integrity: sha512-+ZFta25nWtGCOBG9/IET8w1RO5Oawsd6H8Uf6AJ9EA/StFuKVtKAEJEJ6uRt84OH+T4YkI0ASmIHAhRA+0KVxw==}
+    engines: {node: '>=22'}
 
   '@vitest/mocker@4.1.5':
     resolution: {integrity: sha512-/x2EmFC4mT4NNzqvC3fmesuV97w5FC903KPmey4gsnJiMQ3Be1IlDKVaDaG8iqaLFHqJ2FVEkxZk5VmeLjIItw==}
@@ -5166,9 +5174,6 @@ packages:
   '@vitest/pretty-format@4.1.5':
     resolution: {integrity: sha512-7I3q6l5qr03dVfMX2wCo9FxwSJbPdwKjy2uu/YPpU3wfHvIL4QHwVRp57OfGrDFeUJ8/8QdfBKIV12FTtLn00g==}
 
-  '@vitest/pretty-format@4.1.7':
-    resolution: {integrity: sha512-umgCarTOYQWIaDMvGDRZij+6b9oVeLIyJzfN+AS88e0ZOU3QTgNNSTtjQOpcvWr3np1N0j4WgZj+sb3oYBDscw==}
-
   '@vitest/runner@4.1.5':
     resolution: {integrity: sha512-2D+o7Pr82IEO46YPpoA/YU0neeyr6FTerQb5Ro7BUnBuv6NQtT/kmVnczngiMEBhzgqz2UZYl5gArejsyERDSQ==}
 
@@ -5186,9 +5191,6 @@ packages:
 
   '@vitest/utils@4.1.5':
     resolution: {integrity: sha512-76wdkrmfXfqGjueGgnb45ITPyUi1ycZ4IHgC2bhPDUfWHklY/q3MdLOAB+TF1e6xfl8NxNY0ZYaPCFNWSsw3Ug==}
-
-  '@vitest/utils@4.1.7':
-    resolution: {integrity: sha512-T532WBu791cBxJlCl6SO+J14l81DQx6uQHm1bQbmCDY7nqlEIgkza/UFnSBNaUtSf41unldDFjdOBYEQC4b5Hw==}
 
   '@volar/kit@2.4.28':
     resolution: {integrity: sha512-cKX4vK9dtZvDRaAzeoUdaAJEew6IdxHNCRrdp5Kvcl6zZOqb6jTOfk3kXkIkG3T7oTFXguEMt5+9ptyqYR84Pg==}
@@ -8237,6 +8239,10 @@ packages:
     resolution: {integrity: sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q==}
     engines: {node: '>=12.20.0'}
 
+  obug@3.0.0:
+    resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
+    engines: {node: '>=12.20.0'}
+
   ofetch@1.5.1:
     resolution: {integrity: sha512-2W4oUZlVaqAPAil6FUg/difl6YhqhUR7x2eZY4bQCko22UXg3hptq9KLQdqFClV+Wu85UX7hNtdGTngi/1BxcA==}
 
@@ -10927,7 +10933,7 @@ snapshots:
       cjs-module-lexer: 1.2.3
       esbuild: 0.28.1
       miniflare: 4.20260630.0
-      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
+      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
       wrangler: 4.106.0(@cloudflare/workers-types@5.20260707.1)
       zod: 3.25.76
     transitivePeerDependencies:
@@ -10984,7 +10990,7 @@ snapshots:
       '@codspeed/core': 6.1.0
       tinybench: 2.9.0
       vite: 8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0)
-      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
+      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
     transitivePeerDependencies:
       - debug
       - supports-color
@@ -13271,7 +13277,7 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
     optionalDependencies:
-      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
 
   '@testing-library/react@16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
@@ -13733,19 +13739,17 @@ snapshots:
       vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@22.19.7)(@vitest/coverage-v8@4.1.5)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@22.19.7)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
     optional: true
 
-  '@vitest/coverage-v8@4.1.7(vitest@4.1.5)':
+  '@vitest/coverage-v8@5.1.0(vitest@4.1.5)':
     dependencies:
       '@bcoe/v8-coverage': 1.0.2
-      '@vitest/utils': 4.1.7
+      '@vitest/istanbul-lib-coverage': 2.1.0
+      '@vitest/istanbul-lib-report': 2.1.0
       ast-v8-to-istanbul: 1.0.7
-      istanbul-lib-coverage: 3.2.2
-      istanbul-lib-report: 3.0.1
-      istanbul-reports: 3.2.0
       magicast: 0.5.5
-      obug: 2.2.1
+      obug: 3.0.0
       std-env: 4.3.0
       tinyrainbow: 3.2.0
-      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
+      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
 
   '@vitest/expect@3.2.4':
     dependencies:
@@ -13763,6 +13767,12 @@ snapshots:
       '@vitest/utils': 4.1.5
       chai: 6.2.2
       tinyrainbow: 3.2.0
+
+  '@vitest/istanbul-lib-coverage@2.1.0': {}
+
+  '@vitest/istanbul-lib-report@2.1.0':
+    dependencies:
+      '@vitest/istanbul-lib-coverage': 2.1.0
 
   '@vitest/mocker@4.1.5(vite@7.3.6(@types/node@26.5.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))':
     dependencies:
@@ -13828,10 +13838,6 @@ snapshots:
     dependencies:
       tinyrainbow: 3.2.0
 
-  '@vitest/pretty-format@4.1.7':
-    dependencies:
-      tinyrainbow: 3.2.0
-
   '@vitest/runner@4.1.5':
     dependencies:
       '@vitest/utils': 4.1.5
@@ -13859,12 +13865,6 @@ snapshots:
   '@vitest/utils@4.1.5':
     dependencies:
       '@vitest/pretty-format': 4.1.5
-      convert-source-map: 2.0.0
-      tinyrainbow: 3.2.0
-
-  '@vitest/utils@4.1.7':
-    dependencies:
-      '@vitest/pretty-format': 4.1.7
       convert-source-map: 2.0.0
       tinyrainbow: 3.2.0
 
@@ -14345,7 +14345,7 @@ snapshots:
       drizzle-orm: 0.45.2(@cloudflare/workers-types@5.20260707.1)(@opentelemetry/api@1.10.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(kysely@0.28.17)
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
-      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
+      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
     transitivePeerDependencies:
       - '@opentelemetry/api'
 
@@ -14372,7 +14372,7 @@ snapshots:
       drizzle-orm: 0.45.2(@cloudflare/workers-types@5.20260707.1)(@opentelemetry/api@1.10.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)(kysely@0.28.17)
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
-      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
+      vitest: 4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
     transitivePeerDependencies:
       - '@opentelemetry/api'
 
@@ -16227,7 +16227,8 @@ snapshots:
     transitivePeerDependencies:
       - '@noble/hashes'
 
-  html-escaper@2.0.2: {}
+  html-escaper@2.0.2:
+    optional: true
 
   html-escaper@3.0.3: {}
 
@@ -16516,18 +16517,21 @@ snapshots:
       sha.js: 2.4.12
       simple-get: 4.0.1
 
-  istanbul-lib-coverage@3.2.2: {}
+  istanbul-lib-coverage@3.2.2:
+    optional: true
 
   istanbul-lib-report@3.0.1:
     dependencies:
       istanbul-lib-coverage: 3.2.2
       make-dir: 4.0.0
       supports-color: 7.2.0
+    optional: true
 
   istanbul-reports@3.2.0:
     dependencies:
       html-escaper: 2.0.2
       istanbul-lib-report: 3.0.1
+    optional: true
 
   iterator.prototype@1.1.5:
     dependencies:
@@ -16835,6 +16839,7 @@ snapshots:
   make-dir@4.0.0:
     dependencies:
       semver: 7.8.5
+    optional: true
 
   make-fetch-happen@15.0.6:
     dependencies:
@@ -17630,6 +17635,8 @@ snapshots:
       es-object-atoms: 1.1.1
 
   obug@2.2.1: {}
+
+  obug@3.0.0: {}
 
   ofetch@1.5.1:
     dependencies:
@@ -19553,7 +19560,7 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@22.19.7)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@22.19.7)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
+  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@22.19.7)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@22.19.7)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
     dependencies:
       '@vitest/expect': 4.1.5
       '@vitest/mocker': 4.1.5(vite@8.3.2(@types/node@22.19.7)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
@@ -19578,12 +19585,12 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
       '@types/node': 22.19.7
-      '@vitest/coverage-v8': 4.1.7(vitest@4.1.5)
+      '@vitest/coverage-v8': 5.1.0(vitest@4.1.5)
       jsdom: 29.1.1(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@7.3.6(@types/node@26.5.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
+  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@7.3.6(@types/node@26.5.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
     dependencies:
       '@vitest/expect': 4.1.5
       '@vitest/mocker': 4.1.5(vite@7.3.6(@types/node@26.5.0)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
@@ -19608,12 +19615,12 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
       '@types/node': 26.5.0
-      '@vitest/coverage-v8': 4.1.7(vitest@4.1.5)
+      '@vitest/coverage-v8': 5.1.0(vitest@4.1.5)
       jsdom: 29.1.1(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0)):
+  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.5
       '@vitest/mocker': 4.1.5(vite@8.3.2(@types/node@26.5.0)(esbuild@0.19.12)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
@@ -19638,12 +19645,12 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
       '@types/node': 26.5.0
-      '@vitest/coverage-v8': 4.1.7(vitest@4.1.5)
+      '@vitest/coverage-v8': 5.1.0(vitest@4.1.5)
       jsdom: 29.1.1(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0)):
+  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.5
       '@vitest/mocker': 4.1.5(vite@8.3.2(@types/node@26.5.0)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
@@ -19668,12 +19675,12 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
       '@types/node': 26.5.0
-      '@vitest/coverage-v8': 4.1.7(vitest@4.1.5)
+      '@vitest/coverage-v8': 5.1.0(vitest@4.1.5)
       jsdom: 29.1.1(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0)):
+  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0)):
     dependencies:
       '@vitest/expect': 4.1.5
       '@vitest/mocker': 4.1.5(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.0))
@@ -19698,12 +19705,12 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
       '@types/node': 26.5.0
-      '@vitest/coverage-v8': 4.1.7(vitest@4.1.5)
+      '@vitest/coverage-v8': 5.1.0(vitest@4.1.5)
       jsdom: 29.1.1(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - msw
 
-  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@4.1.7)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
+  vitest@4.1.5(@opentelemetry/api@1.10.0)(@types/node@26.5.0)(@vitest/coverage-v8@5.1.0)(jsdom@29.1.1(@noble/hashes@2.4.0))(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1)):
     dependencies:
       '@vitest/expect': 4.1.5
       '@vitest/mocker': 4.1.5(vite@8.3.2(@types/node@26.5.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.1)(yaml@2.9.1))
@@ -19728,7 +19735,7 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
       '@types/node': 26.5.0
-      '@vitest/coverage-v8': 4.1.7(vitest@4.1.5)
+      '@vitest/coverage-v8': 5.1.0(vitest@4.1.5)
       jsdom: 29.1.1(@noble/hashes@2.4.0)
     transitivePeerDependencies:
       - msw
