@@ -158,6 +158,38 @@ describe('ACP interaction notifications and undelivered answers (slice E)', () =
     });
   });
 
+  it('does not notify a chat creator who is no longer a project member', async () => {
+    // The creator was removed after starting the chat, before the request arrived.
+    const removed = await setup();
+    await testEnv.DATABASE.prepare(
+      'DELETE FROM project_members WHERE project_id = ? AND user_id = ?'
+    )
+      .bind(removed.projectId, removed.userId)
+      .run();
+    await drain(removed.store);
+
+    // Liveness: the projection ran (the inbox still holds the request), it only told nobody.
+    const markerId = await runInDurableObject(removed.store, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec(
+          'SELECT attention_marker_id FROM interactions WHERE interaction_id = ?',
+          removed.interactionId
+        )
+        .one() as { attention_marker_id: string | null };
+      return row.attention_marker_id;
+    });
+    expect(markerId).toBeTruthy();
+    const { notifications: list } = await removed.notifications.listNotifications(removed.userId, {
+      projectId: removed.projectId,
+    });
+    expect(list.filter((n) => n.type === 'needs_input')).toHaveLength(0);
+
+    await runInDurableObject(removed.store, async (_instance, state) => {
+      state.storage.sql.exec(`DELETE FROM outbox`);
+      await state.storage.deleteAlarm();
+    });
+  });
+
   it('files one error item when the person’s answer was never confirmed delivered', async () => {
     const { userId, projectId, chatSessionId, interactionId, store } = await setup();
     await drain(store);
