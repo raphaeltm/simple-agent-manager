@@ -380,6 +380,7 @@ export {
   listProjectIdeas,
   setProjectIdeaStatus,
 } from './ideas';
+export { getRunReceipt } from './insights-receipt';
 export {
   addObservation,
   createKnowledgeEntity,
