@@ -3,13 +3,13 @@ import { Button, IconButton, paneClassName, Spinner } from '@simple-agent-manage
 import { ArrowRight, Check, X } from 'lucide-react';
 import { forwardRef, useMemo, useState } from 'react';
 
-import { answerInboxItem } from '../../lib/api';
+import { useMinuteClock } from '../../hooks/useMinuteClock';
+import type { answerInboxItem } from '../../lib/api';
+import { deliveryNote, useInboxPermissionDetail, useInboxSend } from './inbox-actions';
 import { buildRows } from './inbox-model';
-import { isStaleInboxError, useInboxPermissionDetail } from './InboxAnswerControls';
 import { InboxPushInvite } from './InboxPushInvite';
 import { InboxEmptyState, InboxRow } from './InboxRow';
 import { useInboxList, useInvalidateInbox } from './useInbox';
-import { useMinuteClock } from './useInboxWalk';
 
 /** Rows the quick view lists before "Open inbox". */
 const QUICK_VIEW_LIMIT = 8;
@@ -40,9 +40,21 @@ function staticOneTaps(item: InboxItem): OneTap[] {
 
 function OneTapButtons({ item, taps }: { item: InboxItem; taps: OneTap[] }) {
   const invalidate = useInvalidateInbox();
-  const [busy, setBusy] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const handlers = useMemo(
+    () => ({
+      onAnswered: (receipt: string) => {
+        setDone(receipt);
+        invalidate();
+      },
+      onStale: () => {
+        setDone('Already handled somewhere else');
+        invalidate();
+      },
+    }),
+    [invalidate]
+  );
+  const { busy, error, send } = useInboxSend(item, handlers);
   if (taps.length === 0) return null;
   if (done)
     return (
@@ -50,26 +62,9 @@ function OneTapButtons({ item, taps }: { item: InboxItem; taps: OneTap[] }) {
         role="status"
         className="m-0 flex items-center gap-1.5 px-3 pb-2.5 pl-14 text-sm text-[var(--sam-status-success-fg)]"
       >
-        <Check size={14} aria-hidden="true" /> Sent “{done}”
+        <Check size={14} aria-hidden="true" /> {done}
       </p>
     );
-  const tap = async (choice: OneTap) => {
-    if (busy) return;
-    setBusy(choice.label);
-    setError(null);
-    try {
-      await answerInboxItem(item.projectId, item.ref, choice.body);
-      setDone(choice.label);
-      invalidate();
-    } catch (cause) {
-      if (isStaleInboxError(cause)) {
-        setDone('already handled');
-        invalidate();
-      } else setError(cause instanceof Error ? cause.message : 'Could not send this answer');
-    } finally {
-      setBusy(null);
-    }
-  };
   return (
     <div className="flex flex-col gap-1.5 px-3 pb-2.5 pl-14">
       <div className="flex flex-wrap gap-2">
@@ -79,7 +74,13 @@ function OneTapButtons({ item, taps }: { item: InboxItem; taps: OneTap[] }) {
             size="sm"
             variant={choice.primary ? 'primary' : 'secondary'}
             disabled={busy !== null}
-            onClick={() => void tap(choice)}
+            onClick={() =>
+              void send(
+                choice.label,
+                choice.body,
+                (r) => `Sent “${choice.label}”${deliveryNote(r)}`
+              )
+            }
             className="min-h-11 max-w-full !whitespace-normal break-words"
           >
             {busy === choice.label ? 'Sending…' : choice.label}

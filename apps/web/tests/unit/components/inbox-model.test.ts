@@ -51,8 +51,16 @@ describe('inbox model', () => {
     ).toEqual({
       href: 'https://github.com/a/b/pull/1',
       external: true,
+      host: 'github.com',
     });
     expect(linkTarget('p', { kind: 'url', id: 'javascript:alert(1)', label: null })).toBeNull();
     expect(linkTarget('p', { kind: 'mystery', id: 'x', label: null })).toBeNull();
+    expect(linkTarget('p', { kind: 'idea', id: '..', label: null })).toBeNull();
+    expect(
+      linkTarget('p', { kind: 'url', id: 'https://user:pw@github.com/x', label: null })
+    ).toBeNull();
+    expect(
+      linkTarget('p', { kind: 'url', id: 'https://github.com.evil.example/login', label: 'PR' })
+    ).toMatchObject({ host: 'github.com.evil.example' });
   });
 });

@@ -14,7 +14,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { useNotifications } from '../hooks/useNotifications';
+import { useNotificationSocket } from '../hooks/useNotificationSocket';
 import { useProjectList } from '../hooks/useProjectData';
 import { useSamSettings } from '../hooks/useSamSettings';
 import { signOut } from '../lib/auth';
@@ -167,9 +167,9 @@ export function AppShell({ children }: AppShellProps) {
   // Detect project context from URL (excludes reserved paths like /projects/new)
   const projectId = extractProjectId(location.pathname);
 
-  // One notification socket for the app: its new-notification events refresh the inbox counts
-  // and lists (and the Updates chip), so nothing polls.
-  useNotifications();
+  // One notification socket for the app: its events refresh the inbox counts and lists (and the
+  // Updates chip), so nothing polls.
+  useNotificationSocket();
 
   // The phone drawer shows the same inbox counts as the desktop nav (nav parity, rule 15).
   const globalInboxCount = useInboxCount(null).data?.needsYou;

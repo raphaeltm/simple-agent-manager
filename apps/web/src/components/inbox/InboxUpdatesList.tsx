@@ -101,7 +101,9 @@ export function InboxUpdatesList({
         const project = showProject ? projectLabel(notification) : null;
         const open = () => {
           if (!notification.readAt) void markNotificationRead(notification.id).then(refresh);
-          if (notification.actionUrl?.startsWith('/')) navigate(notification.actionUrl);
+          // In-app paths only: `//host` would be protocol-relative.
+          if (notification.actionUrl && /^\/(?![/\\])/.test(notification.actionUrl))
+            navigate(notification.actionUrl);
         };
         return (
           <li key={notification.id} className="flex list-none items-start gap-1 rounded-xl">

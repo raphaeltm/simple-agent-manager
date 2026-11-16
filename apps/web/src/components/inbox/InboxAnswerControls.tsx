@@ -1,66 +1,29 @@
-import {
-  type InboxActionResponse,
-  type InboxItem,
-  OPERATIONS_IRREVERSIBLE_ACTIONS,
-  type OperationsAction,
-} from '@simple-agent-manager/shared';
+import type { InboxItem } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { useQuery } from '@tanstack/react-query';
 import { MessageSquare, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
-import { useQueryScope } from '../../hooks/useQueryScope';
-import { answerInboxItem, getSecretRequest } from '../../lib/api';
-import { ApiClientError } from '../../lib/api/client';
+import { answerInboxItem } from '../../lib/api';
 import { projectChatPath } from '../../lib/project-routes';
-import { projectQueryKeys } from '../../lib/query-options/projects';
 import { AttentionAnswerControls } from '../notifications/AttentionAnswerControls';
 import { ApprovalDecisionButtons } from '../operations-approvals/ApprovalItem';
 import { PermissionOptions } from '../project-message-view/AcpPermissionOptions';
 import { SecretRequestForm } from '../project-message-view/tool-cards/SecretRequestForm';
-import {
-  type PermissionDetail,
-  type PermissionOption,
-  usePermissionDetail,
+import { useSecretRequest } from '../project-message-view/tool-cards/useSecretRequest';
+import type {
+  PermissionDetail,
+  PermissionOption,
 } from '../project-message-view/useAcpPermissionCard';
-
-/** The item was answered or closed somewhere else (409), or is gone (404). */
-export function isStaleInboxError(error: unknown): boolean {
-  return error instanceof ApiClientError && (error.status === 404 || error.status === 409);
-}
-
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
-
-function deliveryNote(response: InboxActionResponse): string {
-  return response.agentNotified ? '' : ' · the agent will be told shortly';
-}
-
-export interface InboxAnswerHandlers {
-  /** The answer was accepted: show `receipt` and move on. */
-  onAnswered: (receipt: string) => void;
-  /** Answered or closed elsewhere: close this item. */
-  onStale: () => void;
-}
-
-/** Secure permission detail (title, description, options) for a live permission item. */
-export function useInboxPermissionDetail(item: InboxItem) {
-  const spec = item.answerSpec;
-  const live =
-    spec.type === 'interaction' &&
-    spec.interactionKind === 'permission' &&
-    Boolean(spec.interactionId && item.sessionId) &&
-    item.status === 'open' &&
-    item.canAct;
-  return usePermissionDetail({
-    projectId: item.projectId,
-    sessionId: item.sessionId ?? '',
-    interactionId: spec.type === 'interaction' ? (spec.interactionId ?? '') : '',
-    mayReveal: live,
-  });
-}
+import {
+  deliveryNote,
+  errorText,
+  type InboxAnswerHandlers,
+  isStaleInboxError,
+  type useInboxPermissionDetail,
+  useInboxSend,
+} from './inbox-actions';
+import { isIrreversibleApproval } from './inbox-model';
 
 /** What the agent wants to run lives in the body; only the buttons are pinned. */
 export function InboxPermissionSummary({ detail }: { detail: PermissionDetail | null }) {
@@ -98,31 +61,6 @@ function ErrorLine({ error }: { error: string | null }) {
       {error}
     </p>
   );
-}
-
-/** One answer request with stale handling; failures keep the item and show the error. */
-function useInboxSend(item: InboxItem, handlers: InboxAnswerHandlers) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const send = async (
-    key: string,
-    body: Parameters<typeof answerInboxItem>[2],
-    receipt: (response: InboxActionResponse) => string
-  ) => {
-    if (busy) return;
-    setBusy(key);
-    setError(null);
-    try {
-      const response = await answerInboxItem(item.projectId, item.ref, body);
-      handlers.onAnswered(receipt(response));
-    } catch (cause) {
-      if (isStaleInboxError(cause)) handlers.onStale();
-      else setError(errorText(cause, 'Could not send this answer'));
-    } finally {
-      setBusy(null);
-    }
-  };
-  return { busy, error, send };
 }
 
 function PermissionControls({
@@ -177,14 +115,8 @@ function PermissionControls({
 }
 
 function SecretControls({ item, handlers }: { item: InboxItem; handlers: InboxAnswerHandlers }) {
-  const scope = useQueryScope();
   const requestId = item.answerSpec.type === 'secret' ? item.answerSpec.requestId : '';
-  const query = useQuery({
-    queryKey: projectQueryKeys.secretRequest(scope, item.projectId, requestId),
-    queryFn: ({ signal }) => getSecretRequest(item.projectId, requestId, signal),
-    enabled: Boolean(scope && requestId),
-    retry: false,
-  });
+  const { query } = useSecretRequest(item.projectId, requestId);
   if (!query.data) {
     if (query.error && isStaleInboxError(query.error)) {
       return <StaleNotice onStale={handlers.onStale} />;
@@ -315,9 +247,7 @@ function ReviewControls({ item, handlers }: { item: InboxItem; handlers: InboxAn
 
 function ApprovalControls({ item, handlers }: { item: InboxItem; handlers: InboxAnswerHandlers }) {
   const { busy, error, send } = useInboxSend(item, handlers);
-  const irreversible =
-    item.answerSpec.type === 'approval' &&
-    OPERATIONS_IRREVERSIBLE_ACTIONS.includes(item.answerSpec.action as OperationsAction);
+  const irreversible = isIrreversibleApproval(item.answerSpec);
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <ApprovalDecisionButtons
@@ -388,7 +318,6 @@ export function InboxAnswerControls({
               throw cause;
             }
           }}
-          onResolved={() => undefined}
         />
       );
     case 'interaction':

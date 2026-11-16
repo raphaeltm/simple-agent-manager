@@ -1,5 +1,6 @@
+import { useClickOutside, useEscapeKey } from '@simple-agent-manager/ui';
 import { Archive, MoreHorizontal } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { INBOX_CHIPS, type InboxView } from './inbox-model';
 
@@ -25,23 +26,9 @@ export function InboxFilterBar({
     currentRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [value]);
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (
-        event instanceof KeyboardEvent
-          ? event.key === 'Escape'
-          : !menuRef.current?.contains(event.target as Node)
-      )
-        setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', close);
-    return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', close);
-    };
-  }, [menuOpen]);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  useClickOutside(menuRef, closeMenu, menuOpen);
+  useEscapeKey(closeMenu, menuOpen);
 
   const chips =
     value === 'archived'

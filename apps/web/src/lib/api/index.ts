@@ -458,12 +458,10 @@ export {
 export {
   dismissNotification,
   getNotificationPreferences,
-  getNotificationUnreadCount,
   getNotificationWsUrl,
   getVapidPublicKey,
   listNotifications,
   listWebPushSubscriptions,
-  markAllNotificationsRead,
   markNotificationRead,
   subscribeWebPush,
   unsubscribeWebPush,

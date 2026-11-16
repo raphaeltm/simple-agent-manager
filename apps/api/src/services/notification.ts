@@ -71,7 +71,7 @@ function getStub(env: NotificationEnv, userId: string): DurableObjectStub<Notifi
  * when a sessionId is available.
  *
  * Returns a frontend-relative path consumed exclusively by the React app
- * via `navigate(notification.actionUrl)` in NotificationCenter. MUST NOT
+ * via `navigate(notification.actionUrl)` in the inbox Updates list (`InboxUpdatesList`). MUST NOT
  * be used for server-side redirects, web push click_action, or external
  * integrations — those require absolute `https://app.${BASE_DOMAIN}/...` URLs.
  *

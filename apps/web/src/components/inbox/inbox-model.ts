@@ -1,8 +1,11 @@
-import type {
-  InboxFilter,
-  InboxItem,
-  InboxItemKind,
-  InboxLink,
+import {
+  type InboxAnswerSpec,
+  type InboxFilter,
+  type InboxItem,
+  type InboxItemKind,
+  type InboxLink,
+  OPERATIONS_IRREVERSIBLE_ACTIONS,
+  type OperationsAction,
 } from '@simple-agent-manager/shared';
 import {
   CircleAlert,
@@ -22,7 +25,13 @@ import {
   ShieldQuestion,
 } from 'lucide-react';
 
-import { projectChatPath, projectIdeaPath, projectLibraryFilePath } from '../../lib/project-routes';
+import {
+  projectAgentContextPath,
+  projectChatPath,
+  projectIdeaPath,
+  projectLibraryFilePath,
+} from '../../lib/project-routes';
+import { formatMsSpan } from '../../lib/time-utils';
 
 /**
  * Pure inbox view model (slice C, spec idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9 section 4.1). Items arrive
@@ -71,12 +80,19 @@ export function isPausedOnItem(item: InboxItem): boolean {
   return item.agentState === 'waiting' && item.status === 'open';
 }
 
-/** Minutes left before a live deadline, or null when the item has none (or it passed). */
-export function minutesLeft(item: InboxItem, now: number): number | null {
+/** Time left before a live deadline ("4m", "1h 30m"), or null when there is none (or it passed). */
+export function timeLeft(item: InboxItem, now: number): string | null {
   if (!item.expiresAt || item.status !== 'open') return null;
   const ms = Date.parse(item.expiresAt) - now;
-  if (!Number.isFinite(ms) || ms <= 0) return null;
-  return Math.max(1, Math.ceil(ms / 60_000));
+  return Number.isFinite(ms) && ms > 0 ? formatMsSpan(ms) : null;
+}
+
+/** An Operations approval whose action cannot be undone (approving deletes its target). */
+export function isIrreversibleApproval(spec: InboxAnswerSpec): boolean {
+  return (
+    spec.type === 'approval' &&
+    OPERATIONS_IRREVERSIBLE_ACTIONS.includes(spec.action as OperationsAction)
+  );
 }
 
 /** Short agent state for a row ("paused on this"), or null when unknown. */
@@ -111,14 +127,9 @@ export function agentStateLong(item: InboxItem): string | null {
   }
 }
 
+/** Compact age of an item ("12m", "3h 5m", "2d"). */
 export function formatAge(iso: string, now: number): string {
-  const ms = now - Date.parse(iso);
-  if (!Number.isFinite(ms) || ms < 60_000) return 'now';
-  const minutes = Math.floor(ms / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
+  return formatMsSpan(now - Date.parse(iso));
 }
 
 /** A list row: one item, or a stack of items from one chat (or one group). */
@@ -203,7 +214,9 @@ export function linkIcon(link: InboxLink): LucideIcon {
 export function linkTarget(
   projectId: string,
   link: InboxLink
-): { href: string; external: boolean } | null {
+): { href: string; external: boolean; host?: string } | null {
+  // A dot segment would climb out of the intended path once the router resolves it.
+  if (!link.id || link.id === '.' || link.id === '..') return null;
   switch (link.kind) {
     case 'idea':
       return { href: projectIdeaPath(projectId, link.id), external: false };
@@ -215,14 +228,29 @@ export function linkTarget(
       return { href: projectChatPath(projectId, link.id), external: false };
     case 'policy':
     case 'knowledge':
-      return { href: `/projects/${encodeURIComponent(projectId)}/agent-context`, external: false };
+      return { href: projectAgentContextPath(projectId), external: false };
     case 'pr':
     case 'pull_request':
     case 'url':
-      return /^https:\/\//.test(link.id) ? { href: link.id, external: true } : null;
+      return externalTarget(link.id);
     default:
       return null;
   }
+}
+
+/**
+ * An agent-supplied external link: https only, no credentials in the URL, and the host returned
+ * so the chip can show where it really goes (the label is the agent's own text).
+ */
+function externalTarget(id: string): { href: string; external: true; host: string } | null {
+  let url: URL;
+  try {
+    url = new URL(id);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || !url.hostname) return null;
+  return { href: url.toString(), external: true, host: url.hostname };
 }
 
 /** The label a link chip shows: the agent's label, else the kind and id. */

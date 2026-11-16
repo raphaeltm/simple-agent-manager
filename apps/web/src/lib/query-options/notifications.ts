@@ -1,7 +1,7 @@
 import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { queryOptions } from '@tanstack/react-query';
 
-import { getNotificationPreferences, getNotificationUnreadCount, listNotifications } from '../api';
+import { getNotificationPreferences, listNotifications } from '../api';
 import { parseNotificationListItems } from '../notification-validation';
 
 export type NotificationListParams = Parameters<typeof listNotifications>[0];
@@ -28,8 +28,6 @@ export const notificationQueryKeys = {
     [...notificationQueryKeys.all(queryScope), 'preferences'] as const,
   list: (queryScope: string, params?: NotificationListParams) =>
     [...notificationQueryKeys.all(queryScope), 'list', params ?? {}] as const,
-  unreadCount: (queryScope: string) =>
-    [...notificationQueryKeys.all(queryScope), 'unread-count'] as const,
   /**
    * One agent question (`GET …/attention/:markerId`). Shared by the notification reader and
    * the chat card, so an answer given in either refreshes both.
@@ -73,16 +71,6 @@ export function notificationsListQueryOptions(
         unreadCount: typeof response.unreadCount === 'number' ? response.unreadCount : 0,
         nextCursor: response.nextCursor ?? null,
       };
-    },
-  });
-}
-
-export function notificationUnreadCountQueryOptions(queryScope: string) {
-  return queryOptions({
-    queryKey: notificationQueryKeys.unreadCount(queryScope),
-    queryFn: async () => {
-      const response = await getNotificationUnreadCount();
-      return typeof response.count === 'number' ? response.count : 0;
     },
   });
 }

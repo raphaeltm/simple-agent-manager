@@ -1,13 +1,20 @@
 import type { InboxItem } from '@simple-agent-manager/shared';
 import { IconButton } from '@simple-agent-manager/ui';
 import { Inbox } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { InboxQuickView } from './InboxQuickView';
+import { importWithRetry } from '../../lib/lazy-with-retry';
 import { useInboxCount } from './useInbox';
+
+// The icon lives in the app shell on every page; the quick view (and the answer code behind it)
+// loads only when someone opens it, so it stays out of the main bundle.
+const loadQuickView = () => importWithRetry(() => import('./InboxQuickView'));
+const InboxQuickView = lazy(() =>
+  loadQuickView().then((module) => ({ default: module.InboxQuickView }))
+);
 
 /** The cross-project Inbox page, opened on one item when given. */
 export function inboxPath(item?: InboxItem): string {
@@ -37,6 +44,8 @@ export function InboxButton() {
     setStyle({ top: rect.bottom + 8, left: Math.max(16, rect.left) });
   }, [open]);
 
+  // Two refs (the icon and the portaled panel), so the single-ref `useClickOutside` from
+  // packages/ui does not fit.
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: MouseEvent) => {
@@ -70,6 +79,8 @@ export function InboxButton() {
       <IconButton
         ref={buttonRef}
         onClick={() => (isMobile ? navigate('/inbox') : setOpen((value) => !value))}
+        onPointerEnter={isMobile ? undefined : () => void loadQuickView()}
+        onFocus={isMobile ? undefined : () => void loadQuickView()}
         label={label}
         icon={<Inbox size={20} strokeWidth={1.75} />}
         count={count > 99 ? '99+' : count || undefined}
@@ -80,20 +91,22 @@ export function InboxButton() {
       />
       {open &&
         createPortal(
-          <InboxQuickView
-            ref={panelRef}
-            style={style}
-            total={count}
-            onClose={close}
-            onOpenItem={(item) => {
-              setOpen(false);
-              navigate(inboxPath(item));
-            }}
-            onOpenInbox={() => {
-              setOpen(false);
-              navigate(inboxPath());
-            }}
-          />,
+          <Suspense fallback={null}>
+            <InboxQuickView
+              ref={panelRef}
+              style={style}
+              total={count}
+              onClose={close}
+              onOpenItem={(item) => {
+                setOpen(false);
+                navigate(inboxPath(item));
+              }}
+              onOpenInbox={() => {
+                setOpen(false);
+                navigate(inboxPath());
+              }}
+            />
+          </Suspense>,
           document.body
         )}
     </div>

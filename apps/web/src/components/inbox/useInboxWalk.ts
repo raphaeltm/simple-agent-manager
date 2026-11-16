@@ -2,8 +2,8 @@ import type { InboxItem } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
+import { isStaleInboxError } from './inbox-actions';
 import { type InboxView, nextAfter, parseInboxView, walkOrder } from './inbox-model';
-import { isStaleInboxError } from './InboxAnswerControls';
 import type { InboxReceipt } from './InboxItemView';
 import { useInboxItem, useInboxList, useInvalidateInbox, usePendingArchive } from './useInbox';
 
@@ -14,16 +14,6 @@ const INBOX_RECEIPT_MS =
   Number.isFinite(configuredReceiptMs) && configuredReceiptMs > 0
     ? configuredReceiptMs
     : DEFAULT_INBOX_RECEIPT_MS;
-
-/** Re-render once a minute so ages and "4m left" stay true without refetching. */
-export function useMinuteClock(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return now;
-}
 
 /**
  * The inbox walk: which view and item are open (both in the URL, so phone Back returns to the
@@ -217,6 +207,10 @@ export function useInboxWalk({
     setReceipt(null);
   }, [navigateTo, undoPendingArchive, unhide]);
 
+  const open = useCallback((item: InboxItem) => navigateTo(item, false), [navigateTo]);
+  const step = useCallback((item: InboxItem) => navigateTo(item, true), [navigateTo]);
+  const close = useCallback(() => navigateTo(null, false), [navigateTo]);
+
   const visibleReceipt: InboxReceipt | null = receipt
     ? {
         id: receipt.id,
@@ -239,9 +233,9 @@ export function useInboxWalk({
     itemParam: effectiveParam,
     detail,
     receipt: visibleReceipt,
-    open: (item: InboxItem) => navigateTo(item, false),
-    step: (item: InboxItem) => navigateTo(item, true),
-    close: () => navigateTo(null, false),
+    open,
+    step,
+    close,
     onAnswered,
     onStale,
     archiveItem,

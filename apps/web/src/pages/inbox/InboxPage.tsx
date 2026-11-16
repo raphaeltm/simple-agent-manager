@@ -4,11 +4,11 @@ import { Archive, ArrowLeft, ChevronLeft, ChevronRight, MessageSquare } from 'lu
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 
+import { useInboxPermissionDetail } from '../../components/inbox/inbox-actions';
 import { buildRows, stackPosition } from '../../components/inbox/inbox-model';
 import {
   InboxAnswerControls,
   InboxPermissionSummary,
-  useInboxPermissionDetail,
 } from '../../components/inbox/InboxAnswerControls';
 import { InboxFilterBar } from '../../components/inbox/InboxFilterBar';
 import {
@@ -19,8 +19,9 @@ import {
 import { InboxEmptyState, InboxRow } from '../../components/inbox/InboxRow';
 import { InboxUpdatesList, useInboxUpdates } from '../../components/inbox/InboxUpdatesList';
 import { useInboxCount } from '../../components/inbox/useInbox';
-import { useInboxWalk, useMinuteClock } from '../../components/inbox/useInboxWalk';
+import { useInboxWalk } from '../../components/inbox/useInboxWalk';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { useMinuteClock } from '../../hooks/useMinuteClock';
 import { projectChatPath } from '../../lib/project-routes';
 
 type Walk = ReturnType<typeof useInboxWalk>;

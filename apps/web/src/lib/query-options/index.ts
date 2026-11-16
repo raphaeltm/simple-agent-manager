@@ -161,7 +161,6 @@ export {
   notificationQueryKeys,
   type NotificationsListQueryData,
   notificationsListQueryOptions,
-  notificationUnreadCountQueryOptions,
   timelineProgressNotificationsQueryOptions,
 } from './notifications';
 export {

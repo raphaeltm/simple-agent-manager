@@ -9,7 +9,7 @@ import { getInboxCount, getInboxItem, listInbox } from '../api';
  * free text, so none of these keys are persisted.
  *
  * Freshness: fetched on load, refetched when the window regains focus, and invalidated when the
- * notification socket reports something new (`useNotifications`). There is no interval poll.
+ * notification socket reports something new (`useNotificationSocket`). There is no interval poll.
  */
 export const inboxQueryKeys = {
   all: (queryScope: string) => ['auth', queryScope, 'inbox'] as const,

@@ -5,7 +5,7 @@ import { useId, useState } from 'react';
 import { resolveAttentionAnswer } from '../../lib/api';
 
 /** Above this many options the choices become a scrollable radio list with one Send button. */
-export const ATTENTION_OPTION_BUTTON_LIMIT = 5;
+const ATTENTION_OPTION_BUTTON_LIMIT = 5;
 
 export interface AttentionAnswerResult {
   answer: string;
@@ -37,7 +37,7 @@ export function AttentionAnswerControls({
   sessionId: string;
   markerId: string;
   options: string[];
-  onResolved: (result: AttentionAnswerResult) => void;
+  onResolved?: (result: AttentionAnswerResult) => void;
   allowCustom?: boolean;
   submit?: (answer: string) => Promise<AttentionAnswerResult>;
   layout?: 'inline' | 'pinned';
@@ -63,7 +63,7 @@ export function AttentionAnswerControls({
         : await resolveAttentionAnswer(projectId, sessionId, markerId, trimmed);
       const settled = { answer: result.answer, resolved: result.resolved };
       setOutcome(settled);
-      onResolved(settled);
+      onResolved?.(settled);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not send this answer');
     } finally {

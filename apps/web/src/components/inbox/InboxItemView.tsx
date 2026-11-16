@@ -1,9 +1,4 @@
-import {
-  type InboxItem,
-  type InboxItemContext,
-  OPERATIONS_IRREVERSIBLE_ACTIONS,
-  type OperationsAction,
-} from '@simple-agent-manager/shared';
+import type { InboxItem, InboxItemContext } from '@simple-agent-manager/shared';
 import { Check, ChevronDown, CircleAlert, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -11,12 +6,13 @@ import { Link } from 'react-router';
 import {
   agentStateLong,
   contextSummary,
+  isIrreversibleApproval,
   isPausedOnItem,
   KIND_META,
   linkIcon,
   linkLabel,
   linkTarget,
-  minutesLeft,
+  timeLeft,
 } from './inbox-model';
 
 /** Agent-chosen links as one scrolling row of chips; each resolves with the reader's access. */
@@ -49,8 +45,13 @@ export function InboxLinkChips({ item }: { item: InboxItem }) {
             target="_blank"
             rel="noopener noreferrer"
             className={chip}
+            title={target.href}
           >
             {content}
+            {/* The agent wrote the label; the host says where the link really goes. */}
+            {target.host && (
+              <span className="shrink-0 text-[11px] text-fg-muted">· {target.host}</span>
+            )}
           </a>
         ) : (
           <Link key={key} to={target.href} className={chip}>
@@ -202,12 +203,10 @@ export function InboxItemBody({
   now: number;
   stackPosition: { index: number; total: number; topic: string | null } | null;
 }) {
-  const left = minutesLeft(item, now);
-  const state = left !== null ? `Expires in ${left}m` : agentStateLong(item);
+  const left = timeLeft(item, now);
+  const state = left !== null ? `Expires in ${left}` : agentStateLong(item);
   const amber = left !== null || isPausedOnItem(item);
-  const irreversible =
-    item.answerSpec.type === 'approval' &&
-    OPERATIONS_IRREVERSIBLE_ACTIONS.includes(item.answerSpec.action as OperationsAction);
+  const irreversible = isIrreversibleApproval(item.answerSpec);
   return (
     <div className="flex min-w-0 flex-col gap-3" data-testid="inbox-item-body">
       {stackPosition && <InboxStackCounter position={stackPosition} />}

@@ -1,6 +1,6 @@
 import type { InboxItem } from '@simple-agent-manager/shared';
 import { Inbox } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 
 import {
   agentStateShort,
@@ -8,16 +8,16 @@ import {
   type InboxRowModel,
   isPausedOnItem,
   KIND_META,
-  minutesLeft,
+  timeLeft,
 } from './inbox-model';
 
-/** Kind icon. Amber only when the agent is stopped on this ask. */
-export function InboxKindIcon({ item }: { item: InboxItem }) {
+/** Kind icon. Amber only when the agent is stopped on this ask, or a live deadline runs. */
+export function InboxKindIcon({ item, now }: { item: InboxItem; now: number }) {
   const Icon = KIND_META[item.kind].icon;
   const tone =
     item.kind === 'error'
       ? 'bg-danger-tint text-danger-fg'
-      : isPausedOnItem(item) || minutesLeft(item, Date.now()) !== null
+      : isPausedOnItem(item) || timeLeft(item, now) !== null
         ? 'bg-warning-tint text-warning-fg'
         : 'sam-well text-fg-muted';
   return (
@@ -72,8 +72,8 @@ export function InboxMetaLine({
   showProject: boolean;
   now: number;
 }) {
-  const left = minutesLeft(item, now);
-  const state = left !== null ? `${left}m left` : agentStateShort(item);
+  const left = timeLeft(item, now);
+  const state = left !== null ? `${left} left` : agentStateShort(item);
   const amber = left !== null || isPausedOnItem(item);
   const segments: MetaSegment[] = [];
   if (showProject && item.projectName)
@@ -90,7 +90,7 @@ export function InboxMetaLine({
  * state. A stack (several items from one chat) shows its first item and "3 from <chat>".
  * Reused by the Inbox page, the quick view and (later) "Needs you" on the Project Overview.
  */
-export function InboxRow({
+export const InboxRow = memo(function InboxRow({
   row,
   selectedRef,
   showProject,
@@ -135,7 +135,7 @@ export function InboxRow({
           aria-current={selected ? 'true' : undefined}
           className="flex w-full min-w-0 cursor-pointer items-start gap-3 rounded-xl border-0 bg-transparent px-3 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
-          <InboxKindIcon item={first} />
+          <InboxKindIcon item={first} now={now} />
           <span className="min-w-0 flex-1">
             <span className="line-clamp-3 text-[15px] leading-snug font-medium break-words text-fg-primary [overflow-wrap:anywhere]">
               {first.title}
@@ -166,7 +166,7 @@ export function InboxRow({
       </div>
     </li>
   );
-}
+});
 
 export function InboxEmptyState({
   archived,
