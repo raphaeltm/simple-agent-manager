@@ -23,8 +23,9 @@ their checks. Nothing is estimated: when SAM has no record for something, the pa
 - **CI passes first try**: of the pull requests opened in the range, the share whose first commit
   passed every check with no failure and no rerun. A pull request counts as failed as soon as any
   check on that commit fails, and as passed once its checks have finished or it has moved on
-  (merged, closed or pushed again). Until then it is left out, and the figure says **Waiting on
-  CI**. Pull requests SAM did not see
+  (merged, closed or pushed again). Until then it is left out, and the figure says **No result
+  yet**; that includes a repository with no CI, where no check ever reports. Pull requests SAM did
+  not see
   from their first commit are left out, and when there are none the figure reads **Not recorded**.
 - **Waiting on a person, median**: how long questions agents filed for people (asks in the Inbox) waited
   for an answer. A question still open counts up to now.

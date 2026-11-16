@@ -179,6 +179,20 @@ test.describe('Insights', () => {
     await capture(page, 'insights-flow-empty');
   });
 
+  test('a pull request with no check result yet is not called a running check', async ({
+    page,
+  }) => {
+    // Staging found this shape: a repository without CI reports no checks at all, so the
+    // pull request stays undecided and the tile must not claim checks are running.
+    await setupScene(page, 'undecided');
+    await page.goto(`${BASE}/flow`);
+    const tile = page.getByTestId('insights-tile-ci-first-try');
+    await expect(tile).toContainText('No result yet');
+    await expect(tile).toContainText('1 pull request recorded, checks not reported yet');
+    await expect(tile).not.toContainText('running');
+    await capture(page, 'insights-flow-undecided');
+  });
+
   test('a failed read says so and offers a retry', async ({ page }) => {
     await setupScene(page, 'error');
     await page.goto(`${BASE}/flow`);

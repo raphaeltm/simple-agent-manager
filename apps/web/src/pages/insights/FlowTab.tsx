@@ -98,7 +98,7 @@ export function FlowBody({ data, projectId }: { data: ProjectFlowResponse; proje
               ? formatPercent(ciFirstTry.rate)
               : ciFirstTry.recorded === 0
                 ? 'Not recorded'
-                : 'Waiting on CI'
+                : 'No result yet'
           }
           detail={
             ciDelta
@@ -107,7 +107,9 @@ export function FlowBody({ data, projectId }: { data: ProjectFlowResponse; proje
                 ? `${ciFirstTry.count} of ${ciFirstTry.of} pull requests`
                 : ciFirstTry.recorded === 0
                   ? 'No pull request recorded from its first commit yet'
-                  : `${ciFirstTry.recorded} pull requests still running checks`
+                  : // Undecided covers both "checks still running" and "no checks reported at
+                    // all" (a repository without CI), so the copy must not claim either.
+                    `${ciFirstTry.recorded} ${ciFirstTry.recorded === 1 ? 'pull request' : 'pull requests'} recorded, checks not reported yet`
           }
           tone={ciDelta?.tone}
         />

@@ -12,7 +12,8 @@ import type {
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 
-export type FlowScene = 'realistic' | 'stress' | 'empty';
+/** `undecided`: an otherwise empty project with one pull request whose checks never reported. */
+export type FlowScene = 'realistic' | 'stress' | 'empty' | 'undecided';
 
 const LONG_CHECK = `apps/api › tests/integration/${'very-long-nested-directory-name/'.repeat(4)}snapshot-retry-with-an-unbroken-identifier.test.ts`;
 const LONG_IDEA =
@@ -66,7 +67,7 @@ export function makeFlow(
     generatedAt: new Date(now).toISOString(),
     unavailable: [],
   };
-  if (scene === 'empty') {
+  if (scene === 'empty' || scene === 'undecided') {
     return {
       ...base,
       tiles: {
@@ -76,7 +77,13 @@ export function makeFlow(
           count: 0,
           sampled: { ideas: 0, cap: 100, truncated: false },
         },
-        ciFirstTry: { count: 0, of: 0, rate: null, previousRate: null, recorded: 0 },
+        ciFirstTry: {
+          count: 0,
+          of: 0,
+          rate: null,
+          previousRate: null,
+          recorded: scene === 'undecided' ? 1 : 0,
+        },
         waitingOnPerson: { medianMs: null, previousMedianMs: null, count: 0 },
         rework: { count: 0, of: 0, rate: null, previousRate: null, windowDays: 7 },
       },
