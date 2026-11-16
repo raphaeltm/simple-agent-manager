@@ -7,7 +7,7 @@
 import type { ProjectOverviewResponse } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../../../src/hooks/useToast';
@@ -16,6 +16,9 @@ import { ProjectOverview } from '../../../src/pages/project-overview';
 import { ProjectContext } from '../../../src/pages/ProjectContext';
 
 const PROJECT_ID = 'proj-1';
+
+const viewport = vi.hoisted(() => ({ isMobile: false }));
+vi.mock('../../../src/hooks/useIsMobile', () => ({ useIsMobile: () => viewport.isMobile }));
 
 const socket = vi.hoisted(() => ({
   onSessionEvent: null as
@@ -105,6 +108,15 @@ let submitResponse: { status: number; body: unknown };
 let overviewBody: ProjectOverviewResponse;
 /** Extra GET routes a test serves (automation lists, members), keyed by path. */
 let extraRoutes: Record<string, unknown>;
+/** This project's open inbox items for the viewer, in server (inbox) order. */
+let inboxItems: Record<string, unknown>[];
+/** The inbox list's next cursor: set when there are more pages than the Overview reads. */
+let inboxNextCursor: string | null;
+/** When set, the next inbox list read waits on this promise (controlled refetch ordering). */
+let inboxGate: Promise<void> | null;
+/** When set, the profile list read waits on this promise; `profileItems` is what it returns. */
+let profilesGate: Promise<void> | null;
+let profileItems: unknown[];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -129,7 +141,7 @@ function route(path: string, method: string): Response {
         agents: [{ id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true }],
       });
     case `/api/projects/${PROJECT_ID}/agent-profiles`:
-      return json(200, { items: [PROFILE] });
+      return json(200, { items: profileItems });
     case `/api/projects/${PROJECT_ID}/agent-profiles/picker`:
       return json(200, { usage: [], hiddenProfileIds: [], usageWindowDays: 30 });
     case `/api/projects/${PROJECT_ID}/skills`:
@@ -140,6 +152,13 @@ function route(path: string, method: string): Response {
       return json(200, { available: false, hasInfraCredential: true });
     case `/api/projects/${PROJECT_ID}/overview`:
       return json(200, overviewBody);
+    case `/api/projects/${PROJECT_ID}/inbox`:
+      return json(200, { items: inboxItems, nextCursor: inboxNextCursor, skipped: 0 });
+    case `/api/projects/${PROJECT_ID}/inbox/count`:
+      return json(200, {
+        needsYou: inboxItems.length,
+        blocking: inboxItems.filter((item) => item.blocking).length,
+      });
     default:
       // Reads this test does not cover (accounts, automations, commands) fail like an
       // unreachable API would; the page must still work around them.
@@ -230,7 +249,50 @@ const AUTOMATION_ROUTES = {
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location">{location.pathname}</div>;
+  return (
+    <>
+      <div data-testid="location">{location.pathname}</div>
+      <div data-testid="location-search">{location.search}</div>
+    </>
+  );
+}
+
+/** One open inbox item, the shape `GET /api/projects/:id/inbox` returns. */
+function inboxItem(ref: string, fields: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ref,
+    store: 'ask',
+    kind: 'question',
+    projectId: PROJECT_ID,
+    projectName: 'Acme Billing',
+    sessionId: `sess-${ref}`,
+    topic: `Chat for ${ref}`,
+    taskId: `task-${ref}`,
+    stackKey: `stack-${ref}`,
+    title: `Question ${ref}?`,
+    body: null,
+    blocking: true,
+    agentState: 'waiting',
+    status: 'open',
+    createdAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+    expiresAt: null,
+    dueAt: null,
+    answerSpec: { type: 'options', options: ['Yes', 'No'], allowText: false },
+    links: [],
+    canAct: true,
+    untrustedContent: true,
+    ...fields,
+  };
+}
+
+/** Stands in for the inbox item view: its Back is the browser's. */
+function InboxStub() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      inbox page back
+    </button>
+  );
 }
 
 function renderOverview() {
@@ -238,7 +300,7 @@ function renderOverview() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const context = { projectId: PROJECT_ID, project: null, reload: async () => {} };
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <MemoryRouter initialEntries={[`/projects/${PROJECT_ID}/overview`]}>
@@ -246,6 +308,7 @@ function renderOverview() {
             <Routes>
               <Route path="/projects/:id/overview" element={<ProjectOverview />} />
               <Route path="/projects/:id/chat/:sessionId" element={<div>chat page</div>} />
+              <Route path="/projects/:id/inbox" element={<InboxStub />} />
             </Routes>
             <LocationProbe />
           </ProjectContext.Provider>
@@ -253,6 +316,7 @@ function renderOverview() {
       </ToastProvider>
     </QueryClientProvider>
   );
+  return { ...view, queryClient };
 }
 
 async function typeAndSend(text: string) {
@@ -271,6 +335,12 @@ describe('Project Overview', () => {
   beforeEach(() => {
     recorded = [];
     extraRoutes = {};
+    inboxItems = [];
+    inboxNextCursor = null;
+    inboxGate = null;
+    profilesGate = null;
+    profileItems = [PROFILE];
+    viewport.isMobile = false;
     overviewBody = overview([EXISTING]);
     submitResponse = {
       status: 200,
@@ -295,6 +365,14 @@ describe('Project Overview', () => {
           path,
           body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
         });
+        if (profilesGate && path === `/api/projects/${PROJECT_ID}/agent-profiles`) {
+          await profilesGate;
+        }
+        if (inboxGate && path === `/api/projects/${PROJECT_ID}/inbox`) {
+          const gate = inboxGate;
+          inboxGate = null;
+          await gate;
+        }
         return route(path, method);
       })
     );
@@ -520,5 +598,242 @@ describe('Project Overview', () => {
     });
     await waitFor(() => expect(reads()).toBeGreaterThan(before));
     hidden.mockRestore();
+  });
+  describe('Needs you (inbox slice F2)', () => {
+    const seven = () =>
+      Array.from({ length: 7 }, (_, i) =>
+        inboxItem(`ask:q${i + 1}`, { title: `Question ${i + 1}?` })
+      );
+
+    it('lists the first five items in inbox order, with the count and a link to the project inbox', async () => {
+      inboxItems = seven();
+      renderOverview();
+      // The quiet "checking" line stands in until the list loads, then the section replaces it.
+      await screen.findByTestId('overview-needs-you-list');
+      const section = screen.getByRole('region', { name: 'Needs you' });
+      const rows = within(section).getAllByTestId('inbox-row');
+      expect(rows).toHaveLength(5);
+      // Server order is the inbox order: the first five, in order, and nothing past the cap.
+      expect(rows.map((row) => row.textContent)).toEqual(
+        [1, 2, 3, 4, 5].map((n) => expect.stringContaining(`Question ${n}?`))
+      );
+      expect(within(section).queryByText('Question 6?')).not.toBeInTheDocument();
+      expect(await within(section).findByRole('link', { name: /All 7/ })).toHaveAttribute(
+        'href',
+        `/projects/${PROJECT_ID}/inbox`
+      );
+    });
+
+    it('shows three rows on a phone', async () => {
+      viewport.isMobile = true;
+      inboxItems = seven();
+      renderOverview();
+      // The quiet "checking" line stands in until the list loads, then the section replaces it.
+      await screen.findByTestId('overview-needs-you-list');
+      const section = screen.getByRole('region', { name: 'Needs you' });
+      expect(within(section).getAllByTestId('inbox-row')).toHaveLength(3);
+    });
+
+    it('opens a tapped item in the project inbox item view, remembering it came from here', async () => {
+      inboxItems = seven();
+      renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      const section = screen.getByRole('region', { name: 'Needs you' });
+      fireEvent.click(within(section).getByRole('button', { name: /Question 2\?/ }));
+      await waitFor(() =>
+        expect(screen.getByTestId('location')).toHaveTextContent(`/projects/${PROJECT_ID}/inbox`)
+      );
+      const search = new URLSearchParams(screen.getByTestId('location-search').textContent ?? '');
+      expect(search.get('item')).toBe('ask:q2');
+      expect(search.get('from')).toBe('overview');
+    });
+
+    it('is one quiet line when nothing needs you, not an empty panel', async () => {
+      inboxItems = [];
+      renderOverview();
+      const quiet = await screen.findByTestId('overview-needs-you-quiet');
+      await within(quiet).findByText('Nothing needs you.');
+      expect(within(quiet).getByRole('link', { name: 'Open the project inbox' })).toHaveAttribute(
+        'href',
+        `/projects/${PROJECT_ID}/inbox`
+      );
+      expect(screen.queryByTestId('overview-needs-you-list')).not.toBeInTheDocument();
+      // Liveness: the rest of the page rendered.
+      expect(await screen.findByRole('region', { name: 'Running now' })).toBeInTheDocument();
+    });
+
+    it('words a chat paused on your item "Paused on this" in Running now, whatever the read says', async () => {
+      // The read says working (the agent is blocked mid-turn on a secret request), the inbox says
+      // the agent is paused on the viewer's item: the page follows the inbox.
+      overviewBody = overview([
+        EXISTING,
+        { ...EXISTING, sessionId: 'sess-other', topic: 'Someone else is asked', state: 'waiting' },
+      ]);
+      inboxItems = [
+        inboxItem('secret:sr-1', {
+          store: 'secret',
+          kind: 'secret',
+          sessionId: 'sess-existing',
+          title: 'STRIPE_KEY',
+          answerSpec: { type: 'secret', envKey: 'STRIPE_KEY', requestId: 'sr-1' },
+        }),
+      ];
+      renderOverview();
+      const running = await screen.findByRole('region', { name: 'Running now' });
+      const paused = await within(running).findByRole('link', {
+        name: /Fix rounding in tax totals/,
+      });
+      await within(paused).findByText('Paused on this');
+      expect(within(paused).getByText('Paused on this')).toHaveClass('text-warning-fg');
+      // Control: a chat waiting on someone else is not worded as yours.
+      const other = within(running).getByRole('link', { name: /Someone else is asked/ });
+      expect(within(other).getByText('Waiting for an answer')).not.toHaveClass('text-warning-fg');
+      // And its item is in Needs you.
+      const section = await screen.findByRole('region', { name: 'Needs you' });
+      expect(within(section).getByText('STRIPE_KEY')).toBeInTheDocument();
+    });
+    it('keeps the read\'s "waiting on you" while the inbox has pages it did not fetch', async () => {
+      // More open items than one page: the chat's paused item may be past the first page.
+      overviewBody = overview([
+        {
+          ...EXISTING,
+          sessionId: 'sess-deep',
+          topic: 'Paused past page one',
+          state: 'waiting',
+          waitingOnViewer: true,
+        },
+      ]);
+      inboxItems = [inboxItem('ask:other')];
+      inboxNextCursor = 'page-2';
+      renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      const running = screen.getByRole('region', { name: 'Running now' });
+      const row = await within(running).findByRole('link', { name: /Paused past page one/ });
+      expect(within(row).getByText('Paused on this')).toHaveClass('text-warning-fg');
+    });
+
+    it('trusts the complete inbox over the read: no item for the chat, not worded as yours', async () => {
+      overviewBody = overview([
+        {
+          ...EXISTING,
+          sessionId: 'sess-deep',
+          topic: 'Read says waiting',
+          state: 'waiting',
+          waitingOnViewer: true,
+        },
+        // An item that is not paused (the agent is still working) does not make a chat paused.
+        { ...EXISTING, sessionId: 'sess-task', topic: 'Has a task for you' },
+      ]);
+      inboxItems = [
+        inboxItem('ask:task', {
+          kind: 'task',
+          blocking: false,
+          agentState: 'working',
+          sessionId: 'sess-task',
+          answerSpec: { type: 'acknowledge' },
+        }),
+      ];
+      renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      const running = screen.getByRole('region', { name: 'Running now' });
+      const waiting = await within(running).findByRole('link', { name: /Read says waiting/ });
+      expect(within(waiting).getByText('Waiting for an answer')).not.toHaveClass('text-warning-fg');
+      const task = within(running).getByRole('link', { name: /Has a task for you/ });
+      expect(within(task).queryByText('Paused on this')).not.toBeInTheDocument();
+    });
+
+    it('a refetch keeps the rows mounted (no unmount, no spinner)', async () => {
+      inboxItems = [inboxItem('ask:q1', { title: 'Question 1?' }), inboxItem('ask:q2')];
+      const { queryClient } = renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      const before = screen.getAllByTestId('inbox-row')[0];
+      let release = () => {};
+      inboxGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await act(async () => {
+        void queryClient.invalidateQueries({ queryKey: ['auth', 'user-1', 'inbox'] });
+      });
+      // Mid-refetch: the same row node is still on the page.
+      await waitFor(() => expect(inboxGate).toBeNull());
+      expect(screen.getAllByTestId('inbox-row')[0]).toBe(before);
+      expect(screen.queryByTestId('overview-needs-you-quiet')).not.toBeInTheDocument();
+      inboxItems = [inboxItem('ask:q1', { title: 'Question 1?' })];
+      await act(async () => {
+        release();
+      });
+      await waitFor(() => expect(screen.getAllByTestId('inbox-row')).toHaveLength(1));
+      expect(screen.getAllByTestId('inbox-row')[0]).toBe(before);
+    });
+
+    it('coming back while the list refetches: focus follows to the section when the row leaves', async () => {
+      inboxItems = [
+        inboxItem('ask:q1', { title: 'Question 1?' }),
+        inboxItem('ask:q2', { title: 'Question 2?' }),
+      ];
+      const { queryClient } = renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      fireEvent.click(screen.getByRole('button', { name: /Question 2\?/ }));
+      await screen.findByRole('button', { name: 'inbox page back' });
+      // The person answered item 2; its refetch is held open while they come back.
+      inboxItems = [inboxItem('ask:q1', { title: 'Question 1?' })];
+      let release = () => {};
+      inboxGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await act(async () => {
+        void queryClient.invalidateQueries({ queryKey: ['auth', 'user-1', 'inbox'] });
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'inbox page back' }));
+      // Cached rows first: the answered row is still listed and takes focus for now.
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Question 2\?/ }))
+      );
+      await act(async () => {
+        release();
+      });
+      await waitFor(() => expect(screen.getAllByTestId('inbox-row')).toHaveLength(1));
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Needs you' }))
+      );
+    });
+
+    it('coming back from an item puts focus on its row', async () => {
+      inboxItems = [
+        inboxItem('ask:q1', { title: 'Question 1?' }),
+        inboxItem('ask:q2', { title: 'Question 2?' }),
+      ];
+      renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      fireEvent.click(screen.getByRole('button', { name: /Question 2\?/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'inbox page back' }));
+      await screen.findByTestId('overview-needs-you-list');
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Question 2\?/ }))
+      );
+    });
+
+    it('the task box does not offer to create a profile while the profiles are still loading', async () => {
+      let release = () => {};
+      profilesGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      renderOverview();
+      // Liveness: the page and the box are up, the agents are known.
+      await screen.findByRole('region', { name: 'Running now' });
+      await screen.findByPlaceholderText(/Start a task/);
+      expect(screen.queryByText('Create a profile to start')).not.toBeInTheDocument();
+      await act(async () => {
+        release();
+      });
+      await screen.findByText('Opus 5.5 Build', { selector: 'button *' });
+      expect(screen.queryByText('Create a profile to start')).not.toBeInTheDocument();
+    });
+
+    it('still offers to create a profile when the project really has none (control)', async () => {
+      profileItems = [];
+      renderOverview();
+      expect(await screen.findByText('Create a profile to start')).toBeInTheDocument();
+    });
   });
 });

@@ -1645,6 +1645,43 @@ lifecycle bookkeeping.
 | `DIGITALOCEAN_IMAGE`                       | `ubuntu-24-04-x64` | Default Droplet image slug                                            |
 | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000`           | Instant-session create-workspace budget (includes in-container clone) |
 
+## Outbound Requests to User-Chosen URLs
+
+Some requests go to a URL the code does not fix: a browser's Web Push endpoint, the base URL of a
+user's OpenAI-compatible credential, a registry named in a deployment manifest, the issuer of an
+agent sign-in trust, and the workspace URL `check_dns_status` probes. SAM checks the host of each
+before the request (`classifyHost` in `packages/worker-core/src/network-hosts/classify.ts`):
+loopback, private ranges, carrier-grade NAT, unique-local IPv6, `localhost`, single-label names
+and `.local`/`.internal`/`.lan`-style names are private; link-local, cloud metadata hosts and
+reserved ranges are forbidden. Literal addresses are recognised in every spelling a URL parser
+accepts (decimal, hex, octal, IPv4-mapped and other IPv6 embeddings).
+
+| Request                               | Rule                                                                                                                                                                                                                                                                                  | Where                                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Web Push subscription                 | Endpoint must be HTTPS on a public host when saved; a stored endpoint that fails the check is skipped at delivery and logged as `web_push.endpoint_refused` (no URL in the log). Redirects are never followed.                                                                        | `schemas/notifications.ts`, `lib/web-push.ts`, `durable-objects/notification-push.ts` |
+| OpenAI-compatible credential base URL | Must be HTTPS on a public host when saved or updated; a stored base URL that fails the check is skipped when the AI proxy resolves an upstream (`ai_proxy_passthrough.upstream_refused`), so the request gets the usual 401 "no compatible upstream credential".                      | `routes/composable-credentials.ts`, `routes/ai-proxy-passthrough-upstream.ts`         |
+| Agent sign-in issuer keys             | Fetched through `guardedFetch` with no redirects; a refused issuer answers `503 ISSUER_KEYS_UNAVAILABLE` and logs `agent_sign_in.issuer_keys_refused`.                                                                                                                                | `services/agent-sign-in/verify.ts`                                                    |
+| Deployment-release registry lookups   | Registry, token realm and every redirect must be HTTPS on a public host.                                                                                                                                                                                                              | `packages/app-deployment/src/image-resolver-outbound.ts`                              |
+| `check_dns_status`                    | Follows only redirects that stay on the workspace's own origin, each re-checked; reports any other redirect with its status without requesting it, and reports failures as fixed categories, never raw error text. A private-domain install may reach its own private workspace host. | `routes/mcp/check-dns-status.ts`                                                      |
+
+Until a later change moves them, the AI proxy's own calls to a credential's base URL still let the
+runtime follow a redirect: the base URL itself is checked, but a public base URL that redirects
+is not re-checked per hop. `guardedFetch`, used everywhere else above, never lets the runtime
+follow a redirect. It checks every hop, keeps only `Accept`,
+`Accept-Language`, `Content-Type`, `Content-Language` and `User-Agent` on a hop to another origin,
+and refuses a 307 or 308 that would carry a request body to another origin.
+
+| Admin setting           | Default | Meaning                                                                                                                                              |
+| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `outbound.maxRedirects` | `3`     | Redirect hops a guarded fetch follows, each re-checked, range 0–10. `0` refuses every redirect. Used by `check_dns_status`. If settings cannot be read, no redirect is followed. Category **Operations**. |
+
+The check reads names, not DNS answers: a public name that resolves to a private address passes.
+On Cloudflare the Worker's request leaves from Cloudflare's network, not from the installation's
+private network.
+
+The lint rule `sam/no-unguarded-outbound-fetch` keeps new requests on this path
+(`packages/eslint-plugin-sam/docs/rules/no-unguarded-outbound-fetch.md`).
+
 ## Admin Observability
 
 | Variable                                    | Default  | Description                         |

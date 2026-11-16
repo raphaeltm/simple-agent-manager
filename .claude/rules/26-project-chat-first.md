@@ -10,6 +10,8 @@ paths:
 
 The app is chat-first (spec 022). The **project chat** is the primary way users interact with workspaces, agents, files, and tools. The workspace view is secondary — most users access everything through the project chat without ever navigating to a standalone workspace page.
 
+Opening a project lands on its **Overview** (`/projects/:id` redirects to `/projects/:id/overview`, inbox slice F2), with chat one tap away. "Chat first" here is about where features integrate, not which route a project opens on.
+
 When building or modifying any feature that has a user-facing component, the **project chat integration** must be designed and implemented first. The workspace view integration is secondary and can follow.
 
 ### What This Means in Practice
