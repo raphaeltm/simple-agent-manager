@@ -35,7 +35,11 @@ export interface DurabilityFoundationHooks {
   /** Release durable messages queued behind the (now ended) turn. */
   nudgeDeliveries(chatSessionId: string): number;
   /** A person's message answers the chat's open questions in D1 `asks` (`question-asks.ts`). */
-  closeQuestionAsks?(sessionId: string, messageId: string): Promise<unknown>;
+  closeQuestionAsks?(
+    sessionId: string,
+    messageId: string,
+    messageCreatedAt: number
+  ): Promise<unknown>;
 }
 
 export async function acceptPromptDelivery(
@@ -81,7 +85,11 @@ export async function finalizeAcceptedPromptDelivery(
   // A person's prompt answers the chat's open questions in D1 `asks`, after the broadcast and the
   // alarm so the D1 round trip delays neither (`question-asks.ts`, never throws).
   if (accepted.transcriptInserted && input.senderType === 'human') {
-    await hooks.closeQuestionAsks?.(input.targetSessionId, accepted.transcriptMessageId);
+    await hooks.closeQuestionAsks?.(
+      input.targetSessionId,
+      accepted.transcriptMessageId,
+      accepted.transcriptCreatedAt
+    );
   }
 }
 

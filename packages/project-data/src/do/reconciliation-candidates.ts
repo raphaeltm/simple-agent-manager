@@ -164,8 +164,11 @@ async function resolveCandidateProjectId(
               SELECT MAX(COALESCE(a.expires_at, 0)) FROM asks a
                WHERE a.project_id = tasks.project_id AND a.source_session_id = tasks.chat_session_id
                  AND a.kind = 'question' AND a.status = 'open'
+                 -- Past its deadline still holds for three sweep ticks: the inbox sweep may
+                 -- extend an undelivered question, and expires it within one tick otherwise.
                  AND (a.expires_at IS NULL
-                   OR a.expires_at > CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
+                   OR a.expires_at > CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)
+                     - 15 * 60000)
             ) AS open_question_until
      FROM tasks WHERE id = ? LIMIT 1`
   )

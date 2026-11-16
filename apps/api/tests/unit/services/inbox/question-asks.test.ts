@@ -540,7 +540,7 @@ describe('a typed chat message answers the chat’s open questions', () => {
     const broadcast = vi.fn();
     const closed = await closeQuestionAsksForHumanMessage(
       env as never,
-      { projectId: P1, sessionId: 'chat-1', messageId: 'msg-1' },
+      { projectId: P1, sessionId: 'chat-1', messageId: 'msg-1', messageCreatedAt: Date.now() },
       broadcast
     );
     expect(closed).toBe(2);

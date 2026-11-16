@@ -23,7 +23,13 @@ type Broadcast = (type: string, payload: Record<string, unknown>, sessionId?: st
  */
 export async function closeQuestionAsksForHumanMessage(
   env: Env,
-  input: { projectId: string | null; sessionId: string; messageId: string | null },
+  input: {
+    projectId: string | null;
+    sessionId: string;
+    messageId: string | null;
+    /** When the message was persisted; a question filed after it is not answered by it. */
+    messageCreatedAt: number;
+  },
   broadcast: Broadcast
 ): Promise<number> {
   if (!input.projectId) return 0;
@@ -43,8 +49,7 @@ export async function closeQuestionAsksForHumanMessage(
         now,
         input.projectId,
         input.sessionId,
-        // A question filed after the message is not answered by it.
-        now
+        input.messageCreatedAt
       )
       .all<{ id: string }>();
     const ids = (result.results ?? []).map((row) => row.id).filter(Boolean);

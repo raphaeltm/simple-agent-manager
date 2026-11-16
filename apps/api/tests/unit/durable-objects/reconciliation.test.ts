@@ -694,7 +694,7 @@ describe('Task Reconciliation Module', () => {
 
       it.each([
         ['answered', { status: 'answered' }],
-        ['expired', { expiresAt: Date.now() - 1 }],
+        ['expired more than three sweep ticks ago', { expiresAt: Date.now() - 16 * 60_000 }],
         ['in another project', { projectId: 'project-2' }],
         ['in another chat', { sessionId: 'session-2' }],
       ])('does not hold for a question that is %s (control)', async (_label, overrides) => {
@@ -703,6 +703,13 @@ describe('Task Reconciliation Module', () => {
         await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([
           expect.objectContaining({ sessionId: 'session-1' }),
         ]);
+      });
+
+      it('a question just past its deadline still holds until the sweep handles it', async () => {
+        setupTaskSession();
+        seedAsk('q-1', { expiresAt: Date.now() - 60_000 });
+        await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([]);
+        expect(gate()).toMatchObject({ questionHold: true });
       });
 
       it('a release never ends a claim lease or another deferral', () => {
