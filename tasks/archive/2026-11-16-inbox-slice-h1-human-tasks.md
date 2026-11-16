@@ -70,7 +70,7 @@ non-blocking work to a person and be woken when the person acts. A human task is
   chat + idempotencyKey, else chat + title); cancel records reason; archived/finished filing chat
   keeps the task open and delivery falls to record-only through the existing source-task guard.
 - **Limits (admin settings):** `inbox.openTasksPerChat`, `inbox.taskStepsMax`,
-  `inbox.watchersPerItemMax`.
+  `inbox.watchersPerItemMax`, `inbox.taskActivityMax`, `inbox.closedTaskWatchHours`.
 
 ## Implementation checklist
 
@@ -109,7 +109,16 @@ non-blocking work to a person and be woken when the person acts. A human task is
 - Instruction text: +83 bytes (1,662 → 1,745 bytes for `instruction-inbox-guidance.ts`; the paragraph
   itself grew by the clause "or for work only a person can do `assign` a task (`inbox_write` method
   `assign`),").
-- Discrimination proofs recorded in the PR body (four guards, each turned exactly the intended test red).
+- Discrimination proofs recorded in the PR body (eight guards, each turned exactly the intended test red).
 
 - Slice E (#2781) touches the same operations; rebase if it lands first. It uses D1 0248.
 - A DO migration means staging2 only (primary staging refuses new DO migration tags).
+
+## Review outcome
+
+- Local reviewers (task-completion-validator, security-auditor, cloudflare-specialist,
+  test-engineer): two HIGHs fixed (watch lifetime renewal; attach limited to the same person and
+  lifecycle-only), MEDIUMs fixed or covered by tests. CodeRabbit: 17 comments, 12 fixed, all
+  replied and resolved. Details in PR #2818.
+- Staging: primary staging (internal SQLite DO migration, not a wrangler tag), live checks with
+  Claude Code and Codex agents — see the PR body.
