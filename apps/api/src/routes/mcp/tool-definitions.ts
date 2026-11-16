@@ -47,6 +47,7 @@ import { AGENT_MODEL_TOOLS } from './tool-definitions-agent-model-tools';
 import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
 import { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
+import { INBOX_TOOLS } from './tool-definitions-inbox-tools';
 import { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
@@ -62,7 +63,6 @@ import { PROJECT_EVENT_CHANNEL_TOOLS } from './tool-definitions-project-event-ch
 import { PROJECT_EVENT_TOOLS } from './tool-definitions-project-event-tools';
 import { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
 import { SKILL_TOOLS } from './tool-definitions-skill-tools';
-import { INBOX_TOOLS } from './tool-definitions-inbox-tools';
 import { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 import { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 import { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';

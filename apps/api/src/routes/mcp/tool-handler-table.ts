@@ -27,12 +27,6 @@ import {
   handleUpdateIdea,
 } from './idea-tools';
 import {
-  handleClaimIncident,
-  handleGetIncident,
-  handleListIncidentQueue,
-  handleResolveIncident,
-} from './incident-tools';
-import {
   handleInboxAsk,
   handleInboxCancelItem,
   handleInboxGetItem,
@@ -40,6 +34,12 @@ import {
   handleInboxReview,
   handleInboxUpdateItem,
 } from './inbox-tools';
+import {
+  handleClaimIncident,
+  handleGetIncident,
+  handleListIncidentQueue,
+  handleResolveIncident,
+} from './incident-tools';
 import { handleRequestHumanInput } from './instruction-tools';
 import {
   handleAddKnowledge,

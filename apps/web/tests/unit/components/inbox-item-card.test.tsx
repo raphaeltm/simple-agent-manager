@@ -15,9 +15,8 @@ vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'user-1' }, isSuperadmin: false, isLoading: false }),
 }));
 
-const { InboxItemCard } = await import(
-  '../../../src/components/project-message-view/tool-cards/InboxItemCard'
-);
+const { InboxItemCard } =
+  await import('../../../src/components/project-message-view/tool-cards/InboxItemCard');
 
 function inboxItem(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -65,6 +64,7 @@ function toolCall(result: unknown, status: ToolCallItem['status'] = 'completed')
 const FILED = { inboxItem: { ref: 'ask:01ASK', id: '01ASK', sessionId: 's1' } };
 const calls: { method: string; path: string; body: unknown }[] = [];
 let current: InboxItem | null = inboxItem();
+let serverError = false;
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -76,6 +76,7 @@ function json(status: number, body: unknown) {
 beforeEach(() => {
   calls.length = 0;
   current = inboxItem();
+  serverError = false;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -88,6 +89,8 @@ beforeEach(() => {
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
       });
       if (path === '/api/projects/p1/inbox/items/ask:01ASK' && method === 'GET') {
+        if (serverError)
+          return json(500, { error: 'INTERNAL_ERROR', message: 'Database unavailable' });
         return current
           ? json(200, { item: current, context: null })
           : json(404, { error: 'NOT_FOUND', message: 'Inbox item not found' });
@@ -121,9 +124,11 @@ describe('InboxItemCard', () => {
     expect(screen.getByText('Review requested')).toBeTruthy();
     expect(screen.getByText('Waiting for your review')).toBeTruthy();
     expect(screen.getByText('PR 9')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Open in inbox' }).getAttribute('href')).toBe(
-      '/inbox?item=ask%3A01ASK&project=p1'
-    );
+    expect(
+      screen
+        .getByRole('link', { name: 'Open in inbox: Please review the pricing page' })
+        .getAttribute('href')
+    ).toBe('/inbox?item=ask%3A01ASK&project=p1');
 
     fireEvent.click(screen.getByRole('button', { name: 'Looks good' }));
     await waitFor(() =>
@@ -168,6 +173,16 @@ describe('InboxItemCard', () => {
     current = null;
     renderCard(toolCall(FILED));
     expect(await screen.findByText(/not in your inbox/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
+  it('says loading failed (not "not in your inbox") for a server error, with Retry', async () => {
+    serverError = true;
+    renderCard(toolCall(FILED));
+    expect((await screen.findByRole('alert')).textContent).toMatch(
+      /Couldn.t load this inbox item: Database unavailable/
+    );
+    expect(screen.queryByText(/not in your inbox/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 

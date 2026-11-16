@@ -22,13 +22,13 @@ import {
 } from './_helpers';
 import type { BudgetedPolicy, InstructionPayloadParts } from './instruction-budget';
 import { buildEventingInstructions } from './instruction-eventing-guidance';
-import { INBOX_TURN_END_INSTRUCTION } from './instruction-inbox-guidance';
 import {
   buildKnowledgeInstructions,
   buildPolicyInstructions,
   serializeRejection,
 } from './instruction-formatting';
 import { buildInstructionIdeaSlice, type InstructionIdeaContext } from './instruction-idea-context';
+import { INBOX_TURN_END_INSTRUCTION } from './instruction-inbox-guidance';
 import { renderWithinBudgets } from './instruction-payload';
 
 export { handleRequestHumanInput } from './human-input-tool';
