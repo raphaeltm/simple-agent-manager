@@ -10,7 +10,10 @@ import {
 } from '@simple-agent-manager/scheduler-core';
 
 import { log } from '../../lib/logger';
-import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import {
+  isNodeAgentVersionCompatible,
+  normalizeAgentVersion,
+} from '../../services/node-agent-compatibility';
 import {
   type CapacityAwareNodePlacementRow,
   capacityPoolNoCandidatesError,
@@ -108,7 +111,8 @@ export async function handleNodeSelection(
          placement_explanation_json AS placementExplanationJson,
          last_metrics AS lastMetrics,
          last_heartbeat_at AS lastHeartbeatAt,
-         agent_version AS agentVersion
+         agent_version AS agentVersion,
+         agent_ready_at AS agentReadyAt
        FROM nodes WHERE id = ? AND user_id = ?`
     )
       .bind(state.config.preferredNodeId, state.userId)
@@ -117,20 +121,54 @@ export async function handleNodeSelection(
             id: string;
             status: string;
             agentVersion: string | null;
+            agentReadyAt: string | null;
           })
         | null
       >();
 
-    if (!node || node.status !== 'running') {
+    if (!node || !['creating', 'running'].includes(node.status)) {
       throw Object.assign(new Error('Specified node is not available'), { permanent: true });
+    }
+    // Missing version is boot progress, not evidence of a different build. Keep
+    // the shared compatibility predicate strict for reuse, dispatch and cleanup.
+    const agentVersion = normalizeAgentVersion(node.agentVersion);
+    if (
+      agentVersion &&
+      !isNodeAgentVersionCompatible(agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)
+    ) {
+      throw Object.assign(
+        new Error('Specified node agent build differs from the required VM agent build'),
+        { permanent: true }
+      );
+    }
+    const waitingForVersion =
+      !agentVersion && !!normalizeAgentVersion(rc.env.VM_AGENT_REQUIRED_VERSION);
+    if (node.status === 'creating' || !node.agentReadyAt || waitingForVersion) {
+      // Stay in selection: each alarm must revalidate ownership, placement and
+      // reservation capacity before adopting a user-pinned node. Never replace it.
+      state.agentReadyStartedAt ??= Date.now();
+      const deadline = state.agentReadyStartedAt + rc.getAgentReadyTimeoutMs();
+      const reason = waitingForVersion
+        ? 'agent has not reported a version yet'
+        : 'agent has not become ready yet';
+      if (Date.now() >= deadline) {
+        throw Object.assign(
+          new Error(`Specified node not ready by deadline: ${reason}`),
+          { permanent: true }
+        );
+      }
+      log.info('task_runner_do.preferred_node_waiting', {
+        taskId: state.taskId,
+        nodeId: node.id,
+        reason,
+        deadline,
+      });
+      await rc.ctx.storage.put('state', state);
+      await rc.ctx.storage.setAlarm(Math.min(deadline, Date.now() + rc.getAgentPollIntervalMs()));
+      return;
     }
     if (!nodeSatisfiesTaskResources(node, state)) {
       throw Object.assign(new Error('Specified node does not satisfy the requested resources'), {
-        permanent: true,
-      });
-    }
-    if (!isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)) {
-      throw Object.assign(new Error('Specified node is running an incompatible VM agent build'), {
         permanent: true,
       });
     }
