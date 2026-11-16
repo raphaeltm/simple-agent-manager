@@ -91,7 +91,7 @@ Discrimination proven: removing `project_id` from the update predicate reddens o
 removing `source_session_id` from the cancel predicate reddens only the other-chat attack.
 
 Remaining before staging:
-- [ ] Test: overview + session-summary-index with a non-blocking ask (blocking control) — test-engineer H1
+- [x] Test: overview + session-summary-index with a non-blocking ask (blocking control) — test-engineer H1
 - [ ] Test: request_human_input alias push via fileQuestionAsk with a NOTIFICATION stub — H2
 - [x] Test: compact-mode inbox_write matcher (ask, review, update/cancel refused, non-ask ref refused) — H3
 - [ ] Test: reconciliation candidate with only a non-blocking ask is not held (blocking control)
