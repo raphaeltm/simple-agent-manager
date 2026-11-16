@@ -11,6 +11,9 @@ import type { Env } from '../../../src/env';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 const calls = vi.hoisted(() => ({
   schedule: vi.fn(),
+  deleteSchedules: vi.fn(),
+  waitUntil: vi.fn(),
+  running: false,
   lifecycle: vi.fn(async () => {}),
   destroy: vi.fn(),
   start: vi.fn(),
@@ -31,11 +34,16 @@ vi.mock('@cloudflare/containers', () => ({
     schedule(...args: unknown[]) {
       return calls.schedule(...args);
     }
-    destroy() {
-      return calls.destroy();
+    async destroy() {
+      await calls.destroy();
+      calls.running = false;
     }
-    startAndWaitForPorts(...args: unknown[]) {
-      return calls.start(...args);
+    deleteSchedules(name: string) {
+      calls.deleteSchedules(name);
+    }
+    async startAndWaitForPorts(...args: unknown[]) {
+      await calls.start(...args);
+      calls.running = true;
     }
     containerFetch(...args: unknown[]) {
       return calls.fetch(...args);
@@ -57,6 +65,7 @@ let stored: Map<string, unknown>;
 let builder: InstanceType<typeof ComposeBuilderContainer>;
 beforeEach(() => {
   vi.clearAllMocks();
+  calls.running = false;
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [schema.deploymentPublishJobs, schema.deploymentPublishJobEvents]);
   const deadline = new Date(Date.now() + 60_000).toISOString();
@@ -73,6 +82,13 @@ beforeEach(() => {
   } as Env;
   stored = new Map();
   const ctx = {
+    container: {
+      getTcpPort: () => ({ fetch: calls.fetch }),
+      get running() {
+        return calls.running;
+      },
+    },
+    waitUntil: calls.waitUntil,
     storage: {
       get: async (key: string) => stored.get(key),
       put: async (key: string, value: unknown) => {
@@ -93,7 +109,7 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 async function launch() {
   await builder.startJob('job', 1);
-  await builder.launchBuilder({ jobId: 'job', attempt: 1 });
+  await builder.runBuilder({ jobId: 'job', attempt: 1 });
 }
 describe('per-job builder lifecycle adapter', () => {
   it('launches after a controlled late collector callback without undoing admission', async () => {
@@ -217,6 +233,7 @@ describe('per-job builder lifecycle adapter', () => {
   });
   it('unexpected process exit produces a durable failure; terminal success survives cleanup', async () => {
     await launch();
+    calls.running = false;
     await builder.onStop();
     expect(sqlite.prepare('SELECT status FROM deployment_publish_jobs').get()).toEqual({
       status: 'failed',
@@ -239,7 +256,7 @@ it('persists kickoff before returning without starting a container in the HTTP w
     attempt: 1,
   });
   expect(stored.get('buildJob')).toMatchObject({ jobId: 'job', attempt: 1 });
-  await builder.launchBuilder({ jobId: 'job', attempt: 1 });
+  await builder.runBuilder({ jobId: 'job', attempt: 1 });
   expect(calls.start).toHaveBeenCalledTimes(1);
 });
 
@@ -247,10 +264,10 @@ it('ignores duplicate and stale capacity alarms without defeating backoff', asyn
   await builder.startJob('job', 1);
   calls.start.mockRejectedValueOnce(new Error('Maximum number of running containers'));
   await Promise.all([
-    builder.launchBuilder({ jobId: 'job', attempt: 1 }),
-    builder.launchBuilder({ jobId: 'job', attempt: 1 }),
+    builder.runBuilder({ jobId: 'job', attempt: 1 }),
+    builder.runBuilder({ jobId: 'job', attempt: 1 }),
   ]);
-  await builder.launchBuilder({ jobId: 'job', attempt: 1 });
+  await builder.runBuilder({ jobId: 'job', attempt: 1 });
   expect(calls.start).toHaveBeenCalledTimes(1);
   expect(
     sqlite
@@ -295,9 +312,126 @@ it('never contacts the bootstrap port after acceptance, even if RUN binds it', a
     throw new Error('untrusted RUN now owns the former bootstrap port');
   });
   await builder.startJob('job', 1);
-  await builder.launchBuilder({ jobId: 'job', attempt: 1 });
+  await builder.runBuilder({ jobId: 'job', attempt: 1 });
   await builder.enforceDeadline();
   await builder.onStop();
   expect(calls.fetch).toHaveBeenCalledTimes(2);
   expect(calls.destroy).toHaveBeenCalled();
+});
+
+it.each(['succeeded', 'missing'])(
+  'old deadline never touches an inactive %s guest',
+  async (status) => {
+    await launch();
+    calls.running = false;
+    if (status === 'missing') sqlite.exec('DELETE FROM deployment_publish_jobs');
+    else
+      sqlite.exec(
+        "UPDATE deployment_publish_jobs SET status='succeeded',executor_instance_id=NULL"
+      );
+    calls.destroy.mockClear();
+    calls.start.mockClear();
+    calls.fetch.mockClear();
+    await builder.enforceDeadline();
+    expect(calls.destroy).not.toHaveBeenCalled();
+    expect(calls.start).not.toHaveBeenCalled();
+    expect(calls.fetch).not.toHaveBeenCalled();
+    expect(calls.deleteSchedules).toHaveBeenCalledWith('enforceDeadline');
+    expect(calls.deleteSchedules).toHaveBeenCalledWith('launchBuilder');
+  }
+);
+it('a never-settling acceptance diagnostic cannot block kickoff or deadline destruction', async () => {
+  const actual = env.DATABASE.batch.bind(env.DATABASE);
+  let entered!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let first = true;
+  env.DATABASE.batch = (async (statements) => {
+    if (first) {
+      first = false;
+      entered();
+      return new Promise(() => {});
+    }
+    return actual(statements);
+  }) as D1Database['batch'];
+  const launched = launch();
+  await pending;
+  expect(
+    await Promise.race([
+      launched.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 100)),
+    ])
+  ).toBe(true);
+  await builder.enforceDeadline();
+  expect(calls.destroy).toHaveBeenCalledTimes(1);
+});
+
+it('legacy persisted kickoff callback releases the sequential SDK alarm immediately', async () => {
+  const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+  env.DATABASE.prepare = ((sql) => {
+    const statement = prepare(sql);
+    return {
+      ...statement,
+      bind: (...args: unknown[]) => ({
+        ...statement.bind(...args),
+        raw: () => new Promise(() => {}),
+      }),
+    };
+  }) as D1Database['prepare'];
+  expect(builder.launchBuilder({ jobId: 'job', attempt: 1 })).toBeUndefined();
+  expect(calls.waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+  expect(calls.start).not.toHaveBeenCalled();
+});
+it('a previous SDK stop notification during retry startup cannot revoke its new deadline or job', async () => {
+  calls.start.mockImplementationOnce(async () => {
+    await builder.onStop();
+  });
+  await launch();
+  expect(
+    sqlite.prepare('SELECT status,executor_instance_id FROM deployment_publish_jobs').get()
+  ).toEqual({ status: 'starting', executor_instance_id: 'job' });
+  expect(calls.fetch).toHaveBeenCalledTimes(2);
+  expect(calls.deleteSchedules).not.toHaveBeenCalled();
+  expect(calls.schedule).toHaveBeenCalledWith(expect.any(Date), 'enforceDeadline');
+});
+
+it('destroys SDK startup that resumes after deadline abort without depending on D1', async () => {
+  let resume!: () => void, entered!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    resume = resolve;
+  });
+  const starting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  calls.start.mockImplementationOnce(async () => {
+    entered();
+    await blocked;
+  });
+  const launched = launch();
+  await starting;
+  env.DATABASE = {
+    prepare: () => {
+      throw new Error('D1 unavailable');
+    },
+  } as unknown as D1Database;
+  await expect(builder.enforceDeadline()).resolves.toBeUndefined();
+  expect(calls.schedule).toHaveBeenCalledWith(expect.any(Date), 'enforceDeadline');
+  resume();
+  await launched.catch(() => undefined);
+  expect(calls.destroy).toHaveBeenCalledTimes(1);
+  expect(calls.running).toBe(false);
+  expect(calls.fetch).not.toHaveBeenCalled();
+});
+
+it('inactive terminal cleanup releases its reservation without waking compute', async () => {
+  await launch();
+  calls.running = false;
+  sqlite.exec("UPDATE deployment_publish_jobs SET status='succeeded'");
+  calls.destroy.mockClear();
+  await builder.enforceDeadline();
+  expect(calls.destroy).not.toHaveBeenCalled();
+  expect(sqlite.prepare('SELECT executor_instance_id FROM deployment_publish_jobs').get()).toEqual({
+    executor_instance_id: null,
+  });
 });

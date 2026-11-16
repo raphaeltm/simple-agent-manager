@@ -7,6 +7,7 @@ import {
   releaseCloudflareBuildReservation,
   startReservedCloudflareBuild,
 } from '@simple-agent-manager/app-deployment';
+import { log } from '@simple-agent-manager/worker-core';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -41,11 +42,19 @@ export class ComposeBuilderContainer extends Container<Env> {
   enableInternet = true;
   private operation: Promise<unknown> = Promise.resolve();
   private startAbort?: AbortController;
+  private startupInProgress = false;
   private kickoff: Promise<unknown> = Promise.resolve();
   private serialized<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.operation.then(fn, fn);
     this.operation = result.catch(() => undefined);
     return result;
+  }
+  private fetchBootstrap(url: string, init: RequestInit & { signal: AbortSignal }) {
+    init.signal.throwIfAborted();
+    const container = this.ctx.container;
+    if (!container?.running) throw new Error('Builder stopped before acceptance');
+    // Raw workerd port transport never invokes the SDK's implicit restart path.
+    return container.getTcpPort(PORT).fetch(url, init);
   }
   private async loadJob(jobId: string, attempt: number) {
     const db = drizzle(this.env.DATABASE, { schema });
@@ -95,7 +104,16 @@ export class ComposeBuilderContainer extends Container<Env> {
     await this.schedule(new Date(), 'launchBuilder', { jobId, attempt });
     return { accepted: true };
   }
-  async launchBuilder(identity: { jobId: string; attempt: number }) {
+  launchBuilder(identity: { jobId: string; attempt: number }) {
+    // SDK alarms await callbacks sequentially. Do not hold the hard deadline
+    // behind a stalled D1 read or other kickoff work.
+    this.ctx.waitUntil(
+      this.runBuilder(identity).catch(() => {
+        log.warn('cloudflare_builder.kickoff_pending', { publishJobId: identity.jobId });
+      })
+    );
+  }
+  async runBuilder(identity: { jobId: string; attempt: number }) {
     // Alarm delivery and cron recovery may overlap. Coalesce the full operation,
     // including stop/requeue, so stale deliveries cannot defeat capacity backoff.
     const run = this.kickoff.then(async () => {
@@ -190,16 +208,28 @@ export class ComposeBuilderContainer extends Container<Env> {
         this.startAbort.signal,
         AbortSignal.timeout(Math.min(startTimeoutMs, deadline - Date.now())),
       ]);
-      await this.startAndWaitForPorts({
-        ports: [PORT],
-        cancellationOptions: {
-          abort: signal,
-          instanceGetTimeoutMS: startTimeoutMs,
-          portReadyTimeoutMS: startTimeoutMs,
-        },
-      });
+      this.startupInProgress = true;
+      try {
+        await this.startAndWaitForPorts({
+          ports: [PORT],
+          cancellationOptions: {
+            abort: signal,
+            instanceGetTimeoutMS: startTimeoutMs,
+            portReadyTimeoutMS: startTimeoutMs,
+          },
+        });
+      } finally {
+        this.startupInProgress = false;
+        if (signal.aborted) {
+          // The SDK can start after awaiting internal work even if the signal
+          // was already aborted. Reconcile locally before any D1 failure write.
+          await this.stopContainer(state);
+          await this.schedule(new Date(), 'enforceDeadline');
+        }
+      }
+      signal.throwIfAborted();
       // Private SDK transport to this microVM's port; this is not an Internet HTTP endpoint.
-      const health = await this.containerFetch('http://builder/health', { signal });
+      const health = await this.fetchBootstrap('http://builder/health', { signal });
       const version: unknown = await health.json();
       if (
         !health.ok ||
@@ -235,7 +265,7 @@ export class ComposeBuilderContainer extends Container<Env> {
         deadline
       );
       // Launch never traverses public HTTP; Container SDK routes inside its private port transport.
-      const response = await this.containerFetch('http://builder/start', {
+      const response = await this.fetchBootstrap('http://builder/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
@@ -258,26 +288,39 @@ export class ComposeBuilderContainer extends Container<Env> {
         accepted: true,
         stopRequested: false,
       });
-      await appendDeploymentPublishJobEvent(drizzle(this.env.DATABASE, { schema }), {
-        publishJobId: jobId,
-        expectedAttempt: attempt,
-        projectId: job.projectId,
-        environmentId: job.environmentId,
-        workspaceId: job.workspaceId,
-        nodeId: job.nodeId,
-        eventType: 'publish.builder.accepted',
-        message: 'Cloudflare builder accepted job',
-        detail: { version: version.version },
-      });
+      this.ctx.waitUntil(
+        appendDeploymentPublishJobEvent(drizzle(this.env.DATABASE, { schema }), {
+          publishJobId: jobId,
+          expectedAttempt: attempt,
+          projectId: job.projectId,
+          environmentId: job.environmentId,
+          workspaceId: job.workspaceId,
+          nodeId: job.nodeId,
+          eventType: 'publish.builder.accepted',
+          message: 'Cloudflare builder accepted job',
+          detail: { version: version.version },
+        }).catch(() => {
+          log.warn('cloudflare_builder.accepted_event_pending', { publishJobId: jobId });
+        })
+      );
       return { version: version.version };
     });
+  }
+  private async stopContainer(state: BuildState | undefined) {
+    if (state) await this.ctx.storage.put(STATE_KEY, { ...state, stopRequested: true });
+    // Calling destroy on an inactive guest can activate platform compute. Read
+    // workerd's synchronous running flag, never a fetch/start/state SDK path.
+    if (this.ctx.container?.running) await this.destroy();
+    this.deleteSchedules('launchBuilder'); // Includes schedules persisted by older code.
+    this.deleteSchedules('enforceDeadline');
+    if (this.startupInProgress && state)
+      await this.schedule(new Date(Date.now() + state.stopRetryMs), 'enforceDeadline');
   }
   async stopJob() {
     this.startAbort?.abort();
     return this.serialized(async () => {
       const state = await this.ctx.storage.get<BuildState>(STATE_KEY);
-      if (state) await this.ctx.storage.put(STATE_KEY, { ...state, stopRequested: true });
-      await this.destroy();
+      await this.stopContainer(state);
       if (state)
         await releaseCloudflareBuildReservation(
           drizzle(this.env.DATABASE, { schema }),
@@ -292,14 +335,16 @@ export class ComposeBuilderContainer extends Container<Env> {
     // outage may delay the verdict, but cannot extend arbitrary RUN execution.
     this.startAbort?.abort();
     try {
-      await this.stopJob();
+      // Bypass the startup queue: database reads in that queue may be stalled.
+      // The execution deadline owns destruction independently of D1 health.
+      await this.stopContainer(state);
     } catch (error) {
       // Container SDK consumes one-shot schedules even when a callback throws.
       // Re-arm explicitly; preserve the original deadline rather than extending it.
       if (state) await this.schedule(new Date(Date.now() + state.stopRetryMs), 'enforceDeadline');
       throw error;
     }
-    if (!state) return;
+    if (!state || this.startupInProgress) return;
     const { db, job } = await this.loadJob(state.jobId, state.attempt);
     if (job && !PUBLISH_JOB_TERMINAL_STATUSES.has(job.status)) {
       const changed = await appendDeploymentPublishJobEvent(db, {
@@ -328,9 +373,15 @@ export class ComposeBuilderContainer extends Container<Env> {
           source: 'cloudflare_builder.deadline',
           occurredAt: Date.now(),
         });
+    } else if (job) {
+      await releaseCloudflareBuildReservation(db, state.jobId, state.attempt);
     }
   }
   override async onStop() {
+    // SDK startup synchronizes a previous guest's pending stop event before it
+    // starts the next guest. The current startup owns its failure verdict and
+    // deadline; that older notification cannot revoke either.
+    if (this.startupInProgress || this.ctx.container?.running) return;
     const state = await this.ctx.storage.get<BuildState>(STATE_KEY);
     if (!state) return;
     const { db, job } = await this.loadJob(state.jobId, state.attempt);
