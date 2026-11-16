@@ -43,7 +43,6 @@ export { OperationError, operationErrorHttpStatus, toOperationHttpError } from '
 export { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from './idea-content-limit';
 export { createIdea, updateIdea } from './idea-core';
 export { ideaTaskPredicateSql } from './idea-identity';
-export { projectOverviewGet, type ProjectOverviewInput } from './project-overview';
 export {
   getIdeaWithDerivedStatus,
   type IdeaPullRequestRefresh,
@@ -106,6 +105,7 @@ export {
 } from './platform-operations';
 export { type ProfileAccountBinding } from './port-types';
 export { type OperationPorts, type ProjectEventErrorKind } from './ports';
+export { projectOverviewGet, type ProjectOverviewInput } from './project-overview';
 export {
   ensurePullRequest,
   getPullRequestStates,
