@@ -6,7 +6,7 @@
  *   - a rule names source files that do not load it (the rule was left behind by a move),
  *   - two rule files are identical copies,
  *   - a Claude Code hook entry is malformed (Claude Code would silently skip it),
- *   - a generated rule index is out of date,
+ *   - a generated rule index, or the Codex hook's rule lookup, is out of date,
  *   - a size ceiling in agent-context-budget.json is exceeded.
  *
  * Usage:
@@ -21,6 +21,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { CODEX_RULE_SCOPES_FILE, renderCodexRuleScopes } from './agent-codex-rule-scopes';
 import { checkClaudeHookConfig } from './agent-hook-config';
 import {
   checkCodexChainSizes,
@@ -103,6 +104,8 @@ function parseBudget(value: unknown): Budget {
 }
 
 const read = (path: string) => readFileSync(resolve(ROOT, path), 'utf8');
+/** Generated files may not exist yet; a missing file reads as empty, so it is stale. */
+const readGenerated = (path: string) => (existsSync(resolve(ROOT, path)) ? read(path) : '');
 const bytesOf = (path: string) => Buffer.byteLength(read(path), 'utf8');
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
 
@@ -236,6 +239,7 @@ function indexTargets(
       file: ROOT_INDEX_FILE,
       expected: applyGeneratedBlock(read(ROOT_INDEX_FILE), renderRootIndex(model)),
     },
+    { file: CODEX_RULE_SCOPES_FILE, expected: renderCodexRuleScopes(model) },
   ];
   if (files.includes('AGENTS.md')) {
     targets.push({
@@ -299,7 +303,7 @@ function runObserved(model: InstructionModel, logPath: string, args: string[]): 
 
 function writeIndexes(model: InstructionModel, files: string[]): void {
   for (const target of indexTargets(model, files)) {
-    if (read(target.file) === target.expected) continue;
+    if (readGenerated(target.file) === target.expected) continue;
     writeFileSync(resolve(ROOT, target.file), target.expected);
     console.log(`updated ${target.file}`);
   }
@@ -313,7 +317,7 @@ function collectFindings(
 ): Finding[] {
   const input = { model, trackedFiles: files };
   const staleIndexes = indexTargets(model, files)
-    .filter((target) => read(target.file) !== target.expected)
+    .filter((target) => readGenerated(target.file) !== target.expected)
     .map((target) => ({
       check: 'index-stale',
       file: target.file,
