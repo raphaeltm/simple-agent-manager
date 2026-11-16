@@ -8,7 +8,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { paneClassName } from '@simple-agent-manager/ui';
 import { Paperclip } from 'lucide-react';
-import type { MutableRefObject } from 'react';
+import type { FocusEvent, MutableRefObject, ReactNode } from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
@@ -95,6 +95,15 @@ type ChatInputProps = Readonly<{
   onRemoveAttachment?: (index: number) => void;
   fileInputRef?: MutableRefObject<HTMLInputElement | null>;
   uploading?: boolean;
+  /** One line above the box, e.g. the Overview's "Started: … · Open chat" receipt. */
+  receipt?: ReactNode;
+  /**
+   * Fold the To row away while the box is empty and nothing in it has focus, so an idle
+   * composer is one row (the Overview on a phone). It unfolds on focus or once typed into.
+   */
+  collapseToolbarWhenIdle?: boolean;
+  /** Focus the text box on mount (default true). */
+  focusOnMount?: boolean;
 }>;
 
 function getComposerPlaceholder({
@@ -158,8 +167,12 @@ export function ChatInput({
   onRemoveAttachment,
   fileInputRef,
   uploading,
+  receipt,
+  collapseToolbarWhenIdle = false,
+  focusOnMount = true,
 }: ChatInputProps) {
   const isMobile = useIsMobile();
+  const [focusWithin, setFocusWithin] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [accountsOpen, setAccountsOpen] = useState(false);
@@ -267,10 +280,28 @@ export function ChatInput({
   };
   const showOptions = optionsOpen || hasResourceErrors;
   const optionsPanelId = useId();
+  // Folded only while there is nothing to show: no text, no files, no open panel or sheet.
+  const idle =
+    value.length === 0 &&
+    (attachments?.length ?? 0) === 0 &&
+    !focusWithin &&
+    !showOptions &&
+    !accountsOpen &&
+    !profileSheet.open;
+  const toolbarVisible = showToolbar && !(collapseToolbarWhenIdle && idle);
+  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+    // Focus moving between controls inside the composer keeps it unfolded.
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusWithin(false);
+  };
 
   return (
     // The new-chat message box is a SAM Glass slab, like the follow-up composer in a chat.
-    <div className={`${paneClassName('slab')} shrink-0 px-3 py-3 md:px-4`}>
+    <div
+      className={`${paneClassName('slab')} shrink-0 px-3 py-3 md:px-4`}
+      onFocus={() => setFocusWithin(true)}
+      onBlur={handleBlur}
+    >
+      {receipt}
       {error && (
         <div role="alert" className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
@@ -294,11 +325,11 @@ export function ChatInput({
         />
       )}
 
-      {showToolbar && showOptions && (
+      {toolbarVisible && showOptions && (
         <ComposerOptionsPanel id={optionsPanelId} options={options} compact={isMobile} />
       )}
 
-      {showToolbar && accountsOpen && showAccountControl && runAccounts && (
+      {toolbarVisible && accountsOpen && showAccountControl && runAccounts && (
         <RunAccountPanel
           id={accountsPanelId}
           accounts={runAccounts}
@@ -314,7 +345,7 @@ export function ChatInput({
       )}
 
       {/* While the account list is open it is the place to choose; the nudge would repeat it. */}
-      {showToolbar && selectedProfile && profileUsages && !accountsOpen && (
+      {toolbarVisible && selectedProfile && profileUsages && !accountsOpen && (
         <ProfileUsageNudge
           usage={runUsage}
           profileUsage={selectedUsage}
@@ -325,7 +356,7 @@ export function ChatInput({
         />
       )}
 
-      {showToolbar && (
+      {toolbarVisible && (
         <div className="mb-2 flex items-center gap-2">
           {/* The account wraps under To when the toolbar is narrow (a phone). */}
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
@@ -393,8 +424,9 @@ export function ChatInput({
         fileInputRef={fileInputRef}
         uploading={uploading}
         showShortcutHint={!isMobile}
-        showAttachButton={!showToolbar}
+        showAttachButton={!toolbarVisible}
         attachTitle="Attach files to this task"
+        focusOnMount={focusOnMount}
       />
       <ProfilePickerSheet
         open={profileSheet.open}

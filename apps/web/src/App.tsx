@@ -116,6 +116,7 @@ function Project() {
 }
 const ProjectChat = lazyNamed(loadProjectChat, 'ProjectChat');
 const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'ProjectActivity');
+const ProjectOverview = lazyNamed(() => import('./pages/project-overview'), 'ProjectOverview');
 const ProjectAgentChat = lazyNamed(() => import('./pages/ProjectAgentChat'), 'ProjectAgentChat');
 const ProjectCreate = lazyNamed(() => import('./pages/ProjectCreate'), 'ProjectCreate');
 const ProjectDeploymentEnvironmentDetail = lazyNamed(
@@ -318,6 +319,7 @@ export default function App() {
                         element={page(<Project />, <ProjectRouteFallback />)}
                       >
                         <Route index element={<Navigate to="chat" replace />} />
+                        <Route path="overview" element={page(<ProjectOverview />)} />
                         <Route
                           path="chat"
                           element={page(

@@ -24,7 +24,14 @@ export { NewChatProfileCards } from './NewChatProfileCards';
 export { ProfileAvatar } from './ProfileAvatar';
 export { ProfilePickerSheet } from './ProfilePickerSheet';
 export { ProfileToControl } from './ProfileToControl';
+export { ProfileUsageAvatar } from './ProfileUsageAvatar';
 export { ProfileUsageNudge } from './ProfileUsageNudge';
 export { type RunAccount, useRunAccounts } from './run-accounts';
 export { RunAccountButton, RunAccountPanel } from './RunAccountControl';
-export { type ProfileUsage, usageEntry, useProfileUsages } from './usage';
+export {
+  type ProfileUsage,
+  usageEntry,
+  type UsageWord,
+  usageWords,
+  useProfileUsages,
+} from './usage';

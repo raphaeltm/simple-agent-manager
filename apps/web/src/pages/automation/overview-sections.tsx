@@ -103,6 +103,65 @@ const FIX_LABELS: Record<Attention['fix'], string> = {
   review: 'Take a look',
 };
 
+/**
+ * The way out of an attention state: Resume in place for a paused trigger the viewer may
+ * change, otherwise a link to where the fix is. Shared by the Automation page's panel and the
+ * Project Overview's one-line row, so both offer the same fix.
+ */
+function AttentionFix({
+  item,
+  attention,
+  canWrite,
+  compact = false,
+}: {
+  item: AutomationItem;
+  attention: Attention;
+  canWrite: boolean;
+  /** One button, sized for a one-line row; the runs link is left to the row's own link. */
+  compact?: boolean;
+}) {
+  const { projectId } = useProjectContext();
+  const resume = useAutomationAction(
+    () => updateTrigger(projectId, item.id, { status: 'active' }),
+    { success: 'Resumed', failure: 'Could not resume it' }
+  );
+  const detail = automationPaths.detail(projectId, item.kind, item.id);
+  const inlineResume = canWrite && attention.fix === 'resume' && item.kind === 'trigger';
+  const sizing = compact ? 'min-h-11 px-3 text-sm' : 'min-h-11 px-4 text-[0.95rem]';
+  if (inlineResume) {
+    return (
+      <>
+        <Button
+          onClick={() => resume.mutate()}
+          loading={resume.isPending}
+          size={compact ? 'sm' : undefined}
+          className={compact ? 'min-h-11 shrink-0' : undefined}
+        >
+          Resume
+        </Button>
+        {!compact && (
+          <Link
+            to={`${detail}#runs`}
+            className="inline-flex min-h-11 items-center rounded-md border border-border-default px-4 text-[0.95rem] font-semibold text-fg-primary no-underline hover:bg-surface-hover"
+          >
+            See the runs
+          </Link>
+        )}
+      </>
+    );
+  }
+  return (
+    <Link
+      to={attention.fix === 'review-runs' ? `${detail}#runs` : detail}
+      className={`inline-flex shrink-0 items-center rounded-md bg-accent font-semibold text-fg-on-accent no-underline ${sizing}`}
+    >
+      {canWrite || attention.fix === 'review-runs' || attention.fix === 'review'
+        ? FIX_LABELS[attention.fix]
+        : 'Take a look'}
+    </Link>
+  );
+}
+
 function AttentionPanel({
   item,
   attention,
@@ -113,13 +172,8 @@ function AttentionPanel({
   canWrite: boolean;
 }) {
   const { projectId } = useProjectContext();
-  const resume = useAutomationAction(
-    () => updateTrigger(projectId, item.id, { status: 'active' }),
-    { success: 'Resumed', failure: 'Could not resume it' }
-  );
   const Icon = attention.tone === 'danger' ? TriangleAlert : CircleAlert;
   const detail = automationPaths.detail(projectId, item.kind, item.id);
-  const inlineResume = canWrite && attention.fix === 'resume' && item.kind === 'trigger';
   return (
     <Panel tone={attention.tone} className="p-4" label={item.name}>
       <div className="flex gap-3">
@@ -139,32 +193,50 @@ function AttentionPanel({
           <p className="m-0 -mt-1.5 text-[15px] font-semibold text-fg-primary">{attention.title}</p>
           <p className="m-0 text-sm text-fg-muted [overflow-wrap:anywhere]">{attention.body}</p>
           <div className="mt-2 flex flex-wrap gap-3">
-            {inlineResume ? (
-              <>
-                <Button onClick={() => resume.mutate()} loading={resume.isPending}>
-                  Resume
-                </Button>
-                <Link
-                  to={`${detail}#runs`}
-                  className="inline-flex min-h-11 items-center rounded-md border border-border-default px-4 text-[0.95rem] font-semibold text-fg-primary no-underline hover:bg-surface-hover"
-                >
-                  See the runs
-                </Link>
-              </>
-            ) : (
-              <Link
-                to={attention.fix === 'review-runs' ? `${detail}#runs` : detail}
-                className="inline-flex min-h-11 items-center rounded-md bg-accent px-4 text-[0.95rem] font-semibold text-fg-on-accent no-underline"
-              >
-                {canWrite || attention.fix === 'review-runs' || attention.fix === 'review'
-                  ? FIX_LABELS[attention.fix]
-                  : 'Take a look'}
-              </Link>
-            )}
+            <AttentionFix item={item} attention={attention} canWrite={canWrite} />
           </div>
         </div>
       </div>
     </Panel>
+  );
+}
+
+/**
+ * One failing automation as a single row: its name and what is wrong, linking to the
+ * automation, with the same fix button as the Automation page's panel. For summaries (the
+ * Project Overview) where the full panel is too tall.
+ */
+export function AttentionLine({
+  item,
+  attention,
+  canWrite,
+}: {
+  item: AutomationItem;
+  attention: Attention;
+  canWrite: boolean;
+}) {
+  const { projectId } = useProjectContext();
+  const Icon = attention.tone === 'danger' ? TriangleAlert : CircleAlert;
+  return (
+    <div className="flex min-w-0 items-center gap-2 py-1" data-testid="automation-attention-line">
+      <Link
+        to={automationPaths.detail(projectId, item.kind, item.id)}
+        className="flex min-h-11 min-w-0 flex-1 items-center gap-2.5 rounded-md px-1 no-underline hover:bg-surface-hover"
+      >
+        <Icon
+          size={16}
+          aria-hidden
+          className={`shrink-0 ${attention.tone === 'danger' ? 'text-danger-fg' : 'text-warning-fg'}`}
+        />
+        <span className="flex min-w-0 flex-col">
+          <span className="line-clamp-1 break-all text-sm font-medium text-fg-primary">
+            {item.name}
+          </span>
+          <span className="line-clamp-1 break-all text-xs text-fg-muted">{attention.title}</span>
+        </span>
+      </Link>
+      <AttentionFix item={item} attention={attention} canWrite={canWrite} compact />
+    </div>
   );
 }
 

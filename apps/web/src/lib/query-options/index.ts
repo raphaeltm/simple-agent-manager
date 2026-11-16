@@ -158,6 +158,7 @@ export {
   notificationUnreadCountQueryOptions,
   timelineProgressNotificationsQueryOptions,
 } from './notifications';
+export { projectOverviewQueryKeys, projectOverviewQueryOptions } from './project-overview';
 export {
   instantRuntimeEnabledQueryOptions,
   projectArtifactsEnabledQueryOptions,

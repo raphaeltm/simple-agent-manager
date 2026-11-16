@@ -169,6 +169,7 @@ describe('useCommandPaletteContext', () => {
     const { result } = renderContextHook();
 
     const labels = result.current.contextActions.map((a) => a.label);
+    expect(labels).toContain('My Project: Go to Overview');
     expect(labels).toContain('My Project: Go to Library');
     expect(labels).toContain('My Project: Go to Deployments');
     expect(labels).toContain('My Project: Go to Agent Context');
@@ -179,6 +180,7 @@ describe('useCommandPaletteContext', () => {
   });
 
   it.each([
+    ['ctx-project-overview', '/projects/p1/overview'],
     ['ctx-project-library', '/projects/p1/library'],
     ['ctx-project-deployments', '/projects/p1/deployments'],
     ['ctx-project-agent-context', '/projects/p1/agent-context'],
@@ -324,11 +326,11 @@ describe('useCommandPaletteContext', () => {
 
     const { result } = renderContextHook({ chatSessions: sessions });
     // Default cap is 20. On a project+session URL we have:
-    //   10 project nav (Chat/Ideas/Activity/Settings/Library/Agent Context/
-    //   Notifications/Automation/Profiles/Skills) + 3 create + 2 session = 15 (all fit)
+    //   11 project nav (Overview/Chat/Ideas/Deployments/Settings/Library/Agent Context/
+    //   Notifications/Automation/Profiles/Skills) + 3 create + 2 session = 16 (all fit)
     // (outputPrUrl is only on detail endpoint, not list; "Open PR" action removed)
     expect(result.current.contextActions.length).toBeLessThanOrEqual(20);
-    expect(result.current.contextActions.length).toBe(15);
+    expect(result.current.contextActions.length).toBe(16);
   });
 
   // ── window.open assertions ──
