@@ -122,7 +122,7 @@ export function StatTiles({
     <div className="grid grid-cols-1 gap-[var(--sam-space-gutter)] sm:grid-cols-3">
       <StatTile
         testId="stat-compute"
-        label={`Compute, ${rangeText.toLowerCase()}`}
+        label={`Compute · ${rangeText}`}
         value={compute ? formatUsd(compute.totalUsd) : '—'}
         note={computeNotes.join(' · ')}
       />

@@ -73,7 +73,7 @@ export function AdminHealthCost() {
           options={RANGE_OPTIONS}
           value={range}
           onChange={setRange}
-          className="w-full shrink-0 sm:w-auto"
+          className="w-full shrink-0 sm:w-72"
         />
       </Pane>
 

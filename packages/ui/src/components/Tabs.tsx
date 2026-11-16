@@ -84,11 +84,19 @@ export function Tabs({ tabs, basePath, className }: TabsProps) {
     // settle back with the active tab still clipped. If it did, align the
     // tab's left edge (a real snap position), clamped to the end of the strip
     // (also a valid snap stop), so the snap keeps the tab in view.
+    // When the active tab opens a group, keep the group's label in view with it (the label is
+    // also a snap stop).
+    const previous = el.previousElementSibling;
+    const anchor =
+      previous instanceof HTMLElement && previous.dataset.testid === 'tabs-group-label'
+        ? previous
+        : el;
     const raf = requestAnimationFrame(() => {
       const elRect = el.getBoundingClientRect();
+      const anchorRect = anchor.getBoundingClientRect();
       const listRect = list.getBoundingClientRect();
-      if (elRect.right > listRect.right + 1 || elRect.left < listRect.left - 1) {
-        const target = list.scrollLeft + (elRect.left - listRect.left);
+      if (elRect.right > listRect.right + 1 || anchorRect.left < listRect.left - 1) {
+        const target = list.scrollLeft + (anchorRect.left - listRect.left);
         list.scrollLeft = Math.max(0, Math.min(target, list.scrollWidth - list.clientWidth));
       }
     });
@@ -138,7 +146,7 @@ export function Tabs({ tabs, basePath, className }: TabsProps) {
                 <span
                   role="presentation"
                   data-testid="tabs-group-label"
-                  className={`inline-flex shrink-0 items-center self-center whitespace-nowrap px-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-muted ${index > 0 ? 'ml-1 border-0 border-l border-solid border-[var(--sam-hairline)]' : ''}`}
+                  className={`inline-flex shrink-0 snap-start items-center self-center whitespace-nowrap px-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-muted ${index > 0 ? 'ml-1 border-0 border-l border-solid border-[var(--sam-hairline)]' : ''}`}
                 >
                   {tab.group}
                 </span>
