@@ -60,7 +60,7 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 - \`update_task_status\` — Report progress at significant milestones. The human sees these in the SAM dashboard in real time. Use them liberally — a human monitoring a long-running task has no other visibility into what you're doing.
 - \`complete_task\` — Call when ALL work is done and pushed. Include a clear summary and, when a pull request exists, pass its URL as \`evidence.prUrl\`. Only used in task mode — in conversation mode, the human ends the session.
 - \`dispatch_task\` — Spawn a new task for another agent. Use this when you discover work that's adjacent but outside your current scope. Describe the task clearly — the receiving agent gets only what you write here.
-- \`request_human_input\` — When you're genuinely blocked and need a human decision. Provide rich context and, when possible, a set of options to choose from. SAM records the request so the human can answer it.
+- \`inbox_write\` / \`inbox_read\` — How you reach a person: they read their inbox, not chats. Method \`ask\` files one question (blocking only when you cannot continue), \`review\` asks them to evaluate your work; check \`inbox_read\` method \`list\` first. \`request_human_input\` is an alias of a blocking ask. You are woken in this chat when they answer.
 
 **Knowledge & History:**
 - \`tasks_read\` method \`search\` / \`tasks_read\` method \`get\` — Find and inspect other tasks in the project. Useful for understanding what work has been done or is in progress.
@@ -114,7 +114,7 @@ These are patterns that work well across different types of tasks:
 - \`tasks_read\` method \`agents\` before touching heavily-shared files
 - \`gh run list\` after pushing to verify CI passes
 - \`ideas_write\` method \`create\` when you notice something worth tracking but out of scope
-- \`request_human_input\` when genuinely blocked — don't guess at ambiguous requirements
+- \`inbox_write\` method \`ask\` when you need a decision — don't guess at ambiguous requirements, and don't end a turn with a question only in your message
 - Commit and push frequently — treat every push as a checkpoint
 
 **Wrapping up:**

@@ -54,7 +54,7 @@ function makeObservation(overrides: Partial<{ id: string; entityId: string; cont
   };
 }
 
-function makePolicy(overrides: Partial<{ id: string; category: string; title: string; content: string; active: boolean; confidence: number; source: string; scope: string; expiresAt: number | null }> = {}) {
+function makePolicy(overrides: Partial<{ id: string; category: string; title: string; content: string; active: boolean; confidence: number; source: string; scope: string; expiresAt: number | null; injectMode: 'pinned' | 'on_demand' }> = {}) {
   return {
     id: overrides.id ?? 'pol-1',
     category: overrides.category ?? 'rule',
@@ -66,6 +66,7 @@ function makePolicy(overrides: Partial<{ id: string; category: string; title: st
     sourceSessionId: null,
     scope: overrides.scope ?? 'always',
     expiresAt: overrides.expiresAt ?? null,
+    injectMode: overrides.injectMode ?? 'pinned',
     createdAt: Date.now() - 86400000,
     updatedAt: Date.now(),
   };
@@ -143,6 +144,28 @@ const LIFECYCLE_POLICIES = [
   }),
 ];
 
+/**
+ * Inject-mode states: pinned and on-demand side by side, an on-demand policy with a
+ * 200-character unbroken title and long body, markup in a title, and enough policies (35)
+ * that the summary adds up a realistic total.
+ */
+const INJECT_MODE_POLICIES = [
+  makePolicy({ id: 'pm1', category: 'rule', title: 'Staging is the default validation path', content: 'Deploy to staging and verify before merging. '.repeat(8) }),
+  makePolicy({ id: 'pm2', category: 'preference', title: 'Daily journal posts stay technical', injectMode: 'on_demand' }),
+  makePolicy({ id: 'pm3', category: 'constraint', title: 'C'.repeat(200), content: 'D'.repeat(1_500), injectMode: 'on_demand' }),
+  makePolicy({ id: 'pm4', category: 'delegation', title: '<script>alert(1)</script> & émoji 🚀 policy', injectMode: 'on_demand' }),
+  makePolicy({ id: 'pm5', category: 'rule', title: 'X' }),
+  ...Array.from({ length: 30 }, (_, i) =>
+    makePolicy({
+      id: `pmany${i}`,
+      category: ['rule', 'constraint', 'delegation', 'preference'][i % 4]!,
+      title: `Project policy number ${i} about review hygiene`,
+      content: 'Agents must keep this behaviour in every session. '.repeat(1 + (i % 6)),
+      injectMode: i % 3 === 0 ? 'on_demand' : 'pinned',
+    })
+  ),
+];
+
 const NORMAL_OBSERVATIONS = [
   makeObservation({ id: 'o1', entityId: 'e1' }),
   makeObservation({ id: 'o2', entityId: 'e1', content: 'A'.repeat(240), confidence: 0.81, sourceType: 'behavioral' }),
@@ -162,6 +185,7 @@ async function setupMocks(page: Page, opts: {
   actions?: ReturnType<typeof makeActivity>[];
   observations?: ReturnType<typeof makeObservation>[];
   requests?: CapturedRequest[];
+  policyPatchStatus?: number;
 } = {}) {
   const entities = opts.entities ?? NORMAL_ENTITIES;
   const policies = opts.policies ?? NORMAL_POLICIES;
@@ -262,6 +286,12 @@ async function setupMocks(page: Page, opts: {
       return route.fulfill({ json: { entities, total: entities.length } });
     }
     if (path.includes('/api/projects/proj-1/policies/') && method === 'PATCH') {
+      if (opts.policyPatchStatus && opts.policyPatchStatus >= 400) {
+        return route.fulfill({
+          status: opts.policyPatchStatus,
+          json: { error: 'FORBIDDEN', message: 'You need project admin rights to change this policy' },
+        });
+      }
       return route.fulfill({ json: { updated: true, policyId: path.split('/').pop() } });
     }
     if (path.includes('/api/projects/proj-1/policies/') && method === 'DELETE') {
@@ -385,12 +415,17 @@ test.describe('Agent Context — Mobile', () => {
     await page.getByRole('button', { name: 'Save' }).click();
     await expect.poll(() => requests.some((request) => request.method === 'PATCH' && request.path === '/api/projects/proj-1/knowledge/e1')).toBe(true);
 
-    await page.getByRole('button', { name: /CodeStyle/ }).click();
+    // Editing expands the entity, and the refetch after saving keeps the tab mounted
+    // (stale-while-revalidate, rule 48), so the entity is still expanded here.
+    await expect(page.getByText('Prefers focused implementation notes')).toBeVisible();
     await page.getByRole('button', { name: 'Edit observation' }).first().click();
     await page.getByRole('textbox', { name: 'Observation' }).fill('Updated observation content');
     await page.getByRole('spinbutton', { name: 'Confidence' }).fill('77');
     await page.getByRole('button', { name: 'Save' }).click();
     await expect.poll(() => requests.some((request) => request.method === 'PATCH' && request.path === '/api/projects/proj-1/knowledge/observations/o1')).toBe(true);
+    // The tab stays mounted through the refetch now, so wait for the edit form to close
+    // before picking the first row's delete button.
+    await expect(page.getByRole('textbox', { name: 'Observation' })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Delete observation' }).first().click();
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -402,6 +437,7 @@ test.describe('Agent Context — Mobile', () => {
     await page.getByLabel('Content').fill('Updated policy content');
     await page.getByRole('button', { name: 'Save' }).click();
     await expect.poll(() => requests.some((request) => request.method === 'PATCH' && request.path === '/api/projects/proj-1/policies/p1')).toBe(true);
+    await expect(page.getByLabel('Content')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Delete policy' }).first().click();
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -424,6 +460,53 @@ test.describe('Agent Context — Mobile', () => {
         body: expect.objectContaining({ title: 'Updated policy', content: 'Updated policy content' }),
       }),
     ]));
+    await assertNoOverflow(page);
+  });
+
+  test('policies tab inject mode: control, sizes, and unpin request', async ({ page }) => {
+    const requests: CapturedRequest[] = [];
+    await setupMocks(page, { policies: INJECT_MODE_POLICIES, requests });
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Policies")');
+
+    const summary = page.getByLabel('Policy size in agent sessions');
+    await expect(summary).toContainText('sent to every agent session from 22 pinned policies');
+    await expect(summary).toContainText('13 on demand');
+
+    const card = page.locator('article').filter({ hasText: 'Staging is the default validation path' });
+    const pinned = card.getByRole('button', { name: 'Pinned' });
+    const onDemand = card.getByRole('button', { name: 'On demand' });
+    await expect(pinned).toHaveAttribute('aria-pressed', 'true');
+    await expect(card.getByText(/Adds [\d,]+ characters to every agent session\./)).toBeVisible();
+
+    // Phone-usable: both options at least 44px tall and inside the card, measured.
+    const cardBox = (await card.boundingBox())!;
+    for (const button of [pinned, onDemand]) {
+      const box = (await button.boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.x).toBeGreaterThanOrEqual(cardBox.x);
+      expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width + 1);
+    }
+    await screenshot(page, 'agent-context-policy-inject-mode-mobile');
+    await assertNoOverflow(page);
+
+    await onDemand.click();
+    await expect
+      .poll(() => requests.find((r) => r.method === 'PATCH' && r.path === '/api/projects/proj-1/policies/pm1'))
+      .toEqual(expect.objectContaining({ body: { injectMode: 'on_demand' } }));
+  });
+
+  test('policies tab inject mode long on-demand title and error toast', async ({ page }) => {
+    await setupMocks(page, { policies: INJECT_MODE_POLICIES, policyPatchStatus: 403 });
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Policies")');
+    const longCard = page.locator('article').filter({ hasText: 'C'.repeat(200) });
+    await longCard.scrollIntoViewIfNeeded();
+    await expect(longCard.getByText(/Title only in every session/)).toBeVisible();
+    await expect(longCard.getByRole('button', { name: 'On demand' })).toHaveAttribute('aria-pressed', 'true');
+    await longCard.getByRole('button', { name: 'Pinned' }).click();
+    await expect(page.getByText('You need project admin rights to change this policy')).toBeVisible();
+    await screenshot(page, 'agent-context-policy-inject-mode-long-error-mobile');
     await assertNoOverflow(page);
   });
 
@@ -512,6 +595,16 @@ test.describe('Agent Context — Desktop', () => {
     await expect(worstCase.getByText('expired', { exact: true })).toBeVisible();
 
     await screenshot(page, 'agent-context-policy-lifecycle-desktop');
+    await assertNoOverflow(page);
+  });
+  test('policies tab inject mode with many mixed policies', async ({ page }) => {
+    await setupMocks(page, { policies: INJECT_MODE_POLICIES });
+    await page.goto('/projects/proj-1/agent-context');
+    await page.click('button:has-text("Policies")');
+    await expect(page.getByLabel('Policy size in agent sessions')).toBeVisible();
+    const card = page.locator('article').filter({ hasText: 'Daily journal posts stay technical' });
+    await expect(card.getByRole('button', { name: 'On demand' })).toHaveAttribute('aria-pressed', 'true');
+    await screenshot(page, 'agent-context-policy-inject-mode-desktop');
     await assertNoOverflow(page);
   });
 });

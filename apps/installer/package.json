@@ -19,7 +19,7 @@
     "typescript": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:",
-    "@playwright/test": "1.62.1",
+    "@playwright/test": "1.65.0",
     "tsx": "catalog:",
     "astro": "6.4.8",
     "@astrojs/check": "catalog:"

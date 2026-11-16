@@ -57,3 +57,15 @@ pnpm --filter @simple-agent-manager/www compress:screenshots public/images/blog/
 - The analytics tracker (`scripts/build-tracker.ts`) is bundled at build time, not at runtime
 - Do NOT confuse this with `apps/web/` — different stack (Astro vs React+Vite), different domain
 - Starlight sidebar config lives in `astro.config.ts`, not in the content files
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/04-ui-standards.md`: UI Standards
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+
+<!-- END GENERATED RULE INDEX -->

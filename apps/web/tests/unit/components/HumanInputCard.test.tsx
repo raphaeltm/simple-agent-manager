@@ -260,7 +260,7 @@ describe('human input card in chat', () => {
     expect(screen.queryByRole('button', { name: 'Start both' })).not.toBeInTheDocument();
   });
 
-  it('picks up an answer given from the notification bell, then stops refreshing', async () => {
+  it('picks up an answer given from the Inbox, then stops refreshing', async () => {
     let calls = 0;
     getAttentionRequestContext.mockImplementation(async () => {
       calls += 1;
@@ -298,10 +298,10 @@ describe('human input card in chat', () => {
     expect(getAttentionRequestContext).toHaveBeenCalledTimes(1);
   });
 
-  it('points to the bell without fetching when the conversation has no project', () => {
+  it('points to the Inbox without fetching when the conversation has no project', () => {
     render(<AcpConversationItemView item={itemFor(compactMetadata())} />);
 
-    expect(screen.getByText(/Answer it from the notification bell/)).toBeInTheDocument();
+    expect(screen.getByText(/Answer it from your Inbox/)).toBeInTheDocument();
     expect(getAttentionRequestContext).not.toHaveBeenCalled();
   });
 

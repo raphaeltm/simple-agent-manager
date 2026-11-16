@@ -20,9 +20,8 @@ curl -fsSL "https://api.example.com/api/cli/download?os=darwin&arch=arm64" -o sa
 ```
 
 The one-liner picks Apple Silicon on any Mac; on an Intel Mac, use **Other platforms → macOS
-Intel**, or change `arch=arm64` to `arch=amd64`. Ignore the quick-start steps further down that
-page: they're out of date, and their sign-in step points the CLI at the maintainer's own instance instead of
-yours. Sign in as described below instead.
+Intel**, or change `arch=arm64` to `arch=amd64`. The page's quick start shows the commands below
+with your installation's API address filled in.
 
 ## Sign in
 

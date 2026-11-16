@@ -4,7 +4,7 @@
  * `cleanup_blocked_reason` is what operators read (the `node_destroying_too_long` anomaly, the
  * admin node view); `alertNodeCleanupBlocked` is the existing rate-limited operator alert. A node
  * that can never be torn down automatically must surface here rather than retry silently
- * (`apps/api/.claude/rules/71`, rule 47).
+ * (`.claude/rules/71`, rule 47).
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';

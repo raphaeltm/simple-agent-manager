@@ -1,3 +1,5 @@
+import type { PolicyInjectMode } from '@simple-agent-manager/shared';
+import { DEFAULT_POLICY_INJECT_MODE, isPolicyInjectMode } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { parseRow } from './core';
@@ -20,6 +22,8 @@ const PolicyRowSchema = v.object({
   // instead of throwing and taking the whole read down (rule 50).
   expires_at: v.optional(v.nullable(v.number())),
   scope: v.optional(v.nullable(v.string())),
+  // Added by DO migration 080. Tolerated as absent for the same reason as above.
+  inject_mode: v.optional(v.nullable(v.string())),
   created_at: v.number(),
   updated_at: v.number(),
 });
@@ -35,6 +39,7 @@ export function parsePolicyRow(row: unknown): {
   active: boolean;
   scope: string;
   expiresAt: number | null;
+  injectMode: PolicyInjectMode;
   createdAt: number;
   updatedAt: number;
 } {
@@ -50,6 +55,12 @@ export function parsePolicyRow(row: unknown): {
     active: r.active === 1 || r.active === true,
     scope: r.scope ?? 'always',
     expiresAt: r.expires_at ?? null,
+    // A missing or unrecognized value reads as pinned: the failure mode is "injected in
+    // full", never "hidden from agents".
+    injectMode:
+      typeof r.inject_mode === 'string' && isPolicyInjectMode(r.inject_mode)
+        ? r.inject_mode
+        : DEFAULT_POLICY_INJECT_MODE,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

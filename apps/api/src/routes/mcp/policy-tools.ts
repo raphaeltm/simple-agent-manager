@@ -3,12 +3,20 @@
  *
  * Phase 4: Policy Propagation
  */
-import type { PolicyCategory, PolicyScope, PolicySource } from '@simple-agent-manager/shared';
+import type {
+  PolicyCategory,
+  PolicyInjectMode,
+  PolicyScope,
+  PolicySource,
+} from '@simple-agent-manager/shared';
 import {
+  DEFAULT_POLICY_INJECT_MODE,
   isPolicyCategory,
+  isPolicyInjectMode,
   isPolicyScope,
   isPolicySource,
   POLICY_CATEGORIES,
+  POLICY_INJECT_MODES,
   POLICY_SCOPES,
   resolvePolicyLimits,
   validatePolicyLifecycle,
@@ -85,6 +93,21 @@ function parseLifecycleParams(
   return { ok: true, scope, expiresAt };
 }
 
+/** Parse the optional `injectMode` param. Absent stays undefined (rule 73). */
+function parseInjectModeParam(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+): { ok: true; injectMode?: PolicyInjectMode } | { ok: false; response: JsonRpcResponse } {
+  if (params.injectMode === undefined) return { ok: true };
+  if (typeof params.injectMode !== 'string' || !isPolicyInjectMode(params.injectMode)) {
+    return {
+      ok: false,
+      response: jsonRpcError(requestId, INVALID_PARAMS, `injectMode must be one of: ${POLICY_INJECT_MODES.join(', ')}`),
+    };
+  }
+  return { ok: true, injectMode: params.injectMode };
+}
+
 export async function handleAddPolicy(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -151,6 +174,10 @@ export async function handleAddPolicy(
     return jsonRpcError(requestId, INVALID_PARAMS, lifecycleError);
   }
 
+  const injectModeParam = parseInjectModeParam(requestId, params);
+  if (!injectModeParam.ok) return injectModeParam.response;
+  const injectMode = injectModeParam.injectMode ?? DEFAULT_POLICY_INJECT_MODE;
+
   try {
     const result = await projectDataService.createPolicy(
       env, tokenData.projectId,
@@ -159,6 +186,7 @@ export async function handleAddPolicy(
       confidence,
       scope,
       expiresAt,
+      injectMode,
     );
 
     log.info('mcp.add_policy', {
@@ -168,6 +196,7 @@ export async function handleAddPolicy(
       source,
       scope,
       expiresAt,
+      injectMode,
     });
 
     return jsonRpcSuccess(requestId, {
@@ -179,6 +208,7 @@ export async function handleAddPolicy(
         confidence,
         scope,
         expiresAt,
+        injectMode,
         createdAt: result.now,
       }) }],
     });
@@ -300,6 +330,10 @@ export async function handleUpdatePolicy(
   if (!lifecycle.ok) return lifecycle.response;
   if (lifecycle.scope !== undefined) updates.scope = lifecycle.scope;
   if (lifecycle.expiresAt !== undefined) updates.expiresAt = lifecycle.expiresAt;
+
+  const injectModeParam = parseInjectModeParam(requestId, params);
+  if (!injectModeParam.ok) return injectModeParam.response;
+  if (injectModeParam.injectMode !== undefined) updates.injectMode = injectModeParam.injectMode;
 
   if (Object.keys(updates).length === 0) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'At least one update field must be provided');

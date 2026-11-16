@@ -2,7 +2,7 @@
  * Accessible on/off switch shared across the app: the model picker, compute pool accounts and
  * deployment settings.
  *
- * `packages/ui` has no Switch component yet (see `apps/web/.claude/rules/04-ui-standards.md`
+ * `packages/ui` has no Switch component yet (see `.claude/rules/04-ui-standards.md`
  * item 5). It lives here, outside any one feature's folder, until it moves to `packages/ui`.
  *
  * A real `<button role="switch">`, not a decorative track nested inside a

@@ -1322,9 +1322,13 @@ describe('Worker vars omitted because they equal the code default', () => {
   // The busy-build placement wait it bounded was removed (2026-11-08): a busy node is now ranked by
   // its startup backlog instead of waited on, so nothing reads the timeout.
   const RETIRED_WITH_BUSY_BUILD_WAIT = ['VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS'] as const;
+  // A question's window moved to the admin setting `inbox.questionTimeoutMinutes` with inbox
+  // slice G (2026-11-16): questions are D1 `asks` rows, and nothing reads the variable.
+  const RETIRED_WITH_QUESTION_ASKS = ['HUMAN_INPUT_TIMEOUT_MS'] as const;
   const RETIRED_VARS: readonly string[] = [
     ...RETIRED_WITH_ANONYMOUS_TRIALS,
     ...RETIRED_WITH_BUSY_BUILD_WAIT,
+    ...RETIRED_WITH_QUESTION_ASKS,
   ];
 
   it('pins original bindings to retained values, deliberate retunes or proven runtime defaults', () => {

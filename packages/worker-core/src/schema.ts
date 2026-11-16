@@ -816,8 +816,26 @@ export const asks = sqliteTable(
     notifiedAt: integer('notified_at'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
+    // Questions (`request_human_input`, slice G; migration 0247).
+    /** The workspace the asking agent ran in, for the expiry outcome (task and runtime). */
+    sourceWorkspaceId: text('source_workspace_id'),
+    /** The `request_human_input` category (`HUMAN_INPUT_CATEGORIES`), when given. */
+    category: text('category'),
+    /** The notification sent for the ask; reminders resend its push, expiry checks its receipt. */
+    notificationId: text('notification_id'),
+    /** Next reminder (push resend); NULL when none is left. */
+    nextEscalationAt: integer('next_escalation_at'),
+    escalationCount: integer('escalation_count').notNull().default(0),
+    /** Hard limit on how long an undelivered ask may be extended. */
+    maxExpiresAt: integer('max_expires_at'),
   },
   (table) => ({
+    openEscalationIdx: index('idx_asks_open_escalation')
+      .on(table.nextEscalationAt)
+      .where(sql`status = 'open' AND next_escalation_at IS NOT NULL`),
+    openQuestionIdx: index('idx_asks_open_question')
+      .on(table.projectId, table.sourceSessionId, table.createdAt)
+      .where(sql`kind = 'question' AND status = 'open'`),
     assigneeStatusIdx: index('idx_asks_assignee_status').on(
       table.assigneeUserId,
       table.status,
@@ -1291,6 +1309,17 @@ export const tasks = sqliteTable(
       .on(table.projectId, table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
     projectCreatedAtIdx: index('idx_tasks_project_created_at').on(table.projectId, table.createdAt),
+    /** Run receipt comparison with recent runs of the same skill or profile (migration 0252). */
+    projectSkillCreatedIdx: index('idx_tasks_project_skill_created').on(
+      table.projectId,
+      table.skillId,
+      table.createdAt
+    ),
+    projectProfileCreatedIdx: index('idx_tasks_project_profile_created').on(
+      table.projectId,
+      table.agentProfileHint,
+      table.createdAt
+    ),
     projectUserIdx: index('idx_tasks_project_user').on(table.projectId, table.userId),
     chatSessionIdUnique: uniqueIndex('idx_tasks_chat_session_id_unique')
       .on(table.chatSessionId)
@@ -1414,9 +1443,41 @@ export const pullRequestChecks = sqliteTable(
     checkKey: text('check_key').notNull(),
     state: text('state', { enum: ['pending', 'success', 'failure', 'neutral'] }).notNull(),
     updatedAt: text('updated_at').notNull(),
+    /** When this check first reported a failure on this commit; never cleared by a rerun (migration 0251). */
+    firstFailedAt: text('first_failed_at'),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.projectId, table.repository, table.headSha, table.checkKey] }),
+  })
+);
+
+/**
+ * Every head commit SAM saw for a pull request (migration 0251), written by
+ * `upsertPullRequestSnapshot`. `fromOpen` = this head came in GitHub's `pull_request.opened`
+ * event, so it is the commit the pull request opened with. Insights reads it for "CI passed on
+ * the first try"; old-head check deletes keep that commit's checks.
+ */
+export const pullRequestHeads = sqliteTable(
+  'pull_request_heads',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    headSha: text('head_sha').notNull(),
+    firstSeenAt: text('first_seen_at').notNull(),
+    fromOpen: integer('from_open', { mode: 'boolean' }).notNull().default(false),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.projectId, table.repository, table.prNumber, table.headSha],
+    }),
+    projectRepoHead: index('idx_pull_request_heads_project_repo_head').on(
+      table.projectId,
+      table.repository,
+      table.headSha
+    ),
   })
 );
 
@@ -5869,5 +5930,45 @@ export const lifecycleStateEpisodes = sqliteTable(
       table.endedAt
     ),
     endedIdx: index('idx_lifecycle_state_episodes_ended').on(table.endedAt),
+  })
+);
+
+/**
+ * One row per reported lifecycle phase (Insights slice T, migration 0250). Written by
+ * `recordLifecycleTimings` and `recordRunnerPhase`, read by `packages/operations`
+ * `insights-phase-timings`, purged by the daily lifecycle latency evaluation. No foreign keys:
+ * bounded telemetry must never block or cascade an entity delete. `createdAt` is epoch ms.
+ */
+export const lifecyclePhaseTimings = sqliteTable(
+  'lifecycle_phase_timings',
+  {
+    id: integer('id').primaryKey(),
+    operation: text('operation').notNull(),
+    phase: text('phase').notNull(),
+    outcome: text('outcome').notNull(),
+    durationMs: integer('duration_ms').notNull(),
+    projectId: text('project_id'),
+    workspaceId: text('workspace_id'),
+    nodeId: text('node_id'),
+    chatSessionId: text('chat_session_id'),
+    taskId: text('task_id'),
+    skillId: text('skill_id'),
+    agentProfileId: text('agent_profile_id'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => ({
+    workspaceIdx: index('idx_lifecycle_phase_timings_workspace')
+      .on(table.workspaceId, table.createdAt)
+      .where(sql`workspace_id IS NOT NULL`),
+    taskIdx: index('idx_lifecycle_phase_timings_task')
+      .on(table.taskId, table.createdAt)
+      .where(sql`task_id IS NOT NULL`),
+    skillPhaseIdx: index('idx_lifecycle_phase_timings_skill_phase')
+      .on(table.projectId, table.skillId, table.phase, table.createdAt)
+      .where(sql`skill_id IS NOT NULL`),
+    profilePhaseIdx: index('idx_lifecycle_phase_timings_profile_phase')
+      .on(table.projectId, table.agentProfileId, table.phase, table.createdAt)
+      .where(sql`agent_profile_id IS NOT NULL`),
+    createdIdx: index('idx_lifecycle_phase_timings_created').on(table.createdAt),
   })
 );

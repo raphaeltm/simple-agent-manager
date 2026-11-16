@@ -130,8 +130,8 @@ Two-phase provider deletion for the deadline-bounded cleanup callers, GCP first:
 
 ## References
 
-- `.claude/rules/81-work-bounds-must-state-throughput.md`, `apps/api/.claude/rules/47-control-loop-io-budget.md`
-- `packages/providers/.claude/rules/56-destructive-provider-ownership-proof.md`
+- `.claude/rules/81-work-bounds-must-state-throughput.md`, `.claude/rules/47-control-loop-io-budget.md`
+- `.claude/rules/56-destructive-provider-ownership-proof.md`
 - PR #2715 (fallback credential teardown), PR #2718 (credential re-save provenance)
 
 ## Implementation notes (2026-11-14)

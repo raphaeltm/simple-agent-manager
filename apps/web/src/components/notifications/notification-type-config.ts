@@ -21,8 +21,7 @@ export interface NotificationTypeConfig {
 }
 
 /**
- * How each notification type looks in the bell panel and on the project Notifications page.
- * One table for both: exhaustive over `NOTIFICATION_TYPES`, so adding a type fails to compile
+ * How each notification type looks in the inbox's Updates list. One table: exhaustive over `NOTIFICATION_TYPES`, so adding a type fails to compile
  * until it has a row here.
  */
 export const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, NotificationTypeConfig> = {
@@ -52,18 +51,27 @@ export function notificationTypeConfig(type: string): NotificationTypeConfig {
 }
 
 /**
- * Notification types that represent actionable items needing human attention.
- * These are the only types counted in the bell badge.
- * Low-value updates (task_complete, progress, session_ended, pr_created, comment,
- * session_access) are accessible in the Updates tab but do not inflate the badge count.
- * A mention is addressed to you by a person, so it needs you. An Operations approval waits on
- * your tap, and so does an agent's secret request.
+ * Where each notification type lives now that the inbox replaced the bell (spec idea
+ * 01M7G03ZCQ6TM6CMEYDRKQ8ST9). `inbox`: the ask it announces is an inbox item, so the inbox
+ * shows the item and the notification would be a duplicate. `update`: an FYI, listed under the
+ * inbox's Updates chip. Exhaustive, so a new type must choose.
  */
-export const ATTENTION_TYPES: ReadonlySet<string> = new Set<NotificationType>([
-  'needs_input',
-  'error',
-  'cron_failure',
-  'mention',
-  'operations_approval',
-  'secret_request',
-]);
+export const NOTIFICATION_INBOX_ROLE: Record<NotificationType, 'inbox' | 'update'> = {
+  needs_input: 'inbox',
+  operations_approval: 'inbox',
+  secret_request: 'inbox',
+  task_complete: 'update',
+  error: 'update',
+  progress: 'update',
+  session_ended: 'update',
+  pr_created: 'update',
+  cron_failure: 'update',
+  mention: 'update',
+  comment: 'update',
+  session_access: 'update',
+};
+
+/** True for notifications the Updates chip lists (unknown types included, as neutral updates). */
+export function isUpdateNotification(type: string): boolean {
+  return (NOTIFICATION_INBOX_ROLE as Partial<Record<string, 'inbox' | 'update'>>)[type] !== 'inbox';
+}
