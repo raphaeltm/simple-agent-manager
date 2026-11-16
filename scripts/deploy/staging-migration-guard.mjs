@@ -12,6 +12,8 @@ import { pathToFileURL } from 'node:url';
 
 export const WRANGLER_TOML = 'apps/api/wrangler.toml';
 export const PRIMARY_INSTALLATION = 'staging';
+// An absolute path on the runner, so PATH cannot substitute another binary.
+const GIT = process.env.GITHUB_ACTIONS === 'true' ? '/usr/bin/git' : 'git';
 
 // Tags in [[migrations]] order. Fails closed on anything it cannot read unambiguously.
 export function migrationTags(toml, source) {
@@ -47,14 +49,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const action = process.env.LEASE_ACTION || 'deploy';
     let refusal = null;
     if (installation === PRIMARY_INSTALLATION && action === 'deploy') {
-      execFileSync('git', ['fetch', '--quiet', '--depth=1', 'origin', 'main'], {
+      execFileSync(GIT, ['fetch', '--quiet', '--depth=1', 'origin', 'main'], {
         stdio: 'inherit',
       });
       refusal = checkInstallation({
         installation,
         action,
         branchToml: readFileSync(WRANGLER_TOML, 'utf8'),
-        mainToml: execFileSync('git', ['show', `FETCH_HEAD:${WRANGLER_TOML}`], {
+        mainToml: execFileSync(GIT, ['show', `FETCH_HEAD:${WRANGLER_TOML}`], {
           encoding: 'utf8',
         }),
       });
