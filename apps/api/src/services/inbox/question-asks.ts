@@ -8,11 +8,7 @@
  * (`deliverInboxAskNotice`, the wake path for a sleeping chat) and `notified_at` is recorded. A
  * delivery that was not queued keeps `notified_at` NULL and the inbox sweep retries it.
  */
-import {
-  fileAgentAsk,
-  loadAskNoticeRow,
-  notifyClosedAsk,
-} from '@simple-agent-manager/operations';
+import { fileAgentAsk, loadAskNoticeRow, notifyClosedAsk } from '@simple-agent-manager/operations';
 import type { HumanInputCategory } from '@simple-agent-manager/shared';
 import { HUMAN_INPUT_CATEGORIES } from '@simple-agent-manager/shared';
 import { maybeJsonRecord, questionOptions } from '@simple-agent-manager/worker-core';

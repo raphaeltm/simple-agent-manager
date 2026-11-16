@@ -41,7 +41,8 @@ const groupKey = {
 };
 const idempotencyKey = {
   type: 'string',
-  description: 'Any unique string; a retried call with the same key returns the item already filed.',
+  description:
+    'Any unique string; a retried call with the same key returns the item already filed.',
 };
 const ref = { type: 'string', description: 'Item reference, `ask:<id>`, as returned when filed.' };
 

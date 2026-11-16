@@ -109,7 +109,10 @@ async function run(
   const resolved = await resolveSource(tokenData, env);
   if ('error' in resolved) return jsonRpcError(requestId, INVALID_PARAMS, resolved.error);
   try {
-    return json(requestId, await body(operationContext(tokenData, env, requestId), resolved.source));
+    return json(
+      requestId,
+      await body(operationContext(tokenData, env, requestId), resolved.source)
+    );
   } catch (error) {
     if (error instanceof ValiError) {
       const issue = error.issues[0];

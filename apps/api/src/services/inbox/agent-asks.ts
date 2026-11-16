@@ -116,7 +116,12 @@ function previewWorkspaceId(url: URL, baseDomain: string): string | null {
 async function checkOne(env: Env, projectId: string, link: InboxLink): Promise<string | null> {
   const db = env.DATABASE;
   const exists = async (sql: string, ...params: unknown[]) =>
-    Boolean(await db.prepare(sql).bind(...params).first());
+    Boolean(
+      await db
+        .prepare(sql)
+        .bind(...params)
+        .first()
+    );
   switch (link.kind) {
     case 'idea':
       return (await exists(

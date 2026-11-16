@@ -101,7 +101,10 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
         tool: 'inbox_list_items',
         summary: 'open items from this chat, or with scope project from the whole project',
       },
-      get: { tool: 'inbox_get_item', summary: "one item with its status, the person's answer and outcome" },
+      get: {
+        tool: 'inbox_get_item',
+        summary: "one item with its status, the person's answer and outcome",
+      },
     },
   },
   {
@@ -110,7 +113,7 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
     destructive: true,
     requiresTask: true,
     summary:
-      "File what you need from a person in their inbox; they read the inbox, not chats. One ask per item. You are woken in this chat when they answer.",
+      'File what you need from a person in their inbox; they read the inbox, not chats. One ask per item. You are woken in this chat when they answer.',
     methods: {
       ask: {
         tool: 'inbox_ask',
@@ -122,7 +125,10 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
         summary: 'ask the person to evaluate something you made; answered "Looks good" or a reply',
       },
       update: { tool: 'inbox_update_item', summary: 'edit the wording or links of your open item' },
-      cancel: { tool: 'inbox_cancel_item', summary: 'close your open item when it is moot, saying why' },
+      cancel: {
+        tool: 'inbox_cancel_item',
+        summary: 'close your open item when it is moot, saying why',
+      },
     },
   },
   {

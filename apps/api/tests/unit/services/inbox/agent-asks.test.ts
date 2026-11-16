@@ -6,8 +6,8 @@
  * events, chat/policy/knowledge lookups, prompt delivery) and the agent-wake policy.
  */
 import {
-  answerInboxItem,
   type AgentInboxSource,
+  answerInboxItem,
   cancelAgentAsk,
   fileAgentAsk,
   fileAgentReview,
@@ -116,8 +116,10 @@ const foreign: AgentInboxSource = {
   userId: 'outsider',
 };
 
-const ask = (source = chat1, input: Parameters<typeof fileAgentAsk>[2] = { title: 'Which region?' }) =>
-  fileAgentAsk(ctxFor(source.userId, source.projectId), source, input);
+const ask = (
+  source = chat1,
+  input: Parameters<typeof fileAgentAsk>[2] = { title: 'Which region?' }
+) => fileAgentAsk(ctxFor(source.userId, source.projectId), source, input);
 
 async function rejects(promise: Promise<unknown>, code: string, message?: RegExp) {
   const error = await promise.then(
@@ -153,10 +155,7 @@ beforeEach(() => {
   createAllSchemaTables(sqlite, schema);
   sqlite.exec('DROP TABLE asks');
   for (const file of ['0245_asks.sql', '0247_asks_questions.sql']) {
-    applySqliteMigration(
-      sqlite,
-      new URL(`../../../../src/db/migrations/${file}`, import.meta.url)
-    );
+    applySqliteMigration(sqlite, new URL(`../../../../src/db/migrations/${file}`, import.meta.url));
   }
   env = {
     DATABASE: createSqliteD1(sqlite),
@@ -213,7 +212,12 @@ describe('inbox_write ask', () => {
       ],
       groupKey: 'deploy',
     });
-    expect(filed).toMatchObject({ kind: 'question', blocking: true, created: true, sessionId: 'chat-1' });
+    expect(filed).toMatchObject({
+      kind: 'question',
+      blocking: true,
+      created: true,
+      sessionId: 'chat-1',
+    });
     expect(filed.ref).toBe(`ask:${filed.id}`);
     const row = askRow(filed.id);
     expect(row).toMatchObject({
@@ -254,7 +258,14 @@ describe('inbox_write ask', () => {
     );
     expect(filed.notificationScheduled).toBe(true);
     // The chat reads as paused on a person.
-    expect(await hasOpenQuestionAsk(env.DATABASE, { projectId: P1, sessionId: 'chat-1', taskId: 'task-1', now: Date.now() })).toBe(true);
+    expect(
+      await hasOpenQuestionAsk(env.DATABASE, {
+        projectId: P1,
+        sessionId: 'chat-1',
+        taskId: 'task-1',
+        now: Date.now(),
+      })
+    ).toBe(true);
   });
 
   it('files a non-blocking ask that never expires and does not pause the chat', async () => {
@@ -265,11 +276,20 @@ describe('inbox_write ask', () => {
     // It still reaches the person.
     expect(edges.createNotification).toHaveBeenCalledOnce();
     const now = Date.now();
-    expect(await hasOpenQuestionAsk(env.DATABASE, { projectId: P1, sessionId: 'chat-1', taskId: 'task-1', now })).toBe(false);
+    expect(
+      await hasOpenQuestionAsk(env.DATABASE, {
+        projectId: P1,
+        sessionId: 'chat-1',
+        taskId: 'task-1',
+        now,
+      })
+    ).toBe(false);
     expect((await readOpenQuestionAttention(env.DATABASE, { projectId: P1, now })).size).toBe(0);
     // Liveness: the same reader does see a blocking question.
     await ask(chat1, { title: 'Ship it?' });
-    expect((await readOpenQuestionAttention(env.DATABASE, { projectId: P1, now: Date.now() })).size).toBe(1);
+    expect(
+      (await readOpenQuestionAttention(env.DATABASE, { projectId: P1, now: Date.now() })).size
+    ).toBe(1);
   });
 
   it('a chat message answers the blocking question and leaves the non-blocking ask open', async () => {
@@ -294,7 +314,11 @@ describe('inbox_write ask', () => {
     });
     const text = await ask(chat1, { title: 'What should the banner say?' });
     expect(JSON.parse(String(askRow(text.id).answer_spec_json))).toEqual({ type: 'text' });
-    await rejects(ask(chat1, { title: 'Both?', options: ['a'], answer: 'text' }), 'invalid_input', /one answer shape/);
+    await rejects(
+      ask(chat1, { title: 'Both?', options: ['a'], answer: 'text' }),
+      'invalid_input',
+      /one answer shape/
+    );
   });
 
   it('refuses a missing, multi-line or over-long title', async () => {
@@ -320,7 +344,10 @@ describe('inbox_write ask', () => {
     const grouped = await ask(chat3, { title: 'Pick a colour for the logo', groupKey: 'brand' });
     const close = await ask(chat3, { title: 'Which deploy region should we use?' });
     await ask(chat3, { title: 'Unrelated question about billing' });
-    const filed = await ask(chat1, { title: 'Which region should the deploy use?', groupKey: 'brand' });
+    const filed = await ask(chat1, {
+      title: 'Which region should the deploy use?',
+      groupKey: 'brand',
+    });
     expect(filed.similar.map((item) => [item.ref, item.match])).toEqual([
       [grouped.ref, 'group'],
       [close.ref, 'title'],
@@ -333,8 +360,22 @@ describe('inbox_write ask', () => {
   });
 
   it('accepts each link kind of this project and refuses one from another project', async () => {
-    insert('tasks', { id: 'idea-1', project_id: P1, user_id: 'owner', title: 'I', status: 'draft', is_idea: 1 });
-    insert('tasks', { id: 'idea-2', project_id: P2, user_id: 'outsider', title: 'I', status: 'draft', is_idea: 1 });
+    insert('tasks', {
+      id: 'idea-1',
+      project_id: P1,
+      user_id: 'owner',
+      title: 'I',
+      status: 'draft',
+      is_idea: 1,
+    });
+    insert('tasks', {
+      id: 'idea-2',
+      project_id: P2,
+      user_id: 'outsider',
+      title: 'I',
+      status: 'draft',
+      is_idea: 1,
+    });
     insert('project_files', {
       id: 'file-1',
       project_id: P1,
@@ -347,7 +388,16 @@ describe('inbox_write ask', () => {
       updated_at: '2026-11-16T00:00:00Z',
     });
     insert('nodes', { id: 'node-1', user_id: 'owner', name: 'n', status: 'running' });
-    insert('workspaces', { id: '01ABCWS', node_id: 'node-1', project_id: P1, user_id: 'owner', name: 'w', repository: 'acme/one', branch: 'main', status: 'running' });
+    insert('workspaces', {
+      id: '01ABCWS',
+      node_id: 'node-1',
+      project_id: P1,
+      user_id: 'owner',
+      name: 'w',
+      repository: 'acme/one',
+      branch: 'main',
+      status: 'running',
+    });
     const filed = await ask(chat1, {
       title: 'Review these?',
       links: [
@@ -370,10 +420,21 @@ describe('inbox_write ask', () => {
     ]) {
       await rejects(ask(chat1, { title: 'Link?', links: [link] }), 'invalid_input', /links\[0\]/);
     }
-    await rejects(ask(chat1, { title: 'Link?', links: [{ kind: 'pr', url: 'http://github.com/acme/one/pull/1' }] }), 'invalid_input', /https/);
+    await rejects(
+      ask(chat1, {
+        title: 'Link?',
+        links: [{ kind: 'pr', url: 'http://github.com/acme/one/pull/1' }],
+      }),
+      'invalid_input',
+      /https/
+    );
     // A check that cannot run refuses the link rather than storing an unchecked reference.
     edges.getPolicy.mockRejectedValueOnce(new Error('DO down'));
-    await rejects(ask(chat1, { title: 'Link?', links: [{ kind: 'policy', id: 'pol-1' }] }), 'invalid_input', /could not be checked/);
+    await rejects(
+      ask(chat1, { title: 'Link?', links: [{ kind: 'policy', id: 'pol-1' }] }),
+      'invalid_input',
+      /could not be checked/
+    );
   });
 });
 
@@ -427,16 +488,28 @@ describe('update, cancel and get: tenancy', () => {
       links: [{ kind: 'chat', id: 'chat-3' }],
     });
     expect(askRow(filed.id)).toMatchObject({ title: 'New title', body_md: 'Because' });
-    await cancelAgentAsk(ctxFor('owner', P1), chat1, { ref: filed.ref, reason: 'Found it in the docs' });
+    await cancelAgentAsk(ctxFor('owner', P1), chat1, {
+      ref: filed.ref,
+      reason: 'Found it in the docs',
+    });
     const row = askRow(filed.id);
     expect(row).toMatchObject({ status: 'cancelled' });
     expect(row.notified_at).not.toBeNull();
     expect(JSON.parse(String(row.answer_json))).toEqual({ cancelReason: 'Found it in the docs' });
     // A blocking question stops pausing its chat.
-    expect(edges.recordQuestionWithdrawn).toHaveBeenCalledWith(env, P1, { sessionId: 'chat-1', askId: filed.id });
+    expect(edges.recordQuestionWithdrawn).toHaveBeenCalledWith(env, P1, {
+      sessionId: 'chat-1',
+      askId: filed.id,
+    });
     // A closed item cannot be edited or cancelled again.
-    await rejects(updateAgentAsk(ctxFor('owner', P1), chat1, { ref: filed.ref, title: 'x' }), 'conflict');
-    await rejects(cancelAgentAsk(ctxFor('owner', P1), chat1, { ref: filed.ref, reason: 'x' }), 'conflict');
+    await rejects(
+      updateAgentAsk(ctxFor('owner', P1), chat1, { ref: filed.ref, title: 'x' }),
+      'conflict'
+    );
+    await rejects(
+      cancelAgentAsk(ctxFor('owner', P1), chat1, { ref: filed.ref, reason: 'x' }),
+      'conflict'
+    );
   });
 
   it('an agent in project 2 cannot update, cancel or read an item of project 1', async () => {
@@ -444,10 +517,18 @@ describe('update, cancel and get: tenancy', () => {
     const before = askRow(filed.id);
     // The foreign agent passes the real ref and even claims the owner's chat id.
     const forged = { ...foreign, sessionId: 'chat-1' };
-    await rejects(updateAgentAsk(ctxFor('outsider', P2), forged, { ref: filed.ref, title: 'Hacked' }), 'not_found');
-    await rejects(cancelAgentAsk(ctxFor('outsider', P2), forged, { ref: filed.ref, reason: 'x' }), 'not_found');
+    await rejects(
+      updateAgentAsk(ctxFor('outsider', P2), forged, { ref: filed.ref, title: 'Hacked' }),
+      'not_found'
+    );
+    await rejects(
+      cancelAgentAsk(ctxFor('outsider', P2), forged, { ref: filed.ref, reason: 'x' }),
+      'not_found'
+    );
     await rejects(getAgentAsk(ctxFor('outsider', P2), foreign, { ref: filed.ref }), 'not_found');
-    expect((await listAgentAsks(ctxFor('outsider', P2), foreign, { scope: 'project' })).items).toEqual([]);
+    expect(
+      (await listAgentAsks(ctxFor('outsider', P2), foreign, { scope: 'project' })).items
+    ).toEqual([]);
     expect(askRow(filed.id)).toEqual(before);
     // Owner control on the same fixture.
     expect((await getAgentAsk(ctxFor('owner', P1), chat1, { ref: filed.ref })).title).toBe('Mine');
@@ -456,8 +537,14 @@ describe('update, cancel and get: tenancy', () => {
   it("another chat of the same project can read but not update or cancel this chat's item", async () => {
     const filed = await ask(chat1, { title: 'Mine' });
     const before = askRow(filed.id);
-    await rejects(updateAgentAsk(ctxFor('owner', P1), chat3, { ref: filed.ref, title: 'Hacked' }), 'not_found');
-    await rejects(cancelAgentAsk(ctxFor('owner', P1), chat3, { ref: filed.ref, reason: 'x' }), 'not_found');
+    await rejects(
+      updateAgentAsk(ctxFor('owner', P1), chat3, { ref: filed.ref, title: 'Hacked' }),
+      'not_found'
+    );
+    await rejects(
+      cancelAgentAsk(ctxFor('owner', P1), chat3, { ref: filed.ref, reason: 'x' }),
+      'not_found'
+    );
     expect(askRow(filed.id)).toEqual(before);
     expect(edges.recordQuestionWithdrawn).not.toHaveBeenCalled();
     const read = await getAgentAsk(ctxFor('owner', P1), chat3, { ref: filed.ref });
@@ -479,8 +566,14 @@ describe('update, cancel and get: tenancy', () => {
       created_at: 1,
       updated_at: 1,
     });
-    await rejects(cancelAgentAsk(ctxFor('owner', P1), chat1, { ref: 'ask:err-1', reason: 'x' }), 'not_found');
-    await rejects(updateAgentAsk(ctxFor('owner', P1), chat1, { ref: 'ask:err-1', title: 'x' }), 'not_found');
+    await rejects(
+      cancelAgentAsk(ctxFor('owner', P1), chat1, { ref: 'ask:err-1', reason: 'x' }),
+      'not_found'
+    );
+    await rejects(
+      updateAgentAsk(ctxFor('owner', P1), chat1, { ref: 'ask:err-1', title: 'x' }),
+      'not_found'
+    );
     expect(askRow('err-1').status).toBe('open');
   });
 
