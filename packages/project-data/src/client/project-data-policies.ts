@@ -2,7 +2,12 @@
  * Policy service functions — extracted from project-data.ts for file size compliance.
  * Re-exported from project-data.ts so consumers don't need to change imports.
  */
-import type { PolicyCategory, PolicyScope, PolicySource } from '@simple-agent-manager/shared';
+import type {
+  PolicyCategory,
+  PolicyInjectMode,
+  PolicyScope,
+  PolicySource,
+} from '@simple-agent-manager/shared';
 
 import type { ProjectData } from '../do';
 import type { ProjectDataEnv as Env } from '../do/types';
@@ -19,10 +24,11 @@ export async function createPolicy(
   category: PolicyCategory, title: string, content: string,
   source: PolicySource, sourceSessionId: string | null, confidence: number,
   scope: PolicyScope = 'always', expiresAt: number | null = null,
+  injectMode: PolicyInjectMode = 'pinned',
 ) {
   const stub = await getStub(env, projectId);
   return stub.createPolicy(
-    category, title, content, source, sourceSessionId, confidence, scope, expiresAt,
+    category, title, content, source, sourceSessionId, confidence, scope, expiresAt, injectMode,
   );
 }
 
@@ -43,6 +49,7 @@ export async function updatePolicy(
   updates: {
     title?: string; content?: string; category?: PolicyCategory; active?: boolean;
     confidence?: number; scope?: PolicyScope; expiresAt?: number | null;
+    injectMode?: PolicyInjectMode;
   },
 ) {
   const stub = await getStub(env, projectId);

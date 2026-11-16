@@ -537,6 +537,123 @@ describe('listSessionsFromIndex', () => {
     });
   });
 
+  describe('open questions held in D1 asks (inbox slice G)', () => {
+    function addQuestion(
+      id: string,
+      sessionId: string,
+      opts: {
+        projectId?: string;
+        status?: string;
+        createdAt?: number;
+        expiresAt?: number;
+        blocking?: 0 | 1;
+      } = {}
+    ): void {
+      sqlite
+        .prepare(
+          `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
+              body_md, answer_spec_json, category, source_session_id, status, expires_at,
+              created_at, updated_at)
+           VALUES (?, ?, 'user', ?, 'question', ?, 'Pick one', 'Pick one of these, please.',
+              '{"type":"options","options":["a","b"],"allowText":false}', 'decision', ?, ?, ?, ?, ?)`
+        )
+        .run(
+          id,
+          opts.projectId ?? PROJECT,
+          OWNER,
+          opts.blocking ?? 1,
+          sessionId,
+          opts.status ?? 'open',
+          opts.expiresAt ?? now + 60_000,
+          opts.createdAt ?? 3_000,
+          opts.createdAt ?? 3_000
+        );
+    }
+
+    it('shows a chat’s open question as its attention, in the shape a marker summary had', async () => {
+      addSession('chat-q', { status: 'active' });
+      addSession('chat-plain', { status: 'active', lastMessageAt: 4000 });
+      setCoverage(PROJECT, { sessionCount: 2 });
+      addQuestion('ask-1', 'chat-q');
+      // Attack fixtures: the same chat id in another project, and a closed question.
+      addQuestion('ask-foreign', 'chat-plain', { projectId: OTHER_PROJECT });
+      addQuestion('ask-closed', 'chat-plain', { status: 'answered' });
+      // A non-blocking ask (inbox slice D) does not pause the chat.
+      addQuestion('ask-nonblocking', 'chat-plain', { blocking: 0 });
+      const out = await listSessionsFromIndex(env, {
+        projectId: PROJECT,
+        status: null,
+        limit: 10,
+        offset: 0,
+        createdByUserId: null,
+      });
+      if (!('result' in out)) throw new Error('expected a result');
+      const byId = new Map(out.result.sessions.map((session) => [session.id, session]));
+      expect(byId.get('chat-q')?.attention).toEqual({
+        markerId: 'ask-1',
+        kind: 'needs_input',
+        source: 'request_human_input',
+        createdAt: 3_000,
+        expiresAt: now + 60_000,
+        reason: 'Pick one of these, please.',
+        options: ['a', 'b'],
+        category: 'decision',
+        interactionId: null,
+        interactionKind: null,
+      });
+      expect(byId.get('chat-plain')?.attention).toBeNull();
+    });
+
+    it('keeps a newer marker question, and puts the ask ahead of an older non-question marker', async () => {
+      const marker = (kind: string, createdAt: number) =>
+        JSON.stringify({
+          markerId: `m-${kind}`,
+          kind,
+          createdAt,
+          expiresAt: null,
+          reason: 'r',
+          options: [],
+        });
+      addSession('newer-marker', { attentionJson: marker('needs_input', 9_000) });
+      addSession('older-wake-failed', { attentionJson: marker('wake_failed', 9_000) });
+      setCoverage(PROJECT, { sessionCount: 2 });
+      addQuestion('ask-a', 'newer-marker', { createdAt: 3_000 });
+      addQuestion('ask-b', 'older-wake-failed', { createdAt: 3_000 });
+      const out = await listSessionsFromIndex(env, {
+        projectId: PROJECT,
+        status: null,
+        limit: 10,
+        offset: 0,
+        createdByUserId: null,
+      });
+      if (!('result' in out)) throw new Error('expected a result');
+      const byId = new Map(out.result.sessions.map((session) => [session.id, session]));
+      expect(byId.get('newer-marker')?.attention).toMatchObject({ markerId: 'm-needs_input' });
+      expect(byId.get('older-wake-failed')?.attention).toMatchObject({ markerId: 'ask-b' });
+    });
+
+    it('ranks an old chat waiting on a question in the attention group of the live read', async () => {
+      for (let index = 0; index < 4; index += 1) {
+        addSession(`quiet-${index}`, { status: 'active', lastMessageAt: 8_000 - index });
+      }
+      addSession('old-asking', { status: 'active', lastMessageAt: 100 });
+      setCoverage(PROJECT, { sessionCount: 5 });
+      addQuestion('ask-old', 'old-asking');
+      const out = await listSessionsFromIndex(env, {
+        projectId: PROJECT,
+        status: null,
+        limit: 2,
+        offset: 0,
+        createdByUserId: null,
+        includeLive: true,
+      });
+      if (!('result' in out)) throw new Error('expected a result');
+      expect(
+        out.result.sessions.find((session) => session.id === 'old-asking')?.attention
+      ).toMatchObject({ markerId: 'ask-old' });
+    });
+  });
+
   describe('includeLive — state-grouped sidebar reads', () => {
     /**
      * A page of two, newest first: `new-stopped`, `new-active`. Older than the page:
@@ -683,8 +800,8 @@ describe('listSessionsFromIndex', () => {
         'old-stopped',
         'member-awake',
       ]);
-      // Coverage, count and page only.
-      expect(prepare).toHaveBeenCalledTimes(3);
+      // Coverage, count, page, and the open questions in `asks` (inbox slice G).
+      expect(prepare).toHaveBeenCalledTimes(4);
     });
 
     it('serves the page without live rows when the live read fails', async () => {

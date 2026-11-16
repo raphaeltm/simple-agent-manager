@@ -9,13 +9,12 @@ import * as v from 'valibot';
 import { authorizeProjectOperation } from './authorization';
 import { ConnectorAnswerFields } from './connector-answer-input';
 import { requireReadScope } from './connector-read-core';
+import { createAsk, CreateAskInputSchema } from './inbox-ask-create-core';
 import { getInboxItem } from './inbox-item-core';
 import { countInbox, listInbox } from './inbox-list-core';
 import {
   answerInboxItem,
   archiveInboxItem,
-  createAsk,
-  CreateAskInputSchema,
   prepareInboxAnswer,
   prepareInboxArchive,
 } from './inbox-write-core';

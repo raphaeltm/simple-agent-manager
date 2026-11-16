@@ -235,7 +235,7 @@ shared with them, the agent is told it is a teammate's input rather than the cha
 instruction. In the chat it's labelled with who sent it, for example
 **Grace Lee sent Rae Patel's comment to the agent**. Everyone else can comment, but not send: ask the chat's
 owner, or someone it's shared with, to send it, and @mention them so they get a **Mention**
-notification (a plain comment notification doesn't add to the bell's count).
+notification (comments and mentions are listed under the Inbox's **Updates** chip).
 
 ### Share a chat
 
@@ -286,8 +286,8 @@ Before you share, know what it means:
 
 ### What your teammate sees
 
-Your teammate gets a **Shared Session** notification that opens the chat. It's in the **Updates**
-tab of their notifications, which doesn't add to the bell's count, so tell them you've shared it.
+Your teammate gets a **Shared Session** notification that opens the chat. It's under the **Updates**
+chip of their [Inbox](/docs/guides/inbox/), which doesn't add to the inbox count, so tell them you've shared it.
 The chat is also in their **All** list, though not under **Mine**, because they
 didn't start it. Above the
 message box they see _You're chatting in Prakash Rao's session. It runs on Prakash Rao's accounts.

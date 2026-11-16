@@ -79,3 +79,13 @@ export const PROJECT_CREATE_CONFIG_STALE_TIME_MS = resolveDurationMs(
   import.meta.env.VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS,
   DEFAULT_PROJECT_CREATE_CONFIG_STALE_TIME_MS
 );
+
+/**
+ * Insights · Flow (`GET /api/projects/:projectId/insights/flow`): counts over 7 to 90 days,
+ * which move slowly. Past this the page refetches in the background without hiding the numbers.
+ */
+const DEFAULT_INSIGHTS_STALE_TIME_MS = 300_000;
+export const INSIGHTS_STALE_TIME_MS = resolveDurationMs(
+  import.meta.env.VITE_INSIGHTS_STALE_TIME_MS,
+  DEFAULT_INSIGHTS_STALE_TIME_MS
+);

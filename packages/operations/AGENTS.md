@@ -72,5 +72,6 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md`: Making a Scoping Column Nullable Silently Deletes Every Check That Used It
 - `.claude/rules/65-capped-selection-must-rank-and-disclose.md`: A Capped Selection Must Rank By Its Purpose, And Must Disclose What It Dropped
 - `.claude/rules/67-shared-predicates-that-trigger-actions.md`: Never Widen a Shared Predicate That Drives an Action
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 
 <!-- END GENERATED RULE INDEX -->

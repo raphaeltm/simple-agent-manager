@@ -8,7 +8,6 @@
 import {
   DEFAULT_HUMAN_INPUT_ESCALATION_FRACTIONS,
   DEFAULT_HUMAN_INPUT_MAX_WAIT_MS,
-  DEFAULT_HUMAN_INPUT_TIMEOUT_MS,
   DEFAULT_HUMAN_INPUT_UNDELIVERED_GRACE_MS,
 } from '@simple-agent-manager/shared';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
@@ -187,23 +186,6 @@ export function resolveAttentionMarkerById(
   return count;
 }
 
-export function linkAttentionNotification(
-  sql: SqlStorage,
-  markerId: string,
-  notificationUserId: string,
-  notificationId: string
-): boolean {
-  return (
-    sql.exec(
-      `UPDATE session_attention_markers
-     SET notification_user_id = ?, source_notification_id = ?
-     WHERE id = ? AND resolved_at IS NULL`,
-      notificationUserId,
-      notificationId,
-      markerId
-    ).rowsWritten > 0
-  );
-}
 
 export type PrepareAttentionAnswerResult =
   | { status: 'ready' }
@@ -579,36 +561,6 @@ export function computeAttentionAlarmTime(sql: SqlStorage): number | null {
   return row.earliest as number;
 }
 
-/**
- * Compute the expiry time for a needs_input marker based on env config.
- */
-export function computeHumanInputExpiry(humanInputTimeoutMs: string | undefined): number {
-  const parsed = Number.parseInt(humanInputTimeoutMs ?? '', 10);
-  const timeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_HUMAN_INPUT_TIMEOUT_MS;
-  return Date.now() + timeoutMs;
-}
-
-export function computeHumanInputSchedule(
-  env: {
-    HUMAN_INPUT_TIMEOUT_MS?: string;
-    HUMAN_INPUT_ESCALATION_FRACTIONS?: string;
-    HUMAN_INPUT_MAX_WAIT_MS?: string;
-  },
-  now: number = Date.now()
-): { expiresAt: number; nextEscalationAt: number | null; maxExpiresAt: number } {
-  const timeout = positiveEnvNumber(env.HUMAN_INPUT_TIMEOUT_MS, DEFAULT_HUMAN_INPUT_TIMEOUT_MS);
-  const maxWait = Math.max(
-    timeout,
-    positiveEnvNumber(env.HUMAN_INPUT_MAX_WAIT_MS, DEFAULT_HUMAN_INPUT_MAX_WAIT_MS)
-  );
-  const firstFraction =
-    parseHumanInputEscalationFractions(env.HUMAN_INPUT_ESCALATION_FRACTIONS)[0] ?? null;
-  return {
-    expiresAt: now + timeout,
-    nextEscalationAt: firstFraction === null ? null : now + Math.round(timeout * firstFraction),
-    maxExpiresAt: now + maxWait,
-  };
-}
 
 export function humanInputUndeliveredGraceMs(value?: string): number {
   return positiveEnvNumber(value, DEFAULT_HUMAN_INPUT_UNDELIVERED_GRACE_MS);

@@ -144,6 +144,7 @@ import {
 } from './routes/project-deployment';
 import { projectEventChannelRoutes } from './routes/project-event-channels';
 import { projectEventSubscriptionRoutes } from './routes/project-event-subscriptions';
+import { projectInsightsRoutes } from './routes/project-insights';
 import { projectOverviewRoutes } from './routes/project-overview';
 import { projectsRoutes } from './routes/projects';
 import { acpInteractionCallbackRoute } from './routes/projects/acp-interaction-callback';
@@ -422,6 +423,7 @@ app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be be
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/ideas', ideaRoutes);
 app.route('/api/projects/:projectId/overview', projectOverviewRoutes);
+app.route('/api/projects/:projectId/insights', projectInsightsRoutes);
 app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);

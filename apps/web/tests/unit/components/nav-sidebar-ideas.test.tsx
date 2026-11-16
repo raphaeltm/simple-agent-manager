@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -27,9 +28,11 @@ describe('NavSidebar — Ideas nav item', () => {
 
   it('renders Ideas link in project context', () => {
     render(
-      <MemoryRouter initialEntries={['/projects/proj-1/chat']}>
-        <NavSidebar projectName="Test Project" />
-      </MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/projects/proj-1/chat']}>
+          <NavSidebar projectName="Test Project" />
+        </MemoryRouter>
+      </QueryClientProvider>
     );
     expect(screen.getByText('Ideas')).toBeInTheDocument();
     expect(screen.queryByText('Tasks')).not.toBeInTheDocument();

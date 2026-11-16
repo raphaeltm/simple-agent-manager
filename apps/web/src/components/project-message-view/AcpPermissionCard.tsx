@@ -4,6 +4,7 @@ import { AlertTriangle, Check, Clock3, RefreshCw, ShieldQuestion, X } from 'luci
 import { useState } from 'react';
 
 import type { AcpInteractionSnapshotItem } from '../../lib/api/acp-interactions';
+import { PermissionOptions } from './AcpPermissionOptions';
 import {
   type PermissionDetail,
   type PermissionOption,
@@ -156,39 +157,6 @@ function PermissionDescription({ detail }: { detail: PermissionDetail }) {
           {expanded ? 'Hide details' : 'Show details'}
         </Button>
       )}
-    </div>
-  );
-}
-
-function PermissionOptions({
-  options,
-  disabled,
-  onChoose,
-}: {
-  options: PermissionOption[];
-  disabled: boolean;
-  onChoose: (option: PermissionOption) => void;
-}) {
-  return (
-    <div
-      className="flex min-w-0 flex-wrap gap-2 pr-14"
-      aria-label="Permission options"
-      data-testid="acp-permission-options"
-    >
-      {options.map((option) => (
-        <Button
-          key={option.id}
-          type="button"
-          size="sm"
-          variant={option.kind.startsWith('reject') ? 'danger' : 'secondary'}
-          className="h-auto min-h-11 min-w-0 max-w-full !whitespace-normal break-words text-left"
-          disabled={disabled}
-          onClick={() => onChoose(option)}
-          data-option-id={option.id}
-        >
-          {option.name}
-        </Button>
-      ))}
     </div>
   );
 }

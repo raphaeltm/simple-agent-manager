@@ -181,6 +181,7 @@ before you try again.
 | Operations    | `operations.githubTriggerQueueMaxPendingLimit`, `…TtlSecondsLimit`                                                                                               | 1,000 events; 2,592,000 seconds (30 days)         | The most a [GitHub trigger](/docs/guides/triggers/#when-a-github-trigger-is-busy) can set for waiting events and how long they wait. Applies when someone creates a trigger or changes its queue settings                                                                                                                                                                                                                                                                                                                                                                     | —                                                                                 |
 | Operations    | `operations.webhookQueueMaxPending`, `operations.webhookQueueTtlSeconds`, `operations.webhookSignatureToleranceSeconds`                                          | 50 events; 86,400 seconds (24 hours); 300 seconds | How many events a [signed webhook trigger](/docs/guides/webhook-triggers/#waiting-while-the-trigger-is-busy) can hold while its runs are busy, how long one waits before it is dropped, and how far a signed timestamp may differ from SAM's clock. Applies to events received after the change.                                                                                                                                                                                                                                                                              | —                                                                                 |
 | Collaboration | `collaboration.*` (below)                                                                                                                                        | see below                                         | Shared chats, comments, and idea updates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | —                                                                                 |
+| Collaboration | `instructions.*` ([Agent instructions](#agent-instructions))                                                                                                     | see below                                         | Size budgets for the `get_instructions` payload agents read at session start                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | —                                                                                 |
 | Operations    | `nodes.usageWindowMinutes`, `nodes.usageChunkLookbackMinutes`, `nodes.usageMaxHistoryWorkspaces`, `nodes.usageMaxWorkspaces`, `nodes.usageMaxChunksPerWorkspace` | 60, 60, 150, 500, 48                              | On the [Nodes page](/docs/guides/compute-pools/#what-each-machine-is-using): minutes of CPU and memory history drawn (15–360); how early a history chunk may start and still be read, which must cover the longest chunk a VM agent uploads (15–1,440); most workspaces per person whose history is read (1–500, running first, each machine's newest before any machine's second); most workspaces per person listed (50–2,000, running and most recently changed first); most history chunks read per workspace, newest first (4–500). The page says what each cap left out | —                                                                                 |
 | Chat          | `chat.profileUsageWindowDays`, `chat.profilePinCandidateLimit`                                                                                                   | 30                                                | How far back the new-chat profile picker looks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | —                                                                                 |
 | Chat          | `secrets.*`                                                                                                                                                      | see [Chat](#chat) below                           | Agent secret requests: how long they stay open, allowed expiries, the open-request cap, retention and purging                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | —                                                                                 |
@@ -261,17 +262,61 @@ where it says so and the app continues from there.
 Listed under **Chat**. Bounds for the [inbox](/docs/reference/api/#inbox) list and for the inbox
 items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 
-| Setting                    | Default | Range      | What it limits                                                                           |
-| -------------------------- | ------- | ---------- | ---------------------------------------------------------------------------------------- |
-| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                       |
-| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                         |
-| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed            |
-| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                          |
-| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                                 |
-| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                          |
-| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                  |
-| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired    |
-| `inbox.sweepBatchSize`     | 10      | 1–50       | Items one five-minute sweep expires or re-notifies (each is a write and an agent notice) |
+| Setting                    | Default | Range      | What it limits                                                                         |
+| -------------------------- | ------- | ---------- | -------------------------------------------------------------------------------------- |
+| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                     |
+| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                       |
+| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed          |
+| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                        |
+| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                               |
+| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                        |
+| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                |
+| `inbox.similarMatchesMax`  | 3       | 0–20       | Similar open items an agent is shown when it files an ask or a review; 0 turns it off  |
+| `inbox.similarScanMax`     | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)   |
+| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired  |
+| `inbox.sweepBatchSize`     | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries) |
+
+A question an agent asks with `request_human_input` is an inbox item, and these settings set its
+schedule (`apps/api/src/services/inbox/sweep.ts`, every five minutes):
+
+| Setting                                 | Default | Range   | What it controls                                                                     |
+| --------------------------------------- | ------- | ------- | ------------------------------------------------------------------------------------ |
+| `inbox.questionTimeoutMinutes`          | 120     | 1–1,440 | Minutes a question stays open once its notification reached you; then the task stops |
+| `inbox.questionFirstReminderPercent`    | 25      | 0–99    | Point in that window (percent) where the push is sent again; 0 turns it off          |
+| `inbox.questionSecondReminderPercent`   | 75      | 0–99    | Point in that window (percent) where the push is sent a last time; 0 turns it off    |
+| `inbox.questionUndeliveredGraceMinutes` | 120     | 1–1,440 | Extra minutes, with the push resent, when no device confirmed the notification       |
+| `inbox.questionMaxWaitMinutes`          | 1,440   | 1–4,320 | Most minutes a question stays open even when its notification never arrived          |
+
+A changed setting applies to questions asked afterwards; an open question keeps the deadline it was
+given, and its reminders follow the current percentages.
+
+## Run receipt
+
+Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-apiprojectsprojectidtaskstaskidreceipt)
+(`packages/operations/src/insights-receipt-settings-definition.ts`).
+
+| Setting                                  | Default | Range       | What it limits                                                                     |
+| ---------------------------------------- | ------- | ----------- | ---------------------------------------------------------------------------------- |
+| `insights.receiptMessageScanMaxRows`     | 10,000  | 100–100,000 | Chat messages one receipt reads to count tool calls; a longer run shows a floor    |
+| `insights.receiptWaitingMaxQuestions`    | 200     | 10–2,000    | Agent questions one receipt reads to measure time waiting on a person              |
+| `insights.receiptComparisonRuns`         | 50      | 3–500       | Recent runs of the same skill or profile read to find the usual durations          |
+| `insights.receiptComparisonWindowDays`   | 30      | 1–365       | Days back the receipt looks for runs to compare with                               |
+| `insights.receiptComparisonMinRuns`      | 3       | 1–50        | Fewest comparable runs before a duration is called slower than usual               |
+| `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                |
+| `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                    |
+| `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown |
+
+## Insights flow
+
+Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow tab
+(`packages/operations/src/insights-flow-settings.ts`).
+
+| Setting                          | Default | Range  | What it limits                                                                                      |
+| -------------------------------- | ------- | ------ | --------------------------------------------------------------------------------------------------- |
+| `insights.flowIdeaSampleCap`     | 100     | 10–500 | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short |
+| `insights.flowWaitingIdeasLimit` | 5       | 1–20   | Ideas shown under "Ideas waiting longest"                                                           |
+| `insights.flowFlakyChecksLimit`  | 5       | 1–20   | Checks shown under "Flaky checks"                                                                   |
+| `insights.flowReworkWindowDays`  | 7       | 1–30   | Days after a merge in which another pull request on the same branch or idea counts as rework        |
 
 ## Node provisioning
 
@@ -454,6 +499,11 @@ trigger are configured, files them as incidents for that project's agents to inv
   **Lifecycle latency regression: _entity_ _state_** when the p95 is over the state's budget, or more
   than `lifecycleLatency.regressionPercent` of its p95 over the previous 7 days. Every run logs a
   `lifecycle_latency.daily_summary` line with those numbers for every watched state.
+- **Phase timings are stored.** The phase durations the VM agent reports for provisioning,
+  workspace setup, sleep and wake, and the TaskRunner's step durations, are written to
+  `lifecycle_phase_timings` (migration `0250_lifecycle_phase_timings.sql`) by
+  `recordLifecycleTimings` and `recordRunnerPhase`, one row per phase, as well as being logged.
+  The daily check purges them with the same `lifecycleLatency.retentionDays`.
 
 Watched states and their **Operations** budgets, in minutes. Set a budget to 0 to turn off both the
 watchdog and the daily check for that state.
@@ -480,7 +530,7 @@ The rest control the checks themselves:
 | `lifecycleLatency.observationsPerSourcePerTick` | 200     | 10–1,000   | Rows in watched states sampled per table in one run, oldest first. A truncated sample is logged and does not close episodes it could not see |
 | `lifecycleLatency.regressionPercent`            | 200     | 101–10,000 | How far above its previous 7-day p95 a state's 24-hour p95 must be to count as a regression                                                  |
 | `lifecycleLatency.minSamples`                   | 5       | 1–10,000   | Fewest finished episodes in a window before the daily check judges it                                                                        |
-| `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes are kept                                                                                                              |
+| `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes and stored phase timings are kept                                                                                     |
 | `lifecycleLatency.evaluationSampleLimit`        | 2,000   | 10–20,000  | Most recent finished episodes the daily check reads per state                                                                                |
 
 ## Health & cost
@@ -556,6 +606,23 @@ These **Operations** settings control automatic links between chats, ideas, libr
 | `operations.agentIdeaContentPageLength`       | 65,536  | 1,000–65,536   | Idea content read in one `ideas_read` method `get` call; a continuation notice names the next offset when a page is shorter |
 
 If you lower the cap on read and view links below what a target already has, nothing is removed straight away: each new read or view link to that target then removes at most one batch of them, until the target is back under the cap. Reading the same thing again doesn't count as a new link.
+
+## Agent instructions
+
+These **Collaboration** settings bound the size of the `get_instructions` payload every agent
+reads at session start. Pinned policies and the task are never trimmed by them. Every policy is
+pinned until a project admin unpins it in **Agent context → Policies**. While every policy is
+pinned, setting the three character budgets to their maximum returns the unbudgeted payload. To
+undo an unpin, pin the policy again. The section budgets count characters of rendered text; the
+total counts characters of the serialized payload, so the three do not simply add up.
+
+| Setting                                     | Default | Range            | What it controls                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------- | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instructions.totalMaxChars`                | 120,000 | 10,000–2,000,000 | Serialized payload size. Over it, knowledge then on-demand policy text are trimmed. If pinned policies, the task and the indexes alone exceed it, only those are sent, with a note. Claude Code saves tool results over about 50,000 characters to a file, so set about 48,000 for inline delivery once enough policies are on demand |
+| `instructions.knowledgeMaxChars`            | 20,000  | 1,000–2,000,000  | Knowledge block including the entity index. Lowest-ranked observations go first and the index states how many                                                                                                                                                                                                                         |
+| `instructions.onDemandPolicyMaxChars`       | 12,000  | 0–2,000,000      | Full text of on-demand policies that match the task. Every on-demand policy is still listed by title and id                                                                                                                                                                                                                           |
+| `instructions.onDemandPolicyMaxPerCategory` | 5       | 0–200            | On-demand policies of one category shown in full in one session                                                                                                                                                                                                                                                                       |
+| `instructions.onDemandPolicyMinRelevance`   | 2       | 1–100            | Score an on-demand policy needs to be shown in full: 2 per distinctive title word and 1 per distinctive body word found in the task                                                                                                                                                                                                   |
 
 ## Workflows
 

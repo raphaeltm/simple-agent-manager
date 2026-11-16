@@ -1,8 +1,8 @@
 import {
-  Bell,
   Brain,
   Eye,
   FolderOpen,
+  Inbox,
   LayoutDashboard,
   Lightbulb,
   MessageSquare,
@@ -100,10 +100,10 @@ const PROJECT_NAV_ITEMS: ProjectActionItem[] = [
     path: 'agent-context',
   },
   {
-    id: 'ctx-project-notifications',
-    label: 'Go to Notifications',
-    icon: <Bell size={14} />,
-    path: 'notifications',
+    id: 'ctx-project-inbox',
+    label: 'Go to Inbox',
+    icon: <Inbox size={14} />,
+    path: 'inbox',
   },
   {
     id: 'ctx-project-automation',

@@ -10,6 +10,7 @@ import {
   Gauge,
   Github,
   Home,
+  Inbox,
   Key,
   KeyRound,
   LayoutDashboard,
@@ -31,6 +32,7 @@ import type { NavItem } from './global-command-palette-types';
 export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
   const items: NavItem[] = [
     { id: 'nav-dashboard', label: 'Home', path: '/dashboard', icon: <Home size={14} /> },
+    { id: 'nav-inbox', label: 'Inbox', path: '/inbox', icon: <Inbox size={14} /> },
     { id: 'nav-chats', label: 'Chats', path: '/chats', icon: <MessageSquare size={14} /> },
     {
       id: 'nav-projects',

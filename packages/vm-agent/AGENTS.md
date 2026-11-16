@@ -66,6 +66,7 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/61-guards-must-cover-every-runtime.md`: A Guard Added for One Runtime Must Be Enforced for Every Runtime
 - `.claude/rules/67-shared-predicates-that-trigger-actions.md`: Never Widen a Shared Predicate That Drives an Action
 - `.claude/rules/71-request-context-must-not-outlive-its-request.md`: A Goroutine That Outlives Its Request Must Not Capture That Request's Context
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 - `.claude/rules/75-external-api-check-then-act.md`: A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure
 - `.claude/rules/78-snapshot-capture-must-scale-with-the-session.md`: Snapshot Capture Cost Must Scale With the Session, Not the Repository
 

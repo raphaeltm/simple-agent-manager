@@ -239,6 +239,43 @@ describe('connector operations current membership and creator authority', () => 
     expect((await samChatsList.run(ctx('unknown'), {})).chats).toEqual([]);
     expect((await samChatsList.run(ctx('colleague'), {})).chats[0]?.attention).toBeNull();
   });
+  it('chats and project counts show questions held in D1 asks (slice G) to the chat creator only', async () => {
+    const future = Date.now() + 3_600_000;
+    sqlite.exec(`
+      INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at)
+        VALUES ('asking','project','owner',40);
+      INSERT INTO asks (id,project_id,assignee_kind,assignee_user_id,kind,blocking,title,body_md,
+          source_session_id,status,expires_at,created_at,updated_at)
+        VALUES ('ask-1','project','user','owner','question',1,'Pick','Pick a region.','asking','open',${future},35,35);
+      -- Attack: the same chat id under another project must not reach it.
+      INSERT INTO asks (id,project_id,assignee_kind,assignee_user_id,kind,blocking,title,body_md,
+          source_session_id,status,expires_at,created_at,updated_at)
+        VALUES ('ask-foreign','secret','user','owner','question',1,'Foreign','Foreign.','chat','open',${future},99,99);
+    `);
+    const chats = Object.fromEntries(
+      (await samChatsList.run(ctx(), {})).chats.map((chat) => [chat.id, chat])
+    );
+    expect(chats.asking?.attention).toMatchObject({
+      markerId: 'ask-1',
+      kind: 'needs_input',
+      reason: 'Pick a region.',
+    });
+    // The marker question in 'chat' stays; the foreign ask is not merged into it.
+    expect(chats.chat?.attention).toMatchObject({ markerId: 'm-chat' });
+    // Another member sees no attention on the owner's chat.
+    const colleague = Object.fromEntries(
+      (await samChatsList.run(ctx('colleague'), {})).chats.map((chat) => [chat.id, chat])
+    );
+    expect(colleague.asking?.attention).toBeNull();
+    // The project count includes the chat waiting on an asks question (control: closed → not).
+    const count = async () =>
+      (await samProjectsList.run(ctx(), {})).projects.find((p) => p.id === 'project')
+        ?.needsAttention;
+    expect(await count()).toBe(2);
+    sqlite.prepare("UPDATE asks SET status = 'answered' WHERE id = 'ask-1'").run();
+    expect(await count()).toBe(1);
+  });
+
   it('chats carry their task state beside the lifecycle label, flagging a stale active label', async () => {
     sqlite.exec(`
       INSERT INTO tasks (id,project_id,user_id,title,status,execution_step,parent_task_id,updated_at)
