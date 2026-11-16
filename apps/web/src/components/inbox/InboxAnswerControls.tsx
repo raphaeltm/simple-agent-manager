@@ -2,7 +2,7 @@ import type { InboxItem } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { MessageSquare, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 
 import { answerInboxItem } from '../../lib/api';
 import { projectChatPath } from '../../lib/project-routes';
@@ -23,7 +23,11 @@ import {
   type useInboxPermissionDetail,
   useInboxSend,
 } from './inbox-actions';
-import { isIrreversibleApproval } from './inbox-model';
+import {
+  type InboxErrorActionModel,
+  isIrreversibleApproval,
+  readErrorActions,
+} from './inbox-model';
 
 /** What the agent wants to run lives in the body; only the buttons are pinned. */
 export function InboxPermissionSummary({ detail }: { detail: PermissionDetail | null }) {
@@ -266,6 +270,53 @@ function ApprovalControls({ item, handlers }: { item: InboxItem; handlers: Inbox
   );
 }
 
+const ERROR_ACTION_RECEIPTS: Record<string, string> = {
+  retried: 'Retrying',
+  wake_requested: 'Waking the chat',
+  resumed: 'Resumed',
+};
+
+/** SAM's named actions on an error item: the first is primary. Open chat only navigates. */
+function ErrorActionControls({
+  item,
+  actions,
+  handlers,
+}: {
+  item: InboxItem;
+  actions: InboxErrorActionModel[];
+  handlers: InboxAnswerHandlers;
+}) {
+  const navigate = useNavigate();
+  const { busy, error, send } = useInboxSend(item, handlers);
+  const visible = actions.filter((action) => action.id !== 'open_chat' || item.sessionId);
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2">
+        {visible.map((action, index) => (
+          <Button
+            key={action.id}
+            variant={index === 0 ? 'primary' : 'secondary'}
+            disabled={busy !== null}
+            className="min-h-11"
+            onClick={() => {
+              if (action.id === 'open_chat') {
+                if (item.sessionId) navigate(projectChatPath(item.projectId, item.sessionId));
+                return;
+              }
+              // `action` is slice E's answer field; older shared types do not name it yet.
+              const body = { action: action.id } as unknown as Parameters<typeof send>[1];
+              void send(action.id, body, (r) => ERROR_ACTION_RECEIPTS[r.outcome] ?? action.label);
+            }}
+          >
+            {busy === action.id ? 'Sending…' : action.label}
+          </Button>
+        ))}
+      </div>
+      <ErrorLine error={error} />
+    </div>
+  );
+}
+
 /**
  * The pinned answer area of an inbox item, chosen by `answerSpec.type` so every kind is handled
  * generically. Every answer goes to the record the agent reads, through the slice A routes (the
@@ -291,6 +342,11 @@ export function InboxAnswerControls({
       <p role="status" className="m-0 text-sm text-fg-muted">
         You can read this item, but someone else answers it.
       </p>
+    );
+  const errorActions = readErrorActions(item);
+  if (errorActions)
+    return (
+      <ErrorActionControls key={item.ref} item={item} actions={errorActions} handlers={handlers} />
     );
   const spec = item.answerSpec;
   switch (spec.type) {

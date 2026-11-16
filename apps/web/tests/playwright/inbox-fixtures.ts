@@ -164,7 +164,14 @@ export const KIND_ITEMS: Item[] = [
     topic: 'Fix rounding in tax totals',
     title: 'Couldn’t start: the GitHub App no longer has access to acme/billing',
     body: 'Each run stopped at "clone repository".',
-    answerSpec: { type: 'acknowledge' },
+    // Slice E's error actions (first is primary; Open chat only navigates).
+    answerSpec: {
+      type: 'actions',
+      actions: [
+        { id: 'retry', label: 'Retry' },
+        { id: 'open_chat', label: 'Open chat' },
+      ],
+    },
   }),
   base({
     ref: 'ask:long',

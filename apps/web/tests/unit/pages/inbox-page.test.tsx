@@ -671,3 +671,57 @@ describe('InboxPage — focus', () => {
     expect(document.activeElement).toBe(document.body);
   });
 });
+
+describe('InboxPage — error items and malformed rows', () => {
+  const errorItem = () =>
+    item({
+      ref: 'ask:err',
+      kind: 'error',
+      blocking: false,
+      agentState: 'not_started',
+      // Slice E's answer spec, read at runtime (older shared types do not name it).
+      answerSpec: {
+        type: 'actions',
+        actions: [
+          { id: 'retry', label: 'Retry' },
+          { id: 'open_chat', label: 'Open chat' },
+        ],
+      } as unknown as InboxItem['answerSpec'],
+    });
+
+  it('runs the primary action through the answer route', async () => {
+    server.items = [errorItem()];
+    installFetch(server);
+    renderInbox();
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    fireEvent.click(retry);
+    await screen.findByText('Nothing needs you');
+    expect(answerCalls(server)[0]).toMatchObject({
+      path: '/api/projects/p1/inbox/items/ask:err/answer',
+      body: { action: 'retry' },
+    });
+  });
+
+  it('opens the chat without calling the server for Open chat', async () => {
+    server.items = [errorItem()];
+    installFetch(server);
+    renderInbox();
+    const pinned = await screen.findByTestId('inbox-pinned-controls');
+    fireEvent.click(within(pinned).getByRole('button', { name: 'Open chat' }));
+    await waitFor(() => expect(location).toBe('/projects/p1/chat/s1'));
+    expect(answerCalls(server)).toHaveLength(0);
+  });
+
+  it('skips a malformed row and keeps the rest', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    server.items = [
+      { ref: 'ask:broken', title: 42 } as unknown as InboxItem,
+      item({ ref: 'ask:ok' }),
+    ];
+    installFetch(server);
+    renderInbox();
+    expect(await screen.findByRole('button', { name: /Title ask:ok/ })).toBeInTheDocument();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});

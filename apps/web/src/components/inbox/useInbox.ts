@@ -10,6 +10,7 @@ import {
   inboxListQueryOptions,
   inboxQueryKeys,
 } from '../../lib/query-options';
+import { isRenderableInboxItem } from './inbox-model';
 
 /**
  * Reusable inbox hooks (slice C). A later slice puts "Needs you" on the Project Overview with
@@ -33,7 +34,16 @@ export function useInboxList(projectId: string | null, filter: InboxFilter, enab
     const seen = new Set<string>();
     const out: InboxItem[] = [];
     for (const page of query.data?.pages ?? []) {
-      for (const item of page.items) {
+      // A malformed page (proxy error body, API drift) reads as empty instead of crashing the shell.
+      const pageItems: unknown = page?.items;
+      if (!Array.isArray(pageItems)) continue;
+      for (const item of pageItems) {
+        if (!isRenderableInboxItem(item)) {
+          console.warn('Dropping a malformed inbox row', {
+            ref: (item as { ref?: unknown } | null)?.ref,
+          });
+          continue;
+        }
         if (seen.has(item.ref)) continue;
         seen.add(item.ref);
         out.push(item);

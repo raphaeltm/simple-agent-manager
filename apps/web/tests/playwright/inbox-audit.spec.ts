@@ -88,7 +88,7 @@ test.describe('Inbox — Mobile', () => {
       const params = new URLSearchParams({ item: kind.ref, project: kind.project });
       await openInbox(page, state(), `/inbox?${params.toString()}`);
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
-      if (kind.name === 'task' || kind.name === 'error') {
+      if (kind.name === 'task') {
         // Nothing to answer yet: no empty control strip (Open chat is in the top bar).
         await expect(page.getByTestId('inbox-pinned-controls')).toHaveCount(0);
       } else {
@@ -159,7 +159,7 @@ test.describe('Inbox — Desktop', () => {
       const params = new URLSearchParams({ item: kind.ref, project: kind.project });
       await openInbox(page, state(), `/inbox?${params.toString()}`);
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
-      if (kind.name === 'task' || kind.name === 'error') {
+      if (kind.name === 'task') {
         // Nothing to answer yet: no empty control strip (Open chat is in the top bar).
         await expect(page.getByTestId('inbox-pinned-controls')).toHaveCount(0);
       } else {

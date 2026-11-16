@@ -75,6 +75,28 @@ export const KIND_META: Record<InboxItemKind, { label: string; icon: LucideIcon 
   error: { label: 'Problem', icon: CircleAlert },
 };
 
+/**
+ * Whether a row from the server has the fields the inbox renders. One malformed row is skipped
+ * (and logged), never allowed to break the list (`.claude/rules/50`).
+ */
+export function isRenderableInboxItem(value: unknown): value is InboxItem {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<InboxItem>;
+  return (
+    typeof item.ref === 'string' &&
+    typeof item.projectId === 'string' &&
+    typeof item.title === 'string' &&
+    typeof item.stackKey === 'string' &&
+    typeof item.kind === 'string' &&
+    item.kind in KIND_META &&
+    typeof item.createdAt === 'string' &&
+    Array.isArray(item.links) &&
+    !!item.answerSpec &&
+    typeof item.answerSpec === 'object' &&
+    typeof item.answerSpec.type === 'string'
+  );
+}
+
 /** The agent is stopped on this item: the one state worth amber. */
 export function isPausedOnItem(item: InboxItem): boolean {
   return item.agentState === 'waiting' && item.status === 'open';
@@ -132,12 +154,39 @@ export function formatAge(iso: string, now: number): string {
   return formatMsSpan(now - Date.parse(iso));
 }
 
+/** SAM's actions on an error item (slice E). Unknown action ids are ignored. */
+export const INBOX_ERROR_ACTION_IDS = ['retry', 'wake', 'resume', 'open_chat'] as const;
+export type InboxErrorActionId = (typeof INBOX_ERROR_ACTION_IDS)[number];
+export interface InboxErrorActionModel {
+  id: InboxErrorActionId;
+  label: string;
+}
+
+/**
+ * The named actions of an error item (`answerSpec.type === 'actions'`, slice E), read at runtime
+ * so a build without slice E's types still renders them. Order is display order; the first is
+ * primary. Null when the item has none.
+ */
+export function readErrorActions(item: InboxItem): InboxErrorActionModel[] | null {
+  const spec = item.answerSpec as { type?: unknown; actions?: unknown };
+  if (spec.type !== 'actions' || !Array.isArray(spec.actions)) return null;
+  const actions = spec.actions.filter(
+    (action): action is InboxErrorActionModel =>
+      !!action &&
+      typeof action === 'object' &&
+      (INBOX_ERROR_ACTION_IDS as readonly unknown[]).includes((action as { id?: unknown }).id) &&
+      typeof (action as { label?: unknown }).label === 'string'
+  );
+  return actions.length > 0 ? actions : null;
+}
+
 /**
  * Whether an item has an answer area to pin. Open human tasks and SAM's own error items have
  * nothing to answer yet (Open chat is in the top bar), so they show no empty control strip.
  */
 export function hasPinnedControls(item: InboxItem): boolean {
   if (item.status !== 'open' || !item.canAct) return true;
+  if (readErrorActions(item)) return true;
   return !(item.answerSpec.type === 'acknowledge' && item.kind !== 'review');
 }
 

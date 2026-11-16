@@ -39,7 +39,7 @@ Slice A (PR #2776) shipped the inbox backend: one list of every ask an agent mak
 - [x] Remove NotificationCenter, NotificationQuestionDialog (+loader), NotificationItem, attention-request, ProjectNotifications; redirect `/projects/:id/notifications`
 - [x] Unit/behavioural tests (answer each kind, archive with/without Undo, failed answer, stale item, last-of-stack → next stack, last overall → empty, nav counts)
 - [x] Rule 82: typed chat cards still render for every harness after the split
-- [ ] Playwright audit 375/1280 with stress data; screenshots posted on PR
+- [x] Playwright audit 375/1280 with stress data (30/30, blocking clipped-overflow check); screenshots posted on PR
 - [x] Docs: notifications/chat-features/collaboration guides; docs screenshot spec
 - [x] Interface handoff on feature.inbox
 
