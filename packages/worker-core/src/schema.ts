@@ -775,6 +775,74 @@ export const runtimeSecretRequests = sqliteTable(
 
 export type RuntimeSecretRequestRow = typeof runtimeSecretRequests.$inferSelect;
 
+/**
+ * Inbox asks (migration 0245, idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9). One row per ask with no older
+ * home; questions, permissions, secret requests and approvals keep their own stores and the inbox
+ * reads them in place. Status changes are compare-and-set with `project_id` in the predicate.
+ */
+export const asks = sqliteTable(
+  'asks',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** 'user' names assigneeUserId; 'team' is any active project member (claimable). */
+    assigneeKind: text('assignee_kind').notNull().default('user'),
+    assigneeUserId: text('assignee_user_id'),
+    claimedByUserId: text('claimed_by_user_id'),
+    kind: text('kind').notNull(),
+    blocking: integer('blocking', { mode: 'boolean' }).notNull().default(false),
+    title: text('title').notNull(),
+    bodyMd: text('body_md'),
+    answerSpecJson: text('answer_spec_json'),
+    stepsJson: text('steps_json'),
+    /** References only: `[{kind, id, label}]`, resolved with the reader's access. */
+    linksJson: text('links_json'),
+    dueHint: text('due_hint'),
+    dueAt: integer('due_at'),
+    sourceSessionId: text('source_session_id'),
+    sourceTaskId: text('source_task_id'),
+    sourceMessageId: text('source_message_id'),
+    agentProfileId: text('agent_profile_id'),
+    groupKey: text('group_key'),
+    dedupeKey: text('dedupe_key'),
+    status: text('status').notNull().default('open'),
+    answerJson: text('answer_json'),
+    resolvedByUserId: text('resolved_by_user_id'),
+    resolvedAt: integer('resolved_at'),
+    expiresAt: integer('expires_at'),
+    /** Epoch ms the filing agent's notice that the ask closed was queued; NULL = the sweep retries. */
+    notifiedAt: integer('notified_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    assigneeStatusIdx: index('idx_asks_assignee_status').on(
+      table.assigneeUserId,
+      table.status,
+      table.createdAt
+    ),
+    projectStatusIdx: index('idx_asks_project_status').on(
+      table.projectId,
+      table.status,
+      table.createdAt
+    ),
+    sessionStatusIdx: index('idx_asks_session_status').on(table.sourceSessionId, table.status),
+    openExpiryIdx: index('idx_asks_open_expiry')
+      .on(table.expiresAt)
+      .where(sql`status = 'open' AND expires_at IS NOT NULL`),
+    unnotifiedIdx: index('idx_asks_unnotified')
+      .on(table.resolvedAt)
+      .where(sql`notified_at IS NULL AND status IN ('answered', 'done', 'archived', 'expired')`),
+    projectDedupeIdx: uniqueIndex('idx_asks_project_dedupe')
+      .on(table.projectId, table.dedupeKey)
+      .where(sql`dedupe_key IS NOT NULL`),
+  })
+);
+
+export type AskRow = typeof asks.$inferSelect;
+
 export const projectRuntimeEnvVars = sqliteTable(
   'project_runtime_env_vars',
   {
@@ -4263,6 +4331,10 @@ export const sessionSummaries = sqliteTable(
       table.createdByUserId,
       table.updatedAt
     ),
+    /** The inbox's open-question read (migration 0245). */
+    openAttentionIdx: index('idx_session_summaries_open_attention')
+      .on(table.projectId, table.createdByUserId)
+      .where(sql`attention_json IS NOT NULL`),
     archiveRankIdx: index('idx_session_summaries_archive_rank')
       .on(
         sql`${table.messageCount} DESC`,

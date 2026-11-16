@@ -2818,18 +2818,45 @@ export class ProjectData extends DurableObject<Env> {
     return attention.releaseAttentionAnswer(this.sql, sessionId, markerId, answer);
   }
 
-  async completeAttentionAnswer(
+  completeAttentionAnswer(sessionId: string, markerId: string, answer: string): Promise<number> {
+    return this.completeAttentionClaim(sessionId, markerId, answer, 'answer');
+  }
+
+  /**
+   * Inbox archive of a question (idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9). Separate RPC names from the
+   * answer methods, so a worker newer than this object fails closed instead of staging an empty
+   * answer through the old signature.
+   */
+  prepareAttentionArchive(sessionId: string, markerId: string) {
+    return attention.prepareAttentionAnswer(this.sql, sessionId, markerId, '', 'archive');
+  }
+
+  releaseAttentionArchive(sessionId: string, markerId: string): number {
+    return attention.releaseAttentionAnswer(this.sql, sessionId, markerId, '', 'archive');
+  }
+
+  completeAttentionArchive(sessionId: string, markerId: string): Promise<number> {
+    return this.completeAttentionClaim(sessionId, markerId, '', 'archive');
+  }
+
+  private async completeAttentionClaim(
     sessionId: string,
     markerId: string,
-    answer: string
+    answer: string,
+    mode: attention.AttentionClaimMode
   ): Promise<number> {
-    const count = attention.completeAttentionAnswer(this.sql, sessionId, markerId, answer);
+    const count = attention.completeAttentionAnswer(this.sql, sessionId, markerId, answer, mode);
     if (count > 0) {
       await this.recalculateAlarm();
       this.scheduleSummarySync();
       this.broadcastEvent(
         'attention.resolved',
-        { sessionId, markerId, count, reason: 'structured_answer' },
+        {
+          sessionId,
+          markerId,
+          count,
+          reason: mode === 'archive' ? 'archived' : 'structured_answer',
+        },
         sessionId
       );
     }
