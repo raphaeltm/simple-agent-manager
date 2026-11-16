@@ -19,7 +19,7 @@ import {
 import { emailSignInPlugins } from './services/email-sign-in';
 import { establishFirstSuperadmin, FIRST_SUPERADMIN_SETTING } from './services/first-superadmin';
 import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
-import { untrustedGitLabUserInfo } from './services/gitlab-sign-in-identity';
+import { gitLabLoginProvider } from './services/gitlab-login-provider';
 import {
   resolveLoginOAuthConfig,
   selectGitHubOAuthConfig,
@@ -277,19 +277,11 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
   }
 
   if (gitlabOAuth) {
-    // better-auth links a sign-in to the existing user with that email when the provider is
-    // trusted OR the provider says the email is verified, so an untrusted host must lose both.
-    const trusted = gitlabOAuth.identityTrusted;
-    if (trusted) trustedProviders.push('gitlab');
-    socialProviders.gitlab = {
-      clientId: gitlabOAuth.clientId,
-      clientSecret: gitlabOAuth.clientSecret,
-      issuer: gitlabOAuth.host,
-      scope: ['read_user', 'api', 'read_repository', 'write_repository'],
-      overrideUserInfoOnSignIn: trusted,
-      // An untrusted host's emails count as unverified and its account ids are host-scoped.
-      ...(trusted ? {} : { getUserInfo: untrustedGitLabUserInfo(gitlabOAuth.host) }),
-    };
+    const provider = gitLabLoginProvider(env, gitlabOAuth);
+    if (provider) {
+      if (gitlabOAuth.identityTrusted) trustedProviders.push('gitlab');
+      socialProviders.gitlab = provider;
+    }
   }
 
   return betterAuth({

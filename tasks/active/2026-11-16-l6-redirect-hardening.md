@@ -1,0 +1,28 @@
+# L6: node and GitLab redirect hardening
+
+## Problem and scope
+Land C4/C10, F7 and the port-proxy token Location part of F20 from the self-host integration work onto current main. No self-host runtime/configuration changes.
+
+## Preflight and research
+Classes: external-api-change, cross-component-change, business-logic-change, security-sensitive-change, infra-change.
+Node control requests and liveness probes use fetchWithTimeout without explicit manual redirects. Workspace proxy only forces manual for port previews. Go ServeMux may canonicalize the port route before authentication, echoing its query token into a 307 Location. GitLab default BetterAuth profile fetch follows redirects; untrusted identity rules must survive in the guarded profile hook. Main's worker-core guard already uses a cross-origin header allowlist and refuses cross-origin bodies. Reuse it.
+Trace: auth.ts -> GitLab provider -> OAuth token/profile; repo-hosting gitlabFetch -> GitLab API. Workspace browser -> workspaceSubdomainProxy -> vm-agent ServeMux -> port proxy -> workspace app.
+Integration setup remains the static /api/auth/callback/gitlab callback and existing scopes; no new registration or IAM trust boundary. User tokens remain per-account, and host-scoped untrusted account IDs plus unverified email prevent cross-user linking. The node VM remains the isolation boundary.
+Rule 54: release resolver keys this Go change to a new immutable binary; Worker manual redirect protection must also protect old agents while busy nodes drain. No protocol fields change.
+
+## Checklist
+- [ ] Force manual node control/liveness/workspace fetches; fail node 3xx without following or disclosing Location.
+- [ ] Guard GitLab host, profile, API, code exchange and refresh using existing guardedFetch; bounded admin redirect limit and existing timeout.
+- [ ] Preserve untrusted GitLab identity rules; use exported BetterAuth types and exercise real library callback/refresh.
+- [ ] Prevent vm-agent mux 307 Location token leak; regression and normal controls.
+- [ ] Reduce outbound-fetch baseline where applicable; annotate fixed node destinations.
+- [ ] Verify Cloudflare outbound redirect default using official docs/runtime evidence.
+- [ ] Run regression controls, full quality, required local reviews.
+- [ ] Staging lease both installs, deploy, full VM lifecycle and cleanup; GitLab sign-in or integration evidence if unconfigured.
+- [ ] CI/CodeRabbit gates; merge; production deploy; channel and idea updates.
+
+## Acceptance
+Node 307 is failure and never followed; node 200 works. Private GitLab refused, public GitLab allowed. Cross-origin hop strips Authorization and custom credentials. Token exchange/refresh cannot leak client secrets. Go Location contains no token. Legitimate preview application redirects remain functional. Required reviews/staging/CI pass before merge.
+
+## References
+Idea 01M72M9AEB933ZY8269D376DKC; L5a #2751; rules 54, 62, 74, 77.

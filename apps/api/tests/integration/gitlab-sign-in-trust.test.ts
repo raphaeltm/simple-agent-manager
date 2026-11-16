@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { getBetterAuthAccessTokenForProvider } from '../../src/services/better-auth-access-token';
 import { generateEncryptionKey } from '../../src/services/encryption';
 import {
   __resetPlatformConfigCacheForTest,
@@ -205,6 +206,134 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
       name: string;
       image: string;
     };
+
+  it.each(['https://127.0.0.1', 'https://10.0.0.2', 'https://metadata.google.internal'])(
+    'refuses private GitLab %s before browser authorization',
+    async (host) => {
+      const env = baseEnv({
+        GITLAB_HOST: host,
+        GITLAB_CLIENT_ID: CLIENT_ID,
+        GITLAB_CLIENT_SECRET: CLIENT_SECRET,
+      } as Partial<Env>);
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const response = await app.request(
+        `${API_ORIGIN}/api/auth/sign-in/social`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: APP_ORIGIN },
+          body: JSON.stringify({ provider: 'gitlab', callbackURL: CALLBACK_URL }),
+        },
+        env
+      );
+      expect(response.status).toBe(404);
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('uses outbound.maxRedirects default through the real resolver for profile hops', async () => {
+    const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    const gitlab = createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email));
+    let profileCalls = 0;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname === '/oauth/token') return gitlab.fetch(input, init);
+      profileCalls++;
+      return new Response(null, { status: 307, headers: { location: `${PUBLIC_HOST}/loop` } });
+    });
+    const callback = await signInWithGitLab(env, PUBLIC_HOST);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(profileCalls).toBe(4); // original + default three allowed hops
+    expect(gitlabAccounts()).toEqual([]);
+  });
+
+  it('profile redirects drop Authorization before the cross-origin hop', async () => {
+    const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    const gitlab = createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email));
+    const requests: Request[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      if (request.url === `${PUBLIC_HOST}/api/v4/user`)
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://profile.example/user' },
+        });
+      if (request.url === 'https://profile.example/user') {
+        expect(request.headers.get('authorization')).toBeNull();
+        expect(request.redirect).toBe('manual');
+        return Response.json(profileClaiming(OWNER.email));
+      }
+      return gitlab.fetch(input, init);
+    });
+    const callback = await signInWithGitLab(env, PUBLIC_HOST);
+    expect(callback.headers.get('location')).toBe(CALLBACK_URL);
+    expect(requests.map((r) => new URL(r.url).pathname)).toEqual([
+      '/oauth/token',
+      '/api/v4/user',
+      '/user',
+    ]);
+    expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+  });
+
+  it('BetterAuth code exchange refuses 307 without replaying the client secret', async () => {
+    const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    const requests: Request[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      expect(request.redirect).toBe('manual');
+      return new Response(null, {
+        status: 307,
+        headers: { location: 'https://unvetted.example/token' },
+      });
+    });
+    const callback = await signInWithGitLab(env, PUBLIC_HOST);
+    expect(callback.headers.get('location')).toContain('error=');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(`${PUBLIC_HOST}/oauth/token`);
+    expect(gitlabAccounts()).toEqual([]);
+    expect(ownerSessions()).toBe(0);
+  });
+
+  it.each([200, 307])('BetterAuth refresh handles %s using manual token fetch', async (status) => {
+    const env = await runtimeGitLabEnv(PUBLIC_HOST);
+    vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
+    await signInWithGitLab(env, PUBLIC_HOST);
+    const now = Date.now();
+    sqlite
+      .prepare(
+        "UPDATE accounts SET access_token = 'expired', refresh_token = 'refresh-secret', access_token_expires_at = ? WHERE provider_id = 'gitlab'"
+      )
+      .run(now - 60_000);
+    const requests: Request[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      requests.push(request);
+      expect(request.redirect).toBe('manual');
+      if (status === 307)
+        return new Response(null, {
+          status: 307,
+          headers: { location: 'https://unvetted.example/token' },
+        });
+      return Response.json({
+        access_token: 'refreshed',
+        refresh_token: 'rotated',
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    });
+    const refresh = getBetterAuthAccessTokenForProvider(
+      env,
+      new Headers({ cookie: jar.header() }),
+      OWNER.id,
+      'gitlab'
+    );
+    if (status === 200) await expect(refresh).resolves.toMatchObject({ accessToken: 'refreshed' });
+    else await expect(refresh).rejects.toThrow();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(`${PUBLIC_HOST}/oauth/token`);
+  });
 
   it('refuses a runtime self-managed host that claims the owner’s verified email (2026-11-12)', async () => {
     const env = await runtimeGitLabEnv(SELF_MANAGED_HOST);

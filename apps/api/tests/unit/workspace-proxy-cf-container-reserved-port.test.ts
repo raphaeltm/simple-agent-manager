@@ -124,6 +124,53 @@ describe('cf-container workspace port routes', () => {
   });
 
   it.each(['vm', 'cf-container'] as const)(
+    'refuses old %s agent token-bearing redirects',
+    async (runtime) => {
+      nodeRuntime = runtime;
+      const redirect = () =>
+        new Response('<a href="?token=backend-port-token">moved</a>', {
+          status: 307,
+          headers: { location: '/workspaces/ws/ports/3000/?token=backend-port-token' },
+        });
+      proxyHttp.mockImplementation(async () => redirect());
+      vi.mocked(fetch).mockImplementation(async () => redirect());
+      const response = await worker.default.fetch(publicPortRequest(3000, '//app'), containerEnv());
+      expect(response.status).toBe(502);
+      expect(response.headers.get('location')).toBeNull();
+      expect(await response.text()).not.toContain('backend-port-token');
+      expect(runtime === 'vm' ? vi.mocked(fetch) : proxyHttp).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each(['vm', 'cf-container'] as const)(
+    'refuses %s control redirects, including caller follow mode',
+    async (runtime) => {
+      nodeRuntime = runtime;
+      mockGetSession.mockResolvedValue({ user: { id: 'user-1', status: 'active' } });
+      const redirect = () =>
+        new Response('moved', {
+          status: 307,
+          headers: { location: 'https://unvetted.example/health' },
+        });
+      proxyHttp.mockImplementation(async () => redirect());
+      vi.mocked(fetch).mockImplementation(async () => redirect());
+      const response = await worker.default.fetch(
+        new Request(`https://ws-${WORKSPACE_ID}.workspaces.example.com/health`, {
+          redirect: 'follow',
+        }),
+        containerEnv()
+      );
+      expect(response.status).toBe(502);
+      expect(response.headers.get('location')).toBeNull();
+      const forwarded =
+        runtime === 'cf-container'
+          ? (proxyHttp.mock.calls[0]![0] as Request)
+          : new Request(vi.mocked(fetch).mock.calls[0]![0], vi.mocked(fetch).mock.calls[0]![1]);
+      expect(forwarded.redirect).toBe('manual');
+    }
+  );
+
+  it.each(['vm', 'cf-container'] as const)(
     'strips SAM cookies and returns preview redirects for %s',
     async (runtime) => {
       nodeRuntime = runtime;

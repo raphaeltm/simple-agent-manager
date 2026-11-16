@@ -267,6 +267,15 @@ export async function nodeAgentRequest(
   }
 }
 
+/** A node redirect is a failed control response. Discard its Location and body:
+ * Go's mux can echo a query JWT into both before the route consumes it.
+ */
+function nodeResponse(response: Response): Response {
+  if (response.status < 300 || response.status >= 400) return response;
+  void response.body?.cancel().catch(() => undefined);
+  return new Response('Node redirect refused', { status: response.status });
+}
+
 export async function fetchNodeAgent(
   nodeId: string,
   env: Env,
@@ -275,6 +284,8 @@ export async function fetchNodeAgent(
   requestTimeoutMs: number,
   controls: FetchNodeAgentControls = {}
 ): Promise<Response> {
+  // Node URLs come from SAM routing, never a redirect chosen by the node.
+  options = { ...options, redirect: 'manual' };
   const {
     sourceTaskGuard,
     beforeExternalMutation,
@@ -283,7 +294,7 @@ export async function fetchNodeAgent(
   } = controls;
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     await beforeExternalMutation?.();
-    return fetchWithTimeout(url, options, requestTimeoutMs);
+    return nodeResponse(await fetchWithTimeout(url, options, requestTimeoutMs));
   }
 
   const db = drizzle(env.DATABASE, { schema });
@@ -295,7 +306,7 @@ export async function fetchNodeAgent(
 
   if (node?.runtime !== 'cf-container') {
     await beforeExternalMutation?.();
-    return fetchWithTimeout(url, options, requestTimeoutMs);
+    return nodeResponse(await fetchWithTimeout(url, options, requestTimeoutMs));
   }
 
   const config = getVmAgentContainerConfig(env);
@@ -349,7 +360,7 @@ export async function fetchNodeAgent(
         );
       }),
     ]);
-    return response;
+    return nodeResponse(response);
   } catch (error) {
     const timedOut = error instanceof Error && error.message.startsWith('Request timed out after ');
     if (!timedOut) throw error;
