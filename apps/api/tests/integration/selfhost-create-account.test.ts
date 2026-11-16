@@ -131,7 +131,7 @@ describe('selfhost create-account SQL', () => {
     return me.ok ? ((await me.json()) as Record<string, unknown>) : null;
   }
 
-  it('creates an account that signs in with an emailed code, with no accounts row', async () => {
+  it('creates an account that signs in by email and wins the sole-user administrator election', async () => {
     // Control: without the account, no code is sent and nothing is created.
     expect(await signInByEmail('teammate@example.com')).toBeNull();
     expect(realUsers()).toEqual([]);
@@ -142,7 +142,8 @@ describe('selfhost create-account SQL', () => {
     expect(await signInByEmail('teammate@example.com')).toMatchObject({
       id: row?.id,
       email: 'teammate@example.com',
-      role: 'user',
+      // Main's durable first-user election runs at sign-in, after the CLI wrote a plain user.
+      role: 'superadmin',
       status: 'active',
     });
   });

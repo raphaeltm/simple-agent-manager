@@ -219,7 +219,7 @@ export function SessionLinkedWorkDrawer({
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         {/* Spinner only before the first result. A refetch keeps the list on screen
-              (`apps/web/.claude/rules/48-stale-while-revalidate-ui.md`). */}
+              (`.claude/rules/48-stale-while-revalidate-ui.md`). */}
         {linkedWork.isLoading ? (
           // `Spinner` is its own `role="status"` region, so this wrapper must not be a
           // second one — two status regions for one load announce twice.

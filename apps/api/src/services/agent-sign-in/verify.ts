@@ -8,6 +8,7 @@
  * the token before it returns.
  */
 import { MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
+import { guardedFetch, OutboundRequestRefusedError } from '@simple-agent-manager/worker-core';
 import {
   createRemoteJWKSet,
   customFetch,
@@ -18,7 +19,6 @@ import {
 import * as v from 'valibot';
 
 import { log } from '../../lib/logger';
-import { guardedFetch, OutboundRequestRefusedError } from '../../lib/network-hosts';
 import { AppError } from '../../middleware/error';
 import { agentSignInJwksUrl, type AgentSignInTrust } from './config';
 

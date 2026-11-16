@@ -47,7 +47,7 @@ rather than immortal. What is missing is a prompt, intentional closure.
       (`.claude/rules/44-dual-write-migration-enumerate-writers.md`).
 - [ ] A failed acceptance closes the node and workspace rows it created through the same
       shared finalizer the launch path uses, rather than leaving them at `creating`
-      (`apps/api/.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`, the
+      (`.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`, the
       lifecycle-finalizer section of `44`).
 - [ ] A regression test per caller: make a late step inside `acceptInstantSession` throw
       and assert no `creating` node or workspace row survives, with an owner control

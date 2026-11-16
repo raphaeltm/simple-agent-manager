@@ -445,7 +445,6 @@
     "HETZNER_MAX_LIST_PAGES",
     "HUMAN_INPUT_ESCALATION_FRACTIONS",
     "HUMAN_INPUT_MAX_WAIT_MS",
-    "HUMAN_INPUT_TIMEOUT_MS",
     "HUMAN_INPUT_UNDELIVERED_GRACE_MS",
     "IDENTITY_TOKEN_CACHE_BUFFER_SECONDS",
     "IDENTITY_TOKEN_CACHE_MIN_TTL_SECONDS",
@@ -1316,6 +1315,8 @@
   ],
   "bootstrapExceptions": {
     "AGENT_EMAIL_INBOUND_SMTP": "Set by the self-host deploy only when the sam-mx SMTP receiver (compose profile mail-in, deploy/selfhost/sam-mx) is installed: it declares that a process outside the Worker receives mail for agents.<BASE_DOMAIN>. An admin toggle cannot install or remove that process, so turning it on without the receiver would advertise agent addresses that never receive mail. Ignored when the AGENT_EMAIL binding exists.",
+    "DEPLOY_BUILDER_CLASS_MAX_INSTANCES": "Deploy-generated mirror of the actual ComposeBuilderContainer max_instances, required to clamp runtime admission to the deployed class capacity. Runtime edits cannot resize the Cloudflare application. Builder admission controls remain admin settings.",
+
     "AGENT_EMAIL_WORKER_NAME": "Deploy-generated name of this Worker's own script, emitted by scripts/deploy/sync-wrangler-config.ts only together with the AGENT_EMAIL send binding. The agent email admin setup points the Email Routing rule at it, so it must not be admin-editable: another value would route agent mail to a different Worker.",
     "AGENT_SIGN_IN_TRUST": "Trust root for agent sign-in through workload identity: which external issuer, source workloads and target accounts may obtain a session. Deploy-time Worker secret only, by design: an admin-editable setting would let a compromised admin account open a sign-in door.",
     "ANALYTICS_SINK": "Deployment shape, not a tunable: selects where product analytics are stored and read (Analytics Engine on Cloudflare, the observability D1 database on a self-hosted box). Set by the self-host config generator; switching it at runtime would split analytics across two stores. Retention bounds for the D1 sink are admin settings (operations.analyticsD1RetentionDays, operations.analyticsD1MaxRows).",

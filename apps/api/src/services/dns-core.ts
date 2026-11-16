@@ -295,7 +295,7 @@ export interface DNSRecordMatch {
  * Cloudflare permits several A records per name (round-robin), so "how many
  * matched" is real information. Callers that must not fail on ambiguity — an
  * upsert that gates a deployment — can still record it instead of silently
- * converging one of several. See `apps/api/.claude/rules/75` §8.
+ * converging one of several. See `.claude/rules/75` §8.
  */
 export async function findDNSRecordMatchesByName(
   recordName: string,

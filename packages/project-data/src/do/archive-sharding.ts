@@ -50,6 +50,7 @@ import { insertArchiveSearchDocumentBatch } from './archive-search-writes';
 import * as compactArchive from './compact-archive';
 import { resolveMaterializationPassConfig } from './materialization';
 import * as messages from './messages';
+import { advanceImportedMessageSequence } from './messages-persist-helpers';
 import type {
   ArchivedToolPayloadListResult,
   MessageToolContentResult,
@@ -705,9 +706,18 @@ function validateTargetState(value: unknown): ProjectDataArchiveTargetState {
 
 function readSessionAnchor(sql: SqlStorage, sessionId: string): ProjectDataArchiveRow | null {
   const columns = CHAT_SESSION_ANCHOR_COLUMNS.join(', ');
-  const query = `SELECT ${columns} FROM chat_sessions WHERE id = ?`;
+  const query = `SELECT ${columns}, stream_ingest_state FROM chat_sessions WHERE id = ?`;
   const row = sql.exec(query, sessionId).toArray()[0] ?? null;
-  return row ? toArchiveRow(row, CHAT_SESSION_ANCHOR_COLUMNS) : null;
+  // Optional ingest metadata is transported without changing the historical
+  // terminal-hash column set. NULL legacy sessions retain identical envelopes.
+  return row
+    ? toArchiveRow(
+        row,
+        row.stream_ingest_state == null
+          ? CHAT_SESSION_ANCHOR_COLUMNS
+          : [...CHAT_SESSION_ANCHOR_COLUMNS, 'stream_ingest_state']
+      )
+    : null;
 }
 
 function countRows(sql: SqlStorage, query: string, ...params: Array<string | number>): number {
@@ -1600,10 +1610,14 @@ export function prepareArchiveTarget(
   }
 
   const row: ProjectDataArchiveRow = { ...input.sessionRow };
-  const placeholders = CHAT_SESSION_ANCHOR_COLUMNS.map(() => '?').join(', ');
-  const insertSessionQuery = `INSERT INTO chat_sessions (${CHAT_SESSION_ANCHOR_COLUMNS.join(', ')})
+  const insertColumns =
+    row.stream_ingest_state == null
+      ? CHAT_SESSION_ANCHOR_COLUMNS
+      : [...CHAT_SESSION_ANCHOR_COLUMNS, 'stream_ingest_state'];
+  const placeholders = insertColumns.map(() => '?').join(', ');
+  const insertSessionQuery = `INSERT INTO chat_sessions (${insertColumns.join(', ')})
      VALUES (${placeholders})`;
-  sql.exec(insertSessionQuery, ...CHAT_SESSION_ANCHOR_COLUMNS.map((column) => row[column] ?? null));
+  sql.exec(insertSessionQuery, ...insertColumns.map((column) => row[column] ?? null));
   sql.exec(
     `INSERT INTO project_data_archive_target_sessions (
        session_id, project_id, migration_id, owner_name, generation, source_owner_name,
@@ -1804,6 +1818,8 @@ export async function commitArchiveTargetChunk(
     committedHash = input.sha256;
   } else {
     for (const row of input.rows) insertArchiveRow(sql, input.tableName, row);
+    if (input.tableName === 'chat_messages')
+      advanceImportedMessageSequence(sql, input.sessionId, input.rows);
     committedHash = await canonicalRowsSha256(
       spec.columns,
       readCommittedRowsForChunk(sql, input.tableName, input.rowIds)
@@ -3862,6 +3878,8 @@ export async function restoreSourceArchiveChunk(
     );
     if (after > before) inserted++;
   }
+  if (input.tableName === 'chat_messages')
+    advanceImportedMessageSequence(sql, input.sessionId, input.rows);
   const committedRows = readCommittedRowsForChunk(sql, input.tableName, input.rowIds);
   const committedHash = await canonicalRowsSha256(spec.columns, committedRows);
   if (committedHash !== input.sha256) {

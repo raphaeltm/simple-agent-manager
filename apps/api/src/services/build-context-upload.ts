@@ -2,7 +2,7 @@
 // The upload keeps its original `(env, …)` signature here and binds the worker's shared R2 S3
 // client (`WHEN_REQUIRED`, so the VM need not send a checksum header), which also serves compose
 // artifacts, attachments and session snapshots, and works against an operator store.
-import { createBuildContextUpload as createUpload } from '@simple-agent-manager/app-deployment';
+import { createBuildContextDownload as createDownload, createBuildContextUpload as createUpload } from '@simple-agent-manager/app-deployment';
 
 import type { Env } from '../env';
 import { getR2PresignTarget } from './r2-s3-client';
@@ -19,4 +19,9 @@ export async function createBuildContextUpload(
   expiresIn: BuildContextUploadArgs[2]
 ): ReturnType<typeof createUpload> {
   return createUpload(owner, descriptor, expiresIn, getR2PresignTarget(env, 'WHEN_REQUIRED'));
+}
+
+
+export async function createBuildContextDownload(env: Env, r2Key: string, expiresIn: number) {
+  return createDownload(r2Key, expiresIn, getR2PresignTarget(env, 'WHEN_REQUIRED'));
 }

@@ -40,13 +40,18 @@ function configure(host: string, allowPrivateNetwork: boolean) {
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
+let fixture: ReturnType<typeof createAdminSettingsEnv>;
 
 beforeEach(() => {
+  __resetAdminSettingsCacheForTest();
+  fixture = createAdminSettingsEnv();
   fetchMock = vi.fn(async () => Response.json(PROJECT));
   vi.stubGlobal('fetch', fetchMock);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 afterEach(() => {
+  fixture.sqlite.close();
+  __resetAdminSettingsCacheForTest();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -54,7 +59,7 @@ afterEach(() => {
 describe('GitLab host policy', () => {
   it('refuses a private GitLab host without the admin opt-in, before any request', async () => {
     configure('http://192.168.1.20', false);
-    await expect(verifyGitLabProjectAccess({} as Env, 'glpat', 5)).rejects.toMatchObject({
+    await expect(verifyGitLabProjectAccess(fixture.env, 'glpat', 5)).rejects.toMatchObject({
       statusCode: 400,
       error: 'GITLAB_PRIVATE_NETWORK_NOT_ALLOWED',
     });
@@ -63,7 +68,7 @@ describe('GitLab host policy', () => {
 
   it('control: with integration.gitlab.allowPrivateNetwork on, the private host is called', async () => {
     configure('http://192.168.1.20', true);
-    await expect(verifyGitLabProjectAccess({} as Env, 'glpat', 5)).resolves.toMatchObject({
+    await expect(verifyGitLabProjectAccess(fixture.env, 'glpat', 5)).resolves.toMatchObject({
       gitlabProjectId: 5,
     });
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -71,7 +76,7 @@ describe('GitLab host policy', () => {
 
   it('refuses a metadata host even with the opt-in', async () => {
     configure('http://169.254.169.254', true);
-    await expect(verifyGitLabProjectAccess({} as Env, 'glpat', 5)).rejects.toMatchObject({
+    await expect(verifyGitLabProjectAccess(fixture.env, 'glpat', 5)).rejects.toMatchObject({
       statusCode: 400,
       error: 'GITLAB_HOST_NOT_ALLOWED',
     });
@@ -86,7 +91,7 @@ describe('GitLab host policy', () => {
         headers: { location: 'https://gitlab-cdn.example.net/api/v4/projects/5' },
       })
     );
-    await expect(verifyGitLabProjectAccess({} as Env, 'glpat-secret', 5)).resolves.toMatchObject({
+    await expect(verifyGitLabProjectAccess(fixture.env, 'glpat-secret', 5)).resolves.toMatchObject({
       gitlabProjectId: 5,
     });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
@@ -111,11 +116,11 @@ describe('GitLab host policy', () => {
           headers: { location: `https://gitlab.example.com/api/v4/loop/${(hop += 1)}` },
         })
     );
-    await expect(verifyGitLabProjectAccess({} as Env, 'glpat', 5)).rejects.toMatchObject({
+    await expect(verifyGitLabProjectAccess(fixture.env, 'glpat', 5)).rejects.toMatchObject({
       statusCode: 502,
       error: 'GITLAB_REQUEST_REFUSED',
     });
-    // outbound.maxRedirects defaults to 3 (settings unreadable here, so the default applies).
+    // outbound.maxRedirects defaults to 3 (settings readable and unset, so the default applies).
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
@@ -154,7 +159,7 @@ describe('GitLab host policy', () => {
     const app = new Hono<{ Bindings: Env }>();
     app.onError(handleAppError);
     app.get('/probe', async (c) => c.json(await verifyGitLabProjectAccess(c.env, 'glpat', 5)));
-    const response = await app.request('/probe', {}, {} as Env);
+    const response = await app.request('/probe', {}, fixture.env);
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({ error: 'GITLAB_REQUEST_REFUSED' });
     expect(fetchMock).toHaveBeenCalledOnce();

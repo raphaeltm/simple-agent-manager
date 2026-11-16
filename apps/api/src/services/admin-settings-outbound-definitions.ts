@@ -1,24 +1,28 @@
 /**
- * Admin settings for outbound requests to URLs SAM did not choose itself (lib/network-hosts):
- * how many validated redirect hops a guarded fetch follows, and whether the admin-configured
- * GitLab host may be on the private network. Runtime tunables are admin settings, not Worker
- * vars (policy 9017df94).
+ * Admin settings for outbound requests to URLs SAM did not choose itself (`guardedFetch` in
+ * `@simple-agent-manager/worker-core`): how many validated redirect hops a guarded fetch follows.
+ * Runtime tunables are admin settings, not Worker vars (.claude/rules/07-env-and-urls.md).
  */
-import { DEFAULT_OUTBOUND_MAX_REDIRECTS, MAX_OUTBOUND_REDIRECTS } from '../lib/network-hosts';
+import {
+  DEFAULT_OUTBOUND_MAX_REDIRECTS,
+  MAX_OUTBOUND_REDIRECTS,
+} from '@simple-agent-manager/worker-core';
+
 import {
   type AdminSettingDefinition,
   integerDefinition,
   switchDefinition,
 } from './admin-setting-definitions';
 
-export type OutboundSettingName = 'outbound.maxRedirects' | 'integration.gitlab.allowPrivateNetwork';
+export type OutboundSettingName =
+  'outbound.maxRedirects' | 'integration.gitlab.allowPrivateNetwork';
 
 export const OUTBOUND_SETTINGS: readonly AdminSettingDefinition[] = [
   integerDefinition(
     'outbound.maxRedirects',
     DEFAULT_OUTBOUND_MAX_REDIRECTS,
     'Operations',
-    'Redirect hops SAM follows for a URL a user or admin chose (AI proxy base URLs, the OpenAI-compatible endpoint, GitLab, check_dns_status). Every hop is re-checked; 0 refuses every redirect.',
+    'Redirect hops a guarded outbound request follows when the server it calls answers with a redirect (today: check_dns_status, whose workspace host is answered by a node the user controls; it also stays on the workspace origin). Every hop is re-checked; 0 refuses every redirect.',
     { min: 0, max: MAX_OUTBOUND_REDIRECTS }
   ),
   switchDefinition(

@@ -503,7 +503,7 @@ async function openChat(page: Page, options: MockOptions = {}) {
   // vacuously without this.
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await expect(page.getByTestId('session-tool-related')).toBeVisible({ timeout: 15_000 });
-  // Fixed wait mandated by `apps/web/.claude/rules/17-ui-visual-testing.md`: CSS transitions
+  // Fixed wait mandated by `.claude/rules/17-ui-visual-testing.md`: CSS transitions
   // have no completion event to await.
   await page.waitForTimeout(600);
 }
@@ -636,7 +636,7 @@ test.describe('Linked work — chat Related panel', () => {
    * is not "disjoint boxes", which would contradict the design; it is "the panel's right edge
    * meets the rail's right edge, which is the viewport edge, and the panel starts at or before
    * the rail does". Asserted as measured coordinates, because the tool-rail incident behind
-   * `apps/web/.claude/rules/17-ui-visual-testing.md` passed 36 assertions and a screenshot
+   * `.claude/rules/17-ui-visual-testing.md` passed 36 assertions and a screenshot
    * review and was only caught by comparing two numbers.
    */
   test('the open panel is flush with the viewport edge and covers the rail column', async ({

@@ -59,6 +59,7 @@ nodeDiagnosticsRoutes.get('/:id/events', async (c) => {
  * Only available when the node is running.
  */
 nodeDiagnosticsRoutes.get('/:id/system-info', async (c) => {
+  c.header('Cache-Control', 'no-store');
   const nodeId = c.req.param('id');
   const node = await ownedNode(c, nodeId);
   const outcome = await runNodeDiagnostic(node, ownerNodeAccess(getUserId(c)), (id, userId) =>

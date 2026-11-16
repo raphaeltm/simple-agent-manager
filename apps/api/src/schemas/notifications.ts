@@ -4,9 +4,8 @@ import {
   NOTIFICATION_CHANNELS,
   NOTIFICATION_TYPES,
 } from '@simple-agent-manager/shared';
+import { classifyHost } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
-
-import { classifyHost } from '../lib/network-hosts';
 
 // Derive validation schemas from the shared notification constants so the API
 // contract cannot drift from the canonical type/channel lists.

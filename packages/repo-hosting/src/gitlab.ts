@@ -3,7 +3,7 @@ import {
   AppError,
   errors,
   getTimeoutMs,
-  guardedFetch,
+  guardedFetchWithDeadline,
   log,
   readResponseJson,
 } from '@simple-agent-manager/worker-core';
@@ -325,7 +325,7 @@ async function gitlabFetch(
   // A redirect cannot take the request, or its bearer token, anywhere the configured host could
   // not go; a refusal mid-flight is a 502/504 with a stable code, not an uncaught 500.
   try {
-    return await guardedFetch(
+    return await guardedFetchWithDeadline(
       `${apiBaseUrl}${pathAndQuery}`,
       { ...init, headers },
       {

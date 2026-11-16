@@ -12,6 +12,7 @@ import { DEFAULT_STALLED_TASK_CLASSIFIER_TIMEOUT_MS } from '@simple-agent-manage
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
   classifyLongRunningTaskStall,
@@ -19,6 +20,7 @@ import {
 } from '../../../src/scheduled/stalled-task-classifier';
 import type { TaskRuntimeLiveness } from '../../../src/services/task-runtime-liveness';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
+import { createSchemaTables } from '../../helpers/sqlite-d1';
 
 const projectData = vi.hoisted(() => ({
   getMessages: vi.fn(),
@@ -95,6 +97,7 @@ const onUnhandled = (reason: unknown) => {
 
 beforeEach(() => {
   ({ sqlite, env: baseEnv } = createAdminSettingsEnv());
+  createSchemaTables(sqlite, [schema.asks]);
   unhandled = [];
   process.on('unhandledRejection', onUnhandled);
   projectData.getMessages

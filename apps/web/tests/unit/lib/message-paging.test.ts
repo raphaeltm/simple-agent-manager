@@ -67,6 +67,25 @@ describe('refreshCachedTranscript', () => {
     expect(mocks.getChatSession).not.toHaveBeenCalled();
   });
 
+  it('refreshes an in-place tail before draining pages beyond the newest window', async () => {
+    const tail = persisted('canonical-tail', 100);
+    const grown = { ...tail, role: 'assistant', content: `${tail.content} appended` };
+    const cache = { ...tail, role: 'assistant' };
+    mocks.getChatSession
+      .mockResolvedValueOnce(page([grown, persisted('next-page', 200)], true))
+      .mockResolvedValueOnce(page([persisted('newest-page', 300)], false));
+    const result = await refreshCachedTranscript('p-1', 's-1', page([cache], false));
+    expect(mocks.getChatSession).toHaveBeenNthCalledWith(1, 'p-1', 's-1', {
+      after: '[100,99,"canonical-tail"]',
+      signal: undefined,
+    });
+    expect(result?.messages).toEqual([
+      grown,
+      persisted('next-page', 200),
+      persisted('newest-page', 300),
+    ]);
+  });
+
   it('fails visibly when a page does not advance the cursor', async () => {
     const stuck = persisted('stuck', 200);
     mocks.getChatSession
@@ -125,7 +144,7 @@ describe('mergeRecentWindowOrRefresh', () => {
     expect(merged.messages.map((message) => message.id)).toEqual(['loaded-tail', 'gap', 'recent']);
     expect(merged.hasMore).toBe(true);
     expect(mocks.getChatSession).toHaveBeenCalledWith('p-1', 's-1', {
-      after: '[100,100,"loaded-tail"]',
+      after: '[100,99,"loaded-tail"]',
       signal: undefined,
     });
   });

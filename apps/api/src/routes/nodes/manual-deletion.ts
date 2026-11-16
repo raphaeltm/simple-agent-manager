@@ -1,3 +1,4 @@
+import { assertNoReservedCloudflareBuilds } from '@simple-agent-manager/app-deployment';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
 
@@ -33,6 +34,7 @@ export async function confirmManualNodeDeletionRoute(c: Context<{ Bindings: Env 
   const owned = await requireNodeOwnership(c, nodeId);
   if (!owned) throw errors.notFound('Node');
 
+  await assertNoReservedCloudflareBuilds(db, { nodeId });
   const strandedTasks = await listStrandedNodeTasks(c.env, nodeId);
   const { node, runtimeTerminationConfirmedAt, operatorProof } = await recordManualNodeDeletion(
     db,

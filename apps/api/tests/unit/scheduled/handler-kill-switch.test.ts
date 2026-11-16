@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CAPACITY_POOL_CONTINUATION_CRON } from '../../../src/services/capacity-pool-refresh-defaults';
+
 const {
+  capacityPoolContinuationMock,
   capacityPoolReconciliationMock,
   enabledMock,
   isolateMock,
@@ -10,6 +13,7 @@ const {
   providerOrphanMock,
   persistErrorMock,
 } = vi.hoisted(() => ({
+  capacityPoolContinuationMock: vi.fn(),
   capacityPoolReconciliationMock: vi.fn(),
   enabledMock: vi.fn(),
   isolateMock: vi.fn(async () => undefined),
@@ -39,6 +43,9 @@ vi.mock('../../../src/scheduled/session-sleep-lifecycle-repair', () => ({
 vi.mock('../../../src/scheduled/capacity-pool-reconciliation', () => ({
   runScheduledCapacityPoolReconciliation: capacityPoolReconciliationMock,
 }));
+vi.mock('../../../src/scheduled/capacity-pool-continuation', () => ({
+  runScheduledCapacityPoolContinuations: capacityPoolContinuationMock,
+}));
 vi.mock('../../../src/scheduled/provider-orphan-reconciliation', () => ({
   runProviderOrphanReconciliation: providerOrphanMock,
 }));
@@ -59,7 +66,10 @@ const context = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 const env = { DATABASE: {}, OBSERVABILITY_DATABASE: {}, KV: {} } as never;
 
 describe('scheduled operational sweep kill switch', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    isolateMock.mockImplementation(async () => undefined);
+  });
 
   it('stops every operational sweep while disabled', async () => {
     enabledMock.mockResolvedValue(false);
@@ -74,6 +84,79 @@ describe('scheduled operational sweep kill switch', () => {
     });
   });
 
+  it('applies the same operational brake to the one-minute continuation', async () => {
+    enabledMock.mockResolvedValue(false);
+    isolateMock.mockImplementation(async (_name, callback) => callback());
+
+    await scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context);
+
+    expect(enabledMock).toHaveBeenCalledWith(env, 'cron');
+    expect(isolateMock.mock.calls.map(([name]) => name)).toEqual(['capacity_pool_continuation']);
+    expect(capacityPoolContinuationMock).not.toHaveBeenCalled();
+    expect(capacityPoolReconciliationMock).not.toHaveBeenCalled();
+    expect(context.waitUntil).not.toHaveBeenCalled();
+    expect(logInfoMock).toHaveBeenCalledWith('cron.skipped_disabled', {
+      cron: CAPACITY_POOL_CONTINUATION_CRON,
+      type: 'capacity-pool-continuation',
+      switch: 'cron',
+    });
+  });
+
+  it('contains a failed one-minute kill-switch read and records the failed tick instead of success', async () => {
+    enabledMock.mockRejectedValue(new Error('Kill switch unavailable'));
+    isolateMock.mockImplementation(async (_name, callback) => {
+      try {
+        return await callback();
+      } catch {
+        return undefined;
+      }
+    });
+    await expect(
+      scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context)
+    ).resolves.toBeUndefined();
+    expect(capacityPoolContinuationMock).not.toHaveBeenCalled();
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        type: 'capacity-pool-continuation',
+        resumed: null,
+        failed: 1,
+      })
+    );
+  });
+
+  it('reports one-minute continuation outcomes without running unrelated sweeps', async () => {
+    enabledMock.mockResolvedValue(true);
+    capacityPoolContinuationMock.mockResolvedValue({ resumed: 3, failed: 1 });
+    isolateMock.mockImplementation(async (_name, callback) => callback());
+    await scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context);
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        type: 'capacity-pool-continuation',
+        resumed: 3,
+        failed: 1,
+      })
+    );
+    expect(capacityPoolReconciliationMock).not.toHaveBeenCalled();
+  });
+
+  it('dispatches only the isolated catalog continuation on the one-minute trigger', async () => {
+    enabledMock.mockResolvedValue(true);
+
+    await scheduled({ cron: CAPACITY_POOL_CONTINUATION_CRON } as ScheduledController, env, context);
+
+    expect(isolateMock.mock.calls.map(([name]) => name)).toEqual(['capacity_pool_continuation']);
+    const callback = isolateMock.mock.calls[0]?.[1];
+    expect(callback).toEqual(expect.any(Function));
+    await callback?.();
+    expect(capacityPoolContinuationMock).toHaveBeenCalledExactlyOnceWith(env);
+    expect(capacityPoolReconciliationMock).not.toHaveBeenCalled();
+    expect(sessionSleepMock).not.toHaveBeenCalled();
+    expect(sessionSleepLifecycleRepairMock).not.toHaveBeenCalled();
+    expect(context.waitUntil).not.toHaveBeenCalled();
+  });
+
   it('resumes the complete sweep block after re-enable', async () => {
     enabledMock.mockResolvedValue(true);
 
@@ -81,6 +164,7 @@ describe('scheduled operational sweep kill switch', () => {
 
     expect(isolateMock).toHaveBeenCalled();
     const sweepNames = isolateMock.mock.calls.map(([name]) => name);
+    expect(sweepNames).not.toContain('capacity_pool_continuation');
     expect(sweepNames).toContain('deployment_publish_jobs');
     expect(sweepNames).toContain('node_cleanup');
     expect(sweepNames).toContain('capacity_pool_reconciliation');

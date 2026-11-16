@@ -81,6 +81,16 @@ export const PROJECT_CREATE_CONFIG_STALE_TIME_MS = resolveDurationMs(
 );
 
 /**
+ * Insights · Flow (`GET /api/projects/:projectId/insights/flow`): counts over 7 to 90 days,
+ * which move slowly. Past this the page refetches in the background without hiding the numbers.
+ */
+const DEFAULT_INSIGHTS_STALE_TIME_MS = 300_000;
+export const INSIGHTS_STALE_TIME_MS = resolveDurationMs(
+  import.meta.env.VITE_INSIGHTS_STALE_TIME_MS,
+  DEFAULT_INSIGHTS_STALE_TIME_MS
+);
+
+/**
  * Platform capabilities (`GET /api/config/platform-capabilities`): which platform services the
  * installation has. They change only when the installation is reconfigured.
  */

@@ -1,10 +1,4 @@
-export {
-  classifyHost,
-  type HostClass,
-  isAcceptableOperatorEndpoint,
-  isForbiddenEndpointHost,
-  isPrivateNetworkHost,
-} from './classify';
+export { classifyHost, type HostClass } from './classify';
 export {
   assertOutboundUrl,
   DEFAULT_OUTBOUND_MAX_REDIRECTS,
@@ -14,3 +8,4 @@ export {
   type OutboundRefusalReason,
   OutboundRequestRefusedError,
 } from './guarded-fetch';
+export { isAcceptableOperatorEndpoint, isForbiddenEndpointHost, isPrivateNetworkHost } from './operator-endpoint';

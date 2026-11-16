@@ -108,6 +108,6 @@ The 2026-09-26 audit found two task-status defects:
 
 ## References
 
-- `apps/api/.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`
+- `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`
 - SAM idea `01KZNGJG1DCH8DBC835Y0272P4`
 - `tasks/archive/2026-09-14-stuck-task-sweep-preserves-sleeping-conversations.md`

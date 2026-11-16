@@ -1,11 +1,18 @@
 /**
  * The admin setting `outbound.maxRedirects` (admin-settings-outbound-definitions.ts) for callers
- * of the guarded fetch (lib/network-hosts) that do not already read it in a settings batch.
+ * of `guardedFetch` that do not already read it in a settings batch.
  */
+import {
+  DEFAULT_OUTBOUND_MAX_REDIRECTS,
+  MAX_OUTBOUND_REDIRECTS,
+} from '@simple-agent-manager/worker-core';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { DEFAULT_OUTBOUND_MAX_REDIRECTS, MAX_OUTBOUND_REDIRECTS } from '../lib/network-hosts';
 import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
+
+/** Hop limit when the setting cannot be read: refuse every redirect rather than guess. */
+const UNREADABLE_SETTING_MAX_REDIRECTS = 0;
 
 /** A resolved `outbound.maxRedirects` value, or the default when it is absent or out of range. */
 export function outboundMaxRedirectsValue(value: unknown): number {
@@ -18,8 +25,10 @@ export function outboundMaxRedirectsValue(value: unknown): number {
 }
 
 /**
- * The redirect hop limit for a guarded fetch. When settings cannot be read the default applies:
- * every hop is still re-validated, so the default is a bound, not an opening.
+ * The redirect hop limit for a guarded fetch. Settings are read through the per-isolate admin
+ * settings cache, so this costs no I/O on a warm isolate. When settings cannot be read the
+ * strictest limit applies (0: no redirect is followed), so an unreadable setting can never
+ * loosen what an admin configured; the guard itself never falls back to an unguarded fetch.
  */
 export async function resolveOutboundMaxRedirects(env: Env): Promise<number> {
   try {
@@ -28,8 +37,8 @@ export async function resolveOutboundMaxRedirects(env: Env): Promise<number> {
   } catch (err) {
     log.warn('outbound.max_redirects_setting_unreadable', {
       error: err instanceof Error ? err.message : String(err),
-      fallback: DEFAULT_OUTBOUND_MAX_REDIRECTS,
+      fallback: UNREADABLE_SETTING_MAX_REDIRECTS,
     });
-    return DEFAULT_OUTBOUND_MAX_REDIRECTS;
+    return UNREADABLE_SETTING_MAX_REDIRECTS;
   }
 }

@@ -131,10 +131,12 @@ export function isHostedGitRemote(env: Pick<Env, 'BASE_DOMAIN'>, remote: string)
  * through Caddy, no egress-fence exception). Anything else uses the global fetch.
  */
 export function artifactsRemoteFetch(env: BackendEnv): typeof fetch {
+  // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- SAM creates the repository remote URLs supplied by its Artifacts backend
   if (!isLocalHostedGitActive(env)) return fetch;
   return async (input, init) => {
     const request = new Request(input, init);
     if (!isHostedGitRemote(env, request.url) || !env.DATABASE || !env.ENCRYPTION_KEY) {
+      // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- SAM creates the repository remote URLs supplied by its Artifacts backend
       return fetch(request);
     }
     const response = await handleHostedGitRequest(

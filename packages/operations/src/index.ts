@@ -63,6 +63,85 @@ export {
   validateIdeaStatusTransition,
 } from './idea-transitions';
 export { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from './idea-update-core';
+export {
+  type AgentAskInput,
+  AgentAskInputSchema,
+  AgentCancelInputSchema,
+  type AgentFileResult,
+  type AgentLinkInput,
+  type AgentReviewInput,
+  AgentReviewInputSchema,
+  AgentUpdateInputSchema,
+  cancelAgentAsk,
+  fileAgentAsk,
+  fileAgentReview,
+  updateAgentAsk,
+} from './inbox-agent-core';
+export {
+  type AgentInboxSource,
+  type AgentListInput,
+  findSimilarAsks,
+  getAgentAsk,
+  listAgentAsks,
+  titleSimilarity,
+} from './inbox-agent-reads';
+export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
+export { getInboxItem, resolveInboxItem } from './inbox-item-core';
+export { countInbox, listInbox } from './inbox-list-core';
+export {
+  inboxOperations,
+  samInboxAnswer,
+  samInboxArchive,
+  samInboxAskCreate,
+  samInboxCount,
+  samInboxItemGet,
+  samInboxList,
+} from './inbox-operations';
+export {
+  nextQuestionReminderAt,
+  questionReminderFractions,
+  questionSchedule,
+  questionUndeliveredExtension,
+} from './inbox-question-schedule';
+export { inboxTitle } from './inbox-rows';
+export { defaultInboxLimits, getInboxLimits, type InboxLimits } from './inbox-settings';
+export { INBOX_SETTINGS, type InboxSettingName } from './inbox-settings-definition';
+export {
+  answerInboxItem,
+  archiveInboxItem,
+  type InboxAnswerInput,
+  loadAskNoticeRow,
+  notifyClosedAsk,
+} from './inbox-write-core';
+export { projectFlow, type ProjectFlowInput } from './insights-flow';
+export {
+  getInsightsFlowLimits,
+  INSIGHTS_FLOW_SETTINGS,
+  type InsightsFlowLimits,
+  type InsightsFlowSettingName,
+} from './insights-flow-settings';
+export {
+  DEFAULT_PHASE_STATS_SAMPLE_LIMIT,
+  DEFAULT_PHASE_STATS_WINDOW_DAYS,
+  DEFAULT_PHASE_TIMING_LIST_LIMIT,
+  listPhaseTimings,
+  type ListPhaseTimingsInput,
+  MAX_PHASE_STATS_PHASES,
+  MAX_PHASE_STATS_SAMPLE_LIMIT,
+  MAX_PHASE_STATS_WINDOW_DAYS,
+  MAX_PHASE_TIMING_LIST_LIMIT,
+  nearestRankPercentile,
+  type PhaseDurationStat,
+  phaseDurationStats,
+  type PhaseDurationStatsInput,
+  type PhaseDurationStatsResult,
+  type PhaseTimingRow,
+} from './insights-phase-timings';
+export { runReceipt, type RunReceiptInput } from './insights-receipt';
+export {
+  INSIGHTS_RECEIPT_SETTINGS,
+  type InsightsReceiptSettingName,
+} from './insights-receipt-settings-definition';
 export { getPlatformOperationLimits } from './limits';
 export {
   getFileContext,
@@ -104,10 +183,20 @@ export {
   samTasksList,
 } from './platform-operations';
 export { type ProfileAccountBinding } from './port-types';
-export { type OperationPorts, type ProjectEventErrorKind } from './ports';
+export {
+  type InboxAskAnnouncement,
+  type InboxAskNoticeOutcome,
+  type InboxAskNoticeRow,
+  type InboxAttentionMarker,
+  type OperationInboxPort,
+  type OperationPorts,
+  type ProjectEventErrorKind,
+} from './ports';
+export { projectOverviewGet, type ProjectOverviewInput } from './project-overview';
 export {
   ensurePullRequest,
   getPullRequestStates,
+  openingHeadExistsSql,
   parseProjectPullRequestUrl,
   type PullRequestSnapshot,
   upsertPullRequestSnapshot,

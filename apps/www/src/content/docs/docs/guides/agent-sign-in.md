@@ -93,6 +93,11 @@ Then set one value, `AGENT_SIGN_IN_TRUST`, on the test instance:
 | `jwksTimeoutSeconds`      | no       | Timeout for fetching the issuer's public keys, `1`–`30`. Default `5`.                                                                                                                 |
 | `clockToleranceSeconds`   | no       | Allowed clock difference between the installations, `0`–`300`. Default `30`.                                                                                                          |
 
+SAM fetches the issuer's public keys itself, over HTTPS to a public host only, without following
+redirects (`services/agent-sign-in/verify.ts`). An issuer on a loopback, private or metadata
+address is refused: sign-ins answer `503 ISSUER_KEYS_UNAVAILABLE` and the Worker logs
+`agent_sign_in.issuer_keys_refused`.
+
 Unknown fields, a missing field or an invalid value switch the feature off and log
 `agent_sign_in.config_invalid`. A typo can never widen what is allowed.
 

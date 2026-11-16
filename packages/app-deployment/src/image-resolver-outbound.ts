@@ -142,7 +142,7 @@ function validateOutboundUrl(input: string | URL, kind: OutboundUrlKind): URL {
   if (hostname.includes('%')) {
     throw new Error(`Unsafe ${kind} URL rejected: encoded hostnames are not allowed.`);
   }
-  // Shared classifier (lib/network-hosts): only public hosts are registry endpoints.
+  // Shared classifier (classifyHost, worker-core network-hosts): only public hosts are registry endpoints.
   if (classifyHost(hostname) !== 'public') {
     throw new Error(
       `Unsafe ${kind} URL rejected: host ${hostname} is not a public registry endpoint.`

@@ -92,6 +92,75 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe('publish job atomic guards on SQLite', () => {
+  it.each([
+    ['starting', 'builder_start', 'context_ready', 'context_ready'],
+    ['building', 'compose_build', 'validating', 'compose_config'],
+    ['recording_release', 'release_submission', 'uploading', 'upload_archive'],
+    ['uploading', 'artifact_complete', 'uploading', 'artifact_init'],
+    ['starting', 'builder_start', undefined, 'context_ready'],
+  ])(
+    'atomically rejects backward Cloudflare progress %s/%s to %s/%s',
+    async (from, step, to, incomingStep) => {
+      seed();
+      sqlite
+        .prepare("UPDATE deployment_publish_jobs SET executor='cloudflare',status=?,current_step=?")
+        .run(from, step);
+      const before = row();
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          status: to,
+          currentStep: incomingStep,
+        })
+      ).toBe(false);
+      expect(row()).toEqual(before);
+      expect(
+        sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()
+      ).toEqual({ n: 0 });
+    }
+  );
+  it('allows in-order progress, including the export/upload loop for two services', async () => {
+    seed('job', 'context_ready');
+    sqlite
+      .prepare(
+        "UPDATE deployment_publish_jobs SET executor='cloudflare',current_step='context_ready'"
+      )
+      .run();
+    for (const [status, currentStep] of [
+      ['starting', 'builder_start'],
+      ['starting', 'builder_ready'],
+      ['validating', 'compose_config'],
+      ['building', 'compose_build'],
+      ['uploading', 'artifact_init'],
+      ['exporting', 'docker_save'],
+      ['uploading', 'upload_archive'],
+      ['exporting', 'docker_save'],
+      ['uploading', 'upload_archive'],
+      ['uploading', 'artifact_complete'],
+      ['recording_release', 'release_submission'],
+      ['succeeded', 'complete'],
+    ]) {
+      expect(await appendDeploymentPublishJobEvent(db(), { ...event, status, currentStep })).toBe(
+        true
+      );
+      expect(row()).toMatchObject({ status, current_step: currentStep });
+    }
+  });
+
+  it.each([
+    { status: undefined, currentStep: null },
+    { status: 'constructor', currentStep: undefined },
+    { status: 'building', currentStep: '__proto__' },
+    { status: 'toString', currentStep: 'compose_build' },
+  ])('rejects invalid or clearing Cloudflare progress without throwing: %j', async (incoming) => {
+    seed();
+    sqlite.exec(
+      "UPDATE deployment_publish_jobs SET executor='cloudflare',current_step='compose_build'"
+    );
+    const before = row();
+    expect(await appendDeploymentPublishJobEvent(db(), { ...event, ...incoming })).toBe(false);
+    expect(row()).toEqual(before);
+  });
   it.each([undefined, 'building'])(
     'rejects terminal flag with non-terminal status %s without writes',
     async (status) => {
@@ -362,5 +431,109 @@ describe('publish job atomic guards on SQLite', () => {
     ).toBe(false);
     sqlite.exec('UPDATE deployment_publish_jobs SET context_shadow=0');
     expect(await release('owner-release')).toBe(true);
+  });
+});
+
+describe('Cloudflare queue and attempt fences', () => {
+  it('does not stall queued context_ready jobs but enforces the absolute deadline', async () => {
+    seed('queued', 'context_ready', recent, old, old);
+    expect(await failExpiredDeploymentPublishJobs(db(), settings, now)).toHaveLength(0);
+    expect(
+      await failExpiredDeploymentPublishJobs(db(), settings, now + settings.deadlineMs)
+    ).toHaveLength(1);
+  });
+  it('atomically rejects an old attempt without history or state mutations', async () => {
+    seed();
+    sqlite.exec("UPDATE deployment_publish_jobs SET executor='cloudflare'");
+    expect(
+      await appendDeploymentPublishJobEvent(db(), {
+        ...event,
+        expectedAttempt: 2,
+        expectedExecutor: 'cloudflare',
+      })
+    ).toBe(false);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()).toEqual(
+      { n: 0 }
+    );
+    expect(
+      await appendDeploymentPublishJobEvent(db(), {
+        ...event,
+        expectedAttempt: 1,
+        expectedExecutor: 'cloudflare',
+      })
+    ).toBe(true);
+  });
+});
+
+describe('source collector terminal authority ends at context handoff', () => {
+  for (const status of [
+    'context_ready',
+    'starting',
+    'building',
+    'uploading',
+    'recording_release',
+  ]) {
+    it(`rejects delayed source failure in ${status}, allows the builder verdict`, async () => {
+      seed('job', status);
+      sqlite
+        .prepare("UPDATE deployment_publish_jobs SET executor='cloudflare',context_shadow=0")
+        .run();
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          sourceCollector: true,
+          status: 'failed',
+          currentStep: 'source_failed',
+          terminal: true,
+        })
+      ).toBe(false);
+      expect(row().status).toBe(status);
+      expect(
+        sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()
+      ).toEqual({ n: 0 });
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          expectedExecutor: 'cloudflare',
+          status: 'failed',
+          terminal: true,
+        })
+      ).toBe(true);
+    });
+  }
+  for (const status of ['queued', 'collecting'])
+    it(`keeps prehandoff source failure in ${status}`, async () => {
+      seed('job', status);
+      sqlite
+        .prepare("UPDATE deployment_publish_jobs SET executor='cloudflare',context_shadow=0")
+        .run();
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          sourceCollector: true,
+          status: 'failed',
+          terminal: true,
+        })
+      ).toBe(true);
+    });
+  it('retains legacy and shadow source failures', async () => {
+    for (const [id, executor, shadow] of [
+      ['node', 'node', 0],
+      ['shadow', 'cloudflare', 1],
+    ] as const) {
+      seed(id);
+      sqlite
+        .prepare('UPDATE deployment_publish_jobs SET executor=?,context_shadow=? WHERE id=?')
+        .run(executor, shadow, id);
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          publishJobId: id,
+          sourceCollector: true,
+          status: 'failed',
+          terminal: true,
+        })
+      ).toBe(true);
+    }
   });
 });

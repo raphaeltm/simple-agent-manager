@@ -10,13 +10,13 @@ import {
   DIALECT_VALUES,
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
+import { assertOutboundUrl } from '@simple-agent-manager/worker-core';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { assertOutboundUrl } from '../lib/network-hosts';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { requireApproved, requireAuth } from '../middleware/auth';

@@ -622,14 +622,14 @@ describe('ideas routes', () => {
    *
    * The page above seeds 100 ideas with NO linked chats, so `readSessionTasks`,
    * `readAssociatedPullRequests` and `readAgentProfileNames` never fire in it — they are
-   * guarded on `sessionTaskIds.length > 0`. A busy project's ideas mostly do have a chat, and
-   * those three reads chunk at 96 task ids, so they are where the count could start growing.
-   * This seeds more distinct linked tasks than one chunk holds, which is the case a
-   * "realistic" fixture would have missed by landing under the boundary.
+   * guarded on `sessionTaskIds.length > 0`. A busy project's ideas mostly do have a chat, so
+   * those three reads are where the count could start growing. Each passes its ids as one
+   * `json_each(?)` bind, so this seeds more distinct linked tasks than the 100-parameter bind
+   * ceiling allows, which a "realistic" fixture would have missed by landing under it.
    */
   it('stays batched when every idea on the page has linked work', async () => {
     const ideaCount = 100;
-    // 2 chats each: 200 distinct task ids, so the 96-per-query chunking runs three times.
+    // 2 chats each: 200 distinct task ids, past the 100-parameter bind ceiling.
     const snapshots: Record<string, unknown> = {};
     for (let index = 0; index < ideaCount; index += 1) {
       const ideaId = `idea-${index}`;
@@ -688,10 +688,10 @@ describe('ideas routes', () => {
 
     // Still one Durable Object call for the whole page.
     expect(mocks.snapshotCalls).toHaveLength(1);
-    // The three linkage reads chunk at 96 ids: 200 distinct task ids is 3 chunks each for
-    // `readSessionTasks` and `readAssociatedPullRequests`, plus 1 for the single profile id.
-    // Still a fixed handful, and still nothing per idea — 100 ideas would otherwise be 100+.
-    expect(queries.length).toBeLessThanOrEqual(20);
+    // The three linkage reads are one statement each, whatever the number of ids
+    // (`readSessionTasks`, `readAssociatedPullRequests`, `readAgentProfileNames`). Still a fixed
+    // handful, and nothing per idea: 100 ideas would otherwise be 100+.
+    expect(queries.length).toBeLessThanOrEqual(10);
     expect(queries.length).toBeLessThan(ideaCount);
   });
 

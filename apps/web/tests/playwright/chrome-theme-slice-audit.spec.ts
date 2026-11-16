@@ -123,10 +123,13 @@ async function screenshot(page: Page, name: string) {
 }
 
 async function openNotifications(page: Page) {
-  const bell = page.getByRole('button', { name: /notifications/i }).first();
-  await expect(bell).toBeVisible();
-  await bell.click();
-  await expect(page.getByRole('dialog', { name: 'Notifications' })).toBeVisible();
+  // The inbox icon took the bell's slot: a quick view on desktop, the Inbox page on a phone.
+  const inbox = page.getByRole('button', { name: /^Inbox/ }).first();
+  await expect(inbox).toBeVisible();
+  await inbox.click();
+  await expect(
+    page.getByRole('dialog', { name: 'Inbox quick view' }).or(page.getByTestId('inbox-page'))
+  ).toBeVisible();
 }
 
 async function openCommandPalette(page: Page) {

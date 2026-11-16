@@ -325,13 +325,13 @@ describe('Project chat — switching between chats', () => {
     expect(switched!.conversation).not.toContain('Alpha answer one');
     expect(screen.queryByText('Alpha answer one')).not.toBeInTheDocument();
 
-    // The cached copy is reconciled in the background, asking only for rows
-    // newer than its newest row — even though it is well inside staleTime.
+    // The cached copy is reconciled in the background, overlapping its newest row
+    // to refresh content appended under its stable ID — even though it is well inside staleTime.
     await waitFor(() =>
       expect(mocks.getChatSession).toHaveBeenCalledWith(
         PROJECT_ID,
         BRAVO.id,
-        expect.objectContaining({ after: '[2000,2000,"b1"]' })
+        expect.objectContaining({ after: '[2000,1999,"b1"]' })
       )
     );
     expect(screen.getByText('Bravo cached answer')).toBeInTheDocument();

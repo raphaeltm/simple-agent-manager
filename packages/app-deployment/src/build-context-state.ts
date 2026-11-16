@@ -1,9 +1,10 @@
 import { ulid } from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, notInArray, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import { BUILD_CONTEXT_PREFIX } from './build-context-defaults';
+import { PUBLISH_JOB_TERMINAL_STATUSES } from './deployment-publish-jobs';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 export interface BuildContextOwner {
@@ -18,6 +19,7 @@ export interface BuildContextDescriptor {
   sizeBytes: number;
   sha256: string;
   durationMs?: number;
+  projectName?: string;
 }
 export function buildContextKey(owner: BuildContextOwner): string {
   const parts = [owner.projectId, owner.environmentId, owner.id];
@@ -71,7 +73,8 @@ export async function completeBuildContext(
       eq(j.status, 'collecting'),
       eq(j.contextR2Key, buildContextKey(owner)),
       eq(j.contextBytes, descriptor.sizeBytes),
-      eq(j.contextSha256, descriptor.sha256)
+      eq(j.contextSha256, descriptor.sha256),
+      sql`coalesce(${j.contextProjectName}, '') = ${descriptor.projectName ?? ''}`
     )
   );
 }
@@ -126,11 +129,12 @@ async function transitionContext(
     update.contextR2Key = buildContextKey(owner);
     update.contextBytes = descriptor.sizeBytes;
     update.contextSha256 = descriptor.sha256;
+    update.contextProjectName = descriptor.projectName ?? null;
   } else update.queuedAt = now;
   const [, rows] = await db.batch([history, db.update(j).set(update).where(predicate).returning()]);
   if (rows[0]) return { ...rows[0], replayed: false };
   // The response can be lost after this transaction commits. Recognize only
-  // the exact receipt in the operation's destination state; never revive a
+  // the exact receipt in the operation's destination state, or its admitted forward state; never revive a
   // canceled/terminal job or reissue an upload after completion. Replays do
   // not update timestamps or insert duplicate history.
   const [receipt] = await db
@@ -139,10 +143,19 @@ async function transitionContext(
     .where(
       and(
         ownerPredicate(owner),
-        eq(j.status, status),
+        status === 'context_ready'
+          ? or(
+              eq(j.status, status),
+              and(
+                isNotNull(j.executorInstanceId),
+                notInArray(j.status, [...PUBLISH_JOB_TERMINAL_STATUSES])
+              )
+            )
+          : eq(j.status, status),
         eq(j.contextR2Key, buildContextKey(owner)),
         eq(j.contextBytes, descriptor.sizeBytes),
-        eq(j.contextSha256, descriptor.sha256)
+        eq(j.contextSha256, descriptor.sha256),
+        sql`coalesce(${j.contextProjectName}, '') = ${descriptor.projectName ?? ''}`
       )
     )
     .limit(1);

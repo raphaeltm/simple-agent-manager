@@ -8,6 +8,8 @@ import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+import samOutboundFetchBaseline from './packages/eslint-plugin-sam/outbound-fetch-baseline.json' with { type: 'json' };
+import { OUTBOUND_FETCH_GUARD_FILES } from './packages/eslint-plugin-sam/outbound-fetch-scope.js';
 import samPlugin from './packages/eslint-plugin-sam/src/index.js';
 
 const typescriptFiles = ['**/*.{ts,tsx,mts,cts}'];
@@ -505,6 +507,20 @@ export default defineConfig([
     files: ['apps/api/src/vendor/dgit/**/*.ts'],
     rules: {
       '@typescript-eslint/ban-ts-comment': 'off',
+    },
+  },
+  {
+    // Outbound requests from Worker source must go through guardedFetch (F6, landing slice L5a,
+    // tasks/active/2026-11-15-l5-outbound-fetch-guard.md). Stage: ratchet. Every pre-existing
+    // global-fetch site is held by the per-file baseline; any new unacknowledged site fails lint,
+    // and a file whose count drops must lower its baseline. See
+    // packages/eslint-plugin-sam/docs/rules/no-unguarded-outbound-fetch.md.
+    files: OUTBOUND_FETCH_GUARD_FILES,
+    rules: {
+      'sam/no-unguarded-outbound-fetch': [
+        'error',
+        { repoRoot: import.meta.dirname, baseline: samOutboundFetchBaseline },
+      ],
     },
   },
   {

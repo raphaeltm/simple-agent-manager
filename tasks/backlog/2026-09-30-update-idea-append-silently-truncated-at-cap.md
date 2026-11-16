@@ -74,5 +74,5 @@ those records vanish, and neither the agent nor the reader can tell.
 ## References
 
 - `.claude/rules/38-agent-feedback-and-memory.md` (agents append evidence to Ideas)
-- `apps/api/.claude/rules/65-capped-selection-must-rank-and-disclose.md` (a capped result must
+- `.claude/rules/65-capped-selection-must-rank-and-disclose.md` (a capped result must
   disclose what it dropped) applies here by analogy

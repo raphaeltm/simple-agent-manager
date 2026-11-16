@@ -1,3 +1,4 @@
+import { CHAT_MESSAGE_APPEND_CAPABILITY } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -58,8 +59,11 @@ export interface UseProjectWebSocketReturn {
 /**
  * Project-wide WebSocket hook for sidebar session list updates.
  *
- * Connects WITHOUT a sessionId query param so the socket is "untagged" and
- * receives ALL events broadcast by the ProjectData DO. Session lifecycle
+ * Connects WITHOUT a sessionId query param, so it is a project socket: it
+ * receives every non-transcript event for all sessions (lifecycle, attention,
+ * comments, access, activity) and never transcript frames (`message.new`,
+ * `messages.batch`, `message.append`); see
+ * `packages/project-data/src/do/session-sockets.ts`. Session lifecycle
  * events are forwarded as typed deltas via `onSessionEvent` for incremental
  * state updates. On reconnect, `onReconnected` is called so the consumer
  * can do a full refetch to re-sync.
@@ -119,7 +123,12 @@ export function useProjectWebSocket({
     }
 
     const API_URL = import.meta.env.VITE_API_URL || '';
-    const wsUrl = API_URL.replace(/^http/, 'ws') + `/api/projects/${projectId}/sessions/ws`;
+    // This socket reads lifecycle/comment deltas, never transcript frames. The
+    // capability no longer affects merging for project sockets; it is kept so a
+    // Worker from before that change does not switch merging off for this project.
+    const wsUrl =
+      API_URL.replace(/^http/, 'ws') +
+      `/api/projects/${projectId}/sessions/ws?messageAppend=${CHAT_MESSAGE_APPEND_CAPABILITY}`;
 
     try {
       const ws = new WebSocket(wsUrl);

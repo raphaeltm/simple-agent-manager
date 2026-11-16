@@ -3,7 +3,9 @@ import { CORE_SETTINGS } from './admin-settings-core-definitions';
 import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish-definitions';
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
 import { GCP_CATALOG_SETTINGS } from './admin-settings-gcp-catalog-definitions';
+import { INSTRUCTION_BUDGET_SETTINGS } from './admin-settings-instructions-definitions';
 import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
+import { MESSAGE_MERGE_SETTINGS } from './admin-settings-message-merge-definitions';
 import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
@@ -12,6 +14,7 @@ import { AI_PROXY_SETTINGS } from './ai-proxy-settings';
 import { llmEndpointSettingDefinitions } from './llm-endpoint-settings';
 import { SPEECH_ENDPOINT_SETTINGS } from './speech-endpoint-settings';
 import { STALLED_CLASSIFIER_ENDPOINT_SETTINGS } from './stalled-task-classifier-endpoint-settings';
+
 export {
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -28,6 +31,7 @@ export {
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
 const definitions = [
+  ...MESSAGE_MERGE_SETTINGS,
   ...DEPLOYMENT_PUBLISH_SETTINGS,
   ...CORE_SETTINGS,
   ...NODE_TUNNEL_SETTINGS,
@@ -41,6 +45,7 @@ const definitions = [
   ...AI_PROXY_SETTINGS,
   ...SPEECH_ENDPOINT_SETTINGS,
   ...STALLED_CLASSIFIER_ENDPOINT_SETTINGS,
+  ...INSTRUCTION_BUDGET_SETTINGS,
 ];
 
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(

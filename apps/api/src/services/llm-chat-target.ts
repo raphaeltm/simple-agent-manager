@@ -99,6 +99,7 @@ export function fetchChatTarget(
   init: RequestInit,
   url: string = target.url
 ): Promise<Response> {
+  // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- Cloudflare chooses the fixed Workers AI endpoint for this target
   if (isCloudflareChatTarget(target)) return fetch(url, init);
   return guardedFetch(url, init, {
     allowPrivateNetwork: target.allowPrivateNetwork,

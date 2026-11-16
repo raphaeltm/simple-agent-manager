@@ -8,7 +8,11 @@
  * Used by the GitLab API client (gitlab.ts) and the GitLab sign-in provider
  * (gitlab-login-provider.ts), so both refuse the same hosts.
  */
-import { classifyHost, OutboundRequestRefusedError } from '@simple-agent-manager/worker-core';
+import {
+  classifyHost,
+  OutboundDeadlineError,
+  OutboundRequestRefusedError,
+} from '@simple-agent-manager/worker-core';
 import { AppError } from '@simple-agent-manager/worker-core';
 
 /** One deadline for a whole GitLab call, redirect hops included (GITLAB_API_TIMEOUT_MS). */
@@ -55,10 +59,10 @@ export function assertGitLabHostAllowed(host: string, allowPrivateNetwork: boole
  * returned unchanged for the caller to rethrow.
  */
 export function gitLabRequestError(err: unknown): unknown {
-  if (!(err instanceof OutboundRequestRefusedError)) return err;
-  if (err.reason === 'deadline') {
+  if (err instanceof OutboundDeadlineError) {
     return new AppError(504, 'GITLAB_TIMEOUT', 'GitLab did not answer in time.');
   }
+  if (!(err instanceof OutboundRequestRefusedError)) return err;
   return new AppError(
     502,
     'GITLAB_REQUEST_REFUSED',

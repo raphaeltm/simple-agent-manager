@@ -262,6 +262,18 @@
       "reviewedAt": "2026-11-14T01:20:00.000Z",
       "expiresAt": "2026-12-14T01:20:00.000Z",
       "digests": ["3baab23fcd18d079d16ea924fd23f9846a7353b819614beeaf9fa2698251b2ee"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "PR 2760 registers the pre-migration message fixture Durable Object, shifting three previously reviewed test-only signing/encryption fixtures in apps/api/vitest.workers.config.ts by four lines. Verified full matched spans byte-identical to origin/main and each prior line-specific digest already reviewed; only the exact shifted digests are added.",
+      "owner": "security",
+      "reviewedAt": "2026-11-15T16:12:25.640Z",
+      "expiresAt": "2026-12-06T12:30:14.413Z",
+      "digests": [
+        "caec4310082d0b8549cf4445c9030ecdb8a23e98613f581e9050228cfe5582dc",
+        "e80c7e20e86a0c09d48491a9ad0f681a161185399834abf689c491cc58404d18",
+        "751da363c1e618b01b169097dbbc341d6dd0e3e2cceef8beaa5092403a04a45d"
+      ]
     }
   ]
 }

@@ -28,7 +28,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
-import { guardedFetch } from '../lib/network-hosts';
+import { guardedFetchWithDeadline } from '../lib/network-hosts';
 import { readResponseJson } from '../lib/runtime-validation';
 import { getTimeoutMs } from './fetch-timeout';
 import { untrustedGitLabAccountSubject } from './gitlab-sign-in-identity';
@@ -69,7 +69,7 @@ export async function fetchGitLabUserInfo(
   if (!accessToken) return null;
   let response: Response;
   try {
-    response = await guardedFetch(
+    response = await guardedFetchWithDeadline(
       `${config.host}/api/v4/user`,
       { headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' } },
       {

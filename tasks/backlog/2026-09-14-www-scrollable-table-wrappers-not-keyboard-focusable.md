@@ -56,3 +56,7 @@ For each `overflow-x: auto` wrapper around a `<table>`, add:
 ## Execute
 
 Execute this task using the /do skill.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2716 rewrote the three enterprise pages, removing 3 of the 8 wrappers. Still without `tabindex="0"`: `self-host/index.astro`, `compare/paseo.astro`, `layouts/BlogPost.astro`, `components/GitHubAppSetup.astro`, `components/placement/explorer.css`.

@@ -23,9 +23,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { continueCapacityPoolPublications } from '../../../src/scheduled/capacity-pool-continuation';
 import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/capacity-pool-reconciliation';
 import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
 import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
+import { capacityPoolRefreshSettings } from '../../../src/services/capacity-pool-refresh-settings';
 import { initialStatusForProviderOffering } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
@@ -52,7 +54,10 @@ import {
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
 import { listUserProviderCatalogSeeds } from '../../../src/services/provider-catalogs';
-import { applyCapacityPoolSchemaMigrations } from '../../helpers/capacity-pool-migrations';
+import {
+  applyCapacityPoolSchemaMigrations,
+  catalogPublicationMigrationSql,
+} from '../../helpers/capacity-pool-migrations';
 import { pickStarterMachines } from '../../helpers/capacity-pool-picks';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
@@ -60,7 +65,7 @@ let sqlite: Database.Database | null = null;
 const TEST_ENCRYPTION_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64');
 const originalFetch = globalThis.fetch;
 
-function createDb() {
+function createDb(options: { includeCatalogPublication?: boolean } = {}) {
   sqlite = new Database(':memory:');
   sqlite.pragma('foreign_keys = ON');
   sqlite.exec(`
@@ -211,7 +216,7 @@ function createDb() {
     );
   `);
   seedIdentity();
-  applyCapacityPoolSchemaMigrations(sqlite);
+  applyCapacityPoolSchemaMigrations(sqlite, options);
   return poolDb();
 }
 
@@ -785,7 +790,8 @@ describe('default capacity pool creation', () => {
           ...statement,
           bind(...values: unknown[]) {
             const bound = statement.bind(...values);
-            if (query.includes('INSERT INTO capacity_pool_candidates')) candidates.add(bound);
+            if (/INSERT INTO capacity_pool_candidate(?:s|_staging)/.test(query))
+              candidates.add(bound);
             return bound;
           },
         };
@@ -804,7 +810,7 @@ describe('default capacity pool creation', () => {
         offeringResolver: async () => manyLiveOfferings(100),
       }
     );
-    expect(batches).toEqual([200]);
+    expect(batches).toEqual([200, 2]); // Private chunk plus two bulk promotion statements.
     expect(result.user?.candidates).toHaveLength(100);
   });
 
@@ -1609,7 +1615,7 @@ describe('default capacity pool creation', () => {
     expectCpx62CatalogCandidate(expect.any(String));
   });
 
-  it('reports provider catalog failures while safely seeding a new source from static metadata', async () => {
+  it('reports provider catalog failures while keeping unvalidated static bootstrap metadata private', async () => {
     const db = createDb();
     const encrypted = await encrypt('live-hetzner-token', TEST_ENCRYPTION_KEY);
     seedUserCredential({
@@ -1636,16 +1642,17 @@ describe('default capacity pool creation', () => {
     expect(warningPayloads.length).toBeGreaterThan(0);
     expect(warningPayloads[0]).toContain('hetzner catalog API unavailable');
     expect(warningPayloads.join('\n')).not.toContain('live-hetzner-token');
-    // Seeded from static metadata, with nothing picked: nothing joins a pool on its own.
-    expect(result.user?.effectiveState).toBe('configured-empty');
+    // An unvalidated first fallback is visible in the editor but cannot certify bootstrap.
+    expect(result.user?.effectiveState).toBe('migration-pending');
     expect(
       getRows<{ provider_instance_catalog_source: string }>(`
         SELECT provider_instance_catalog_source
-        FROM capacity_pool_candidates
+        FROM capacity_pool_candidate_staging
         WHERE provider_instance_type = 'cx23'
         LIMIT 1
       `)[0]
     ).toEqual({ provider_instance_catalog_source: 'static' });
+    expect(getCount('capacity_pool_candidates')).toBe(0);
   });
 
   it('disables failed-refresh sources with no candidates when the backing credential is disabled', async () => {
@@ -1661,7 +1668,7 @@ describe('default capacity pool creation', () => {
       }),
     });
 
-    expect(failedRefresh.user?.effectiveState).toBe('configured-empty');
+    expect(failedRefresh.user?.effectiveState).toBe('migration-pending');
     expect(getCount('capacity_pool_candidates')).toBe(0);
     expect(
       sqlite
@@ -4166,11 +4173,19 @@ describe('default capacity pool creation', () => {
         ?.prepare(
           `
           UPDATE capacity_pools
-          SET configuration_state = ?, migration_state = CASE WHEN ? = 'migration-pending' THEN 'pending' ELSE 'complete' END
+          SET configuration_state = ?, migration_state = CASE WHEN ? = 'migration-pending' THEN 'pending' ELSE 'complete' END,
+              catalog_published_at = CASE WHEN ? = 'migration-pending' THEN NULL ELSE catalog_published_at END
           WHERE scope = 'user' AND owner_user_id = 'user-1'
         `
         )
-        .run(state, state);
+        .run(state, state, state);
+      if (state === 'migration-pending') {
+        sqlite
+          ?.prepare(
+            "UPDATE capacity_pool_refreshes SET state='pending',attempts=1,deadline_at=? WHERE scope='user'"
+          )
+          .run(Date.now() + 60_000);
+      }
       if (state === 'source-disabled') {
         sqlite?.prepare("UPDATE capacity_sources SET status = 'disabled'").run();
       } else {
@@ -4215,9 +4230,14 @@ describe('default capacity pool creation', () => {
     await pickStarterMachines(db as never);
     sqlite
       ?.prepare(
-        "UPDATE capacity_pools SET migration_state = 'pending', configuration_state = 'migration-pending' WHERE scope = 'user'"
+        "UPDATE capacity_pools SET migration_state = 'pending', configuration_state = 'migration-pending', catalog_published_at = NULL WHERE scope = 'user'"
       )
       .run();
+    sqlite
+      ?.prepare(
+        "UPDATE capacity_pool_refreshes SET state='pending',attempts=1,deadline_at=? WHERE scope='user'"
+      )
+      .run(Date.now() + 60_000);
 
     const selection = await resolveTaskStartCapacityPoolSelection(
       db as never,
@@ -5346,9 +5366,11 @@ describe('capacity pool review findings', () => {
 
       // Budget 0: one 200-row batch per pass, resuming from the durable cursor.
       expect((await refresh()).user?.pool.migrationState).toBe('pending');
-      expect(getCount('capacity_pool_candidates')).toBe(200);
+      expect(getCount('capacity_pool_candidates')).toBe(0);
+      expect(getCount('capacity_pool_candidate_staging')).toBe(200);
       expect((await refresh()).user?.pool.migrationState).toBe('pending');
-      expect(getCount('capacity_pool_candidates')).toBe(400);
+      expect(getCount('capacity_pool_candidates')).toBe(0);
+      expect(getCount('capacity_pool_candidate_staging')).toBe(400);
     });
 
     it('publishes in bounded passes, resumes across a restart, and only then marks missing', async () => {
@@ -5440,10 +5462,10 @@ describe('capacity pool review findings', () => {
         expect(result.user?.effectiveState).toBe(
           pass === 0 ? 'migration-pending' : 'configured-empty'
         );
-        expect(getCount('capacity_pool_candidates')).toBe(pass === 0 ? 200 : 270);
+        expect(getCount('capacity_pool_candidates')).toBe(pass === 0 ? 0 : 270);
         // Initial bounded publication still writes 200 then 70 rows. Later identical refreshes
         // remain ready without rewriting candidate rows just to advance refresh timestamps.
-        const expectedCandidateRefreshWrites = pass === 0 ? 200 : pass === 1 ? 70 : 0;
+        const expectedCandidateRefreshWrites = pass === 1 ? 270 : 0;
         expect(
           getCount(
             'capacity_pool_candidates',
@@ -5455,7 +5477,7 @@ describe('capacity pool review findings', () => {
             'capacity_pool_candidates',
             `provider_instance_catalog_last_seen_at = '${refreshedAt}'`
           )
-        ).toBe(expectedCandidateRefreshWrites);
+        ).toBe(pass === 1 ? 70 : 0);
         if (pass === 1) stableRevision = result.user?.pool.revision;
         if (pass > 1) expect(result.user?.pool.revision).toBe(stableRevision);
       }
@@ -5510,7 +5532,7 @@ describe('capacity pool review findings', () => {
               ...statement,
               bind(...values: unknown[]) {
                 const bound = statement.bind(...values);
-                if (query.includes('INSERT INTO capacity_pool_candidates'))
+                if (/INSERT INTO capacity_pool_candidate(?:s|_staging)/.test(query))
                   candidateStatements.add(bound);
                 return bound;
               },
@@ -5572,7 +5594,7 @@ describe('capacity pool review findings', () => {
           expect(newerResult.user?.effectiveState).toBe('configured-ready');
           expect(newerResult.user?.pool.revision).toBe(ready.user?.pool.revision);
         } else {
-          expect(newerResult.user?.effectiveState).toBe('migration-pending');
+          expect(newerResult.user?.effectiveState).toBe('configured-ready'); // Last committed catalog remains usable.
           const resumed = await ensureDefaultCapacityPoolsForExistingCredentials(
             poolDb() as never,
             { ...options, offeringResolver: async () => newerOfferings }
@@ -5698,7 +5720,7 @@ describe('capacity pool review findings', () => {
           .run(JSON.stringify(cursor), row.key);
         const result = await refresh();
         expect(result.user?.pool.migrationState).toBe(kind === 'legacy' ? 'complete' : 'pending');
-        expect(getCount('capacity_pool_candidates')).toBe(kind === 'legacy' ? 8 : 4);
+        expect(getCount('capacity_pool_candidates')).toBe(kind === 'legacy' ? 8 : 0);
         expect((await refresh()).user?.pool.migrationState).toBe('complete');
       }
     );
@@ -7303,5 +7325,872 @@ describe('pool provider order (idea 01M6NXTF2RQ5QXHM7YZ4ZF0XBK)', () => {
 
     expect(summary.user?.pool.sourceOrder ?? null).toBeNull();
     expect(summary.user?.candidates.length).toBeGreaterThan(0);
+  });
+});
+
+describe('durable catalog refresh continuation', () => {
+  async function interruptedCatalog() {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2031-01-01T00:00:00Z'));
+    createDb();
+    const token = await encrypt('bounded-staging-provider-token', TEST_ENCRYPTION_KEY);
+    seedUserCredential({
+      id: 'refresh-credential',
+      encryptedToken: token.ciphertext,
+      iv: token.iv,
+    });
+    const serverTypes = Array.from({ length: 5 }, (_, index) =>
+      hetznerServerType({
+        id: index + 1,
+        name: `cx${index + 1}3`,
+        description: `Machine ${index}`,
+        cores: 2,
+        memory: 4,
+        disk: 40,
+        hourlyGross: '0.0048',
+        monthlyGross: '3.99',
+      })
+    );
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            server_types: serverTypes,
+            meta: { pagination: { next_page: null } },
+          }),
+          { status: 200 }
+        )
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+    const env = {
+      ...catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+      CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE: '2',
+    } as Env;
+    sqlite!
+      .prepare('INSERT INTO platform_settings (key,value,updated_at) VALUES (?,?,?)')
+      .run('operations.capacityPoolPublishBudgetMs', '0', new Date().toISOString());
+    // A daily sweep has already happened; continuation must bypass that gate.
+    sqlite!
+      .prepare('INSERT INTO platform_settings (key,value,updated_at) VALUES (?,?,?)')
+      .run(
+        'capacityPools.scheduledReconciliation.lastRun.v1',
+        new Date().toISOString(),
+        new Date().toISOString()
+      );
+    const first = await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env,
+    });
+    expect(first.user?.effectiveState).toBe('migration-pending');
+    expect(getCount('capacity_pool_candidates')).toBe(0);
+    expect(getCount('capacity_pool_candidate_staging')).toBe(2);
+    return { env, fetchMock };
+  }
+
+  async function legacyInterruptedCatalog() {
+    const fixture = await interruptedCatalog();
+    await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env: fixture.env,
+      candidatePublishBudgetMs: 20_000,
+    });
+    await pickStarterMachines(poolDb() as never);
+    await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env: fixture.env,
+      candidatePublishBudgetMs: 20_000,
+    });
+    const lastSuccess = Date.now();
+    vi.setSystemTime(Date.now() + 60_000);
+    // Rollback: the older binary rewrites a live prefix but knows nothing about the
+    // completed durable work row or private staging left by the newer binary.
+    sqlite!.exec(`UPDATE capacity_pool_candidates SET provider_instance_price_hourly_micros=99
+      WHERE rowid IN (SELECT rowid FROM capacity_pool_candidates ORDER BY id LIMIT 6);
+      UPDATE capacity_pools SET migration_state='pending';
+      DELETE FROM capacity_pool_candidate_staging;`);
+    sqlite!
+      .prepare(
+        `UPDATE capacity_pool_refreshes SET state='complete', generation=6,
+      attempts=1, started_at=?, deadline_at=?, next_attempt_at=?, last_success_at=?`
+      )
+      .run(lastSuccess, lastSuccess + 120_000, lastSuccess, lastSuccess);
+    const cursor = getRows<{ key: string }>(
+      "SELECT key FROM platform_settings WHERE key LIKE 'capacityPools.candidatePublication.v1:%'"
+    )[0]!;
+    sqlite!
+      .prepare('UPDATE platform_settings SET value=?,updated_at=? WHERE key=?')
+      .run(
+        JSON.stringify({ digest: 'pre-atomic-catalog', published: 6, complete: false }),
+        new Date().toISOString(),
+        cursor.key
+      );
+    return { ...fixture, lastSuccess, cursorKey: cursor.key };
+  }
+
+  it.each(['complete', 'failed', 'expired'] as const)(
+    'quarantines an unfinished legacy live prefix with %s work before any adopter runs',
+    async (state) => {
+      await legacyInterruptedCatalog();
+      if (state !== 'complete')
+        sqlite!
+          .prepare(
+            `UPDATE capacity_pool_refreshes
+        SET state=?, deadline_at=?, next_attempt_at=?, last_error=?`
+          )
+          .run(
+            state === 'expired' ? 'pending' : 'failed',
+            Date.now() - 1,
+            Date.now() + 60_000,
+            'Retained actionable catalog error'
+          );
+      const before = getRows('SELECT * FROM capacity_pool_refreshes');
+      const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        labels: false,
+      });
+      expect(summary.user?.catalogRefreshPending).toBe(false);
+      expect(summary.user?.catalogPublished).toBe(false);
+      expect(summary.user?.diagnostics).toContain('legacy-catalog-publication-unfinished');
+      expect(summary.user?.effectiveState).toBe('catalog-unavailable');
+      expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(before);
+      expect(getCount('capacity_pool_candidate_staging')).toBe(0);
+    }
+  );
+
+  it.each(['pending', 'failed'] as const)(
+    'does not overwrite a newer %s owner at the adoption conflict',
+    async (state) => {
+      const { env } = await legacyInterruptedCatalog();
+      const now = Date.now();
+      // A newer owner wins after discovery but before the insert conflict resolves.
+      // Exercise the real conflict WHERE independently of the discovery predicate.
+      sqlite!.exec(`CREATE TEMP TRIGGER adoption_owner_race BEFORE INSERT ON capacity_pool_refreshes
+        BEGIN UPDATE capacity_pool_refreshes SET state='${state}',generation=99,attempts=3,
+          started_at=${now},deadline_at=${now + 120_000},next_attempt_at=${now + 60_000},
+          last_error='New owner error' WHERE pool_id=NEW.pool_id; END`);
+      await continueCapacityPoolPublications(
+        poolDb() as never,
+        env,
+        await capacityPoolRefreshSettings(),
+        Date.now() + 20_000
+      );
+      expect(
+        getRows(
+          'SELECT state,generation,attempts,started_at,deadline_at,next_attempt_at,last_error FROM capacity_pool_refreshes'
+        )
+      ).toEqual([
+        {
+          state,
+          generation: 99,
+          attempts: 3,
+          started_at: now,
+          deadline_at: now + 120_000,
+          next_attempt_at: now + 60_000,
+          last_error: 'New owner error',
+        },
+      ]);
+      expect(getCount('capacity_pool_candidate_staging')).toBe(0);
+    }
+  );
+
+  it.each([
+    ['finished cursor', JSON.stringify({ digest: 'legacy', published: 6, complete: true }), false],
+    ['malformed JSON', '{', false],
+    [
+      'noninteger prefix',
+      JSON.stringify({ digest: 'legacy', published: 1.5, complete: false }),
+      false,
+    ],
+    [
+      'invalid completion',
+      JSON.stringify({ digest: 'legacy', published: 6, complete: 'false' }),
+      false,
+    ],
+    ['wrong source key', JSON.stringify({ digest: 'legacy', published: 6, complete: false }), true],
+  ] as const)(
+    'ignores %s when detecting unfinished legacy publication',
+    async (_name, value, wrongSource) => {
+      const { env, cursorKey } = await legacyInterruptedCatalog();
+      sqlite!
+        .prepare('UPDATE platform_settings SET key=?,value=? WHERE key=?')
+        .run(wrongSource ? cursorKey + '-other-source' : cursorKey, value, cursorKey);
+      const before = getRows('SELECT * FROM capacity_pool_refreshes');
+      const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        labels: false,
+      });
+      expect(summary.user?.catalogPublished).toBe(true);
+      expect(summary.user?.diagnostics).not.toContain('legacy-catalog-publication-unfinished');
+      await continueCapacityPoolPublications(
+        poolDb() as never,
+        env,
+        await capacityPoolRefreshSettings(),
+        Date.now() + 20_000
+      );
+      expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(before);
+    }
+  );
+
+  it('quarantines known-temporary mirror-complete legacy work until point adoption', async () => {
+    const { env, fetchMock } = await legacyInterruptedCatalog();
+    sqlite!.exec("UPDATE capacity_pools SET migration_state='complete'");
+    const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      labels: false,
+    });
+    expect(summary.user?.catalogPublished).toBe(false);
+    expect(summary.user?.catalogRefreshPending).toBe(false);
+    expect(summary.user?.diagnostics).toContain('legacy-catalog-publication-unfinished');
+    const before = getRows('SELECT * FROM capacity_pool_refreshes');
+    const calls = fetchMock.mock.calls.length;
+    // Known temporary idle-only discovery boundary: Idea 01M7FN82782X6K04SEHF6JBY2E.
+    // Minute discovery stays indexed on pending pools, rather than scanning all pools.
+    await continueCapacityPoolPublications(
+      poolDb() as never,
+      env,
+      await capacityPoolRefreshSettings(),
+      Date.now() + 20_000
+    );
+    expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(before);
+    await resolveTaskStartCapacityPoolSelection(
+      poolDb() as never,
+      defaultTaskPlacement('legacy-read-only'),
+      { ensure: false, env }
+    );
+    expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(before);
+    const admitted = await resolveTaskStartCapacityPoolSelection(
+      poolDb() as never,
+      defaultTaskPlacement('legacy-admit'),
+      { env }
+    );
+    expect(admitted?.catalogRefreshPending).toBe(true);
+    expect(admitted?.catalogPublished).toBe(false);
+    expect(admitted?.candidates).toHaveLength(0);
+    expect(
+      getRows<{ state: string; generation: number; attempts: number }>(
+        'SELECT state,generation,attempts FROM capacity_pool_refreshes'
+      )
+    ).toEqual([{ state: 'pending', generation: 6, attempts: 0 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(calls);
+    await runScheduledCapacityPoolReconciliation({
+      ...env,
+      DATABASE: createSqliteD1WithBindLimit(sqlite!, 100),
+    });
+    expect(getCount('capacity_pool_candidate_staging')).toBe(2);
+    expect(
+      getRows<{ generation: number; attempts: number }>(
+        'SELECT generation,attempts FROM capacity_pool_refreshes'
+      )
+    ).toEqual([{ generation: 7, attempts: 1 }]);
+  });
+
+  it.each(['pending', 'failed', 'expired'] as const)(
+    'uses the winning %s refresh state when point adoption loses its conflict',
+    async (state) => {
+      const { env, fetchMock } = await legacyInterruptedCatalog();
+      sqlite!.exec("UPDATE capacity_pools SET migration_state='complete'");
+      const now = Date.now();
+      sqlite!
+        .exec(`CREATE TEMP TRIGGER adoption_point_owner_race BEFORE INSERT ON capacity_pool_refreshes
+        BEGIN UPDATE capacity_pool_refreshes SET state='${state === 'failed' ? 'failed' : 'pending'}',
+          generation=99,attempts=3,started_at=${now},
+          deadline_at=${state === 'expired' ? now - 1 : now + 120_000},
+          next_attempt_at=${now + 60_000},last_error='New owner error'
+          WHERE pool_id=NEW.pool_id; END`);
+      const calls = fetchMock.mock.calls.length;
+      const summary = await resolveEffectiveDefaultCapacityPoolSummary(poolDb() as never, {
+        userId: 'user-1',
+        ensure: true,
+        initializeOnly: true,
+        includeInstallation: false,
+        env,
+      });
+      expect(summary?.catalogPublished).toBe(false);
+      expect(summary?.catalogRefreshPending).toBe(state === 'pending');
+      expect(summary?.effectiveState).toBe(
+        state === 'pending' ? 'migration-pending' : 'catalog-unavailable'
+      );
+      expect(summary?.diagnostics).toContain('legacy-catalog-publication-unfinished');
+      expect(summary?.diagnostics).toContain(
+        state === 'pending'
+          ? 'configured-default-pool-migration-pending'
+          : state === 'failed'
+            ? 'catalog-refresh-failed'
+            : 'catalog-refresh-not-pending'
+      );
+      if (state === 'failed') expect(summary?.diagnostics).toContain('New owner error');
+      expect(getRows('SELECT generation,attempts FROM capacity_pool_refreshes')).toEqual([
+        { generation: 99, attempts: 3 },
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(calls);
+      expect(getCount('capacity_pool_candidate_staging')).toBe(0);
+    }
+  );
+
+  it('rebuilds a legacy live prefix privately across restarts despite a stale completed work row', async () => {
+    const { env, cursorKey, lastSuccess } = await legacyInterruptedCatalog();
+    const liveBefore = getRows('SELECT * FROM capacity_pool_candidates ORDER BY id');
+    const daily = getRows(
+      "SELECT value FROM platform_settings WHERE key='capacityPools.scheduledReconciliation.lastRun.v1'"
+    );
+    let digest: string | undefined;
+    let deadline: number | undefined;
+    for (let pass = 1; pass <= 5; pass++) {
+      const due = getRows<{ next_attempt_at: number }>(
+        'SELECT next_attempt_at FROM capacity_pool_refreshes'
+      )[0]!.next_attempt_at;
+      vi.setSystemTime(Math.max(Date.now() + 60_000, Math.ceil(due / 60_000) * 60_000));
+      await runScheduledCapacityPoolReconciliation({
+        ...env,
+        DATABASE: createSqliteD1WithBindLimit(sqlite!, 100),
+      });
+      const work = getRows<{
+        state: string;
+        generation: number;
+        attempts: number;
+        deadline_at: number;
+        last_success_at: number;
+      }>('SELECT * FROM capacity_pool_refreshes')[0]!;
+      const saved = sqlite!
+        .prepare('SELECT value FROM platform_settings WHERE key=?')
+        .get(cursorKey) as { value: string };
+      const progress = JSON.parse(saved.value) as {
+        digest: string;
+        published: number;
+        complete: boolean;
+        atomic?: boolean;
+      };
+      digest ??= progress.digest;
+      deadline ??= work.deadline_at;
+      expect(progress.digest).toBe(digest);
+      expect(work.deadline_at).toBe(deadline);
+      expect(work.generation).toBe(6 + pass);
+      expect(work.attempts).toBe(pass);
+      const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        labels: false,
+      });
+      if (pass < 5) {
+        expect(progress).toMatchObject({ published: pass * 2, complete: false, atomic: false });
+        expect(work).toMatchObject({ state: 'pending', last_success_at: lastSuccess });
+        expect(getRows('SELECT * FROM capacity_pool_candidates ORDER BY id')).toEqual(liveBefore);
+        expect(getCount('capacity_pool_candidate_staging')).toBe(pass * 2);
+        expect(summary.user?.catalogPublished).toBe(false);
+        expect(summary.user?.catalogRefreshPending).toBe(true);
+      } else {
+        expect(progress).toMatchObject({ published: 10, complete: true, atomic: true });
+        expect(work.state).toBe('complete');
+        expect(work.last_success_at).toBeGreaterThan(lastSuccess);
+        expect(summary.user?.catalogPublished).toBe(true);
+        expect(summary.user?.catalogRefreshPending).toBe(false);
+        expect(getCount('capacity_pool_candidate_staging')).toBe(0);
+        expect(
+          getRows<{ price: number }>(
+            'SELECT provider_instance_price_hourly_micros AS price FROM capacity_pool_candidates'
+          ).every((r) => r.price !== 99)
+        ).toBe(true);
+      }
+      expect(
+        getRows(
+          "SELECT value FROM platform_settings WHERE key='capacityPools.scheduledReconciliation.lastRun.v1'"
+        )
+      ).toEqual(daily);
+    }
+    const finished = getRows('SELECT * FROM capacity_pool_refreshes');
+    vi.setSystemTime(Date.now() + 60_000);
+    await runScheduledCapacityPoolReconciliation(env);
+    expect(getRows('SELECT * FROM capacity_pool_refreshes')).toEqual(finished);
+  });
+
+  it('accepts an older writer finishing inherited unsafe progress without atomic provenance', async () => {
+    const { env, cursorKey } = await legacyInterruptedCatalog();
+    await runScheduledCapacityPoolReconciliation(env);
+    const stored = sqlite!
+      .prepare('SELECT value FROM platform_settings WHERE key=?')
+      .get(cursorKey) as { value: string };
+    const progress = JSON.parse(stored.value) as { digest: string; atomic: boolean };
+    expect(progress.atomic).toBe(false);
+    // The previous build reads digest/published/complete and ignores unknown fields.
+    // Its normal completed payload omits the new field; that must release quarantine.
+    sqlite!
+      .prepare('UPDATE platform_settings SET value=? WHERE key=?')
+      .run(JSON.stringify({ digest: progress.digest, published: 10, complete: true }), cursorKey);
+    sqlite!.exec(`UPDATE capacity_pool_candidates SET provider_instance_price_hourly_micros=4800;
+      UPDATE capacity_pools SET migration_state='complete'`);
+    const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      labels: false,
+    });
+    expect(summary.user?.catalogPublished).toBe(true);
+    expect(summary.user?.diagnostics).not.toContain('legacy-catalog-publication-unfinished');
+    const due = getRows<{ next_attempt_at: number }>(
+      'SELECT next_attempt_at FROM capacity_pool_refreshes'
+    )[0]!.next_attempt_at;
+    vi.setSystemTime(Math.max(Date.now() + 60_000, due));
+    await runScheduledCapacityPoolReconciliation(env);
+    expect(getRows<{ state: string }>('SELECT state FROM capacity_pool_refreshes')).toEqual([
+      { state: 'complete' },
+    ]);
+  });
+
+  it('resumes saved multi-batch work on cron within minutes, independently of the daily gate', async () => {
+    const { env } = await interruptedCatalog();
+    const startedAt = Date.now();
+    const daily = getRows<{ value: string }>(
+      "SELECT value FROM platform_settings WHERE key='capacityPools.scheduledReconciliation.lastRun.v1'"
+    )[0]!.value;
+    for (let pass = 1; pass <= 4; pass++) {
+      const due = getRows<{ next_attempt_at: number }>(
+        "SELECT next_attempt_at FROM capacity_pool_refreshes WHERE scope='user'"
+      )[0]!.next_attempt_at;
+      // A minute cron resumes on its first tick after the saved retry time.
+      vi.setSystemTime(new Date(Math.max(Date.now() + 60_000, Math.ceil(due / 60_000) * 60_000)));
+      // Fresh D1/Env handles simulate a replacement process with no continuation notification.
+      const result = await runScheduledCapacityPoolReconciliation({
+        ...env,
+        DATABASE: createSqliteD1WithBindLimit(sqlite!, 100),
+      });
+      expect(result.skipped).toBe(false);
+      expect(
+        getRows<{ value: string }>(
+          "SELECT value FROM platform_settings WHERE key='capacityPools.scheduledReconciliation.lastRun.v1'"
+        )[0]!.value
+      ).toBe(daily);
+      expect(getCount('capacity_pool_candidates')).toBe(pass < 4 ? 0 : 10);
+    }
+    expect(Date.now() - startedAt).toBeLessThanOrEqual(5 * 60_000);
+    expect(
+      getRows<{ state: string; attempts: number; last_success_at: number }>(
+        "SELECT state, attempts, last_success_at FROM capacity_pool_refreshes WHERE scope='user'"
+      )[0]
+    ).toMatchObject({ state: 'complete', attempts: 5, last_success_at: expect.any(Number) });
+    expect(
+      getRows<{ migration_state: string }>('SELECT migration_state FROM capacity_pools')[0]
+    ).toEqual({ migration_state: 'complete' });
+  });
+
+  it('backs off a persistently failing real provider and exhausts one fixed recovery episode', async () => {
+    const { env, fetchMock } = await interruptedCatalog();
+    const startedAt = Date.now();
+    const initial = getRows<{ started_at: number; deadline_at: number }>(
+      'SELECT started_at, deadline_at FROM capacity_pool_refreshes'
+    )[0]!;
+    clearCapacityCatalogCache();
+    fetchMock.mockClear();
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: 'unauthorized', message: 'Authentication failed' } }),
+          { status: 403 }
+        )
+    );
+    for (let minute = 1; minute <= 121; minute++) {
+      vi.setSystemTime(new Date(startedAt + minute * 60_000));
+      await runScheduledCapacityPoolReconciliation(env);
+      const work = getRows<{ started_at: number; deadline_at: number }>(
+        'SELECT started_at, deadline_at FROM capacity_pool_refreshes'
+      )[0]!;
+      expect(work).toEqual(initial);
+    }
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(5);
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(30);
+    expect(
+      getRows<{ state: string; next_attempt_at: number }>(
+        'SELECT state, next_attempt_at FROM capacity_pool_refreshes'
+      )[0]
+    ).toMatchObject({ state: 'failed', next_attempt_at: expect.any(Number) });
+    const before = fetchMock.mock.calls.length;
+    await runScheduledCapacityPoolReconciliation(env);
+    expect(fetchMock).toHaveBeenCalledTimes(before);
+  });
+
+  it('daily discovery recovers a failed real publication after cooldown without a manual refresh', async () => {
+    const { env, fetchMock } = await interruptedCatalog();
+    sqlite!.exec(
+      `UPDATE capacity_pool_refreshes SET deadline_at = ${Date.now()}, next_attempt_at = ${Date.now()} WHERE scope='user'`
+    );
+    await runScheduledCapacityPoolReconciliation(env);
+    const failed = getRows<{ generation: number; next_attempt_at: number }>(
+      "SELECT generation, next_attempt_at FROM capacity_pool_refreshes WHERE scope='user' AND state='failed'"
+    )[0]!;
+    expect(failed).toBeDefined();
+    const calls = fetchMock.mock.calls.length;
+
+    // Drive actual daily discovery before and at cooldown, with its discovery lease expired.
+    for (const now of [failed.next_attempt_at - 5 * 60_000, failed.next_attempt_at]) {
+      vi.setSystemTime(new Date(now));
+      sqlite!
+        .prepare(
+          "UPDATE platform_settings SET value=? WHERE key='capacityPools.scheduledReconciliation.lastRun.v1'"
+        )
+        .run(new Date(now - 24 * 60 * 60_000).toISOString());
+      await runScheduledCapacityPoolReconciliation({
+        ...env,
+        DATABASE: createSqliteD1WithBindLimit(sqlite!, 100),
+      });
+      const row = getRows<{
+        state: string;
+        attempts: number;
+        generation: number;
+        started_at: number;
+        deadline_at: number;
+      }>(
+        "SELECT state,attempts,generation,started_at,deadline_at FROM capacity_pool_refreshes WHERE scope='user'"
+      )[0]!;
+      if (now < failed.next_attempt_at) {
+        expect(row.state).toBe('failed');
+        expect(fetchMock).toHaveBeenCalledTimes(calls);
+        expect(getCount('capacity_pool_candidate_staging')).toBe(2);
+      } else {
+        expect(row).toMatchObject({ state: 'pending', attempts: 1, started_at: now });
+        expect(row.generation).toBeGreaterThan(failed.generation);
+        expect(row.deadline_at).toBe(now + 2 * 60 * 60_000);
+        expect(getCount('capacity_pool_candidate_staging')).toBe(4);
+      }
+    }
+    for (let pass = 0; pass < 3; pass++) {
+      const due = getRows<{ next_attempt_at: number }>(
+        "SELECT next_attempt_at FROM capacity_pool_refreshes WHERE scope='user'"
+      )[0]!.next_attempt_at;
+      vi.setSystemTime(new Date(Math.max(Date.now() + 60_000, Math.ceil(due / 60_000) * 60_000)));
+      await runScheduledCapacityPoolReconciliation(env);
+    }
+    expect(
+      getRows<{ state: string }>("SELECT state FROM capacity_pool_refreshes WHERE scope='user'")[0]
+    ).toEqual({ state: 'complete' });
+    expect(getCount('capacity_pool_candidates')).toBe(10);
+    expect(getCount('capacity_pool_candidate_staging')).toBe(0);
+  });
+
+  it('propagates the aggregate pass deadline through real credential preparation and a stalled provider', async () => {
+    const { env } = await interruptedCatalog();
+    clearCapacityCatalogCache();
+    let signal: AbortSignal | null | undefined;
+    const stalled = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      signal = init?.signal;
+      return new Promise<Response>(() => {});
+    });
+    globalThis.fetch = stalled as typeof fetch;
+    const deadlineAt = Date.now() + 200;
+    const operation = ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env,
+      reconciliationDeadlineAt: deadlineAt,
+    });
+    await vi.waitFor(() => expect(stalled).toHaveBeenCalledTimes(1), { interval: 1 });
+    await vi.advanceTimersByTimeAsync(deadlineAt - Date.now());
+    const result = await operation;
+    expect(Date.now()).toBe(deadlineAt);
+    expect(signal?.aborted).toBe(true);
+    expect(stalled).toHaveBeenCalledTimes(1);
+    expect(result.user?.effectiveState).toBe('migration-pending');
+    expect(getCount('capacity_pool_candidates')).toBe(0);
+    expect(getCount('capacity_pool_candidate_staging')).toBe(2);
+    expect(
+      getRows<{ state: string; next_attempt_at: number }>(
+        "SELECT state,next_attempt_at FROM capacity_pool_refreshes WHERE scope='user'"
+      )[0]
+    ).toMatchObject({ state: 'pending', next_attempt_at: expect.any(Number) });
+  });
+
+  it('recovers a lost claimed continuation after its lease and fences duplicate cron claims', async () => {
+    const { env } = await interruptedCatalog();
+    sqlite!.exec(
+      `UPDATE capacity_pool_refreshes SET next_attempt_at = next_attempt_at + 180000, generation = generation + 1 WHERE scope='user'`
+    );
+    vi.setSystemTime(new Date(Date.now() + 60_000));
+    expect((await runScheduledCapacityPoolReconciliation(env)).skipped).toBe(true);
+    expect(getCount('capacity_pool_candidate_staging')).toBe(2);
+    vi.setSystemTime(new Date(Date.now() + 180_000));
+    await Promise.all([
+      runScheduledCapacityPoolReconciliation(env),
+      runScheduledCapacityPoolReconciliation(env),
+    ]);
+    expect(getCount('capacity_pool_candidate_staging')).toBe(4);
+    expect(getCount('capacity_pool_candidates')).toBe(0);
+  });
+
+  it('turns deadline exhaustion into a visible retained-catalog error instead of restarting forever', async () => {
+    const { env, fetchMock } = await interruptedCatalog();
+    sqlite!.exec(
+      `UPDATE capacity_pool_refreshes SET deadline_at = ${Date.now()}, next_attempt_at = ${Date.now()} WHERE scope='user'`
+    );
+    const callsBefore = fetchMock.mock.calls.length;
+    await runScheduledCapacityPoolReconciliation(env);
+    const row = getRows<{ state: string; last_error: string }>(
+      "SELECT state,last_error FROM capacity_pool_refreshes WHERE scope='user'"
+    )[0]!;
+    expect(row.state).toBe('failed');
+    expect(row.last_error).toContain('Infrastructure Refresh');
+    const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      labels: false,
+    });
+    expect(summary.user?.diagnostics).toContain(row.last_error);
+    expect(fetchMock.mock.calls.length).toBe(callsBefore);
+    vi.setSystemTime(new Date(Date.now() + 60_000));
+    await runScheduledCapacityPoolReconciliation(env);
+    expect(
+      getRows<{ state: string }>("SELECT state FROM capacity_pool_refreshes WHERE scope='user'")[0]!
+        .state
+    ).toBe('failed');
+  });
+  it.each(['pool', 'source'] as const)(
+    'never revives explicitly disabled %s authority during continuation',
+    async (target) => {
+      const { env } = await interruptedCatalog();
+      sqlite!.exec(
+        target === 'pool'
+          ? "UPDATE capacity_pools SET status='disabled'"
+          : "UPDATE capacity_sources SET status='disabled'"
+      );
+      vi.setSystemTime(new Date(Date.now() + 60_000));
+      await runScheduledCapacityPoolReconciliation(env);
+      expect(
+        getRows<{ status: string }>(
+          `SELECT status FROM ${target === 'pool' ? 'capacity_pools' : 'capacity_sources'}`
+        )[0]!.status
+      ).toBe('disabled');
+      expect(getCount('capacity_pool_candidates')).toBe(0);
+      expect(
+        getRows<{ state: string }>(
+          "SELECT state FROM capacity_pool_refreshes WHERE scope='user'"
+        )[0]!.state
+      ).toBe('complete');
+    }
+  );
+
+  it('fails a malformed persisted scope before doing provider work', async () => {
+    const { env, fetchMock } = await interruptedCatalog();
+    sqlite!.exec("UPDATE capacity_pool_refreshes SET scope='installation' WHERE scope='user'");
+    const before = fetchMock.mock.calls.length;
+    vi.setSystemTime(new Date(Date.now() + 60_000));
+    await runScheduledCapacityPoolReconciliation(env);
+    expect(fetchMock.mock.calls.length).toBe(before);
+    expect(
+      getRows<{ state: string; last_error: string }>(
+        'SELECT state,last_error FROM capacity_pool_refreshes'
+      )[0]
+    ).toMatchObject({ state: 'failed', last_error: expect.stringContaining('scope is invalid') });
+  });
+  it('keeps a published pool placeable and surfaces an exhausted replacement without another provider call', async () => {
+    const { env, fetchMock } = await interruptedCatalog();
+    await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env,
+      candidatePublishBudgetMs: 20_000,
+    });
+    await pickStarterMachines(poolDb() as never);
+    await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env,
+      candidatePublishBudgetMs: 20_000,
+    });
+    const committedCount = getCount('capacity_pool_candidates');
+    const partial = await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env,
+      candidatePublishBudgetMs: 0,
+      candidatePublishBatchSize: 1,
+      offeringResolver: async () => manyLiveOfferings(5),
+    });
+    expect(partial.user?.effectiveState).toBe('configured-ready');
+    sqlite!.exec(
+      `UPDATE capacity_pool_refreshes SET deadline_at=${Date.now()}, next_attempt_at=${Date.now()} WHERE scope='user'`
+    );
+    const calls = fetchMock.mock.calls.length;
+    await runScheduledCapacityPoolReconciliation(env);
+    const summary = await readDefaultCapacityPoolSummaries(poolDb() as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      labels: false,
+    });
+    expect(summary.user?.effectiveState).toBe('configured-ready');
+    expect(summary.user?.diagnostics.join(' ')).toContain('Infrastructure Refresh');
+    expect(getCount('capacity_pool_candidates')).toBe(committedCount);
+    expect(fetchMock.mock.calls.length).toBe(calls);
+    expect(
+      (
+        await resolveTaskStartCapacityPoolSelection(
+          poolDb() as never,
+          defaultTaskPlacement('retained-after-exhaustion'),
+          { ensure: false }
+        )
+      )?.candidates.length
+    ).toBeGreaterThan(0);
+  });
+
+  it('advances discovery after durable queuing when the aggregate budget is spent before inline draining', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2031-01-01T00:00:00Z'));
+    createDb();
+    sqlite!.exec("INSERT INTO users(id) VALUES ('user-3')");
+    for (const id of ['user-1', 'user-2', 'user-3'])
+      seedUserCredential({ id: `credential-${id}`, userId: id });
+    const first = await backfillDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      includeInstallation: false,
+      scopeBatchSize: 2,
+      reconciliationDeadlineAt: Date.now(),
+    });
+    expect(first.usersEnsured).toBe(0);
+    expect(
+      getRows<{ pool_id: string }>('SELECT pool_id FROM capacity_pool_refreshes ORDER BY pool_id')
+    ).toHaveLength(2);
+    const next = await backfillDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+      includeInstallation: false,
+      scopeBatchSize: 2,
+      reconciliationDeadlineAt: Date.now(),
+    });
+    expect(next.usersEnsured).toBe(0);
+    expect(
+      getRows<{ pool_id: string }>('SELECT pool_id FROM capacity_pool_refreshes ORDER BY pool_id')
+    ).toHaveLength(3);
+  });
+});
+
+describe('catalog publication upgrade adoption', () => {
+  it('bounds upgrade adoption across interrupted passes without failed-known rows starving later scopes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2031-01-01T00:00:00Z'));
+    createDb();
+    for (let index = 0; index < 90; index++) {
+      const id = `legacy-${index.toString().padStart(3, '0')}`;
+      sqlite!.prepare('INSERT INTO users(id) VALUES (?)').run(id);
+      sqlite!
+        .prepare(
+          `INSERT INTO capacity_pools
+        (id,scope,owner_user_id,name,is_default,status,configuration_state,migration_state,created_at,updated_at)
+        VALUES (?, 'user', ?, 'Legacy', 1, 'active', 'configured-ready', 'pending', '2030-01-01', '2030-01-01')`
+        )
+        .run(`cap-pool-default:user:${id}`, id);
+      if (index < 30)
+        sqlite!
+          .prepare(
+            `INSERT INTO capacity_pool_refreshes
+        (pool_id,scope,owner_user_id,state,generation,attempts,started_at,deadline_at,next_attempt_at,last_error)
+        VALUES (?, 'user', ?, 'failed', 4, 8, 1, 2, 2, 'Retained actionable failure')`
+          )
+          .run(`cap-pool-default:user:${id}`, id);
+    }
+    const env = {
+      ...catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+      CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE: '20',
+    } as Env;
+    const settings = await capacityPoolRefreshSettings();
+    for (let pass = 0; pass < 3; pass++) {
+      const db = poolDb();
+      const run = db.run.bind(db);
+      // A process loses its execution budget immediately after saving the adoption page.
+      vi.spyOn(db, 'run').mockImplementation(async (query) => {
+        const result = await run(query);
+        vi.setSystemTime(Date.now() + 1);
+        return result;
+      });
+      await continueCapacityPoolPublications(db as never, env, settings, Date.now() + 1);
+      expect(getCount('capacity_pool_refreshes')).toBe(30 + (pass + 1) * 20);
+      expect(
+        getRows<{ state: string; generation: number; last_error: string }>(
+          "SELECT state,generation,last_error FROM capacity_pool_refreshes WHERE state='failed'"
+        )
+      ).toEqual(
+        Array.from({ length: 30 }, () => ({
+          state: 'failed',
+          generation: 4,
+          last_error: 'Retained actionable failure',
+        }))
+      );
+    }
+    expect(
+      getRows<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM capacity_pool_refreshes WHERE state='pending'"
+      )[0]?.count
+    ).toBe(60);
+    // An already-expired invocation cannot even begin another adoption page.
+    await continueCapacityPoolPublications(poolDb() as never, env, settings, Date.now());
+    expect(getCount('capacity_pool_refreshes')).toBe(90);
+  });
+
+  it('backfills only committed pre-upgrade proof and automatically adopts unfinished legacy work', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2031-01-01T00:00:00Z'));
+    createDb({ includeCatalogPublication: false });
+    const token = await encrypt('upgrade-smoke-provider-token', TEST_ENCRYPTION_KEY);
+    seedUserCredential({
+      id: 'upgrade-user',
+      userId: 'user-2',
+      encryptedToken: token.ciphertext,
+      iv: token.iv,
+    });
+    sqlite!.exec(`INSERT INTO capacity_pools
+      (id,scope,owner_user_id,name,is_default,status,configuration_state,migration_state,created_at,updated_at,last_reconciled_at)
+      VALUES ('cap-pool-default:user:user-1','user','user-1','Committed',1,'active','configured-ready','complete','2030-01-01','2030-01-02','2030-01-02'),
+      ('cap-pool-default:user:user-2','user','user-2','Interrupted',1,'active','configured-ready','pending','2030-01-01','2030-01-02','2030-01-02')`);
+    // Execute the actual additive migration against records created by the previous schema.
+    sqlite!.exec(catalogPublicationMigrationSql);
+    expect(
+      getRows<{ owner_user_id: string; catalog_published_at: string | null }>(
+        'SELECT owner_user_id,catalog_published_at FROM capacity_pools ORDER BY owner_user_id'
+      )
+    ).toEqual([
+      { owner_user_id: 'user-1', catalog_published_at: '2030-01-02' },
+      { owner_user_id: 'user-2', catalog_published_at: null },
+    ]);
+    sqlite!
+      .prepare('INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,?)')
+      .run(
+        'capacityPools.scheduledReconciliation.lastRun.v1',
+        new Date().toISOString(),
+        new Date().toISOString()
+      );
+    globalThis.fetch = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            server_types: [
+              hetznerServerType({
+                id: 1,
+                name: 'cx23',
+                description: 'CX23',
+                cores: 2,
+                memory: 4,
+                disk: 40,
+                hourlyGross: '0.0048',
+                monthlyGross: '3.99',
+              }),
+            ],
+            meta: { pagination: { next_page: null } },
+          }),
+          { status: 200 }
+        )
+    ) as typeof fetch;
+    const result = await runScheduledCapacityPoolReconciliation(
+      catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100))
+    );
+    expect(result.skipped).toBe(false);
+    expect(result.usersEnsured).toBe(0); // Daily discovery did not run.
+    expect(
+      getRows<{ state: string; last_success_at: number }>(
+        "SELECT state,last_success_at FROM capacity_pool_refreshes WHERE owner_user_id='user-2'"
+      )[0]
+    ).toMatchObject({ state: 'complete', last_success_at: expect.any(Number) });
+    expect(
+      getRows<{ migration_state: string; catalog_published_at: string }>(
+        "SELECT migration_state,catalog_published_at FROM capacity_pools WHERE owner_user_id='user-2'"
+      )[0]
+    ).toMatchObject({ migration_state: 'complete', catalog_published_at: expect.any(String) });
+    expect(getCount('capacity_pool_candidates')).toBe(2);
   });
 });

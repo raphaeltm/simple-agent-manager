@@ -1,81 +1,39 @@
-import type {
-  ProviderCatalog,
-  Task,
-  TaskMode,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
-import { DEFAULT_WORKSPACE_PROFILE, hasByocComputeCredential } from '@simple-agent-manager/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ProviderCatalog, Task } from '@simple-agent-manager/shared';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
-import { selectProfileId } from '../../components/project-chat/profile-picker/model';
-import {
-  hasAnyResourceValue,
-  toResourceRequirements,
-} from '../../components/resource-requirements';
-import { useAgentCatalog } from '../../hooks/useAgentCatalog';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
-import { useCredentials } from '../../hooks/useCredentials';
 import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjectWebSocket';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useQueryScope } from '../../hooks/useQueryScope';
-import { useTrialStatus } from '../../hooks/useTrialStatus';
 import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionResponse } from '../../lib/api';
-import {
-  getProjectTask,
-  getTranscribeApiUrl,
-  listChatSessions,
-  listProjectTasks,
-  startInstantChatSession,
-  submitTask,
-} from '../../lib/api';
+import { getProjectTask, listChatSessions, listProjectTasks } from '../../lib/api';
 import { CHAT_SESSION_LIST_LIMIT } from '../../lib/chat-query-config';
 import { getSessionState } from '../../lib/chat-session-utils';
 import { readInitialSessionList } from '../../lib/project-route-prefetch';
-import {
-  applyMessageCommentRealtimeEventToQueryCache,
-  instantRuntimeEnabledQueryOptions,
-} from '../../lib/query-options';
+import { applyMessageCommentRealtimeEventToQueryCache } from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { buildForkMessage } from './profileWizardHelpers';
-import {
-  buildBaseSubmitRequest,
-  getCompletedAttachmentRefs,
-  withAttachmentRefs,
-} from './submitRequest';
-import type { ProvisioningState } from './types';
+import type { PendingDerived, ProvisioningState } from './types';
 import {
   CHAT_TASK_LIST_LIMIT,
   SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
 } from './types';
-import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
-import { useComposerOverrides } from './useComposerOverrides';
 import { useComposerPrefill } from './useComposerPrefill';
 import { useConversationActions } from './useConversationActions';
-import { useProfileChoice } from './useProfileChoice';
-import { useProjectSkills } from './useProjectSkills';
+import { useNewChatComposer } from './useNewChatComposer';
 import { useProvisioningTracker } from './useProvisioningTracker';
 import { useSessionReducer } from './useSessionReducer';
 import { rawToSessionEvent } from './useSessionReducer';
 import { useSessionSections } from './useSessionSections';
 import { useStableTaskInfoMap } from './useStableTaskInfoMap';
 
-/** Pre-filled fork/retry context shown on the new chat screen. */
-export interface PendingDerived {
-  type: 'fork' | 'retry';
-  parentSessionId: string;
-  parentSessionLabel: string;
-  parentTaskId: string;
-  parentBranch?: string;
-  errorMessage?: string;
-  /** Retry only: true while the original prompt loads; Send stays disabled until it arrives. */
-  promptLoading: boolean;
-}
+export type { PendingDerived } from './types';
 
 export type SessionScope = 'my' | 'all';
 
@@ -98,21 +56,37 @@ export function useProjectChatState() {
   const initialLoadRef = useRef<Promise<ChatSessionResponse[]>>(Promise.resolve([]));
   // The first list came from the route prefetch; see the first-socket-open refresh below.
   const listFromPrefetchRef = useRef(false);
-  // Credentials, platform compute availability, provider catalog, agent catalog and agent profiles all
-  // come from shared TanStack queries. Before this migration each was fetched by a
-  // mount effect local to this hook, duplicating requests that the settings pages,
-  // onboarding wizards, task forms and workspace creation were already making.
-  const { credentials, loading: credentialsLoading } = useCredentials(queryScope);
-  // "Is there compute this user may provision on": their own cloud account, or the installation's
-  // machines. Not the SAM-managed AI proxy (`available`), which is off on installs that provide
-  // machines but leave agent credentials to each user; keying on it refused every send there.
-  const { platformCompute, loading: platformComputeLoading } = useTrialStatus(queryScope);
-  const hasUserCloudCredentials = hasByocComputeCredential(credentials);
-  const hasCloudCredentials = hasUserCloudCredentials || platformCompute;
-  // The composer refuses only once both reads have answered "no". A send while either is still
-  // in flight goes to the server, which decides placement itself; refusing then would tell a
-  // user with compute that they have none.
-  const computeKnownAbsent = !hasCloudCredentials && !credentialsLoading && !platformComputeLoading;
+  // The new-chat composer and its start path, shared with the Project Overview's task box.
+  const composer = useNewChatComposer();
+  const {
+    message,
+    setMessage,
+    submitting,
+    submitError,
+    setSubmitError,
+    configuredAgents,
+    selectedAgentType,
+    setSelectedAgentType,
+    agentProfiles,
+    selectedProfileId,
+    profileChoice,
+    skills,
+    selectedSkillId,
+    setSelectedSkillId,
+    attachments,
+    hasCloudCredentials,
+    hasUserCloudCredentials,
+    transcribeApiUrl,
+  } = composer;
+  const {
+    taskResourceReqs,
+    setTaskResourceReqs,
+    taskResourceErrors,
+    setTaskResourceErrors,
+    agentOverrides,
+    setAgentOverrides,
+    resetComposerOverrides,
+  } = composer.overrides;
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sidebar filtering
@@ -123,48 +97,6 @@ export function useProjectChatState() {
   // Track explicit "new chat" intent so auto-select doesn't override it
   const newChatIntentRef = useRef(false);
 
-  // New chat input state
-  const [message, setMessage] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  // Agent type selection
-  const { agents: agentCatalog } = useAgentCatalog(queryScope);
-  const configuredAgents = useMemo(
-    () => agentCatalog.filter((agent) => agent.configured && agent.supportsAcp),
-    [agentCatalog]
-  );
-  const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
-
-  // Fill in a default agent type once one is available, never overriding a choice
-  // (`.claude/rules/06-technical-patterns.md`, interaction-effect analysis).
-  useEffect(() => {
-    const firstAgent = configuredAgents[0];
-    if (!firstAgent) return;
-    setSelectedAgentType((current) => current ?? firstAgent.id);
-  }, [configuredAgents]);
-
-  // Whether Instant can run here decides the runtime of an automatically created first profile.
-  const instantRuntimeQuery = useQuery({
-    ...instantRuntimeEnabledQueryOptions(queryScope),
-    enabled: Boolean(queryScope),
-  });
-  // Profiles, the person's picker state and pre-selection, the picker sheet and the
-  // inline create-profile wizard.
-  const profileChoice = useProfileChoice({
-    projectId,
-    queryScope,
-    configuredAgents,
-    selectedAgentType,
-    instantEnabled: instantRuntimeQuery.data === true,
-  });
-  const {
-    agentProfiles,
-    selectedProfileId,
-    openProfileWizard,
-    profilePicker: { picker: profilePickerInput, refresh: refreshProfilePicker },
-  } = profileChoice;
-  const { skills, selectedSkillId, setSelectedSkillId } = useProjectSkills(projectId);
   // The catalog is only meaningful once the user can actually provision, matching the
   // previous behaviour where it was fetched inside the `hasCloud` branch.
   const { catalogs: allProviderCatalogs } = useProviderCatalog(
@@ -176,40 +108,6 @@ export function useProjectChatState() {
   // Pass sessionId as refreshKey so cached commands are re-fetched when switching sessions
   // (ensures commands persisted during session N are available in session N+1)
   const { commands: slashCommands } = useAvailableCommands(projectId, undefined, sessionId);
-
-  // File attachments (extracted hook)
-  const attachments = useAttachments(projectId, setSubmitError);
-
-  // Workspace profile selection — defaults to project setting or platform default
-  const [selectedWorkspaceProfile, setSelectedWorkspaceProfile] = useState<WorkspaceProfile>(
-    (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE
-  );
-  // Devcontainer config name — empty string means auto-detect
-  const [selectedDevcontainerConfigName, setSelectedDevcontainerConfigName] = useState(
-    project?.defaultDevcontainerConfigName ?? ''
-  );
-
-  // Task mode selection — defaults based on workspace profile
-  const [selectedTaskMode, setSelectedTaskMode] = useState<TaskMode>(
-    ((project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE) ===
-      'lightweight'
-      ? 'conversation'
-      : 'task'
-  );
-  const userSetTaskModeRef = useRef(false);
-
-  // Per-chat resource, model and effort overrides — blank fields inherit from profile/project
-  const {
-    taskResourceReqs,
-    setTaskResourceReqs,
-    taskResourceErrors,
-    setTaskResourceErrors,
-    agentOverrides,
-    setAgentOverrides,
-    resetComposerOverrides,
-    validateTaskResources,
-    agentOverrideFields,
-  } = useComposerOverrides(projectId);
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
@@ -241,19 +139,11 @@ export function useProjectChatState() {
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
   const { taskInfoMap, replaceAll: replaceTaskInfoMap } = useStableTaskInfoMap();
 
-  const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
-
   const sessionList = useSessionSections(sessions, taskInfoMap, searchQuery);
 
   // ---------------------------------------------------------------------------
   // Effects
   // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    if (!userSetTaskModeRef.current) {
-      setSelectedTaskMode(selectedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
-    }
-  }, [selectedWorkspaceProfile]);
 
   useEffect(() => {
     if (!multiplayerActive) {
@@ -412,114 +302,20 @@ export function useProjectChatState() {
   // Handlers
   // ---------------------------------------------------------------------------
 
-  const resolveProfileIdForSubmit = useCallback(async () => {
-    if (selectedProfileId) return selectedProfileId;
-    if (configuredAgents.length === 0) {
-      setSubmitError('Add an agent in Settings before starting a chat.');
-      return null;
-    }
-    if (agentProfiles.length > 0) {
-      // Sent before the picker state arrived: same default rule, without waiting for it.
-      const fallback = profilePickerInput.status === 'ready' ? profilePickerInput : null;
-      return selectProfileId(null, agentProfiles, fallback ?? { status: 'unavailable' });
-    }
-    openProfileWizard();
-    setSubmitError('Create a profile before sending your first message.');
-    return null;
-  }, [
-    agentProfiles,
-    configuredAgents.length,
-    openProfileWizard,
-    profilePickerInput,
-    selectedProfileId,
-  ]);
-
+  /**
+   * Start a chat from the new-chat composer and open it. The start itself is shared with the
+   * Overview's task box (`useNewChatComposer`); opening the chat and showing its provisioning
+   * belong to this page.
+   */
   const handleSubmit = async () => {
-    const trimmed =
-      message.trim() || (attachments.chatAttachments.length > 0 ? DEFAULT_ATTACHMENT_MESSAGE : '');
-    if (!trimmed) return;
-    if (attachments.chatAttachments.some((a) => a.status !== 'complete')) {
-      setSubmitError('Please wait for file uploads to complete');
-      return;
-    }
-    setSubmitError(null);
-
-    // Fix 4: validate resource overrides before dispatch and surface per-field errors
-    if (!validateTaskResources()) {
-      setSubmitError('Fix resource requirement errors before sending');
-      return;
-    }
-    const hasResources = hasAnyResourceValue(taskResourceReqs);
-
-    setSubmitting(true);
-    try {
-      const submitProfileId = await resolveProfileIdForSubmit();
-      if (!submitProfileId) return;
-
-      const selectedProfile =
-        agentProfiles.find((profile) => profile.id === submitProfileId) ?? null;
-      const selectedSkill = selectedSkillId
-        ? (skills.find((skill) => skill.id === selectedSkillId) ?? null)
-        : null;
-      const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
-      const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
-      const agentFields = agentOverrideFields(selectedProfile, selectedSkill);
-      const requiresTaskSubmission = attachmentRefs.length > 0;
-      // Fix 2: when task has explicit resource overrides, route through submitTask
-      // so the backend can honor them; Instant cannot carry resource requirements.
-      const useInstantSession =
-        selectedRuntime === 'cf-container' && !requiresTaskSubmission && !hasResources;
-
-      if (useInstantSession) {
-        const result = await startInstantChatSession(projectId, {
-          message: trimmed,
-          agentProfileId: submitProfileId,
-          skillId: selectedSkillId ?? undefined,
-          parentTaskId: pendingDerived?.parentTaskId || undefined,
-          ...agentFields,
-        });
-        setMessage('');
-        setPendingDerived(null);
-        attachments.clearAttachments();
-        resetComposerOverrides();
-        newChatIntentRef.current = false;
-        navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
-        loadSessions().catch(() => undefined);
-        void refreshProfilePicker();
-        return;
-      }
-
-      if (selectedRuntime !== 'cf-container' && computeKnownAbsent) {
-        setSubmitError(
-          'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to add a platform cloud credential.'
-        );
-        return;
-      }
-
-      const baseRequest = buildBaseSubmitRequest({
-        message: trimmed,
-        agentProfileId: submitProfileId,
-        skillId: selectedSkillId,
-        selectedAgentType,
-        selectedResourceRequirements: toResourceRequirements(taskResourceReqs),
-        selectedWorkspaceProfile,
-        selectedDevcontainerConfigName,
-        selectedTaskMode,
-        pendingDerived,
-      });
-      const result = await submitTask(
-        projectId,
-        withAttachmentRefs({ ...baseRequest, ...agentFields }, attachmentRefs)
-      );
-      setMessage('');
-      setPendingDerived(null);
-      attachments.clearAttachments();
-      // Fix 3: reset per-chat overrides after successful submit
-      resetComposerOverrides();
+    const start = await composer.startNewChat(pendingDerived);
+    if (!start) return;
+    setPendingDerived(null);
+    if (start.kind === 'task') {
       setProvisioning({
-        taskId: result.taskId,
-        sessionId: result.sessionId,
-        branchName: result.branchName,
+        taskId: start.taskId,
+        sessionId: start.sessionId,
+        branchName: start.branchName,
         status: 'queued',
         executionStep: null,
         errorMessage: null,
@@ -529,15 +325,10 @@ export function useProjectChatState() {
         requestedVmSize: null,
         provisionedVmSize: null,
       });
-      newChatIntentRef.current = false;
-      navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
-      void loadSessions();
-      void refreshProfilePicker();
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to start task');
-    } finally {
-      setSubmitting(false);
     }
+    newChatIntentRef.current = false;
+    navigate(`/projects/${projectId}/chat/${start.sessionId}`, { replace: true });
+    void loadSessions().catch(() => undefined);
   };
 
   const handleNewChat = useCallback(() => {
@@ -643,11 +434,6 @@ export function useProjectChatState() {
     loadSessions,
   });
 
-  const handleTaskModeChange = useCallback((mode: TaskMode) => {
-    userSetTaskModeRef.current = true;
-    setSelectedTaskMode(mode);
-  }, []);
-
   // ---------------------------------------------------------------------------
   // Derived state
   // ---------------------------------------------------------------------------
@@ -702,7 +488,7 @@ export function useProjectChatState() {
     providerCatalogs,
     hasUserCloudCredentials,
     profileWizard: profileChoice.profileWizard,
-    openProfileWizard,
+    openProfileWizard: profileChoice.openProfileWizard,
     closeProfileWizard: profileChoice.closeProfileWizard,
     updateProfileWizard: profileChoice.updateProfileWizard,
     createProfileFromWizard: profileChoice.createProfileFromWizard,
@@ -710,12 +496,12 @@ export function useProjectChatState() {
     suggestProfileName: profileChoice.suggestProfileName,
     handleUpdateProfile: profileChoice.handleUpdateProfile,
     slashCommands,
-    selectedWorkspaceProfile,
-    setSelectedWorkspaceProfile,
-    selectedDevcontainerConfigName,
-    setSelectedDevcontainerConfigName,
-    selectedTaskMode,
-    handleTaskModeChange,
+    selectedWorkspaceProfile: composer.selectedWorkspaceProfile,
+    setSelectedWorkspaceProfile: composer.setSelectedWorkspaceProfile,
+    selectedDevcontainerConfigName: composer.selectedDevcontainerConfigName,
+    setSelectedDevcontainerConfigName: composer.setSelectedDevcontainerConfigName,
+    selectedTaskMode: composer.selectedTaskMode,
+    handleTaskModeChange: composer.handleTaskModeChange,
     taskResourceReqs,
     setTaskResourceReqs,
     taskResourceErrors,

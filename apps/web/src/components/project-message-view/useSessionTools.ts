@@ -63,6 +63,7 @@ export interface UseSessionToolsInput {
   onOpenTimeline?: () => void;
   onOpenResources?: () => void;
   onOpenAutomation?: () => void;
+  onOpenReceipt?: () => void;
   onOpenRelated?: () => void;
   onOpenComments?: () => void;
   onRetry?: () => void;
@@ -111,6 +112,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onOpenTimeline,
     onOpenResources,
     onOpenAutomation,
+    onOpenReceipt,
     onOpenRelated,
     onOpenComments,
     onRetry,
@@ -209,6 +211,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       hasTimelineHandler: !!onOpenTimeline,
       hasResourcesHandler: !!onOpenResources,
       hasAutomationHandler: !!onOpenAutomation,
+      hasReceiptHandler: !!onOpenReceipt,
       hasRelatedHandler: !!onOpenRelated,
       hasCommentsHandler: !!onOpenComments,
       hasRetryHandler: !!onRetry,
@@ -234,6 +237,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onOpenTimeline,
     onOpenResources,
     onOpenAutomation,
+    onOpenReceipt,
     onOpenRelated,
     onOpenComments,
     onRetry,
@@ -266,6 +270,9 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
           break;
         case 'related':
           onOpenRelated?.();
+          break;
+        case 'receipt':
+          onOpenReceipt?.();
           break;
         case 'comments':
           onOpenComments?.();
@@ -302,6 +309,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       onOpenTimeline,
       onOpenResources,
       onOpenAutomation,
+      onOpenReceipt,
       onOpenRelated,
       onOpenComments,
       onOpenShare,

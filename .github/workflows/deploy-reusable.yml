@@ -24,6 +24,13 @@ on:
         required: false
         type: string
         default: ''
+      installation:
+        # A secondary installation (scripts/deploy/staging-installations.mjs) that runs with this
+        # environment's credentials but deploys to its own domain, zone, stack and prefix.
+        # Empty means the environment's own installation.
+        required: false
+        type: string
+        default: ''
       agent_email:
         # Retained for compatibility with older callers; preparation is automatic.
         required: false
@@ -214,10 +221,29 @@ jobs:
         id: deploy_resources
         env:
           DEPLOY_ENVIRONMENT: ${{ inputs.environment }}
+          INSTALLATION: ${{ inputs.installation }}
           RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET }}
         run: node scripts/deploy/workflow-resource-names.mjs deploy
+
+      # A secondary installation has its own zone (looked up by domain, no secret needed) and
+      # shares the account's workers.dev subdomain, which is read here and never written.
+      # Both fail closed; nothing falls back to the primary's CF_ZONE_ID.
+      - name: Resolve Installation Zone
+        id: installation_zone
+        if: ${{ steps.deploy_resources.outputs.secondary == 'true' }}
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          ZONE_NAME: ${{ steps.deploy_resources.outputs.zone_name }}
+          USE_SHARED_ENGINE: ${{ inputs.use_shared_engine }}
+        run: |
+          if [ "$USE_SHARED_ENGINE" = "true" ]; then
+            echo "::error::The shared deployment engine does not support secondary installations."
+            exit 1
+          fi
+          node scripts/deploy/resolve-installation-zone.mjs --workers-subdomain
 
       - name: Snapshot container rollout identities
         if: ${{ inputs.dry_run != true }}
@@ -449,16 +475,21 @@ jobs:
           pulumi config set cloudflareZoneId "$CF_ZONE_ID"
           pulumi config set baseDomain "$BASE_DOMAIN"
           pulumi config set resourcePrefix "$RESOURCE_PREFIX"
+          # Secondary installations share the account's workers.dev subdomain.
+          if [ -n "$WORKERS_DEV_SUBDOMAIN" ]; then
+            pulumi config set workersDevSubdomain "$WORKERS_DEV_SUBDOMAIN"
+          fi
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.deploy_resources.outputs.secondary == 'true' && (steps.installation_zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN }}
           PREVIEW_URL_TTL_SECONDS: ${{ vars.PREVIEW_URL_TTL_SECONDS }}
           RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
+          WORKERS_DEV_SUBDOMAIN: ${{ steps.installation_zone.outputs.workers_dev_subdomain }}
 
       - name: Pulumi Preview
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run == true) }}
@@ -512,7 +543,7 @@ jobs:
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.deploy_resources.outputs.secondary == 'true' && (steps.installation_zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
 
       - name: Sync Wrangler Config (API + Tail Worker)
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
@@ -999,7 +1030,6 @@ jobs:
           CLOUD_INIT_CERT_REQUEST_TIMEOUT_SECONDS: ${{ vars.CLOUD_INIT_CERT_REQUEST_TIMEOUT_SECONDS }}
           TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS: ${{ vars.TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS }}
           TASK_RUNNER_BOOT_MAX_REPLACEMENTS: ${{ vars.TASK_RUNNER_BOOT_MAX_REPLACEMENTS }}
-          HUMAN_INPUT_TIMEOUT_MS: ${{ vars.HUMAN_INPUT_TIMEOUT_MS }}
           HUMAN_INPUT_ESCALATION_FRACTIONS: ${{ vars.HUMAN_INPUT_ESCALATION_FRACTIONS }}
           HUMAN_INPUT_UNDELIVERED_GRACE_MS: ${{ vars.HUMAN_INPUT_UNDELIVERED_GRACE_MS }}
           HUMAN_INPUT_MAX_WAIT_MS: ${{ vars.HUMAN_INPUT_MAX_WAIT_MS }}
@@ -1037,6 +1067,8 @@ jobs:
           VM_AGENT_TUNNEL_RESTART_SECONDS: ${{ vars.VM_AGENT_TUNNEL_RESTART_SECONDS }}
           SANDBOX_CONTAINER_MAX_INSTANCES: ${{ vars.SANDBOX_CONTAINER_MAX_INSTANCES }}
           VM_AGENT_CONTAINER_MAX_INSTANCES: ${{ vars.VM_AGENT_CONTAINER_MAX_INSTANCES }}
+          DEPLOY_BUILDER_MAX_INSTANCES: ${{ vars.DEPLOY_BUILDER_MAX_INSTANCES }}
+          DEPLOY_BUILDER_INSTANCE_TYPE: ${{ vars.DEPLOY_BUILDER_INSTANCE_TYPE }}
           SANDBOX_ENABLED: ${{ vars.SANDBOX_ENABLED }}
           MAX_CONCURRENT_SETUP_SESSIONS: ${{ vars.MAX_CONCURRENT_SETUP_SESSIONS }}
           SETUP_SESSION_TTL_MS: ${{ vars.SETUP_SESSION_TTL_MS }}
@@ -1117,8 +1149,9 @@ jobs:
             echo "needs_tail_sync=false" >> $GITHUB_OUTPUT
           fi
 
+      # Account-wide: a secondary installation must not set it (it reads it instead, above).
       - name: Ensure workers.dev Subdomain
-        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) && steps.deploy_resources.outputs.secondary != 'true' }}
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -1164,7 +1197,7 @@ jobs:
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: pnpm build
         env:
-          VITE_API_URL: https://api.${{ vars.BASE_DOMAIN }}
+          VITE_API_URL: https://api.${{ steps.deploy_resources.outputs.base_domain }}
           VITE_PUBLIC_WEBSITE_URL: ${{ vars.PUBLIC_WEBSITE_URL || '' }}
           VITE_FEATURE_MULTI_TERMINAL: 'true'
           VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES: ${{ vars.VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES || '100' }}
@@ -1259,8 +1292,10 @@ jobs:
         # same version string as the container-baked binary (prepare-container
         # above), and so unchanged agent source rebuilds byte-identically under
         # the immutable release key that publish-vm-agent-artifacts.sh enforces.
+        # Linux only: publish-vm-agent-artifacts.sh uploads linux amd64/arm64 and
+        # nothing serves darwin builds of the VM agent.
         run: |
-          make -C packages/vm-agent build-all VERSION="$VM_AGENT_RELEASE" BUILD_DATE="$VM_AGENT_BUILD_DATE"
+          make -C packages/vm-agent build-linux-amd64 build-linux-arm64 VERSION="$VM_AGENT_RELEASE" BUILD_DATE="$VM_AGENT_BUILD_DATE"
         env:
           VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}
           VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}
@@ -1304,6 +1339,41 @@ jobs:
           sudo node scripts/deploy/configure-docker-mirror.mjs /etc/docker/daemon.json https://mirror.gcr.io
           sudo systemctl restart docker
           docker info --format '{{json .RegistryConfig.Mirrors}}'
+
+      # Instant container images are keyed by every input that can change them
+      # (scripts/deploy/container-image-inputs.ts). An image already in the account
+      # registry for the same key is deployed by digest: no build, no push, and no
+      # container rollout when it is the running image. A new key builds and pushes,
+      # and the rollout gate below waits as before. Any doubt (unrecognised
+      # Dockerfile shape, failed fingerprint, registry error) leaves the Dockerfile
+      # in place so Wrangler builds it as it always did. Set the
+      # CONTAINER_IMAGE_REUSE_ENABLED variable to 'false' to always build that way.
+      - name: Install uv for container image fingerprints
+        if: ${{ !inputs.use_shared_engine && inputs.dry_run != true && vars.CONTAINER_IMAGE_REUSE_ENABLED != 'false' }}
+        # Same pinned release as apps/api/Dockerfile.vm-agent-container. Resolves
+        # the image's PyPI tools to detect upstream releases; a failure here only
+        # disables reuse for that image.
+        # The installer itself checks the sha256 of the uv archive it downloads.
+        run: |
+          set -euo pipefail
+          if curl -LsSf --proto '=https' --proto-redir '=https' -o "$RUNNER_TEMP/uv-install.sh" https://astral.sh/uv/0.13.8/install.sh &&
+             echo "4d8fa56e00f16b66feecacbd943773c61d61ab768b13856de350d86fd8740e2f  $RUNNER_TEMP/uv-install.sh" | sha256sum --check --status; then
+            env UV_INSTALL_DIR="$RUNNER_TEMP/uv" UV_NO_MODIFY_PATH=1 sh "$RUNNER_TEMP/uv-install.sh" || echo "::warning::uv install failed; the VM-agent image will be built, not reused"
+          else
+            echo "::warning::uv installer missing or changed; the VM-agent image will be built, not reused"
+          fi
+
+      - name: Resolve container images
+        if: ${{ !inputs.use_shared_engine && inputs.dry_run != true && vars.CONTAINER_IMAGE_REUSE_ENABLED != 'false' }}
+        run: pnpm tsx scripts/deploy/container-image-reuse.ts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          API_WORKER_NAME: ${{ steps.deploy_resources.outputs.api_worker }}
+          DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
+          UV_BIN: ${{ runner.temp }}/uv/uv
+          CONTAINER_IMAGE_FINGERPRINT_TIMEOUT_MS: ${{ vars.CONTAINER_IMAGE_FINGERPRINT_TIMEOUT_MS }}
+          CONTAINER_REGISTRY_CREDENTIAL_MINUTES: ${{ vars.CONTAINER_REGISTRY_CREDENTIAL_MINUTES }}
 
       # A first installation needs an API service for the tail Worker's service binding.
       # Established installations defer API code publication until after secrets so an
@@ -1830,7 +1900,6 @@ jobs:
           CLOUD_INIT_CERT_REQUEST_TIMEOUT_SECONDS: ${{ vars.CLOUD_INIT_CERT_REQUEST_TIMEOUT_SECONDS }}
           TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS: ${{ vars.TASK_RUNNER_FIRST_HEARTBEAT_TIMEOUT_MS }}
           TASK_RUNNER_BOOT_MAX_REPLACEMENTS: ${{ vars.TASK_RUNNER_BOOT_MAX_REPLACEMENTS }}
-          HUMAN_INPUT_TIMEOUT_MS: ${{ vars.HUMAN_INPUT_TIMEOUT_MS }}
           HUMAN_INPUT_ESCALATION_FRACTIONS: ${{ vars.HUMAN_INPUT_ESCALATION_FRACTIONS }}
           HUMAN_INPUT_UNDELIVERED_GRACE_MS: ${{ vars.HUMAN_INPUT_UNDELIVERED_GRACE_MS }}
           HUMAN_INPUT_MAX_WAIT_MS: ${{ vars.HUMAN_INPUT_MAX_WAIT_MS }}
@@ -1868,6 +1937,8 @@ jobs:
           VM_AGENT_TUNNEL_RESTART_SECONDS: ${{ vars.VM_AGENT_TUNNEL_RESTART_SECONDS }}
           SANDBOX_CONTAINER_MAX_INSTANCES: ${{ vars.SANDBOX_CONTAINER_MAX_INSTANCES }}
           VM_AGENT_CONTAINER_MAX_INSTANCES: ${{ vars.VM_AGENT_CONTAINER_MAX_INSTANCES }}
+          DEPLOY_BUILDER_MAX_INSTANCES: ${{ vars.DEPLOY_BUILDER_MAX_INSTANCES }}
+          DEPLOY_BUILDER_INSTANCE_TYPE: ${{ vars.DEPLOY_BUILDER_INSTANCE_TYPE }}
           SANDBOX_ENABLED: ${{ vars.SANDBOX_ENABLED }}
           MAX_CONCURRENT_SETUP_SESSIONS: ${{ vars.MAX_CONCURRENT_SETUP_SESSIONS }}
           SETUP_SESSION_TTL_MS: ${{ vars.SETUP_SESSION_TTL_MS }}
@@ -1905,49 +1976,73 @@ jobs:
           PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
           STACK: ${{ steps.deploy_resources.outputs.stack }}
 
+      # A secondary installation shares this environment's account-level credentials but not
+      # its identity: OAuth/App callbacks, signing, encryption and analytics overrides belong to
+      # the primary installation, so they are not passed and Pulumi generates the keys. Its
+      # agent sign-in trust is the primary's, retargeted at its bootstrap users.
+      - name: Derive Installation Agent Sign-In Trust
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) && steps.deploy_resources.outputs.secondary == 'true' }}
+        run: pnpm tsx scripts/deploy/bootstrap-staging-installation.ts derive-trust
+        env:
+          AGENT_SIGN_IN_TRUST_FILE: ${{ runner.temp }}/agent-sign-in-trust.json
+          INSTALLATION: ${{ steps.deploy_resources.outputs.installation }}
+          DEPLOY_ENVIRONMENT: ${{ steps.deploy_resources.outputs.credential_environment }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
+          SOURCE_AGENT_SIGN_IN_TRUST: ${{ secrets.AGENT_SIGN_IN_TRUST }}
+
       - name: Configure Worker Secrets
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
-        run: bash scripts/deploy/configure-secrets.sh "$DEPLOY_ENV"
+        run: |
+          # A secondary installation's trust was derived into a file (never a step output).
+          if [ -n "$AGENT_SIGN_IN_TRUST_FILE" ]; then
+            AGENT_SIGN_IN_TRUST=""
+            if [ -f "$AGENT_SIGN_IN_TRUST_FILE" ]; then
+              AGENT_SIGN_IN_TRUST="$(cat "$AGENT_SIGN_IN_TRUST_FILE")"
+            fi
+            export AGENT_SIGN_IN_TRUST
+          fi
+          bash scripts/deploy/configure-secrets.sh "$DEPLOY_ENV"
         env:
+          AGENT_SIGN_IN_TRUST_FILE: ${{ steps.deploy_resources.outputs.secondary == 'true' && format('{0}/agent-sign-in-trust.json', runner.temp) || '' }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          CF_ZONE_ID: ${{ steps.deploy_resources.outputs.secondary == 'true' && (steps.installation_zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
-          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
-          GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
-          GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
-          GH_APP_ID: ${{ secrets.GH_APP_ID }}
-          GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          GH_APP_SLUG: ${{ secrets.GH_APP_SLUG }}
+          VAPID_PRIVATE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.VAPID_PRIVATE_KEY || '' }}
+          VAPID_PUBLIC_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.VAPID_PUBLIC_KEY || '' }}
+          VAPID_SUBJECT: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.VAPID_SUBJECT || '' }}
+          GH_CLIENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_CLIENT_ID || '' }}
+          GH_CLIENT_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_CLIENT_SECRET || '' }}
+          GH_APP_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_APP_ID || '' }}
+          GH_APP_PRIVATE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_APP_PRIVATE_KEY || '' }}
+          GH_APP_SLUG: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_APP_SLUG || '' }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
-          SECRET_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
-          SECRET_JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
-          SECRET_JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_LOGIN_CLIENT_ID: ${{ secrets.GOOGLE_LOGIN_CLIENT_ID }}
-          GOOGLE_LOGIN_CLIENT_SECRET: ${{ secrets.GOOGLE_LOGIN_CLIENT_SECRET }}
-          GITLAB_HOST: ${{ secrets.GITLAB_HOST }}
-          GITLAB_CLIENT_ID: ${{ secrets.GITLAB_CLIENT_ID }}
-          GITLAB_CLIENT_SECRET: ${{ secrets.GITLAB_CLIENT_SECRET }}
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
-          GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
+          SECRET_ENCRYPTION_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.ENCRYPTION_KEY || '' }}
+          SECRET_JWT_PRIVATE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.JWT_PRIVATE_KEY || '' }}
+          SECRET_JWT_PUBLIC_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.JWT_PUBLIC_KEY || '' }}
+          GOOGLE_CLIENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GOOGLE_CLIENT_ID || '' }}
+          GOOGLE_CLIENT_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GOOGLE_CLIENT_SECRET || '' }}
+          GOOGLE_LOGIN_CLIENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GOOGLE_LOGIN_CLIENT_ID || '' }}
+          GOOGLE_LOGIN_CLIENT_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GOOGLE_LOGIN_CLIENT_SECRET || '' }}
+          GITLAB_HOST: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GITLAB_HOST || '' }}
+          GITLAB_CLIENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GITLAB_CLIENT_ID || '' }}
+          GITLAB_CLIENT_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GITLAB_CLIENT_SECRET || '' }}
+          BETTER_AUTH_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.BETTER_AUTH_SECRET || '' }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.CREDENTIAL_ENCRYPTION_KEY || '' }}
+          GH_WEBHOOK_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GH_WEBHOOK_SECRET || '' }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           SMOKE_TEST_AUTH_ENABLED: ${{ secrets.SMOKE_TEST_AUTH_ENABLED }}
-          AGENT_SIGN_IN_TRUST: ${{ secrets.AGENT_SIGN_IN_TRUST }}
-          DEPLOY_SIGNING_PRIVATE_KEY: ${{ secrets.DEPLOY_SIGNING_PRIVATE_KEY }}
-          DEPLOY_SIGNING_PUBLIC_KEY: ${{ secrets.DEPLOY_SIGNING_PUBLIC_KEY }}
-          SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
-          GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
-          GA4_MEASUREMENT_ID: ${{ secrets.GA4_MEASUREMENT_ID }}
+          AGENT_SIGN_IN_TRUST: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.AGENT_SIGN_IN_TRUST || '' }}
+          DEPLOY_SIGNING_PRIVATE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.DEPLOY_SIGNING_PRIVATE_KEY || '' }}
+          DEPLOY_SIGNING_PUBLIC_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.DEPLOY_SIGNING_PUBLIC_KEY || '' }}
+          SEGMENT_WRITE_KEY: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.SEGMENT_WRITE_KEY || '' }}
+          GA4_API_SECRET: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GA4_API_SECRET || '' }}
+          GA4_MEASUREMENT_ID: ${{ steps.deploy_resources.outputs.secondary != 'true' && secrets.GA4_MEASUREMENT_ID || '' }}
           CF_AIG_TOKEN: ${{ secrets.CF_AIG_TOKEN }}
           DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN }}
           DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID }}
@@ -2049,6 +2144,58 @@ jobs:
           exit 1
         env:
           API_URL: ${{ steps.deploy_resources.outputs.api_url }}
+
+      # Secondary installations only (never production; the script re-checks the allowlist):
+      # seed the agent test users, copy a portable cloud credential from the primary
+      # installation, register the smoke token, then pick the shared pool's machines through
+      # the admin API (so it runs after the health check). Idempotent; see the script header.
+      - name: Bootstrap Secondary Installation
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) && steps.deploy_resources.outputs.secondary == 'true' && inputs.environment != 'production' }}
+        working-directory: infra
+        run: |
+          read_output() {
+            local value
+            value="$(pulumi stack output --stack "$1" "$2" --show-secrets)"
+            if [ -z "$value" ]; then
+              echo "::error::Pulumi output $2 is empty on stack $1" >&2
+              return 1
+            fi
+            printf '%s' "$value"
+          }
+          TARGET_D1_ID="$(read_output "$TARGET_STACK" d1DatabaseId)"
+          SOURCE_D1_ID="$(read_output "$PRIMARY_STACK" d1DatabaseId)"
+          TARGET_ENCRYPTION_KEY="$(read_output "$TARGET_STACK" encryptionKey)"
+          echo "::add-mask::$TARGET_ENCRYPTION_KEY"
+          if [ -n "$PRIMARY_ENCRYPTION_KEY_OVERRIDE" ]; then
+            SOURCE_ENCRYPTION_KEY="$PRIMARY_ENCRYPTION_KEY_OVERRIDE"
+          else
+            SOURCE_ENCRYPTION_KEY="$(read_output "$PRIMARY_STACK" encryptionKey)"
+            echo "::add-mask::$SOURCE_ENCRYPTION_KEY"
+          fi
+          if [ "$TARGET_D1_ID" = "$SOURCE_D1_ID" ] || [ "$TARGET_STACK" = "$PRIMARY_STACK" ]; then
+            echo "::error::Target and primary installation resolve to the same stack or database."
+            exit 1
+          fi
+          export TARGET_D1_ID SOURCE_D1_ID TARGET_ENCRYPTION_KEY SOURCE_ENCRYPTION_KEY
+          cd .. && pnpm tsx scripts/deploy/bootstrap-staging-installation.ts bootstrap
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          INSTALLATION: ${{ steps.deploy_resources.outputs.installation }}
+          DEPLOY_ENVIRONMENT: ${{ steps.deploy_resources.outputs.credential_environment }}
+          BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
+          TARGET_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
+          PRIMARY_STACK: ${{ steps.deploy_resources.outputs.primary_stack }}
+          # The primary Worker's keys: an Environment override wins over Pulumi, as in
+          # configure-secrets.sh. The secondary never receives these overrides.
+          PRIMARY_ENCRYPTION_KEY_OVERRIDE: ${{ secrets.ENCRYPTION_KEY }}
+          SOURCE_CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
+          # Only the primary's designated test accounts' own credentials may be copied.
+          SOURCE_AGENT_SIGN_IN_TRUST: ${{ secrets.AGENT_SIGN_IN_TRUST }}
 
       - name: Output Deployment URLs
         id: output

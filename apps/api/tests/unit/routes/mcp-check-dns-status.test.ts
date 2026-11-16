@@ -21,12 +21,23 @@ import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 import { type HeldHttpServer, startHeldHttpServer } from '../../helpers/held-http-server';
 
 const TOKEN = { taskId: '', projectId: 'p1', userId: 'u1', workspaceId: 'ws1' } as McpTokenData;
-const ENV = { BASE_DOMAIN: 'sam.example.com' } as Env;
+/** A real admin-settings database, so outbound.maxRedirects resolves to its default (3). */
+let ENV: Env;
+let settingsDb: Database.Database | undefined;
+
+beforeEach(() => {
+  __resetAdminSettingsCacheForTest();
+  const created = createAdminSettingsEnv();
+  settingsDb = created.sqlite;
+  ENV = { ...created.env, BASE_DOMAIN: 'sam.example.com' } as Env;
+});
 const WORKSPACE = 'https://ws-ws1.sam.example.com';
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  settingsDb?.close();
+  settingsDb = undefined;
 });
 
 function resultOf(res: unknown): Record<string, unknown> {
@@ -114,7 +125,7 @@ describe('check_dns_status with mocked transport', () => {
   it('a private-domain install checks its own private workspace host', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
-    const res = await handleCheckDnsStatus(1, TOKEN, { BASE_DOMAIN: 'sam.lan' } as Env);
+    const res = await handleCheckDnsStatus(1, TOKEN, { ...ENV, BASE_DOMAIN: 'sam.lan' } as Env);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]?.[0]).toBe('https://ws-ws1.sam.lan/');
     expect(resultOf(res)).toMatchObject({ httpStatus: 200, dnsResolved: true });
@@ -123,7 +134,7 @@ describe('check_dns_status with mocked transport', () => {
   it('control: on a private-domain install a redirect to a loopback service is not followed', async () => {
     const fetchMock = vi.fn(async () => redirect('http://127.0.0.1:7001/'));
     vi.stubGlobal('fetch', fetchMock);
-    const res = await handleCheckDnsStatus(1, TOKEN, { BASE_DOMAIN: 'sam.lan' } as Env);
+    const res = await handleCheckDnsStatus(1, TOKEN, { ...ENV, BASE_DOMAIN: 'sam.lan' } as Env);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(resultOf(res)).toMatchObject({ status: 'redirect_refused', refusal: 'host' });
   });
@@ -141,7 +152,7 @@ describe('check_dns_status with mocked transport', () => {
     const fetchMock = vi.fn(async () => redirect(`${WORKSPACE}/loop/${(hop += 1)}`));
     vi.stubGlobal('fetch', fetchMock);
     const res = await handleCheckDnsStatus(1, TOKEN, ENV);
-    // outbound.maxRedirects defaults to 3 (no settings database here, so the default applies).
+    // outbound.maxRedirects resolves to its default, 3, from the real settings database.
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(resultOf(res)).toMatchObject({ status: 'redirect_refused', refusal: 'redirect_limit' });
   });
@@ -177,6 +188,18 @@ describe('check_dns_status reads outbound.maxRedirects', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
   afterEach(() => sqlite.close());
+
+  it('follows no redirect when settings cannot be read (strictest limit, never the default)', async () => {
+    const fetchMock = vi.fn(async () => redirect(`${WORKSPACE}/login`));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await handleCheckDnsStatus(1, TOKEN, { BASE_DOMAIN: 'sam.example.com' } as Env);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(resultOf(res)).toMatchObject({
+      httpStatus: 302,
+      status: 'redirect_refused',
+      refusal: 'redirect_limit',
+    });
+  });
 
   it('cuts a same-origin chain at the configured limit, not the default', async () => {
     await updateAdminSettings(env, {

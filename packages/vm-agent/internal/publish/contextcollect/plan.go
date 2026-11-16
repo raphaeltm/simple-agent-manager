@@ -20,6 +20,7 @@ type buildContext struct {
 	matchers []*patternmatcher.PatternMatcher
 }
 type collectionPlan struct {
+	projectName   string
 	root          string
 	source        *os.Root
 	contexts      []buildContext
@@ -74,6 +75,7 @@ func makePlan(ctx context.Context, opts Options) (*collectionPlan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load Compose build context: %w", err)
 	}
+	p.projectName = project.Name
 	for _, path := range project.ComposeFiles {
 		if original, ok := graph.originals[path]; ok {
 			path = original

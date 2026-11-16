@@ -46,14 +46,14 @@ export function seedEvictionOwnerAndNode(sqlite: Database.Database): void {
 
 /**
  * Picks the owner's starter machines, as a person does before work runs: nothing joins a pool
- * on its own, and recovery places the replacement runtime on the pool.
+ * on its own, and recovery places the replacement runtime on the pool. Prepare the validated
+ * bundled catalog; the seeded recovery credential is not encrypted for a live provider lookup.
  */
 export async function pickEvictionPools(env: Env): Promise<void> {
   await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
     userId: 'user-1',
     projectId: 'project-1',
     includeInstallation: true,
-    env,
   });
 }
 

@@ -8,6 +8,7 @@
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
  */
+import type { RunReceiptFactsInput } from '@simple-agent-manager/shared';
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
@@ -26,10 +27,15 @@ import {
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 import { expectJsonRecord } from '@simple-agent-manager/worker-core';
 import { normalizeSearchQuery } from '@simple-agent-manager/worker-core';
+import { preferAttention, readOpenQuestionAttention } from '@simple-agent-manager/worker-core';
 import { DurableObject } from 'cloudflare:workers';
 
 import { measureArchiveSql } from '../archive/sql-metrics';
 import { estimateArchiveWrites } from '../archive/write-budget';
+import {
+  assertExactWriteAllowed,
+  isProjectDataArchiveExactRoutingEnabled,
+} from '../client/project-data-archive-routing';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import * as agentMessageChannels from './agent-message-channels';
@@ -67,7 +73,9 @@ import * as logicalTranscript from './logical-transcript';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messageContext from './message-context';
+import { emptyMessageIngestMetrics, refuseMerge } from './message-ingest-metrics';
 import * as messagePersistence from './message-persistence';
+import { DEFAULT_MESSAGE_MERGE_CONFIG, type MessageIngestSource } from './message-stream-ingest';
 import * as messages from './messages';
 import { runMigrations } from './migrations';
 import * as missionState from './missions';
@@ -106,9 +114,12 @@ import {
   type ProviderLimitAttentionResult,
   syncProviderLimitAttention,
 } from './provider-limit-attention';
+import * as questionAsks from './question-asks';
 import * as reconciliation from './reconciliation';
+import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
+import { getRunReceiptFacts } from './run-receipt-facts';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import { withoutSamNotice } from './sam-notice-metadata';
 import * as sessionAccess from './session-access';
@@ -116,6 +127,12 @@ import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionReads from './session-reads';
 import { guardedSessionSleep, type SessionSleepRuntimeGuard } from './session-sleep-runtime-guard';
+import {
+  admitBrowserSocket,
+  broadcastToBrowserSockets,
+  closeQuietly,
+  countLegacySockets,
+} from './session-sockets';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
@@ -661,7 +678,12 @@ export class ProjectData extends DurableObject<Env> {
       this.scheduleSummarySync();
       this.broadcastEvent(
         'session.updated',
-        { sessionId, workspaceId, taskId, status: 'active' },
+        {
+          sessionId,
+          workspaceId,
+          taskId,
+          status: sessionReads.getSession(this.sql, sessionId)?.status,
+        },
         sessionId
       );
     }
@@ -688,16 +710,68 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async signalSessionWakeReady(input: sessionWakeReady.SessionWakeReadyInput): Promise<number> {
+  /** null rejects authority; a nonnegative count (including a duplicate zero) acknowledges it. */
+  async signalSessionWakeReady(
+    input: sessionWakeReady.SessionWakeReadyInput
+  ): Promise<number | null> {
     // Authority reads must be serialized with dedup writes: an older RPC suspended in D1
     // cannot overwrite a newer fence and make its duplicate appear novel.
     const run = this.wakeReadyLock.then(async () => {
       this.ensureProjectId(input.projectId);
-      if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return 0;
-      const now = Date.now();
-      const released = this.meteredStorage.transactionSync(() =>
-        sessionWakeReady.applySessionWakeReady(this.sql, input, now)
+      if (isProjectDataArchiveExactRoutingEnabled(this.env))
+        await assertExactWriteAllowed(
+          this.env,
+          input.projectId,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
+      messages.assertTranscriptWriteAllowed(
+        this.sql,
+        input.chatSessionId,
+        'signalSessionWakeReady'
       );
+      const activationGuard = sessionWakeReady.captureSessionWakeActivation(this.sql, input);
+      if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return null;
+      const now = Date.now();
+      const { activated, released } = this.meteredStorage.transactionSync(() => {
+        // A source intent may have been prepared while the D1 authority read awaited.
+        messages.assertTranscriptWriteAllowed(
+          this.sql,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
+        const activated = sessionWakeReady.activateSessionWakeReady(
+          this.sql,
+          input,
+          activationGuard,
+          now
+        );
+        return {
+          activated,
+          released: sessionWakeReady.isSessionWakeReadyLocallyAccepted(this.sql, input)
+            ? sessionWakeReady.applySessionWakeReady(this.sql, input, now)
+            : null,
+        };
+      });
+      if (activated) {
+        this.ctx.waitUntil(
+          sessionWakeReady.recordSessionWakeActivation(input, now, (event) =>
+            this.admitProjectEvent(event)
+          )
+        );
+        this.scheduleSummarySync();
+        this.broadcastEvent(
+          'session.updated',
+          {
+            sessionId: input.chatSessionId,
+            workspaceId: input.workspaceId,
+            taskId: input.fence.runtime === 'vm' ? input.fence.taskId : undefined,
+            status: 'active',
+          },
+          input.chatSessionId
+        );
+      }
+      if (released === null) return null;
       // Re-arm even on duplicate: a previous RPC may have committed SQLite before alarm I/O failed.
       await this.recalculateAlarm();
       return released;
@@ -832,17 +906,31 @@ export class ProjectData extends DurableObject<Env> {
       timestamp: string;
       sequence?: number;
       origin?: string | null;
-    }>
+    }>,
+    source?: MessageIngestSource
   ): Promise<messagePersistence.MessageBatchPersistenceResult> {
-    return this.withArchiveTranscriptLock(() =>
-      messagePersistence.persistMessageBatchWithSideEffects(
+    return this.withArchiveTranscriptLock(async () => {
+      const config = source
+        ? ((await projectDataPorts().operations.messageMergeConfig?.(this.env)) ??
+          DEFAULT_MESSAGE_MERGE_CONFIG)
+        : DEFAULT_MESSAGE_MERGE_CONFIG;
+      const metrics = emptyMessageIngestMetrics();
+      const legacy = countLegacySockets(this.ctx, sessionId);
+      metrics.legacySessionSocketsMax = legacy.session;
+      // Informational only: project sockets get no transcript frames and never gate merging.
+      metrics.legacyProjectSocketsMax = legacy.project;
+      const legacyClient = legacy.session > 0;
+      if (!config.enabled) refuseMerge(metrics, 'setting_disabled');
+      else if (legacyClient) refuseMerge(metrics, 'legacy_client');
+      return messagePersistence.persistMessageBatchWithSideEffects(
         this.sql,
         this.env,
         this.messagePersistenceHooks(),
         sessionId,
-        batchMessages
-      )
-    );
+        batchMessages,
+        { source, config: { ...config, enabled: config.enabled && !legacyClient }, metrics }
+      );
+    });
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
@@ -915,7 +1003,47 @@ export class ProjectData extends DurableObject<Env> {
       },
       nudgeDeliveries: (chatSessionId) =>
         promptDelivery.nudgePromptDeliveriesForTarget(this.sql, chatSessionId),
+      closeQuestionAsks: (sessionId, messageId, messageCreatedAt) =>
+        this.closeQuestionAsks(sessionId, messageId, messageCreatedAt),
     };
+  }
+
+  /** A person's chat message answers the chat's open questions in D1 `asks` (inbox slice G). */
+  private async closeQuestionAsks(
+    sessionId: string,
+    messageId: string | null,
+    messageCreatedAt: number
+  ): Promise<number> {
+    const closed = await questionAsks.closeQuestionAsksForHumanMessage(
+      this.env,
+      { projectId: this.getProjectId(), sessionId, messageId, messageCreatedAt },
+      (type, payload, targetSessionId) => this.broadcastEvent(type, payload, targetSessionId)
+    );
+    if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
+    return closed;
+  }
+
+  /** The chats' open questions from D1 `asks`, merged into their attention (inbox slice G). */
+  private async withQuestionAttention(
+    sessions: Record<string, unknown>[]
+  ): Promise<Record<string, unknown>[]> {
+    const projectId = this.getProjectId();
+    const sessionIds = sessions
+      .map((session) => session.id)
+      .filter((id): id is string => typeof id === 'string');
+    if (!projectId || sessionIds.length === 0) return sessions;
+    const questions = await readOpenQuestionAttention(this.env.DATABASE, {
+      projectId,
+      sessionIds,
+      now: Date.now(),
+    });
+    if (questions.size === 0) return sessions;
+    return sessions.map((session) => {
+      const question = typeof session.id === 'string' ? questions.get(session.id) : undefined;
+      return question
+        ? { ...session, attention: preferAttention(session.attention, question) }
+        : session;
+    });
   }
 
   /**
@@ -937,9 +1065,13 @@ export class ProjectData extends DurableObject<Env> {
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
+      recordMessageIngest: (metrics) => this.rowUsage.recordMessageIngest(metrics),
+      transactionSync: (fn) => this.meteredStorage.transactionSync(fn),
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
       broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
+      closeQuestionAsks: (sessionId, messageId, messageCreatedAt) =>
+        this.closeQuestionAsks(sessionId, messageId, messageCreatedAt),
     };
   }
 
@@ -985,17 +1117,26 @@ export class ProjectData extends DurableObject<Env> {
       taskId,
       createdByUserId
     );
+    const sessions = await this.withQuestionAttention(result.sessions);
     return {
-      sessions: result.sessions.map((s) => this.addBaseDomain(s)),
+      sessions: sessions.map((s) => this.addBaseDomain(s)),
       total: result.total,
       hasMore: result.hasMore,
     };
   }
 
   async getSessionsByTaskIds(taskIds: string[]): Promise<Array<Record<string, unknown>>> {
-    return sessionReads.getSessionsByTaskIds(this.sql, taskIds).map((s) => this.addBaseDomain(s));
+    const sessions = await this.withQuestionAttention(
+      sessionReads.getSessionsByTaskIds(this.sql, taskIds)
+    );
+    return sessions.map((s) => this.addBaseDomain(s));
   }
 
+  /**
+   * One session. Its `attention` is the ProjectData marker summary only: this read sits on many
+   * control loops, and nothing renders a single session's attention; the list reads above merge
+   * open questions from D1 `asks` (inbox slice G).
+   */
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const result = sessionReads.getSession(this.sql, sessionId);
     return result ? this.addBaseDomain(result) : null;
@@ -2524,8 +2665,21 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /** Batched: the work linked to many ideas at once, for the Ideas list. */
-  getIdeaWorkSnapshots(ideaIds: string[], caps: ideaWork.IdeaWorkLinkCaps) {
-    return ideaWork.getIdeaWorkSnapshots(this.sql, ideaIds, caps);
+  async getIdeaWorkSnapshots(ideaIds: string[], caps: ideaWork.IdeaWorkLinkCaps) {
+    const snapshots = ideaWork.getIdeaWorkSnapshots(this.sql, ideaIds, caps);
+    const projectId = this.getProjectId();
+    const sessionIds = ideaWork.ideaQuestionSessionIds(snapshots);
+    if (projectId && sessionIds.length > 0) {
+      ideaWork.mergeQuestionAsks(
+        snapshots,
+        await readOpenQuestionAttention(this.env.DATABASE, {
+          projectId,
+          sessionIds,
+          now: Date.now(),
+        })
+      );
+    }
+    return snapshots;
   }
 
   async cacheCommands(
@@ -2685,19 +2839,109 @@ export class ProjectData extends DurableObject<Env> {
     });
   }
 
+  /**
+   * An agent asked a question that is now a D1 `asks` row (inbox slice G): it answers SAM's open
+   * check-in, as a question marker did, and the chat list shows it live. Nothing is stored here.
+   */
+  async recordQuestionAsked(input: {
+    sessionId: string;
+    askId: string;
+    createdAt: number;
+    expiresAt: number | null;
+    reason: string | null;
+    options: string[];
+  }): Promise<void> {
+    const resolved = attention.resolveAttentionMarkersByKind(
+      this.sql,
+      input.sessionId,
+      'reconciliation_checkin',
+      null,
+      'agent',
+      'human_input_requested'
+    );
+    if (resolved > 0) {
+      await this.recalculateAlarm();
+      this.scheduleSummarySync();
+    }
+    this.broadcastEvent(
+      'attention.created',
+      {
+        sessionId: input.sessionId,
+        markerId: input.askId,
+        kind: 'needs_input',
+        createdAt: input.createdAt,
+        expiresAt: input.expiresAt,
+        reason: input.reason,
+        options: input.options,
+      },
+      input.sessionId
+    );
+  }
+
+  /**
+   * The agent cancelled its blocking question in D1 `asks` (`inbox_write` method `cancel`, inbox
+   * slice D): the chat stops showing it as paused, as when a question is answered. Nothing is
+   * stored here; the row is already closed.
+   */
+  async recordQuestionWithdrawn(input: { sessionId: string; askId: string }): Promise<void> {
+    if (releaseQuestionHold(this.sql, input.sessionId)) await this.recalculateAlarm();
+    this.broadcastEvent(
+      'attention.resolved',
+      { sessionId: input.sessionId, markerId: input.askId, reason: 'cancelled' },
+      input.sessionId
+    );
+  }
+
+  /**
+   * The outcome of an expired question held in D1 `asks` (the inbox sweep expired the row): the
+   * same task outcome a question marker's expiry has. A chat message from the person after the
+   * question answered it, so then the task is left alone.
+   */
+  async expireQuestionAsk(input: {
+    askId: string;
+    sessionId: string;
+    taskId: string | null;
+    workspaceId: string | null;
+    createdAt: number;
+  }): Promise<{ outcome: 'expired' | 'answered_in_chat' }> {
+    const answeredInChat = questionAsks.humanMessageSince(
+      this.sql,
+      input.sessionId,
+      input.createdAt
+    );
+    if (!answeredInChat) {
+      await attentionExpiry.failExpiredQuestionAsk(
+        this.sql,
+        this.env,
+        {
+          id: input.askId,
+          sessionId: input.sessionId,
+          taskId: input.taskId,
+          workspaceId: input.workspaceId,
+          createdAt: input.createdAt,
+        },
+        async (sessionId, errorMessage) => {
+          await this.failSession(sessionId, errorMessage);
+        },
+        { projectId: this.getProjectId(), scheduleSummarySync: () => this.scheduleSummarySync() }
+      );
+    }
+    if (releaseQuestionHold(this.sql, input.sessionId)) await this.recalculateAlarm();
+    this.broadcastEvent(
+      'attention.resolved',
+      {
+        sessionId: input.sessionId,
+        markerId: input.askId,
+        reason: answeredInChat ? 'human_message' : 'expired',
+      },
+      input.sessionId
+    );
+    return { outcome: answeredInChat ? 'answered_in_chat' : 'expired' };
+  }
+
   async createAttentionMarker(
     opts: attention.CreateAttentionMarkerOpts
   ): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
-    if (opts.kind === 'needs_input' && opts.source === 'request_human_input') {
-      attention.resolveAttentionMarkersByKind(
-        this.sql,
-        opts.sessionId,
-        'reconciliation_checkin',
-        null,
-        'agent',
-        'human_input_requested'
-      );
-    }
     const result = attention.createAttentionMarker(this.sql, opts);
     await this.recalculateAlarm();
     // The D1 session index (Connector inbox, chat list badges) copies the attention summary; a
@@ -2719,19 +2963,6 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
-  linkAttentionNotification(
-    markerId: string,
-    notificationUserId: string,
-    notificationId: string
-  ): boolean {
-    return attention.linkAttentionNotification(
-      this.sql,
-      markerId,
-      notificationUserId,
-      notificationId
-    );
-  }
-
   prepareAttentionAnswer(sessionId: string, markerId: string, answer: string) {
     return attention.prepareAttentionAnswer(this.sql, sessionId, markerId, answer);
   }
@@ -2740,18 +2971,45 @@ export class ProjectData extends DurableObject<Env> {
     return attention.releaseAttentionAnswer(this.sql, sessionId, markerId, answer);
   }
 
-  async completeAttentionAnswer(
+  completeAttentionAnswer(sessionId: string, markerId: string, answer: string): Promise<number> {
+    return this.completeAttentionClaim(sessionId, markerId, answer, 'answer');
+  }
+
+  /**
+   * Inbox archive of a question (idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9). Separate RPC names from the
+   * answer methods, so a worker newer than this object fails closed instead of staging an empty
+   * answer through the old signature.
+   */
+  prepareAttentionArchive(sessionId: string, markerId: string) {
+    return attention.prepareAttentionAnswer(this.sql, sessionId, markerId, '', 'archive');
+  }
+
+  releaseAttentionArchive(sessionId: string, markerId: string): number {
+    return attention.releaseAttentionAnswer(this.sql, sessionId, markerId, '', 'archive');
+  }
+
+  completeAttentionArchive(sessionId: string, markerId: string): Promise<number> {
+    return this.completeAttentionClaim(sessionId, markerId, '', 'archive');
+  }
+
+  private async completeAttentionClaim(
     sessionId: string,
     markerId: string,
-    answer: string
+    answer: string,
+    mode: attention.AttentionClaimMode
   ): Promise<number> {
-    const count = attention.completeAttentionAnswer(this.sql, sessionId, markerId, answer);
+    const count = attention.completeAttentionAnswer(this.sql, sessionId, markerId, answer, mode);
     if (count > 0) {
       await this.recalculateAlarm();
       this.scheduleSummarySync();
       this.broadcastEvent(
         'attention.resolved',
-        { sessionId, markerId, count, reason: 'structured_answer' },
+        {
+          sessionId,
+          markerId,
+          count,
+          reason: mode === 'archive' ? 'archived' : 'structured_answer',
+        },
         sessionId
       );
     }
@@ -2813,6 +3071,11 @@ export class ProjectData extends DurableObject<Env> {
 
   listActiveAttentionMarkers(sessionId: string) {
     return attention.listActiveAttentionMarkers(this.sql, sessionId);
+  }
+
+  /** One chat's run-receipt facts: tool calls, questions, last agent message (`run-receipt-facts.ts`). */
+  getRunReceiptFacts(input: RunReceiptFactsInput) {
+    return getRunReceiptFacts(this.sql, input);
   }
 
   async createAcpSession(opts: {
@@ -3467,16 +3730,7 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      const pair = new WebSocketPair();
-      const sessionId = url.searchParams.get('sessionId');
-      const tags: string[] = [];
-      if (sessionId) {
-        if (!/^[0-9a-f-]{36}$/i.test(sessionId))
-          return new Response('Invalid sessionId format', { status: 400 });
-        tags.push(`session:${sessionId}`);
-      }
-      this.ctx.acceptWebSocket(pair[1], tags);
-      return new Response(null, { status: 101, webSocket: pair[0] });
+      return admitBrowserSocket(this.ctx, this.sql, url);
     }
     return new Response('Not found', { status: 404 });
   }
@@ -3517,10 +3771,10 @@ export class ProjectData extends DurableObject<Env> {
     _reason: string,
     _wasClean: boolean
   ): Promise<void> {
-    ws.close();
+    closeQuietly(ws);
   }
   async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
-    ws.close();
+    closeQuietly(ws);
   }
 
   // --- Knowledge Graph ---
@@ -3853,7 +4107,8 @@ export class ProjectData extends DurableObject<Env> {
     sourceSessionId: string | null,
     confidence: number,
     scope: import('@simple-agent-manager/shared').PolicyScope = 'always',
-    expiresAt: number | null = null
+    expiresAt: number | null = null,
+    injectMode: import('@simple-agent-manager/shared').PolicyInjectMode = 'pinned'
   ) {
     const result = policies.createPolicy(
       this.sql,
@@ -3865,7 +4120,8 @@ export class ProjectData extends DurableObject<Env> {
       sourceSessionId,
       confidence,
       scope,
-      expiresAt
+      expiresAt,
+      injectMode
     );
     this.broadcastEvent('policy.created', { id: result.id, category, title });
     return result;
@@ -3889,6 +4145,7 @@ export class ProjectData extends DurableObject<Env> {
       confidence?: number;
       scope?: import('@simple-agent-manager/shared').PolicyScope;
       expiresAt?: number | null;
+      injectMode?: import('@simple-agent-manager/shared').PolicyInjectMode;
     }
   ) {
     const result = policies.updatePolicy(this.sql, policyId, updates);
@@ -3947,37 +4204,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private broadcastEvent(type: string, payload: Record<string, unknown>, sessionId?: string): void {
-    const message = JSON.stringify({ type, payload });
-    if (sessionId) {
-      const sessionSockets = this.ctx.getWebSockets(`session:${sessionId}`);
-      const allSockets = this.ctx.getWebSockets();
-      const sent = new Set<WebSocket>();
-      for (const ws of sessionSockets) {
-        try {
-          ws.send(message);
-          sent.add(ws);
-        } catch {
-          /* closed */
-        }
-      }
-      for (const ws of allSockets) {
-        if (sent.has(ws)) continue;
-        if (this.ctx.getTags(ws).some((t) => t.startsWith('session:'))) continue;
-        try {
-          ws.send(message);
-        } catch {
-          /* closed */
-        }
-      }
-    } else {
-      for (const ws of this.ctx.getWebSockets()) {
-        try {
-          ws.send(message);
-        } catch {
-          /* closed */
-        }
-      }
-    }
+    broadcastToBrowserSockets(this.ctx, type, payload, sessionId);
   }
 
   private broadcastCommentThread(
