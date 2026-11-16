@@ -236,6 +236,8 @@ func run(ctx context.Context, launch Launch, spec Spec, sink publish.EventSink) 
 	sink.Event(ctx, publish.Event{Status: "starting", CurrentStep: "builder_ready", EventType: "publish.builder.ready", Message: "DinD builder ready"})
 	artifact, err := publish.Build(ctx, publish.BuildOptions{WorkspaceDir: source, Reference: spec.Reference, BuildEnv: spec.BuildEnv, SecretKeys: spec.SecretKeys, BuildNetwork: "host", Events: sink})
 	if err != nil {
+		// TODO(01M7HDK9DV8G2JPBK1KTVNY6JN): preserve the failing step and a bounded,
+		// redacted build-output tail; Cloudflare callbacks currently expose only this generic error.
 		return errors.New("compose build failed")
 	}
 	plane := publish.NewHTTPControlPlane(publish.HTTPControlPlaneOptions{BaseURL: launch.ControlPlaneURL, Token: launch.Token, Client: Client(launch.callbackTimeout())})
