@@ -49,7 +49,14 @@ export async function handleRequestHumanInput(
   }
 
   // Sanitize context: strip null bytes, Unicode bidi overrides, and C0/C1 control chars (except \n, \t)
-  const sanitizedContext = sanitizeUserInput(context.trim());
+  const sanitizedContext = sanitizeUserInput(context.trim()).trim();
+  if (!sanitizedContext) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'context is required and must be a non-empty string'
+    );
+  }
 
   // Validate category if provided
   let category: HumanInputCategory | null = null;
@@ -78,7 +85,9 @@ export async function handleRequestHumanInput(
     }
     options = (params.options as string[])
       .slice(0, MAX_HUMAN_INPUT_OPTIONS_COUNT)
-      .map((o) => sanitizeUserInput(o).slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH));
+      .map((o) => sanitizeUserInput(o).trim().slice(0, MAX_HUMAN_INPUT_OPTION_LENGTH))
+      // An option that is empty once cleaned cannot be picked; leave it out.
+      .filter((o) => o.length > 0);
     if (options.length === 0) options = null;
   }
 
@@ -142,14 +151,17 @@ export async function handleRequestHumanInput(
       error: err instanceof Error ? err.message : String(err),
     });
     // The per-chat cap and length limits are the inbox's; say which one the agent hit.
-    const limitHit =
-      err instanceof OperationError && ['rate_limited', 'invalid_input'].includes(err.code);
+    if (err instanceof OperationError && ['rate_limited', 'invalid_input'].includes(err.code)) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    // A shape the inbox refuses: the agent can fix its call (the details stay in the log).
+    if (err instanceof Error && err.name === 'ValiError') {
+      return jsonRpcError(requestId, INVALID_PARAMS, 'Human input request is not valid');
+    }
     return jsonRpcError(
       requestId,
-      limitHit ? INVALID_PARAMS : INTERNAL_ERROR,
-      limitHit && err instanceof Error
-        ? err.message
-        : 'Human input request could not be recorded safely'
+      INTERNAL_ERROR,
+      'Human input request could not be recorded safely'
     );
   }
 

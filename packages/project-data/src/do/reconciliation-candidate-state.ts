@@ -25,6 +25,8 @@ export interface ReconciliationGate {
   nextAttemptAt: number;
   excludedTaskId: string | null;
   checkinIntent: ReconciliationCheckinIntent | null;
+  /** Deferred because the chat has an open question (inbox slice G); released when it closes. */
+  questionHold: boolean;
 }
 
 /**
@@ -97,6 +99,7 @@ function parseGate(raw: string | null): ReconciliationGate | null {
       nextAttemptAt: parsed.nextAttemptAt,
       excludedTaskId: typeof parsed.excludedTaskId === 'string' ? parsed.excludedTaskId : null,
       checkinIntent: parseCheckinIntent(parsed.checkinIntent),
+      questionHold: parsed.questionHold === true,
     };
   } catch {
     return null;
@@ -185,7 +188,8 @@ export function deferReconciliationCandidate(
 export function deferReconciliationCandidateUntil(
   sql: SqlStorage,
   sessionId: string,
-  nextAttemptAt: number
+  nextAttemptAt: number,
+  options: { questionHold?: boolean } = {}
 ): void {
   const key = gateKey(sessionId);
   const existing = parseGate(readMeta(sql, key));
@@ -193,6 +197,7 @@ export function deferReconciliationCandidateUntil(
     ...(existing?.checkinIntent ? { checkinIntent: existing.checkinIntent } : {}),
     attempts: 0,
     nextAttemptAt,
+    ...(options.questionHold ? { questionHold: true } : {}),
   });
 }
 
@@ -219,6 +224,19 @@ export function getOrCreateReconciliationCheckinIntent(
     checkinIntent,
   });
   return checkinIntent;
+}
+
+/**
+ * A chat's open question closed (answered, archived, expired, or the person wrote in the chat):
+ * a check-in held until the question's deadline is due again from now (inbox slice G). A gate
+ * that is not deferred is left alone.
+ */
+export function releaseQuestionHold(sql: SqlStorage, sessionId: string, now = Date.now()): boolean {
+  const existing = parseGate(readMeta(sql, gateKey(sessionId)));
+  // Only a question hold: a claim lease or a quarantine on the same gate is not ours to end.
+  if (!existing?.questionHold || existing.nextAttemptAt <= now) return false;
+  deferReconciliationCandidateUntil(sql, sessionId, now);
+  return true;
 }
 
 export function clearReconciliationCandidateGate(sql: SqlStorage, sessionId: string): void {

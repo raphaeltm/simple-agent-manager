@@ -13,6 +13,7 @@ import * as mailbox from './mailbox';
 import { projectDataPorts } from './ports';
 import * as delivery from './prompt-delivery';
 import { runPromptDeliveryClaim } from './prompt-delivery-runner';
+import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { resetReconciliationEpisode } from './reconciliation-episode';
 import { promptDeliveryToolMetadata } from './sam-notice-metadata';
 import * as sessionState from './session-state';
@@ -61,9 +62,6 @@ export async function finalizeAcceptedPromptDelivery(
   let alarmError: unknown = null;
   try {
     runAcceptedPromptDeliveryHooks(sql, _env, hooks, input, accepted);
-    if (accepted.transcriptInserted && input.senderType === 'human') {
-      await hooks.closeQuestionAsks?.(input.targetSessionId, accepted.transcriptMessageId);
-    }
   } catch (error) {
     hookError = error;
   } finally {
@@ -80,6 +78,11 @@ export async function finalizeAcceptedPromptDelivery(
     throw hookError;
   }
   if (alarmError) throw alarmError;
+  // A person's prompt answers the chat's open questions in D1 `asks`, after the broadcast and the
+  // alarm so the D1 round trip delays neither (`question-asks.ts`, never throws).
+  if (accepted.transcriptInserted && input.senderType === 'human') {
+    await hooks.closeQuestionAsks?.(input.targetSessionId, accepted.transcriptMessageId);
+  }
 }
 
 function runAcceptedPromptDeliveryHooks(
@@ -94,6 +97,7 @@ function runAcceptedPromptDeliveryHooks(
   // did when a question marker resolved.
   const questionAskId = input.sourceKind === 'inbox_ask' ? input.metadata?.questionAskId : null;
   if (typeof questionAskId === 'string' && questionAskId) {
+    releaseQuestionHold(sql, input.targetSessionId);
     hooks.broadcastEvent(
       'attention.resolved',
       {
@@ -226,12 +230,12 @@ export function createCheckpointEpisode(
   const result = hooks.transactionSync(() => checkpoints.createCheckpointEpisode(sql, input));
   if (!result.created) return result;
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-      metric: 'checkpoint_episode_transition',
-      projectId: hooks.getProjectId(),
-      sessionId: input.sessionId,
-      checkpointEpisodeId: result.episode.id,
-      attemptCount: result.episode.attemptCount,
-      reason: 'planned',
+    metric: 'checkpoint_episode_transition',
+    projectId: hooks.getProjectId(),
+    sessionId: input.sessionId,
+    checkpointEpisodeId: result.episode.id,
+    attemptCount: result.episode.attemptCount,
+    reason: 'planned',
   });
   activityEvents.recordActivityEventInternal(
     sql,
@@ -273,12 +277,12 @@ export function transitionCheckpointEpisode(
   );
   if (!episode || !before || episode.state === before.state) return episode;
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-      metric: 'checkpoint_episode_transition',
-      projectId: hooks.getProjectId(),
-      sessionId: episode.sessionId,
-      checkpointEpisodeId: episode.id,
-      attemptCount: episode.attemptCount,
-      reason: `${before.state}->${episode.state}`,
+    metric: 'checkpoint_episode_transition',
+    projectId: hooks.getProjectId(),
+    sessionId: episode.sessionId,
+    checkpointEpisodeId: episode.id,
+    attemptCount: episode.attemptCount,
+    reason: `${before.state}->${episode.state}`,
   });
   activityEvents.recordActivityEventInternal(
     sql,

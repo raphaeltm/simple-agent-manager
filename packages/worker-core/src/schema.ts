@@ -833,6 +833,9 @@ export const asks = sqliteTable(
     openEscalationIdx: index('idx_asks_open_escalation')
       .on(table.nextEscalationAt)
       .where(sql`status = 'open' AND next_escalation_at IS NOT NULL`),
+    openQuestionIdx: index('idx_asks_open_question')
+      .on(table.projectId, table.sourceSessionId, table.createdAt)
+      .where(sql`kind = 'question' AND status = 'open'`),
     assigneeStatusIdx: index('idx_asks_assignee_status').on(
       table.assigneeUserId,
       table.status,

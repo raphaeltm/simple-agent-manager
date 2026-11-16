@@ -56,8 +56,10 @@ import type { Env } from '../../../../src/env';
 import { createOperationPorts } from '../../../../src/operation-ports';
 import { answerAttention, registerChatAttentionRoute } from '../../../../src/routes/chat-attention';
 import {
+  answerQuestionAsk,
   fileQuestionAsk,
   linkQuestionNotification,
+  loadQuestionAsk,
 } from '../../../../src/services/inbox/question-asks';
 import { runInboxAskSweep } from '../../../../src/services/inbox/sweep';
 import {
@@ -282,7 +284,9 @@ describe('answering a question', () => {
 
   it('reports an answer whose delivery was not queued as still being delivered; the sweep delivers it', async () => {
     const { id } = await question();
-    edges.acceptPromptDelivery.mockRejectedValueOnce(new Error('DO unavailable'));
+    edges.acceptPromptDelivery
+      .mockRejectedValueOnce(new Error('DO unavailable'))
+      .mockRejectedValueOnce(new Error('DO unavailable'));
     await expect(answer(id, 'eu')).resolves.toEqual({
       resolved: false,
       alreadyResolved: false,
@@ -290,8 +294,9 @@ describe('answering a question', () => {
       answer: 'eu',
     });
     expect(askRow(id)).toMatchObject({ status: 'answered', notified_at: null });
-    // The same answer again is still in flight; a different one conflicts with it.
+    // The same answer again retries the delivery; still failing, it is still in flight.
     await expect(answer(id, 'eu')).resolves.toMatchObject({ inFlight: true });
+    // A different one conflicts with it.
     await expect(answer(id, 'us')).rejects.toMatchObject({
       statusCode: 409,
       message: 'A different answer is already being delivered',
@@ -299,6 +304,24 @@ describe('answering a question', () => {
     // The sweep retries the notice once it is past the inline grace.
     await runInboxAskSweep(env, Number(askRow(id).resolved_at) + 2 * MINUTE);
     expect(askRow(id).notified_at).not.toBeNull();
+    expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(3);
+    // Every attempt used one delivery id, so a delivery that did land is not repeated.
+    expect(
+      new Set(edges.acceptPromptDelivery.mock.calls.map((call) => call[2].deliveryId))
+    ).toEqual(new Set([`inbox-ask:${id}`]));
+  });
+
+  it('the person can unstick an answer that was not delivered by sending it again', async () => {
+    const { id } = await question();
+    edges.acceptPromptDelivery.mockRejectedValueOnce(new Error('DO unavailable'));
+    await expect(answer(id, 'eu')).resolves.toMatchObject({ inFlight: true });
+    await expect(answer(id, 'eu')).resolves.toEqual({
+      resolved: true,
+      alreadyResolved: false,
+      answer: 'eu',
+    });
+    expect(askRow(id).notified_at).not.toBeNull();
+    await expect(answer(id, 'eu')).resolves.toMatchObject({ alreadyResolved: true });
     expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(2);
   });
 
@@ -332,11 +355,38 @@ describe('answering a question', () => {
       status: 'active',
     });
     await expect(answer(id, 'eu', P2, 'chat-2')).rejects.toMatchObject({ statusCode: 404 });
+    // Each conjunct alone: the right chat under the wrong project, the wrong chat of the project.
+    await expect(answer(id, 'eu', P2, 'chat-1')).rejects.toMatchObject({ statusCode: 404 });
     await expect(answer(id, 'eu', P1, 'chat-other')).rejects.toMatchObject({ statusCode: 404 });
     expect(askRow(id).status).toBe('open');
     expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
     // Owner control.
     await expect(answer(id, 'eu')).resolves.toMatchObject({ resolved: true });
+  });
+
+  it('the final compare-and-set is bound to project and chat (forged snapshot attack, owner control)', async () => {
+    const { id } = await question();
+    const ask = await loadQuestionAsk(env, P1, 'chat-1', id);
+    if (!ask) throw new Error('expected the ask');
+    const authorization = await edges.authorizeAgentWake();
+    for (const forged of [
+      { ...ask, projectId: P2 },
+      { ...ask, sessionId: 'chat-other' },
+    ]) {
+      await expect(
+        answerQuestionAsk(env, { ask: forged, answer: 'eu', userId: 'owner', authorization })
+      ).rejects.toMatchObject({ statusCode: 404 });
+    }
+    expect(askRow(id).status).toBe('open');
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+    // Owner control with the genuine snapshot; a second answer from the same stale snapshot loses.
+    await expect(
+      answerQuestionAsk(env, { ask, answer: 'eu', userId: 'owner', authorization })
+    ).resolves.toMatchObject({ resolved: true });
+    await expect(
+      answerQuestionAsk(env, { ask, answer: 'us', userId: 'owner', authorization })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(edges.acceptPromptDelivery).toHaveBeenCalledOnce();
   });
 
   it('the inbox answer route goes through the same path and outcomes', async () => {
@@ -460,8 +510,20 @@ describe('a typed chat message answers the chat’s open questions', () => {
   it('closes the chat’s open questions only, bound to project and chat, without a notice', async () => {
     const a = await question();
     const b = await question({ context: 'Second question?' });
-    const otherChat = await question({ sessionId: 'chat-x', taskId: 'task-x' }).catch(() => null);
-    expect(otherChat).toBeNull(); // task-x is not a task of the project
+    // Another chat of the same project: not answered by a message in chat-1.
+    insert('asks', {
+      id: 'other-chat',
+      project_id: P1,
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      kind: 'question',
+      blocking: 1,
+      title: 'Other chat',
+      source_session_id: 'chat-other',
+      status: 'open',
+      created_at: 1,
+      updated_at: 1,
+    });
     insert('asks', {
       id: 'foreign',
       project_id: P2,
@@ -487,6 +549,7 @@ describe('a typed chat message answers the chat’s open questions', () => {
       expect(askRow(id).notified_at).not.toBeNull();
     }
     expect(askRow('foreign').status).toBe('open');
+    expect(askRow('other-chat').status).toBe('open');
     expect(broadcast).toHaveBeenCalledWith(
       'attention.resolved',
       expect.objectContaining({ sessionId: 'chat-1', markerId: a.id, reason: 'human_message' }),

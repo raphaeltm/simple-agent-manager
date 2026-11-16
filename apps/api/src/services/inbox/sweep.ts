@@ -8,8 +8,10 @@
  * 2. retry notices that were not queued (`notified_at IS NULL` on a closed ask) for
  *    `inbox.noticeRetryMinutes` after the item closed, the way the secret request sweep retries
  *    `runtime_secret_requests.notified_at`.
- * The steps share one budget of `inbox.sweepBatchSize` rows, so a tick is bounded (rule 47);
- * every selected row leaves the candidate set: a reminder advances `next_escalation_at`, an
+ * Each step reads at most `inbox.sweepBatchSize` rows, so a tick is bounded (rule 47) and one step
+ * cannot starve another. At the default 10 each step drains 120 rows an hour: a question needs one
+ * row per reminder and one to expire, so a burst of 100 questions expiring together drains in
+ * about 50 minutes (raise the setting, up to 50, for more). Every selected row leaves the candidate set: a reminder advances `next_escalation_at`, an
  * extension moves `expires_at`, an expiry closes the row, a notice past its window ages out.
  * The schedule has the ProjectData marker alarm's precision of one sweep tick (five minutes).
  */
@@ -199,17 +201,13 @@ async function extendUndeliveredQuestion(
 export async function runInboxAskSweep(env: Env, now = Date.now()): Promise<InboxSweepStats> {
   const deps = { env, ports: createOperationPorts(env) };
   const limits = await getInboxLimits(deps);
-  let budget = limits.sweepBatchSize;
+  // Each step has its own budget, so due reminders can never starve expiries or notice retries.
+  const budget = limits.sweepBatchSize;
   let expired = 0;
   let noticesRetried = 0;
   let extended = 0;
 
   const reminders = await sendDueQuestionReminders(env, limits, now, budget);
-  budget -= reminders.selected;
-  if (budget <= 0) {
-    log.info('inbox_ask.sweep', { expired, noticesRetried, remindersSent: reminders.sent });
-    return { expired, noticesRetried, remindersSent: reminders.sent, extended };
-  }
 
   const due = await env.DATABASE.prepare(
     `SELECT ${SCHEDULE_COLUMNS} FROM asks
@@ -250,9 +248,7 @@ export async function runInboxAskSweep(env: Env, now = Date.now()): Promise<Inbo
     }
     await notifyClosedAsk(deps, { ...row, status: 'expired' }, 'expired');
   }
-  budget -= (due.results ?? []).length;
-
-  if (budget > 0) {
+  {
     const unnotified = await env.DATABASE.prepare(
       `SELECT ${NOTICE_COLUMNS} FROM asks
         WHERE notified_at IS NULL AND status IN ('answered', 'done', 'archived', 'expired')
@@ -271,7 +267,12 @@ export async function runInboxAskSweep(env: Env, now = Date.now()): Promise<Inbo
   }
 
   if (expired > 0 || noticesRetried > 0 || reminders.sent > 0 || extended > 0) {
-    log.info('inbox_ask.sweep', { expired, noticesRetried, remindersSent: reminders.sent, extended });
+    log.info('inbox_ask.sweep', {
+      expired,
+      noticesRetried,
+      remindersSent: reminders.sent,
+      extended,
+    });
   }
   return { expired, noticesRetried, remindersSent: reminders.sent, extended };
 }

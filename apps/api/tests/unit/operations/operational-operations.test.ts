@@ -398,7 +398,7 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
               created_at, updated_at)
            VALUES (?, ?, 'user', 'owner', 'question', 1, 'Pick a region', 'Pick a region for the deploy.',
               '{"type":"options","options":["eu","us"],"allowText":false}', 'decision', ?, 'task',
-              'open', 9000, 20000, 1, 6000, 'n-ask', ?, ?)`
+              'open', 4102444800000, 4102444800000, 1, 6000, 'n-ask', ?, ?)`
         )
         .run(id, projectId, sessionId, createdAt, createdAt);
     insertAsk('ask-1', 'p', 'chat', 3_000);
