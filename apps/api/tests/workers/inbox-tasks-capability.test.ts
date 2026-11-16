@@ -8,8 +8,13 @@
  * Every guard runs on a real SQL engine (D1 and the Durable Object's SQLite).
  */
 import { runInDurableObject } from 'cloudflare:test';
+import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../src/env';
+import { handleAppError } from '../../src/middleware/app-error-handler';
+import { requireApproved, requireAuth } from '../../src/middleware/auth';
+import { projectMembersRoutes } from '../../src/routes/projects/members';
 import { moveDepartedMemberTasksToTeam } from '../../src/services/inbox/departed-member-tasks';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
@@ -23,6 +28,7 @@ import {
   callTool,
   fetchMock,
   get,
+  ORIGIN,
   post,
   seed,
   type Seeded,
@@ -425,12 +431,36 @@ describe('human tasks through the real entry points', () => {
     });
     const ref = filed.inboxItem.ref;
     await deliverWakes(s, s.chatSessionId);
-    await testEnv.DATABASE.prepare(
-      `UPDATE project_members SET status = 'removed' WHERE project_id = ? AND user_id = ?`
-    )
-      .bind(s.projectId, s.colleagueId)
-      .run();
-    expect(await moveDepartedMemberTasksToTeam(testEnv, s.projectId, s.colleagueId)).toBe(1);
+    // The real offboarding routes (preview, then apply as removed), which call the handoff.
+    const members = new Hono<{ Bindings: Env }>();
+    members.onError(handleAppError);
+    members.use('/api/projects/*', requireAuth(), requireApproved());
+    members.route('/api/projects', projectMembersRoutes);
+    const offboard = (action: string, body?: unknown) =>
+      members.request(
+        `/api/projects/${s.projectId}/members/${s.colleagueId}/${action}`,
+        {
+          method: 'POST',
+          headers: {
+            Cookie: s.ownerCookie,
+            Origin: ORIGIN,
+            ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        },
+        testEnv
+      );
+    const preview = (await (await offboard('offboarding-preview')).json()) as {
+      offboardingPlanId: string;
+      canApply: boolean;
+    };
+    expect(preview.canApply).toBe(true);
+    const applied = await offboard('offboarding-apply', {
+      planId: preview.offboardingPlanId,
+      actions: [],
+      finalMemberStatus: 'removed',
+    });
+    expect(applied.status, await applied.clone().text()).toBe(200);
     // The handoff commits the event to the outbox only; the reconcile sweep admits it.
     expect(await wakesFor(s, s.chatSessionId)).toHaveLength(0);
     await reconcileProjectEventSourceOutbox(testEnv);
@@ -439,7 +469,7 @@ describe('human tasks through the real entry points', () => {
     expect(wakes[0]!.content).toContain('SAM reassigned');
     const view = await get<TaskView>(itemPath(s, ref), s.ownerCookie);
     expect(view.body.task).toMatchObject({ assignee: { kind: 'team', userId: null } });
-    // Control: nothing else moves on a second run.
+    // Control: a second run of the handoff moves nothing.
     expect(await moveDepartedMemberTasksToTeam(testEnv, s.projectId, s.colleagueId)).toBe(0);
 
     const moot = await assign(s, {
