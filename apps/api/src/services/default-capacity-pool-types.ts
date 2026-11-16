@@ -30,6 +30,8 @@ export type CapacityPoolSummaryWorkloadRoles = 'editor-visible' | 'all';
 
 export interface ReadDefaultPoolSummaryOptions {
   workloadRoles?: CapacityPoolSummaryWorkloadRoles;
+  /** Only write-authorized placement may queue interrupted legacy work for this exact pool. */
+  adoptLegacyPublication?: boolean;
   /**
    * Default placement reads must remain active-only. UI/editor reads opt into
    * disabled default pools so users can add back offerings after removing the
@@ -75,6 +77,8 @@ export interface DefaultCapacityPoolOfferingResolution {
   offerings: ProviderInstanceOffering[];
   refreshSucceeded: boolean;
   catalogComplete?: boolean;
+  /** Validated publication facts; successful static reference catalogs need not enumerate live inventory. */
+  catalogValidated?: boolean;
 }
 
 export type DefaultCapacityPoolOfferingResolver = (
@@ -116,6 +120,13 @@ export interface DefaultCapacityPoolsBackfillOptions {
    * `operations.capacityPoolPublishBudgetMs`; 0 writes one batch per pass.
    */
   candidatePublishBudgetMs?: number;
+  /** Shared across every source/scope in an invocation; bounds aggregate expensive work. */
+  reconciliationDeadlineAt?: number;
+  refreshSettings?: import('./capacity-pool-refresh-settings').CapacityPoolRefreshSettings;
+  /** Scheduler continuation must not restart an exhausted operation. */
+  refreshContinuation?: boolean;
+  /** Exact durable lease claimed by the cron continuation; stale claimants cannot reacquire. */
+  refreshClaim?: { generation: number; nextAttemptAt: number };
   /** Secret-free credential anchors scrubbed/pruned per backfill pass. */
   credentialAnchorScrubBatchSize?: number;
   beforeSourcePublication?: (input: {

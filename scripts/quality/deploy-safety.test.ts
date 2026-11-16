@@ -16,7 +16,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   normalizeSha,
   selectSuccessfulCiRun,
-  validateAutomaticProductionDispatch,
   validateEmergencyOverrideReason,
   validateProductionDispatch,
 } from '../deploy/validate-production-dispatch.js';
@@ -287,34 +286,6 @@ describe('production deployment safety gate', () => {
   });
 });
 
-describe('automatic production deployment safety gate', () => {
-  it('re-verifies the triggering SHA is still current main after the deployment queue', async () => {
-    stubGithub(greenSha, []);
-
-    await expect(
-      validateAutomaticProductionDispatch({
-        githubEventName: 'workflow_run',
-        githubRepository: repository,
-        githubToken: 'ghs_fake_token_value_for_test_only',
-        targetCommitSha: greenSha,
-      })
-    ).resolves.toEqual({ sha: greenSha, ciVerified: true, emergencyOverride: false });
-  });
-
-  it('fails closed instead of rolling back when an older main CI finishes late', async () => {
-    stubGithub(greenSha, []);
-
-    await expect(
-      validateAutomaticProductionDispatch({
-        githubEventName: 'workflow_run',
-        githubRepository: repository,
-        githubToken: 'ghs_fake_token_value_for_test_only',
-        targetCommitSha: redSha,
-      })
-    ).rejects.toThrow(/does not match the current trusted main tip.*failed closed/i);
-  });
-});
-
 describe('deployment workflow safety wiring', () => {
   it('manual production deploy validates the exact SHA before calling reusable deploy', () => {
     const deploy = workflow('deploy.yml');
@@ -353,11 +324,26 @@ describe('deployment workflow safety wiring', () => {
     expect(deploy).toContain(
       'github.event.workflow_run.head_repository.full_name == github.repository'
     );
-    expect(deploy).toContain('github.event.workflow_run.head_sha');
+    expect(deploy).toContain('TRIGGERING_COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}');
+    expect(deploy).not.toContain('TARGET_COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}');
     expect(deploy).toContain('Validate automatic production target');
     expect(deploy).toContain('ref: refs/heads/main');
-    expect(deploy).toContain('Re-verify current main after deployment queue');
-    expect(deploy).toContain("needs.validate-automatic-dispatch.result == 'success'");
+    expect(deploy).toContain('Select current main tip after deployment queue');
+
+    // The gate may select nothing (tip CI not green yet, or already deployed). The deploy
+    // job must then be skipped, because deploy-reusable.yml falls back to github.sha.
+    const deployIf = workflowJobIfExpression(deploy, 'deploy');
+    expect(deployIf).toContain("needs.validate-automatic-dispatch.result == 'success' &&");
+    expect(deployIf).toContain("needs.validate-automatic-dispatch.outputs.deploy_sha != ''");
+
+    const autoJob = parsedWorkflow('deploy.yml').jobs?.['validate-automatic-dispatch'] as
+      | { permissions?: unknown }
+      | undefined;
+    expect(autoJob?.permissions).toEqual({
+      contents: 'read',
+      actions: 'read',
+      deployments: 'read',
+    });
   });
 
   it('checks out the verified deploy SHA in the reusable workflow', () => {

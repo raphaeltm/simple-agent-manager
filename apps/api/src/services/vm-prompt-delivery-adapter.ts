@@ -114,9 +114,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
     if (target.runtime === 'cf-container') {
-      const guarded = await commitContainerWake(this.env, target, () =>
-        runSideEffectGuard(input)
-      );
+      const guarded = await commitContainerWake(this.env, target, () => runSideEffectGuard(input));
       if (guarded) return guarded;
     }
     if (!capabilities.promptReceipts.supported && !input.allowLegacyVm) {
@@ -311,7 +309,12 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   async reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
     const resolution: TargetResolution = input.resolvedTarget
       ? { kind: 'ready', target: input.resolvedTarget }
-      : await this.resolveTarget(input.projectId, input.claim.message.targetSessionId, input);
+      : await this.resolveTarget(
+          input.projectId,
+          input.claim.message.targetSessionId,
+          input,
+          false
+        );
     if (resolution.kind === 'guarded') return resolution.result;
     if (resolution.kind === 'failed') {
       return {
@@ -390,14 +393,16 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   private async resolveTarget(
     projectId: string,
     chatSessionId: string,
-    input: VmPromptDeliveryAdapterInput
+    input: VmPromptDeliveryAdapterInput,
+    allowWake = true
   ): Promise<TargetResolution> {
     return resolveVmPromptDeliveryTarget(
       this.env,
       projectId,
       chatSessionId,
       input.sourceTaskGuard,
-      () => runSideEffectGuard(input)
+      () => runSideEffectGuard(input),
+      { allowWake, isSessionActive: input.isSessionActive }
     );
   }
 

@@ -184,6 +184,9 @@ export function sourceTaskGuardForClaim(
     // A secret request outcome wakes the requesting agent only while its task (or that task's
     // own session-recovery successor) is live, for the same reason.
     claim.message.sourceKind !== 'secret_request' &&
+    // An inbox ask notice (archived / expired) wakes the filing agent only while its task (or
+    // that task's own session-recovery successor) is live, for the same reason.
+    claim.message.sourceKind !== 'inbox_ask' &&
     // A continuation re-wakes the chat only while its own task is live: unguarded, the
     // recovery claim would reactivate even a terminal task.
     claim.message.sourceKind !== 'checkpoint_continuation'
@@ -207,7 +210,8 @@ export function sourceTaskGuardForClaim(
     ...((claim.message.sourceKind === 'scheduled_action' ||
       claim.message.sourceKind === 'github_trigger' ||
       // A secret request outcome only wakes a requester who is still an active project member.
-      claim.message.sourceKind === 'secret_request') &&
+      claim.message.sourceKind === 'secret_request' ||
+      claim.message.sourceKind === 'inbox_ask') &&
     typeof metadata.creatorUserId === 'string'
       ? { requiredProjectMemberId: metadata.creatorUserId }
       : {}),
@@ -220,14 +224,17 @@ export async function invalidProjectEventWakeSourceTaskResult(
   claim: PromptDeliveryClaim
 ): Promise<PromptDeliveryResult | null> {
   if (
-    claim.message.sourceKind === 'secret_request' &&
+    (claim.message.sourceKind === 'secret_request' || claim.message.sourceKind === 'inbox_ask') &&
     typeof claim.message.metadata?.creatorUserId !== 'string'
   ) {
     // Without the requester the membership guard cannot be built; refuse rather than wake.
     return {
       kind: 'failed',
       reason: 'terminal_target',
-      error: 'Secret request notice has no requester',
+      error:
+        claim.message.sourceKind === 'inbox_ask'
+          ? 'Inbox ask notice has no requester'
+          : 'Secret request notice has no requester',
       runtimeIdentity: claim.message.runtimeIdentity,
       capabilities: null,
     };

@@ -132,11 +132,11 @@ export async function runPromptDeliveryClaim(
 ): Promise<PromptDeliveryResult> {
   const startedAt = Date.now();
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-      metric: 'prompt_delivery_attempt',
-      projectId: hooks.projectId,
-      sessionId: claim.message.targetSessionId,
-      deliveryId: claim.message.id,
-      attemptCount: claim.message.deliveryAttempts,
+    metric: 'prompt_delivery_attempt',
+    projectId: hooks.projectId,
+    sessionId: claim.message.targetSessionId,
+    deliveryId: claim.message.id,
+    attemptCount: claim.message.deliveryAttempts,
   });
 
   let result: PromptDeliveryResult;
@@ -199,6 +199,14 @@ export async function runPromptDeliveryClaim(
       claim,
       allowLegacyVm: config.legacyVmCompatEnabled,
       requestTimeoutMs: config.backgroundTimeoutMs,
+      isSessionActive: (workspaceId: string) =>
+        sql
+          .exec(
+            "SELECT 1 AS active FROM chat_sessions WHERE id = ? AND status = 'active' AND workspace_id = ?",
+            claim.message.targetSessionId,
+            workspaceId
+          )
+          .toArray().length > 0,
       beforeSideEffect: validateDeliveryTarget,
       beforeSubmit: (capabilities: VmPromptDeliveryCapabilities) =>
         markPromptDeliverySubmitting(sql, claim, capabilities),
@@ -313,13 +321,13 @@ export async function runPromptDeliveryClaim(
     } as const
   )[result.kind];
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-      metric,
-      projectId: hooks.projectId,
-      sessionId: claim.message.targetSessionId,
-      deliveryId: claim.message.id,
-      attemptCount: claim.message.deliveryAttempts,
-      durationMs: Date.now() - startedAt,
-      reason: 'reason' in result ? result.reason : null,
+    metric,
+    projectId: hooks.projectId,
+    sessionId: claim.message.targetSessionId,
+    deliveryId: claim.message.id,
+    attemptCount: claim.message.deliveryAttempts,
+    durationMs: Date.now() - startedAt,
+    reason: 'reason' in result ? result.reason : null,
   });
 
   if (applied) {

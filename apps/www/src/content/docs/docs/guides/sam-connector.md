@@ -187,9 +187,9 @@ app should confirm with you first.
 When an agent is [waiting for you](/docs/guides/chat-features/#when-the-agent-needs-you), your app
 can show you what it asked, with the agent's own options or form fields, and send your answer.
 That includes questions an agent asks you directly, which also appear in the app's view of the
-chat and of its pending requests. The inbox lists chats with a question first, so an older
-question isn't pushed out by newer activity; each inbox page checks a few chats and continues on
-the next page. Apps
+chat and of its pending requests. The inbox lists everything agents are waiting on from you,
+one item each: questions, permission requests, secret requests and asks, with what blocks an
+agent first. Secret values are never sent through an app; supply those in SAM. Apps
 are told to confirm every answer with you before sending it. SAM checks that the answer is one the
 agent offered, but it can't tell whether the app asked you first, so treat an app that answers
 without asking as a reason to disconnect it.

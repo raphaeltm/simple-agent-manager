@@ -585,11 +585,12 @@ describe('handleAgentSession', () => {
     expect(state.completed).toBe(true);
   });
 
-  it('wakes ProjectData before clearing the durable sleeping snapshot claim', async () => {
+  it('links ProjectData with deferred activation before clearing the exact sleeping snapshot claim', async () => {
     const state = makeState({
       config: {
         ...makeState().config,
         resumeSnapshotChatSessionId: 'chat-1',
+        recoveryAttemptId: 'recovery-attempt-1',
       },
     });
     const { rc } = makeContext();
@@ -614,7 +615,8 @@ describe('handleAgentSession', () => {
       'project-1',
       'chat-1',
       'workspace-1',
-      'task-1'
+      'task-1',
+      { deferActivation: true, recoveryAttemptId: 'recovery-attempt-1' }
     );
     expect(wakeSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
       completeSessionSnapshotRecoveryMock.mock.invocationCallOrder[0]
@@ -625,7 +627,7 @@ describe('handleAgentSession', () => {
       'task-1',
       'workspace-1',
       undefined,
-      undefined
+      'recovery-attempt-1'
     );
     expect(state.config.resumeSnapshotChatSessionId).toBeNull();
   });
@@ -641,6 +643,7 @@ describe('handleAgentSession', () => {
       config: {
         ...makeState().config,
         resumeSnapshotChatSessionId: 'chat-1',
+        recoveryAttemptId: 'recovery-attempt-1',
       },
     });
     const { rc } = makeContext({
@@ -656,7 +659,8 @@ describe('handleAgentSession', () => {
       'project-1',
       'chat-1',
       'workspace-1',
-      'task-1'
+      'task-1',
+      { deferActivation: true, recoveryAttemptId: 'recovery-attempt-1' }
     );
     expect(completeSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
       expect.anything(),
@@ -664,7 +668,7 @@ describe('handleAgentSession', () => {
       'task-1',
       'workspace-1',
       undefined,
-      undefined
+      'recovery-attempt-1'
     );
     expect(state.config.resumeSnapshotChatSessionId).toBeNull();
     expect(state.currentStep).toBe('running');

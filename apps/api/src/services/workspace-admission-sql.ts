@@ -50,6 +50,7 @@ export function buildWorkspaceAdmissionSql(
     nodeClass: input.authorityNodeClass ?? 'managed',
     capacityPlacementSnapshot: input.capacityPlacementSnapshot ?? null,
     requireProjectMembership: true,
+    authorityMode: 'existing-node',
   });
   const requestedReservationJson = JSON.stringify(resolvedReservation);
   const admissionAt = new Date();

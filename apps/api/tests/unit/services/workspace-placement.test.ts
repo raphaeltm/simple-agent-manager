@@ -460,7 +460,7 @@ describe('reserveWorkspacePlacement', () => {
       'removed membership',
       `UPDATE project_members SET status = 'removed', removed_at = '${new Date().toISOString()}'`,
     ],
-    ['pool revision changed', `UPDATE capacity_pools SET revision = 99`],
+    ['allocation identity missing', `UPDATE nodes SET provider_instance_id = NULL`],
     ['pool disabled', `UPDATE capacity_pools SET status = 'disabled'`],
     ['pool owned by another project', `UPDATE capacity_pools SET owner_project_id = 'project-2'`],
     ['source disabled', `UPDATE capacity_sources SET status = 'disabled'`],
