@@ -43,6 +43,13 @@ a feature back on, replace that whole block with your own `[features]` table, fo
 example `[features]` followed by `apps = true`. SAM keeps any value you set there
 and adds its defaults for the features you leave out.
 
+Hooks your repository defines for Codex (in `.codex/config.toml` or
+`.codex/hooks.json`) run in SAM sessions, as Claude Code runs the hooks in
+`.claude/settings.json`. Codex normally waits for someone to trust the project
+and review each hook, which nobody can do in a SAM session. SAM trusts the
+session's working directory and its hooks when it starts the agent, so treat a
+repository's hooks like any other code you let the agent run.
+
 ### Gemini CLI
 
 | Property      | Value                                                  |
