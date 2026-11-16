@@ -3,6 +3,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,6 +14,11 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrNoRunningDevcontainer reports that no running container carries the
+// requested label. Callers that act on "the container is gone" use errors.Is
+// rather than matching the message text, which operators also read.
+var ErrNoRunningDevcontainer = errors.New("no running devcontainer found")
 
 type containerCandidate struct {
 	id        string
@@ -76,7 +82,7 @@ func FindContainerByLabel(ctx context.Context, labelKey, labelValue string) (str
 		return "", err
 	}
 	if len(candidates) == 0 {
-		return "", fmt.Errorf("no running devcontainer found (label: %s=%s)", labelKey, labelValue)
+		return "", fmt.Errorf("%w (label: %s=%s)", ErrNoRunningDevcontainer, labelKey, labelValue)
 	}
 	sortCandidates(candidates)
 	return candidates[0].id, nil
@@ -185,7 +191,7 @@ func (d *Discovery) discover(ctx context.Context) (string, error) {
 		d.lastCheck = time.Time{}
 		d.mu.Unlock()
 		d.clearBridgeIP()
-		return "", fmt.Errorf("no running devcontainer found (label: %s=%s)", d.labelKey, d.labelValue)
+		return "", fmt.Errorf("%w (label: %s=%s)", ErrNoRunningDevcontainer, d.labelKey, d.labelValue)
 	}
 
 	sortCandidates(candidates)

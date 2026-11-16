@@ -110,6 +110,7 @@ const BUILT_FILES: Record<string, string[]> = {
   'prepare-container': [
     'packages/vm-agent/bin/vm-agent-linux-amd64',
     'apps/api/container-artifacts/vm-agent-linux-amd64',
+    'apps/api/container-artifacts/sam-builder-linux-amd64',
     'apps/api/container-artifacts/install-opencode.sh',
   ],
   'vm-agent build-all': [

@@ -178,10 +178,11 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
       } as typeof schema.credentials.$inferInsert);
     await seedTask({ status: 'ready' });
     // The member picked machines in their pool: nothing joins a pool on its own.
+    // Prepare the validated bundled catalog; this member-identity fixture does not
+    // supply a provider secret for a live catalog lookup.
     await ensurePoolsWithStarterMachines(db() as never, {
       userId: MEMBER,
       projectId: PROJECT,
-      env,
     });
 
     const response = await makeApp(runRoutes).fetch(

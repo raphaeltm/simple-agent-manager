@@ -11,7 +11,6 @@
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
-  CHAT_MESSAGE_APPEND_CAPABILITY,
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
   type IdeaUpdateNote,
@@ -31,6 +30,10 @@ import { DurableObject } from 'cloudflare:workers';
 
 import { measureArchiveSql } from '../archive/sql-metrics';
 import { estimateArchiveWrites } from '../archive/write-budget';
+import {
+  assertExactWriteAllowed,
+  isProjectDataArchiveExactRoutingEnabled,
+} from '../client/project-data-archive-routing';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import * as agentMessageChannels from './agent-message-channels';
@@ -68,12 +71,9 @@ import * as logicalTranscript from './logical-transcript';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messageContext from './message-context';
+import { emptyMessageIngestMetrics, refuseMerge } from './message-ingest-metrics';
 import * as messagePersistence from './message-persistence';
-import {
-  DEFAULT_MESSAGE_MERGE_CONFIG,
-  type MessageIngestSource,
-  sealMessageStream,
-} from './message-stream-ingest';
+import { DEFAULT_MESSAGE_MERGE_CONFIG, type MessageIngestSource } from './message-stream-ingest';
 import * as messages from './messages';
 import { runMigrations } from './migrations';
 import * as missionState from './missions';
@@ -122,6 +122,12 @@ import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionReads from './session-reads';
 import { guardedSessionSleep, type SessionSleepRuntimeGuard } from './session-sleep-runtime-guard';
+import {
+  admitBrowserSocket,
+  broadcastToBrowserSockets,
+  closeQuietly,
+  countLegacySockets,
+} from './session-sockets';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
@@ -667,7 +673,12 @@ export class ProjectData extends DurableObject<Env> {
       this.scheduleSummarySync();
       this.broadcastEvent(
         'session.updated',
-        { sessionId, workspaceId, taskId, status: 'active' },
+        {
+          sessionId,
+          workspaceId,
+          taskId,
+          status: sessionReads.getSession(this.sql, sessionId)?.status,
+        },
         sessionId
       );
     }
@@ -694,16 +705,68 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async signalSessionWakeReady(input: sessionWakeReady.SessionWakeReadyInput): Promise<number> {
+  /** null rejects authority; a nonnegative count (including a duplicate zero) acknowledges it. */
+  async signalSessionWakeReady(
+    input: sessionWakeReady.SessionWakeReadyInput
+  ): Promise<number | null> {
     // Authority reads must be serialized with dedup writes: an older RPC suspended in D1
     // cannot overwrite a newer fence and make its duplicate appear novel.
     const run = this.wakeReadyLock.then(async () => {
       this.ensureProjectId(input.projectId);
-      if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return 0;
-      const now = Date.now();
-      const released = this.meteredStorage.transactionSync(() =>
-        sessionWakeReady.applySessionWakeReady(this.sql, input, now)
+      if (isProjectDataArchiveExactRoutingEnabled(this.env))
+        await assertExactWriteAllowed(
+          this.env,
+          input.projectId,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
+      messages.assertTranscriptWriteAllowed(
+        this.sql,
+        input.chatSessionId,
+        'signalSessionWakeReady'
       );
+      const activationGuard = sessionWakeReady.captureSessionWakeActivation(this.sql, input);
+      if (!(await sessionWakeReady.isSessionWakeReadyCurrent(this.env, input))) return null;
+      const now = Date.now();
+      const { activated, released } = this.meteredStorage.transactionSync(() => {
+        // A source intent may have been prepared while the D1 authority read awaited.
+        messages.assertTranscriptWriteAllowed(
+          this.sql,
+          input.chatSessionId,
+          'signalSessionWakeReady'
+        );
+        const activated = sessionWakeReady.activateSessionWakeReady(
+          this.sql,
+          input,
+          activationGuard,
+          now
+        );
+        return {
+          activated,
+          released: sessionWakeReady.isSessionWakeReadyLocallyAccepted(this.sql, input)
+            ? sessionWakeReady.applySessionWakeReady(this.sql, input, now)
+            : null,
+        };
+      });
+      if (activated) {
+        this.ctx.waitUntil(
+          sessionWakeReady.recordSessionWakeActivation(input, now, (event) =>
+            this.admitProjectEvent(event)
+          )
+        );
+        this.scheduleSummarySync();
+        this.broadcastEvent(
+          'session.updated',
+          {
+            sessionId: input.chatSessionId,
+            workspaceId: input.workspaceId,
+            taskId: input.fence.runtime === 'vm' ? input.fence.taskId : undefined,
+            status: 'active',
+          },
+          input.chatSessionId
+        );
+      }
+      if (released === null) return null;
       // Re-arm even on duplicate: a previous RPC may have committed SQLite before alarm I/O failed.
       await this.recalculateAlarm();
       return released;
@@ -846,21 +909,21 @@ export class ProjectData extends DurableObject<Env> {
         ? ((await projectDataPorts().operations.messageMergeConfig?.(this.env)) ??
           DEFAULT_MESSAGE_MERGE_CONFIG)
         : DEFAULT_MESSAGE_MERGE_CONFIG;
-      const legacyClient = this.ctx.getWebSockets().some((ws) => {
-        const tags = this.ctx.getTags(ws);
-        const sessionTag = tags.find((tag) => tag.startsWith('session:'));
-        return (
-          (!sessionTag || sessionTag === `session:${sessionId}`) &&
-          !tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY)
-        );
-      });
+      const metrics = emptyMessageIngestMetrics();
+      const legacy = countLegacySockets(this.ctx, sessionId);
+      metrics.legacySessionSocketsMax = legacy.session;
+      // Informational only: project sockets get no transcript frames and never gate merging.
+      metrics.legacyProjectSocketsMax = legacy.project;
+      const legacyClient = legacy.session > 0;
+      if (!config.enabled) refuseMerge(metrics, 'setting_disabled');
+      else if (legacyClient) refuseMerge(metrics, 'legacy_client');
       return messagePersistence.persistMessageBatchWithSideEffects(
         this.sql,
         this.env,
         this.messagePersistenceHooks(),
         sessionId,
         batchMessages,
-        { source, config: { ...config, enabled: config.enabled && !legacyClient } }
+        { source, config: { ...config, enabled: config.enabled && !legacyClient }, metrics }
       );
     });
   }
@@ -957,6 +1020,7 @@ export class ProjectData extends DurableObject<Env> {
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
+      recordMessageIngest: (metrics) => this.rowUsage.recordMessageIngest(metrics),
       transactionSync: (fn) => this.meteredStorage.transactionSync(fn),
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
@@ -2761,18 +2825,45 @@ export class ProjectData extends DurableObject<Env> {
     return attention.releaseAttentionAnswer(this.sql, sessionId, markerId, answer);
   }
 
-  async completeAttentionAnswer(
+  completeAttentionAnswer(sessionId: string, markerId: string, answer: string): Promise<number> {
+    return this.completeAttentionClaim(sessionId, markerId, answer, 'answer');
+  }
+
+  /**
+   * Inbox archive of a question (idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9). Separate RPC names from the
+   * answer methods, so a worker newer than this object fails closed instead of staging an empty
+   * answer through the old signature.
+   */
+  prepareAttentionArchive(sessionId: string, markerId: string) {
+    return attention.prepareAttentionAnswer(this.sql, sessionId, markerId, '', 'archive');
+  }
+
+  releaseAttentionArchive(sessionId: string, markerId: string): number {
+    return attention.releaseAttentionAnswer(this.sql, sessionId, markerId, '', 'archive');
+  }
+
+  completeAttentionArchive(sessionId: string, markerId: string): Promise<number> {
+    return this.completeAttentionClaim(sessionId, markerId, '', 'archive');
+  }
+
+  private async completeAttentionClaim(
     sessionId: string,
     markerId: string,
-    answer: string
+    answer: string,
+    mode: attention.AttentionClaimMode
   ): Promise<number> {
-    const count = attention.completeAttentionAnswer(this.sql, sessionId, markerId, answer);
+    const count = attention.completeAttentionAnswer(this.sql, sessionId, markerId, answer, mode);
     if (count > 0) {
       await this.recalculateAlarm();
       this.scheduleSummarySync();
       this.broadcastEvent(
         'attention.resolved',
-        { sessionId, markerId, count, reason: 'structured_answer' },
+        {
+          sessionId,
+          markerId,
+          count,
+          reason: mode === 'archive' ? 'archived' : 'structured_answer',
+        },
         sessionId
       );
     }
@@ -3488,19 +3579,7 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      const pair = new WebSocketPair();
-      const sessionId = url.searchParams.get('sessionId');
-      const tags: string[] = [];
-      if (sessionId) {
-        if (!/^[0-9a-f-]{36}$/i.test(sessionId))
-          return new Response('Invalid sessionId format', { status: 400 });
-        tags.push(`session:${sessionId}`);
-      }
-      if (url.searchParams.get('messageAppend') === CHAT_MESSAGE_APPEND_CAPABILITY)
-        tags.push(CHAT_MESSAGE_APPEND_CAPABILITY);
-      else sealMessageStream(this.sql, sessionId ?? undefined);
-      this.ctx.acceptWebSocket(pair[1], tags);
-      return new Response(null, { status: 101, webSocket: pair[0] });
+      return admitBrowserSocket(this.ctx, this.sql, url);
     }
     return new Response('Not found', { status: 404 });
   }
@@ -3541,10 +3620,10 @@ export class ProjectData extends DurableObject<Env> {
     _reason: string,
     _wasClean: boolean
   ): Promise<void> {
-    ws.close();
+    closeQuietly(ws);
   }
   async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
-    ws.close();
+    closeQuietly(ws);
   }
 
   // --- Knowledge Graph ---
@@ -3971,37 +4050,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private broadcastEvent(type: string, payload: Record<string, unknown>, sessionId?: string): void {
-    const message = JSON.stringify({ type, payload });
-    if (sessionId) {
-      const sessionSockets = this.ctx.getWebSockets(`session:${sessionId}`);
-      const allSockets = this.ctx.getWebSockets();
-      const sent = new Set<WebSocket>();
-      for (const ws of sessionSockets) {
-        try {
-          ws.send(message);
-          sent.add(ws);
-        } catch {
-          /* closed */
-        }
-      }
-      for (const ws of allSockets) {
-        if (sent.has(ws)) continue;
-        if (this.ctx.getTags(ws).some((t) => t.startsWith('session:'))) continue;
-        try {
-          ws.send(message);
-        } catch {
-          /* closed */
-        }
-      }
-    } else {
-      for (const ws of this.ctx.getWebSockets()) {
-        try {
-          ws.send(message);
-        } catch {
-          /* closed */
-        }
-      }
-    }
+    broadcastToBrowserSockets(this.ctx, type, payload, sessionId);
   }
 
   private broadcastCommentThread(

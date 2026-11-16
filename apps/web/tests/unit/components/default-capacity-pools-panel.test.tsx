@@ -1,3 +1,4 @@
+import type { ProviderCatalog } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -274,6 +275,73 @@ describe('DefaultCapacityPoolsPanel', () => {
     ).toBeInTheDocument();
     expect(mocks.reconcileProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1');
     expect(mocks.toast.success).toHaveBeenCalledWith('Machine list refreshed');
+  });
+
+  it.each(['project', 'user', 'installation'] as const)(
+    'keeps a ready %s pool editable while showing a safe refresh recovery notice',
+    async (scope) => {
+      const ready = {
+        ...summary(scope),
+        candidates: summary(scope).candidates.map((candidate) => ({
+          ...candidate,
+          capacitySourceId: `source-${scope}`,
+        })),
+        effectiveState: 'configured-ready' as const,
+        diagnostics: ['catalog-refresh-failed', '<script>unsafe provider failure</script>'],
+      };
+      const recovered = { ...ready, diagnostics: [] };
+      const fetch =
+        scope === 'project'
+          ? mocks.fetchProjectDefaultCapacityPools
+          : scope === 'user'
+            ? mocks.fetchUserDefaultCapacityPools
+            : mocks.fetchInstallationDefaultCapacityPools;
+      const reconcile =
+        scope === 'project'
+          ? mocks.reconcileProjectDefaultCapacityPools
+          : scope === 'user'
+            ? mocks.reconcileUserDefaultCapacityPools
+            : mocks.reconcileInstallationDefaultCapacityPools;
+      fetch.mockResolvedValue(response(scope, ready));
+      reconcile.mockResolvedValue(response(scope, recovered));
+
+      renderPanel(scope === 'project' ? { projectId: 'project-1' } : { scope });
+
+      expect(
+        await screen.findByText(
+          'Machine list refresh failed. Check the connected cloud accounts, then select Refresh to retry.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByText('Ready · 2 in pool')).toBeInTheDocument();
+      expect(screen.getByRole('switch', { name: /^Use .+ in this pool$/ })).toBeEnabled();
+      expect(screen.getAllByRole('button', { name: 'Refresh machine list' })).toHaveLength(1);
+      expect(screen.queryByText(/unsafe provider failure/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Refresh machine list' }));
+      await waitFor(() => expect(reconcile).toHaveBeenCalledOnce());
+      if (scope === 'project') expect(reconcile).toHaveBeenCalledWith('project-1');
+      else expect(reconcile).toHaveBeenCalledWith();
+      await waitFor(() =>
+        expect(screen.queryByText(/Machine list refresh failed/)).not.toBeInTheDocument()
+      );
+      expect(screen.getByRole('switch', { name: /^Use .+ in this pool$/ })).toBeEnabled();
+    }
+  );
+
+  it('shows no refresh failure notice for a normal ready pool', async () => {
+    mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+      response('user', {
+        ...summary('user'),
+        candidates: summary('user').candidates.map((candidate) => ({
+          ...candidate,
+          capacitySourceId: 'source-user',
+        })),
+        effectiveState: 'configured-ready',
+        diagnostics: [],
+      })
+    );
+    renderPanel({ scope: 'user' });
+    expect(await screen.findByRole('switch', { name: /^Use .+ in this pool$/ })).toBeEnabled();
+    expect(screen.queryByText(/Machine list refresh failed/)).not.toBeInTheDocument();
   });
 
   it('explains a permission error in plain words', async () => {

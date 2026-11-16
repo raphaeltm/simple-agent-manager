@@ -15,6 +15,8 @@ import { createDeploymentPublishJobPorts } from '../../app-deployment-ports/publ
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { resolveAdminSetting } from '../../services/admin-settings';
+import { collectBuildContextOnSource } from '../../services/build-context-collection';
 import { scheduleBuildContextShadow } from '../../services/build-context-shadow';
 import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
 import { loadDeploymentBuildInterpolationEnv } from '../../services/deployment-environment-config';
@@ -111,32 +113,36 @@ export async function handleBuildAndPublish(
     .from(schema.nodes)
     .where(eq(schema.nodes.id, workspace.nodeId))
     .limit(1);
-  scheduleBuildContextShadow(
-    env,
-    {
-      projectId,
-      environmentId: policyResult.environmentId,
-      workspaceId: tokenData.workspaceId,
-      nodeId: workspace.nodeId,
-      taskId: tokenData.taskId || null,
-      agentProfileId: policyResult.taskAgentProfileId || null,
-      requestedBy: tokenData.userId,
-      environmentName: environment,
-      reference,
-      workingDir: workingDir ?? null,
-    },
-    { buildInterpolationEnv: buildEnv.values, secretInterpolationKeys: buildEnv.secretKeys },
-    execCtx
-  );
-  // Temporary until phase 3 of idea 01KZ6V37D1QGDR3WN12PSDB0QD adds the Cloudflare builder.
-  if (node?.runtime === 'cf-container') {
+  const executor =
+    node?.runtime === 'cf-container'
+      ? 'cloudflare'
+      : await resolveAdminSetting(env, 'deployments.buildExecutor');
+  if (executor === 'cloudflare' && !policyResult.taskAgentProfileId)
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      "Deploying from Instant sessions isn't available yet; use a VM session."
+      'Cloudflare publishing requires a task agent profile.'
     );
-  }
+  if (executor === 'node')
+    scheduleBuildContextShadow(
+      env,
+      {
+        projectId,
+        environmentId: policyResult.environmentId,
+        workspaceId: tokenData.workspaceId,
+        nodeId: workspace.nodeId,
+        taskId: tokenData.taskId || null,
+        agentProfileId: policyResult.taskAgentProfileId || null,
+        requestedBy: tokenData.userId,
+        environmentName: environment,
+        reference,
+        workingDir: workingDir ?? null,
+      },
+      { buildInterpolationEnv: buildEnv.values, secretInterpolationKeys: buildEnv.secretKeys },
+      execCtx
+    );
   const job = await createDeploymentPublishJob(db, {
+    executor: executor === 'cloudflare' ? 'cloudflare' : 'node',
     projectId,
     environmentId: policyResult.environmentId,
     workspaceId: tokenData.workspaceId,
@@ -191,6 +197,31 @@ export async function handleBuildAndPublish(
   if (workingDir) proxyBody.workingDir = workingDir;
 
   try {
+    if (executor === 'cloudflare') {
+      const result = await collectBuildContextOnSource(env, job, {
+        buildInterpolationEnv: buildEnv.values,
+        secretInterpolationKeys: buildEnv.secretKeys,
+      });
+      if (!result.supported) throw new Error(result.message);
+      return jsonRpcSuccess(requestId, {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              publishJobId: job.id,
+              executor: 'cloudflare',
+              status: 'queued',
+              environment,
+              environmentId: job.environmentId,
+              instructions:
+                'The source is collecting the build context. Keep it awake until deployment.publish_job.context_ready or later. After context_ready the independent Cloudflare builder owns the job and the source can sleep. Wait for deployment.publish_job events; do not submit a duplicate job.',
+              pollTool: 'deployments_read',
+              pollMethod: 'publish_status',
+            }),
+          },
+        ],
+      });
+    }
     await startBuildPublishJobOnVm(
       env,
       tokenData.workspaceId,
@@ -278,6 +309,7 @@ export async function handleBuildAndPublish(
       status: 'failed',
       currentStep: 'start',
       level: 'error',
+      sourceCollector: executor === 'cloudflare',
       eventType: 'publish.job.start_failed',
       message,
       errorMessage: message,
@@ -285,6 +317,32 @@ export async function handleBuildAndPublish(
       terminal: true,
       retryable: true,
     });
+    if (!changed && executor === 'cloudflare') {
+      const [current] = await db
+        .select()
+        .from(schema.deploymentPublishJobs)
+        .where(eq(schema.deploymentPublishJobs.id, job.id))
+        .limit(1);
+      if (current)
+        return jsonRpcSuccess(requestId, {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                publishJobId: job.id,
+                executor,
+                status: current.status,
+                environment,
+                environmentId: current.environmentId,
+                pollTool: 'deployments_read',
+                pollMethod: 'publish_status',
+                instructions:
+                  'The job has already advanced. Follow this job to completion; do not submit a duplicate.',
+              }),
+            },
+          ],
+        });
+    }
     if (changed)
       await recordDeploymentPublishJobLifecycleEventBestEffort(env, {
         projectId,

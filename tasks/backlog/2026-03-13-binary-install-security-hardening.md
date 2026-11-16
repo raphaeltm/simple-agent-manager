@@ -74,3 +74,7 @@ Additionally, agent stderr is forwarded to the observability system without cred
 - Security audit output: `/tmp/claude-1000/-workspaces-simple-agent-manager/tasks/ac81a81d00ce092a6.output`
 - Install command: `packages/shared/src/agents.ts:111`, `packages/vm-agent/internal/acp/gateway.go:635`
 - Stderr forwarding: `packages/vm-agent/internal/acp/session_host.go:1100-1104`
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2770 pins the Instant image's uv install to 0.13.8 and checks its sha256 (`apps/api/Dockerfile.vm-agent-container:40-41`). Still open: the VM path still pipes an unpinned `curl … astral.sh/uv/install.sh | sh` (`packages/vm-agent/internal/acp/gateway.go:1078,1096`).

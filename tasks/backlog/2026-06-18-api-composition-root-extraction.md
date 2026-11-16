@@ -47,3 +47,7 @@
 - Tests cover fragile route-order/auth/CORS/proxy/scheduled behavior.
 - No staging deployment is performed.
 - PR is clearly marked do-not-merge and do-not-deploy.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The ws-* proxy and port access are extracted. Still open: the app-creation module, named route-registration groups, and moving `onError` (`index.ts:188`), well-known routes (`:319-343`), `notFound` (`:521`) and the scheduled export (`:177,531`). Evidence: #2714 (`routes/workspace-subdomain-proxy.ts`, `workspace-port-access.ts`); #2681; `apps/api/src/index.ts` 1,003→548 lines.

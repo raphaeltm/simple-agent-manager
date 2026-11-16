@@ -257,7 +257,7 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
   });
 
   describe('session-scoped message broadcast', () => {
-    it('sends message.new only to subscribed session socket and untagged sockets', async () => {
+    it('sends message.new only to the subscribed session socket, never to project sockets', async () => {
       // Set up the SQL mock to return a valid session and next sequence
       mockCtx.storage.sql.exec = vi.fn((query: string, ..._args: any[]) => {
         if (query.includes('SELECT workspace_id FROM chat_sessions')) {
@@ -304,11 +304,8 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
       // Session B socket should NOT receive the message
       expect(sessionBSocket.send).not.toHaveBeenCalled();
 
-      // Untagged socket should receive the message (project-wide listener)
-      expect(untaggedSocket.send).toHaveBeenCalled();
-      const sentUntagged = JSON.parse(untaggedSocket._sent[0]);
-      expect(sentUntagged.type).toBe('message.new');
-      expect(sentUntagged.payload.sessionId).toBe('session-a');
+      // Project sockets (session list) never consume transcript frames.
+      expect(untaggedSocket.send).not.toHaveBeenCalled();
     });
 
     it('sends session.created to ALL sockets (intentional project-wide event)', async () => {

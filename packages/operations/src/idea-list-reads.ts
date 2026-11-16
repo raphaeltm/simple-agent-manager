@@ -119,6 +119,28 @@ export async function readIdeaRows(
   return result.results ?? [];
 }
 
+/**
+ * The newest ideas of any listed status (open, done or parked), newest update first: what the
+ * Project Overview's "Recently" shows. One read instead of the list's two capped groups.
+ */
+export async function readRecentIdeaRows(
+  ctx: OperationContext,
+  projectId: string,
+  limit: number
+): Promise<IdeaRow[]> {
+  const statuses = [...IDEA_OPEN_STATUSES, 'completed', 'cancelled'];
+  const placeholders = statuses.map(() => '?').join(', ');
+  const result = await ctx.env.DATABASE.prepare(
+    `SELECT ${IDEA_COLUMNS} FROM tasks
+      WHERE project_id = ? AND ${ideaTaskPredicateSql()} AND status IN (${placeholders})
+      ORDER BY updated_at DESC, id DESC
+      LIMIT ?`
+  )
+    .bind(projectId, ...statuses, limit)
+    .all<IdeaRow>();
+  return result.results ?? [];
+}
+
 export async function readIdeaRow(
   ctx: OperationContext,
   projectId: string,

@@ -47,7 +47,8 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({ select: mockSelect, update: mockUpdate, delete: mockDelete }),
 }));
 
-vi.mock('drizzle-orm', () => ({
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('drizzle-orm')>()),
   and: (...args: unknown[]) => args,
   or: (...args: unknown[]) => args,
   isNull: (value: unknown) => [value, null],

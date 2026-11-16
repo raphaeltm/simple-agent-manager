@@ -20,6 +20,11 @@ Select **Admin** in the sidebar (only superadmins see it), then the **Settings**
 titled **Runtime settings**. An account must be an approved, active superadmin to use it; admins
 can't.
 
+On an ordinary self-hosted instance, the first account to sign in while it is the only account
+becomes the superadmin, once. That first-sign-in election never runs again, even if that
+superadmin is deleted. If no account can open **Admin**, follow
+[Recovering when no account can administer the instance](/docs/guides/self-hosting/#recovering-when-no-account-can-administer-the-instance).
+
 Settings are grouped into **OAuth**, **Connector**, **Operations**, **Collaboration**,
 **Chat**, **AI models**, and **Email**. Type in **Search settings** to filter by name, group, or
 description. Each card is named after the setting, split into words (`operations.cronSweepsEnabled`
@@ -68,11 +73,11 @@ value and **Source** after the reload, nothing was saved: check the value and tr
 
 The **Operations** category includes these chat storage settings:
 
-| Setting                        | Code default | Effect                                                                                                                                     |
-| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                          |
+| Setting                        | Code default | Effect                                                                                                                                              |
+| ------------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                                   |
 | `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows. |
-| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                   |
+| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                            |
 
 Merging requires an updated reporter that sends its durable outbox incarnation. Older reporters,
 and requests with a missing or malformed incarnation, keep individual inserts and provide **zero
@@ -94,9 +99,9 @@ effective settings and actual reporter versions before forecasting fleet savings
 rollout through successive row-usage windows.
 
 Existing message rows and their comment anchors remain unchanged. Tool, user, system, thinking,
-plan and typed-card rows keep their existing storage format. A connected browser that does not
-advertise incremental append support disables merging for the sessions it watches; a legacy
-project-wide connection disables it for the project. Refresh old tabs to restore eligibility.
+plan and typed-card rows keep their existing storage format. A browser built before merging
+existed disables merging only for a chat it has open, until that chat is closed or the tab is
+refreshed. Its session-list connection does not affect merging.
 
 To roll back, save `false` for `chat.messageMergingEnabled`. The next batch seals any open merged
 row and stores new chunks individually; retry receipts remain available. Previously merged rows
@@ -253,6 +258,23 @@ where it says so and the app continues from there.
 | `secrets.expirySweepBatchSize`   | 10                  | 1–25          | Expired or unnotified requests one five-minute sweep handles (each one notifies its agent)                                                                                                                              |
 | `secrets.notifyRetryMinutes`     | 60                  | 15–1,440      | Minutes during which the sweep retries telling an agent about its request's outcome if the first notice could not be queued                                                                                             |
 
+## Inbox
+
+Listed under **Chat**. Bounds for the [inbox](/docs/reference/api/#inbox) list and for the inbox
+items agents file (`packages/operations/src/inbox-settings-definition.ts`).
+
+| Setting                    | Default | Range      | What it limits                                                                           |
+| -------------------------- | ------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                       |
+| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                         |
+| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed            |
+| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                          |
+| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                                 |
+| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                          |
+| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                  |
+| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired    |
+| `inbox.sweepBatchSize`     | 10      | 1–50       | Items one five-minute sweep expires or re-notifies (each is a write and an agent notice) |
+
 ## Node provisioning
 
 This **Operations** setting bounds one durable node-provisioning attempt
@@ -277,14 +299,40 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 
 ## Compute pool refresh
 
-This **Operations** setting bounds how long one refresh spends writing a changed compute pool
-catalog. A pool cannot place new machines until its catalog is fully written, so a refresh keeps
-writing 200-row batches until the catalog is complete or the budget is used, then resumes on the
-next refresh.
+These **Operations** settings bound catalog refresh work and recovery. A pool keeps using its last
+validated, published catalog while a replacement is prepared. Each source's validated replacement
+is published together; a new pool stays pending until its first validated publication. A successful,
+explicitly validated bundled catalog can publish known offerings without a complete live inventory;
+failed fallbacks and partial API catalogs remain private. Only a complete provider inventory can
+mark missing machines unavailable. Retaining the catalog never overrides disabled accounts,
+machines you remove or current permissions. See
+[Compute pools](/docs/guides/compute-pools/#how-refresh-treats-your-choices).
 
-| Setting                                  | Default | Range     | What it controls                                                                           |
-| ---------------------------------------- | ------- | --------- | ------------------------------------------------------------------------------------------ |
-| `operations.capacityPoolPublishBudgetMs` | 20,000  | 0–120,000 | Milliseconds per source per refresh for writing a changed catalog; 0 writes one batch only |
+| Setting                                           | Default    | Range              | What it controls                                                                                            |
+| ------------------------------------------------- | ---------- | ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `operations.capacityPoolPublishBudgetMs`          | 20,000     | 0–120,000          | Milliseconds per source per pass for publishing a changed catalog; 0 writes one batch (200 rows by default) |
+| `operations.capacityPoolRefreshPassBudgetMs`      | 20,000     | 1–120,000          | Shared milliseconds per pass across sources and scopes; SAM stops starting more work when this is spent     |
+| `operations.capacityPoolRefreshRetryBaseMs`       | 15,000     | 1–300,000          | Initial eligibility delay after incomplete publication                                                      |
+| `operations.capacityPoolRefreshRetryMaxMs`        | 300,000    | 1–900,000          | Maximum eligibility backoff; its effective value is at least the base delay                                 |
+| `operations.capacityPoolRefreshDeadlineMs`        | 7,200,000  | 1–86,400,000       | Recovery budget from the first claim, excluding queue time (2 hours by default)                             |
+| `operations.capacityPoolRefreshLeaseMs`           | 180,000    | 1–900,000          | Milliseconds before a crashed claim can be retried; its effective value is at least the shared pass budget  |
+| `operations.capacityPoolRefreshFailureCooldownMs` | 21,600,000 | 60,000–604,800,000 | Milliseconds before daily discovery may revive an exhausted refresh (6 hours by default)                    |
+
+A dedicated continuation check runs every minute and picks up eligible saved work independently
+of the daily discovery gate. A 15-second eligibility delay therefore does not promise a retry
+within 15 seconds. Repeated failures back off up to five minutes before the next eligible tick. Saved progress survives process restarts and missed notifications; a crashed
+claim must also wait for its lease to expire. An in-flight operation can finish after a pass's
+time budget. Provider requests share the remaining deadline and attempt to abort on timeout;
+D1 batches already underway must finish. The pass budget also stops SAM starting more work.
+
+The recovery deadline starts with the first claim; time waiting in the discovery queue does not
+spend it. If that budget is exhausted, the pool summary and Admin Errors show an actionable error,
+operators receive a notification, and SAM retains the last committed catalog. Daily discovery can
+start another episode after the failure cooldown; it does not restart the failed episode every
+minute. Check the compute account and select **Refresh** in Infrastructure settings to retry sooner. Increasing the deadline setting applies to
+future attempts; it does not extend a deadline already saved for an unfinished attempt. Larger
+catalogs, more accounts and slower provider or database responses can exhaust the budget; the
+deadline is a recovery limit, not a completion guarantee.
 
 ## Dead wake claims
 

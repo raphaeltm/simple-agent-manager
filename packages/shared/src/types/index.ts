@@ -461,8 +461,6 @@ export type {
   PersistMessageItem,
   PersistMessageRequest,
   PlanEntry,
-  ProjectWebSocketEvent,
-  ProjectWebSocketEventType,
   RecentChatsResponse,
   RemoveWorktreeResponse,
   SessionActivitySource,
@@ -813,6 +811,20 @@ export {
   isIdeaHumanTransition,
 } from './ideas';
 
+// Project Overview (Inbox slice F1)
+export type {
+  OverviewMergedPullRequest,
+  OverviewRunningChat,
+  OverviewRunningState,
+  ProjectOverviewResponse,
+  ProjectOverviewSection,
+} from './project-overview';
+export {
+  DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
+  DEFAULT_PROJECT_OVERVIEW_RUNNING_LIMIT,
+  MAX_PROJECT_OVERVIEW_LIMIT,
+} from './project-overview';
+
 // Knowledge Graph
 export type {
   AddObservationRequest,
@@ -1117,3 +1129,36 @@ export {
   RUNTIME_SECRET_REQUEST_REASON_MAX_LENGTH,
   RUNTIME_SECRET_REQUEST_STATUSES,
 } from './runtime-secret-requests';
+
+// Inbox (idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9)
+export type {
+  AskAssigneeKind,
+  AskKind,
+  AskStatus,
+  InboxActionResponse,
+  InboxAgentState,
+  InboxAnswerRequest,
+  InboxAnswerSpec,
+  InboxContextMessage,
+  InboxCountResponse,
+  InboxFilter,
+  InboxItem,
+  InboxItemContext,
+  InboxItemKind,
+  InboxItemResponse,
+  InboxLink,
+  InboxListResponse,
+  InboxStore,
+  ParsedInboxRef,
+} from './inbox';
+export {
+  ASK_ASSIGNEE_KINDS,
+  ASK_KINDS,
+  ASK_STATUSES,
+  formatInboxRef,
+  INBOX_AGENT_STATES,
+  INBOX_FILTERS,
+  INBOX_ITEM_KINDS,
+  INBOX_STORES,
+  parseInboxRef,
+} from './inbox';

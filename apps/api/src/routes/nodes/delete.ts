@@ -1,3 +1,4 @@
+import { assertNoReservedCloudflareBuilds } from '@simple-agent-manager/app-deployment';
 import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -172,6 +173,7 @@ export async function deleteOwnedNode(
   userId: string
 ): Promise<void> {
   const nodeId = node.id;
+  await assertNoReservedCloudflareBuilds(db, { nodeId });
   const strandedTasks = await listStrandedNodeTasks(env, nodeId);
 
   const cleanup = await deleteNodeResources(nodeId, userId, env);
@@ -243,6 +245,7 @@ export async function completeOwnerNodeRemoval(input: {
 }): Promise<void> {
   const { env, db, node, userId, cleanup } = input;
   const nodeId = node.id;
+  await assertNoReservedCloudflareBuilds(db, { nodeId });
   // Deprovision app-route DNS records for any deployment environments hosted on
   // this node. The environment rows survive (nodeId is set null by the FK), but
   // their grey-cloud A records would otherwise point at the now-freed VM IP.

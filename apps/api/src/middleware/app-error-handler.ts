@@ -1,3 +1,7 @@
+import {
+  CLOUDFLARE_BUILD_DELETION_CONFLICT,
+  isCloudflareBuildDeletionConflict,
+} from '@simple-agent-manager/app-deployment';
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
@@ -121,7 +125,10 @@ export function handleAppError(err: Error, c: AppContext): Response {
   let status: number;
   let body: Record<string, unknown>;
 
-  if (err instanceof AppError) {
+  if (isCloudflareBuildDeletionConflict(err)) {
+    status = 409;
+    body = { error: 'CONFLICT', message: CLOUDFLARE_BUILD_DELETION_CONFLICT };
+  } else if (err instanceof AppError) {
     status = err.statusCode;
     body = { ...err.toJSON() };
   } else if (err instanceof GcpApiError) {

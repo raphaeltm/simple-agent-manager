@@ -350,3 +350,36 @@ func TestCollectMonorepoScale(t *testing.T) {
 	}
 	t.Logf("100000 files, %d payload bytes, %d compressed bytes, collection %s (reported %dms)", 100000*len(payload), result.Bytes, time.Since(start), result.DurationMs)
 }
+
+func TestCollectorRetainsComposeProjectIdentity(t *testing.T) {
+	for _, name := range []string{"", "explicit-name"} {
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "Original-Project")
+			if err := os.Mkdir(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			compose := "services:\n  web:\n    build: .\n"
+			if name != "" {
+				compose = "name: " + name + "\n" + compose
+			}
+			if err := os.WriteFile(filepath.Join(root, "compose.yaml"), []byte(compose), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "Dockerfile"), []byte("FROM scratch"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			result, err := Collect(context.Background(), Options{Root: testRoot(t, root)}, &out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected := name
+			if expected == "" {
+				expected = "original-project"
+			}
+			if result.ProjectName != expected {
+				t.Fatalf("project=%q expected%q", result.ProjectName, expected)
+			}
+		})
+	}
+}
