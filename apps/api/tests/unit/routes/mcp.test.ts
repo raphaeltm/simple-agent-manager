@@ -811,6 +811,8 @@ describe('MCP Routes', () => {
           'deployments_write',
           'ideas_read',
           'ideas_write',
+          'inbox_read',
+          'inbox_write',
           'knowledge_read',
           'knowledge_write',
           'policies_read',
@@ -4678,11 +4680,14 @@ describe('MCP Routes', () => {
         id: 'ask-1',
         createdAt: 1,
         expiresAt: 2,
+        notificationScheduled: true,
       });
-      questionAskMocks.linkQuestionNotification.mockResolvedValue(undefined);
     });
 
-    it('should send notification and return success', async () => {
+    // The push and the live chat update are part of filing (`fileAgentAsk` →
+    // `announceAgentAsk`, inbox slice D) and are tested there
+    // (tests/unit/services/inbox/agent-asks.test.ts); the handler reports their outcome.
+    it('files the question and reports the notification outcome', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         user_id: 'user-789',
         title: 'Fix the bug',
@@ -4718,22 +4723,6 @@ describe('MCP Routes', () => {
         })
       );
       expect(mockDoStub.createAttentionMarker).not.toHaveBeenCalled();
-      expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
-        'user-789',
-        expect.objectContaining({
-          type: 'needs_input',
-          metadata: expect.objectContaining({
-            attentionMarkerId: 'ask-1',
-            options: ['Approach A', 'Approach B'],
-          }),
-        })
-      );
-      expect(questionAskMocks.linkQuestionNotification).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.any(String),
-        'ask-1',
-        expect.any(String)
-      );
     });
 
     it('should reject empty context', async () => {
@@ -4834,13 +4823,17 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('options must be an array');
     });
 
-    it('should preserve the attention safety marker when notification delivery setup throws', async () => {
+    it('still returns the recorded question when no notification was scheduled', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         user_id: 'user-789',
         title: 'Fix the bug',
       });
-      // Make the notification DO throw to exercise the best-effort catch branch
-      mockNotificationStub.createNotification.mockRejectedValueOnce(new Error('DO unavailable'));
+      questionAskMocks.fileQuestionAsk.mockResolvedValueOnce({
+        id: 'ask-1',
+        createdAt: 1,
+        expiresAt: 2,
+        notificationScheduled: false,
+      });
 
       const res = await mcpRequest(
         app,
@@ -4858,7 +4851,6 @@ describe('MCP Routes', () => {
       // The question is still recorded, so the chat card can still be answered.
       expect(payload.humanInputRequest).toEqual({ id: 'ask-1', sessionId: 'session-1' });
       expect(questionAskMocks.fileQuestionAsk).toHaveBeenCalledOnce();
-      expect(questionAskMocks.linkQuestionNotification).not.toHaveBeenCalled();
     });
 
     it('returns an error instead of claiming safety when no chat session exists', async () => {
@@ -4919,7 +4911,7 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('context is required');
     });
 
-    it('should call notifyNeedsInput with correct payload for all four categories', async () => {
+    it('passes each of the four categories to the shared filing operation', async () => {
       const categories = ['decision', 'clarification', 'approval', 'error_help'] as const;
 
       for (const category of categories) {
@@ -4941,9 +4933,9 @@ describe('MCP Routes', () => {
         expect(res.status).toBe(200);
         const body = await res.json();
         expect(body.result).toBeDefined();
-        expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
-          'user-789',
-          expect.objectContaining({ type: 'needs_input' })
+        expect(questionAskMocks.fileQuestionAsk).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ category, context: 'Need help' })
         );
       }
     });
