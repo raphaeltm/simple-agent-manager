@@ -4,7 +4,8 @@ import {
   type RenderOptions,
   screen,
 } from '@testing-library/react';
-import type { ReactElement } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement, ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -13,9 +14,17 @@ import { extractProjectId, NavSidebar } from '../../../src/components/NavSidebar
 import { ThemeProvider } from '../../../src/contexts/ThemeContext';
 
 // MobileNavDrawer renders the shared <ThemeSwitcher />, which calls useTheme and
-// therefore requires a ThemeProvider ancestor.
+// therefore requires a ThemeProvider ancestor. NavSidebar reads the inbox counts, so it needs a
+// QueryClient (signed out here, so no request is made).
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <QueryClientProvider client={new QueryClient()}>
+      <ThemeProvider>{children}</ThemeProvider>
+    </QueryClientProvider>
+  );
+}
 function render(ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
-  return baseRender(ui, { wrapper: ThemeProvider, ...options });
+  return baseRender(ui, { wrapper: Providers, ...options });
 }
 
 // Mock AuthProvider to provide superadmin context
