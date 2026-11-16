@@ -46,8 +46,9 @@ options popovers (correct stacking), Budgets / This week / Automations content.
 - [x] Light theme checked (Playwright case + screenshots)
 - [x] Review fix: Zen mode inset (`--sam-shell-inset-start`) + Focus/Zen Playwright cases (Zen red without the fix)
 - [x] Review fix: main column above the rail (`md:z-10`) so its gutter scrollbar is reachable (hit-test assertion red without it)
-- [ ] Before/after screenshots posted on the PR
-- [ ] ui-ux-specialist and task-completion-validator reviews
+- [x] Review fix (validator MEDIUM): stacked-row hit-test check (red without the clip-path) and a direct phone edge assertion (scroller meets app bar and task box)
+- [x] Before/after screenshots posted on the PR (#2816 comment 6924823820)
+- [x] ui-ux-specialist (ADDRESSED) and task-completion-validator (WARN, MEDIUM addressed) reviews
 - [ ] CI green, merged, production deploy watched
 
 ## Acceptance criteria

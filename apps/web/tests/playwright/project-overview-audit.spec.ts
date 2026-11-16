@@ -1058,6 +1058,14 @@ test.describe('Project Overview layering and spacing', () => {
       const top = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
       expect(top!.y - (appBar!.y + appBar!.height)).toBeGreaterThanOrEqual(8);
       expect(top!.x).toBeGreaterThanOrEqual(8);
+      // Panes leave at real edges: the scroller meets the app bar and the task box.
+      const scroller = await page.getByTestId('overview-scroll').boundingBox();
+      const taskBox = await page
+        .locator('[data-testid="project-overview"] > div')
+        .last()
+        .boundingBox();
+      expect(Math.abs(scroller!.y - (appBar!.y + appBar!.height))).toBeLessThanOrEqual(1);
+      expect(Math.abs(scroller!.y + scroller!.height - taskBox!.y)).toBeLessThanOrEqual(1);
     } else {
       expect(first!.y).toBeGreaterThanOrEqual(14);
       // The two columns' boxes overlap in the gutter; the main column's scrollbar lives there,
@@ -1126,6 +1134,41 @@ test.describe('Project Overview layering and spacing', () => {
     await page.screenshot({
       path: `../../.codex/tmp/playwright-screenshots/overview-layering-light-end-${page.viewportSize()?.width}.png`,
     });
+  });
+
+  test('a stacked Needs you row shows its back cards only below the front card', async ({
+    page,
+  }) => {
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
+    await page.goto(BASE);
+    const stack = page.getByTestId('inbox-row').filter({ hasText: /3 from Ship billing/ });
+    await expect(stack).toBeVisible();
+    // Hit-testing honours clip-path: inside the front card, no back card may be under the point
+    // (it would show through the translucent card); below it, each back card is still there.
+    const result = await stack.evaluate((li) => {
+      const front = li.querySelector<HTMLElement>(':scope > div')!.getBoundingClientRect();
+      const backs = [...li.querySelectorAll<HTMLElement>(':scope > span[aria-hidden="true"]')];
+      const inside = backs.flatMap((back) => {
+        const box = back.getBoundingClientRect();
+        const x = box.left + box.width / 2;
+        return [front.bottom - 2, front.bottom - 6].map((y) =>
+          document.elementsFromPoint(x, y).includes(back)
+        );
+      });
+      const below = backs.map((back) => {
+        const box = back.getBoundingClientRect();
+        return document.elementsFromPoint(box.left + box.width / 2, box.bottom - 1).includes(back);
+      });
+      return { count: backs.length, inside, below };
+    });
+    expect(result.count).toBe(2);
+    expect(result.inside.every((hit) => !hit)).toBe(true);
+    expect(result.below).toEqual([true, true]);
   });
 
   test('Recently lines its ideas up with its pull requests', async ({ page }) => {
