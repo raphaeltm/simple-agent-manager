@@ -7,7 +7,7 @@ Land only the integration branch's shared inbound IP and comparison helpers onto
 
 ## Preflight and findings
 Classification: security-sensitive-change, business-logic-change, cross-component-change, docs-sync-change.
-Main 10ec60b9c has 13 explicit IP readers, plus BetterAuth's default IP resolver. Some callers fall back to untrusted XFF. The branch helper trusts only ingress-overwritten CF-Connecting-IP, validates literals, and returns null on absence/malformed input, causing rate limits to share unknown. Trusted proxies must overwrite this same header from the peer and prevent direct ingress bypass; no forwarding-header mode is added.
+Main 10ec60b9c has 12 explicit IP consuming paths (13 raw header reads), plus BetterAuth's default IP resolver. Some callers fall back to untrusted XFF. The branch helper trusts only ingress-overwritten CF-Connecting-IP, validates literals, and returns null on absence/malformed input, causing rate limits to share unknown. Trusted proxies must overwrite this same header from the peer and prevent direct ingress bypass; no forwarding-header mode is added.
 The branch's constant-time helper extracts the existing setup-token comparator. Audit all touched files for other secret equality checks. Main moved provider-specific code into packages; enumerate current apps and packages rather than copy old call-site files.
 Rule 74: trusted peer attribution is the condition; header presence alone is not evidence of trusted ingress. CF overwrites the header; another ingress must enforce equivalent ownership. XFF/X-Real-IP diverge because callers can send them.
 Rule 77 incident: mocked BetterAuth missed an OAuth hook contract. Use real BetterAuth to assert persisted session IP under spoofed forwarding headers, including a failure control.
@@ -32,3 +32,5 @@ Valid Cloudflare IP strings remain unchanged; XFF/X-Real-IP never supply client 
 
 ## Validation evidence
 Baseline pnpm lint and typecheck passed (existing web hook warnings only). Before fixes, real OAuth tests: 3 failed / 7 passed, storing spoof XFF; reader/rate tests: 3 failed / 14 passed. After fixes: 5 files, 69 tests passed. BetterAuth IPv6 /64 and test-mode localhost normalization retained. API-wide secret equality audit: no additional secret/token equality in touched files beyond setup-token comparator; ID/type/status comparisons remain ordinary equality. Node heartbeat IP/DNS extracted in separate refactor commit: node-lifecycle.ts now 481 lines, auth.ts 494. No additional I/O: helper runs once per former header reader, pure bounded parsing; BetterAuth config resolves on existing createAuth path.
+
+Review repair: 17 obsolete source-text assertions in node-ip-validation.test.ts replaced with behavioral reconciliation tests; 46 tests pass across repaired suite and two route suites. Comment corrected to generic trusted ingress (no absent selfhost deployment claim).
