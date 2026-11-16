@@ -20,6 +20,7 @@ import { ulid } from '../../lib/ulid';
 import { parentAgentAttribution, withoutAuthorAttribution } from '../../services/agent-authorship';
 import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
+import { resolveSystemErrorFor } from '../../services/inbox/system-errors';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,
@@ -497,6 +498,14 @@ export async function handleRetrySubtask(
     log.error('orchestration.retry.do_startup_failed', { taskId, error: errorMsg });
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
   }
+
+  // The retry worked: the failed child's inbox error item closes (slice E). Never throws.
+  await resolveSystemErrorFor(env, {
+    projectId: tokenData.projectId,
+    source: 'task',
+    subjectId: childTaskId,
+    resolution: 'retried',
+  });
 
   log.info('orchestration.retry_subtask.success', {
     stoppedTaskId: childTaskId,

@@ -10,7 +10,9 @@ import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
 import { refreshGcpPriceTableIfDue } from '../services/gcp-price-table';
 import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
+import { runInboxAutomationErrorSweep } from '../services/inbox/automation-errors';
 import { runInboxAskSweep } from '../services/inbox/sweep';
+import { runInboxSystemErrorSweep } from '../services/inbox/system-errors';
 import {
   runLifecycleLatencyDailyEvaluation,
   runLifecycleLatencyWatchdog,
@@ -230,6 +232,16 @@ export async function scheduled(
   );
   // Two indexed reads per idle tick; work is capped by inbox.sweepBatchSize.
   const inboxAskSweep = await sweeps.isolate('inbox_ask_sweep', () => runInboxAskSweep(env));
+  // One indexed scan of recently failed tasks plus one UPDATE per idle tick; filings capped by
+  // inbox.errorSweepBatchSize (`services/inbox/system-errors.ts`).
+  const inboxSystemErrorSweep = await sweeps.isolate('inbox_system_error_sweep', () =>
+    runInboxSystemErrorSweep(env)
+  );
+  // Failing or auto-paused automations: bounded by inbox.errorSweepBatchSize
+  // (`services/inbox/automation-errors.ts`).
+  const inboxAutomationErrorSweep = await sweeps.isolate('inbox_automation_error_sweep', () =>
+    runInboxAutomationErrorSweep(env)
+  );
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
   );
@@ -409,6 +421,10 @@ export async function scheduled(
     secretRequestNoticesRetried: secretRequestSweep?.noticesRetried,
     inboxAsksExpired: inboxAskSweep?.expired,
     inboxAskNoticesRetried: inboxAskSweep?.noticesRetried,
+    inboxSystemErrorsFiled: inboxSystemErrorSweep?.filed,
+    inboxSystemErrorsClosed: inboxSystemErrorSweep?.closed,
+    inboxAutomationErrorsFiled: inboxAutomationErrorSweep?.filed,
+    inboxAutomationErrorsClosed: inboxAutomationErrorSweep?.closed,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
     sessionTaskRepairReused: sessionTaskRepair?.reused,

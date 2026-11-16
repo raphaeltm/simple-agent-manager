@@ -74,6 +74,19 @@ export interface InboxLink {
   label: string | null;
 }
 
+/**
+ * Fixes an `error` item can offer (inbox slice E). `retry`, `wake` and `resume` run the existing
+ * retry / wake / resume operation with the answering person's authority; `open_chat` is handled
+ * by the client (navigate to the item's chat) and the answer route refuses it.
+ */
+export const INBOX_ERROR_ACTIONS = ['retry', 'wake', 'resume', 'open_chat'] as const;
+export type InboxErrorAction = (typeof INBOX_ERROR_ACTIONS)[number];
+
+export interface InboxErrorActionOption {
+  id: InboxErrorAction;
+  label: string;
+}
+
 /** How the item is answered. The shape of the `answer` request follows from `type`. */
 export type InboxAnswerSpec =
   /** Pick one of `options` (`answer`), or type text when `allowText`. */
@@ -91,7 +104,9 @@ export type InboxAnswerSpec =
   /** `decision: 'approve' | 'deny'` with an optional `note`. */
   | { type: 'approval'; action: string; targetType: string; targetId: string }
   /** "Looks good" / "Mark done": no fields, or an optional `answer` comment. */
-  | { type: 'acknowledge' };
+  | { type: 'acknowledge' }
+  /** A system error: run one of `actions` (`action`), first is primary. Archive dismisses it. */
+  | { type: 'actions'; actions: InboxErrorActionOption[] };
 
 export interface InboxItem {
   /** Stable reference: `ask:<id>`, `attention:<sessionId>:<markerId>`, `secret:<id>`, `approval:<id>`. */
@@ -114,6 +129,10 @@ export interface InboxItem {
   /** Open items are `open`; `asks` rows carry their own status. */
   status: AskStatus;
   createdAt: string;
+  /** Last change; for an `error` item, when it last failed. */
+  updatedAt: string;
+  /** `error` items: how many times the thing failed while the item was open. Null otherwise. */
+  failureCount: number | null;
   expiresAt: string | null;
   dueAt: string | null;
   answerSpec: InboxAnswerSpec;
@@ -173,6 +192,8 @@ export interface InboxAnswerRequest {
   formContent?: Record<string, unknown>;
   decision?: 'approve' | 'deny';
   note?: string;
+  /** `actions` items: the fix to run (`retry`, `wake`, `resume`). */
+  action?: InboxErrorAction;
   /** Secret value: accepted from the app's own pages only, never logged or returned. */
   secret?: { value: string; replaceExisting?: boolean; expectedExistingVersion?: string };
 }

@@ -63,6 +63,17 @@ export {
   validateIdeaStatusTransition,
 } from './idea-transitions';
 export { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from './idea-update-core';
+export {
+  fileSystemError,
+  quotedName,
+  resolveSystemError,
+  SYSTEM_ERROR_SOURCES,
+  type SystemErrorFiled,
+  type SystemErrorInput,
+  systemErrorKey,
+  type SystemErrorResolution,
+  type SystemErrorSource,
+} from './inbox-error-core';
 export { getInboxItem, resolveInboxItem } from './inbox-item-core';
 export { countInbox, listInbox } from './inbox-list-core';
 export {

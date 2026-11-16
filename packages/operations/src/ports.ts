@@ -476,6 +476,16 @@ export interface OperationInboxPort {
    * caller records `notified_at`; a sweep retries a notice that was not queued.
    */
   notifyAsk(row: InboxAskNoticeRow, outcome: InboxAskNoticeOutcome): Promise<boolean>;
+  /**
+   * A system error item's Retry: the existing task retry (`retrySubtask`), with the person's
+   * authority. Throws an `OperationError` when it is refused.
+   */
+  retryTask(userId: string, projectId: string, taskId: string): Promise<{ newTaskId: string }>;
+  /**
+   * A system error item's Wake: the existing chat wake (`authorizeAgentWake`, then
+   * `ensureSessionRecovery`). Throws an `OperationError` when it is refused.
+   */
+  wakeChat(userId: string, projectId: string, sessionId: string): Promise<void>;
 }
 
 export interface OperationPorts {

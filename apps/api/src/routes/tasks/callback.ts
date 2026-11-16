@@ -11,6 +11,7 @@ import { toTaskResponse } from '../../lib/mappers';
 import { requireRouteParam } from '../../lib/route-helpers';
 import { errors } from '../../middleware/error';
 import { jsonValidator, UpdateTaskStatusSchema } from '../../schemas';
+import { fileTaskFailure } from '../../services/inbox/system-errors';
 import { verifyCallbackToken } from '../../services/jwt';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
@@ -475,6 +476,9 @@ taskCallbackRoute.post(
                 outputBranch: updatedTask.outputBranch,
               });
             } else if (body.toStatus === 'failed') {
+              // File the inbox error item first so the notification opens it (slice E). Filing
+              // never throws; a normal ending files nothing and keeps the chat link.
+              const filed = await fileTaskFailure(c.env, projectId, taskId);
               await notificationService.notifyTaskFailed(c.env, task.userId, {
                 projectId,
                 projectName,
@@ -482,6 +486,7 @@ taskCallbackRoute.post(
                 taskTitle: task.title,
                 errorMessage: body.errorMessage,
                 sessionId,
+                inboxRef: filed?.ref ?? null,
               });
             }
           })().catch((e) => {

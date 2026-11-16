@@ -2,11 +2,12 @@
  * The worker side of the inbox (`OperationInboxPort`, `packages/operations/src/ports.ts`). Every
  * method delegates to the path its store already uses; nothing here answers a store a second way.
  */
-import type { OperationInboxPort } from '@simple-agent-manager/operations';
+import { OperationError, type OperationInboxPort } from '@simple-agent-manager/operations';
 import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import { retrySubtask } from '../../durable-objects/sam-session/tools/retry-subtask';
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import {
@@ -22,6 +23,7 @@ import {
   declineRuntimeSecretRequest,
   fulfillRuntimeSecretRequest,
 } from '../runtime-secret-requests';
+import { ensureSessionRecovery } from '../session-recovery';
 import { readAskContext } from './ask-context';
 import { deliverInboxAskNotice } from './ask-notice';
 
@@ -148,6 +150,50 @@ export function createInboxPort(env: Env): OperationInboxPort {
     },
 
     notifyAsk: (row, outcome) => deliverInboxAskNotice(env, row, outcome),
+
+    async retryTask(userId, projectId, taskId) {
+      // The existing retry: a new task with the same description, owner-only (`retrySubtask`).
+      const owned = await env.DATABASE.prepare(
+        'SELECT 1 AS ok FROM tasks WHERE id = ? AND project_id = ?'
+      )
+        .bind(taskId, projectId)
+        .first();
+      if (!owned) throw new OperationError('not_found', 'Task not found');
+      const result = (await retrySubtask(
+        { taskId },
+        {
+          env: env as unknown as Record<string, unknown>,
+          userId,
+        }
+      )) as { newTaskId?: unknown; error?: unknown };
+      if (typeof result.newTaskId !== 'string') {
+        throw new OperationError(
+          'conflict',
+          typeof result.error === 'string' ? result.error : 'The task could not be retried'
+        );
+      }
+      return { newTaskId: result.newTaskId };
+    },
+
+    async wakeChat(userId, projectId, sessionId) {
+      await authorizeAgentWake(env, {
+        projectId,
+        sessionId,
+        actorUserId: userId,
+        trigger: 'user_followup',
+        action: 'wake the agent in this session',
+      });
+      const result = await ensureSessionRecovery(env, projectId, sessionId);
+      if (result.status !== 'waking') {
+        // The refusal reason is a fixed code (`recordSessionRecoveryRefusal`), not error text.
+        throw new OperationError(
+          'conflict',
+          result.reason === 'container_runtime_wakes_in_place'
+            ? 'This chat wakes when you send it a message'
+            : `SAM could not wake this chat (${result.reason})`
+        );
+      }
+    },
   };
 }
 
