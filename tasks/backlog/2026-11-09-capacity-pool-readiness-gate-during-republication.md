@@ -86,3 +86,7 @@ Cloud catalog is rewritten after each save.
       needs the authority recompute moved to the edit path (or proven unnecessary).
 - [ ] Test: a pool edit followed by an identical refresh writes no candidate rows and keeps the
       pool ready (through the real edit and ensure paths).
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2693 shipped the readiness gate (`apps/api/src/services/default-capacity-pool-summaries.ts` keys readiness on `catalogPublished`, staged promotion), shared pass/source budgets and resumable continuation. Still open: `candidateSetDigest` still hashes `status` (`default-capacity-pool-candidates-publication.ts`), so a pool edit republishes the whole catalog; and the credential-mutation latency item.

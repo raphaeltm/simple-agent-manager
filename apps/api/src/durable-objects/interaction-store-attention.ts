@@ -4,7 +4,6 @@ import { ACP_INTERACTION_ATTENTION_SOURCE, formatInboxRef } from '@simple-agent-
 import type { Env } from '../env';
 import { canonicalJson } from '../lib/canonical-json';
 import { log, serializeError } from '../lib/logger';
-import { fileUndeliveredAnswerError, loadChatForError } from '../services/inbox/system-errors';
 import * as notificationService from '../services/notification';
 import { nowMs, parseSummary, terminalState } from './interaction-store-model';
 import { readInteractionRow } from './interaction-store-read';
@@ -54,6 +53,7 @@ async function notifyInteractionOwner(
 ): Promise<void> {
   if (!env.NOTIFICATION) return;
   try {
+    const { loadChatForError } = await import('../services/inbox/system-errors');
     const chat = await loadChatForError(env, row.project_id, row.chat_session_id);
     if (!chat?.createdBy) return;
     await notificationService.notifyInteractionRequested(env, chat.createdBy, {
@@ -102,6 +102,8 @@ export async function resolveInteractionAttention(
   // The person answered but the agent never confirmed it (`recordDelivery`, outcome
   // `unconfirmed`): their inbox says so (slice E). Once, on this projection. Never throws.
   if (resolved > 0 && row.state === 'delivery_unconfirmed') {
+    // Loaded on use: the filing service builds operation ports (a large worker graph).
+    const { fileUndeliveredAnswerError } = await import('../services/inbox/system-errors');
     await fileUndeliveredAnswerError(env, {
       projectId: row.project_id,
       sessionId: row.chat_session_id,

@@ -71,6 +71,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
    * they feed `useSessionTools`' memoized action array, and an inline arrow would rebuild it
    * on every render (rule 64). See `useSessionOverlays`.
    */
+  const overlays = useSessionOverlays();
   const {
     showTimeline,
     openTimeline,
@@ -81,16 +82,11 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     showResources,
     openResources,
     closeResources,
-    showAutomation,
     openAutomation,
-    closeAutomation,
-    showRelated,
     openRelated,
-    closeRelated,
-    showShare,
     openShare,
-    closeShare,
-  } = useSessionOverlays();
+    openReceipt,
+  } = overlays;
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
   const { user } = useAuth();
@@ -251,6 +247,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     onOpenTimeline: openTimeline,
     onOpenResources: openResources,
     onOpenAutomation: openAutomation,
+    onOpenReceipt: openReceipt,
     onOpenRelated: openRelated,
     onOpenComments: openComments,
     onRetry,
@@ -483,13 +480,9 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         nodeId={lc.workspace?.nodeId ?? null}
         viewerId={viewerId}
         sessionTools={sessionTools}
-        showAutomation={showAutomation}
-        onCloseAutomation={closeAutomation}
-        showRelated={showRelated}
-        onCloseRelated={closeRelated}
+        overlays={overlays}
+        taskId={lc.taskEmbed?.id ?? lc.session?.task?.id ?? lc.session?.taskId ?? null}
         linkedWork={linkedWork}
-        showShare={showShare}
-        onCloseShare={closeShare}
         onAccessChanged={lc.applySessionAccess}
       />
     </div>

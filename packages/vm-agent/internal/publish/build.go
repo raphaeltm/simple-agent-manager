@@ -24,6 +24,10 @@ const unsupportedComposeVolumesGuidance = "build_and_publish supports safe named
 
 // BuildOptions configures a host-side compose build.
 type BuildOptions struct {
+	// BuildNetwork overrides networking only for build commands on remote DinD.
+	// The captured release retains the original service/runtime networks.
+	BuildNetwork string
+
 	// WorkspaceDir is the host path of the cloned repo (the compose project
 	// root). It is the same directory passed to `devcontainer up`.
 	WorkspaceDir string
@@ -240,7 +244,7 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 	if opts.Events != nil {
 		opts.Events.Event(ctx, Event{Status: "building", CurrentStep: "compose_build", EventType: "publish.build.started", Message: "docker compose build started", Detail: map[string]any{"targetCount": len(targets)}})
 	}
-	if _, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, composeEnv, "build"); err != nil {
+	if _, err := buildComposeServices(ctx, composeCmd, opts, cfg, composeEnv); err != nil {
 		log.Error("compose build command failed", "composeCmd", composeCmd, "error", err)
 		return nil, fmt.Errorf("build: docker compose build: %w", err)
 	}
@@ -676,8 +680,28 @@ func inspectImage(ctx context.Context, image string) (*imageInspect, error) {
 }
 
 // runCompose runs the configured compose CLI (which may be multi-word, e.g.
-// "docker compose") with args in dir, returning stdout.
+// "docker compose") for non-build operations. Builds must use runComposeBuild:
+// inferring them from an argument position could silently undercount attempts.
 func runCompose(ctx context.Context, composeCmd, dir string, env map[string]string, args ...string) ([]byte, error) {
+	for _, arg := range append(strings.Fields(composeCmd), args...) {
+		if arg == "build" {
+			return nil, fmt.Errorf("publish Compose builds require the counted runComposeBuild helper")
+		}
+	}
+	return executeCompose(ctx, composeCmd, dir, env, args...)
+}
+
+// runComposeBuild separates global Compose options from build options/services,
+// ensuring every build attempt counts even with trailing flags or service names.
+func runComposeBuild(ctx context.Context, composeCmd, dir string, env map[string]string, prefixArgs []string, buildArgs ...string) ([]byte, error) {
+	args := append(append([]string{}, prefixArgs...), "build")
+	args = append(args, buildArgs...)
+	composeBuildAttempts.Add(1)
+	return executeCompose(ctx, composeCmd, dir, env, args...)
+}
+
+// executeCompose is shared only by the guarded config and counted build helpers.
+func executeCompose(ctx context.Context, composeCmd, dir string, env map[string]string, args ...string) ([]byte, error) {
 	parts := strings.Fields(composeCmd)
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("empty compose command")

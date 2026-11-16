@@ -1,5 +1,5 @@
 /**
- * Chat task-state enrichment past D1's 100-bound-parameter ceiling (apps/api/.claude/rules/69):
+ * Chat task-state enrichment past D1's 100-bound-parameter ceiling (.claude/rules/69):
  * better-sqlite3 allows tens of thousands, so the fixture runs on a harness that enforces D1's
  * limit, with more task ids than one statement can bind and a remainder chunk.
  */

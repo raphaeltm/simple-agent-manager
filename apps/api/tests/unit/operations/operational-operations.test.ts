@@ -85,6 +85,7 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
     sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
       schema.users,
+      schema.asks,
       schema.projects,
       schema.projectMembers,
       schema.tasks,
@@ -385,6 +386,43 @@ describe('operational MCP evidence with real SQLite authorization and persistenc
     await expect(samChatInteractions.run(ctx('reader'), session)).rejects.toMatchObject({
       code: 'forbidden',
     });
+  });
+
+  it('shows a question held in D1 asks (slice G) beside markers, bound to its project and chat', async () => {
+    const insertAsk = (id: string, projectId: string, sessionId: string, createdAt: number) =>
+      sqlite
+        .prepare(
+          `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
+              body_md, answer_spec_json, category, source_session_id, source_task_id, status,
+              expires_at, max_expires_at, escalation_count, next_escalation_at, notification_id,
+              created_at, updated_at)
+           VALUES (?, ?, 'user', 'owner', 'question', 1, 'Pick a region', 'Pick a region for the deploy.',
+              '{"type":"options","options":["eu","us"],"allowText":false}', 'decision', ?, 'task',
+              'open', 4102444800000, 4102444800000, 1, 6000, 'n-ask', ?, ?)`
+        )
+        .run(id, projectId, sessionId, createdAt, createdAt);
+    insertAsk('ask-1', 'p', 'chat', 3_000);
+    // Attack fixtures: same chat id under another project, and another chat of this project.
+    insertAsk('ask-foreign', 'foreign', 'chat', 4_000);
+    insertAsk('ask-other-chat', 'p', 'other-chat', 4_000);
+    mocks.attention.mockResolvedValue([question()]);
+    const read = await samChatRead.run(ctx('grantee'), session);
+    expect(read.pendingAttention?.map((item) => item.markerId)).toEqual(['ask-1', 'marker-1']);
+    expect(read.pendingAttention?.[0]).toMatchObject({
+      markerId: 'ask-1',
+      kind: 'needs_input',
+      source: 'request_human_input',
+      answerable: true,
+      category: 'decision',
+      options: ['eu', 'us'],
+      reminders: 1,
+      notification: { notificationId: 'n-ask', deviceDelivery: 'not_recorded' },
+    });
+    expect(read.pendingAttention?.[0]?.question.text).toContain('Pick a region for the deploy.');
+    // An answered question is not pending.
+    sqlite.prepare("UPDATE asks SET status = 'answered' WHERE id = 'ask-1'").run();
+    const after = await samChatRead.run(ctx('grantee'), session);
+    expect(after.pendingAttention?.map((item) => item.markerId)).toEqual(['marker-1']);
   });
 
   it('reports a new question as a change and says when questions could not be read', async () => {

@@ -5,7 +5,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { fileSleepLossError } from './inbox/system-errors';
 import { getNodeAgentBackgroundRequestTimeoutMs } from './node-agent';
 import * as projectDataService from './project-data';
 import {
@@ -390,7 +389,14 @@ export async function runSessionSleepFallback(
     }
 
     pointOfNoReturn = true;
-    // Possible loss of unsaved work: tell the owner in their inbox (slice E). Never throws.
+    const slept = await completeSleepTeardown(env, workspace, agentSession, claimId, snapshot, {
+      fallback: true,
+      requirement,
+    });
+    // The workspace is released and unsaved work may be lost: tell the owner in their inbox
+    // (slice E). Only after the teardown, so a teardown that fails and retries files nothing.
+    // Never throws.
+    const { fileSleepLossError } = await import('./inbox/system-errors');
     await fileSleepLossError(env, {
       projectId: workspace.projectId,
       sessionId: chatSessionId,
@@ -398,10 +404,6 @@ export async function runSessionSleepFallback(
       exactRestore: Boolean(
         point && point.snapshotStatus === 'available' && point.degradation === 'none'
       ),
-    });
-    const slept = await completeSleepTeardown(env, workspace, agentSession, claimId, snapshot, {
-      fallback: true,
-      requirement,
     });
     await finishSleepCleanup(
       db,

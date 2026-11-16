@@ -57,4 +57,22 @@ pnpm --filter @simple-agent-manager/worker-core lint        # ESLint
 - Depends only on `@simple-agent-manager/shared` and third-party libraries.
 - No function accepts the worker `Env`. Take explicit values or a narrow interface.
 - Changing `src/schema.ts` still needs a D1 migration in `apps/api/src/db/migrations/`; see
-  `apps/api/.claude/rules/31-migration-safety.md`.
+  `.claude/rules/31-migration-safety.md`.
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/31-migration-safety.md`: Migration Safety (ABSOLUTE RULE — DATA LOSS PREVENTION)
+- `.claude/rules/44-dual-write-migration-enumerate-writers.md`: Storage Migrations Must Enumerate Every Writer of the Migrated Data
+- `.claude/rules/50-list-read-row-fault-isolation.md`: List/Snapshot Reads Must Tolerate a Single Malformed Row
+- `.claude/rules/51-runtime-boundary-validation.md`: Runtime boundary validation
+- `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md`: Making a Scoping Column Nullable Silently Deletes Every Check That Used It
+- `.claude/rules/69-emergency-config-paths-need-their-own-coverage.md`: A Code Path That Only Activates Under an Emergency Configuration Needs Tests In That Configuration
+- `.claude/rules/71-tightening-a-column-can-delete-a-capability.md`: A New Required Column Can Silently Delete a Capability for Every Existing Row
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+
+<!-- END GENERATED RULE INDEX -->

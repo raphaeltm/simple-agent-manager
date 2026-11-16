@@ -317,6 +317,47 @@ async function failExpiredTaskMarker(
   });
 }
 
+/**
+ * The outcome of an expired agent question held in D1 `asks` (inbox slice G): the same task
+ * outcome a question marker's expiry has (`failExpiredTaskMarker`). The inbox sweep expires the
+ * row and calls this through `ProjectData.expireQuestionAsk`.
+ */
+export async function failExpiredQuestionAsk(
+  sql: SqlStorage,
+  env: Env,
+  question: {
+    id: string;
+    sessionId: string;
+    taskId: string | null;
+    workspaceId: string | null;
+    createdAt: number;
+  },
+  failSession: (sessionId: string, errorMessage: string) => Promise<void>,
+  hooks: AttentionExpiryProcessingHooks
+): Promise<void> {
+  await failExpiredTaskMarker(
+    sql,
+    env,
+    {
+      id: question.id,
+      sessionId: question.sessionId,
+      taskId: question.taskId,
+      workspaceId: question.workspaceId,
+      kind: 'needs_input',
+      source: 'request_human_input',
+      sourceNotificationId: null,
+      notificationUserId: null,
+      createdAt: question.createdAt,
+      expiresAt: null,
+      nextEscalationAt: null,
+      escalationCount: 0,
+      maxExpiresAt: null,
+    },
+    failSession,
+    hooks
+  );
+}
+
 async function cleanupExpiredTaskRun(env: Env, workspaceId: string, taskId: string): Promise<void> {
   try {
     await projectDataPorts().tasks.releaseTaskRun(env, taskId);

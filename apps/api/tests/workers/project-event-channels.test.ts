@@ -87,7 +87,7 @@ describe('canonical event channels', () => {
     }
   });
 
-  it('revokes all five MCP tools without exposing history or changing canonical state', async () => {
+  it('refuses all five MCP tools for a suspended member without exposing history or changing canonical state', async () => {
     const f = await fixture();
     await f.publish('one');
     const history = body<{ cursor: string }>(
@@ -131,14 +131,13 @@ describe('canonical event channels', () => {
       ['follow_event_channel', { channel: 'builds', idempotencyKey: 'new-follow' }],
       ['catch_up_event_channel', { subscriptionId: followed.subscription.id }],
     ];
+    // A suspended membership is refused by the MCP token lifecycle gate before any tool runs;
+    // the token is kept, because reinstating the member must restore access.
     for (const [tool, args] of calls) {
-      const response = await f.tool(tool, args);
-      expect(response.error).toMatchObject({
-        message: 'Project not found',
-        data: { httpStatus: 404 },
-      });
-      expect(response.result).toBeUndefined();
+      const response = await f.toolRequest(tool, args);
+      expect(response.status).toBe(401);
     }
+    expect(await env.KV.get(`mcp:${f.token}`)).not.toBeNull();
     expect(await snapshot()).toEqual(before);
   });
 
@@ -718,13 +717,13 @@ describe('canonical event channels', () => {
       .run();
     expect(
       (
-        await f.tool('publish_channel_event', {
+        await f.toolRequest('publish_channel_event', {
           channel: 'builds',
           message: 'denied',
           idempotencyKey: 'denied',
         })
-      ).error
-    ).toBeDefined();
+      ).status
+    ).toBe(401);
   });
 
   it('keeps snapshots bounded and scoped; retention gaps and cancellation cannot advance catch-up', async () => {

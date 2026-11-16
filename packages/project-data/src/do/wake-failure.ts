@@ -3,10 +3,18 @@ import { createModuleLogger, serializeError } from '@simple-agent-manager/worker
 import * as activity from './activity';
 import { createAttentionMarker } from './attention';
 import { persistSystemMessage } from './messages';
+import { projectDataPorts } from './ports';
+import type { Env } from './types';
 
 const log = createModuleLogger('project_data.wake_failure');
 export const WAKE_FAILED_ATTENTION_KIND = 'wake_failed';
 
+/**
+ * A failed wake is one inbox error item in D1 `asks` (inbox slice E, dedupe key
+ * `error:wake:<sessionId>`), not an attention marker: the chat list reads it back as its
+ * `wake_failed` attention (`@simple-agent-manager/worker-core` `readOpenQuestionAttention`). A
+ * repeat failure while the item is open updates it and posts nothing new in the chat.
+ */
 export interface RaiseSessionWakeFailureInput {
   sessionId: string;
   taskId?: string | null;
@@ -15,71 +23,93 @@ export interface RaiseSessionWakeFailureInput {
   detail?: string | null;
 }
 
-export function raiseSessionWakeFailure(
+export async function raiseSessionWakeFailure(
   sql: SqlStorage,
+  env: Env,
+  projectId: string | null,
   input: RaiseSessionWakeFailureInput,
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void
-): { markerId: string | null; messageId: string | null; inserted: boolean } {
+): Promise<{ askId: string | null; messageId: string | null; inserted: boolean }> {
   const session = sql
     .exec(
-      `SELECT id, task_id, workspace_id
+      `SELECT id, task_id, workspace_id, created_by_user_id, topic, status
          FROM chat_sessions
         WHERE id = ?
         LIMIT 1`,
       input.sessionId
     )
     .toArray()[0];
-  if (!session) return { markerId: null, messageId: null, inserted: false };
+  if (!session) return { askId: null, messageId: null, inserted: false };
+  // An archived chat is a normal ending: nobody is waiting on it (policy a974b04f).
+  if (session.status === 'archived') return { askId: null, messageId: null, inserted: false };
 
-  const existing = sql
-    .exec(
-      `SELECT id
-         FROM session_attention_markers
-        WHERE session_id = ?
-          AND kind = ?
-          AND resolved_at IS NULL
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      input.sessionId,
-      WAKE_FAILED_ATTENTION_KIND
-    )
-    .toArray()[0];
-  if (typeof existing?.id === 'string') {
-    log.info('wake_failure.already_visible', {
-      sessionId: input.sessionId,
-      deliveryId: input.deliveryId ?? null,
-      reason: input.reason,
-      attentionMarkerId: existing.id,
-    });
-    return { markerId: existing.id, messageId: null, inserted: false };
-  }
-
-  const taskId = input.taskId ?? (typeof session.task_id === 'string' ? session.task_id : null);
-  const workspaceId = typeof session.workspace_id === 'string' ? session.workspace_id : null;
+  const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
+  const taskId = input.taskId ?? text(session.task_id);
+  const workspaceId = text(session.workspace_id);
   const detail = input.detail?.trim();
   const message =
     detail && detail !== input.reason ? `Wake failed: ${detail}` : `Wake failed: ${input.reason}`;
 
-  let markerId: string | null = null;
-  try {
-    markerId = createAttentionMarker(sql, {
+  let filed: { id: string; created: boolean } | null = null;
+  if (projectId) {
+    try {
+      filed = await projectDataPorts().inboxErrors.fileWakeFailure(env, {
+        projectId,
+        sessionId: input.sessionId,
+        taskId: text(session.task_id) ?? taskId,
+        createdByUserId: text(session.created_by_user_id),
+        topic: text(session.topic),
+      });
+    } catch (error) {
+      log.error('wake_failure.inbox_item_failed', {
+        sessionId: input.sessionId,
+        reason: input.reason,
+        ...serializeError(error),
+      });
+    }
+  }
+  if (filed && !filed.created) {
+    log.info('wake_failure.already_visible', {
       sessionId: input.sessionId,
-      taskId,
-      workspaceId,
-      kind: WAKE_FAILED_ATTENTION_KIND,
-      source: 'session_wake',
+      deliveryId: input.deliveryId ?? null,
       reason: input.reason,
-      metadata: JSON.stringify({
-        deliveryId: input.deliveryId ?? null,
-        detail: detail ?? null,
-      }),
-    }).id;
-  } catch (error) {
-    log.error('wake_failure.attention_marker_create_failed', {
-      sessionId: input.sessionId,
-      reason: input.reason,
-      ...serializeError(error),
+      askId: filed.id,
     });
+    return { askId: filed.id, messageId: null, inserted: false };
+  }
+  let markerId = filed?.id ?? null;
+  if (!filed) {
+    // One visible failure at a time, as before: an open marker already shows it.
+    const existing = sql
+      .exec(
+        `SELECT id FROM session_attention_markers
+          WHERE session_id = ? AND kind = ? AND resolved_at IS NULL LIMIT 1`,
+        input.sessionId,
+        WAKE_FAILED_ATTENTION_KIND
+      )
+      .toArray()[0];
+    if (typeof existing?.id === 'string') {
+      return { askId: null, messageId: null, inserted: false };
+    }
+    // The inbox item could not be filed (D1 unavailable, no one to address it to): fall back to
+    // the chat's own marker so the failure never goes invisible. Readers still show it.
+    try {
+      markerId = createAttentionMarker(sql, {
+        sessionId: input.sessionId,
+        taskId,
+        workspaceId,
+        kind: WAKE_FAILED_ATTENTION_KIND,
+        source: 'session_wake',
+        reason: input.reason,
+        metadata: JSON.stringify({ deliveryId: input.deliveryId ?? null, detail: detail ?? null }),
+      }).id;
+    } catch (error) {
+      log.error('wake_failure.attention_marker_create_failed', {
+        sessionId: input.sessionId,
+        reason: input.reason,
+        ...serializeError(error),
+      });
+    }
   }
 
   const persisted = persistSystemMessage(sql, input.sessionId, message);
@@ -140,5 +170,5 @@ export function raiseSessionWakeFailure(
     messageId: persisted?.id ?? null,
   });
 
-  return { markerId, messageId: persisted?.id ?? null, inserted: true };
+  return { askId: markerId, messageId: persisted?.id ?? null, inserted: true };
 }

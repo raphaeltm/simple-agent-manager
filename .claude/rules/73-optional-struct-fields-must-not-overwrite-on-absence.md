@@ -1,4 +1,28 @@
+---
+paths:
+  - '**/*.go'
+  - '**/*.ts'
+  - '**/*.tsx'
+  - '**/*.sql'
+---
+
 # A Zero-Valued Optional Field Must Not Overwrite Existing State
+
+## Enforcement
+
+- **Go, blocking in CI:** `pnpm quality:go-optional-fields`
+  (`scripts/quality/go-optional-fields/`) reports a non-string scalar field of an options
+  or patch value that is copied onto existing state with no "not supplied" check, or
+  guarded only by its own truthiness. It reports the original incident at every commit
+  where it existed. A deliberate full replacement opts out with
+  `//sam:optional-field-ok <reason>` on or above the line.
+- **TypeScript:** strict null checks reject the direct form (assigning `boolean | undefined`
+  to `boolean`). Defaulting an absent field on an update path (`patch.flag ?? false`,
+  spreads, `Object.assign`) is not checked: the same syntax is the normal way to create a
+  record, so a lint could not tell them apart. That part, the stored-override-layer shape
+  below, and the tests the rule requires remain review judgment.
+- The check cannot prove that a consumer gates on the right signal (requirement 6). The
+  per-call-site, explicit-override and consumer tests below stay required.
 
 ## When This Applies
 
@@ -56,7 +80,7 @@ nothing panics, no type changes, and every call site still compiles.
 
 It is the options-struct sibling of `.claude/rules/63` (relaxing a column deletes
 the checks that used it) and `.claude/rules/71` (tightening one deletes a
-capability): here, the *default* deletes state.
+capability): here, the _default_ deletes state.
 
 The tells:
 
@@ -94,7 +118,7 @@ The tells:
    and leaves the next caller free to reintroduce the bug.
 
 6. **Ask whether the overwritten field was the right signal in the first place.**
-   The overwrite is the trigger; the reason it was *damaging* is usually that some
+   The overwrite is the trigger; the reason it was _damaging_ is usually that some
    consumer gates behaviour on a field that is merely **correlated** with the
    property it actually cares about. `agent_ws.go` gated runtime-asset injection on
    `runtime.Lightweight` ("skip the devcontainer build" — a per-workspace
@@ -111,7 +135,7 @@ The tells:
   exact upsert shape, assert the field survived. Naming each case after its call
   site is what makes a future deletion visible.
 - **A liveness assertion inside each case** (`.claude/rules/62`): assert a field
-  the caller *did* supply was applied, so a passing test cannot mean the update
+  the caller _did_ supply was applied, so a passing test cannot mean the update
   became a no-op.
 - **An explicit-override control**: the field must still be settable to its zero
   value on purpose, in both directions.

@@ -11,6 +11,7 @@ export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
   'DATABASE.diagnostic_reconciliation_state',
   'DATABASE.github_trigger_inbox',
   'DATABASE.github_webhook_deliveries',
+  'DATABASE.lifecycle_phase_timings',
   'DATABASE.lifecycle_state_episodes',
   'DATABASE.lifecycle_state_observations',
   'DATABASE.node_lifecycle_decisions',

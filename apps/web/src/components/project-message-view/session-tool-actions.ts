@@ -19,6 +19,7 @@ import {
   Info,
   Link2,
   MessageSquareQuote,
+  ReceiptText,
   RotateCcw,
   Users,
   Workflow,
@@ -67,6 +68,7 @@ export type SessionToolId =
   | 'resources'
   | 'automation'
   | 'related'
+  | 'receipt'
   | 'comments'
   | 'share'
   | 'retry'
@@ -128,6 +130,8 @@ export interface BuildSessionToolActionsInput {
   hasResourcesHandler: boolean;
   hasAutomationHandler: boolean;
   hasRelatedHandler: boolean;
+  /** The Run receipt (Insights slice R); offered only for a task-backed chat. */
+  hasReceiptHandler?: boolean;
   hasCommentsHandler: boolean;
   hasRetryHandler: boolean;
   hasForkHandler: boolean;
@@ -327,6 +331,16 @@ function buildSessionGroup(input: BuildSessionToolActionsInput): SessionToolSpec
   // now read `taskEmbed`, falling back to the session fields only when the embed has not
   // arrived yet (the detail response populates it, list responses do not).
   const hasTask = !!(taskEmbed?.id ?? session.task?.id ?? session.taskId);
+  // The receipt reads the task's run, so like Retry and Fork it exists only with a task. It is
+  // offered while the run is live too: it then shows the time so far.
+  if (hasTask && input.hasReceiptHandler) {
+    actions.push({
+      id: 'receipt',
+      label: 'Receipt',
+      hint: 'Run receipt: where the time went, the outcome and what slowed it down',
+      icon: ReceiptText,
+    });
+  }
   if (hasTask) {
     if (hasRetryHandler && !isExpiredTask(taskEmbed ?? session.task)) {
       actions.push({

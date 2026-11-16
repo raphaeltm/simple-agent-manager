@@ -380,6 +380,8 @@ export {
   listProjectIdeas,
   setProjectIdeaStatus,
 } from './ideas';
+export { answerInboxItem, archiveInboxItem, getInboxCount, getInboxItem, listInbox } from './inbox';
+export { getRunReceipt } from './insights-receipt';
 export {
   addObservation,
   createKnowledgeEntity,
@@ -451,12 +453,10 @@ export {
 export {
   dismissNotification,
   getNotificationPreferences,
-  getNotificationUnreadCount,
   getNotificationWsUrl,
   getVapidPublicKey,
   listNotifications,
   listWebPushSubscriptions,
-  markAllNotificationsRead,
   markNotificationRead,
   subscribeWebPush,
   unsubscribeWebPush,
@@ -464,6 +464,7 @@ export {
 } from './notifications';
 export type { ListPoliciesResponse, ProjectPolicy } from './policies';
 export { deletePolicy, getPolicy, listPolicies, updatePolicy } from './policies';
+export { getProjectOverview } from './project-overview';
 export type {
   AccountMapResponse,
   DevcontainerConfigEntry,

@@ -58,6 +58,13 @@ const TABS: Array<{ id: TabId; label: string; icon: ReactNode }> = [
 
 export function AgentContextPage() {
   const { projectId } = useProjectContext();
+  // Keyed on the project so a switch starts from a clean slate: refetches keep the tab mounted
+  // (rule 48), so without the key the previous project's policies would stay visible and its
+  // controls would send their ids under the new project.
+  return <AgentContextPageContent key={projectId} projectId={projectId} />;
+}
+
+function AgentContextPageContent({ projectId }: { projectId: string }) {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [filter, setFilter] = useState('');
 
@@ -67,8 +74,9 @@ export function AgentContextPage() {
   const [actionsData, setActionsData] = useState<ActivityEventResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // `loading` starts true and only gates the first load: a refetch after an edit or an
+  // inject-mode change must keep the visible tab mounted (rule 48).
   const loadData = useCallback(async () => {
-    setLoading(true);
     try {
       const [kRes, pRes, aRes] = await Promise.all([
         listKnowledgeEntities(projectId, { limit: 100 }),
@@ -190,7 +198,12 @@ export function AgentContextPage() {
         )}
 
         {activeTab === 'policies' && !loading && (
-          <PoliciesTab policies={filteredPolicies} projectId={projectId} onRefresh={loadData} />
+          <PoliciesTab
+            policies={filteredPolicies}
+            allPolicies={policiesData}
+            projectId={projectId}
+            onRefresh={loadData}
+          />
         )}
 
         {activeTab === 'actions' && !loading && <ActionsTab actions={filteredActions} />}

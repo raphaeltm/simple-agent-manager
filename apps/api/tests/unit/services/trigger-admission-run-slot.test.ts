@@ -2,7 +2,7 @@
  * Which previous runs hold a trigger's run slot, decided by the real admission SQL.
  * Every task status needs an expectation here: the slot predicate is a denylist, so a
  * status added later would silently hold the slot until someone classifies it
- * (`packages/shared/.claude/rules/79`).
+ * (`.claude/rules/79`).
  */
 import { TASK_STATUSES, type TaskStatus } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';

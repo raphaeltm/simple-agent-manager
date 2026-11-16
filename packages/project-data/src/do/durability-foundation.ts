@@ -13,6 +13,7 @@ import * as mailbox from './mailbox';
 import { projectDataPorts } from './ports';
 import * as delivery from './prompt-delivery';
 import { runPromptDeliveryClaim } from './prompt-delivery-runner';
+import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { resetReconciliationEpisode } from './reconciliation-episode';
 import { promptDeliveryToolMetadata } from './sam-notice-metadata';
 import * as sessionState from './session-state';
@@ -33,6 +34,12 @@ export interface DurabilityFoundationHooks {
   armIdleCleanup(chatSessionId: string): void;
   /** Release durable messages queued behind the (now ended) turn. */
   nudgeDeliveries(chatSessionId: string): number;
+  /** A person's message answers the chat's open questions in D1 `asks` (`question-asks.ts`). */
+  closeQuestionAsks?(
+    sessionId: string,
+    messageId: string,
+    messageCreatedAt: number
+  ): Promise<unknown>;
 }
 
 export async function acceptPromptDelivery(
@@ -75,6 +82,15 @@ export async function finalizeAcceptedPromptDelivery(
     throw hookError;
   }
   if (alarmError) throw alarmError;
+  // A person's prompt answers the chat's open questions in D1 `asks`, after the broadcast and the
+  // alarm so the D1 round trip delays neither (`question-asks.ts`, never throws).
+  if (accepted.transcriptInserted && input.senderType === 'human') {
+    await hooks.closeQuestionAsks?.(
+      input.targetSessionId,
+      accepted.transcriptMessageId,
+      accepted.transcriptCreatedAt
+    );
+  }
 }
 
 function runAcceptedPromptDeliveryHooks(
@@ -84,6 +100,22 @@ function runAcceptedPromptDeliveryHooks(
   input: delivery.AcceptPromptDeliveryInput,
   accepted: delivery.AcceptedPromptDelivery
 ): void {
+  // The answer or archive of a question held in D1 `asks` reaches the agent here (`inbox_ask`,
+  // `apps/api/src/services/inbox/ask-notice.ts`); the chat list clears its question live, as it
+  // did when a question marker resolved.
+  const questionAskId = input.sourceKind === 'inbox_ask' ? input.metadata?.questionAskId : null;
+  if (typeof questionAskId === 'string' && questionAskId) {
+    releaseQuestionHold(sql, input.targetSessionId);
+    hooks.broadcastEvent(
+      'attention.resolved',
+      {
+        sessionId: input.targetSessionId,
+        markerId: questionAskId,
+        reason: typeof input.metadata?.outcome === 'string' ? input.metadata.outcome : null,
+      },
+      input.targetSessionId
+    );
+  }
   if (accepted.transcriptInserted) {
     idleCleanup.resetIdleCleanup(sql, env, input.targetSessionId);
     if (input.senderType === 'human') {
@@ -206,12 +238,12 @@ export function createCheckpointEpisode(
   const result = hooks.transactionSync(() => checkpoints.createCheckpointEpisode(sql, input));
   if (!result.created) return result;
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-      metric: 'checkpoint_episode_transition',
-      projectId: hooks.getProjectId(),
-      sessionId: input.sessionId,
-      checkpointEpisodeId: result.episode.id,
-      attemptCount: result.episode.attemptCount,
-      reason: 'planned',
+    metric: 'checkpoint_episode_transition',
+    projectId: hooks.getProjectId(),
+    sessionId: input.sessionId,
+    checkpointEpisodeId: result.episode.id,
+    attemptCount: result.episode.attemptCount,
+    reason: 'planned',
   });
   activityEvents.recordActivityEventInternal(
     sql,
@@ -253,12 +285,12 @@ export function transitionCheckpointEpisode(
   );
   if (!episode || !before || episode.state === before.state) return episode;
   projectDataPorts().observability.recordDurableExecutionMetric(env, {
-      metric: 'checkpoint_episode_transition',
-      projectId: hooks.getProjectId(),
-      sessionId: episode.sessionId,
-      checkpointEpisodeId: episode.id,
-      attemptCount: episode.attemptCount,
-      reason: `${before.state}->${episode.state}`,
+    metric: 'checkpoint_episode_transition',
+    projectId: hooks.getProjectId(),
+    sessionId: episode.sessionId,
+    checkpointEpisodeId: episode.id,
+    attemptCount: episode.attemptCount,
+    reason: `${before.state}->${episode.state}`,
   });
   activityEvents.recordActivityEventInternal(
     sql,
@@ -321,22 +353,31 @@ export function processPromptDeliveryAlarm(
     if (!config.deliveryEnabled) return;
     const expired = hooks.transactionSync(() => delivery.expireDuePromptDeliveries(sql, config));
     if (expired.expiredWakeFailures.length > 0) {
-      for (const wakeFailure of expired.expiredWakeFailures) {
-        raiseSessionWakeFailure(
-          sql,
-          {
-            sessionId: wakeFailure.targetSessionId,
-            taskId: wakeFailure.sourceTaskId,
-            deliveryId: wakeFailure.deliveryId,
-            reason: wakeFailure.terminalReason,
-            detail:
-              wakeFailure.lastError ??
-              'SAM retried the wake until the delivery expired, but the session did not wake.',
-          },
-          hooks.broadcastEvent
-        );
-      }
-      hooks.scheduleSummarySync();
+      // Filing the inbox item is a D1 write, so it runs after this synchronous alarm step.
+      hooks.waitUntil(
+        (async () => {
+          for (const wakeFailure of expired.expiredWakeFailures) {
+            await raiseSessionWakeFailure(
+              sql,
+              env,
+              hooks.getProjectId(),
+              {
+                sessionId: wakeFailure.targetSessionId,
+                taskId: wakeFailure.sourceTaskId,
+                deliveryId: wakeFailure.deliveryId,
+                reason: wakeFailure.terminalReason,
+                detail:
+                  wakeFailure.lastError ??
+                  'SAM retried the wake until the delivery expired, but the session did not wake.',
+              },
+              hooks.broadcastEvent
+            );
+          }
+          hooks.scheduleSummarySync();
+        })().catch((error) => {
+          log.error('alarm.wake_failure_failed', serializeError(error));
+        })
+      );
     }
     const claims = hooks.transactionSync(() => delivery.claimDuePromptDeliveries(sql, config));
     const adapter = projectDataPorts().runtime.createPromptDeliveryAdapter(env);

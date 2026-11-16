@@ -17,9 +17,12 @@ import {
   getReconciliationCandidates,
   processReconciliationCandidates,
 } from '@simple-agent-manager/project-data/internal/do/reconciliation';
+import { releaseQuestionHold } from '@simple-agent-manager/project-data/internal/do/reconciliation-candidate-state';
+import * as workerSchema from '@simple-agent-manager/worker-core/schema';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import {
   acceptedPromptResponse,
   missingPromptReceipt,
@@ -623,6 +626,100 @@ describe('Task Reconciliation Module', () => {
     it('excludes failed tasks', async () => {
       const candidates = await candidatesForTask('task', 'failed');
       expect(candidates).toHaveLength(0);
+    });
+
+    // Inbox slice G: an open question in D1 `asks` holds SAM's check-in, on a real SQL engine.
+    describe('the open-question hold (D1 asks, real SQL)', () => {
+      let d1: Database.Database;
+      function questionEnv(): ProjectDataEnv {
+        return { DATABASE: createSqliteD1(d1) } as unknown as ProjectDataEnv;
+      }
+      function seedTask() {
+        d1.prepare(
+          `INSERT INTO tasks (id, project_id, user_id, title, status, task_mode, workspace_id,
+              chat_session_id, created_at, updated_at)
+           VALUES ('task-1', 'project-1', 'user-1', 't', 'in_progress', 'task', 'ws-1', 'session-1',
+              datetime('now'), datetime('now'))`
+        ).run();
+      }
+      function seedAsk(
+        id: string,
+        overrides: {
+          projectId?: string;
+          sessionId?: string;
+          status?: string;
+          expiresAt?: number;
+        } = {}
+      ) {
+        d1.prepare(
+          `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
+              source_session_id, status, expires_at, created_at, updated_at)
+           VALUES (?, ?, 'user', 'user-1', 'question', 1, 'q', ?, ?, ?, 1, 1)`
+        ).run(
+          id,
+          overrides.projectId ?? 'project-1',
+          overrides.sessionId ?? 'session-1',
+          overrides.status ?? 'open',
+          overrides.expiresAt ?? Date.now() + 2 * 60 * 60_000
+        );
+      }
+      function gate() {
+        const row = db
+          .prepare(`SELECT value FROM do_meta WHERE key = 'taskReconciliationGate:session-1'`)
+          .get() as { value: string } | undefined;
+        return row ? (JSON.parse(row.value) as Record<string, unknown>) : null;
+      }
+
+      beforeEach(() => {
+        d1 = new Database(':memory:');
+        createSchemaTables(d1, [workerSchema.tasks, workerSchema.asks]);
+        seedTask();
+      });
+
+      it('holds the chat until the question’s deadline, so the alarm does not poll', async () => {
+        setupTaskSession();
+        const deadline = Date.now() + 2 * 60 * 60_000;
+        seedAsk('q-1', { expiresAt: deadline });
+        await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([]);
+        expect(gate()).toMatchObject({ attempts: 0, nextAttemptAt: deadline, questionHold: true });
+        // The alarm waits for the deadline instead of re-arming at the lease cadence.
+        expect(computeReconciliationAlarmTime(sql, questionEnv())).toBeGreaterThanOrEqual(deadline);
+        // Answering releases it: the chat is a candidate again at once.
+        expect(releaseQuestionHold(sql, 'session-1')).toBe(true);
+        d1.prepare(`UPDATE asks SET status = 'answered' WHERE id = 'q-1'`).run();
+        await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([
+          expect.objectContaining({ sessionId: 'session-1' }),
+        ]);
+      });
+
+      it.each([
+        ['answered', { status: 'answered' }],
+        ['expired more than three sweep ticks ago', { expiresAt: Date.now() - 16 * 60_000 }],
+        ['in another project', { projectId: 'project-2' }],
+        ['in another chat', { sessionId: 'session-2' }],
+      ])('does not hold for a question that is %s (control)', async (_label, overrides) => {
+        setupTaskSession();
+        seedAsk('q-1', overrides);
+        await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([
+          expect.objectContaining({ sessionId: 'session-1' }),
+        ]);
+      });
+
+      it('a question just past its deadline still holds until the sweep handles it', async () => {
+        setupTaskSession();
+        seedAsk('q-1', { expiresAt: Date.now() - 60_000 });
+        await expect(getReconciliationCandidates(sql, questionEnv())).resolves.toEqual([]);
+        expect(gate()).toMatchObject({ questionHold: true });
+      });
+
+      it('a release never ends a claim lease or another deferral', () => {
+        setupTaskSession();
+        db.prepare(
+          `INSERT INTO do_meta (key, value) VALUES ('taskReconciliationGate:session-1', ?)`
+        ).run(JSON.stringify({ attempts: 2, nextAttemptAt: Date.now() + 60_000 }));
+        expect(releaseQuestionHold(sql, 'session-1')).toBe(false);
+        expect(gate()).toMatchObject({ attempts: 2 });
+      });
     });
 
     it('excludes sessions with active needs_input marker', async () => {

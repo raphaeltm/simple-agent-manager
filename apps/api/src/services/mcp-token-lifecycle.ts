@@ -1,35 +1,83 @@
 /**
- * Workspace lifecycle binding for workspace MCP tokens.
+ * Workspace and actor lifecycle binding for workspace MCP tokens.
  *
  * A workspace MCP token (`mcp-token.ts`) is an opaque KV credential issued to one agent
- * session on one workspace. KV expiry alone lets it outlive that workspace by up to the
- * hard max lifetime, so every MCP entry point that accepts it (the `/mcp` JSON-RPC route,
- * webhook-claim redemption, the GCP deployment identity endpoint) also requires the
- * workspace D1 row it names to still be:
+ * session on one workspace, acting as the workspace's owner in the workspace's project. KV
+ * expiry alone lets it outlive that workspace, and that owner's authority, by up to the hard
+ * max lifetime, so every MCP entry point that accepts it (the `/mcp` JSON-RPC route,
+ * webhook-claim redemption, the GCP deployment identity endpoint) also requires, in ONE D1
+ * read, that the workspace row it names is still:
  *
- * - owned by the same user and project the token was issued for (otherwise the token is
- *   revoked: no later state can make it valid again), and
+ * - owned by the same user and project the token was issued for,
+ * - owned by a user whose account still exists and is not suspended,
+ * - owned by a user with an ACTIVE `project_members` row in that project (the same
+ *   predicate REST uses in `requireActiveProjectMembership`; project owners hold an
+ *   active `owner` row from creation, migration 0081 backfill, and ownership transfer),
+ * - issued to the workspace's current runtime: its credential generation equals
+ *   `workspaces.callback_generation` (both absent on a never-rotated workspace), and
  * - active (`creating` / `running` / `recovery`) on a node that is not ending, exactly
  *   like workspace callback tokens (`assertWorkspaceAcceptsCallback`).
  *
- * - issued to the workspace's current runtime: its credential generation equals
- *   `workspaces.callback_generation` (both absent on a never-rotated workspace).
+ * A failed check either REVOKES the token (deletes it from KV: no later state can make it
+ * valid, and rotation cannot recover a deleted token) or only REJECTS the call (the token
+ * works again once the state recovers). Checks run in this order; the first failure wins.
+ * Every revoking check runs before every rejecting one, so a reversible state (a suspension,
+ * a pending approval, a stopped workspace) can never hide a permanent one and let the token
+ * come back when the reversible state clears:
  *
- * A deleted or missing workspace, or a retired generation, revokes the token. Other inactive
- * states (stopping, stopped, sleeping, error) only reject: the same runtime may resume. A new
- * runtime for the same workspace ID (Instant wake, VM restart or rebuild) rotates the
+ * | Condition                                             | Verdict | Reason                     |
+ * | ----------------------------------------------------- | ------- | -------------------------- |
+ * | workspace row missing                                 | revoke  | `workspace_missing`        |
+ * | workspace user or project differs from the token's    | revoke  | `identity_mismatch`        |
+ * | workspace `deleted`                                   | revoke  | `workspace_deleted`        |
+ * | credential generation retired                         | revoke  | `generation_retired`       |
+ * | `users` row missing (account deleted)                 | revoke  | `user_missing`             |
+ * | no `project_members` row for (project, user)          | revoke  | `membership_missing`       |
+ * | membership `removed` (offboarded)                     | revoke  | `membership_removed`       |
+ * | user `suspended` (an admin can unsuspend)             | reject  | `user_suspended`           |
+ * | user status not `active`/`pending` (unrecognised)     | reject  | `user_status_unrecognized` |
+ * | user `pending` while signup approval is required      | reject  | `user_pending_approval`    |
+ * | membership `invited` / `suspended` / other non-active | reject  | `membership_inactive`      |
+ * | workspace stopping/stopped/sleeping/error/...         | reject  | `workspace_inactive`       |
+ * | node missing, unassigned or ending                    | reject  | `node_inactive`            |
+ *
+ * A `pending` user is gated exactly as REST gates it (`isBlockedBySignupApproval`): denied while
+ * signup approval is required unless their platform role is admin or superadmin, and accepted
+ * otherwise. The current `signup.requireApproval` row is joined into the same read, never
+ * cached, so turning approval on stops a pending owner's already-running agent on its next
+ * call, and approving the account restores it (the token is kept). A NULL `users.status` (the
+ * column is `NOT NULL DEFAULT 'active'` in D1) is read as `active`, the same coercion
+ * `resolveSessionStatus` applies to a session. The member's
+ * ROLE is not checked here; tools that need a specific capability re-check it themselves
+ * (`routes/mcp/orchestration-authority.ts`, `routes/project-deployment.ts`).
+ *
+ * A new runtime for the same workspace ID (Instant wake, VM restart or rebuild) rotates the
  * generation, and its agent sessions receive fresh tokens (`session-restore-mcp.ts`,
  * `mcp-token-rotation.ts`).
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { type McpTokenData, revokeMcpToken, validateMcpToken } from './mcp-token';
+import { type McpTokenData, readMcpToken, revokeMcpToken } from './mcp-token';
 import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
+import {
+  isBlockedBySignupApproval,
+  SIGNUP_APPROVAL_SETTING_KEY,
+  signupApprovalRequiredFromStoredValue,
+} from './signup-approval';
 import { WORKSPACE_CALLBACK_ACTIVE_STATUSES } from './workspace-callback-identity';
 
 interface McpTokenWorkspaceRow {
   userId: string;
   projectId: string | null;
+  /** `users.id` from the LEFT JOIN: NULL exactly when the owner's account row is gone. */
+  joinedUserId: string | null;
+  userStatus: string | null;
+  userRole: string | null;
+  /** Stored `signup.requireApproval` value, NULL when the row is absent (env default applies). */
+  signupApprovalSetting: string | null;
+  /** `project_members.user_id` from the LEFT JOIN: NULL exactly when no membership row exists. */
+  joinedMemberUserId: string | null;
+  membershipStatus: string | null;
   status: string;
   nodeId: string | null;
   nodeStatus: string | null;
@@ -39,7 +87,34 @@ interface McpTokenWorkspaceRow {
 /** Why a token's workspace no longer authorizes it, or null when it does. */
 type McpTokenWorkspaceVerdict = { reason: string; revoke: boolean } | null;
 
+/** Account states that may act through an MCP token (see the module comment for `pending`). */
+const MCP_ACCEPTED_USER_STATUSES: ReadonlySet<string> = new Set(['active', 'pending']);
+
+function actorVerdict(
+  row: McpTokenWorkspaceRow,
+  requireApproval: boolean
+): McpTokenWorkspaceVerdict {
+  // Permanent failures first: a reversible account state below must not mask them.
+  if (row.joinedUserId === null) return { reason: 'user_missing', revoke: true };
+  if (row.joinedMemberUserId === null) return { reason: 'membership_missing', revoke: true };
+  if (row.membershipStatus === 'removed') return { reason: 'membership_removed', revoke: true };
+  const userStatus = row.userStatus ?? 'active';
+  // Recoverable: an admin can unsuspend, and the agent's token must work again when they do.
+  if (userStatus === 'suspended') return { reason: 'user_suspended', revoke: false };
+  if (!MCP_ACCEPTED_USER_STATUSES.has(userStatus)) {
+    return { reason: 'user_status_unrecognized', revoke: false };
+  }
+  // Recoverable: approving the account (or turning approval off) makes the token work again.
+  if (isBlockedBySignupApproval(requireApproval, { role: row.userRole, status: userStatus })) {
+    return { reason: 'user_pending_approval', revoke: false };
+  }
+  // `invited`, `suspended`, or anything else can still become active again.
+  if (row.membershipStatus !== 'active') return { reason: 'membership_inactive', revoke: false };
+  return null;
+}
+
 function workspaceVerdict(
+  env: Env,
   data: McpTokenData,
   row: McpTokenWorkspaceRow | null
 ): McpTokenWorkspaceVerdict {
@@ -52,6 +127,11 @@ function workspaceVerdict(
   if ((data.callbackGeneration ?? null) !== row.callbackGeneration) {
     return { reason: 'generation_retired', revoke: true };
   }
+  const actor = actorVerdict(
+    row,
+    signupApprovalRequiredFromStoredValue(env, row.signupApprovalSetting)
+  );
+  if (actor) return actor;
   if (!WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(row.status)) {
     return { reason: 'workspace_inactive', revoke: false };
   }
@@ -61,37 +141,60 @@ function workspaceVerdict(
   return null;
 }
 
+/** Log value for a LEFT-JOINed status: `missing` when the joined row does not exist. */
+function joinedStatus(
+  joinedId: string | null | undefined,
+  status: string | null | undefined
+): string | null {
+  if (joinedId === undefined) return null;
+  return joinedId === null ? 'missing' : (status ?? null);
+}
+
 /**
- * Validate a workspace MCP token and require its workspace to still be active.
+ * Validate a workspace MCP token and require its workspace and actor to still authorize it.
  * Returns the token data, or null when the token is unknown, expired, or no longer
- * authorized by its workspace.
+ * authorized (see the verdict table in the module comment).
  */
 export async function validateActiveWorkspaceMcpToken(
   env: Env,
   token: string
 ): Promise<McpTokenData | null> {
-  const data = await validateMcpToken(env.KV, token, env);
-  if (!data) return null;
+  const read = await readMcpToken(env.KV, token, env);
+  if (!read) return null;
+  const { data } = read;
 
   const row = data.workspaceId
     ? await env.DATABASE.prepare(
         `SELECT w.user_id AS userId,
                 w.project_id AS projectId,
+                u.id AS joinedUserId,
+                u.status AS userStatus,
+                u.role AS userRole,
+                ps.value AS signupApprovalSetting,
+                pm.user_id AS joinedMemberUserId,
+                pm.status AS membershipStatus,
                 w.status AS status,
                 w.node_id AS nodeId,
                 n.status AS nodeStatus,
                 w.callback_generation AS callbackGeneration
            FROM workspaces w
            LEFT JOIN nodes n ON n.id = w.node_id
+           LEFT JOIN users u ON u.id = w.user_id
+           LEFT JOIN project_members pm
+             ON pm.project_id = w.project_id
+            AND pm.user_id = w.user_id
+           LEFT JOIN platform_settings ps ON ps.key = ?
           WHERE w.id = ?
           LIMIT 1`
       )
-        .bind(data.workspaceId)
+        .bind(SIGNUP_APPROVAL_SETTING_KEY, data.workspaceId)
         .first<McpTokenWorkspaceRow>()
     : null;
 
-  const verdict = workspaceVerdict(data, row);
-  if (!verdict) return data;
+  const verdict = workspaceVerdict(env, data, row);
+  // Only an accepted token slides its idle TTL: a token rejected while its user is
+  // suspended or its workspace is stopped must still expire on the normal idle schedule.
+  if (!verdict) return read.refreshIfDue();
 
   log.info('mcp_token.workspace_rejected', {
     workspaceId: data.workspaceId || null,
@@ -100,6 +203,8 @@ export async function validateActiveWorkspaceMcpToken(
     tokenUserId: data.userId,
     workspaceUserId: row?.userId ?? null,
     workspaceProjectId: row?.projectId ?? null,
+    userStatus: joinedStatus(row?.joinedUserId, row?.userStatus),
+    membershipStatus: joinedStatus(row?.joinedMemberUserId, row?.membershipStatus),
     workspaceStatus: row?.status ?? 'missing',
     nodeStatus: row?.nodeStatus ?? null,
     reason: verdict.reason,

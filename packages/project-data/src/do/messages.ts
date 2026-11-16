@@ -10,6 +10,7 @@ import {
   type ProjectDataArchiveSourceIntentState,
 } from '../archive/contract';
 import { messageBoundsClause } from './message-cursor';
+import { countIngestRole, type MessageIngestMetrics,refuseMerge } from './message-ingest-metrics';
 import {
   type MessageIngestSource,
   type MessageMergeConfig,
@@ -153,7 +154,11 @@ export function persistMessageBatch(
     sequence?: number;
     origin?: string | null;
   }>,
-  context?: { source?: MessageIngestSource; config: MessageMergeConfig }
+  context?: {
+    source?: MessageIngestSource;
+    config: MessageMergeConfig;
+    metrics?: MessageIngestMetrics;
+  }
 ): {
   persisted: number;
   duplicates: number;
@@ -178,7 +183,7 @@ export function persistMessageBatch(
   assertTranscriptWriteAllowed(sql, sessionId, 'persistMessageBatch');
   const session = sql
     .exec(
-      `SELECT id, workspace_id, message_count, topic, status, stream_ingest_state,
+      `SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state,
       materialized_at, materialized_through_created_at, materialized_through_sequence,
       (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch
       FROM chat_sessions WHERE id = ?`,
@@ -194,6 +199,13 @@ export function persistMessageBatch(
     throw new Error(`Session ${sessionId} is stopped and cannot accept messages`);
   }
 
+  const metrics = context?.metrics;
+  if (metrics) {
+    metrics.batches++;
+    for (const message of messages) countIngestRole(metrics.received, message.role);
+  }
+  if (!context?.config.enabled) refuseMerge(metrics, 'setting_disabled');
+  else if (!context.source?.outboxIncarnation) refuseMerge(metrics, 'missing_incarnation');
   const previousStream = readMessageIngestState(session.stream_ingest_state);
   if (context?.source && (context.config.enabled || previousStream))
     assertSessionIdentityGuard(sql, sessionId, 'persist message batch', {
@@ -236,7 +248,8 @@ export function persistMessageBatch(
                 }
               : null,
           messages.map((message) => message.messageId),
-          parseMessageCount(session, 'messages.batch_stream_count')
+          parseMessageCount(session, 'messages.batch_stream_count'),
+          metrics
         )
       : null;
 
@@ -246,7 +259,8 @@ export function persistMessageBatch(
   let duplicates = 0;
   let limitReached = false;
   const now = Date.now();
-  let nextSeq = nextSequence(sql, sessionId);
+  let nextSeq = nextSequence(sql, sessionId, session);
+  let maximumSequence = nextSeq - 1;
   const persistedMessages: Array<{
     id: string;
     role: string;
@@ -320,7 +334,10 @@ export function persistMessageBatch(
     // Rows without a usable timestamp share `now`; reads page on (created_at, sequence, id),
     // so ties are safe (see message-cursor.ts).
     const createdAt = new Date(msg.timestamp).getTime() || now;
+    // Preserve reporter positions and the established within-batch allocator.
+    // The watermark caches the maximum, independently of the next fallback position.
     const sequence = msg.sequence ?? nextSeq++;
+    maximumSequence = Math.max(maximumSequence, sequence);
     const boundedToolMetadata = boundToolMetadataForStorage(
       withoutSamNotice(msg.toolMetadata, sessionId, msg.messageId),
       env
@@ -366,6 +383,11 @@ export function persistMessageBatch(
         sequence,
         origin
       );
+    if (metrics) {
+      countIngestRole(metrics.accepted, msg.role);
+      if (msg.role === 'assistant' && storedToolMetadata === null) metrics.eligible++;
+      if (!stream) countIngestRole(metrics.inserted, msg.role);
+    }
     persisted++;
     persistedMessages.push({
       id: canonicalId,
@@ -382,22 +404,27 @@ export function persistMessageBatch(
   let firstUserContent: string | null = null;
   const hadTopic = !!session.topic;
   const staged = stream?.flush(sql);
+  if (metrics) metrics.duplicates = duplicates;
 
   if (persisted > 0) {
     if (staged)
       sql.exec(
         `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?,
-       stream_ingest_state = ? WHERE id = ?`,
+       stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?`,
         persisted,
         now,
         staged.state,
+        maximumSequence,
+        persisted,
         sessionId
       );
     else
       sql.exec(
-        `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ? WHERE id = ?`,
+        `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?`,
         persisted,
         now,
+        maximumSequence,
+        persisted,
         sessionId
       );
 
@@ -654,8 +681,9 @@ export function persistSystemMessage(
       sequence
     );
     sql.exec(
-      `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
+      `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + 1 WHERE id = ?`,
       now,
+      sequence,
       sessionId
     );
     return { id, now, sequence };

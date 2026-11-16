@@ -88,9 +88,6 @@ export const MAX_WEB_PUSH_ENDPOINT_LENGTH = 2_048;
 /** Maximum accepted encoded browser subscription key length. */
 export const MAX_WEB_PUSH_SUBSCRIPTION_KEY_LENGTH = 256;
 
-/** Initial human-input response window. Default: 2 hours. */
-export const DEFAULT_HUMAN_INPUT_TIMEOUT_MS = 2 * 60 * 60 * 1000;
-
 /** Fractions of the initial response window at which push is re-notified. */
 export const DEFAULT_HUMAN_INPUT_ESCALATION_FRACTIONS = '0.25,0.75';
 

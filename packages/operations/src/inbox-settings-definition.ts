@@ -78,11 +78,49 @@ export const INBOX_SETTINGS = [
       'Minutes the sweep keeps retrying an agent’s notice that an inbox item was archived or expired.',
     range: { min: 5, max: 1_440 },
   },
+  // Questions (`request_human_input`). Defaults are the old HUMAN_INPUT_* Worker defaults
+  // (`DEFAULT_HUMAN_INPUT_*`, `packages/shared/src/constants/notifications.ts`); the sweep in
+  // `apps/api/src/services/inbox/sweep.ts` runs this schedule (spec section 7).
+  {
+    name: 'inbox.questionTimeoutMinutes',
+    defaultValue: 120,
+    description:
+      'Minutes an agent question stays open once its notification reached the person. Then it expires and the task stops.',
+    range: { min: 1, max: 1_440 },
+  },
+  {
+    name: 'inbox.questionFirstReminderPercent',
+    defaultValue: 25,
+    description:
+      'Point in a question’s window, as a percent, where its push notification is sent again. 0 turns this reminder off.',
+    range: { min: 0, max: 99 },
+  },
+  {
+    name: 'inbox.questionSecondReminderPercent',
+    defaultValue: 75,
+    description:
+      'Point in a question’s window, as a percent, where its push notification is sent a last time. 0 turns this reminder off.',
+    range: { min: 0, max: 99 },
+  },
+  {
+    name: 'inbox.questionUndeliveredGraceMinutes',
+    defaultValue: 120,
+    description:
+      'Minutes a question is kept open again, and its push resent, when it would expire but no device confirmed its notification.',
+    range: { min: 1, max: 1_440 },
+  },
+  {
+    name: 'inbox.questionMaxWaitMinutes',
+    defaultValue: 1_440,
+    description:
+      'Most minutes a question may stay open, even when its notification never reached a device. Never shorter than the question window.',
+    range: { min: 1, max: 4_320 },
+  },
   {
     name: 'inbox.sweepBatchSize',
     defaultValue: 10,
     description:
-      'Inbox items one five-minute sweep expires or re-notifies at most. Each costs a write and an agent notice.',
+      'Inbox items each step of the five-minute sweep handles at most (question reminders, expiries, notice retries). Each costs a write and a notice.',
     range: { min: 1, max: 50 },
   },
 ] as const;

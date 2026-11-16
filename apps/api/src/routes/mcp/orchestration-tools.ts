@@ -20,7 +20,7 @@ import { ulid } from '../../lib/ulid';
 import { parentAgentAttribution, withoutAuthorAttribution } from '../../services/agent-authorship';
 import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
-import { resolveSystemErrorFor } from '../../services/inbox/system-errors';
+import { resolveSystemErrorFor } from '../../services/inbox/system-error-resolve';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,

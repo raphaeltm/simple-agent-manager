@@ -458,17 +458,20 @@ test('sam-notifications-feed', async ({ page }) => {
   logPageErrors(page);
   await setupMocks(page, notificationsHandler);
 
-  await page.goto(`/projects/${PROJECT_ID}/notifications`);
-  await expect(page.getByRole('heading', { name: 'Notifications' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'All', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Task Complete', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Needs Input', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Error', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Progress', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Session Ended', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'PR Created', exact: true })).toBeVisible();
-  await expect(page.getByText('Add idempotency keys to refund webhook')).toBeVisible();
-  await expect(page.getByText('confirm dropping legacy ledger_id column')).toBeVisible();
+  // The project Notifications page became the inbox's Updates chip.
+  await page.goto(`/projects/${PROJECT_ID}/inbox?filter=updates`);
+  await expect(page.getByRole('button', { name: /^Updates/ })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(
+    page.getByText('Task completed: Add idempotency keys to refund webhook')
+  ).toBeVisible();
+  await expect(
+    page.getByText('Task failed: staging deploy blocked by missing secret')
+  ).toBeVisible();
+  // An agent's question is an inbox item, not an update.
+  await expect(page.getByText('confirm dropping legacy ledger_id column')).toHaveCount(0);
   await assertNoCrash(page);
   await assertNoOverflow(page);
 

@@ -161,26 +161,52 @@ export interface UsageWord {
   color: string | null;
 }
 
-function windowWord(reading: UsageWindowReading, color: string | null): UsageWord {
+/**
+ * The window's name in words, for surfaces read out of context (the Overview's Budgets):
+ * "5-hour window" rather than the composer's terse "5h".
+ */
+export function usageWindowName(label: string): string {
+  if (label === '5h') return '5-hour window';
+  if (label === 'Week') return 'Weekly window';
+  if (label === 'Month') return 'Monthly window';
+  if (/ week$/.test(label)) return `${label.replace(/ week$/, '')} weekly window`;
+  return `${label} window`;
+}
+
+export interface UsageWordOptions {
+  /** Name the window in full ("5-hour window · 38% left") instead of "5h 38% left". */
+  namedWindows?: boolean;
+}
+
+function windowWord(
+  reading: UsageWindowReading,
+  color: string | null,
+  options: UsageWordOptions
+): UsageWord {
+  const name = options.namedWindows ? usageWindowName(reading.label) : reading.label;
+  const sep = options.namedWindows ? ' · ' : ' ';
   if (isSpent(reading)) {
     const back = reading.resetIn ? ` · back in ${reading.resetIn}` : '';
-    return { text: `${reading.label} used up${back}`, color };
+    return { text: `${name} used up${back}`, color };
   }
   const resets = reading.resetIn ? ` · resets ${reading.resetIn}` : '';
-  return { text: `${reading.label} ${reading.left}% left${resets}`, color };
+  return { text: `${name}${sep}${reading.left}% left${resets}`, color };
 }
 
 /** The words beside the ring: none while both windows have more than half left. */
-export function usageWords(usage: ProfileUsage | null | undefined): UsageWord[] {
+export function usageWords(
+  usage: ProfileUsage | null | undefined,
+  options: UsageWordOptions = {}
+): UsageWord[] {
   if (!usage || (usage.state !== 'low' && usage.state !== 'out')) return [];
   const { session, week } = usage;
-  if (isSpent(week) && week) return [windowWord(week, USAGE_COLORS.urgent)];
+  if (isSpent(week) && week) return [windowWord(week, USAGE_COLORS.urgent, options)];
   const words: UsageWord[] = [];
   const shows = (reading: UsageWindowReading | null): reading is UsageWindowReading =>
     reading !== null &&
     (isSpent(reading) || (reading.left !== null && reading.left <= USAGE_HEALTH.calm));
-  if (shows(session)) words.push(windowWord(session, null));
-  if (shows(week)) words.push(windowWord(week, healthColor(week.left)));
+  if (shows(session)) words.push(windowWord(session, null, options));
+  if (shows(week)) words.push(windowWord(week, healthColor(week.left), options));
   if (words.length > 0) return words;
   // No session or week window explains it (API-rate windows, an unknown length).
   if (usage.state === 'out') {

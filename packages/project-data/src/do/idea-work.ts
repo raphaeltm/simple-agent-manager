@@ -193,6 +193,45 @@ function applyAssets(
   }
 }
 
+/** The chats whose questions an idea shows: the ones strongly linked to it. */
+export function ideaQuestionSessionIds(snapshots: Record<string, IdeaWorkSnapshot>): string[] {
+  return [
+    ...new Set(
+      Object.values(snapshots).flatMap((snapshot) =>
+        snapshot.sessions.filter((session) => session.strong).map((session) => session.sessionId)
+      )
+    ),
+  ];
+}
+
+/**
+ * Add the open questions held in D1 `asks` (inbox slice G) to the snapshots, as question markers
+ * are: one per strongly linked chat, the newest, newest first.
+ */
+export function mergeQuestionAsks(
+  snapshots: Record<string, IdeaWorkSnapshot>,
+  questions: ReadonlyMap<string, { reason: string | null; createdAt: number }>
+): void {
+  if (questions.size === 0) return;
+  for (const snapshot of Object.values(snapshots)) {
+    for (const session of snapshot.sessions) {
+      const question = session.strong ? questions.get(session.sessionId) : undefined;
+      if (!question) continue;
+      const existing = snapshot.needsInput.find((row) => row.sessionId === session.sessionId);
+      if (existing && existing.askedAt >= question.createdAt) continue;
+      snapshot.needsInput = snapshot.needsInput.filter(
+        (row) => row.sessionId !== session.sessionId
+      );
+      snapshot.needsInput.push({
+        sessionId: session.sessionId,
+        question: question.reason,
+        askedAt: question.createdAt,
+      });
+    }
+    snapshot.needsInput.sort((a, b) => b.askedAt - a.askedAt);
+  }
+}
+
 /**
  * The work linked to each of `ideaIds`, keyed by idea id. Ideas with no linked work get an
  * entry with empty lists, so a caller never has to distinguish "absent" from "nothing yet".

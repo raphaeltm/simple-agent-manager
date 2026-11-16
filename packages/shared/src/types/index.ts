@@ -811,6 +811,40 @@ export {
   isIdeaHumanTransition,
 } from './ideas';
 
+// Project Overview (Inbox slice F1)
+export type {
+  OverviewMergedPullRequest,
+  OverviewRunningChat,
+  OverviewRunningState,
+  ProjectOverviewResponse,
+  ProjectOverviewSection,
+} from './project-overview';
+export {
+  DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
+  DEFAULT_PROJECT_OVERVIEW_RUNNING_LIMIT,
+  MAX_PROJECT_OVERVIEW_LIMIT,
+} from './project-overview';
+
+// Run receipt (Insights slice R)
+export type {
+  RunReceipt,
+  RunReceiptAccount,
+  RunReceiptFacts,
+  RunReceiptFactsInput,
+  RunReceiptOutcome,
+  RunReceiptPhase,
+  RunReceiptPhaseKey,
+  RunReceiptPullRequest,
+  RunReceiptResources,
+  RunReceiptSection,
+  RunReceiptSlowItem,
+  RunReceiptSlowKind,
+  RunReceiptToolCalls,
+  RunReceiptToolKindCount,
+  RunReceiptWaitingInterval,
+} from './insights-receipt';
+export { RUN_RECEIPT_PHASE_KEYS } from './insights-receipt';
+
 // Knowledge Graph
 export type {
   AddObservationRequest,
@@ -957,17 +991,21 @@ export type {
   CreatePolicyRequest,
   ListPoliciesResponse,
   PolicyCategory,
+  PolicyInjectMode,
   PolicyScope,
   PolicySource,
   ProjectPolicy,
   UpdatePolicyRequest,
 } from './policy';
 export {
+  DEFAULT_POLICY_INJECT_MODE,
   isPolicyCategory,
+  isPolicyInjectMode,
   isPolicyScope,
   isPolicySource,
   POLICY_CATEGORIES,
   POLICY_DEFAULTS,
+  POLICY_INJECT_MODES,
   POLICY_SCOPES,
   POLICY_SOURCES,
 } from './policy';

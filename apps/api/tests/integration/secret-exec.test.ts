@@ -10,12 +10,13 @@ vi.mock('../../src/services/node-agent', async () => ({
   fetchNodeAgent: boundary.fetch,
 }));
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { mcpRoutes } from '../../src/routes/mcp';
 import type { JsonRpcResponse } from '../../src/routes/mcp/_helpers';
 import { encrypt } from '../../src/services/encryption';
 import type { McpTokenData } from '../../src/services/mcp-token';
-import { createSqliteD1 } from '../helpers/sqlite-d1';
+import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 let sqlite: Database.Database | undefined;
 afterEach(() => {
@@ -37,6 +38,16 @@ async function fixture() {
     INSERT INTO agent_sessions VALUES('session','ws','user','profile','skill'),('other-session','other-ws','other-user',NULL,NULL);
     INSERT INTO agent_profiles VALUES('profile','project','user');
     INSERT INTO skills VALUES('skill','project');
+  `);
+  // The MCP token lifecycle gate requires each workspace owner to be an active project member.
+  createSchemaTables(sqlite, [schema.users, schema.projectMembers]);
+  sqlite.exec(`
+    INSERT INTO users (id, email, status) VALUES
+      ('user', 'user@example.test', 'active'),
+      ('other-user', 'other-user@example.test', 'active');
+    INSERT INTO project_members (project_id, user_id, role, status) VALUES
+      ('project', 'user', 'owner', 'active'),
+      ('other-project', 'other-user', 'owner', 'active');
   `);
   for (const scope of ['project', 'profile', 'skill']) {
     sqlite.exec(

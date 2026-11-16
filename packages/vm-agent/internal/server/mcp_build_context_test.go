@@ -29,6 +29,7 @@ func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
 	}{{"VM", false, false, false}, {"Instant", true, false, false}, {"VMShadow", false, true, false}, {"InstantShadow", true, true, false}, {"CancelShadowUpload", false, true, true}} {
 		instant, shadow, cancelUpload := tc.instant, tc.shadow, tc.cancel
 		t.Run(tc.name, func(t *testing.T) {
+			beforeExecution := publish.ExecutionCounters()
 			temp := t.TempDir()
 			t.Setenv("TMPDIR", temp)
 			s, key := mcpBuildTestServer(t)
@@ -199,6 +200,11 @@ func TestBuildContextCollectRouteBothRuntimesLarge(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
+			// The Cloudflare source path collects context instead of running the
+			// host publisher. Config/discovery Docker calls do not count as builds.
+			if after := publish.ExecutionCounters(); after != beforeExecution {
+				t.Fatalf("context collection ran host build/save: %+v -> %+v", beforeExecution, after)
+			}
 			if finalEvent.Status != expected || finalEvent.Terminal != (shadow || cancelUpload) {
 				t.Fatalf("wrong final callback: %+v", finalEvent)
 			}

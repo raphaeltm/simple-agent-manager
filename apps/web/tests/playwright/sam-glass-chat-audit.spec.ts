@@ -247,10 +247,12 @@ const SURFACES: Surface[] = [
     },
   },
   {
-    name: 'notifications',
+    // The inbox icon in the old bell's slot opens a quick view on desktop (a phone opens the page).
+    name: 'inbox-quick-view',
+    only: 'desktop',
     open: async (page) => {
-      await page.getByRole('button', { name: /^Notifications/ }).click();
-      return page.getByRole('dialog', { name: 'Notifications' });
+      await page.getByRole('button', { name: /^Inbox/ }).click();
+      return page.getByRole('dialog', { name: 'Inbox quick view' });
     },
   },
   {

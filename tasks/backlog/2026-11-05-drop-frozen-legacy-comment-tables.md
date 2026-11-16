@@ -18,7 +18,7 @@ They still cost storage in every project object, and the message tables still ca
 
 - Unification PR: branch `sam/unify-sams-two-comment-m65vzm` (task `01M6N9QFRMGW6CNXA7BTM65VZM`).
 - `pnpm quality:do-migration-safety` refuses `DROP TABLE` in DO migrations. DO SQLite has no
-  point-in-time recovery (`apps/api/.claude/rules/31-migration-safety.md`). Dropping these tables is
+  point-in-time recovery (`.claude/rules/31-migration-safety.md`). Dropping these tables is
   irreversible and needs Raphaël's explicit approval, plus a scanner allowlist decision.
 - `anchored-comment-writer-inventory.test.ts` guarantees nothing writes them.
 

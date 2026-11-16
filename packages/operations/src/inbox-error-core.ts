@@ -22,7 +22,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { OperationError } from './errors';
-import { createAsk } from './inbox-write-core';
+import { createAsk } from './inbox-ask-create-core';
 import type { OperationContext, OperationDeps } from './types';
 
 /** What failed. The dedupe key is `error:<source>:<subjectId>`. */
@@ -133,6 +133,11 @@ export async function fileSystemError(
   const dedupeKey = systemErrorKey(input.source, input.subjectId);
   const actions = input.actions.filter((action) => SOURCE_ACTIONS[input.source].includes(action));
   try {
+    // The fixes on offer follow the thing's current state (an automation that has since been
+    // paused gains Resume), so a repeat rewrites them too.
+    const answerSpec = actions.length
+      ? ({ type: 'actions', actions: systemErrorActions(actions) } as const)
+      : ({ type: 'acknowledge' } as const);
     const filed = await createAsk(systemContext(deps, input.assigneeUserId), {
       projectId: input.projectId,
       assigneeKind: 'user',
@@ -141,9 +146,7 @@ export async function fileSystemError(
       blocking: false,
       title: input.title,
       body: input.body,
-      answerSpec: actions.length
-        ? { type: 'actions', actions: systemErrorActions(actions) }
-        : { type: 'acknowledge' },
+      answerSpec,
       links: input.links ?? [],
       ...(input.sourceTaskId ? { sourceTaskId: input.sourceTaskId } : {}),
       ...(input.sourceTaskId && input.sourceSessionId
@@ -159,10 +162,19 @@ export async function fileSystemError(
     const now = Date.now();
     await deps.env.DATABASE.prepare(
       `UPDATE asks SET failure_count = COALESCE(?, failure_count + 1), title = ?, body_md = ?,
-          updated_at = ?
+          answer_spec_json = ?, links_json = ?, updated_at = ?
         WHERE id = ? AND project_id = ? AND kind = 'error' AND status = 'open'`
     )
-      .bind(input.failureCount ?? null, input.title, input.body, now, filed.id, input.projectId)
+      .bind(
+        input.failureCount ?? null,
+        input.title,
+        input.body,
+        JSON.stringify(answerSpec),
+        input.links?.length ? JSON.stringify(input.links) : null,
+        now,
+        filed.id,
+        input.projectId
+      )
       .run();
     return { ref: filed.ref, id: filed.id, created: filed.created };
   } catch (error) {

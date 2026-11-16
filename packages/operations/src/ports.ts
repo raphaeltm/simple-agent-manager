@@ -33,6 +33,7 @@ import type * as schema from '@simple-agent-manager/worker-core/schema';
 import type { ConnectorAnswerChoice } from './connector-answer-input';
 import type { ConnectorReadSettingName } from './connector-read-settings-definition';
 import type { InboxSettingName } from './inbox-settings-definition';
+import type { InsightsReceiptSettingName } from './insights-receipt-settings-definition';
 import type {
   AgentActivityTask,
   LimitKey,
@@ -82,7 +83,8 @@ export type OperationSettingName =
   | 'collaboration.ideaUpdateQuoteMaxLength'
   | 'collaboration.ideaAgentNoteMinIntervalSeconds'
   | 'collaboration.ideaUpdatePageSize'
-  | InboxSettingName;
+  | InboxSettingName
+  | InsightsReceiptSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;
 
@@ -418,6 +420,10 @@ export interface InboxAskNoticeRow {
   answerJson: string | null;
   sourceSessionId: string | null;
   sourceTaskId: string | null;
+  /** The asking agent's workspace (questions); the expiry outcome stops its task run. */
+  sourceWorkspaceId: string | null;
+  /** Epoch ms the ask was filed. */
+  createdAt: number | null;
   resolvedByUserId: string | null;
   assigneeUserId: string | null;
 }

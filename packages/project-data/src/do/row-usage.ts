@@ -2,6 +2,12 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 
+import {
+  addMessageIngestMetrics,
+  emptyMessageIngestMetrics,
+  type MessageIngestMetrics,
+} from './message-ingest-metrics';
+
 const log = createModuleLogger('project_data');
 import { DEFAULT_ROW_USAGE_INTERVAL_MS, ROW_USAGE_LABEL_LIMIT } from './row-usage-config';
 export { DEFAULT_ROW_USAGE_INTERVAL_MS, ROW_USAGE_LABEL_LIMIT } from './row-usage-config';
@@ -27,6 +33,11 @@ export class RowUsage {
   } | null = null;
   private windowStart = Date.now();
   intervalMs = DEFAULT_ROW_USAGE_INTERVAL_MS;
+  private messageIngest = emptyMessageIngestMetrics();
+
+  recordMessageIngest(batch: MessageIngestMetrics): void {
+    addMessageIngestMetrics(this.messageIngest, batch);
+  }
 
   constructor(
     private readonly projectId: () => string | null,
@@ -165,11 +176,13 @@ export class RowUsage {
         labels: Object.fromEntries(selected.map((entry, rank) => [`rank${rank}`, entry])),
         droppedLabelCount: dropped.length,
         totalLabelCount: labels.length,
+        messageIngest: this.messageIngest,
       });
     } catch {
       // Accounting must never change RPC return values or replace an application's error.
     }
     this.totals.clear();
+    this.messageIngest = emptyMessageIngestMetrics();
     this.windowStart = now;
     try {
       this.afterFlush();

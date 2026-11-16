@@ -27,6 +27,12 @@ const mocks = vi.hoisted(() => ({
   snapshotInteractions: vi.fn(),
 }));
 
+// These answer routes test questions still held as attention markers (asked before inbox slice G);
+// an asks-era question is covered on SQLite in `tests/unit/services/inbox/question-asks.test.ts`.
+vi.mock('../../../src/services/inbox/question-asks', async (original) => ({
+  ...(await original<typeof import('../../../src/services/inbox/question-asks')>()),
+  loadQuestionAsk: vi.fn(async () => null),
+}));
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));

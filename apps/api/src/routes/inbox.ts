@@ -37,7 +37,12 @@ import { type Context, Hono } from 'hono';
 import type { Env } from '../env';
 import { readBoundedRequestBody, RequestBodyTooLargeError } from '../lib/bounded-request-body';
 import { requireRouteParam } from '../lib/route-helpers';
-import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import {
+  assertNotAgentSignInSession,
+  getUserId,
+  requireApproved,
+  requireAuth,
+} from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { webOperationContext } from '../operation-ports';
 import { getRuntimeLimits } from '../services/limits';
@@ -213,6 +218,9 @@ projectInboxRoutes.get('/items/:ref', ...session, async (c) => {
 projectInboxRoutes.post('/items/:ref/answer', ...session, async (c) => {
   assertBrowserJsonWrite(c, 'inbox');
   const body = await readAnswerBody(c);
+  // A system error's fix (retry, wake, resume) is a person's call: an agent's sign-in session may
+  // not run it, as the trigger PATCH route refuses an agent a resume (`onlyStandsDown`).
+  if (body.action !== undefined) assertNotAgentSignInSession(c);
   const ctx = webOperationContext(c, getUserId(c));
   return c.json(
     await run(() =>

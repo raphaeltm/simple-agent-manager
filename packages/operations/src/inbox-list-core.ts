@@ -1,18 +1,18 @@
 /**
  * The inbox list and count (idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9, spec section 3.2): one D1 statement
  * over every store that holds an ask today, filtered to the viewer and to active project
- * membership, merged and sorted. Nothing is copied: questions and permissions are read from the
+ * membership, merged and sorted. Nothing is copied: `asks` rows (questions since slice G,
+ * reviews, tasks, errors), permission requests and questions asked before slice G from the
  * `session_summaries.attention_json` index the ProjectData DO already writes
- * (`packages/project-data/src/do/session-summary-sync.ts`), so the list never calls a Durable
- * Object per chat.
+ * (`packages/project-data/src/do/session-summary-sync.ts`), secret requests and approvals. The
+ * list never calls a Durable Object per chat.
  *
  * Sort: tier 0 items with a live deadline (permissions, asks with a due time), tier 1 blocking,
  * tier 2 the rest; inside a tier the items of one chat (or group) stay together as a stack,
  * stacks ordered by their oldest item, items oldest first.
  *
- * Known limit until slices G and J: `attention_json` holds one marker per chat (the newest open
- * question, `getAttentionSummary`), so a chat with two open questions lists one; the next appears
- * when the first is answered.
+ * `attention_json` holds one marker per chat, so a chat lists one permission (or one question
+ * asked before slice G) at a time until slice J moves permissions into `asks`.
  */
 import type {
   InboxCountResponse,

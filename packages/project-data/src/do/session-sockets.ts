@@ -65,18 +65,30 @@ export function admitBrowserSocket(ctx: DurableObjectState, sql: SqlStorage, url
 }
 
 /**
- * Whether an open socket subscribed to this session cannot apply `message.append`. A socket the
- * server already closed (for example after a resync) stays listed while its close handshake is
- * pending; it receives nothing more, so it must not keep merging off.
+ * Open sockets without the `message.append` capability, for one session's ingest. `session`
+ * counts those subscribed to the session: they gate merging for it. `project` counts unscoped
+ * ones: they never receive transcript frames, so they are reported for diagnostics only. A socket
+ * the server already closed (for example after a resync) stays listed while its close handshake is
+ * pending; it receives nothing more, so it is not counted.
  */
-export function hasLegacySessionSocket(ctx: DurableObjectState, sessionId: string): boolean {
-  return ctx
-    .getWebSockets(sessionTag(sessionId))
-    .some(
-      (ws) =>
-        ws.readyState === WebSocket.OPEN &&
-        !tagsOf(ctx, ws)?.includes(CHAT_MESSAGE_APPEND_CAPABILITY)
-    );
+export function countLegacySockets(
+  ctx: DurableObjectState,
+  sessionId: string
+): { session: number; project: number } {
+  const own = sessionTag(sessionId);
+  let session = 0;
+  let project = 0;
+  for (const ws of ctx.getWebSockets()) {
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    const tags = tagsOf(ctx, ws);
+    // A socket whose tags cannot be read cannot be attributed to a session (it is almost
+    // certainly gone), so it is not counted for either scope.
+    if (!tags || tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY)) continue;
+    const tag = tags.find((t) => t.startsWith(SESSION_TAG_PREFIX));
+    if (!tag) project++;
+    else if (tag === own) session++;
+  }
+  return { session, project };
 }
 
 function send(ws: WebSocket, message: string): void {

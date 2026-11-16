@@ -853,17 +853,21 @@ describe('catalog blockers preserve the accepted VM wake', () => {
             );
             await Promise.all(pending);
           });
+          // The failed wake is one open inbox error item for the chat (slice E), not a marker.
           const markers = await sqlRows(
             f.stub,
-            `SELECT reason, metadata FROM session_attention_markers
+            `SELECT id FROM session_attention_markers
              WHERE session_id = ? AND kind = 'wake_failed'`,
             f.b.sessionId
           );
-          expect(markers).toHaveLength(1);
-          expect(markers[0]?.reason).toBe('ttl_expired');
-          expect(JSON.parse(String(markers[0]?.metadata))).toMatchObject({
-            deliveryId: f.deliveryId,
-          });
+          expect(markers).toHaveLength(0);
+          const items = await env.DATABASE.prepare(
+            `SELECT status, source_session_id FROM asks
+              WHERE project_id = ? AND kind = 'error' AND dedupe_key = ?`
+          )
+            .bind(f.projectId, `error:wake:${f.b.sessionId}`)
+            .all<{ status: string; source_session_id: string }>();
+          expect(items.results).toEqual([{ status: 'open', source_session_id: f.b.sessionId }]);
         } else if (terminal === 'archived') {
           await sqlRows(
             f.stub,

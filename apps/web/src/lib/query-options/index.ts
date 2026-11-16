@@ -129,6 +129,12 @@ export {
   ideaUpdatesQueryOptions,
 } from './ideas';
 export {
+  inboxCountQueryOptions,
+  inboxItemQueryOptions,
+  inboxListQueryOptions,
+  inboxQueryKeys,
+} from './inbox';
+export {
   nodeListQueryOptions,
   nodeQueryKeys,
   nodeResourceUsageQueryOptions,
@@ -155,9 +161,9 @@ export {
   notificationQueryKeys,
   type NotificationsListQueryData,
   notificationsListQueryOptions,
-  notificationUnreadCountQueryOptions,
   timelineProgressNotificationsQueryOptions,
 } from './notifications';
+export { projectOverviewQueryKeys, projectOverviewQueryOptions } from './project-overview';
 export {
   instantRuntimeEnabledQueryOptions,
   projectArtifactsEnabledQueryOptions,
@@ -168,6 +174,7 @@ export {
   projectRuntimeConfigQueryOptions,
 } from './projects';
 export { reportIssueConfigQueryOptions, reportIssueQueryKeys } from './report-issue';
+export { runReceiptQueryKeys, runReceiptQueryOptions } from './run-receipt';
 export {
   activeTasksQueryOptions,
   taskDetailQueryOptions,

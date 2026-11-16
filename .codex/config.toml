@@ -1,14 +1,8 @@
 # Codex project configuration for SAM
 
-# Also load CLAUDE.md as a project doc (in addition to AGENTS.md)
+# Codex reads AGENTS.md first in each directory and uses CLAUDE.md only where no AGENTS.md
+# exists: a fallback, not an addition.
 project_doc_fallback_filenames = ["CLAUDE.md"]
-
-# ==============================================================================
-# Hooks — Test Quality Enforcement
-# ==============================================================================
-
-# Stop hook: block task completion if cross-boundary files lack vertical slice tests.
-# Uses the same script as Claude Code for consistency.
 
 # BEGIN SAM MANAGED MCP
 # Added by SAM vm-agent for Codex ACP sessions.
@@ -16,10 +10,17 @@ sandbox_mode = "danger-full-access"
 approval_policy = "never"
 # END SAM MANAGED MCP
 
-[[hooks.Stop]]
-type = "command"
-command = ".claude/hooks/verify-test-quality.sh"
-timeout = 30000
+# ==============================================================================
+# Hooks (schema: https://developers.openai.com/codex/hooks)
+# ==============================================================================
+# Each event holds matcher groups, and each group holds a `hooks` array of handlers.
+# `timeout` is in seconds. Project hooks run only when this .codex/ layer is trusted and
+# each hook definition has been trusted (Codex records trust against its hash).
+# `pnpm quality:agent-context-budget --check` validates these entries.
+
+# No hooks are configured: SAM-managed Codex sessions do not trust this project, so Codex
+# would skip them (probe evidence on SAM idea 01M7H32EK6S4E31EHWVSJSENR5). The rule-delivery
+# and Stop hooks wait on that decision, on branch sam/codex-rule-delivery-hook.
 
 [projects."/workspaces/simple-agent-manager"]
 trust_level = "trusted"

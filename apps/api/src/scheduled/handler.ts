@@ -6,6 +6,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { runAgentEmailRecovery } from '../services/agent-email/recovery';
 import { CAPACITY_POOL_CONTINUATION_CRON } from '../services/capacity-pool-refresh-defaults';
+import { drainCloudflareBuilds } from '../services/cloudflare-build-executor';
 import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
 import { refreshGcpPriceTableIfDue } from '../services/gcp-price-table';
@@ -156,6 +157,7 @@ export async function scheduled(
   await sweeps.isolate('deployment_publish_jobs', () =>
     runDeploymentPublishJobSweep(env, createDeploymentPublishJobPorts(env), ctx.waitUntil.bind(ctx))
   );
+  await sweeps.isolate('cloudflare_build_drain', () => drainCloudflareBuilds(env));
   const githubTriggerRecovery = await sweeps.isolate('github_trigger_recovery', () =>
     runGitHubTriggerRecovery(env, ctx.waitUntil.bind(ctx))
   );

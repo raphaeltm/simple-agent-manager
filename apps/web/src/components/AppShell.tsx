@@ -14,6 +14,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useGlobalCommandPalette } from '../hooks/useGlobalCommandPalette';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useNotificationSocket } from '../hooks/useNotificationSocket';
 import { useProjectList } from '../hooks/useProjectData';
 import { useSamSettings } from '../hooks/useSamSettings';
 import { signOut } from '../lib/auth';
@@ -30,6 +31,7 @@ import { useAuth } from './AuthProvider';
 import { CredentialHealthNavItem } from './CredentialHealthNavItem';
 import { GlobalAudioPlayer } from './GlobalAudioPlayer';
 import { GlobalCommandPalette } from './GlobalCommandPalette';
+import { useInboxCount } from './inbox/useInbox';
 import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
 import { extractProjectId, getGlobalNavItems, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { OnboardingProvider } from './onboarding';
@@ -165,36 +167,38 @@ export function AppShell({ children }: AppShellProps) {
   // Detect project context from URL (excludes reserved paths like /projects/new)
   const projectId = extractProjectId(location.pathname);
 
-  const mobileNavItems = useMemo((): MobileNavItem[] => {
-    if (projectId) {
-      return PROJECT_NAV_ITEMS.map((item) => ({
-        label: item.label,
-        path: `/projects/${projectId}/${item.path}`,
-        icon: item.icon,
-      }));
-    }
-    const items: MobileNavItem[] = getGlobalNavItems(sam.enabled).map((item) => ({
-      label: item.label,
-      path: item.path,
-      icon: item.icon,
-    }));
-    if (isSuperadmin) {
-      items.push({ label: 'Admin', path: '/admin', icon: <Shield size={18} /> });
-    }
-    return items;
-  }, [isSuperadmin, projectId, sam.enabled]);
+  // One notification socket for the app: its events refresh the inbox counts and lists (and the
+  // Updates chip), so nothing polls.
+  useNotificationSocket();
+
+  // The phone drawer shows the same inbox counts as the desktop nav (nav parity, rule 15).
+  const globalInboxCount = useInboxCount(null).data?.needsYou;
+  const projectInboxCount = useInboxCount(projectId ?? null).data?.needsYou;
 
   const mobileGlobalNavItems = useMemo((): MobileNavItem[] => {
     const items: MobileNavItem[] = getGlobalNavItems(sam.enabled).map((item) => ({
       label: item.label,
       path: item.path,
       icon: item.icon,
+      count: item.inboxCount ? globalInboxCount : undefined,
     }));
     if (isSuperadmin) {
       items.push({ label: 'Admin', path: '/admin', icon: <Shield size={18} /> });
     }
     return items;
-  }, [isSuperadmin, sam.enabled]);
+  }, [globalInboxCount, isSuperadmin, sam.enabled]);
+
+  const mobileNavItems = useMemo((): MobileNavItem[] => {
+    if (projectId) {
+      return PROJECT_NAV_ITEMS.map((item) => ({
+        label: item.label,
+        path: `/projects/${projectId}/${item.path}`,
+        icon: item.icon,
+        count: item.inboxCount ? projectInboxCount : undefined,
+      }));
+    }
+    return mobileGlobalNavItems;
+  }, [mobileGlobalNavItems, projectId, projectInboxCount]);
 
   const handleProjectNavigate = useCallback(
     (path: string) => {

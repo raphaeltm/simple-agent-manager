@@ -1,7 +1,7 @@
 /**
  * The shared lifecycle sets every status check reads. Each task status must belong to
  * exactly one class, so a status added later fails here until someone decides whether it
- * is running, sleeping or finished (`packages/shared/.claude/rules/79`).
+ * is running, sleeping or finished (`.claude/rules/79`).
  */
 import { TASK_STATUSES, type TaskStatus } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
