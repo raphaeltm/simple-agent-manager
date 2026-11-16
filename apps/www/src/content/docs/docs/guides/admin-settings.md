@@ -277,6 +277,10 @@ items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 | `inbox.similarScanMax`     | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)   |
 | `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired  |
 | `inbox.sweepBatchSize`     | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries) |
+| `inbox.openTasksPerChat`   | 20      | 1–200      | Open human tasks one chat may have assigned; assigning past it is refused              |
+| `inbox.taskStepsMax`       | 20      | 1–50       | Steps one human task may list                                                          |
+| `inbox.watchersPerItemMax` | 10      | 1–50       | Chats that may watch one task (the one that assigned it plus chats that attached)      |
+| `inbox.taskActivityMax`    | 100     | 10–500     | Lifecycle rows a task view returns, newest kept; the view says when older ones exist   |
 
 A question an agent asks with `request_human_input` is an inbox item, and these settings set its
 schedule (`apps/api/src/services/inbox/sweep.ts`, every five minutes):

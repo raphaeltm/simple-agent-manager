@@ -1,6 +1,6 @@
 ---
 title: Inbox
-description: One place for everything your agents need from you — questions, permissions, secrets, approvals and reviews — across every project, on a phone or a desktop.
+description: One place for everything your agents need from you — questions, permissions, secrets, approvals, reviews and tasks — across every project, on a phone or a desktop.
 ---
 
 The Inbox lists every open ask an agent has made of you: a question, a permission request, a
@@ -83,6 +83,9 @@ a chat opened directly on a workspace has no inbox to file into.
   working and never expires. `request_human_input` files a blocking ask.
 - **Review** (`review`): something the agent wants you to evaluate, such as a pull request or a
   preview. Answer **Looks good** or reply. It never expires.
+- **Task** (`assign`): work only a person can do, such as adding a production secret or deciding a
+  price. It never blocks the agent and never expires; a soft due date only sorts and highlights it.
+  See [Tasks for people](#tasks-for-people).
 - The agent may edit the wording or links of its own open item, or withdraw it when it is no longer
   needed (`cancel`, with a reason). A withdrawn item leaves your inbox and the agent is not told
   anything new.
@@ -96,6 +99,39 @@ shown the open one so it can point you there instead of filing a duplicate.
 
 An item you answer in the chat card or in the Inbox is the same record: answering either closes
 both, and the agent is woken in its chat with your answer.
+
+## Tasks for people
+
+An agent assigns a task to one project member or to the team, with a one-sentence title, why a
+person is needed, optional steps and links (`assignAgentTask`,
+`packages/operations/src/inbox-agent-tasks.ts`). The member must be an active member of the
+project; anyone else is refused when the task is assigned and when it is handed on. The agent keeps
+working, and its chat watches the task.
+
+In the task you can tick its steps, comment, mark it **done**, reopen it, hand it to someone else or
+back to the team, and archive it (`packages/operations/src/inbox-task-core.ts`). A team task is
+listed for every member until one of you presses **I'll take it**: from then on it is theirs, and it
+no longer counts as waiting on the others. Members whose role cannot write tasks (viewers) can read
+a task and comment on it, nothing more.
+
+The agent that assigned the task is woken in its chat when you comment, take it, hand it on, mark it
+done, reopen it or archive it. Ticking steps is recorded and does not wake it unless it asked for
+that. A comment wakes it only when it comes from the assignee, the member who took the task, or
+someone who can write in the agent's chat; anyone else's comment is kept, and the agent reads it the
+next time it wakes (`decideInboxTaskCommentWake`, `apps/api/src/services/agent-wake-authorization.ts`).
+A comment from someone other than the chat's owner reaches the agent as a teammate's input, not as
+an instruction from the owner. Another agent can watch the same task instead of assigning a
+duplicate (`attach`), and is woken by the same changes.
+
+A teammate who cannot read the agent's chat still sees the task, its steps, links and discussion,
+never the chat transcript. Task discussion also appears on the project's Comments page for the
+people who can read the task. If you leave the project, your open tasks go to the team and the agent
+is told. If the agent's chat is archived or its work has finished, the task stays open for you; the
+changes are recorded but no longer wake that chat.
+
+Limits are in [Admin settings](/docs/guides/admin-settings/#inbox): open tasks per chat
+(`inbox.openTasksPerChat`), steps per task (`inbox.taskStepsMax`), chats watching one task
+(`inbox.watchersPerItemMax`) and activity rows shown (`inbox.taskActivityMax`).
 
 ## Archive
 
