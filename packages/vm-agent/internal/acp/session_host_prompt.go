@@ -599,6 +599,10 @@ func (h *SessionHost) finishPrompt(
 	err error,
 	cancelRequested bool,
 ) {
+	if err == nil {
+		// A cancelled turn still spent the tokens its response reports.
+		h.recordPromptTokenUsage(resp)
+	}
 	if cancelRequested {
 		h.finishPromptCancelled(attempt, reqID, info)
 		return
