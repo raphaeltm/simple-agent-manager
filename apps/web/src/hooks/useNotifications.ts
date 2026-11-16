@@ -16,6 +16,7 @@ import {
   parseNotificationListItems,
 } from '../lib/notification-validation';
 import {
+  inboxQueryKeys,
   notificationQueryKeys,
   type NotificationsListQueryData,
   notificationsListQueryOptions,
@@ -73,6 +74,13 @@ export function useNotifications(): UseNotificationsReturn {
     },
     [listKey, queryClient]
   );
+
+  // An agent ask raises a notification, so a new or changed notification is the signal that the
+  // inbox may have changed. Refetch it instead of polling (slice C, idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9).
+  const invalidateInbox = useCallback(() => {
+    if (!queryScope) return;
+    void queryClient.invalidateQueries({ queryKey: inboxQueryKeys.all(queryScope) });
+  }, [queryClient, queryScope]);
 
   // Load more (pagination)
   const loadMore = useCallback(async () => {
@@ -220,9 +228,11 @@ export function useNotifications(): UseNotificationsReturn {
                 notifications: [msg.notification, ...current.notifications],
                 unreadCount: current.unreadCount + 1,
               }));
+              invalidateInbox();
               break;
 
             case 'notification.updated': {
+              invalidateInbox();
               // Reconcile unreadCount if readAt status changed
               updateNotificationCache((current) => {
                 const existing = current.notifications.find((n) => n.id === msg.notification.id);
@@ -324,7 +334,7 @@ export function useNotifications(): UseNotificationsReturn {
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (pingTimerRef.current) clearInterval(pingTimerRef.current);
     };
-  }, [updateNotificationCache]);
+  }, [invalidateInbox, updateNotificationCache]);
 
   return {
     notifications: notificationsQuery.data?.notifications ?? [],

@@ -1,8 +1,8 @@
 import {
-  Bell,
   Brain,
   Eye,
   FolderOpen,
+  Inbox,
   Lightbulb,
   MessageSquare,
   Monitor,
@@ -73,7 +73,7 @@ const PROJECT_NAV_ITEMS: ProjectActionItem[] = [
   { id: 'ctx-project-settings', label: 'Go to Settings', icon: <Settings size={14} />, path: 'settings' },
   { id: 'ctx-project-library', label: 'Go to Library', icon: <FolderOpen size={14} />, path: 'library' },
   { id: 'ctx-project-agent-context', label: 'Go to Agent Context', icon: <Brain size={14} />, path: 'agent-context' },
-  { id: 'ctx-project-notifications', label: 'Go to Notifications', icon: <Bell size={14} />, path: 'notifications' },
+  { id: 'ctx-project-inbox', label: 'Go to Inbox', icon: <Inbox size={14} />, path: 'inbox' },
   { id: 'ctx-project-automation', label: 'Go to Automation', icon: <Workflow size={14} />, path: 'automation' },
   { id: 'ctx-project-profiles', label: 'Go to Profiles', icon: <UserCog size={14} />, path: 'profiles' },
   { id: 'ctx-project-skills', label: 'Go to Skills', icon: <Zap size={14} />, path: 'skills' },

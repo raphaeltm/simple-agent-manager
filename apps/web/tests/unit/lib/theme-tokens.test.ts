@@ -56,7 +56,7 @@ describe('Slice E theme token coverage', () => {
     'apps/web/src/pages/AgentContextPage/ActionsTab.tsx',
     'apps/web/src/pages/ProjectSettings.tsx',
     'apps/web/src/pages/ProjectLibrary.tsx',
-    'apps/web/src/pages/ProjectNotifications.tsx',
+    'apps/web/src/pages/inbox/InboxPage.tsx',
     'apps/web/src/pages/ideas/IdeasListPage.tsx',
     'apps/web/src/pages/ideas/parts.tsx',
     'apps/web/src/pages/ideas/IdeaPage.tsx',
@@ -74,7 +74,9 @@ describe('Slice E theme token coverage', () => {
     'apps/web/src/components/library/UploadProgressChips.tsx',
     'apps/web/src/components/project/TaskDelegateDialog.tsx',
     'apps/web/src/pages/automation/editor/when-schedule.tsx',
-    'apps/web/src/components/NotificationCenter.tsx',
+    'apps/web/src/components/inbox/InboxQuickView.tsx',
+    'apps/web/src/components/inbox/InboxRow.tsx',
+    'apps/web/src/components/inbox/InboxItemView.tsx',
   ];
 
   const forbiddenPatterns = [

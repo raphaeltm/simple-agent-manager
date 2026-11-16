@@ -381,6 +381,13 @@ export {
   setProjectIdeaStatus,
 } from './ideas';
 export {
+  answerInboxItem,
+  archiveInboxItem,
+  getInboxCount,
+  getInboxItem,
+  listInbox,
+} from './inbox';
+export {
   addObservation,
   createKnowledgeEntity,
   deleteKnowledgeEntity,

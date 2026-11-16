@@ -129,6 +129,12 @@ export {
   ideaUpdatesQueryOptions,
 } from './ideas';
 export {
+  inboxCountQueryOptions,
+  inboxItemQueryOptions,
+  inboxListQueryOptions,
+  inboxQueryKeys,
+} from './inbox';
+export {
   nodeListQueryOptions,
   nodeQueryKeys,
   nodeResourceUsageQueryOptions,
