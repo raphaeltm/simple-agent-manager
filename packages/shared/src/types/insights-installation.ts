@@ -16,7 +16,8 @@ export function isInstallationHealthRange(value: unknown): value is Installation
 }
 
 /** Sections of the read. A section that fails is null and named in `unavailable`. */
-export type InstallationHealthSection = 'compute' | 'reuse' | 'density' | 'newMachines' | 'latency';
+export type InstallationHealthSection =
+  'compute' | 'reuse' | 'density' | 'newMachines' | 'latency' | 'cloudflare';
 
 export interface InstallationHealthWindow {
   range: InstallationHealthRange;
@@ -175,5 +176,60 @@ export interface InstallationHealthResponse {
   density: InstallationMachineDensity | null;
   newMachines: InstallationNewMachineReasons | null;
   latency: InstallationLifecycleLatency | null;
+  /** The Cloudflare account's estimated cost, in USD. Never added to `compute`. */
+  cloudflare: InstallationCloudflareCost | null;
   unavailable: InstallationHealthSection[];
+}
+
+/**
+ * State of the daily Cloudflare cost snapshot (Insights slice CF):
+ * - `never_run`: no snapshot has been attempted yet (it runs daily at 03:00 UTC);
+ * - `not_configured`: `CF_API_TOKEN` or `CF_ACCOUNT_ID` is not set on the Worker;
+ * - `permission_denied`: the token cannot read account analytics (Account Analytics: Read);
+ * - `error`: the last attempt failed for another reason; earlier days still show;
+ * - `ok`: the last attempt stored its window.
+ */
+export type InstallationCloudflareCostStatus =
+  'never_run' | 'not_configured' | 'permission_denied' | 'error' | 'ok';
+
+export interface InstallationCloudflareProductLine {
+  /** Billed metric key, e.g. `doDurationGbSeconds`. */
+  key: string;
+  product: string;
+  label: string;
+  unit: string;
+  monthToDateUsage: number;
+  monthToDateUsd: number;
+  projectedUsd: number;
+}
+
+/**
+ * Usage-derived estimate of what the Cloudflare account costs, from billed analytics at
+ * Cloudflare's list prices (`.claude/rules/76`). Not an invoice: it covers the whole account
+ * (every Worker on it), excludes the Workers Paid subscription, and leaves a few products
+ * unpriced. The month is the month of the latest stored day.
+ */
+export interface InstallationCloudflareCost {
+  status: InstallationCloudflareCostStatus;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  /** Why the last attempt failed, as Cloudflare or the Worker reported it. */
+  error: string | null;
+  /** `YYYY-MM` of the latest stored day; null with no stored days. */
+  month: string | null;
+  /** Latest stored day (`YYYY-MM-DD`). */
+  throughDay: string | null;
+  /** True when `throughDay` is the month's last day: the projection is the month's total. */
+  monthComplete: boolean;
+  /** Days from the 1st through `throughDay` with no stored row; they count as zero. */
+  missingDays: number;
+  monthToDateUsd: number;
+  /** Spent so far plus the recent daily rate for the rest of the month. */
+  projectedUsd: number;
+  /** Most projected cost first, capped by `insights.healthCloudflareTopLines`. */
+  productLines: InstallationCloudflareProductLine[];
+  /** Product lines left out by that cap, and their summed costs. */
+  otherProductLines: { count: number; monthToDateUsd: number; projectedUsd: number };
+  /** Daily estimated cost, oldest first, ending at `throughDay`. Days with no rows are null. */
+  daily: { day: string; costUsd: number | null }[];
 }

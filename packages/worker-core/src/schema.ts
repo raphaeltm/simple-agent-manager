@@ -5993,3 +5993,37 @@ export const lifecyclePhaseTimings = sqliteTable(
     createdIdx: index('idx_lifecycle_phase_timings_created').on(table.createdAt),
   })
 );
+
+/**
+ * Daily usage-derived Cloudflare cost estimate, one row per UTC day per product line (Insights
+ * slice CF, migration 0256). Written by `runCloudflareCostSnapshot`
+ * (apps/api/src/services/cloudflare-cost-snapshot.ts), read by `packages/operations`
+ * `insights-installation-cloudflare`. `fetchedAt` is epoch ms; costs are USD estimates.
+ */
+export const installationCostDaily = sqliteTable(
+  'installation_cost_daily',
+  {
+    source: text('source').notNull(),
+    day: text('day').notNull(),
+    productLine: text('product_line').notNull(),
+    usageQuantity: real('usage_quantity').notNull(),
+    usageUnit: text('usage_unit').notNull(),
+    estimatedCostUsd: real('estimated_cost_usd').notNull(),
+    fetchedAt: integer('fetched_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.source, table.day, table.productLine] }),
+  })
+);
+
+/** The latest cost snapshot attempt per source (migration 0256), so the card can explain itself. */
+export const installationCostSync = sqliteTable('installation_cost_sync', {
+  source: text('source').primaryKey(),
+  status: text('status').notNull(),
+  lastAttemptAt: integer('last_attempt_at').notNull(),
+  lastSuccessAt: integer('last_success_at'),
+  errorMessage: text('error_message'),
+  firstDay: text('first_day'),
+  lastDay: text('last_day'),
+  rowsWritten: integer('rows_written').notNull().default(0),
+});

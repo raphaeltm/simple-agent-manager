@@ -1237,8 +1237,11 @@ export {
   parseInboxRef,
 } from './inbox';
 
-// Admin Health & cost (Insights slice H)
+// Admin Health & cost (Insights slices H and CF)
 export type {
+  InstallationCloudflareCost,
+  InstallationCloudflareCostStatus,
+  InstallationCloudflareProductLine,
   InstallationComputeCurrencySpend,
   InstallationComputeProviderSpend,
   InstallationComputeSpend,

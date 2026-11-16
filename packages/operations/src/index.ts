@@ -139,6 +139,15 @@ export {
   NOT_RECORDED_REASON,
 } from './insights-installation-placements';
 export {
+  cloudflareReadStartDay,
+  readCloudflareCost,
+  summarizeCloudflareCost,
+} from './insights-installation-cloudflare';
+export {
+  INSIGHTS_CLOUDFLARE_COST_SETTINGS,
+  type InsightsCloudflareCostSettingName,
+} from './insights-cloudflare-cost-settings-definition';
+export {
   INSIGHTS_INSTALLATION_SETTINGS,
   type InsightsInstallationSettingName,
 } from './insights-installation-settings-definition';

@@ -1,4 +1,5 @@
 import {
+  INSIGHTS_CLOUDFLARE_COST_SETTINGS,
   INSIGHTS_INSTALLATION_SETTINGS,
   INSIGHTS_PAGE_SETTINGS,
   INSIGHTS_RECEIPT_SETTINGS,
@@ -171,6 +172,15 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     )
   ),
   ...INSIGHTS_INSTALLATION_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_CLOUDFLARE_COST_SETTINGS.map((setting) =>
     integerDefinition(
       setting.name,
       setting.defaultValue,

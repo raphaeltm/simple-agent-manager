@@ -7,15 +7,19 @@
 import { pathToFileURL } from 'node:url';
 
 import {
-  DEFAULT_RECENT_DAYS,
   analyzeCloudflareCost,
-  createDefaultPricing,
+  CLOUDFLARE_GRAPHQL_ENDPOINT,
+  cloudflareCostHttpError,
+  cloudflareCostQueryBody,
+  type CloudflareCostMetricKey,
   type CloudflareCostRows,
-  formatCostReport,
-  type MetricKey,
-} from './cloudflare-cost-core';
+  createCloudflarePricing,
+  DEFAULT_CLOUDFLARE_COST_RECENT_DAYS,
+  parseCloudflareCostResponse,
+} from '../../packages/shared/src/cloudflare-cost/index.js';
+import { formatCostReport } from './cloudflare-cost-report';
 
-export const DEFAULT_GRAPHQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql';
+export const DEFAULT_GRAPHQL_ENDPOINT = CLOUDFLARE_GRAPHQL_ENDPOINT;
 export const DEFAULT_QUERY_LIMIT = 10_000;
 export const EXIT_OK = 0;
 export const EXIT_BUDGET_EXCEEDED = 1;
@@ -31,104 +35,6 @@ interface Config {
   recentDays: number;
   maxUsd: number | null;
 }
-
-interface GraphQLResponse {
-  data?: {
-    viewer?: {
-      accounts?: Array<{
-        durableObjectsPeriodicGroups?: CloudflareCostRows['durableObjectPeriodic'];
-        durableObjectsInvocationsAdaptiveGroups?: CloudflareCostRows['durableObjectInvocations'];
-        aiInferenceAdaptiveGroups?: CloudflareCostRows['workersAi'];
-        r2StorageAdaptiveGroups?: CloudflareCostRows['r2Storage'];
-        d1AnalyticsAdaptiveGroups?: CloudflareCostRows['d1Analytics'];
-        d1StorageAdaptiveGroups?: CloudflareCostRows['d1Storage'];
-        containersUsageAdaptiveGroups?: CloudflareCostRows['containers'];
-      }>;
-    };
-  };
-  errors?: Array<{ message: string }>;
-}
-
-const COST_QUERY = `
-query CloudflareCostAudit(
-  $accountTag: string!
-  $doPeriodicFilter: AccountDurableObjectsPeriodicGroupsFilter_InputObject!
-  $doInvocationFilter: AccountDurableObjectsInvocationsAdaptiveGroupsFilter_InputObject!
-  $aiFilter: AccountAiInferenceAdaptiveGroupsFilter_InputObject!
-  $r2StorageFilter: AccountR2StorageAdaptiveGroupsFilter_InputObject!
-  $d1AnalyticsFilter: AccountD1AnalyticsAdaptiveGroupsFilter_InputObject!
-  $d1StorageFilter: AccountD1StorageAdaptiveGroupsFilter_InputObject!
-  $containersFilter: AccountContainersUsageAdaptiveGroupsFilter_InputObject!
-  $limit: uint64!
-) {
-  viewer {
-    accounts(filter: { accountTag: $accountTag }) {
-      durableObjectsPeriodicGroups(
-        filter: $doPeriodicFilter
-        limit: $limit
-        orderBy: [date_ASC, namespaceId_ASC, name_ASC]
-      ) {
-        dimensions { date namespaceId name }
-        sum {
-          activeTime
-          duration
-          rowsRead
-          rowsWritten
-          storageReadUnits
-          storageWriteUnits
-        }
-      }
-      durableObjectsInvocationsAdaptiveGroups(
-        filter: $doInvocationFilter
-        limit: $limit
-        orderBy: [date_ASC, scriptName_ASC, namespaceId_ASC, type_ASC]
-      ) {
-        dimensions { date scriptName namespaceId type }
-        sum { requests }
-      }
-      aiInferenceAdaptiveGroups(
-        filter: $aiFilter
-        limit: $limit
-        orderBy: [date_ASC, modelId_ASC]
-      ) {
-        dimensions { date modelId }
-        sum { totalNeurons }
-      }
-      r2StorageAdaptiveGroups(
-        filter: $r2StorageFilter
-        limit: $limit
-        orderBy: [date_ASC, bucketName_ASC, storageClass_ASC]
-      ) {
-        dimensions { date bucketName storageClass }
-        max { metadataSize payloadSize }
-      }
-      d1AnalyticsAdaptiveGroups(
-        filter: $d1AnalyticsFilter
-        limit: $limit
-        orderBy: [date_ASC, databaseId_ASC]
-      ) {
-        dimensions { date databaseId }
-        sum { rowsRead rowsWritten }
-      }
-      d1StorageAdaptiveGroups(
-        filter: $d1StorageFilter
-        limit: $limit
-        orderBy: [date_ASC, databaseId_ASC]
-      ) {
-        dimensions { date databaseId }
-        max { databaseSizeBytes }
-      }
-      containersUsageAdaptiveGroups(
-        filter: $containersFilter
-        limit: $limit
-        orderBy: [date_ASC, applicationId_ASC]
-      ) {
-        dimensions { date applicationId }
-        sum { allocatedMemory }
-      }
-    }
-  }
-}`;
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   try {
@@ -173,14 +79,16 @@ export function getConfig(argv: string[], now = new Date()): Config {
     queryLimit: readPositiveNumber('CF_COST_QUERY_LIMIT', DEFAULT_QUERY_LIMIT),
     startDate: args.startDate ?? firstDayOfUtcMonth(now),
     endDate: args.endDate ?? lastCompleteUtcDate(now),
-    recentDays: args.recentDays ?? readPositiveNumber('CF_COST_RECENT_DAYS', DEFAULT_RECENT_DAYS),
+    recentDays:
+      args.recentDays ??
+      readPositiveNumber('CF_COST_RECENT_DAYS', DEFAULT_CLOUDFLARE_COST_RECENT_DAYS),
     maxUsd: args.maxUsd,
   };
 }
 
 export function getPricingFromEnv() {
-  const pricing = createDefaultPricing();
-  for (const key of Object.keys(pricing.metrics) as MetricKey[]) {
+  const pricing = createCloudflarePricing();
+  for (const key of Object.keys(pricing.metrics) as CloudflareCostMetricKey[]) {
     const envPrefix = `CF_COST_${toEnvKey(key)}`;
     const metric = pricing.metrics[key];
     pricing.metrics[key] = {
@@ -194,67 +102,22 @@ export function getPricingFromEnv() {
 }
 
 export async function queryCloudflareCostRows(config: Config): Promise<CloudflareCostRows> {
-  const dateFilter = {
-    date_geq: config.startDate,
-    date_leq: config.endDate,
-  };
   const response = await fetch(config.endpoint, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${config.token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      query: COST_QUERY,
-      variables: {
-        accountTag: config.accountId,
-        doPeriodicFilter: dateFilter,
-        doInvocationFilter: dateFilter,
-        aiFilter: dateFilter,
-        r2StorageFilter: dateFilter,
-        d1AnalyticsFilter: dateFilter,
-        d1StorageFilter: dateFilter,
-        containersFilter: dateFilter,
-        limit: config.queryLimit,
-      },
+    body: cloudflareCostQueryBody({
+      accountId: config.accountId,
+      startDate: config.startDate,
+      endDate: config.endDate,
+      limit: config.queryLimit,
+      options: { durableObjectBreakdown: true },
     }),
   });
-  if (!response.ok) {
-    throw new Error(`Cloudflare GraphQL request failed: ${response.status} ${response.statusText}`);
-  }
-  return parseCostResponse(await response.json(), config.queryLimit);
-}
-
-export function parseCostResponse(payload: unknown, queryLimit: number): CloudflareCostRows {
-  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
-    throw new Error('Cloudflare GraphQL response must be an object');
-  }
-  const response = payload as GraphQLResponse;
-  if (response.errors?.length) {
-    throw new Error(
-      `Cloudflare GraphQL error: ${response.errors.map((error) => error.message).join('; ')}`
-    );
-  }
-  const account = response.data?.viewer?.accounts?.[0];
-  if (!account)
-    throw new Error('Cloudflare GraphQL response did not include the requested account');
-  const rows: CloudflareCostRows = {
-    durableObjectPeriodic: account.durableObjectsPeriodicGroups ?? [],
-    durableObjectInvocations: account.durableObjectsInvocationsAdaptiveGroups ?? [],
-    workersAi: account.aiInferenceAdaptiveGroups ?? [],
-    r2Storage: account.r2StorageAdaptiveGroups ?? [],
-    d1Analytics: account.d1AnalyticsAdaptiveGroups ?? [],
-    d1Storage: account.d1StorageAdaptiveGroups ?? [],
-    containers: account.containersUsageAdaptiveGroups ?? [],
-  };
-  for (const [name, dataset] of Object.entries(rows)) {
-    if (dataset.length >= queryLimit) {
-      throw new Error(
-        `${name} returned ${dataset.length} rows, which reached CF_COST_QUERY_LIMIT=${queryLimit}; refusing a partial cost report`
-      );
-    }
-  }
-  return rows;
+  if (!response.ok) throw cloudflareCostHttpError(response.status);
+  return parseCloudflareCostResponse(await response.json(), config.queryLimit);
 }
 
 function parseArgs(argv: string[]): {
@@ -308,7 +171,7 @@ function lastCompleteUtcDate(now: Date): string {
   return previousDay.toISOString().slice(0, 10);
 }
 
-function toEnvKey(key: MetricKey): string {
+function toEnvKey(key: CloudflareCostMetricKey): string {
   return key.replace(/[A-Z]/g, (match) => `_${match}`).toUpperCase();
 }
 
