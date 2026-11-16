@@ -43,7 +43,9 @@ export function buildInboxAskPrompt(
     if (outcome === 'archived') {
       return `The person archived ${question} from their inbox and will not act on it. Do not wait for an answer: continue without it, or end your turn and say what is left undone.`;
     }
-    return answer ? `The person answered ${question}:\n\n${answer}` : `The person answered ${question}.`;
+    return answer
+      ? `The person answered ${question}:\n\n${answer}`
+      : `The person answered ${question}.`;
   }
   const item = `inbox item ${row.id} ("${row.title}")`;
   switch (outcome) {

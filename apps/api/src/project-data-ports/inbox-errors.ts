@@ -2,7 +2,6 @@ import { quotedName } from '@simple-agent-manager/operations';
 
 import type { InboxErrorsPort } from '../durable-objects/project-data/ports';
 import { log, serializeError } from '../lib/logger';
-import { fileAndNotify } from '../services/inbox/system-errors';
 import { workerEnv } from './worker-env';
 
 /** Failed chat wakes as inbox error items (slice E), filed for the ProjectData object. */
@@ -49,6 +48,8 @@ export const inboxErrorsPort: InboxErrorsPort = {
         .first<{ id: string }>();
       if (!bound) return null;
       const canWake = snapshot?.runtime !== 'cf-container';
+      // Loaded on use: the filing service builds operation ports, whose graph imports this port.
+      const { fileAndNotify } = await import('../services/inbox/system-errors');
       return await fileAndNotify(env, {
         projectId: input.projectId,
         assigneeUserId: owner,

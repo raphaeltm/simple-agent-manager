@@ -18,7 +18,6 @@ import {
   fileSystemError,
   getInboxLimits,
   quotedName,
-  resolveSystemError,
   type SystemErrorFiled,
   type SystemErrorInput,
 } from '@simple-agent-manager/operations';
@@ -324,14 +323,6 @@ async function fileUndeliveredAskAnswers(
     if (filedItem) filed += 1;
   }
   return filed;
-}
-
-/** Close a recovered thing's item. Never throws. */
-export function resolveSystemErrorFor(
-  env: Env,
-  input: Parameters<typeof resolveSystemError>[1]
-): Promise<number> {
-  return resolveSystemError({ env }, input);
 }
 
 /**

@@ -4,7 +4,7 @@ import type { SessionWakeReadyInput } from '../durable-objects/project-data/sess
 import { parseEnvInt } from '../durable-objects/task-runner/helpers';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { resolveSystemErrorFor } from './inbox/system-errors';
+import { resolveSystemErrorFor } from './inbox/system-error-resolve';
 
 // Shared bound for the wake completion's scheduling and browser notifications.
 export const DEFAULT_WAKE_PROGRESS_BROADCAST_TIMEOUT_MS = 5_000;

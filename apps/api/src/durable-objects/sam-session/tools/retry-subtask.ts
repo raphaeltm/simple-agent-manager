@@ -22,7 +22,7 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from '../../../services/capacity-placement-snapshot';
-import { resolveSystemErrorFor } from '../../../services/inbox/system-errors';
+import { resolveSystemErrorFor } from '../../../services/inbox/system-error-resolve';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
