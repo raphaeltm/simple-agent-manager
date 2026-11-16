@@ -66,6 +66,7 @@ import type {
   SendAgentChannelMessageResult,
   SessionActivityTerminalReason,
   SessionUndeliveredPrompt,
+  InboxItemCommentThread,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
 
@@ -90,6 +91,11 @@ import type {
   GroupedFtsWallRecoveryResult,
 } from '../do/grouped-fts-wall-recovery';
 import type { IdeaWorkLinkCaps, IdeaWorkSnapshot } from '../do/idea-work';
+import type {
+  CreateInboxItemCommentInput,
+  InboxItemCommentMutationResult,
+  ListInboxItemCommentThreadsInput,
+} from '../do/inbox-item-comments';
 import type { LogicalMessageRequest, LogicalMessageResult } from '../do/logical-message';
 import type { LogicalTranscriptRequest, LogicalTranscriptResult } from '../do/logical-transcript';
 import type { MessageContextRequest, MessageContextResult } from '../do/message-context';
@@ -2290,6 +2296,34 @@ export async function runProjectEventRetention(
   input: ProjectDataEventInput<RunProjectEventRetentionInput> = {}
 ): Promise<ProjectEventRetentionResult> {
   return callProjectDataEvent(env, projectId, 'runProjectEventRetention', input);
+}
+
+// --- Inbox item comments (inbox slice H1) ------------------------------------
+// Scoped to the asks id. Callers must have already proven the item belongs to `projectId` and
+// that the actor may read it (packages/operations/src/inbox-task-core.ts) — the DO has no D1.
+
+export async function listInboxItemCommentThreads(
+  env: Env,
+  projectId: string,
+  input: ListInboxItemCommentThreadsInput
+): Promise<{ threads: InboxItemCommentThread[]; hasMore: boolean }> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listInboxItemCommentThreads',
+    (stub) => stub.listInboxItemCommentThreads(input),
+    'idempotent_read'
+  );
+}
+
+export async function createInboxItemComment(
+  env: Env,
+  projectId: string,
+  input: CreateInboxItemCommentInput
+): Promise<InboxItemCommentMutationResult> {
+  return callProjectDataNoRetry(env, projectId, 'createInboxItemComment', (stub) =>
+    stub.createInboxItemComment(input)
+  );
 }
 
 // --- Library file comments ---------------------------------------------------

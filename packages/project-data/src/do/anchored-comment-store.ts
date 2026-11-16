@@ -38,6 +38,7 @@ const ThreadRowSchema = v.object({
   session_id: v.nullable(v.string()),
   message_id: v.nullable(v.string()),
   file_id: v.nullable(v.string()),
+  inbox_item_id: v.nullable(v.string()),
   quote: v.nullable(v.string()),
   body: v.string(),
   author_type: v.picklist(['human', 'agent']),
@@ -106,6 +107,7 @@ export interface CommentThreadRecord {
   sessionId: string | null;
   messageId: string | null;
   fileId: string | null;
+  inboxItemId: string | null;
   quote: string | null;
   author: CommentActor;
   body: string;
@@ -126,7 +128,7 @@ export interface CommentThreadRecord {
 }
 
 export const THREAD_SELECT_COLUMNS = `id, anchor_kind, scope_key, session_id, message_id, file_id,
-  quote, body, author_type, author_id, author_name, status, created_at, updated_at, sequence,
+  inbox_item_id, quote, body, author_type, author_id, author_name, status, created_at, updated_at, sequence,
   version, client_mutation_id, sent_at, sent_by_type, sent_by_id, sent_by_name,
   resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
   reopened_at, reopened_by_type, reopened_by_id, reopened_by_name, mentions_json`;
@@ -234,6 +236,7 @@ export function hydrateThreadRows(sql: SqlStorage, rows: unknown[]): CommentThre
     sessionId: r.session_id,
     messageId: r.message_id,
     fileId: r.file_id,
+    inboxItemId: r.inbox_item_id,
     quote: r.quote,
     author: { kind: r.author_type, id: r.author_id, name: r.author_name },
     body: r.body,

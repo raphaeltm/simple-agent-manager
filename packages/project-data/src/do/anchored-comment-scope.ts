@@ -13,7 +13,7 @@
  * are the project-wide inbox ranking and its by-id hydration, which are project-wide by
  * design because this Durable Object is the project.
  *
- * Adding an anchor kind (human_task, later): add a member to `CommentAnchorScope` (the
+ * `inbox_item` (inbox slice H1, DO migration 081) was added this way. Adding another kind: add a member to `CommentAnchorScope` (the
  * exhaustive switch below then fails to compile until it is mapped), an entry to
  * `ANCHOR_KIND_RULES`, one additive migration
  * `ALTER TABLE anchored_comment_threads ADD COLUMN human_task_id TEXT CHECK (...)` whose
@@ -25,7 +25,10 @@
 import type { CommentAnchorKind } from '@simple-agent-manager/shared';
 
 export type CommentAnchorScope =
-  { kind: 'message'; sessionId: string } | { kind: 'library_file'; fileId: string };
+  | { kind: 'message'; sessionId: string }
+  | { kind: 'library_file'; fileId: string }
+  /** Discussion on an inbox item (a human task); scoped to the `asks` id (DO migration 081). */
+  | { kind: 'inbox_item'; itemId: string };
 
 export interface AnchorScopeParams {
   anchorKind: CommentAnchorKind;
@@ -39,6 +42,8 @@ export function anchorScopeParams(scope: CommentAnchorScope): AnchorScopeParams 
       return { anchorKind: 'message', scopeKey: scope.sessionId };
     case 'library_file':
       return { anchorKind: 'library_file', scopeKey: scope.fileId };
+    case 'inbox_item':
+      return { anchorKind: 'inbox_item', scopeKey: scope.itemId };
   }
 }
 
@@ -67,6 +72,14 @@ export const ANCHOR_KIND_RULES: Record<CommentAnchorKind, AnchorKindRules> = {
     threadFingerprintTag: 'file_thread',
     replyFingerprintTag: 'file_reply',
     threadLimitLabel: 'file comment thread limit',
+  },
+  inbox_item: {
+    // An inbox-item comment reaches the filing agent through a `sam.inbox` project event, not
+    // through Send to agent.
+    supportsSent: false,
+    threadFingerprintTag: 'inbox_item_thread',
+    replyFingerprintTag: 'inbox_item_reply',
+    threadLimitLabel: 'inbox item comment thread limit',
   },
 };
 

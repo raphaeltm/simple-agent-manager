@@ -1219,3 +1219,28 @@ export {
   INBOX_WRITE_TOOL,
   parseInboxRef,
 } from './inbox';
+export type {
+  AskActivityKind,
+  AskActorKind,
+  InboxItemCommentThread,
+  InboxTaskActionResponse,
+  InboxTaskActivity,
+  InboxTaskAssignee,
+  InboxTaskCommentRequest,
+  InboxTaskCommentResponse,
+  InboxTaskDetail,
+  InboxTaskDoneRequest,
+  InboxTaskEventType,
+  InboxTaskReassignRequest,
+  InboxTaskStep,
+  InboxTaskStepRequest,
+} from './inbox-tasks';
+export {
+  ASK_ACTIVITY_KINDS,
+  ASK_ACTOR_KINDS,
+  INBOX_EVENT_SOURCE,
+  INBOX_EVENT_SUBJECT_TYPE,
+  INBOX_TASK_DEFAULT_WAKE_EVENT_TYPES,
+  INBOX_TASK_EVENT_TYPES,
+  INBOX_TASK_STEP_EVENT_TYPES,
+} from './inbox-tasks';

@@ -828,6 +828,8 @@ export const asks = sqliteTable(
     escalationCount: integer('escalation_count').notNull().default(0),
     /** Hard limit on how long an undelivered ask may be extended. */
     maxExpiresAt: integer('max_expires_at'),
+    /** Human tasks: JSON array of ticked step indexes (0253); NULL when none is ticked. */
+    stepsCheckedJson: text('steps_checked_json'),
   },
   (table) => ({
     openEscalationIdx: index('idx_asks_open_escalation')
@@ -860,6 +862,31 @@ export const asks = sqliteTable(
 );
 
 export type AskRow = typeof asks.$inferSelect;
+
+/** Lifecycle of an ask, one row per change (human tasks, migration 0253). No discussion text. */
+export const askActivity = sqliteTable(
+  'ask_activity',
+  {
+    id: text('id').primaryKey(),
+    askId: text('ask_id')
+      .notNull()
+      .references(() => asks.id, { onDelete: 'cascade' }),
+    projectId: text('project_id').notNull(),
+    /** 'user' | 'agent' | 'system' */
+    actorKind: text('actor_kind').notNull(),
+    actorId: text('actor_id'),
+    kind: text('kind').notNull(),
+    detailJson: text('detail_json'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => ({
+    askCreatedIdx: index('idx_ask_activity_ask_created').on(
+      table.askId,
+      table.createdAt,
+      table.id
+    ),
+  })
+);
 
 export const projectRuntimeEnvVars = sqliteTable(
   'project_runtime_env_vars',

@@ -108,6 +108,34 @@ export const INBOX_SETTINGS = [
       'Most minutes a question may stay open, even when its notification never reached a device. Never shorter than the question window.',
     range: { min: 1, max: 4_320 },
   },
+  // Human tasks (slice H1).
+  {
+    name: 'inbox.openTasksPerChat',
+    defaultValue: 20,
+    description:
+      'Open human tasks one chat may have assigned at once. Assigning past it is refused, so one agent cannot flood a person’s list.',
+    range: { min: 1, max: 200 },
+  },
+  {
+    name: 'inbox.taskStepsMax',
+    defaultValue: 20,
+    description: 'Steps one human task may list.',
+    range: { min: 1, max: 50 },
+  },
+  {
+    name: 'inbox.watchersPerItemMax',
+    defaultValue: 10,
+    description:
+      'Chats that may watch one human task (the chat that assigned it plus chats that attached to it). Each watcher is woken by the task’s changes.',
+    range: { min: 1, max: 50 },
+  },
+  {
+    name: 'inbox.taskActivityMax',
+    defaultValue: 100,
+    description:
+      'Lifecycle rows a task view or an agent’s read of a task returns, newest kept. The view says when older rows exist.',
+    range: { min: 10, max: 500 },
+  },
   {
     name: 'inbox.sweepBatchSize',
     defaultValue: 10,

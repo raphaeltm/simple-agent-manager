@@ -71,7 +71,11 @@ export type LibraryFileCommentAnchor = {
 
 export type CommentAnchor = MessageCommentAnchor | LibraryFileCommentAnchor;
 
-export const COMMENT_ANCHOR_KINDS = ['message', 'library_file'] as const;
+/**
+ * `inbox_item`: discussion on an inbox item such as a human task (slice H1). Its threads have no
+ * session or file; they are scoped to the `asks` id.
+ */
+export const COMMENT_ANCHOR_KINDS = ['message', 'library_file', 'inbox_item'] as const;
 export type CommentAnchorKind = (typeof COMMENT_ANCHOR_KINDS)[number];
 
 export type MessageCommentSourceMessageContext = {
