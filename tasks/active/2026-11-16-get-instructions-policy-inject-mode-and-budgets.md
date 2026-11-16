@@ -73,7 +73,7 @@ knowledge values.
 - [x] Pure selection module: rank on-demand policies, budget, per-category cap, index rendering
 - [x] Knowledge size budget with disclosure in index lead-in
 - [x] Total guard + warning line + log; size telemetry log
-- [x] Instruction trim of CI-wait paragraph (list removed sentences and where they live in the PR)
+- [x] Instruction trim of CI-wait paragraph: tried, then reverted because `mcp-ci-wait-guidance.test.ts` requires the guidance in both entry points (existing guard). No instruction sentence removed.
 - [x] Web Policies tab: inject-mode control + injected size per policy + summary, phone usable
 - [x] Docs: `apps/www/.../architecture/overview.md`, `reference/api.md` or wherever get_instructions
       is described; admin settings docs if they list settings

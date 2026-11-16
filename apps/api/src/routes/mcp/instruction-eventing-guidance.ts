@@ -8,13 +8,13 @@ export function buildEventingInstructions(input: {
   agentMessageChannelsEnabled: boolean;
 }): string[] {
   const instructions = [
-    // The exact filters (subjectType, full head SHA, exact eventType values, PR-number subjects),
-    // "completed checks need no new wait" and the verified-delivery caveat live in the
-    // `create_project_event_subscription` description, which an agent reads to make that call.
-    // Only the trigger and the reconcile timing stay here.
-    'Waiting on a PR or CI: subscribe with `create_project_event_subscription` instead of polling; ' +
-      'its description gives the exact GitHub filters. Reconcile the PR head and checks before subscribing, ' +
-      'right after subscribing, and after every resume.',
+    'Waiting on a PR or CI: reconcile the current PR head and checks before waiting, immediately after subscribing, and after every resume. ' +
+      'If checks already finished, continue the existing review/release gates instead of waiting for another completion event. ' +
+      'For CI call `create_project_event_subscription` (requestedDelivery defaults to "runtime_steer") with source "github", ' +
+      'subjectType "commit", subjectId = the full 40-character PR head SHA (never abbreviated), and exact eventType values ' +
+      '"check_run.completed", "check_suite.completed", "workflow_run.completed"; bare names do not match. ' +
+      'For reviews/comments use subjectType "pull_request" and subjectId = the PR number. ' +
+      'Verified end to end so far: a PR comment waking an idle, live chat. Sleeping-chat CI/review delivery is not verified yet.',
     'Subscription expiry is not a wake. Before ending your turn, persist PR URL, full head SHA, pending check names/run URLs, ' +
       'subscription ID/expiry and a fallback deadline. Arrange one bounded fallback check using `schedules_write` method `create` ' +
       'with a message_session action targeting this same session; save its ID and confirm it was accepted. ' +
