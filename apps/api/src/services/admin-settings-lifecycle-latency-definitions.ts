@@ -66,7 +66,7 @@ export const LIFECYCLE_LATENCY_SETTINGS: AdminSettingDefinition[] = [
     'lifecycleLatency.retentionDays',
     LIFECYCLE_LATENCY_DEFAULTS.retentionDays,
     'Operations',
-    'Days finished lifecycle episodes are kept before the daily purge removes them.',
+    'Days finished lifecycle episodes and stored phase timings are kept before the daily purge removes them.',
     // At least the daily check's 7-day baseline plus the last day (BASELINE_DAYS + 1).
     { min: 8, max: 365 }
   ),

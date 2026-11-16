@@ -1,8 +1,20 @@
 # Session lifecycle measurements
 
-Control-plane structured logs expose bounded timing summaries without adding D1 or
-ProjectData telemetry records. They follow the deployment's Workers observability
-sampling and retention settings; missing logs are not zero-duration phases.
+Control-plane structured logs expose bounded timing summaries. The same phases are also
+stored in D1 `lifecycle_phase_timings` (one row per phase; migration 0250), never in
+ProjectData. Logs follow the deployment's Workers observability sampling and retention
+settings; stored rows are purged by the daily lifecycle latency check after
+`lifecycleLatency.retentionDays`. Missing rows or logs are not zero-duration phases.
+
+Stored rows (`storeLifecyclePhaseTimings` in `apps/api/src/services/lifecycle-timings.ts`)
+carry the ids the callback already holds (project, workspace, node, chat, and the task for
+runner rows). The INSERT itself resolves the task (the newest task bound to the workspace
+in the same project), its skill, and its profile hint when that hint names a profile the
+task may use, so attribution costs no extra round trip. Runner rows use operations
+`runner_start` / `runner_wake`. A failed store is logged as
+`session_lifecycle.timings_store_failed` and never fails the callback or runner step.
+Shared reads: `phaseDurationStats` and `listPhaseTimings` in
+`packages/operations/src/insights-phase-timings.ts`.
 
 - `session_lifecycle.timings`: VM node provisioning (`operation=provision`), workspace
   setup, snapshot capture (`sleep`), or snapshot restore (`wake`). `phases` contains
@@ -20,7 +32,7 @@ sampling and retention settings; missing logs are not zero-duration phases.
 `POST /api/workspaces/:id/lifecycle-timings` accepts a workspace callback JWT and one
 summary (`operation`, `outcome`, `phases`). Its fixed 8 KiB wire envelope bounds the
 fixed phase vocabulary; unknown labels/fields and invalid durations are discarded.
-It never persists the submitted payload. Agents deliver one best-effort callback
+It never persists the submitted payload, only the bounded phases. Agents deliver one best-effort callback
 per operation, without a retry queue; telemetry delivery does not gate startup.
 Old agents can omit summaries, and old control planes may reject the new callback
 without changing operation success. Node `/ready` accepts optional `provisionTimings`.

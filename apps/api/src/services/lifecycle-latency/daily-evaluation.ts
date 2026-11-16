@@ -19,7 +19,8 @@ const BASELINE_DAYS = 7;
 /**
  * Rows deleted per purge statement, and statements per table per run. These bound one run's I/O,
  * not retention: up to 100k rows a day per table can be purged, against a few thousand
- * episodes a day in production (2026-11: ~6k workspaces and ~1.7k nodes created in total).
+ * episodes a day in production (2026-11: ~6k workspaces and ~1.7k nodes created in total), and
+ * at most ~150 phase timing rows per workspace lifecycle (see `storeLifecyclePhaseTimings`).
  * Anything left over is purged by the next run.
  */
 const PURGE_BATCH_SIZE = 5_000;
@@ -47,6 +48,7 @@ export interface LifecycleLatencyDailyResult {
   evaluations: LifecycleStateEvaluation[];
   regressions: number;
   purgedEpisodes: number;
+  purgedPhaseTimings: number;
 }
 
 /** Nearest-rank percentile over an already sorted list. */
@@ -99,8 +101,11 @@ export function regressionMessage(watch: LifecycleWatch): string {
  * and every duration is a lower bound accurate to about one sample at each end. Regressions are
  * recorded in `platform_errors` for platform-feedback triage; a summary is always logged.
  *
+ * Rows older than `lifecycleLatency.retentionDays` are purged from `lifecycle_state_episodes` and
+ * from `lifecycle_phase_timings` (Insights slice T).
+ *
  * I/O per run: one settings read, one SELECT per watched state (at most 11), one observability insert
- * per regression, and at most `PURGE_MAX_BATCHES` purge deletes.
+ * per regression, and at most `PURGE_MAX_BATCHES` purge deletes per table.
  */
 export async function runLifecycleLatencyDailyEvaluation(
   env: Env,
@@ -176,10 +181,18 @@ export async function runLifecycleLatencyDailyEvaluation(
        SELECT id FROM lifecycle_state_episodes WHERE ended_at < ? ORDER BY ended_at LIMIT ?)`,
     cutoff
   );
+  // Phase timings store created_at as epoch ms; same retention, same bounded batches.
+  const purgedPhaseTimings = await purgeInBatches(
+    env,
+    `DELETE FROM lifecycle_phase_timings WHERE id IN (
+       SELECT id FROM lifecycle_phase_timings WHERE created_at < ? ORDER BY created_at LIMIT ?)`,
+    now.getTime() - settings.retentionDays * DAY_MS
+  );
 
   log.info('lifecycle_latency.daily_summary', {
     regressions,
     purgedEpisodes,
+    purgedPhaseTimings,
     states: evaluations.map((evaluation) => ({
       state: `${evaluation.entityType}.${evaluation.status}`,
       budgetMs: evaluation.budgetMs,
@@ -192,10 +205,10 @@ export async function runLifecycleLatencyDailyEvaluation(
       regression: evaluation.regression,
     })),
   });
-  return { evaluations, regressions, purgedEpisodes };
+  return { evaluations, regressions, purgedEpisodes, purgedPhaseTimings };
 }
 
-async function purgeInBatches(env: Env, sql: string, cutoff: string): Promise<number> {
+async function purgeInBatches(env: Env, sql: string, cutoff: string | number): Promise<number> {
   let purged = 0;
   for (let batch = 0; batch < PURGE_MAX_BATCHES; batch++) {
     const result = await env.DATABASE.prepare(sql).bind(cutoff, PURGE_BATCH_SIZE).run();
