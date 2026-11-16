@@ -9,6 +9,7 @@ import { MESSAGE_MERGE_SETTINGS } from './admin-settings-message-merge-definitio
 import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
+import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
 export {
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -34,6 +35,7 @@ const definitions = [
   ...OPERATOR_SETTINGS,
   ...LIFECYCLE_LATENCY_SETTINGS,
   ...OPERATIONS_TELEMETRY_SETTINGS,
+  ...OUTBOUND_SETTINGS,
   ...INSTRUCTION_BUDGET_SETTINGS,
 ];
 

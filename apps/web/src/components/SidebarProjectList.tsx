@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { type ChangeEvent, useCallback, useMemo, useState } from 'react';
 
 import { useProjectIntentPrefetch } from '../hooks/useProjectIntentPrefetch';
+import { projectPath } from '../lib/project-routes';
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
@@ -150,7 +151,7 @@ export function SidebarProjectList({
                 return (
                   <button
                     key={project.id}
-                    onClick={() => onNavigate(`/projects/${project.id}/chat`)}
+                    onClick={() => onNavigate(projectPath(project.id))}
                     onMouseEnter={() => scheduleHoverPrefetch(project.id)}
                     onMouseLeave={cancelHoverPrefetch}
                     onFocus={() => prefetchProject(project.id)}

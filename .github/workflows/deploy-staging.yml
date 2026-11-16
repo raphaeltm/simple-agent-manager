@@ -125,6 +125,15 @@ jobs:
           INSTALLATION: ${{ inputs.environment || 'staging' }}
           PRIMARY_BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
         run: node scripts/deploy/staging-installations.mjs workflow-target
+      # A branch that adds a Durable Object migration tag main lacks would leave primary staging
+      # ahead of main (migrations only move forward), so every main-based deploy there fails the
+      # migration preflight until it merges. Refused before a place is reserved; use staging2.
+      - name: Keep new Durable Object migrations off primary staging
+        if: ${{ (inputs.environment || 'staging') == 'staging' && (inputs.lease_action == 'deploy' || inputs.lease_action == '') && !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
+        env:
+          LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          LEASE_ACTION: ${{ inputs.lease_action || 'deploy' }}
+        run: node scripts/deploy/staging-migration-guard.mjs
       - name: Reserve a place or confirm this branch's turn
         id: queue
         env:

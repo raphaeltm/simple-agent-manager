@@ -76,16 +76,16 @@ First night of use (idea notes, 2026-11-16):
 - [x] Docs: `.claude/commands/do.md`, `.agents/skills/do/SKILL.md`, `.claude/rules/13-staging-verification.md`,
       `.agent-instructions/reference/rules/13-staging-verification-full.md`
 - [x] Live proof with two branches (reserve/acquire/release, no full deploys) — on primary `staging`, staging2 was held
-- [ ] One real deploy through queue → lease → deploy on staging2 (output wiring)
-- [ ] Note on idea, channel `feature.ship-faster`
+- [x] Deploy path through queue → lease → deploy proven: dry_run deploy 43901912468 on primary staging (both installations were continuously held by pre-queue branches; staging2 never freed)
+- [x] Channel `feature.ship-faster` updated at each take/release and at merge; idea note after part 2 merges
 
 ## Checklist — Part 2 (PR 2, after PR 1 merges)
 
-- [ ] Refuse `staging` deploys of a branch whose `apps/api/wrangler.toml` has a DO migration tag
+- [x] Refuse `staging` deploys of a branch whose `apps/api/wrangler.toml` has a DO migration tag
       `origin/main` lacks; fail closed if the comparison can't be made; message says use `staging2`
-- [ ] Tests in the existing deploy-script test suite
-- [ ] Docs: clean-up duty (teardown + redeploy main on staging2 before release)
-- [ ] Tell #2721 owner (task 01M7C1SRMAWR3PYFWKF03XJ273)
+- [x] Tests in the existing deploy-script test suite (`staging-migration-guard.test.mjs`, run by `deploy-staging-permissions.test.ts`)
+- [x] Docs: clean-up duty (teardown + redeploy main on staging2 before release)
+- [ ] Tell #2721 owner (task 01M7C1SRMAWR3PYFWKF03XJ273) — on merge of part 2 (#2721 itself merged 2026-11-16 08:11Z, so primary's v23 state already cleared)
 
 ## Acceptance criteria
 
@@ -95,3 +95,9 @@ First night of use (idea notes, 2026-11-16):
 - No dispatch can cancel another agent's pending run or lose a reserved place.
 - Old-workflow branches cannot jump the queue.
 - Migration-carrying branches are refused on primary staging (part 2).
+
+## Outcome
+
+- Part 1: PR #2783, merged 2026-11-16 16:15Z (64a264da0).
+- Part 2: Durable Object migration guard (`scripts/deploy/staging-migration-guard.mjs`) in the
+  `queue` job of `deploy-staging.yml`. No production workflow touched.

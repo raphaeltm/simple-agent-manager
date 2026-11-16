@@ -25,6 +25,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { log } from '../../src/lib/logger';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { adminRoutes } from '../../src/routes/admin';
 import { agentSignInRoutes } from '../../src/routes/agent-sign-in';
@@ -217,7 +218,12 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       ENDPOINT,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip },
+        headers: {
+          'content-type': 'application/json',
+          'cf-connecting-ip': ip,
+          'x-forwarded-for': '198.51.100.66',
+          'x-real-ip': '198.51.100.67',
+        },
         body: JSON.stringify({ token, target }),
       },
       env
@@ -280,6 +286,19 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
   }
 
   describe('success', () => {
+    it.each(['', 'not-an-ip'])(
+      'does not store spoofed forwarding headers when ingress IP is %j',
+      async (ip) => {
+        const response = await exchange(await issuer.sign(), TARGET_ID, ip);
+        expect(response.status).toBe(200);
+        expect((await me(cookieFrom(response))).status).toBe(200);
+        expect(sqlite.prepare('SELECT ip_address FROM sessions').all()).toEqual([
+          { ip_address: '' },
+        ]);
+        expect(auditRows()).toHaveLength(1);
+      }
+    );
+
     it('signs the agent in as the allowed target with a short session and an audit record', async () => {
       expect(isAgentSignInEnabled(env)).toBe(true);
       const token = await issuer.sign();
@@ -288,6 +307,9 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       expect(response.status).toBe(200);
       const body = (await response.json()) as { user: { id: string }; sessionCookie: string };
       expect(body.user.id).toBe(TARGET_ID);
+      expect(sqlite.prepare('SELECT ip_address FROM sessions').all()).toEqual([
+        { ip_address: '203.0.113.7' },
+      ]);
       const setCookie = response.headers.get('set-cookie') ?? '';
       expect(setCookie).toMatch(/Max-Age=3600/);
       expect(setCookie).toMatch(/HttpOnly/);
@@ -1240,6 +1262,67 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
 
       vi.setSystemTime(start + 60 * 60 * 1000 + 1000);
       expect((await exchange(await issuer.sign())).status).toBe(200);
+    });
+  });
+
+  describe('issuer key fetch goes through the guarded outbound fetch', () => {
+    let logged: ReturnType<typeof vi.spyOn<typeof log, 'error'>>;
+    beforeEach(() => {
+      logged = vi.spyOn(log, 'error');
+    });
+    afterEach(() => {
+      logged.mockRestore();
+    });
+
+    /** Every outbound request, recorded; the JWKS URL answers as `jwks` says. */
+    function recordOutbound(jwks: (url: string) => Promise<Response>): string[] {
+      const seen: string[] = [];
+      vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        seen.push(request.url);
+        return jwks(request.url);
+      });
+      return seen;
+    }
+
+    it.each([
+      ['loopback', 'https://127.0.0.1/oidc'],
+      ['a private range', 'https://10.0.0.5/oidc'],
+      ['the metadata address', 'https://169.254.169.254/oidc'],
+      ['localhost', 'https://localhost/oidc'],
+    ])('refuses an issuer on %s without sending a request', async (_label, privateIssuer) => {
+      env.AGENT_SIGN_IN_TRUST = trustJson({ issuer: privateIssuer });
+      const seen = recordOutbound(async () => Response.json(await getWorkloadJWKS(issuer.env)));
+      await expectRejected(await exchange(await issuer.sign()), 503, /signing keys/);
+      expect(seen).toEqual([]);
+      expect(logged).toHaveBeenCalledWith(
+        'agent_sign_in.issuer_keys_refused',
+        expect.objectContaining({ host: new URL(privateIssuer).hostname, reason: 'host' })
+      );
+    });
+
+    it('does not follow a redirect from the issuer key document', async () => {
+      // jose already sends redirect: 'manual', so the request count alone would pass without the
+      // guard; the refusal log is what only the guarded fetch produces.
+      const seen = recordOutbound(
+        async () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: 'http://169.254.169.254/computeMetadata/v1/' },
+          })
+      );
+      await expectRejected(await exchange(await issuer.sign()), 503, /signing keys/);
+      expect(seen).toEqual([JWKS_URL]);
+      expect(logged).toHaveBeenCalledWith(
+        'agent_sign_in.issuer_keys_refused',
+        expect.objectContaining({ host: `api.${ISSUER_DOMAIN}`, reason: 'redirect_limit' })
+      );
+    });
+
+    it('fetches a public issuer through the same path (control)', async () => {
+      const seen = recordOutbound(async () => Response.json(await getWorkloadJWKS(issuer.env)));
+      expect((await exchange(await issuer.sign())).status).toBe(200);
+      expect(seen).toEqual([JWKS_URL]);
     });
   });
 });

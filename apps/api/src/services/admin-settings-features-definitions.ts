@@ -1,6 +1,6 @@
 import {
-  INSIGHTS_FLOW_SETTINGS,
   INSIGHTS_INSTALLATION_SETTINGS,
+  INSIGHTS_PAGE_SETTINGS,
   INSIGHTS_RECEIPT_SETTINGS,
 } from '@simple-agent-manager/operations';
 import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
@@ -161,7 +161,7 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
       setting.range
     )
   ),
-  ...INSIGHTS_FLOW_SETTINGS.map((setting) =>
+  ...INSIGHTS_PAGE_SETTINGS.map((setting) =>
     integerDefinition(
       setting.name,
       setting.defaultValue,

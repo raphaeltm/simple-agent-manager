@@ -1,5 +1,5 @@
 import { IconButton, paneClassName } from '@simple-agent-manager/ui';
-import { Loader2, MessageSquare } from 'lucide-react';
+import { History, Loader2, MessageSquare } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
@@ -87,7 +87,9 @@ export function RecentChatsDropdown() {
         label={`Recent chats${activeCount > 0 ? ` (${activeCount} active)` : ''}`}
         aria-expanded={isOpen}
         aria-haspopup="true"
-        icon={<MessageSquare size={20} strokeWidth={1.75} />}
+        // History, not a speech bubble: on a phone the Overview puts a Chat control (a bubble) in
+        // the app bar's primary slot right beside this (inbox slice F2, as prototyped).
+        icon={<History size={20} strokeWidth={1.75} />}
         count={activeCount > 99 ? '99+' : activeCount || undefined}
         countTone="active"
         showTooltip={false}

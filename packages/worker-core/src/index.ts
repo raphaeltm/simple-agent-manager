@@ -43,6 +43,17 @@ export {
   serializeError,
 } from './logger';
 export {
+  assertOutboundUrl,
+  classifyHost,
+  DEFAULT_OUTBOUND_MAX_REDIRECTS,
+  guardedFetch,
+  type HostClass,
+  MAX_OUTBOUND_REDIRECTS,
+  type OutboundPolicy,
+  type OutboundRefusalReason,
+  OutboundRequestRefusedError,
+} from './network-hosts';
+export {
   DEFAULT_OPEN_QUESTION_READ_LIMIT,
   hasOpenQuestionAsk,
   type OpenQuestionQuery,

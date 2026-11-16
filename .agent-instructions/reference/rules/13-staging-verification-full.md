@@ -77,6 +77,18 @@ name (`sam2-staging2`): `GET /accounts/$CF_ACCOUNT_ID/d1/database?name=sam2-stag
 the `staging2` Pulumi stack and the `sammy2.party` zone's workspace and node records. Delete test workspaces and
 nodes first; teardown does not delete VMs. The next deploy rebuilds staging2 from nothing.
 
+**Branches that add a Durable Object migration.** Durable Object migrations only move forward.
+Once a branch deploys a tag that `origin/main` lacks (a new `[[migrations]]` entry in
+`apps/api/wrangler.toml`), every main-based branch fails the migration preflight on that
+installation until the branch merges. So `deploy-staging.yml` refuses such deploys on primary
+`staging` before reserving a place (`scripts/deploy/staging-migration-guard.mjs`, which fails closed
+when it cannot compare the two files; it runs from your branch's workflow copy, so branches must
+include it, and the deploy-time migration preflight stays the backstop). Use `staging2`. Clean-up duty: if your branch has not merged
+when you are done on `staging2`, tear it down (Actions → Teardown → `staging2` → `DELETE`, after
+deleting test workspaces and nodes) and redeploy `main` to it (`gh workflow run deploy-staging.yml
+--ref main -f environment=staging2 -f sam_task_id=<id>`) before you release. staging2 rebuilds
+from nothing, so main-based branches can use it again. Nothing does this automatically.
+
 Adding a third: one entry in `scripts/deploy/staging-installations.mjs` plus a zone in the
 staging Cloudflare account that the staging deploy token can edit.
 

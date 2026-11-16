@@ -995,6 +995,30 @@ membership. Returns `ProjectFlowResponse` (`packages/shared/src/types/insights-f
 - `unavailable`: sections whose read failed this time (`runs`, `ci`, `flaky`, `asks`, `ideas`,
   `rework`, `merged`); they come back empty rather than failing the whole response.
 
+### `GET /api/projects/:projectId/insights/accounts`
+
+Insights · Accounts for one project (`projectAccounts`, `packages/operations/src/insights-accounts.ts`).
+Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). Requires project
+membership. Sent with `Cache-Control: private, no-store`: the body carries the caller's own account
+names and limit windows. Returns `ProjectAccountsResponse`
+(`packages/shared/src/types/insights-accounts.ts`):
+`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, unavailable, generatedAt }`.
+
+- `accounts`: most runs first. Each is `{ key, name, owner, kind, agentType, credentials, runs, merged, runsByBucket, stalls, usage, spend }`.
+  `owner` is `you`, `teammate`, `project`, `platform` or `not_recorded`; `kind` is `subscription`,
+  `api_key`, `platform` or `unknown`. Only the caller's own credentials are rows of their own with a
+  `name` (`key` is `cred:<credentialId>`); everyone else's are grouped by owner, agent and kind, with
+  `name: null` and `credentials` saying how many they stand for. `runs` counts the same runs as
+  Flow, attributed to the agent session that ran them; `runsByBucket` lines up with `buckets`.
+- `stalls`: `{ episodes, totalMs, ongoing }`. `usage`: the caller's own last-reported limit windows
+  (`CredentialLimitCredentialSummary`), else `null`. `spend`: `{ state: 'not_reported' }` for API
+  keys, `null` otherwise.
+- `stallEpisodes`: `{ items, total, listed, truncated }`; each item is
+  `{ accountKey, window, startedAt, endedAt, durationMs, runs, outcome }`, newest first, where
+  `outcome` is `resumed`, `ended` (the run ended while waiting), `blocked` or `ongoing`. `truncated` means the scan cap
+  (`insights.accountsStallScanCap`) left older limit waits out.
+- `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`).
+
 ### `POST /api/projects/:id/tasks`
 
 Create a task record.
@@ -1090,6 +1114,8 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 ```
 
 `resourceRequirements` is additive modern workload input. The API validates known fields and persists the normalized JSON through task launch inputs. Legacy `vmSize` is still accepted for old clients as a deprecated compatibility hint; clients should not infer provider hardware from it. Profiles, skills, and triggers persist the same modern data as `resourceRequirementsJson` for compatibility, with explicit `null` clearing that layer and omitted fields preserving inherited behavior.
+
+Optional `nodeId` pins VM execution to a node owned by the caller. Nodes in `creating` or `running` status are accepted; a booting agent waits before workspace creation within the existing agent-ready deadline (default 15 minutes). A reported different VM agent build is refused, and a deadline failure identifies missing version or readiness. Ownership and placement admission are rechecked by `handleNodeSelection()` (`apps/api/src/durable-objects/task-runner/node-steps.ts`) before a workspace is allocated.
 
 Optional `sourceIdeaId` starts the work from an open idea in the same project. It is validated before anything is created — `404` for an id that is not an open idea in this project, `409` for an idea that is done or parked — and the session → idea link (`works_on` in task mode, `discusses` in conversation mode) is recorded before the agent receives its first prompt, on both the VM and the Instant path. If the link cannot be written the submit fails and the task is not left queued. Repeating the same start touches the same link rather than adding a second one. The idea is never injected into `message`; the agent receives it from `get_instructions`.
 

@@ -10,6 +10,7 @@ import {
   DIALECT_VALUES,
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
+import { assertOutboundUrl } from '@simple-agent-manager/worker-core';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -30,19 +31,23 @@ const ccRoutes = new Hono<{ Bindings: Env }>();
 
 ccRoutes.use('/*', requireAuth(), requireApproved());
 
+/**
+ * A user-supplied provider base URL: HTTPS to a public host. The control plane calls it (the AI
+ * proxy passthrough), so loopback, private-network and metadata hosts are refused here as well
+ * as at use time (`resolveProxyUpstream`), which is the control that cannot be bypassed.
+ */
 function requireHttpsBaseUrl(value: unknown): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw errors.badRequest('HTTPS baseUrl is required');
   }
+  let url: URL;
   try {
-    const url = new URL(value);
-    if (url.protocol !== 'https:') {
-      throw errors.badRequest('HTTPS baseUrl is required');
-    }
-    return value.trim();
+    url = assertOutboundUrl(value.trim());
   } catch {
-    throw errors.badRequest('HTTPS baseUrl is required');
+    throw errors.badRequest('baseUrl must be an HTTPS URL on a public host');
   }
+  if (url.protocol !== 'https:') throw errors.badRequest('HTTPS baseUrl is required');
+  return value.trim();
 }
 
 function requireDialect(value: unknown): Dialect {

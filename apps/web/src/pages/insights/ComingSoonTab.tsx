@@ -1,22 +1,18 @@
 /**
- * The Agent setups, Accounts and People tabs until their slices ship (spec idea
- * 01M7HTS38KX2G78JD0ESAGMKKH: S, A and P). Each says what it will show, so the tab is not a blank
+ * The Agent setups and People tabs until their slices ship (spec idea
+ * 01M7HTS38KX2G78JD0ESAGMKKH: S and P). Each says what it will show, so the tab is not a blank
  * promise. This is the one placeholder the Insights spec allows; those slices replace it.
  */
 import { Pane } from '@simple-agent-manager/ui';
 import { Hourglass } from 'lucide-react';
 import { useLocation } from 'react-router';
 
-type ComingTab = 'agent-setups' | 'accounts' | 'people';
+type ComingTab = 'agent-setups' | 'people';
 
 const COMING: Record<ComingTab, { title: string; body: string }> = {
   'agent-setups': {
     title: 'Agent setups',
     body: 'Which profiles, skills and models get work merged without rework, how long they take, and what they cost per merged pull request.',
-  },
-  accounts: {
-    title: 'Accounts',
-    body: 'Runs per account, how often and how long each one waited on a usage limit, and spend per merged pull request for API keys.',
   },
   people: {
     title: 'People',
@@ -28,7 +24,7 @@ function isComingTab(value: string | undefined): value is ComingTab {
   return value !== undefined && value in COMING;
 }
 
-/** One route component for the three tabs; the last path segment says which. */
+/** One route component for the two tabs; the last path segment says which. */
 export function ComingSoonTab() {
   const segment = useLocation().pathname.replace(/\/+$/, '').split('/').pop();
   const tab: ComingTab = isComingTab(segment) ? segment : 'agent-setups';
