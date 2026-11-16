@@ -108,12 +108,23 @@ const CHECKS_LABEL: Record<NonNullable<RunReceipt['outcome']['checks']>, string>
   neutral: 'CI neutral',
 };
 
-/** "PR #2771 · CI passed · 42m" under the chip. */
+/**
+ * The opening commit's verdict, by the Insights · Flow rule. Pending and not recorded say nothing:
+ * the latest checks already describe a pull request still waiting on CI.
+ */
+const FIRST_TRY_LABEL: Partial<Record<RunReceipt['outcome']['ciFirstTry'], string>> = {
+  passed: 'first push passed',
+  failed: 'first push failed',
+};
+
+/** "PR #2771 · CI passed · first push failed · 42m" under the chip. */
 export function outcomeLine(receipt: RunReceipt): string {
   const parts: string[] = [];
   const pr = receipt.outcome.pullRequest;
   if (pr) parts.push(`PR #${pr.number}`);
   if (receipt.outcome.checks) parts.push(CHECKS_LABEL[receipt.outcome.checks]);
+  const firstTry = FIRST_TRY_LABEL[receipt.outcome.ciFirstTry];
+  if (firstTry) parts.push(firstTry);
   parts.push(
     receipt.live ? `${formatElapsed(receipt.totalMs)} so far` : formatElapsed(receipt.totalMs)
   );

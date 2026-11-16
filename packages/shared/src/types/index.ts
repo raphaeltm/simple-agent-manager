@@ -829,6 +829,7 @@ export {
 export type {
   RunReceipt,
   RunReceiptAccount,
+  RunReceiptCiFirstTry,
   RunReceiptFacts,
   RunReceiptFactsInput,
   RunReceiptOutcome,

@@ -177,7 +177,7 @@ export async function runReceipt(
     outcome: {
       pullRequest: pullRequest?.outcome.pullRequest ?? null,
       checks,
-      ciFirstTry: 'not_recorded',
+      ciFirstTry: pullRequest?.outcome.ciFirstTry ?? 'not_recorded',
       terminalReason: row.terminal_reason ?? null,
     },
     account,

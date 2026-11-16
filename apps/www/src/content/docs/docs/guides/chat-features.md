@@ -419,8 +419,10 @@ phone. It is built from records SAM already keeps (`runReceipt`,
 `packages/operations/src/insights-receipt.ts`), and it says when it has nothing to measure from
 rather than guessing.
 
-- **Outcome**: the pull request the run opened, whether it merged, and the state of its checks on
-  the latest commit.
+- **Outcome**: the pull request the run opened, whether it merged, the state of its checks on
+  the latest commit, and whether the first push passed CI (**first push passed** or **first push
+  failed**, by the same rule as [Insights](/docs/guides/insights/)). Nothing is said while those
+  checks run, or when SAM did not see the pull request from its first commit.
 - **Where the time went**: a bar split into waiting for a machine, setup, agent working, waiting on
   a person (the agent's open questions and the inbox items it filed), and CI (from the agent's last
   message until the pull request's last check finished). While the run is live, the phases it has
@@ -435,8 +437,7 @@ rather than guessing.
   when it was clearly slower than recent runs of the same skill (or profile) in the project. Time
   spent waiting for an answer, failing checks, and memory near the limit are listed too.
 
-Whether CI passed on the first push is not shown: SAM keeps check results for a pull request's
-latest commit only. Admins can tune the receipt's limits under **Chat** in
+Admins can tune the receipt's limits under **Chat** in
 [Admin settings](/docs/guides/admin-settings/#run-receipt).
 
 ## File Browsing
