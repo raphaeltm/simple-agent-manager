@@ -305,6 +305,7 @@ Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-api
 | `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                |
 | `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                    |
 | `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown |
+| `insights.receiptTokenRowsMax`           | 64      | 8–1,000     | Token-usage rows (model × account × agent restart) one receipt reads; more shows a floor |
 
 ## Insights flow
 
