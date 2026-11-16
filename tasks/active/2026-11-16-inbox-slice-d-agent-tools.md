@@ -57,20 +57,20 @@ that it must file an inbox item when it needs a person.
 
 ## Checklist
 
-- [ ] Shared: agent link kinds, tool names, `inbox_write` card tool, link id length
-- [ ] Settings: `inbox.similarMatchesMax`, `inbox.similarScanMax`
-- [ ] Operations: file / update / cancel / list / get; ports
-- [ ] Worker port: announce (live chat + push), withdraw question, link checks
-- [ ] `blocking = 1` on the five "paused" readers; tests
-- [ ] MCP member tools + groups `inbox_read`/`inbox_write`; `request_human_input` alias
-- [ ] Notice wording for reviews; cancel never notifies
-- [ ] Instructions paragraph (get_instructions, both branches), server instructions, tool
+- [x] Shared: agent link kinds, tool names, `inbox_write` card tool, link id length
+- [x] Settings: `inbox.similarMatchesMax`, `inbox.similarScanMax`
+- [x] Operations: file / update / cancel / list / get; ports
+- [x] Worker port: announce (live chat + push), withdraw question, link checks
+- [x] `blocking = 1` on the five "paused" readers; tests
+- [x] MCP member tools + groups `inbox_read`/`inbox_write`; `request_human_input` alias
+- [x] Notice wording for reviews; cancel never notifies
+- [x] Instructions paragraph (get_instructions, both branches), server instructions, tool
       descriptions, onboarding text; size stated
-- [ ] Chat card `InboxItemCard` for `inbox_write`; compact matcher; cross-harness test
-- [ ] Capability test through `/mcp` per method (file → list → answer → notice once; archive;
+- [x] Chat card `InboxItemCard` for `inbox_write`; compact matcher; cross-harness test
+- [x] Capability test through `/mcp` per method (file → list → answer → notice once; archive;
       cancel; sleeping chat woken)
-- [ ] Tenancy on real SQL (project B, other chat), owner controls, discriminating
-- [ ] Docs: chat-features, agents, notifications, admin-settings, api reference; skills
+- [x] Tenancy on real SQL (project B, other chat), owner controls, discriminating
+- [x] Docs: chat-features, agents, notifications, admin-settings, api reference; skills
 - [ ] Staging: Claude Code + Codex on VM, one Instant run
 
 ## Acceptance criteria
@@ -82,3 +82,24 @@ that it must file an inbox item when it needs a person.
 - Retried call with the same idempotencyKey files once; similar open items are returned.
 - Project A token cannot read/update/cancel project B items; cannot update/cancel another chat's.
 - get_instructions carries the paragraph in task and conversation mode.
+
+## Status 2026-11-16 11:45Z (paused: Claude account Sam Support at 92% of its 5h window, resets 14:10Z)
+
+PR #2792 (draft). Reviewers returned: security (0 crit/high; 2 MED fixed), test-engineer (3 HIGH open,
+see below), ui-ux (a11y fixes done), cloudflare (HIGH fixed: reconciliation hold), task-completion (FAIL items below).
+Discrimination proven: removing `project_id` from the update predicate reddens only the project-2 attack;
+removing `source_session_id` from the cancel predicate reddens only the other-chat attack.
+
+Remaining before staging:
+- [ ] Test: overview + session-summary-index with a non-blocking ask (blocking control) — test-engineer H1
+- [ ] Test: request_human_input alias push via fileQuestionAsk with a NOTIFICATION stub — H2
+- [ ] Test: compact-mode inbox_write matcher (ask, review, update/cancel refused, non-ask ref refused) — H3
+- [ ] Test: reconciliation candidate with only a non-blocking ask is not held (blocking control)
+- [ ] Test: cross-user isolation (colleague's items not in list/get/similar) + owner control; PR foreign-host attack
+- [ ] Test: non-blocking ask survives runInboxAskSweep; non-blocking ask answered through /answer once
+- [ ] Test: get_instructions in conversation mode; liveness before attention-null assertions
+- [ ] Revert unrelated list renumbering in apps/www/.../guides/agents.md (prettier)
+- [ ] Docs: say inbox tools need a task-backed session (as request_human_input did)
+- [ ] PR body (preflight, review table, discrimination, I/O per call: ask 10 round trips with 0 links,
+      +1 per link; instruction paragraph 1,072 bytes)
+- [ ] Mark ready + CodeRabbit; staging (Claude Code + Codex on VM, one Instant)
