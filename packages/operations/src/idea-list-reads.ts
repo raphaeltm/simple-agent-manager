@@ -56,6 +56,9 @@ export function filedByAgent(row: IdeaRow): boolean {
   return triggeredBy !== 'user' && triggeredBy !== 'connector';
 }
 
+/** SQL form of `!filedByAgent(row)`: a person filed it, directly or through a connected client. */
+export const IDEA_FILED_BY_PERSON_SQL = "coalesce(triggered_by, 'user') IN ('user', 'connector')";
+
 export function filedByLabel(row: IdeaRow): string | null {
   if (!filedByAgent(row)) return null;
   return row.connector_client_name ?? row.triggered_by ?? null;

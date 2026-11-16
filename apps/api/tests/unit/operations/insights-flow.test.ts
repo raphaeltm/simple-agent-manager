@@ -390,6 +390,9 @@ describe('projectFlow', () => {
     idea('I3', { created_at: daysAgo(2) });
     idea('I-old', { created_at: daysAgo(400), updated_at: daysAgo(400) });
     idea('I-done', { status: 'completed', created_at: daysAgo(15) });
+    // An incident-filed idea is folded away, as on the Ideas list; the person-filed ones stay.
+    idea('I-incident', { created_at: daysAgo(25), triggered_by: 'incident' });
+    idea('I-connector', { created_at: daysAgo(1), triggered_by: 'connector' });
     // Attack: a foreign project's old open idea does not wait in our list.
     insert('tasks', {
       id: 'I-foreign',
@@ -413,9 +416,14 @@ describe('projectFlow', () => {
     const result = await projectFlow(ctx(), { projectId: 'p', range: '30d', nowMs: NOW });
 
     expect(result.tiles.ideaToMerged).toMatchObject({ medianMs: 6 * DAY, count: 1 });
-    expect(result.tiles.ideaToMerged.sampled).toEqual({ ideas: 4, cap: 100, truncated: false });
-    expect(result.waitingIdeas.items.map((i) => i.ideaId)).toEqual(['I2', 'I1', 'I3']);
-    expect(result.waitingIdeas.total).toBe(3);
+    expect(result.tiles.ideaToMerged.sampled).toEqual({ ideas: 6, cap: 100, truncated: false });
+    expect(result.waitingIdeas.items.map((i) => i.ideaId)).toEqual([
+      'I2',
+      'I1',
+      'I3',
+      'I-connector',
+    ]);
+    expect(result.waitingIdeas.total).toBe(4);
     expect(result.waitingIdeas.items[1]).toMatchObject({ state: 'merged' });
     expect(result.waitingIdeas.items[0]).toMatchObject({ state: 'not-started', chats: 0 });
     expect(result.tiles.waitingOnPerson).toEqual({

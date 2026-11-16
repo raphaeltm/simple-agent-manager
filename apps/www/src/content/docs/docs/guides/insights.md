@@ -60,7 +60,8 @@ and the commit it opened with, so a flip on a commit that was later pushed over 
 
 ### Ideas waiting longest
 
-Open ideas filed in the range, oldest first, with how many runs worked on each and where it stands
+Open ideas a person filed in the range, oldest first (ideas an automation or incident filed are
+left out, as on the Ideas page), with how many runs worked on each and where it stands
 (not started, pull request open with CI red, stuck, and so on). Select one to open it.
 
 ## On the Overview

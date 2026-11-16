@@ -8,7 +8,7 @@
  * Ranges are bound as ISO strings (and as milliseconds for asks).
  */
 import { ideaTaskPredicateSql } from './idea-identity';
-import { IDEA_COLUMNS } from './idea-list-reads';
+import { IDEA_COLUMNS, IDEA_FILED_BY_PERSON_SQL } from './idea-list-reads';
 import { IDEA_OPEN_STATUSES } from './idea-transitions';
 import { stopReasonCaseSql } from './insights-flow-stop-reasons';
 
@@ -226,14 +226,15 @@ export function asksStatement(w: FlowWindow): FlowStatement {
 const OPEN_IDEA_STATUSES = IDEA_OPEN_STATUSES.map((s) => `'${s}'`).join(', ');
 
 /**
- * Open ideas filed in the range, oldest first: what has waited longest. Bounded to the range
- * so a years-old backlog does not fill the list; `total` says how many there are.
+ * Open ideas a person filed in the range, oldest first: what has waited longest. Bounded to the
+ * range so a years-old backlog does not fill the list; `total` says how many there are. Ideas an
+ * automation or incident filed are left out, as the Ideas list folds them away (`filedByAgent`).
  */
 export function waitingIdeasStatement(w: FlowWindow, limit: number): FlowStatement {
   return {
     sql: `SELECT ${IDEA_COLUMNS}, count(*) OVER () AS total FROM tasks
            WHERE project_id = ? AND ${ideaTaskPredicateSql()} AND status IN (${OPEN_IDEA_STATUSES})
-             AND created_at >= ?
+             AND ${IDEA_FILED_BY_PERSON_SQL} AND created_at >= ?
            ORDER BY created_at ASC, id ASC
            LIMIT ?`,
     binds: [w.projectId, w.since, limit],
