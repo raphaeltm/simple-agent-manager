@@ -38,6 +38,7 @@ Rules:
 - No numbers or counts at all: no digits and no number words. Never say how many; name the items instead.
 - Plain words only: no links, no URLs, no markdown, no quotes around names, no emoji.
 - Short and specific. Do not restate every item; pick what matters.
+- "moreNotShown" lists kinds where more items exist than you were given. You may say that more are waiting, never how many.
 - If nothing needs attention and nothing is happening, reply {"sentences":[]}.`;
 
 export function buildBriefPrompt(facts: BriefFacts): BriefPrompt {
@@ -94,6 +95,7 @@ export function buildBriefPrompt(facts: BriefFacts): BriefPrompt {
       }),
       title: pull.title,
     })),
+    moreNotShown: facts.moreNotShown,
     newIdeas: facts.newIdeas.map((idea, i) => ({
       ref: add('i', i, { ref: { kind: 'idea', id: idea.id, label: idea.title } }),
       title: idea.title,

@@ -34,6 +34,8 @@ import { getProjectBriefSettings } from './project-brief-settings';
 import {
   OVERVIEW_RUNNING_TASK_STATUSES,
   OVERVIEW_STARTING_TASK_STATUSES,
+  overviewChatRunningSql,
+  overviewPausedSessionsSql,
 } from './project-overview-statuses';
 import type { OperationContext } from './types';
 
@@ -74,16 +76,7 @@ const WAITING_ON_VIEWER_SQL = `(CASE WHEN ${PAUSED_ON_PERSON_SQL} AND ss.created
  */
 const RUNNING_SQL = `
   WITH paused_sessions AS (
-    SELECT source_session_id AS session_id
-      FROM asks
-     WHERE project_id = ? AND kind = 'question' AND status = 'open' AND blocking = 1
-       AND source_session_id IS NOT NULL
-       AND (expires_at IS NULL OR expires_at > ?)
-    UNION
-    SELECT requesting_chat_session_id AS session_id
-      FROM runtime_secret_requests
-     WHERE project_id = ? AND status = 'pending' AND expires_at > ?
-       AND requesting_chat_session_id IS NOT NULL
+    ${overviewPausedSessionsSql('?')}
   )
   SELECT ss.id, ss.task_id, ss.topic, ss.started_at, ss.created_at, ss.last_message_at,
          ss.agent_completed_at, ss.created_by_user_id,
@@ -98,14 +91,7 @@ const RUNNING_SQL = `
       ON ap.id = t.agent_profile_hint
      AND (ap.project_id = ss.project_id OR (ap.project_id IS NULL AND ap.user_id = t.user_id))
    WHERE ss.project_id = ?
-     AND ss.status = 'active'
-     AND t.status IN (${sqlList(OVERVIEW_RUNNING_TASK_STATUSES)})
-     AND (
-       t.status IN (${sqlList(OVERVIEW_STARTING_TASK_STATUSES)})
-       OR ${PAUSED_ON_PERSON_SQL}
-       OR (ss.agent_completed_at IS NULL
-           AND (t.execution_step IS NULL OR t.execution_step <> 'awaiting_followup'))
-     )
+     AND ${overviewChatRunningSql('SELECT session_id FROM paused_sessions')}
    ORDER BY ${WAITING_ON_VIEWER_SQL} DESC,
             COALESCE(ss.last_message_at, ss.created_at, ss.started_at) DESC, ss.id DESC
    LIMIT ?`;

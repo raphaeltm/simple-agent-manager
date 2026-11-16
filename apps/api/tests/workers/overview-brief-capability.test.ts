@@ -453,4 +453,48 @@ describe('Overview brief through the real entry points', () => {
     const after = await viewOverview(s);
     expect(after.brief?.sentences).toHaveLength(1);
   });
+
+  it('a project that goes quiet clears an abandoned generation claim and the old brief (a live claim is left alone)', async () => {
+    const s = await seed();
+    await soloProject(s);
+    const askId = await askAndRun(s);
+    modelReplies.push(reply([{ parts: [{ ref: 'a1' }, { text: ' is waiting on you.' }] }]));
+    await viewOverview(s);
+    expect((await viewOverview(s)).brief).not.toBeNull();
+
+    // A live claim (seconds old) on a now-quiet project: the quiet write must not touch it.
+    await answer(s, `ask:${askId}`, 'Staging first');
+    await testEnv.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+      .bind(s.taskId)
+      .run();
+    await syncSummaries(s.project);
+    await testEnv.DATABASE.prepare(
+      'UPDATE project_briefs SET pending_since = ?, checked_at = NULL WHERE project_id = ?'
+    )
+      .bind(Date.now() - 1_000, s.projectId)
+      .run();
+    await viewOverview(s);
+    const live = await testEnv.DATABASE.prepare(
+      'SELECT brief_json IS NOT NULL AS kept, pending_since IS NOT NULL AS pending FROM project_briefs WHERE project_id = ?'
+    )
+      .bind(s.projectId)
+      .first();
+    expect(live).toEqual({ kept: 1, pending: 1 });
+
+    // The same claim, abandoned (older than its lifetime): the quiet write clears it and the brief.
+    await testEnv.DATABASE.prepare(
+      'UPDATE project_briefs SET pending_since = ?, checked_at = NULL WHERE project_id = ?'
+    )
+      .bind(Date.now() - 10 * 60_000, s.projectId)
+      .run();
+    const view = await viewOverview(s);
+    expect(view.brief).toBeNull();
+    const cleared = await testEnv.DATABASE.prepare(
+      'SELECT brief_json, pending_since FROM project_briefs WHERE project_id = ?'
+    )
+      .bind(s.projectId)
+      .first();
+    expect(cleared).toEqual({ brief_json: null, pending_since: null });
+    expect(gatewayCalls()).toHaveLength(1);
+  });
 });

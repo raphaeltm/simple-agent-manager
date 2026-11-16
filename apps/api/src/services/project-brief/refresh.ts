@@ -186,15 +186,19 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
   // interval like a brief would, so a project that turns busy again soon after shows just its
   // tiles until the interval passes (no model call is spent on the quiet state).
   if (briefFactsAreQuiet(facts)) {
+    // Bound to this check (`checked_at` is the value this call claimed), so a slower check can
+    // never overwrite a brief a newer check already made; and it may clear a generation claim
+    // that was abandoned, but never a live one.
     await db
       .prepare(
         `UPDATE project_briefs
             SET brief_json = NULL, ref_asks_json = '[]', ref_chats_json = '[]',
-                ref_automations_json = '[]', ref_accounts_json = '[]', fingerprint = ?, generated_at = ?, stale = 0,
-                updated_at = ?
-          WHERE project_id = ? AND pending_since IS NULL`
+                ref_automations_json = '[]', ref_accounts_json = '[]', fingerprint = ?,
+                generated_at = ?, stale = 0, pending_since = NULL, updated_at = ?
+          WHERE project_id = ? AND checked_at = ?
+            AND (pending_since IS NULL OR pending_since <= ?)`
       )
-      .bind(fingerprint, now, now, projectId)
+      .bind(fingerprint, now, now, projectId, now, now - BRIEF_PENDING_TTL_MS)
       .run();
     return 'quiet';
   }

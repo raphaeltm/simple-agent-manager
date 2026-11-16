@@ -262,6 +262,27 @@ describe('project brief facts and read', () => {
     expect(await briefFactsFingerprint(await readBriefFacts(db, 'p', NOW))).not.toBe(before);
   });
 
+  it('ranks accounts by urgency before the cap, so an account out of usage is never dropped', async () => {
+    for (let i = 0; i < 9; i += 1) window(`a-warning-${i}`, 'project', 'warning');
+    window('z-rejected', 'platform', 'rejected');
+    window('y-critical', 'project', 'critical');
+    const facts = await readBriefFacts(db, 'p', NOW);
+    expect(facts.accounts.map((a) => a.id).slice(0, 2)).toEqual(['z-rejected', 'y-critical']);
+    expect(facts.accounts).toHaveLength(8);
+    expect(facts.moreNotShown).toContain('accounts');
+  });
+
+  it('says which lists were capped, and only those (rule 65)', async () => {
+    for (let i = 0; i < 9; i += 1) ask(`ask-${i}`, { created_at: NOW - (i + 1) * 60_000 });
+    trigger('broken', ['failed', 'failed', 'failed']);
+    const facts = await readBriefFacts(db, 'p', NOW);
+    expect(facts.asks).toHaveLength(8);
+    expect(facts.moreNotShown).toEqual(['asks']);
+    // Control: at the cap exactly, nothing is said to be missing.
+    sqlite.prepare(`DELETE FROM asks WHERE id = 'ask-0'`).run();
+    expect((await readBriefFacts(db, 'p', NOW)).moreNotShown).toEqual([]);
+  });
+
   describe('readProjectBrief', () => {
     function storeBrief(
       sentences: unknown[],
@@ -299,6 +320,42 @@ describe('project brief facts and read', () => {
         brief?.sentences.map((s) => ('ref' in s.parts[0]! ? s.parts[0].ref.id : null))
       ).toEqual(['open-ask']);
       expect(brief?.stale).toBe(true);
+    });
+
+    it('drops a running-chat claim when the agent finished its turn (Running now no longer lists it), keeps it while paused on a question', async () => {
+      runningChat('finished-turn');
+      runningChat('paused');
+      sqlite
+        .prepare(
+          `UPDATE session_summaries SET agent_completed_at = ? WHERE id IN ('finished-turn', 'paused')`
+        )
+        .run(NOW - 1_000);
+      sqlite
+        .prepare(
+          `UPDATE tasks SET execution_step = 'awaiting_followup' WHERE id = 'task-finished-turn'`
+        )
+        .run();
+      ask('q', { source_session_id: 'paused' });
+      storeBrief([about('chat', 'finished-turn'), about('chat', 'paused')], {
+        chats: ['finished-turn', 'paused'],
+        asks: [],
+      });
+      const brief = await readProjectBrief(db, 'p', NOW);
+      expect(
+        brief?.sentences.map((x) => ('ref' in x.parts[0]! ? x.parts[0].ref.id : null))
+      ).toEqual(['paused']);
+    });
+
+    it('drops an automation claim once it recovers; keeps it while it still fails (control)', async () => {
+      trigger('broken', ['failed', 'failed', 'failed']);
+      trigger('fixed', ['completed', 'failed', 'failed', 'failed']);
+      storeBrief([about('automation', 'broken'), about('automation', 'fixed')], {
+        automations: ['broken', 'fixed'],
+      });
+      const brief = await readProjectBrief(db, 'p', NOW);
+      expect(
+        brief?.sentences.map((x) => ('ref' in x.parts[0]! ? x.parts[0].ref.id : null))
+      ).toEqual(['broken']);
     });
 
     it('drops a running-chat claim once the chat ends and a foreign chat never counts as running; a failed-chat claim stays', async () => {
@@ -450,7 +507,7 @@ describe('project brief facts and read', () => {
     }
 
     it('reads each trigger’s newest runs without sorting its history', () => {
-      const detail = plan(BRIEF_FAILING_AUTOMATIONS_SQL, ['p', 3, 3, 8]).split('\n');
+      const detail = plan(BRIEF_FAILING_AUTOMATIONS_SQL, ['p', 8]).split('\n');
       // Each trigger's runs come straight off the new index, newest first.
       const te = detail.findIndex((line) => line.startsWith('SEARCH te'));
       expect(detail[te]).toBe(

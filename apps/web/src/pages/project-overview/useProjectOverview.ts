@@ -168,6 +168,11 @@ export function useProjectOverview(projectId: string) {
     running,
     isPending: query.isPending,
     isError: query.isError && !data,
+    /**
+     * The latest read failed, even if an earlier one's data is still shown. Sections keep showing
+     * cached data; the generated brief does not, because it may no longer be true.
+     */
+    readFailed: query.isError,
     addPendingStart,
     refresh,
   };

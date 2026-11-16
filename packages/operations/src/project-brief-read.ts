@@ -16,8 +16,12 @@ import {
 import { log } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
-import { BRIEF_ACCOUNT_LIVE_SQL, BRIEF_ASK_VISIBLE_SQL } from './project-brief-sql';
-import { OVERVIEW_RUNNING_TASK_STATUSES } from './project-overview-statuses';
+import {
+  BRIEF_ACCOUNT_LIVE_SQL,
+  BRIEF_ASK_VISIBLE_SQL,
+  BRIEF_AUTOMATION_FAILING_SQL,
+} from './project-brief-sql';
+import { overviewChatRunningSql, overviewPausedSessionsSql } from './project-overview-statuses';
 
 /** At most this many sentences are stored, and so shown (three on desktop, two on a phone). */
 export const BRIEF_MAX_SENTENCES = 3;
@@ -44,8 +48,6 @@ export const StoredBriefSchema = v.object({
 });
 export type StoredBrief = v.InferOutput<typeof StoredBriefSchema>;
 
-const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
-
 /** A ref list column as `json_each` input; a malformed value reads as empty instead of failing. */
 const refs = (column: string) =>
   `json_each(CASE WHEN json_valid(b.${column}) THEN b.${column} ELSE '[]' END)`;
@@ -55,8 +57,10 @@ const refs = (column: string) =>
  * member: an ask must still pass the facts' own visibility rule (`BRIEF_ASK_VISIBLE_SQL`), so a
  * member added after the brief was written never sees an ask through it; an account must still be
  * a shared account near its limit (`BRIEF_ACCOUNT_LIVE_SQL`). Every subquery binds the row's own
- * `project_id`, so a ref can never resolve another project's item (rule 11). Binds `now` twice
- * (asks, accounts), then the project.
+ * `project_id`, so a ref can never resolve another project's item (rule 11). A chat named as
+ * running must still pass Running now's own rule (`overviewChatRunningSql`), and an automation
+ * named as failing must still be failing (`BRIEF_AUTOMATION_FAILING_SQL`). Binds `now` four times
+ * (asks; the paused-chat sets twice; accounts), then the project.
  */
 const BRIEF_SQL = `
   SELECT b.brief_json, b.generated_at, b.stale, b.pending_since, b.last_error_at,
@@ -65,11 +69,11 @@ const BRIEF_SQL = `
         AND a.id IN (SELECT value FROM ${refs('ref_asks_json')})) AS open_asks,
     (SELECT json_group_array(ss.id) FROM session_summaries ss
        JOIN tasks t ON t.id = ss.task_id AND t.project_id = ss.project_id
-      WHERE ss.project_id = b.project_id AND ss.status = 'active'
-        AND t.status IN (${sqlList(OVERVIEW_RUNNING_TASK_STATUSES)})
+      WHERE ss.project_id = b.project_id
+        AND ${overviewChatRunningSql(overviewPausedSessionsSql('b.project_id'))}
         AND ss.id IN (SELECT value FROM ${refs('ref_chats_json')})) AS running_chats,
     (SELECT json_group_array(t.id) FROM triggers t
-      WHERE t.project_id = b.project_id AND t.status <> 'disabled'
+      WHERE t.project_id = b.project_id AND ${BRIEF_AUTOMATION_FAILING_SQL}
         AND t.id IN (SELECT value FROM ${refs('ref_automations_json')})) AS live_automations,
     (SELECT json_group_array(DISTINCT w.credential_reference) FROM credential_limit_windows w
       WHERE w.project_id = b.project_id AND ${BRIEF_ACCOUNT_LIVE_SQL}
@@ -128,7 +132,7 @@ export async function readProjectBrief(
 ): Promise<OverviewBrief | null> {
   const raw = await db
     .prepare(BRIEF_SQL)
-    .bind(now, now, projectId)
+    .bind(now, now, now, now, projectId)
     .first<Record<string, unknown>>();
   if (!raw) return null;
   const row = v.safeParse(RowSchema, raw);

@@ -177,8 +177,14 @@ function json(status: number, body: unknown): Response {
   });
 }
 
+/** When set, the Overview read fails (a background re-read after a good one). */
+let overviewFails = false;
+
 /** The network edge: every request the page makes lands here. */
 function route(path: string, method: string): Response {
+  if (overviewFails && path === `/api/projects/${PROJECT_ID}/overview`) {
+    return json(500, { error: 'INTERNAL_ERROR', message: 'read failed' });
+  }
   if (method === 'POST' && path === `/api/projects/${PROJECT_ID}/tasks/submit`) {
     return json(submitResponse.status, submitResponse.body);
   }
@@ -386,6 +392,7 @@ async function typeAndSend(text: string) {
 describe('Project Overview', () => {
   beforeEach(() => {
     recorded = [];
+    overviewFails = false;
     extraRoutes = {};
     inboxItems = [];
     inboxNextCursor = null;
@@ -909,7 +916,7 @@ describe('Project Overview', () => {
       // Agent-written text is rendered as text, never markup.
       expect(automation.textContent).toBe('Nightly <script>alert(1)</script> build');
       expect(brief.querySelector('script')).toBeNull();
-      const pr = within(brief).getByRole('link', { name: /Round tax totals/ });
+      const pr = within(brief).getByRole('link', { name: 'Round tax totals (opens in a new tab)' });
       expect(pr).toHaveAttribute('href', 'https://github.com/acme/billing/pull/2771');
       expect(pr).toHaveAttribute('rel', 'noopener noreferrer');
       expect(within(brief).queryByTestId('overview-brief-toggle')).toBeNull();
@@ -917,7 +924,6 @@ describe('Project Overview', () => {
       expect(within(brief).getByTestId('overview-brief-age')).toHaveTextContent(
         'Written 25 min ago'
       );
-      expect(within(pr).getByText('(opens in a new tab)')).toBeInTheDocument();
       // Desktop DOM order: the brief comes before Needs you.
       const main = screen.getByTestId('overview-main');
       const regions = within(main)
@@ -991,6 +997,57 @@ describe('Project Overview', () => {
       renderOverview();
       expect(await screen.findByRole('region', { name: 'Running now' })).toBeInTheDocument();
       expect(screen.queryByRole('region', { name: 'Project brief' })).toBeNull();
+    });
+
+    it('keeps the full name as the accessible name when two long names share their start', async () => {
+      const shared = `Migrate the invoicing pipeline from the legacy cron worker to ${'durable '.repeat(2)}`;
+      const one = `${shared}queues for EU customers`;
+      const two = `${shared}queues for US customers`;
+      overviewBody = {
+        ...overview([EXISTING]),
+        brief: briefOf({
+          sentences: [
+            {
+              parts: [
+                { ref: { kind: 'ask', id: 'ask-eu', label: one } },
+                { text: ' and ' },
+                { ref: { kind: 'ask', id: 'ask-us', label: two } },
+                { text: ' wait on you.' },
+              ],
+            },
+          ],
+        }),
+      };
+      renderOverview();
+      const brief = await screen.findByRole('region', { name: 'Project brief' });
+      const eu = within(brief).getByRole('link', { name: one });
+      const us = within(brief).getByRole('link', { name: two });
+      // Shortened on screen, distinct to assistive technology.
+      expect(eu.textContent).toBe(us.textContent);
+      expect(eu.textContent?.endsWith('…')).toBe(true);
+      expect(eu).not.toBe(us);
+    });
+
+    it('hides the brief when a background re-read fails, while the other sections keep their data', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        overviewBody = { ...overview([EXISTING]), brief: briefOf({ stale: true }) };
+        renderOverview();
+        expect(await screen.findByRole('region', { name: 'Project brief' })).toBeInTheDocument();
+        overviewFails = true;
+        // The stale brief's catch-up re-read fails.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(9_000);
+        });
+        await waitFor(() =>
+          expect(screen.queryByRole('region', { name: 'Project brief' })).toBeNull()
+        );
+        expect(
+          screen.getByRole('link', { name: /Fix rounding in tax totals/ })
+        ).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

@@ -16,12 +16,15 @@
  * Round trips: seven reads issued together (workerd runs six at once; background only: a page
  * view never waits on them).
  */
-import { DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import { ideaTaskPredicateSql } from './idea-identity';
-import { BRIEF_ACCOUNT_LIVE_SQL, BRIEF_ASK_VISIBLE_SQL } from './project-brief-sql';
+import {
+  BRIEF_ACCOUNT_LIVE_SQL,
+  BRIEF_ASK_VISIBLE_SQL,
+  BRIEF_AUTOMATION_FAILING_SQL,
+} from './project-brief-sql';
 import { readRunningChats } from './project-overview';
 import { sanitizeUserInput } from './sanitize-user-input';
 
@@ -45,7 +48,21 @@ export interface BriefFacts {
   accounts: Array<{ id: string; label: string; level: 'warning' | 'critical' | 'rejected' }>;
   mergedPullRequests: Array<{ number: number; url: string; title: string }>;
   newIdeas: Array<{ id: string; title: string }>;
+  /**
+   * Kinds that had more rows than the brief was given (each list is capped at
+   * `BRIEF_FACT_ROWS_MAX`), so the model knows a list is partial (rule 65). Never a count.
+   */
+  moreNotShown: BriefFactKind[];
 }
+
+export type BriefFactKind =
+  | 'asks'
+  | 'runningChats'
+  | 'failedChats'
+  | 'failingAutomations'
+  | 'accounts'
+  | 'mergedPullRequests'
+  | 'newIdeas';
 
 /** Clean an untrusted title for the model: no control characters, one line, capped. */
 /** Control and invisible format characters (zero-width, bidi, tag characters used to smuggle text). */
@@ -107,22 +124,11 @@ export const BRIEF_FAILED_CHATS_SQL = `
    ORDER BY t.updated_at DESC, t.id DESC
    LIMIT ?`;
 
-/**
- * Automations whose newest finished runs all failed: the Automation page's own rule
- * (`failureStreak` ≥ `DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES`, apps/web automation model). Each
- * trigger walks its newest runs backwards on `idx_trigger_executions_trigger_sequence` and stops
- * after a few finished ones, with no sort over its history.
- */
+/** Failing automations (`BRIEF_AUTOMATION_FAILING_SQL`), by name. */
 export const BRIEF_FAILING_AUTOMATIONS_SQL = `
   SELECT t.id, t.name, t.status
     FROM triggers t
-   WHERE t.project_id = ? AND t.status <> 'disabled'
-     AND (SELECT COUNT(*) FROM (
-            SELECT te.status FROM trigger_executions te
-             WHERE te.trigger_id = t.id AND te.status IN ('completed', 'failed')
-             ORDER BY te.sequence_number DESC, te.created_at DESC
-             LIMIT ?) recent
-           WHERE recent.status = 'failed') >= ?
+   WHERE t.project_id = ? AND ${BRIEF_AUTOMATION_FAILING_SQL}
    ORDER BY t.name ASC, t.id ASC
    LIMIT ?`;
 
@@ -229,19 +235,21 @@ export async function readBriefFacts(
       .bind(...params)
       .all<Record<string, unknown>>()
       .then((result) => result.results ?? []);
-  const threshold = DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES;
+  // One more row than the brief takes, so a capped list can say it is partial (rule 65).
+  const over = limit + 1;
   const [asks, running, failed, automations, accounts, pulls, ideas] = await Promise.all([
-    all(BRIEF_ASKS_SQL, projectId, now, limit),
+    all(BRIEF_ASKS_SQL, projectId, now, over),
     // A viewer id that matches nobody: the facts are the same for every member.
     readRunningChats(db, projectId, '', limit),
-    all(BRIEF_FAILED_CHATS_SQL, projectId, datePrefix(failedCutoff), failedCutoff, limit),
-    all(BRIEF_FAILING_AUTOMATIONS_SQL, projectId, threshold, threshold, limit),
+    all(BRIEF_FAILED_CHATS_SQL, projectId, datePrefix(failedCutoff), failedCutoff, over),
+    all(BRIEF_FAILING_AUTOMATIONS_SQL, projectId, over),
     all(BRIEF_ACCOUNTS_SQL, projectId, now),
-    all(BRIEF_MERGED_PULL_REQUESTS_SQL, projectId, datePrefix(recentCutoff), recentCutoff, limit),
-    all(BRIEF_NEW_IDEAS_SQL, projectId, datePrefix(recentCutoff), recentCutoff, limit),
+    all(BRIEF_MERGED_PULL_REQUESTS_SQL, projectId, datePrefix(recentCutoff), recentCutoff, over),
+    all(BRIEF_NEW_IDEAS_SQL, projectId, datePrefix(recentCutoff), recentCutoff, over),
   ]);
 
-  // One line per account, at its worst window.
+  // One line per account, at its worst window; the most urgent accounts first, so the cap can
+  // never drop an account that is out of usage in favour of one running low.
   const byAccount = new Map<string, BriefFacts['accounts'][number]>();
   for (const row of parseRows(AccountRow, accounts, 'accounts', projectId)) {
     const current = byAccount.get(row.credential_reference);
@@ -252,41 +260,65 @@ export async function readBriefFacts(
       level: row.last_event_level,
     });
   }
+  const rankedAccounts = [...byAccount.values()].sort(
+    (a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level] || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+
+  const moreNotShown: BriefFactKind[] = [];
+  const capped = <T>(kind: BriefFactKind, rows: T[]): T[] => {
+    if (rows.length > limit) moreNotShown.push(kind);
+    return rows.slice(0, limit);
+  };
+  if (running.total > running.items.length) moreNotShown.push('runningChats');
 
   return {
-    asks: parseRows(AskRow, asks, 'asks', projectId).map((row) => ({
-      id: row.id,
-      kind: briefText(row.kind, 'question'),
-      title: briefText(row.title, 'An open item'),
-      blocking: row.blocking === 1,
-      age: briefAge(row.created_at, now),
-    })),
+    asks: capped(
+      'asks',
+      parseRows(AskRow, asks, 'asks', projectId).map((row) => ({
+        id: row.id,
+        kind: briefText(row.kind, 'question'),
+        title: briefText(row.title, 'An open item'),
+        blocking: row.blocking === 1,
+        age: briefAge(row.created_at, now),
+      }))
+    ),
     runningChats: running.items.map((chat) => ({
       id: chat.sessionId,
       topic: briefText(chat.topic, 'A new chat'),
       state: chat.state,
     })),
-    failedChats: parseRows(FailedChatRow, failed, 'failedChats', projectId).map((row) => ({
-      id: row.id,
-      topic: briefText(row.topic ?? row.title, 'A chat'),
-    })),
-    failingAutomations: parseRows(AutomationRow, automations, 'automations', projectId).map(
-      (row) => ({
+    failedChats: capped(
+      'failedChats',
+      parseRows(FailedChatRow, failed, 'failedChats', projectId).map((row) => ({
+        id: row.id,
+        topic: briefText(row.topic ?? row.title, 'A chat'),
+      }))
+    ),
+    failingAutomations: capped(
+      'failingAutomations',
+      parseRows(AutomationRow, automations, 'automations', projectId).map((row) => ({
         id: row.id,
         name: briefText(row.name, 'An automation'),
         paused: row.status === 'paused',
-      })
+      }))
     ),
-    accounts: [...byAccount.values()].slice(0, limit),
-    mergedPullRequests: parseRows(PullRequestRow, pulls, 'pullRequests', projectId).map((row) => ({
-      number: row.number,
-      url: row.url,
-      title: briefText(row.title, `Pull request`),
-    })),
-    newIdeas: parseRows(IdeaRow, ideas, 'ideas', projectId).map((row) => ({
-      id: row.id,
-      title: briefText(row.title, 'An idea'),
-    })),
+    accounts: capped('accounts', rankedAccounts),
+    mergedPullRequests: capped(
+      'mergedPullRequests',
+      parseRows(PullRequestRow, pulls, 'pullRequests', projectId).map((row) => ({
+        number: row.number,
+        url: row.url,
+        title: briefText(row.title, `Pull request`),
+      }))
+    ),
+    newIdeas: capped(
+      'newIdeas',
+      parseRows(IdeaRow, ideas, 'ideas', projectId).map((row) => ({
+        id: row.id,
+        title: briefText(row.title, 'An idea'),
+      }))
+    ),
+    moreNotShown,
   };
 }
 

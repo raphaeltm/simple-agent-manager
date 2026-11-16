@@ -153,7 +153,7 @@ export function ProjectOverview() {
               one line under it on a phone. Renders nothing when there is no brief. */}
           <ProjectBriefSection
             projectId={projectId}
-            brief={overview.isError || unavailable.has('brief') ? null : overview.data?.brief}
+            brief={overview.readFailed || unavailable.has('brief') ? null : overview.data?.brief}
             className={PHONE_ORDER.brief}
           />
           <NeedsYouSection

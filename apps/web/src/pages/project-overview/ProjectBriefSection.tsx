@@ -38,8 +38,8 @@ export const BRIEF_SENTENCES_DESKTOP = 3;
 
 /**
  * Characters of an item's name shown in a sentence. Names are agent- and person-written and can
- * be long; the brief stays a few lines so Needs you below it keeps its place. The full name is
- * the link's accessible name and tooltip.
+ * be long; the brief stays a few lines so Needs you below it keeps its place. A shortened name's
+ * link keeps the full name as its accessible name (`aria-label`) and tooltip.
  */
 export const BRIEF_LABEL_MAX_CHARS = 60;
 
@@ -116,6 +116,8 @@ function BriefRef({
         rel="noopener noreferrer"
         className={LINK_CLASS}
         title={full}
+        // The full name, even when the text is shortened, so two long names never read the same.
+        aria-label={`${label} (opens in a new tab)`}
       >
         {shown}
         <ExternalLink
@@ -123,12 +125,11 @@ function BriefRef({
           aria-hidden="true"
           className="ml-0.5 inline-block align-baseline text-fg-muted"
         />
-        <span className="sr-only"> (opens in a new tab)</span>
       </a>
     );
   }
   return (
-    <Link to={target.to} state={target.state} className={LINK_CLASS} title={full}>
+    <Link to={target.to} state={target.state} className={LINK_CLASS} title={full} aria-label={full}>
       {shown}
     </Link>
   );
