@@ -10,6 +10,7 @@ import {
   type ProjectDataArchiveSourceIntentState,
 } from '../archive/contract';
 import { messageBoundsClause } from './message-cursor';
+import { countIngestRole, type MessageIngestMetrics,refuseMerge } from './message-ingest-metrics';
 import {
   type MessageIngestSource,
   type MessageMergeConfig,
@@ -153,7 +154,11 @@ export function persistMessageBatch(
     sequence?: number;
     origin?: string | null;
   }>,
-  context?: { source?: MessageIngestSource; config: MessageMergeConfig }
+  context?: {
+    source?: MessageIngestSource;
+    config: MessageMergeConfig;
+    metrics?: MessageIngestMetrics;
+  }
 ): {
   persisted: number;
   duplicates: number;
@@ -194,6 +199,13 @@ export function persistMessageBatch(
     throw new Error(`Session ${sessionId} is stopped and cannot accept messages`);
   }
 
+  const metrics = context?.metrics;
+  if (metrics) {
+    metrics.batches++;
+    for (const message of messages) countIngestRole(metrics.received, message.role);
+  }
+  if (!context?.config.enabled) refuseMerge(metrics, 'setting_disabled');
+  else if (!context.source?.outboxIncarnation) refuseMerge(metrics, 'missing_incarnation');
   const previousStream = readMessageIngestState(session.stream_ingest_state);
   if (context?.source && (context.config.enabled || previousStream))
     assertSessionIdentityGuard(sql, sessionId, 'persist message batch', {
@@ -236,7 +248,8 @@ export function persistMessageBatch(
                 }
               : null,
           messages.map((message) => message.messageId),
-          parseMessageCount(session, 'messages.batch_stream_count')
+          parseMessageCount(session, 'messages.batch_stream_count'),
+          metrics
         )
       : null;
 
@@ -366,6 +379,11 @@ export function persistMessageBatch(
         sequence,
         origin
       );
+    if (metrics) {
+      countIngestRole(metrics.accepted, msg.role);
+      if (msg.role === 'assistant' && storedToolMetadata === null) metrics.eligible++;
+      if (!stream) countIngestRole(metrics.inserted, msg.role);
+    }
     persisted++;
     persistedMessages.push({
       id: canonicalId,
@@ -382,6 +400,7 @@ export function persistMessageBatch(
   let firstUserContent: string | null = null;
   const hadTopic = !!session.topic;
   const staged = stream?.flush(sql);
+  if (metrics) metrics.duplicates = duplicates;
 
   if (persisted > 0) {
     if (staged)
