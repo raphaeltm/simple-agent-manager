@@ -59,26 +59,26 @@ an Overview nav item. It is not the landing page yet and has no Needs you sectio
 
 ## Checklist
 
-- [ ] Shared types `ProjectOverviewResponse` etc. in `packages/shared`
-- [ ] Operation `projectOverviewGet` in `packages/operations` (auth, running query with per-row
+- [x] Shared types `ProjectOverviewResponse` etc. in `packages/shared`
+- [x] Operation `projectOverviewGet` in `packages/operations` (auth, running query with per-row
       validation, ideas via `listIdeasWithDerivedStatus`, merged PRs), exported
-- [ ] REST route `GET /api/projects/:projectId/overview`, mounted; API reference docs
-- [ ] Real-SQL tests: foreign-project rows excluded, owner control, sleeping/idle/terminal excluded,
+- [x] REST route `GET /api/projects/:projectId/overview`, mounted; API reference docs
+- [x] Real-SQL tests: foreign-project rows excluded, owner control, sleeping/idle/terminal excluded,
       waiting chats included, malformed row skipped, merged PRs ordered, limits
-- [ ] Extract composer state + submit into a shared hook used by chat page and Overview (chat page
+- [x] Extract composer state + submit into a shared hook used by chat page and Overview (chat page
       behaviour unchanged; existing chat tests green)
-- [ ] `ChatInput`: receipt slot, collapse-when-empty, focusOnMount passthrough
-- [ ] `usageWords` long window names ("5-hour window · 38% left")
-- [ ] Automation: export compact attention row sharing the fix-button piece with `AttentionPanel`
-- [ ] Overview page (lazy) with sections, layout slots, TanStack query, socket invalidation,
+- [x] `ChatInput`: receipt slot, collapse-when-empty, focusOnMount passthrough
+- [x] `usageWords` long window names ("5-hour window · 38% left")
+- [x] Automation: export compact attention row sharing the fix-button piece with `AttentionPanel`
+- [x] Overview page (lazy) with sections, layout slots, TanStack query, socket invalidation,
       no hidden-tab polling
-- [ ] Route `overview` + nav item first (desktop + mobile drawer) + command palette entry
-- [ ] Behavioural tests: send from Overview → no navigation, receipt, new Running now row (fetch
+- [x] Route `overview` + nav item first (desktop + mobile drawer) + command palette entry
+- [x] Behavioural tests: send from Overview → no navigation, receipt, new Running now row (fetch
       mocked at the network edge); failed start shows error in receipt line
-- [ ] Playwright audit 375/1280: normal, 12 running, 6% account, two failing automations, long
+- [x] Playwright audit 375/1280: normal, 12 running, 6% account, two failing automations, long
       titles, empty quiet project, receipt, failure; screenshots reviewed and posted
-- [ ] Docs: public docs page for the Overview / nav, api-reference
-- [ ] Channel: interface publication; merge + deploy publications
+- [x] Docs: public docs page for the Overview / nav, api-reference
+- [x] Channel: interface publication (event 269eeea2, sequence 3) and staging notice; merge + deploy publications at Phase 7
 
 ## Acceptance criteria
 
@@ -89,3 +89,23 @@ an Overview nav item. It is not the landing page yet and has no Needs you sectio
 - One aggregated read within 20 round trips (count stated in PR); TanStack Query; no polling while
   hidden; one malformed row does not break the read.
 - Staging: verified as the smoke user on a project with a real running agent.
+
+## Outcome notes
+
+- Measured round trips for the overview read: 10 D1 + 1 Durable Object = 11 (test
+  `stays within the dashboard round-trip budget…`), budget 20.
+- Reviews: security PASS with 3 LOW (LOW-1, LOW-2 fixed; LOW-3 kept by design: a skipped malformed
+  row still counts in `total`). Performance: 3 MEDIUM fixed (migration 0246 index, lighter
+  recent-ideas read, no socket refetch on hidden tabs), ResizeObserver LOW fixed. UI/UX: 3 HIGH
+  fixed (waiting-on-you ranking + disclosure, fold/receipt, spoken budgets), M1/M2/M4/M7 and
+  LOWs fixed. Task-completion validator: 2 HIGH fixed (nav/route tests, measured round trips),
+  MEDIUM rendered-section tests added.
+- Deferred with reasons (recorded in PR #2775):
+  - UI M3 (phone usage nudge hidden while folded): the Budgets section shows the same exception
+    second on the phone; showing the nudge in the folded box would spend the row it exists to save.
+  - UI M5 (pane shadows clipped at scroller edges): matches the accepted prototype and the chat
+    list; a negative-margin scroller would risk horizontal overflow at 375px. Revisit with F2's
+    layout change.
+  - UI M6 (phone visual order differs from DOM order): one CSS-arranged tree is required so the
+    composer never remounts across the breakpoint (rule 48); desktop DOM order is logical.
+- Screenshots: PR comment https://github.com/raphaeltm/simple-agent-manager/pull/2775#issuecomment-6905653701
