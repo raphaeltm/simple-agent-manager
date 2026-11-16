@@ -81,7 +81,7 @@ Failure points (writers of `tasks.status='failed'`, 16 of them):
 - [x] Rebase onto main after slice G (#2780) merges (part 6 is built on G's reader): takeover task 01M7JC1MTRFT8PWRQ8BNFP8D6W, merge commit a7b01b35c (tree = slice E rebased on main 30ae952ae; no force-push)
 - [x] Provider-limit block supersedes an open failed-wake item (`closeWakeErrorAskForProviderLimit`), and a usage-limit wait files nothing, both through the real callback route (`provider-limit-lifecycle.test.ts`)
 - [x] API reference: failed-wake and undelivered-inbox-answer rows, wake action, provider-limit behaviour
-- [ ] Re-run reviewers on the rebased head (security-auditor, cloudflare-specialist, test-engineer, task-completion-validator)
+- [x] Re-run reviewers on the rebased head (security-auditor, cloudflare-specialist, test-engineer, task-completion-validator): all findings fixed or deferred with reasons (2fe59c8d6, 2fce75c87, 5e56f8333); validator re-run PASS
 - [ ] Staging verification on the rebased head: real failed start + real failing/paused automation, Retry/Resume from the inbox closes each, phone viewport
 
 ## Notes

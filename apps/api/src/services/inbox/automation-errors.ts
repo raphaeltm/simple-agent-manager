@@ -6,7 +6,7 @@
  * succeeds or the automation is resumed (both end the streak in `consecutiveFailureCount`, which
  * honours the resume reset sequence) or when it is disabled or deleted.
  *
- * Both halves run in the minute cron as one isolated step, each half isolated on its own:
+ * Both halves run in the five-minute operational cron as one isolated step, each half isolated on its own:
  * - file: automations with a failed run completed inside `inbox.errorLookbackMinutes`
  *   (`idx_trigger_executions_failed_completed`) that their item does not reflect yet, one row per
  *   automation, at most `4 × inbox.errorSweepBatchSize` checked (one streak read each) and

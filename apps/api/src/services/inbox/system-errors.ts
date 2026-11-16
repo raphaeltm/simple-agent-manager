@@ -3,7 +3,7 @@
  * `packages/operations/src/inbox-error-core.ts`; this module decides what counts as a failure of
  * each thing, builds the item's sentences, and notifies the owner once per new item.
  *
- * Failed tasks are found by `runInboxSystemErrorSweep` (cron, every minute): one scan over the
+ * Failed tasks are found by `runInboxSystemErrorSweep` (the five-minute operational cron): one scan over the
  * recently failed tasks covers every writer of `tasks.status = 'failed'` (task runner, Instant
  * launch, dispatch, VM-agent callback, stuck-task recovery, node loss, ProjectData). The VM-agent
  * callback also files inline so its existing `error` notification can open the item.
@@ -209,9 +209,10 @@ const TASK_SWEEP_MAX_PAGES = 5;
  * dedupe-key index). A candidate leaves the set once it has an item (the NOT EXISTS,
  * `idx_asks_error_task`) or once it ages out of the window. A failure a person set themselves is
  * excluded in SQL; the other normal endings (classified in code) are paged past. Throughput at the
- * defaults (batch 10, lookback 30 min): 200 rows read and 10 items filed per minute, so normal
+ * defaults (batch 10, lookback 30 min, a tick every 5 min): 200 rows read and 10 items filed per tick, so normal
  * endings starve genuine failures only past 200 of them in 30 minutes, installation-wide, and a
- * filing backlog drains at 600 items an hour.
+ * filing backlog drains at 120 items an hour. A failure is filed within one tick (at most 5 min) of
+ * being written, or at once by the VM-agent callback.
  */
 export async function runInboxSystemErrorSweep(
   env: Env,

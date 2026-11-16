@@ -61,7 +61,7 @@ export const INBOX_SETTINGS = [
     name: 'inbox.errorSweepBatchSize',
     defaultValue: 10,
     description:
-      'Failed tasks one minute-by-minute sweep turns into inbox error items at most. Each costs a few database writes.',
+      'Error items one step of the five-minute sweep files at most (failed tasks, automations, lost answers). Each costs a few database writes.',
     range: { min: 1, max: 50 },
   },
   {
