@@ -424,7 +424,8 @@ export function ChatInput({
         fileInputRef={fileInputRef}
         uploading={uploading}
         showShortcutHint={!isMobile}
-        showAttachButton={!toolbarVisible}
+        // Folded, attach waits in the To row that unfolds on focus, so the idle box is one line.
+        showAttachButton={!showToolbar}
         attachTitle="Attach files to this task"
         focusOnMount={focusOnMount}
       />
