@@ -3,6 +3,9 @@
  * The Flow read is served exactly as the API answers it (`insights-fixtures.ts`). Scenes: a
  * realistic month, a stressed project (long names, every stop reason, 13 weeks, a capped idea
  * sample), an empty project, a failed read, the range switch, and the coming-soon tabs.
+ * Accounts (slice A, `insights-accounts-fixtures.ts`): a realistic month, a stressed project
+ * (long and hostile names, eight accounts, 13 weeks, a capped stall scan), an empty project and
+ * a failed read.
  */
 import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
@@ -13,6 +16,7 @@ import {
   makeMockUser,
   screenshot,
 } from './audit-helpers';
+import { type AccountsScene, makeAccounts } from './insights-accounts-fixtures';
 import { type FlowScene, makeFlow } from './insights-fixtures';
 
 const PROJECT_ID = 'proj-insights';
@@ -48,7 +52,12 @@ const MOCK_PROJECT = {
   },
 };
 
-async function setupScene(page: Page, scene: FlowScene | 'error', requests: string[] = []) {
+async function setupScene(
+  page: Page,
+  scene: FlowScene | 'error',
+  requests: string[] = [],
+  accountsScene: AccountsScene | 'error' = 'realistic'
+) {
   await page.addInitScript((id) => {
     localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true');
   }, USER_ID);
@@ -93,6 +102,16 @@ async function setupScene(page: Page, scene: FlowScene | 'error', requests: stri
       if (scene === 'error')
         return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
       return respond(200, makeFlow(PROJECT_ID, isInsightsRange(range) ? range : '30d', scene));
+    }
+    if (path === `/api/projects/${PROJECT_ID}/insights/accounts`) {
+      const range = url.searchParams.get('range');
+      requests.push(`accounts:${range ?? ''}`);
+      if (accountsScene === 'error')
+        return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
+      return respond(
+        200,
+        makeAccounts(PROJECT_ID, isInsightsRange(range) ? range : '30d', accountsScene)
+      );
     }
     if (path.includes('/sessions')) return respond(200, { sessions: [], total: 0, hasMore: false });
     return respond(200, {});
@@ -222,7 +241,6 @@ test.describe('Insights', () => {
     await page.goto(`${BASE}/flow`);
     for (const [tab, id] of [
       ['Agent setups', 'agent-setups'],
-      ['Accounts', 'accounts'],
       ['People', 'people'],
     ] as const) {
       await page.getByRole('tab', { name: tab, exact: true }).click();
@@ -230,6 +248,80 @@ test.describe('Insights', () => {
       await expect(page.getByTestId(`insights-coming-soon-${id}`)).toContainText('coming soon');
     }
     await capture(page, 'insights-coming-soon');
+  });
+
+  test('accounts with a realistic month', async ({ page }) => {
+    await setupScene(page, 'realistic');
+    await page.goto(`${BASE}/flow`);
+    await page.getByRole('tab', { name: 'Accounts', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}/accounts`));
+    const own = page.getByTestId('insights-account-cred:cc-max');
+    await expect(own).toContainText('Personal Max');
+    await expect(own).toContainText('3× · 1.9 h · paused now');
+    // Your own account shows its current limits through the shared chip.
+    await expect(own.getByTestId('credential-limit-chip')).toBeVisible();
+    // A teammate's accounts are described, never named.
+    await expect(
+      page.getByTestId('insights-account-teammate:openai-codex:subscription')
+    ).toContainText('Teammates’ accounts (2)');
+    const key = page.getByTestId('insights-account-cred:cc-key');
+    await expect(key).toContainText('API key · pay as you go');
+    await expect(key.getByText('Not reported')).toHaveCount(2);
+    await expect(page.getByTestId('insights-accounts-chart')).toBeVisible();
+    await expect(page.getByTestId('insights-stall-list').locator('li')).toHaveCount(5);
+    await expect(page.getByTestId('insights-stall-list')).toContainText(
+      'stopped retrying, needs a person'
+    );
+    await capture(page, 'insights-accounts-realistic');
+  });
+
+  test('accounts under stress', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'stress');
+    await page.goto(`${BASE}/accounts?range=90d`);
+    await expect(page.locator('[data-testid^="insights-account-"]')).toHaveCount(8);
+    // Untrusted names render as text, never as markup.
+    await expect(page.getByText('<script>alert("x")</script> 🔑 key').first()).toBeVisible();
+    // Five accounts get a colour; the other three fold into "Other".
+    await expect(page.getByTestId('insights-accounts-chart')).toContainText('Other (3)');
+    await expect(
+      page.getByText('Showing the 10 most recent of 47. Older limit waits were not examined.')
+    ).toBeVisible();
+    await capture(page, 'insights-accounts-stress');
+  });
+
+  test('accounts for an empty project', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'empty');
+    await page.goto(`${BASE}/accounts`);
+    await expect(page.getByTestId('insights-accounts-empty')).toContainText(
+      'No runs in this range'
+    );
+    await expect(page.getByText('No agent waited on a usage limit in this range.')).toBeVisible();
+    await capture(page, 'insights-accounts-empty');
+  });
+
+  test('a failed accounts read says so and offers a retry', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'error');
+    await page.goto(`${BASE}/accounts`);
+    await expect(page.getByRole('alert')).toContainText('Could not load account insights');
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+    await capture(page, 'insights-accounts-error');
+  });
+
+  test('switching range on accounts reads that range and keeps the cards on screen', async ({
+    page,
+  }) => {
+    const requests: string[] = [];
+    await setupScene(page, 'realistic', requests);
+    await page.goto(`${BASE}/accounts`);
+    await expect(page.getByTestId('insights-account-cred:cc-max')).toBeVisible();
+    await page.getByRole('button', { name: '7 days' }).click();
+    await expect(page).toHaveURL(/range=7d/);
+    await expect(page.getByText('Runs per day by account')).toBeVisible();
+    await expect(page.getByTestId('insights-account-cred:cc-max')).toBeVisible();
+    expect(requests.filter((r) => r.startsWith('accounts:'))).toEqual([
+      'accounts:30d',
+      'accounts:7d',
+    ]);
   });
 
   test('the nav item opens Insights', async ({ page }, testInfo) => {
