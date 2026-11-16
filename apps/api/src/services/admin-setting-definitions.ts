@@ -1,3 +1,5 @@
+import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-deployment';
+
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
@@ -10,6 +12,7 @@ import {
   validateConnectorSetting,
 } from './connector-settings-definition';
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
+import { type InboxSettingName } from './inbox-settings-definition';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
 import { type RuntimeSecretRequestSettingName } from './runtime-secret-request-settings-definition';
@@ -20,18 +23,17 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
+  | DeploymentPublishJobSettingName
+  | 'deployments.publishCallbackMaxBodyBytes'
   | 'chat.messageMergingEnabled'
   | 'chat.messageMergeMaxRowBytes'
   | 'chat.messageMergeRecentIds'
-  | 'deployments.buildContextCollectionMode'
-  | 'deployments.buildContextStartTimeoutMs'
-  | `deployments.buildContext${'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
-  | `deployments.publishJob${'StallMs' | 'DeadlineMs' | 'SweepLimit' | 'CancelTimeoutMs'}`
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `lifecycleLatency.${LifecycleLatencySettingKey}`
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
+  | InboxSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName

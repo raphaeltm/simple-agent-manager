@@ -74,3 +74,15 @@ and `2026-10-24-chat-retries-deleted-workspace` (removed from the backlog 2026-1
 Related: `tasks/backlog/2026-09-09-chat-requests-reaped-task-404.md` is the same symptom from a
 different hook. There, an ended chat requests a deleted task through the restore-provisioning
 effect in `apps/web/src/pages/project-chat/useProjectChatState.ts:525-557`.
+
+## Folded in (2026-11-16)
+
+Two later reports of the same retry-on-404 in `useSessionInfrastructure` (`apps/web/src/components/project-message-view/useSessionInfrastructure.ts`) were folded in here and archived:
+
+- `2026-11-12-slept-session-workspace-404-console-errors`: the **sleeping** case. A slept session's workspace row is retired, and `useRetryingInfrastructureResource` still retries it on the `[2s, 5s, 10s]` schedule (about four 404s per load). Staging sessions `ff0d98a2-a98c-4106-bb3f-f248321de941`, `c600096d-f10f-4a99-a9cd-e6c72d5bbeb9` (2026-11-12).
+- `2026-11-13-chat-page-fetches-deleted-workspace`: reproduces on a session still on the root object (`01KJNR9R3TEN3KX1ETE33852R8` / `b82b360a-…`, workspace `01M2EYHVKGDJ0QZGF3G5VGM7ZK`), so the archive path is not the cause.
+
+Added criteria:
+
+- [ ] A sleeping or stopped session does not retry a workspace it knows is retired.
+- [ ] Opening a slept chat on staging produces no 404 console errors.

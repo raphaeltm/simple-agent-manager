@@ -3452,6 +3452,37 @@ export async function releaseAttentionAnswer(
   return stub.releaseAttentionAnswer(sessionId, markerId, answer);
 }
 
+/** Inbox archive claim for a question; see `ProjectData.prepareAttentionArchive`. */
+export async function prepareAttentionArchive(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+) {
+  const stub = await getStub(env, projectId);
+  return stub.prepareAttentionArchive(sessionId, markerId);
+}
+
+export async function completeAttentionArchive(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.completeAttentionArchive(sessionId, markerId);
+}
+
+export async function releaseAttentionArchive(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.releaseAttentionArchive(sessionId, markerId);
+}
+
 export async function resolveSessionAttentionMarkers(
   env: Env,
   projectId: string,

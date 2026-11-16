@@ -284,6 +284,51 @@ describe('runNodeCleanupSweep', () => {
   });
 
   describe('Layer 1: stale warm node destruction', () => {
+    it('continues to the next node when teardown and its failure handler both fail', async () => {
+      const { deleteNodeResourcesStrict } = await import('../../src/services/nodes');
+      const outcomes = await import('../../src/scheduled/node-cleanup/cleanup-outcome');
+      const { log } = await import('../../src/lib/logger');
+      const failureHandler = vi
+        .spyOn(outcomes, 'handleCleanupFailure')
+        .mockRejectedValueOnce(new Error('failure diagnosis unavailable'));
+      vi.mocked(deleteNodeResourcesStrict).mockRejectedValueOnce(new Error('provider unavailable'));
+      const warmSince = new Date(Date.now() - 40 * 60 * 1000).toISOString();
+      const env = createMockEnv(
+        new Map([
+          [
+            'n.warm_since IS NOT NULL',
+            ['node-failed', 'node-next'].map((id) => ({
+              id,
+              user_id: 'user-1',
+              warm_since: warmSince,
+              active_ws_count: 0,
+            })),
+          ],
+        ])
+      );
+
+      try {
+        const result = await runNodeCleanupSweep(env);
+
+        expect(vi.mocked(deleteNodeResourcesStrict).mock.calls.map(([id]) => id)).toEqual([
+          'node-failed',
+          'node-next',
+        ]);
+        expect(result.staleDestroyed).toBe(1);
+        expect(result.errors).toBe(1);
+        expect(log.error).toHaveBeenCalledWith(
+          'node_cleanup.failure_handler_failed',
+          expect.objectContaining({
+            nodeId: 'node-failed',
+            error: 'failure diagnosis unavailable',
+            originalError: 'provider unavailable',
+          })
+        );
+      } finally {
+        failureHandler.mockRestore();
+      }
+    });
+
     it('destroys stale warm nodes with no active workspaces', async () => {
       const { deleteNodeResourcesStrict } = await import('../../src/services/nodes');
       const now = Date.now();

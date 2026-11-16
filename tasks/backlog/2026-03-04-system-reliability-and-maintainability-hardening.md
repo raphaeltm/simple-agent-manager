@@ -78,3 +78,7 @@ Key issues identified:
 3. **Proxy Refactoring**: Move proxy logic to a middleware and verify with integration tests.
 4. **Async Migration**: Refactor one provisioning flow (e.g., Workspace Creation) to be fully async via Durable Objects before applying the pattern globally.
 5. **Validation**: Ensure all existing E2E and unit tests pass; add new tests for the configuration service and async state machine.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The subdomain-proxy extraction from `index.ts` is done. Still open: the `Env` split (`env.ts` is 1,461 lines), VM agent `/health` states, and consistent error codes. Evidence: #2714; `apps/api/src/routes/workspace-subdomain-proxy.ts` (new); `apps/api/src/index.ts` now 548 lines.

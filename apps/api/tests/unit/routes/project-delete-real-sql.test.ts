@@ -126,6 +126,19 @@ describe('DELETE /api/projects/:id library cleanup — real SQL vertical slice',
 
   afterEach(() => sqlite.close());
 
+  it('rejects a reserved builder before deleting project records or R2 objects', async () => {
+    addProject(PROJECT_A, OWNER_A);
+    addFile(PROJECT_A, 'a-file-1');
+    sqlite.exec(`INSERT INTO deployment_publish_jobs
+      (id,project_id,executor,context_shadow,executor_instance_id,status)
+      VALUES ('job','project-a','cloudflare',0,'job','succeeded')`);
+    const response = await app.request(`/api/projects/${PROJECT_A}`, { method: 'DELETE' }, env);
+    expect(response.status).toBe(409);
+    expect(ids('projects')).toContain(PROJECT_A);
+    expect(ids('project_files')).toContain('a-file-1');
+    expect(deletedObjects).toEqual([]);
+  });
+
   it('deletes project A rows and R2 keys through the route while project B is untouched', async () => {
     addProject(PROJECT_A, OWNER_A);
     addProject(PROJECT_B, 'user-b');

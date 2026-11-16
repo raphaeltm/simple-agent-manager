@@ -20,6 +20,11 @@ Select **Admin** in the sidebar (only superadmins see it), then the **Settings**
 titled **Runtime settings**. An account must be an approved, active superadmin to use it; admins
 can't.
 
+On an ordinary self-hosted instance, the first account to sign in while it is the only account
+becomes the superadmin, once. That first-sign-in election never runs again, even if that
+superadmin is deleted. If no account can open **Admin**, follow
+[Recovering when no account can administer the instance](/docs/guides/self-hosting/#recovering-when-no-account-can-administer-the-instance).
+
 Settings are grouped into **OAuth**, **Connector**, **Operations**, **Collaboration**,
 **Chat**, **AI models**, and **Email**. Type in **Search settings** to filter by name, group, or
 description. Each card is named after the setting, split into words (`operations.cronSweepsEnabled`
@@ -250,6 +255,23 @@ where it says so and the app continues from there.
 | `secrets.purgeBudgetSeconds`     | 20                  | 1–120         | Seconds the daily purge may run                                                                                                                                                                                         |
 | `secrets.expirySweepBatchSize`   | 10                  | 1–25          | Expired or unnotified requests one five-minute sweep handles (each one notifies its agent)                                                                                                                              |
 | `secrets.notifyRetryMinutes`     | 60                  | 15–1,440      | Minutes during which the sweep retries telling an agent about its request's outcome if the first notice could not be queued                                                                                             |
+
+## Inbox
+
+Listed under **Chat**. Bounds for the [inbox](/docs/reference/api/#inbox) list and for the inbox
+items agents file (`packages/operations/src/inbox-settings-definition.ts`).
+
+| Setting                    | Default | Range      | What it limits                                                                           |
+| -------------------------- | ------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                       |
+| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                         |
+| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed            |
+| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                          |
+| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                                 |
+| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                          |
+| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                  |
+| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired    |
+| `inbox.sweepBatchSize`     | 10      | 1–50       | Items one five-minute sweep expires or re-notifies (each is a write and an agent notice) |
 
 ## Node provisioning
 

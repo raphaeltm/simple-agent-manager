@@ -58,6 +58,7 @@ import {
 } from './services/credential-limit-events/read';
 import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
+import { createInboxPort } from './services/inbox/port';
 import { resolveProfileAccountBindings } from './services/profile-account-bindings';
 import * as projectData from './services/project-data';
 import { describeRootSearchCoverage } from './services/project-data-search-coverage';
@@ -149,6 +150,7 @@ export function createOperationPorts(env: Env): OperationPorts {
       resolveDetailsMany: (...a) => resolveAdminSettingDetailsMany(env, ...a),
       connectorReadLimits: () => getConnectorReadLimits(env),
     },
+    inbox: createInboxPort(env),
     access: {
       requireProjectAccess: (projectId, userId) => requireProjectAccess(db(), projectId, userId),
       requireProjectCapability: (projectId, userId, capability) =>

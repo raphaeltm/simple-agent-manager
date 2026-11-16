@@ -63,6 +63,27 @@ export {
   validateIdeaStatusTransition,
 } from './idea-transitions';
 export { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from './idea-update-core';
+export { getInboxItem, resolveInboxItem } from './inbox-item-core';
+export { countInbox, listInbox } from './inbox-list-core';
+export {
+  inboxOperations,
+  samInboxAnswer,
+  samInboxArchive,
+  samInboxAskCreate,
+  samInboxCount,
+  samInboxItemGet,
+  samInboxList,
+} from './inbox-operations';
+export { defaultInboxLimits, getInboxLimits, type InboxLimits } from './inbox-settings';
+export { INBOX_SETTINGS, type InboxSettingName } from './inbox-settings-definition';
+export {
+  answerInboxItem,
+  archiveInboxItem,
+  createAsk,
+  type CreateAskInput,
+  type InboxAnswerInput,
+  notifyClosedAsk,
+} from './inbox-write-core';
 export { getPlatformOperationLimits } from './limits';
 export {
   getFileContext,
@@ -104,7 +125,15 @@ export {
   samTasksList,
 } from './platform-operations';
 export { type ProfileAccountBinding } from './port-types';
-export { type OperationPorts, type ProjectEventErrorKind } from './ports';
+export {
+  type InboxAskNoticeOutcome,
+  type InboxAskNoticeRow,
+  type InboxAttentionMarker,
+  type OperationInboxPort,
+  type OperationPorts,
+  type ProjectEventErrorKind,
+} from './ports';
+export { projectOverviewGet, type ProjectOverviewInput } from './project-overview';
 export {
   ensurePullRequest,
   getPullRequestStates,

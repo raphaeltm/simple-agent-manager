@@ -11,6 +11,7 @@ import {
   createBuildContextUpload,
   verifyBuildContextObject,
 } from '../../services/build-context-upload';
+import { dispatchCloudflareBuild } from '../../services/cloudflare-build-executor';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import { recordDeploymentPublishJobLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
@@ -19,6 +20,7 @@ const requestSchema = v.object({
   attempt: v.pipe(v.number(), v.integer(), v.minValue(1)),
   sizeBytes: v.pipe(v.number(), v.integer(), v.minValue(1)),
   sha256: v.pipe(v.string(), v.regex(/^[a-f0-9]{64}$/)),
+  projectName: v.optional(v.pipe(v.string(), v.maxLength(255), v.regex(/^[a-z0-9][a-z0-9_-]*$/))),
   durationMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
 });
 const buildContextCallbackRoute = new Hono<{ Bindings: Env }>();
@@ -51,6 +53,10 @@ for (const operation of ['init', 'complete'] as const) {
         )
         .limit(1);
       if (!job) throw errors.notFound('Publish job');
+      if (!job.contextShadow && !body.projectName)
+        throw errors.badRequest(
+          'Source agent is missing Compose project identity; restart the workspace to upgrade before using the Cloudflare executor'
+        );
       const policy = await assertAgentDeploymentAllowedForProfile(
         verified.db,
         verified.projectId,
@@ -114,6 +120,8 @@ for (const operation of ['init', 'complete'] as const) {
           })
         );
       await verified.assertCurrent();
+      if (operation === 'complete' && !job.contextShadow)
+        c.executionCtx.waitUntil(dispatchCloudflareBuild(c.env, job.id));
       return c.json({ ok: true, status: result.status, ...upload });
     }
   );
