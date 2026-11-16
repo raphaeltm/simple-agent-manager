@@ -355,7 +355,6 @@ export type {
 export type {
   CommentAnchor,
   CommentAnchorKind,
-  StoredCommentAnchorKind,
   CommentAuthor,
   CommentAuthorKind,
   CommentMention,
@@ -390,16 +389,17 @@ export type {
   ProjectCommentSessionRef,
   ReplyToLibraryFileCommentThreadRequest,
   ReplyToMessageCommentThreadRequest,
+  StoredCommentAnchorKind,
   UpdateLibraryFileCommentThreadStatusRequest,
   UpdateMessageCommentThreadStatusRequest,
 } from './comments';
 export {
   COMMENT_ANCHOR_KINDS,
-  STORED_COMMENT_ANCHOR_KINDS,
   COMMENT_AUTHOR_KINDS,
   COMMENT_STATUSES,
   MESSAGE_COMMENT_AUTHOR_KINDS,
   MESSAGE_COMMENT_THREAD_STATUSES,
+  STORED_COMMENT_ANCHOR_KINDS,
 } from './comments';
 
 // ProjectData event subscription core
