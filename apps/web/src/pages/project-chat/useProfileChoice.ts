@@ -74,6 +74,7 @@ export function useProfileChoice({
 }>) {
   const {
     profiles: agentProfiles,
+    loading: profilesLoading,
     createProfile: createProfileMutation,
     updateProfile,
   } = useAgentProfiles(projectId, queryScope);
@@ -208,6 +209,8 @@ export function useProfileChoice({
 
   return {
     agentProfiles,
+    /** The first read of the project's profiles is still in flight (no list yet). */
+    profilesLoading,
     selectedProfileId,
     setSelectedProfileId,
     profilePicker,

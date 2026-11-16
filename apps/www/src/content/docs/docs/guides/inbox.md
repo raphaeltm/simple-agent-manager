@@ -13,7 +13,9 @@ chat. It replaced the notification bell panel and the project **Notifications** 
   navigation (on a desktop) or in the app bar (on a phone). Its number counts the items you can act
   on in every project.
 - **For one project**: **Inbox** in the project's navigation, under **Chat**. Its number counts
-  that project only.
+  that project only. The project's [Overview](/docs/guides/project-overview/), where a project
+  opens, shows the first items under **Needs you**; opening one there and going **Back** returns
+  you to the Overview.
 
 On a desktop the inbox icon opens a quick view of the first items. Where one tap is safe it offers
 the answer right there: **Allow** / **Deny** for a permission (never "always allow"), the options of

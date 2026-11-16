@@ -44,11 +44,14 @@ const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'
 
 /**
  * The chat is paused on a person: a ProjectData attention marker (synced to
- * `session_summaries.attention_json`), or an open question held in D1 `asks` (inbox slice G),
- * which is not copied into the summary. `open_questions` is the CTE at the head of `RUNNING_SQL`.
+ * `session_summaries.attention_json`), an open question held in D1 `asks` (inbox slice G), or a
+ * pending secret request from the chat. The inbox lists each of these as a blocking item
+ * ("paused on this", `inboxAgentState`), so Running now keeps the chat too instead of dropping it
+ * when its turn ends (inbox slice F2: the two sections must not contradict each other).
+ * `paused_sessions` is the CTE at the head of `RUNNING_SQL`.
  */
 const PAUSED_ON_PERSON_SQL = `(ss.attention_json IS NOT NULL
-      OR ss.id IN (SELECT session_id FROM open_questions))`;
+      OR ss.id IN (SELECT session_id FROM paused_sessions))`;
 
 /**
  * 1 for a chat paused on a question the viewer must answer (they started it, it is past
@@ -66,16 +69,22 @@ const WAITING_ON_VIEWER_SQL = `(CASE WHEN ${PAUSED_ON_PERSON_SQL} AND ss.created
  * open question. The task join carries `project_id` so a task id cannot reach across projects
  * (rule 11), and a profile name is shown only for this project's profiles or the task creator's
  * own global ones, so a hint naming someone else's global profile reveals nothing. `COUNT(*) OVER ()` gives the total without a second round trip.
- * `open_questions` reads this project's open, unexpired question asks once
- * (`idx_asks_open_question`), bound to the project like every other predicate here.
+ * `paused_sessions` reads this project's open, unexpired question asks (`idx_asks_open_question`)
+ * and its pending, unexpired secret requests (`idx_runtime_secret_requests_status_expires`; few are
+ * ever pending) once, both bound to the project like every other predicate here.
  */
 const RUNNING_SQL = `
-  WITH open_questions AS (
-    SELECT DISTINCT source_session_id AS session_id
+  WITH paused_sessions AS (
+    SELECT source_session_id AS session_id
       FROM asks
      WHERE project_id = ? AND kind = 'question' AND status = 'open' AND blocking = 1
        AND source_session_id IS NOT NULL
        AND (expires_at IS NULL OR expires_at > ?)
+    UNION
+    SELECT requesting_chat_session_id AS session_id
+      FROM runtime_secret_requests
+     WHERE project_id = ? AND status = 'pending' AND expires_at > ?
+       AND requesting_chat_session_id IS NOT NULL
   )
   SELECT ss.id, ss.task_id, ss.topic, ss.started_at, ss.created_at, ss.last_message_at,
          ss.agent_completed_at, ss.created_by_user_id,
@@ -176,10 +185,11 @@ async function readRunning(
   projectId: string,
   limit: number
 ): Promise<ProjectOverviewResponse['running']> {
+  const now = Date.now();
   const result = await ctx.env.DATABASE.prepare(RUNNING_SQL)
-    // Placeholders in order: project and clock (open questions), viewer (sum), project,
-    // viewer (ranking), limit.
-    .bind(projectId, Date.now(), ctx.actor.userId, projectId, ctx.actor.userId, limit)
+    // Placeholders in order: project and clock (open questions), project and clock (pending
+    // secret requests), viewer (sum), project, viewer (ranking), limit.
+    .bind(projectId, now, projectId, now, ctx.actor.userId, projectId, ctx.actor.userId, limit)
     .all<Record<string, unknown>>();
   const rows = result.results ?? [];
   const items: OverviewRunningChat[] = [];
