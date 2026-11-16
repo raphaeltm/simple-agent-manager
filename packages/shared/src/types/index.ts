@@ -1222,6 +1222,7 @@ export {
 
 // Admin Health & cost (Insights slice H)
 export type {
+  InstallationComputeCurrencySpend,
   InstallationComputeProviderSpend,
   InstallationComputeSpend,
   InstallationComputeWeek,

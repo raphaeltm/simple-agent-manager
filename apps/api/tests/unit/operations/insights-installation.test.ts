@@ -149,28 +149,25 @@ describe('installationHealth', () => {
 
       const result = await installationHealth(ctx(), { range: '7d' }, NOW);
 
-      expect(result.compute).toMatchObject({
-        currency: 'USD',
-        totalUsd: 2.68,
-        nodes: 2,
-        unpricedNodes: 0,
-        truncated: false,
-      });
-      expect(result.compute?.byProvider).toEqual([
-        { provider: 'hetzner', usd: 1.68, nodeHours: 168, nodes: 1 },
-        { provider: 'gcp', usd: 1, nodeHours: 10, nodes: 1 },
+      expect(result.compute).toMatchObject({ nodes: 2, unpricedNodes: 0, truncated: false });
+      expect(result.compute?.currencies).toHaveLength(1);
+      expect(result.compute?.currencies[0]).toMatchObject({ currency: 'USD', total: 2.68 });
+      expect(result.compute?.currencies[0]?.byProvider).toEqual([
+        { provider: 'hetzner', amount: 1.68, nodeHours: 168, nodes: 1 },
+        { provider: 'gcp', amount: 1, nodeHours: 10, nodes: 1 },
       ]);
       // compute_usage would have counted the shared machine three times; it is not read.
-      expect(result.compute?.totalUsd).not.toBeCloseTo(1.68 * 3 + 1);
+      expect(result.compute?.currencies[0]?.total).not.toBeCloseTo(1.68 * 3 + 1);
     });
 
     it('leaves out machines SAM did not pay a provider for, and counts unpriced ones separately', async () => {
       node('paid');
+      node('legacy-no-currency', { provider_instance_price_currency: null }); // priced before currencies: USD
       node('byo', { node_class: 'user-owned' });
       node('self-hosted', { credential_source: 'self-hosted' });
       node('instant', { runtime: 'cf-container' });
       node('no-price', { provider_instance_price_hourly_micros: null });
-      node('euro', { provider_instance_price_currency: 'EUR' });
+      node('not-a-currency', { provider_instance_price_currency: 'euros!' });
       node('gone-before', {
         status: 'destroyed',
         created_at: iso('2026-10-01T00:00:00Z'),
@@ -179,8 +176,33 @@ describe('installationHealth', () => {
 
       const result = await installationHealth(ctx(), { range: '7d' }, NOW);
 
-      expect(result.compute).toMatchObject({ totalUsd: 1.68, nodes: 3, unpricedNodes: 2 });
-      expect(result.compute?.byProvider).toHaveLength(1);
+      expect(result.compute).toMatchObject({ nodes: 4, unpricedNodes: 2 });
+      expect(result.compute?.currencies).toEqual([
+        expect.objectContaining({ currency: 'USD', total: 3.36 }),
+      ]);
+    });
+
+    it('reports each price currency on its own and never adds them together', async () => {
+      // Hetzner's catalog prices in EUR, GCP's in USD; SAM keeps no exchange rates.
+      node('hetzner-1', { provider_instance_price_currency: 'EUR' });
+      node('hetzner-2', { provider_instance_price_currency: 'eur' });
+      node('gcp-1', { cloud_provider: 'gcp', provider_instance_price_hourly_micros: 20_000 });
+
+      const result = await installationHealth(ctx(), { range: '7d' }, NOW);
+
+      expect(result.compute).toMatchObject({ nodes: 3, unpricedNodes: 0 });
+      expect(result.compute?.currencies.map((c) => [c.currency, c.total])).toEqual([
+        ['EUR', 3.36], // most machines first
+        ['USD', 3.36],
+      ]);
+      expect(result.compute?.currencies[0]?.byProvider).toEqual([
+        { provider: 'hetzner', amount: 3.36, nodeHours: 336, nodes: 2 },
+      ]);
+      expect(result.compute?.currencies[1]?.weeks.at(-2)).toEqual({
+        weekStart: '2026-11-09T00:00:00.000Z',
+        total: 3.36,
+        byProvider: [{ provider: 'gcp', amount: 3.36 }],
+      });
     });
 
     it('splits spend into Monday-start UTC weeks, oldest first', async () => {
@@ -194,25 +216,25 @@ describe('installationHealth', () => {
       });
 
       const result = await installationHealth(ctx(), { range: 'month' }, NOW);
-      const weeks = result.compute?.weeks ?? [];
+      const weeks = result.compute?.currencies[0]?.weeks ?? [];
 
       expect(weeks).toHaveLength(6);
       expect(weeks.at(-1)).toEqual({
         weekStart: '2026-11-16T00:00:00.000Z',
-        totalUsd: 0.12, // 12 h of the shared machine
-        byProvider: [{ provider: 'hetzner', usd: 0.12 }],
+        total: 0.12, // 12 h of the shared machine
+        byProvider: [{ provider: 'hetzner', amount: 0.12 }],
       });
       expect(weeks.at(-2)).toEqual({
         weekStart: '2026-11-09T00:00:00.000Z',
-        totalUsd: 2.68,
+        total: 2.68,
         byProvider: [
-          { provider: 'hetzner', usd: 1.68 },
-          { provider: 'gcp', usd: 1 },
+          { provider: 'hetzner', amount: 1.68 },
+          { provider: 'gcp', amount: 1 },
         ],
       });
       // The month started 2026-11-01: 15.5 days of the shared machine plus the gcp machine.
       expect(result.window.start).toBe('2026-11-01T00:00:00.000Z');
-      expect(result.compute?.totalUsd).toBe(4.72);
+      expect(result.compute?.currencies[0]?.total).toBe(4.72);
     });
 
     it('keeps the still-running machine under the cap and says the total is a lower bound', async () => {
@@ -228,7 +250,8 @@ describe('installationHealth', () => {
         NOW
       );
 
-      expect(result.compute).toMatchObject({ totalUsd: 1.68, nodes: 1, truncated: true });
+      expect(result.compute).toMatchObject({ nodes: 1, truncated: true });
+      expect(result.compute?.currencies[0]?.total).toBe(1.68);
     });
 
     it('skips a machine with an unreadable timestamp and still prices the rest', async () => {
@@ -237,7 +260,7 @@ describe('installationHealth', () => {
 
       const result = await installationHealth(ctx(), { range: '7d' }, NOW);
 
-      expect(result.compute?.totalUsd).toBe(1.68);
+      expect(result.compute?.currencies[0]?.total).toBe(1.68);
       expect(result.unavailable).toEqual([]);
     });
   });
@@ -620,7 +643,7 @@ describe('installationHealth', () => {
 
       expect(result.latency).toBeNull();
       expect(result.unavailable).toEqual(['latency']);
-      expect(result.compute?.totalUsd).toBe(1.68); // liveness: the other sections still ran
+      expect(result.compute?.currencies[0]?.total).toBe(1.68); // liveness: the other sections still ran
       expect(latency).toHaveBeenCalledWith({ sinceMs: NOW - 7 * 86_400_000, untilMs: NOW });
     });
   });

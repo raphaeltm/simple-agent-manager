@@ -548,7 +548,10 @@ shared `installationHealth` operation (`packages/operations/src/insights-install
   `deleted` or `error`. Machines you brought yourself and Instant containers cost no provider money
   and are left out. Costs are estimates at list prices: they include machines on people's own
   cloud accounts as well as the platform's, and exclude discounts, storage and traffic. A machine
-  removed with an explicit delete loses its row, so its time is not counted.
+  removed with an explicit delete loses its row, so its time is not counted. Each provider records
+  prices in its own currency (Hetzner in EUR, Google Cloud in USD) and SAM keeps no exchange
+  rates, so spend is shown per currency, for example "€1,234 + $567", with one weekly chart per
+  currency. A machine with no recorded price is counted under "without a price".
 - **Warm machine reuse.** The share of workspace placements that went onto a machine that already
   existed: an earlier workspace exists on that machine, or the node decision log recorded a
   warm-pool claim on it since its previous workspace. The note under it gives how many of those

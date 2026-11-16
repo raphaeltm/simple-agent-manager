@@ -26,22 +26,26 @@ function health(overrides: Partial<InstallationHealthResponse> = {}): Installati
     window: { range: 'month', start: '2026-11-01T00:00:00.000Z', end: '2026-11-16T12:00:00.000Z' },
     generatedAt: '2026-11-16T12:00:00.000Z',
     compute: {
-      currency: 'USD',
-      totalUsd: 412.4,
-      byProvider: [
-        { provider: 'hetzner', usd: 291.25, nodeHours: 3000, nodes: 40 },
-        { provider: 'gcp', usd: 121.25, nodeHours: 300, nodes: 6 },
-      ],
-      weeks: [
+      currencies: [
         {
-          weekStart: '2026-11-09T00:00:00.000Z',
-          totalUsd: 100,
-          byProvider: [{ provider: 'hetzner', usd: 100 }],
-        },
-        {
-          weekStart: '2026-11-16T00:00:00.000Z',
-          totalUsd: 20,
-          byProvider: [{ provider: 'gcp', usd: 20 }],
+          currency: 'USD',
+          total: 412.4,
+          byProvider: [
+            { provider: 'hetzner', amount: 291.25, nodeHours: 3000, nodes: 40 },
+            { provider: 'gcp', amount: 121.25, nodeHours: 300, nodes: 6 },
+          ],
+          weeks: [
+            {
+              weekStart: '2026-11-09T00:00:00.000Z',
+              total: 100,
+              byProvider: [{ provider: 'hetzner', amount: 100 }],
+            },
+            {
+              weekStart: '2026-11-16T00:00:00.000Z',
+              total: 20,
+              byProvider: [{ provider: 'gcp', amount: 20 }],
+            },
+          ],
         },
       ],
       unpricedNodes: 2,
@@ -175,6 +179,48 @@ describe('AdminHealthCost', () => {
     expect(rows[2]).toHaveTextContent('Nov 16$20.00Google Cloud $20.00');
   });
 
+  it('shows each price currency on its own, never added together', async () => {
+    const week = (weekStart: string, provider: string, amount: number) => ({
+      weekStart,
+      total: amount,
+      byProvider: [{ provider, amount }],
+    });
+    mocks.getInstallationHealth.mockResolvedValue(
+      health({
+        compute: {
+          currencies: [
+            {
+              currency: 'EUR',
+              total: 1234,
+              byProvider: [{ provider: 'hetzner', amount: 1234, nodeHours: 9000, nodes: 244 }],
+              weeks: [week('2026-11-16T00:00:00.000Z', 'hetzner', 300)],
+            },
+            {
+              currency: 'USD',
+              total: 56.5,
+              byProvider: [{ provider: 'gcp', amount: 56.5, nodeHours: 90, nodes: 52 }],
+              weeks: [week('2026-11-16T00:00:00.000Z', 'gcp', 20)],
+            },
+          ],
+          unpricedNodes: 0,
+          nodes: 296,
+          truncated: false,
+        },
+      })
+    );
+    renderPage();
+
+    const compute = await screen.findByTestId('stat-compute');
+    expect(within(compute).getByText('€1,234 + $56.50')).toBeInTheDocument();
+    expect(compute).toHaveTextContent('Hetzner €1,234 · Google Cloud $56.50');
+    expect(compute).not.toHaveTextContent('without a price');
+    expect(screen.getByTestId('spend-chart-EUR')).toHaveTextContent('Priced in EUR');
+    expect(
+      screen.getByLabelText('Week of Nov 16: $20.00 (Google Cloud $20.00)')
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Week of Nov 16: €300 (Hetzner €300)')).toBeInTheDocument();
+  });
+
   it('gives the warm-pool part of reuse under the reuse rate', async () => {
     mocks.getInstallationHealth.mockResolvedValue(health());
     renderPage();
@@ -228,7 +274,10 @@ describe('AdminHealthCost', () => {
     resolve7d(
       health({
         window: { range: '7d', start: '2026-11-09T12:00:00.000Z', end: '2026-11-16T12:00:00.000Z' },
-        compute: { ...health().compute!, totalUsd: 88 },
+        compute: {
+          ...health().compute!,
+          currencies: [{ ...health().compute!.currencies[0]!, total: 88 }],
+        },
       })
     );
     expect(await screen.findByText('$88.00')).toBeInTheDocument();

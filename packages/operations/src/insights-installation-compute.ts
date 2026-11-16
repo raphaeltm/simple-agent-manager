@@ -8,11 +8,15 @@
  * convention metering and quotas use (`getNodeEndedAt`, apps/api `node-usage-calculation.ts`).
  * Cleanup marks machines `deleted` and keeps the row; only an explicit user delete removes it, so
  * spend is a slight lower bound.
+ *
+ * Providers record prices in their own currency (Hetzner's catalog is EUR, GCP's USD) and SAM
+ * keeps no exchange rates, so spend is grouped by currency and never added across currencies.
+ * A machine with no recorded currency is USD, the convention of rows priced before currencies
+ * were stored.
  */
 import {
-  type InstallationComputeProviderSpend,
+  type InstallationComputeCurrencySpend,
   type InstallationComputeSpend,
-  type InstallationComputeWeek,
   NODE_BILLING_ENDED_STATUSES,
 } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
@@ -20,7 +24,8 @@ import { log } from '@simple-agent-manager/worker-core';
 import type { OperationContext } from './types';
 
 const HOUR_MS = 3_600_000;
-const MICROS_PER_USD = 1_000_000;
+const MICROS_PER_UNIT = 1_000_000;
+const CURRENCY_CODE = /^[A-Z]{3}$/;
 
 const ENDED_STATUS_SQL = NODE_BILLING_ENDED_STATUSES.map((status) => `'${status}'`).join(', ');
 
@@ -73,7 +78,7 @@ export function overlapMs(start: number, end: number, from: number, to: number):
   return Math.max(0, Math.min(end, to) - Math.max(start, from));
 }
 
-const roundUsd = (usd: number) => Math.round(usd * 100) / 100;
+const roundMoney = (amount: number) => Math.round(amount * 100) / 100;
 const roundHours = (hours: number) => Math.round(hours * 10) / 10;
 
 export async function readComputeSpend(
@@ -101,8 +106,12 @@ export async function readComputeSpend(
   const rows = results ?? [];
   const truncated = rows.length > maxNodes;
 
-  const providers = new Map<string, { usd: number; hours: number; nodes: number }>();
-  const weekly = bounds.weekStarts.map(() => new Map<string, number>());
+  type Ledger = {
+    machines: number;
+    providers: Map<string, { amount: number; hours: number; nodes: number }>;
+    weekly: Map<string, number>[];
+  };
+  const ledgers = new Map<string, Ledger>();
   let unpricedNodes = 0;
   let nodes = 0;
   const ended = new Set<string>(NODE_BILLING_ENDED_STATUSES);
@@ -124,23 +133,34 @@ export async function readComputeSpend(
     if (inRangeMs > 0) nodes += 1;
 
     const price = row.price_micros;
-    const usdPriced =
-      typeof price === 'number' &&
-      Number.isFinite(price) &&
-      price >= 0 &&
-      (row.currency === null || row.currency.toUpperCase() === 'USD');
-    if (!usdPriced) {
+    const currency = (row.currency?.trim() || 'USD').toUpperCase();
+    if (
+      typeof price !== 'number' ||
+      !Number.isFinite(price) ||
+      price < 0 ||
+      !CURRENCY_CODE.test(currency)
+    ) {
       if (inRangeMs > 0) unpricedNodes += 1;
       continue;
     }
-    const usdPerMs = price / MICROS_PER_USD / HOUR_MS;
+    const perMs = price / MICROS_PER_UNIT / HOUR_MS;
     const provider = row.cloud_provider?.trim() || 'unknown';
+    let ledger = ledgers.get(currency);
+    if (!ledger) {
+      ledger = {
+        machines: 0,
+        providers: new Map(),
+        weekly: bounds.weekStarts.map(() => new Map<string, number>()),
+      };
+      ledgers.set(currency, ledger);
+    }
+    ledger.machines += 1;
     if (inRangeMs > 0) {
-      const entry = providers.get(provider) ?? { usd: 0, hours: 0, nodes: 0 };
-      entry.usd += inRangeMs * usdPerMs;
+      const entry = ledger.providers.get(provider) ?? { amount: 0, hours: 0, nodes: 0 };
+      entry.amount += inRangeMs * perMs;
       entry.hours += inRangeMs / HOUR_MS;
       entry.nodes += 1;
-      providers.set(provider, entry);
+      ledger.providers.set(provider, entry);
     }
     bounds.weekStarts.forEach((weekStart, index) => {
       const ms = overlapMs(
@@ -149,39 +169,40 @@ export async function readComputeSpend(
         weekStart,
         Math.min(weekStart + 7 * 24 * HOUR_MS, bounds.nowMs)
       );
-      const bucket = weekly[index];
+      const bucket = ledger.weekly[index];
       if (ms <= 0 || !bucket) return;
-      bucket.set(provider, (bucket.get(provider) ?? 0) + ms * usdPerMs);
+      bucket.set(provider, (bucket.get(provider) ?? 0) + ms * perMs);
     });
   }
 
-  const byProvider: InstallationComputeProviderSpend[] = [...providers.entries()]
-    .map(([provider, entry]) => ({
-      provider,
-      usd: roundUsd(entry.usd),
-      nodeHours: roundHours(entry.hours),
-      nodes: entry.nodes,
-    }))
-    .sort((a, b) => b.usd - a.usd || a.provider.localeCompare(b.provider));
-  const weeks: InstallationComputeWeek[] = bounds.weekStarts.map((weekStart, index) => {
-    const bucket = weekly[index] ?? new Map<string, number>();
-    const entries = [...bucket.entries()]
-      .map(([provider, usd]) => ({ provider, usd: roundUsd(usd) }))
-      .sort((a, b) => b.usd - a.usd || a.provider.localeCompare(b.provider));
-    return {
-      weekStart: new Date(weekStart).toISOString(),
-      totalUsd: roundUsd([...bucket.values()].reduce((sum, usd) => sum + usd, 0)),
-      byProvider: entries,
-    };
-  });
+  const byAmount = (
+    a: { amount: number; provider: string },
+    b: { amount: number; provider: string }
+  ) => b.amount - a.amount || a.provider.localeCompare(b.provider);
+  const currencies: InstallationComputeCurrencySpend[] = [...ledgers.entries()]
+    .sort(([codeA, a], [codeB, b]) => b.machines - a.machines || codeA.localeCompare(codeB))
+    .map(([currency, ledger]) => ({
+      currency,
+      total: roundMoney([...ledger.providers.values()].reduce((sum, e) => sum + e.amount, 0)),
+      byProvider: [...ledger.providers.entries()]
+        .map(([provider, entry]) => ({
+          provider,
+          amount: roundMoney(entry.amount),
+          nodeHours: roundHours(entry.hours),
+          nodes: entry.nodes,
+        }))
+        .sort(byAmount),
+      weeks: bounds.weekStarts.map((weekStart, index) => {
+        const bucket = ledger.weekly[index] ?? new Map<string, number>();
+        return {
+          weekStart: new Date(weekStart).toISOString(),
+          total: roundMoney([...bucket.values()].reduce((sum, amount) => sum + amount, 0)),
+          byProvider: [...bucket.entries()]
+            .map(([provider, amount]) => ({ provider, amount: roundMoney(amount) }))
+            .sort(byAmount),
+        };
+      }),
+    }));
 
-  return {
-    currency: 'USD',
-    totalUsd: roundUsd([...providers.values()].reduce((sum, entry) => sum + entry.usd, 0)),
-    byProvider,
-    weeks,
-    unpricedNodes,
-    nodes,
-    truncated,
-  };
+  return { currencies, unpricedNodes, nodes, truncated };
 }

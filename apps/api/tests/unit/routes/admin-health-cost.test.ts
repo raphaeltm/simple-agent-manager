@@ -78,12 +78,12 @@ describe('GET /api/admin/health-cost', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       window: { range: string };
-      compute: { totalUsd: number; byProvider: { provider: string }[] };
+      compute: { currencies: { byProvider: { provider: string }[] }[] };
       latency: { states: unknown[] };
       unavailable: string[];
     };
     expect(body.window.range).toBe('30d');
-    expect(body.compute.byProvider[0]?.provider).toBe('hetzner');
+    expect(body.compute.currencies[0]?.byProvider[0]?.provider).toBe('hetzner');
     expect(body.latency.states).toHaveLength(11); // the real lifecycle port ran
     expect(body.unavailable).toEqual([]);
     expect(statements.length + MIDDLEWARE_ROUND_TRIPS).toBeLessThanOrEqual(ROUND_TRIP_BUDGET);

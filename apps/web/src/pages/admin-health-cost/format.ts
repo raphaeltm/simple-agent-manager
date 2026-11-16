@@ -11,10 +11,22 @@ export function providerLabel(provider: string): string {
   );
 }
 
-export function formatUsd(usd: number): string {
-  if (usd >= 1000) return `$${Math.round(usd).toLocaleString('en-US')}`;
-  if (usd >= 100) return `$${usd.toFixed(0)}`;
-  return `$${usd.toFixed(2)}`;
+/**
+ * "$412", "€1,234", "$9.50": whole units from 100 up, cents below. A code Intl does not know
+ * prints as "12.00 XYZ" rather than throwing.
+ */
+export function formatMoney(amount: number, currency: string): string {
+  const digits = amount >= 100 ? 0 : 2;
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(digits)} ${currency}`;
+  }
 }
 
 /** "38s", "4m 40s", "2h 05m". */

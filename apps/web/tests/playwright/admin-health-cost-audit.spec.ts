@@ -42,21 +42,24 @@ const LONG_REASON =
   'https://example.com/a/really/long/unbroken/path/that/keeps/going/and/going/without/any/spaces/at/all';
 
 function makeHealth(kind: 'normal' | 'stress' | 'empty'): InstallationHealthResponse {
-  const weeks = Array.from({ length: kind === 'stress' ? 26 : 6 }, (_, i) => {
-    const start = new Date(Date.UTC(2026, 9, 5 + i * 7)).toISOString();
-    const hetzner = kind === 'empty' ? 0 : 50 + i * 3;
-    const gcp = kind === 'empty' ? 0 : 10 + (i % 3) * 9;
+  const weekCount = kind === 'stress' ? 26 : 6;
+  const weekStart = (i: number) => new Date(Date.UTC(2026, 9, 5 + i * 7)).toISOString();
+  // Hetzner prices in EUR and GCP in USD, as in production: one chart per currency.
+  const eurWeeks = Array.from({ length: weekCount }, (_, i) => {
+    const hetzner = 50 + i * 3;
     return {
-      weekStart: start,
-      totalUsd: hetzner + gcp,
-      byProvider:
-        kind === 'empty'
-          ? []
-          : [
-              { provider: 'hetzner', usd: hetzner },
-              { provider: 'gcp', usd: gcp },
-              ...(kind === 'stress' ? [{ provider: 'digitalocean', usd: 4.2 }] : []),
-            ],
+      weekStart: weekStart(i),
+      total: hetzner,
+      byProvider: [{ provider: 'hetzner', amount: hetzner }],
+    };
+  });
+  const usdWeeks = Array.from({ length: weekCount }, (_, i) => {
+    const gcp = 10 + (i % 3) * 9;
+    const extra = kind === 'stress' ? [{ provider: 'digitalocean', amount: 4.2 }] : [];
+    return {
+      weekStart: weekStart(i),
+      total: gcp + (kind === 'stress' ? 4.2 : 0),
+      byProvider: [{ provider: 'gcp', amount: gcp }, ...extra],
     };
   });
   return {
@@ -64,36 +67,39 @@ function makeHealth(kind: 'normal' | 'stress' | 'empty'): InstallationHealthResp
     generatedAt: '2026-11-16T12:00:00.000Z',
     compute:
       kind === 'empty'
-        ? {
-            currency: 'USD',
-            totalUsd: 0,
-            byProvider: [],
-            weeks,
-            unpricedNodes: 0,
-            nodes: 0,
-            truncated: false,
-          }
+        ? { currencies: [], unpricedNodes: 0, nodes: 0, truncated: false }
         : {
-            currency: 'USD',
-            totalUsd: kind === 'stress' ? 123456.78 : 412.4,
-            byProvider: [
+            currencies: [
               {
-                provider: 'hetzner',
-                usd: kind === 'stress' ? 98765.43 : 291.2,
-                nodeHours: 30000,
-                nodes: 240,
+                currency: 'EUR',
+                total: kind === 'stress' ? 98765.43 : 291.2,
+                byProvider: [
+                  {
+                    provider: 'hetzner',
+                    amount: kind === 'stress' ? 98765.43 : 291.2,
+                    nodeHours: 30000,
+                    nodes: 240,
+                  },
+                ],
+                weeks: eurWeeks,
               },
               {
-                provider: 'gcp',
-                usd: kind === 'stress' ? 24691.35 : 121.2,
-                nodeHours: 3000,
-                nodes: 47,
+                currency: 'USD',
+                total: kind === 'stress' ? 24691.36 : 121.2,
+                byProvider: [
+                  {
+                    provider: 'gcp',
+                    amount: kind === 'stress' ? 24691.35 : 121.2,
+                    nodeHours: 3000,
+                    nodes: 47,
+                  },
+                  ...(kind === 'stress'
+                    ? [{ provider: 'digitalocean', amount: 0.01, nodeHours: 1, nodes: 1 }]
+                    : []),
+                ],
+                weeks: usdWeeks,
               },
-              ...(kind === 'stress'
-                ? [{ provider: 'digitalocean', usd: 0.01, nodeHours: 1, nodes: 1 }]
-                : []),
             ],
-            weeks,
             unpricedNodes: kind === 'stress' ? 12 : 0,
             nodes: 288,
             truncated: kind === 'stress',
@@ -115,7 +121,7 @@ function makeHealth(kind: 'normal' | 'stress' | 'empty'): InstallationHealthResp
             onNewMachine: 280,
             fromWarmPool: 72,
             reuseRate: 0.876,
-            weeks: weeks.map((w, i) => ({
+            weeks: eurWeeks.map((w, i) => ({
               weekStart: w.weekStart,
               placements: 300,
               reuseRate: 0.6 + (i % 4) * 0.08,

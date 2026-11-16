@@ -28,7 +28,8 @@ export interface InstallationHealthWindow {
 
 export interface InstallationComputeProviderSpend {
   provider: string;
-  usd: number;
+  /** In the enclosing currency. */
+  amount: number;
   nodeHours: number;
   /** Priced machines of this provider that ran during the range. */
   nodes: number;
@@ -37,21 +38,31 @@ export interface InstallationComputeProviderSpend {
 export interface InstallationComputeWeek {
   /** Monday 00:00 UTC that starts the week (ISO). */
   weekStart: string;
-  totalUsd: number;
-  byProvider: { provider: string; usd: number }[];
+  /** In the enclosing currency. */
+  total: number;
+  byProvider: { provider: string; amount: number }[];
+}
+
+/** Spend of the machines priced in one currency. */
+export interface InstallationComputeCurrencySpend {
+  /** ISO 4217 code of the recorded prices, e.g. `EUR` for Hetzner, `USD` for GCP. */
+  currency: string;
+  total: number;
+  byProvider: InstallationComputeProviderSpend[];
+  /** Trailing weeks, oldest first, the current (partial) week last. */
+  weeks: InstallationComputeWeek[];
 }
 
 /**
  * Machine lifetime × the machine's recorded hourly price, summed per machine. Workspaces share
- * machines, so a machine is counted once however many workspaces ran on it.
+ * machines, so a machine is counted once however many workspaces ran on it. Providers record
+ * prices in their own currency and nothing converts between them, so spend is reported per
+ * currency and never added across currencies.
  */
 export interface InstallationComputeSpend {
-  currency: 'USD';
-  totalUsd: number;
-  byProvider: InstallationComputeProviderSpend[];
-  /** Trailing weeks, oldest first, the current (partial) week last. */
-  weeks: InstallationComputeWeek[];
-  /** Machines that ran during the range with no USD hourly price; they add nothing to the totals. */
+  /** One entry per price currency that ran in the range or its weeks, most machines first. */
+  currencies: InstallationComputeCurrencySpend[];
+  /** Machines that ran during the range with no readable hourly price; they add nothing. */
   unpricedNodes: number;
   /** Managed cloud machines that ran during the range. */
   nodes: number;
