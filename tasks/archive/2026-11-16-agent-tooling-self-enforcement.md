@@ -76,7 +76,7 @@ the right context or is enforced programmatically. Guard first, removal second.
 - [x] Launch decision for 73 stated with its evidence (or 73 stays at launch)
 - [x] Codex hook evidence from a real Codex session, or the exact reason it could not be obtained
 - [x] Stop gate runs in every Claude Code session (observed); per-class block/feedback decision with numbers. Codex: not possible until SAM trusts repository hooks
-- [ ] All existing checks pass; `pnpm quality:agent-context-budget --check` passes
+- [x] All existing checks pass; `pnpm quality:agent-context-budget --check` passes (CI on PR #2790)
 
 ## Notes
 
@@ -90,3 +90,5 @@ the right context or is enforced programmatically. Guard first, removal second.
 - Reviews: task-completion-validator, go-specialist, security-auditor, test-engineer all returned; fixes in 0854ed500,
   608503822, f3b156c19 and the commit after it. Codex probe round 2 (01M7HY7P831WQG19HADM5JS85X) stalled on
   "failed to load workspace requirements" from nested codex exec; asked to wrap up.
+- Codex rule-delivery hook and Codex Stop entry not shipped: branch sam/codex-rule-delivery-hook, decision idea 01M7J0TXAHGRY8CWA7Y7SJZAK0.
+- Dependabot gomod entry added for scripts/quality/go-optional-fields (dependency-governance test).
