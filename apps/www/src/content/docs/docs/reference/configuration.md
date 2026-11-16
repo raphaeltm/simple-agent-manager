@@ -1982,8 +1982,6 @@ Client page/referrer fields follow a privacy normalization contract before enque
 | `ANALYTICS_SQL_API_URL`                     | `https://api.cloudflare.com/client/v4/accounts` | Analytics Engine SQL API base URL override                                         |
 | `ANALYTICS_DEFAULT_PERIOD_DAYS`             | `30`                                            | Default admin analytics query lookback in days                                     |
 | `ANALYTICS_TOP_EVENTS_LIMIT`                | `50`                                            | Max rows returned by top-events admin query                                        |
-| `ANALYTICS_GEO_LIMIT`                       | `50`                                            | Max countries in geographic distribution view                                      |
-| `ANALYTICS_RETENTION_WEEKS`                 | `12`                                            | Number of weeks for retention cohort analysis                                      |
 | `ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT` | `20`                                            | Max top pages/referrers/events in website traffic sections                         |
 | `ANALYTICS_INGEST_ENABLED`                  | `true`                                          | Enable browser event ingestion at `/api/t`; `false` returns success without writes |
 | `RATE_LIMIT_ANALYTICS_INGEST`               | `500`                                           | Analytics ingest requests allowed per IP per hour                                  |

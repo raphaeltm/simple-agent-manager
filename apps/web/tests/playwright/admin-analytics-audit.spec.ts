@@ -79,82 +79,6 @@ function makeFeatureAdoption(opts: { longEventNames?: boolean; manyEvents?: bool
   return { totals, trend, period: '30d' };
 }
 
-// Geo distribution mock data
-function makeGeoData(opts: { manyCountries?: boolean } = {}) {
-  const countries = opts.manyCountries
-    ? ['US', 'DE', 'GB', 'FR', 'JP', 'CA', 'AU', 'BR', 'IN', 'NL', 'SE', 'SG', 'CH', 'ES', 'IT']
-    : ['US', 'DE', 'GB', 'FR', 'JP'];
-
-  return {
-    geo: countries.map((country, i) => ({
-      country,
-      event_count: (countries.length - i) * 500,
-      unique_users: (countries.length - i) * 100,
-    })),
-    period: '30d',
-  };
-}
-
-// Retention cohort mock data
-function makeRetentionData(opts: { weeks?: number; allHigh?: boolean; allLow?: boolean } = {}) {
-  const weeksCount = opts.weeks ?? 6;
-  const retention = Array.from({ length: weeksCount }, (_, cohortIndex) => {
-    const cohortDate = new Date('2026-01-20');
-    cohortDate.setDate(cohortDate.getDate() + cohortIndex * 7);
-    const cohortSize = 100 + cohortIndex * 20;
-
-    const weeks = Array.from({ length: weeksCount - cohortIndex }, (_, w) => {
-      let rate: number;
-      if (opts.allHigh) {
-        rate = 90 - w * 2;
-      } else if (opts.allLow) {
-        rate = 5;
-      } else {
-        rate = Math.max(0, Math.round(100 - w * 15 - cohortIndex * 3));
-      }
-      return {
-        week: w,
-        users: Math.round((cohortSize * rate) / 100),
-        rate,
-      };
-    });
-
-    return {
-      cohortWeek: cohortDate.toISOString().slice(0, 10),
-      cohortSize,
-      weeks,
-    };
-  });
-
-  return { retention, weeks: weeksCount };
-}
-
-// Funnel mock data
-function makeFunnelData(opts: { allZero?: boolean } = {}) {
-  if (opts.allZero) {
-    return {
-      funnel: [
-        { event_name: 'signup', unique_users: 0 },
-        { event_name: 'login', unique_users: 0 },
-        { event_name: 'project_created', unique_users: 0 },
-        { event_name: 'workspace_created', unique_users: 0 },
-        { event_name: 'task_submitted', unique_users: 0 },
-      ],
-      periodDays: 30,
-    };
-  }
-  return {
-    funnel: [
-      { event_name: 'signup', unique_users: 1200 },
-      { event_name: 'login', unique_users: 980 },
-      { event_name: 'project_created', unique_users: 620 },
-      { event_name: 'workspace_created', unique_users: 400 },
-      { event_name: 'task_submitted', unique_users: 210 },
-    ],
-    periodDays: 30,
-  };
-}
-
 // Events table mock data
 function makeEventsData(opts: { manyRows?: boolean; longNames?: boolean } = {}) {
   const base = opts.manyRows
@@ -191,10 +115,7 @@ function makeEventsData(opts: { manyRows?: boolean; longNames?: boolean } = {}) 
 
 interface MockScenario {
   dau?: ReturnType<typeof makeDauData>;
-  funnel?: ReturnType<typeof makeFunnelData>;
   featureAdoption?: ReturnType<typeof makeFeatureAdoption>;
-  geo?: ReturnType<typeof makeGeoData>;
-  retention?: ReturnType<typeof makeRetentionData>;
   events?: ReturnType<typeof makeEventsData>;
   aiUsage?: ReturnType<typeof makeAiUsageData>;
   apiError?: boolean;
@@ -244,52 +165,30 @@ function makeAiUsageData(opts: { empty?: boolean; manyModels?: boolean } = {}) {
 
 const NORMAL: MockScenario = {
   dau: makeDauData(30),
-  funnel: makeFunnelData(),
   featureAdoption: makeFeatureAdoption(),
-  geo: makeGeoData(),
-  retention: makeRetentionData({ weeks: 6 }),
   events: makeEventsData(),
   aiUsage: makeAiUsageData(),
 };
 
 const EMPTY: MockScenario = {
   dau: makeDauData(0),
-  funnel: makeFunnelData({ allZero: true }),
   featureAdoption: { totals: [], trend: [], period: '30d' },
-  geo: { geo: [], period: '30d' },
-  retention: { retention: [], weeks: 12 },
   events: { events: [], period: '30d' },
   aiUsage: makeAiUsageData({ empty: true }),
 };
 
 const MANY_ITEMS: MockScenario = {
   dau: makeDauData(90),
-  funnel: makeFunnelData(),
   featureAdoption: makeFeatureAdoption({ manyEvents: true }),
-  geo: makeGeoData({ manyCountries: true }),
-  retention: makeRetentionData({ weeks: 12 }),
   events: makeEventsData({ manyRows: true }),
   aiUsage: makeAiUsageData({ manyModels: true }),
 };
 
 const LONG_TEXT: MockScenario = {
   dau: makeDauData(30),
-  funnel: makeFunnelData(),
   featureAdoption: makeFeatureAdoption({ longEventNames: true }),
-  geo: makeGeoData(),
-  retention: makeRetentionData({ weeks: 6 }),
   events: makeEventsData({ longNames: true }),
   aiUsage: makeAiUsageData({ manyModels: true }),
-};
-
-const HIGH_RETENTION: MockScenario = {
-  ...NORMAL,
-  retention: makeRetentionData({ weeks: 6, allHigh: true }),
-};
-
-const LOW_RETENTION: MockScenario = {
-  ...NORMAL,
-  retention: makeRetentionData({ weeks: 6, allLow: true }),
 };
 
 const API_ERROR: MockScenario = { apiError: true };
@@ -298,7 +197,14 @@ const API_ERROR: MockScenario = { apiError: true };
 // API mock helpers
 // ---------------------------------------------------------------------------
 
+const RETIRED_ANALYTICS_PATHS = [
+  '/admin/analytics/funnel',
+  '/admin/analytics/geo',
+  '/admin/analytics/retention',
+];
+
 async function setupMocks(page: Page, scenario: MockScenario) {
+  const retiredRequests: string[] = [];
   const respond = (route: Route, status: number, body: unknown) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
@@ -325,6 +231,12 @@ async function setupMocks(page: Page, scenario: MockScenario) {
       return respond(route, 200, { notifications: [], unreadCount: 0 });
     }
 
+    // Retired SaaS-era sections (Insights slice H2): the API answers 404 now.
+    if (RETIRED_ANALYTICS_PATHS.some((retired) => path.endsWith(retired))) {
+      retiredRequests.push(path);
+      return respond(route, 404, { error: 'NOT_FOUND' });
+    }
+
     // Analytics endpoints
     if (path.includes('/admin/analytics/dau')) {
       if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
@@ -334,24 +246,9 @@ async function setupMocks(page: Page, scenario: MockScenario) {
       });
     }
 
-    if (path.includes('/admin/analytics/funnel')) {
-      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
-      return respond(route, 200, scenario.funnel ?? makeFunnelData());
-    }
-
     if (path.includes('/admin/analytics/feature-adoption')) {
       if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
       return respond(route, 200, scenario.featureAdoption ?? makeFeatureAdoption());
-    }
-
-    if (path.includes('/admin/analytics/geo')) {
-      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
-      return respond(route, 200, scenario.geo ?? makeGeoData());
-    }
-
-    if (path.includes('/admin/analytics/retention')) {
-      if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
-      return respond(route, 200, scenario.retention ?? makeRetentionData());
     }
 
     if (path.includes('/admin/analytics/website-traffic')) {
@@ -425,6 +322,7 @@ async function setupMocks(page: Page, scenario: MockScenario) {
     // Catch-all for any other API calls
     return respond(route, 200, {});
   });
+  return { retiredRequests };
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +334,39 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     ({ viewport }) => viewport?.width !== 375,
     'Mobile audit runs only on the 375px project'
   );
+
+  test('retired sections are gone and kept sections render', async ({ page }) => {
+    const { retiredRequests } = await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+
+    for (const kept of [
+      /^AI Usage/,
+      /^Daily Active Users/,
+      /^Feature Adoption/,
+      /^Website Traffic/,
+      /^Top Events/,
+    ]) {
+      await expect(page.getByRole('heading', { level: 3, name: kept })).toBeVisible();
+    }
+    for (const retired of [/Conversion Funnel/, /Geographic Distribution/, /Retention Cohorts/]) {
+      await expect(page.getByRole('heading', { name: retired })).toHaveCount(0);
+    }
+    expect(retiredRequests).toEqual([]);
+    await assertNoHorizontalOverflow(page);
+
+    // The page scrolls inside the app shell, so capture each kept section in view.
+    const width = page.viewportSize()?.width ?? 0;
+    for (const [slug, heading] of [
+      ['ai-usage', /^AI Usage/],
+      ['adoption', /^Feature Adoption/],
+      ['traffic', /^Website Traffic/],
+    ] as const) {
+      await page.getByRole('heading', { level: 3, name: heading }).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await screenshot(page, `admin-analytics-sections-${slug}-${width}`);
+    }
+  });
 
   test('normal data — all charts render', async ({ page }) => {
     await setupMocks(page, NORMAL);
@@ -459,7 +390,7 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     expect(count).toBeGreaterThan(0);
   });
 
-  test('many items — 30+ events, 15 countries, 90 day DAU, 12 cohort weeks', async ({ page }) => {
+  test('many items — 30+ events, 90 day DAU, many AI models', async ({ page }) => {
     await setupMocks(page, MANY_ITEMS);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(800);
@@ -478,13 +409,11 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
   test('error state — page still renders with empty states', async ({ page }) => {
     await setupMocks(page, API_ERROR);
     await page.goto('/admin/analytics');
-    await page.waitForTimeout(600);
+    // When APIs fail, individual sections show empty state messages. Wait for the
+    // failed queries to settle instead of racing a fixed timeout against them.
+    await expect(page.locator('text=/No .* data available yet/').first()).toBeVisible();
     await screenshot(page, 'admin-analytics-error-mobile');
     await assertNoHorizontalOverflow(page);
-    // When APIs fail, individual sections show empty state messages
-    const emptyMessages = page.locator('text=/No .* data available yet/');
-    const count = await emptyMessages.count();
-    expect(count).toBeGreaterThan(0);
   });
 
   test('light theme — normal charts and tables', async ({ page }) => {
@@ -511,25 +440,9 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     await seedTheme(page, 'light');
     await setupMocks(page, API_ERROR);
     await page.goto('/admin/analytics');
-    await page.waitForTimeout(600);
+    await expect(page.locator('text=/No .* data available yet/').first()).toBeVisible();
     await expectTheme(page, 'light');
     await screenshot(page, 'admin-analytics-light-error-mobile');
-    await assertNoHorizontalOverflow(page);
-  });
-
-  test('high retention heat map — deep green cells', async ({ page }) => {
-    await setupMocks(page, HIGH_RETENTION);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(700);
-    await screenshot(page, 'admin-analytics-retention-high-mobile');
-    await assertNoHorizontalOverflow(page);
-  });
-
-  test('low retention heat map — pale cells', async ({ page }) => {
-    await setupMocks(page, LOW_RETENTION);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(700);
-    await screenshot(page, 'admin-analytics-retention-low-mobile');
     await assertNoHorizontalOverflow(page);
   });
 
@@ -556,31 +469,15 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     expect(box?.height).toBeGreaterThanOrEqual(36);
   });
 
-  test('retention table has accessible scope attributes', async ({ page }) => {
-    await setupMocks(page, NORMAL);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(600);
-
-    // Check column headers have scope="col"
-    const colHeaders = page.locator('table thead th[scope="col"]');
-    const colCount = await colHeaders.count();
-    expect(colCount).toBeGreaterThan(0);
-
-    // Check row headers have scope="row"
-    const rowHeaders = page.locator('table tbody th[scope="row"]');
-    const rowCount = await rowHeaders.count();
-    expect(rowCount).toBeGreaterThan(0);
-  });
-
   test('events table has scope="col" on all headers', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(600);
 
-    // EventsTable, retention, geo, and website traffic tables should all be present
+    // Events and website traffic tables should both be present
     const tables = page.locator('table');
     const tableCount = await tables.count();
-    expect(tableCount).toBeGreaterThanOrEqual(2); // retention + events + geo + website
+    expect(tableCount).toBeGreaterThanOrEqual(2);
 
     const allColHeaders = page.locator('th[scope="col"]');
     const allColCount = await allColHeaders.count();
@@ -594,7 +491,7 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
 
     await expect(page.getByText('DAU (latest)')).toBeVisible();
     await expect(page.getByText('Avg DAU')).toBeVisible();
-    await expect(page.getByText('Funnel Conversion')).toBeVisible();
+    await expect(page.getByText('Funnel Conversion')).toHaveCount(0);
     await expect(page.getByText(/^Events /)).toBeVisible();
   });
 
@@ -666,6 +563,39 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
 
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
+  test('retired sections are gone and kept sections render', async ({ page }) => {
+    const { retiredRequests } = await setupMocks(page, NORMAL);
+    await page.goto('/admin/analytics');
+    await page.waitForTimeout(800);
+
+    for (const kept of [
+      /^AI Usage/,
+      /^Daily Active Users/,
+      /^Feature Adoption/,
+      /^Website Traffic/,
+      /^Top Events/,
+    ]) {
+      await expect(page.getByRole('heading', { level: 3, name: kept })).toBeVisible();
+    }
+    for (const retired of [/Conversion Funnel/, /Geographic Distribution/, /Retention Cohorts/]) {
+      await expect(page.getByRole('heading', { name: retired })).toHaveCount(0);
+    }
+    expect(retiredRequests).toEqual([]);
+    await assertNoHorizontalOverflow(page);
+
+    // The page scrolls inside the app shell, so capture each kept section in view.
+    const width = page.viewportSize()?.width ?? 0;
+    for (const [slug, heading] of [
+      ['ai-usage', /^AI Usage/],
+      ['adoption', /^Feature Adoption/],
+      ['traffic', /^Website Traffic/],
+    ] as const) {
+      await page.getByRole('heading', { level: 3, name: heading }).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await screenshot(page, `admin-analytics-sections-${slug}-${width}`);
+    }
+  });
+
   test('normal data — full layout', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
@@ -683,12 +613,11 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
     await assertNoHorizontalOverflow(page);
   });
 
-  test('many items — 12 retention weeks desktop scroll', async ({ page }) => {
+  test('many items — desktop', async ({ page }) => {
     await setupMocks(page, MANY_ITEMS);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(800);
     await screenshot(page, 'admin-analytics-many-items-desktop');
-    // The retention table can scroll internally but the page itself must not overflow
     await assertNoHorizontalOverflow(page);
   });
 
@@ -703,7 +632,7 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
   test('error state', async ({ page }) => {
     await setupMocks(page, API_ERROR);
     await page.goto('/admin/analytics');
-    await page.waitForTimeout(600);
+    await expect(page.locator('text=/No .* data available yet/').first()).toBeVisible();
     await screenshot(page, 'admin-analytics-error-desktop');
     await assertNoHorizontalOverflow(page);
   });
@@ -728,7 +657,7 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
     await assertNoHorizontalOverflow(page);
   });
 
-  test('light theme — many rows and retention heat map', async ({ page }) => {
+  test('light theme — many rows', async ({ page }) => {
     await seedTheme(page, 'light');
     await setupMocks(page, MANY_ITEMS);
     await page.goto('/admin/analytics');
@@ -736,24 +665,5 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
     await expectTheme(page, 'light');
     await screenshot(page, 'admin-analytics-light-many-items-desktop');
     await assertNoHorizontalOverflow(page);
-  });
-
-  test('retention heat map high values', async ({ page }) => {
-    await setupMocks(page, HIGH_RETENTION);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(700);
-    await screenshot(page, 'admin-analytics-retention-high-desktop');
-    await assertNoHorizontalOverflow(page);
-  });
-
-  test('retention table caption is present in DOM (SR accessible)', async ({ page }) => {
-    await setupMocks(page, NORMAL);
-    await page.goto('/admin/analytics');
-    await page.waitForTimeout(600);
-
-    const caption = page.locator('table caption.sr-only');
-    await expect(caption).toBeAttached();
-    const captionText = await caption.textContent();
-    expect(captionText?.trim().length).toBeGreaterThan(20);
   });
 });

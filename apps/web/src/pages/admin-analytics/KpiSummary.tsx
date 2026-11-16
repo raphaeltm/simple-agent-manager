@@ -1,14 +1,9 @@
 import { type FC } from 'react';
 
-import type {
-  AnalyticsDauResponse,
-  AnalyticsEventsResponse,
-  AnalyticsFunnelResponse,
-} from '../../lib/api';
+import type { AnalyticsDauResponse, AnalyticsEventsResponse } from '../../lib/api';
 
 interface Props {
   dau: AnalyticsDauResponse | null;
-  funnel: AnalyticsFunnelResponse | null;
   events: AnalyticsEventsResponse | null;
 }
 
@@ -18,7 +13,7 @@ interface KpiCard {
   sub?: string;
 }
 
-export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
+export const KpiSummary: FC<Props> = ({ dau, events }) => {
   const cards: KpiCard[] = [];
 
   // DAU today (last data point)
@@ -47,20 +42,6 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
     });
   }
 
-  // Funnel: top conversion (only show when there's meaningful data)
-  if (funnel?.funnel?.length && funnel.funnel.length >= 2) {
-    const first = funnel.funnel.at(0);
-    const last = funnel.funnel.at(-1);
-    if (first && last && first.unique_users > 0) {
-      const rate = Math.round((last.unique_users / first.unique_users) * 100);
-      cards.push({
-        label: 'Funnel Conversion',
-        value: `${rate}%`,
-        sub: `${first.unique_users.toLocaleString()} \u2192 ${last.unique_users.toLocaleString()}`,
-      });
-    }
-  }
-
   // Total events
   if (events?.events?.length) {
     const total = events.events.reduce((s, e) => s + e.count, 0);
@@ -75,11 +56,14 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
   if (!cards.length) return null;
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {cards.map((card) => (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      {cards.map((card, index) => (
         <div
           key={card.label}
-          className="rounded-lg border border-border-default bg-surface-secondary p-4"
+          className={`rounded-lg border border-border-default bg-surface-secondary p-4${
+            // An odd last card fills the two-column phone row instead of leaving a hole.
+            cards.length % 2 === 1 && index === cards.length - 1 ? ' col-span-2 lg:col-span-1' : ''
+          }`}
         >
           <div className="text-xs font-medium text-fg-muted uppercase tracking-wide">
             {card.label}
