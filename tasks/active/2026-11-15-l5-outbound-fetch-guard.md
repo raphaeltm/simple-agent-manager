@@ -85,12 +85,17 @@ The full row was ~45 source files, above the ~30-file cap. Split approved:
 - [x] F6: `sam/no-unguarded-outbound-fetch`, ratchet baseline (44 sites / 32 files), RuleTester tests
 - [x] Docs: configuration.md section, notifications.md, agent-sign-in.md, quality README, rule doc
 - [x] Note on idea `01M72M9AEB933ZY8269D376DKC` for L12 (passthrough per-hop gap): note `01M7FEE8XED8RSW9TG1E0ZX4NY`
-- [ ] Full quality suite
-- [ ] Reviewers: security-auditor, cloudflare-specialist, architecture-reviewer, performance-reviewer, test-engineer, task-completion-validator
-- [ ] Staging (window from PR Shepherd, channel `feature.pr-shepherd-deps-20261111`): push subscribe + receive; agent sign-in via workload identity; deployment-release image resolve (public image + one refused registry); `check_dns_status`; credential with custom public base URL saved and used + one refused private host; cleanup
+- [x] Full quality suite (CI green on af6abe1d, 12a5c760 and f2e651e9; local check:fast + typecheck on each merge)
+- [x] Reviewers: security-auditor, cloudflare-specialist, architecture-reviewer, performance-reviewer, test-engineer, task-completion-validator (all PASS/ADDRESSED, see below)
+- [x] Staging, on staging2 (`sammy2.party`) under the environment lease: push subscribe + receive; agent sign-in via workload identity; deployment-release image resolve (public image + refused registries); `check_dns_status`; credential with custom public base URL saved + refused private hosts; cleanup. One partial gap: the made-up-key session never showed the upstream answer (see Staging evidence)
 - [ ] PR ready (not merged), CodeRabbit requested and waited
 
-## Staging recipe (window from the PR Shepherd; provisional 15:00-16:40Z)
+## Staging recipe (as planned; superseded, see Staging evidence)
+
+The plan below was written for primary staging with the owner's OpenCode key. The coordinator
+withdrew the key (16:05Z: never use it on staging) and primary staging later became locked to
+PR #2721's Durable Object migration history (v23), so verification ran on staging2 with a made-up
+key and the platform AI proxy instead.
 
 Preparation outside the authenticated job: deploy `deploy-staging.yml` on the frozen head, wait
 green, read-only checks (`/health`, deployed version, platform cloud credential row present, no
@@ -133,6 +138,49 @@ Resources and cost: one platform Hetzner node at the project default size (small
 about EUR 0.006/h) for under 40 min, no deployment node (the resolver check creates no release).
 All-in upper bound under USD 0.10 including Worker requests, D1/DO operations, R2 (none written)
 and egress (a few MB). Zero VMs at rest afterwards.
+
+## Staging evidence (staging2, 2026-11-15 23:28Z to 2026-11-16 00:44Z)
+
+Why staging2: no Shepherd grant for the 16:10-17:50Z window (NOFIT 16:43Z, zero effects); primary
+staging then ran PR #2721's unmerged DO migration v23 / D1 0242, which every branch built from
+main (v22 / 0241) fails the deploy preflight against. Coordinator moved L5a to staging2.
+
+- Lease: staging2 acquired 23:28:08Z by deploy run 43774931811 (head f2e651e9, a second merge of
+  main for #2766, no L5a file changed; smokes PASS); renewed once (run 43778837053); released
+  00:44:28Z (run 43782130599, deployment 7812670003 `released`).
+- Harness: `staging-l5a.mjs` v9.3 (library `/l5a-staging/`, sha256 d6eb9d31...), 8 runs. Every run
+  ended with cleanup resolved and a verified sign-out (200, then `get-session` null).
+- Agent sign-in via workload identity (runs 1-2, as `staging2-agent-user`): exchange 200, session
+  user matches. This is the path whose issuer-key fetch now goes through `guardedFetch`.
+- Push, as `staging2-agent-admin` via the staging smoke token (coordinator option (a), 00:45Z;
+  workload-identity sessions are refused push subscription by design, `rejectAgentSignInSession`):
+  subscribe 201 (Mozilla autopush endpoint); `127.0.0.1` and `169.254.169.254` endpoints refused
+  400 at save (runs 3, 4, 5, 6); one real push decrypted on the autopush channel for session B
+  (run 6). Later runs hit the push-subscription rate limit (429), which is expected.
+- Credentials: private `10.0.0.5` and metadata `169.254.169.254` base URLs refused 400; public
+  `https://opencode.ai/zen/v1` saved 201; private configuration refused 400 (every run).
+- Image resolver: public GHCR image resolved to a digest (MANIFEST_VALIDATION_FAILED after
+  resolution, the expected outcome); private and single-label registries IMAGE_RESOLVE_FAILED.
+- `check_dns_status` (run 6, claude-code on the platform proxy, agent settings untouched): structured
+  result `status ok`, httpStatus 522 (workspace still starting), no raw error text.
+- Partial gap, custom base URL at use time: the OpenCode session on the made-up-key configuration
+  ran a turn (run 8: `awaiting_followup`) but produced no assistant message in 6 minutes, so the
+  upstream 401 never surfaced in chat and the reach could not be observed. Save-time refusal and
+  acceptance are proven above; the use-time skip-and-log of a private stored row is covered by
+  `apps/api/tests/unit/ai-proxy-passthrough.test.ts`.
+- Late proofs (`late-proof.py` v4) PASS for every node created: `DELETE /api/nodes/:id` removes the
+  row only under `runtime_termination_confirmed_at` (`routes/nodes/delete.ts:removeManagedNodeRecords`).
+  Final D1 sweep: 0 run-tagged projects/credentials/configurations/environments, 0 live Hetzner
+  nodes, admin owns 0 projects, both users' agent settings unchanged.
+- Harness findings (not product defects): Docker Hub answers the Worker's anonymous manifest requests
+  with 429 (GHCR used instead); `cx23` is pool size `small` while `POST /api/nodes` defaults to
+  `medium` (filed: `tasks/backlog/2026-11-16-node-create-native-offering-size-mismatch-message.md`);
+  a default task's reservation does not fit `cx23` after the 1 GB host reserve (cx33 used); the
+  pre-existing staging2 project is `repo_provider=github`, so task submit needs a GitHub token (own
+  Artifacts project used); a task submitted 5 s after the first heartbeat got "Specified node is
+  not reachable" (45 s settle added).
+- Cost: 6 Hetzner VMs (one cx23 x2, cx33 x4), each alive under 10 min; under USD 0.05 in VM time
+  plus one short Claude Code session on the platform proxy.
 
 ## Evidence log
 
@@ -181,8 +229,8 @@ and egress (a few MB). Zero VMs at rest afterwards.
 
 ## Acceptance criteria
 
-- [ ] A private/metadata host is refused at every listed site; a public host still works (tests + staging)
-- [ ] A stored refused credential is skipped and logged, never a 500 (test)
-- [ ] A new unguarded global fetch in Worker source fails lint (RuleTester + probe)
-- [ ] Defaults change nothing that works on an existing Cloudflare install (pre-check + reasoning)
-- [ ] Nothing self-host-only ships in the Worker
+- [x] A private/metadata host is refused at every listed site; a public host still works (tests + staging2)
+- [x] A stored refused credential is skipped and logged, never a 500 (test)
+- [x] A new unguarded global fetch in Worker source fails lint (RuleTester + probe)
+- [x] Defaults change nothing that works on an existing Cloudflare install (pre-check + reasoning)
+- [x] Nothing self-host-only ships in the Worker
