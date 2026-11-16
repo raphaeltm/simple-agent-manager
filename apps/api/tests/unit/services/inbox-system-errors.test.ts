@@ -542,3 +542,66 @@ describe('failing automations', () => {
     expect(errorAsks()[0]).toMatchObject({ status: 'done', dedupe_key: null });
   });
 });
+
+describe('an answer whose agent notice the inbox sweep gave up on', () => {
+  it('files one delivery item for the person who answered, once', async () => {
+    task('t-answer', { status: 'in_progress', chat_session_id: 'chat-answer' });
+    insert('session_summaries', {
+      id: 'chat-answer',
+      project_id: P1,
+      user_id: 'owner',
+      created_by_user_id: 'owner',
+      task_id: 't-answer',
+      topic: 'Pick a region',
+      status: 'active',
+      started_at: 1,
+      updated_at: 1,
+    });
+    const resolvedAt = Date.now() - 61 * 60_000;
+    // A question the owner answered an hour ago whose notice was never queued.
+    insert('asks', {
+      id: 'q-lost',
+      project_id: P1,
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      kind: 'question',
+      blocking: 1,
+      title: 'Which region?',
+      status: 'answered',
+      source_session_id: 'chat-answer',
+      source_task_id: 't-answer',
+      resolved_by_user_id: 'owner',
+      resolved_at: resolvedAt,
+      created_at: resolvedAt - 1000,
+      updated_at: resolvedAt,
+    });
+    // Control: one still inside its retry window is left to the notice sweep.
+    insert('asks', {
+      id: 'q-retrying',
+      project_id: P1,
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      kind: 'question',
+      blocking: 1,
+      title: 'Which zone?',
+      status: 'answered',
+      source_session_id: 'chat-answer',
+      source_task_id: 't-answer',
+      resolved_by_user_id: 'owner',
+      resolved_at: Date.now() - 5 * 60_000,
+      created_at: Date.now() - 6 * 60_000,
+      updated_at: Date.now() - 5 * 60_000,
+    });
+
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(1);
+    const [item] = (await listInbox(ctx('owner'), { projectId: P1 })).items;
+    expect(item).toMatchObject({
+      kind: 'error',
+      title: "Your answer didn't reach the agent in “Pick a region”",
+      links: expect.arrayContaining([{ kind: 'ask', id: 'q-lost', label: null }]),
+    });
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
+    expect(errorAsks()).toHaveLength(1);
+    expect(errorAsks()[0]!.failure_count).toBe(1);
+  });
+});

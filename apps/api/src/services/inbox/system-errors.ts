@@ -238,14 +238,78 @@ export async function runInboxSystemErrorSweep(
     .bind(now, now, now)
     .run();
 
+  const undelivered = await fileUndeliveredAskAnswers(env, limits, now);
+
   const stats = {
     scanned: rows.length,
-    filed,
+    filed: filed + undelivered,
     skippedNormal,
     closed: closed.meta?.changes ?? 0,
   };
   if (stats.filed > 0 || stats.closed > 0) log.info('inbox.system_error_sweep', stats);
   return stats;
+}
+
+/**
+ * A person answered, marked done or archived an ask from a chat, and the agent's notice was never
+ * queued within `inbox.noticeRetryMinutes`: the inbox sweep (`sweep.ts`) has given up on it.
+ * File one `delivery` error item per such ask for that person, linking the ask. Bounded: asks
+ * that gave up inside the lookback window, at most `inbox.errorSweepBatchSize` per tick; an ask
+ * leaves the set once an item links it (read on the project's asks, `idx_asks_project_status`,
+ * only for the few candidates) or it ages out of the window.
+ */
+async function fileUndeliveredAskAnswers(
+  env: Env,
+  limits: Awaited<ReturnType<typeof getInboxLimits>>,
+  now: number
+): Promise<number> {
+  const gaveUpBefore = now - limits.noticeRetryMinutes * 60_000;
+  const result = await env.DATABASE.prepare(
+    `SELECT a.id, a.project_id, a.source_session_id, a.resolved_by_user_id
+       FROM asks a
+      WHERE a.notified_at IS NULL AND a.status IN ('answered', 'done', 'archived')
+        AND a.kind != 'error' AND a.source_session_id IS NOT NULL
+        AND a.resolved_by_user_id IS NOT NULL
+        AND a.resolved_at > ? AND a.resolved_at <= ?
+        AND NOT EXISTS (SELECT 1 FROM asks e
+          WHERE e.kind = 'error' AND e.project_id = a.project_id
+            AND e.links_json LIKE '%"kind":"ask","id":"' || a.id || '"%')
+      ORDER BY a.resolved_at LIMIT ?`
+  )
+    .bind(
+      gaveUpBefore - limits.errorLookbackMinutes * 60_000,
+      gaveUpBefore,
+      limits.errorSweepBatchSize
+    )
+    .all<{
+      id: string;
+      project_id: string;
+      source_session_id: string;
+      resolved_by_user_id: string;
+    }>();
+  let filed = 0;
+  for (const row of result.results ?? []) {
+    const chat = await loadChatForError(env, row.project_id, row.source_session_id).catch(
+      () => null
+    );
+    const filedItem = await fileAndNotify(env, {
+      projectId: row.project_id,
+      assigneeUserId: row.resolved_by_user_id,
+      source: 'delivery',
+      subjectId: row.source_session_id,
+      title: `Your answer didn't reach the agent in ${quotedName(chat?.topic, 'a chat')}`,
+      body: 'SAM kept trying but could not hand your answer to the agent; open the chat and tell it again if it still needs it.',
+      actions: ['open_chat'],
+      sourceTaskId: chat?.taskId ?? null,
+      sourceSessionId: row.source_session_id,
+      links: [
+        { kind: 'chat', id: row.source_session_id, label: null },
+        { kind: 'ask', id: row.id, label: null },
+      ],
+    });
+    if (filedItem) filed += 1;
+  }
+  return filed;
 }
 
 /** Close a recovered thing's item. Never throws. */

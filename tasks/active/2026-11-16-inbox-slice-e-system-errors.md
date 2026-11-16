@@ -62,19 +62,29 @@ Failure points (writers of `tasks.status='failed'`, 16 of them):
 
 ## Implementation checklist
 
-- [ ] Migration 0248: `asks.failure_count`, index for failed tasks scan
-- [ ] Shared types: actions answer spec, `InboxItem.failureCount/updatedAt`, `InboxAnswerRequest.action`
-- [ ] Settings: automation failure threshold, error sweep batch, lookback
-- [ ] Error filing core (file/update/resolve) + classification of normal endings
-- [ ] Task failure sweep step (isolated, budgeted) + inline filing in task callback + notification link
-- [ ] Automation failing/paused filing + close on clean run/resume
-- [ ] Failed wake → asks row (port from ProjectData), adapters for every reader (after slice G)
-- [ ] Sleep fallback with possible loss → item
-- [ ] Undelivered answer (InteractionStore unconfirmed) → item
-- [ ] Action execution in inbox answer route: retry / wake / resume; archive without agent notice
-- [ ] Permission request notification (once per request, links inbox item)
-- [ ] Tests: real triggers, exclusions with liveness, tenancy on real SQL, canary secret
-- [ ] Docs: notifications guide, admin settings, api reference
+- [x] Migration 0248: `asks.failure_count`, partial indexes (failed tasks, error items by task, error keys, failed runs, open error items per chat)
+- [x] Shared types: `actions` answer spec, `InboxItem.failureCount/updatedAt`, `InboxAnswerRequest.action`, `INBOX_ERROR_ACTIONS`
+- [x] Settings: `inbox.automationFailureThreshold`, `inbox.errorSweepBatchSize`, `inbox.errorLookbackMinutes`
+- [x] Error filing core `packages/operations/src/inbox-error-core.ts` (file / update in place / resolve; never throws)
+- [x] Normal-ending classification reused: `lifecycleOutcome` (no error), actor `user`, `classifyFailure().diagnosable`
+- [x] Task failure cron step (`apps/api/src/services/inbox/system-errors.ts:runInboxSystemErrorSweep`) + inline filing in `routes/tasks/callback.ts` with the `error` notification linking the item
+- [x] Retry closes the item in both retry implementations (`retry-subtask.ts`, `orchestration-tools.ts`); a task leaving `failed` closes it (sweep)
+- [x] Automation failing/paused filing + close on clean run/resume/disable (`automation-errors.ts`), `cron_failure` notification on a new item
+- [x] Failed wake → `asks` row via ProjectData port `inboxErrors.fileWakeFailure` (`wake-failure.ts`); marker no longer written; chat list reads it through `readOpenQuestionAttention` / `preferAttention`; ranking predicate includes it
+- [x] Wake item closes when the chat wakes (`session-wake-ready.ts`) or the person writes in the chat (`closeChatErrorAsksForHumanMessage`)
+- [x] Sleep fallback with possible loss → item (`session-sleep-fallback.ts` → `fileSleepLossError`)
+- [x] Undelivered permission answer (InteractionStore `delivery_unconfirmed`) → item (`interaction-store-attention.ts`)
+- [x] Actions: retry (`retrySubtask`), wake (`authorizeAgentWake` + `ensureSessionRecovery`), resume (`triggerStatusUpdates` CAS, `task:write`); archive without agent notice
+- [x] Permission/form/URL request notification, once per request, linking the inbox item (`notifyInteractionRequested`)
+- [x] Tests: real writers + sweep, exclusions with liveness, tenancy on real SQL, canary secret, actions, recovery, automations, wake read/close, Workers interaction tests
+- [x] Docs: api reference (system error items), notifications guide, admin settings
+- [ ] Rebase onto main after slice G (#2780) merges (part 6 is built on G's reader)
+- [ ] Staging verification (staging2 queue: F1 → C → G → E)
+
+## Notes
+
+- Round trips: task filing ≈ settings + member + task check + insert (+ dedupe read + update on repeat); cron steps: one indexed scan + bounded filings + one UPDATE (tasks); automations: one scan + one streak read per automation (≤ batch) + one read per open item (≤ 4×batch). Chat list: the question reader gained a UNION ALL arm (same round trip); ranking EXISTS gained an OR arm.
+- Undelivered answers: InteractionStore `delivery_unconfirmed` (permissions) and asks whose notice the inbox sweep gave up on (`fileUndeliveredAskAnswers`). Not covered: durable prompt outbox terminal failures to an awake chat (`max_attempts_exceeded`) for human chat messages; agent-facing `pendingAttention` no longer lists the (unanswerable) wake marker; account map no longer shows wake failures (same as questions after slice G).
 
 ## Acceptance criteria
 
