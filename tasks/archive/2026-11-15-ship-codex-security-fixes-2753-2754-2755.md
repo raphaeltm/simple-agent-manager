@@ -89,6 +89,13 @@ from its own `sam/` branch, closing the bot PR with a link.
 
 ## Acceptance Criteria
 
-- [ ] Each PR merged separately with specialist review evidence, staging evidence, CodeRabbit request-and-wait, and green production deploy
+- [x] Each PR merged separately with specialist review evidence, staging evidence, CodeRabbit request-and-wait, and green production deploy (#2759: merge a0e3baa96, Deploy Production 43810024219 success; #2772: merge b06a660e9, CodeRabbit rate-limited and recorded; #2771 merges last, carrying this archive. Its merge SHA and deploy result are published on `feature.codex-security-fixes`)
 - [x] Bot PRs closed with links to replacements
-- [ ] PR URL, merge SHA and deploy result published on `feature.codex-security-fixes`
+- [x] PR URL, merge SHA and deploy result published on `feature.codex-security-fixes`
+
+## Outcome (2026-11-16)
+
+- #2755 → PR #2759, merged a0e3baa964887fdfdfbe0324ce621069ca81638e, production deploy 43810024219 succeeded.
+- #2753 → PR #2772, merged b06a660e9e2443942a8e367967178992ddf813c1. The migration was renumbered to 0246 after main gained 0245.
+- #2754 → PR #2771. CodeRabbit's Major finding (pending owners while approval is required) was fixed before merge, and staging2 was re-verified on the merged head.
+- Primary staging stayed blocked all night by the #2721 DO migration tag v23, so all three PRs were verified on staging2.

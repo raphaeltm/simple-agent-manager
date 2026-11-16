@@ -20,7 +20,10 @@
  *
  * A failed check either REVOKES the token (deletes it from KV: no later state can make it
  * valid, and rotation cannot recover a deleted token) or only REJECTS the call (the token
- * works again once the state recovers). Checks run in this order; the first failure wins:
+ * works again once the state recovers). Checks run in this order; the first failure wins.
+ * Every revoking check runs before every rejecting one, so a reversible state (a suspension,
+ * a pending approval, a stopped workspace) can never hide a permanent one and let the token
+ * come back when the reversible state clears:
  *
  * | Condition                                             | Verdict | Reason                     |
  * | ----------------------------------------------------- | ------- | -------------------------- |
@@ -29,11 +32,11 @@
  * | workspace `deleted`                                   | revoke  | `workspace_deleted`        |
  * | credential generation retired                         | revoke  | `generation_retired`       |
  * | `users` row missing (account deleted)                 | revoke  | `user_missing`             |
+ * | no `project_members` row for (project, user)          | revoke  | `membership_missing`       |
+ * | membership `removed` (offboarded)                     | revoke  | `membership_removed`       |
  * | user `suspended` (an admin can unsuspend)             | reject  | `user_suspended`           |
  * | user status not `active`/`pending` (unrecognised)     | reject  | `user_status_unrecognized` |
  * | user `pending` while signup approval is required      | reject  | `user_pending_approval`    |
- * | no `project_members` row for (project, user)          | revoke  | `membership_missing`       |
- * | membership `removed` (offboarded)                     | revoke  | `membership_removed`       |
  * | membership `invited` / `suspended` / other non-active | reject  | `membership_inactive`      |
  * | workspace stopping/stopped/sleeping/error/...         | reject  | `workspace_inactive`       |
  * | node missing, unassigned or ending                    | reject  | `node_inactive`            |
@@ -91,7 +94,10 @@ function actorVerdict(
   row: McpTokenWorkspaceRow,
   requireApproval: boolean
 ): McpTokenWorkspaceVerdict {
+  // Permanent failures first: a reversible account state below must not mask them.
   if (row.joinedUserId === null) return { reason: 'user_missing', revoke: true };
+  if (row.joinedMemberUserId === null) return { reason: 'membership_missing', revoke: true };
+  if (row.membershipStatus === 'removed') return { reason: 'membership_removed', revoke: true };
   const userStatus = row.userStatus ?? 'active';
   // Recoverable: an admin can unsuspend, and the agent's token must work again when they do.
   if (userStatus === 'suspended') return { reason: 'user_suspended', revoke: false };
@@ -102,8 +108,6 @@ function actorVerdict(
   if (isBlockedBySignupApproval(requireApproval, { role: row.userRole, status: userStatus })) {
     return { reason: 'user_pending_approval', revoke: false };
   }
-  if (row.joinedMemberUserId === null) return { reason: 'membership_missing', revoke: true };
-  if (row.membershipStatus === 'removed') return { reason: 'membership_removed', revoke: true };
   // `invited`, `suspended`, or anything else can still become active again.
   if (row.membershipStatus !== 'active') return { reason: 'membership_inactive', revoke: false };
   return null;

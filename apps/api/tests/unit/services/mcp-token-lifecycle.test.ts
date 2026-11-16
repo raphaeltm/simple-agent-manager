@@ -231,6 +231,44 @@ describe('validateActiveWorkspaceMcpToken', () => {
     await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
   });
 
+  it.each([
+    ['suspended', () => setUserStatus('suspended')],
+    [
+      'pending while approval is required',
+      () => {
+        setUserStatus('pending');
+        setSignupApprovalSetting('true');
+      },
+    ],
+    ['in an unrecognised status', () => setUserStatus('system')],
+  ] as const)(
+    'revokes when membership is removed while the account is %s, so restoring both cannot revive the token',
+    async (_label, makeAccountReversiblyRefused) => {
+      seed({ status: 'running' });
+      expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).not.toBeNull();
+
+      makeAccountReversiblyRefused();
+      setMembership({ status: 'removed' });
+      expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+      expect(await tokenStillStored()).toBe(false);
+
+      // Re-admit the member and clear the account state: the revoked token stays dead.
+      setMembership({ status: 'active' });
+      setUserStatus('active');
+      setSignupApprovalSetting(null);
+      expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    }
+  );
+
+  it('revokes when the membership row is gone while the account is suspended', async () => {
+    seed({ status: 'running' });
+    setUserStatus('suspended');
+    sqlite.prepare(`DELETE FROM project_members WHERE user_id = 'user-1'`).run();
+
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await tokenStillStored()).toBe(false);
+  });
+
   it('rejects, but keeps, a pending owner token once approval is turned on, and accepts it again after approval', async () => {
     setUserStatus('pending');
     seed({ status: 'running' });
