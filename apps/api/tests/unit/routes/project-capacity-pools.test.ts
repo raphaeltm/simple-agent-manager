@@ -5,7 +5,7 @@ import {
 } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -102,6 +102,8 @@ function createEnv(options: { bindLimit?: number } = {}) {
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
+    schema.capacityPoolCandidateStaging,
+    schema.capacityPoolRefreshes,
   ]);
   return {
     sqlite,
@@ -819,6 +821,15 @@ describe('project capacity pool routes', () => {
     'chunks catalog addition source reads below the D1 bind limit',
     async () => {
       const { sqlite, env } = createEnv({ bindLimit: 100 });
+      // This exercises 99 source IDs against D1's 100-bind ceiling, independently
+      // of catalog throughput. One validated offering per source preserves that boundary.
+      const buildCatalog = vi.mocked(providerCatalogs.buildProviderCatalogForCredential);
+      const originalBuildCatalog = buildCatalog.getMockImplementation()!;
+      buildCatalog.mockImplementation(async (input) => {
+        const catalog = await originalBuildCatalog(input);
+        return { ...catalog, offerings: catalog.offerings.slice(0, 1) };
+      });
+      onTestFinished(() => buildCatalog.mockImplementation(originalBuildCatalog));
       seedUser(sqlite, 'user-1');
       seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
       for (let index = 0; index < 99; index += 1) {

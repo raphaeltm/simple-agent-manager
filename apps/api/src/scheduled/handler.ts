@@ -5,10 +5,12 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { runAgentEmailRecovery } from '../services/agent-email/recovery';
+import { CAPACITY_POOL_CONTINUATION_CRON } from '../services/capacity-pool-refresh-defaults';
 import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
 import { refreshGcpPriceTableIfDue } from '../services/gcp-price-table';
 import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
+import { runInboxAskSweep } from '../services/inbox/sweep';
 import {
   runLifecycleLatencyDailyEvaluation,
   runLifecycleLatencyWatchdog,
@@ -23,6 +25,7 @@ import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
 import { runAnalyticsForwardJob } from './analytics-forward';
+import { runScheduledCapacityPoolContinuations } from './capacity-pool-continuation';
 import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
@@ -63,6 +66,33 @@ export async function scheduled(
   env: Env,
   ctx: ExecutionContext
 ): Promise<void> {
+  if (controller.cron === CAPACITY_POOL_CONTINUATION_CRON) {
+    const type = 'capacity-pool-continuation';
+    log.info('cron.started', { cron: controller.cron, type });
+    const continuationSweeps = createSweepIsolator(env);
+    const result = await continuationSweeps.isolate('capacity_pool_continuation', async () => {
+      if (!(await isOperationalLoopEnabled(env, 'cron'))) {
+        log.info('cron.skipped_disabled', { cron: controller.cron, type, switch: 'cron' });
+        return { resumed: 0, failed: 0, skipped: true };
+      }
+      return { ...(await runScheduledCapacityPoolContinuations(env)), skipped: false };
+    });
+    const failedSweeps = continuationSweeps.failedSweeps();
+    log.info('cron.completed', {
+      cron: controller.cron,
+      type,
+      resumed: result?.resumed ?? null,
+      failed: result?.failed ?? 1,
+      skipped: result?.skipped ?? false,
+      failedSweeps,
+    });
+    if (failedSweeps.length > 0) {
+      await notifyFailedSweeps(env, failedSweeps).catch(() => {
+        log.error('cron.failed_sweep_notification_failed', { type });
+      });
+    }
+    return;
+  }
   const isDailyForward = controller.cron === '0 3 * * *';
   const isMonthlyCostAggregation = isHourlyPlatformMaintenanceCron(controller.cron);
 
@@ -198,6 +228,8 @@ export async function scheduled(
   const secretRequestSweep = await sweeps.isolate('runtime_secret_request_sweep', () =>
     runRuntimeSecretRequestSweep(env)
   );
+  // Two indexed reads per idle tick; work is capped by inbox.sweepBatchSize.
+  const inboxAskSweep = await sweeps.isolate('inbox_ask_sweep', () => runInboxAskSweep(env));
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
   );
@@ -375,6 +407,8 @@ export async function scheduled(
     secretRequestsExpired: secretRequestSweep?.expired,
     secretRequestAgentsNotified: secretRequestSweep?.agentsNotified,
     secretRequestNoticesRetried: secretRequestSweep?.noticesRetried,
+    inboxAsksExpired: inboxAskSweep?.expired,
+    inboxAskNoticesRetried: inboxAskSweep?.noticesRetried,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
     sessionTaskRepairReused: sessionTaskRepair?.reused,

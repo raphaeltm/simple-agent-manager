@@ -86,7 +86,7 @@ async function resolveSteerTarget(
         input.claim.message.targetSessionId,
         input.sourceTaskGuard,
         () => runSideEffectGuard(input),
-        { allowWake: false }
+        { allowWake: false, isSessionActive: input.isSessionActive }
       );
   if (resolution.kind === 'guarded') return resolution.result;
   if (resolution.kind === 'failed') return fallback(resolution.reason, resolution.error);
@@ -335,7 +335,7 @@ export async function reconcileSteerDelivery(
         input.claim.message.targetSessionId,
         input.sourceTaskGuard,
         () => runSideEffectGuard(input),
-        { allowWake: false }
+        { allowWake: false, isSessionActive: input.isSessionActive }
       );
   if (resolution.kind === 'guarded') return resolution.result;
   if (resolution.kind !== 'ready') {

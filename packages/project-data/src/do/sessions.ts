@@ -3,6 +3,7 @@
  */
 import { clearWorkspaceIdleCheck } from './activity';
 import { parseCountCnt, parseSessionStatus, parseSessionStop } from './row-schemas';
+import { invalidateSessionWakeActivation } from './session-wake-activation-guard';
 import type { Env } from './types';
 import { generateId } from './types';
 
@@ -326,6 +327,7 @@ function terminateSession(
     sessionId
   );
 
+  if (cursor.rowsWritten > 0) invalidateSessionWakeActivation(sql, sessionId);
   if (evictionSource && cursor.rowsWritten > 0) {
     clearEvictionStopEligibility(sql, sessionId);
     sql.exec(
@@ -369,12 +371,17 @@ export function sleepSession(
     sessionId,
     previousStatus
   );
-  if (cursor.rowsWritten > 0) clearEvictionStopEligibility(sql, sessionId);
+  if (cursor.rowsWritten > 0) {
+    invalidateSessionWakeActivation(sql, sessionId);
+    clearEvictionStopEligibility(sql, sessionId);
+  }
   return cursor.rowsWritten > 0;
 }
 
 export interface WakeSessionOptions {
   allowStopped?: boolean;
+  /** VM snapshot restore links the runtime before the TaskRunner handoff commits. */
+  deferActivation?: boolean;
 }
 
 export function wakeSession(
@@ -387,12 +394,14 @@ export function wakeSession(
   const now = Date.now();
   const cursor = sql.exec(
     `UPDATE chat_sessions
-     SET status = 'active', workspace_id = ?, ended_at = NULL,
+     SET status = CASE WHEN ? = 1 AND status != 'active' THEN 'sleeping' ELSE 'active' END,
+         workspace_id = ?, ended_at = NULL,
          agent_completed_at = NULL, updated_at = ?
      WHERE id = ? AND (
        status = 'sleeping' OR (status IN ('active', 'failed') AND workspace_id = ?)
        OR (? = 1 AND status = 'stopped')
      )`,
+    options.deferActivation ? 1 : 0,
     workspaceId,
     now,
     sessionId,
@@ -400,6 +409,7 @@ export function wakeSession(
     options.allowStopped && hasEvictionStopEligibility(sql, sessionId) ? 1 : 0
   );
   if (cursor.rowsWritten === 0) return false;
+  invalidateSessionWakeActivation(sql, sessionId);
   clearEvictionStopEligibility(sql, sessionId);
   clearWorkspaceIdleCheck(sql, workspaceId, sessionId);
   return true;
@@ -469,6 +479,7 @@ export function linkSessionToWorkspace(
     now,
     sessionId
   );
+  invalidateSessionWakeActivation(sql, sessionId);
 
   // Initialize workspace activity tracking for idle detection.
   sql.exec(

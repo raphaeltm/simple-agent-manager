@@ -216,12 +216,30 @@ async function resolveRecoveryPlacement(
     }
   );
   if ('error' in resolved) {
+    // Retry catalog unavailability only while publication work is durably pending.
+    // Otherwise surface the catalog refusal without spending a snapshot claim.
+    let reason = 'placement_unsatisfiable';
+    if (resolved.errorKind === 'credentials') {
+      reason = 'placement_credentials_missing';
+    } else if (resolved.placementErrorCode === 'no-eligible-capacity-candidate') {
+      switch (resolved.capacityPoolEffectiveState) {
+        case 'migration-pending':
+        case 'catalog-unavailable':
+          reason = resolved.capacityPoolRefreshPending
+            ? 'session_recovery_placement_transient'
+            : 'placement_catalog_refresh_unavailable';
+          break;
+        case 'source-disabled':
+          reason = 'placement_sources_disabled';
+          break;
+        case 'configured-empty':
+          reason = 'placement_pool_empty';
+          break;
+      }
+    }
     return {
       error: resolved.error,
-      reason:
-        resolved.errorKind === 'credentials'
-          ? 'placement_credentials_missing'
-          : 'placement_unsatisfiable',
+      reason,
     };
   }
   return resolved;

@@ -16,6 +16,7 @@ import type {
   DefaultCapacityPoolOfferingResolution,
   DefaultCapacityPoolsBackfillOptions,
 } from './default-capacity-pools';
+import { IoTimeoutError, withDeadline } from './fetch-timeout';
 import { resolveGcpBootDiskPolicy } from './gcp-provider-factory';
 import {
   buildProviderCatalogForCredential,
@@ -281,6 +282,7 @@ export async function resolveOfferingsForSeed(
     try {
       const catalog = await buildProviderCatalogForCredential({
         env: options.env,
+        deadlineAt: options.reconciliationDeadlineAt,
         seed: {
           id: seed.id,
           provider: seed.provider,
@@ -300,11 +302,11 @@ export async function resolveOfferingsForSeed(
         },
       });
       const refreshStatus = catalog.refreshStatus;
-      const resolution: DefaultCapacityPoolOfferingResolution = {
+      const resolution = normalizeOfferingResolution({
         offerings: catalog.offerings ?? [],
         refreshSucceeded: refreshStatus?.succeeded ?? true,
         catalogComplete: refreshStatus?.complete ?? true,
-      };
+      });
       writeCachedCatalog(cacheKey, resolution, ttlMs, now);
       return resolution;
     } catch (error) {
@@ -314,11 +316,26 @@ export async function resolveOfferingsForSeed(
         credentialSource: seed.credentialSource,
         ...serializeError(error),
       });
-      return {
-        offerings: getStaticProviderCatalogOfferings(
+      // Static GCP metadata also reads the current disk policy. That read shares the
+      // original pass budget; a failed live read must not start a new settings timeout.
+      const remaining = (options.reconciliationDeadlineAt ?? Infinity) - Date.now();
+      const fallback = async () =>
+        getStaticProviderCatalogOfferings(
           seed.provider,
           await staticCatalogOptions(seed.provider, options.env)
-        ),
+        );
+      let offerings: ProviderInstanceOffering[] = [];
+      if (remaining > 0) {
+        try {
+          offerings = Number.isFinite(remaining)
+            ? await withDeadline(fallback, remaining)
+            : await fallback();
+        } catch (fallbackError) {
+          if (!(fallbackError instanceof IoTimeoutError)) throw fallbackError;
+        }
+      }
+      return {
+        offerings,
         refreshSucceeded: false,
         catalogComplete: false,
       };
@@ -332,6 +349,7 @@ export async function resolveOfferingsForSeed(
     ),
     refreshSucceeded: true,
     catalogComplete: false,
+    catalogValidated: true, // Bundled static reference metadata, not a failed API fallback.
   };
 }
 
@@ -339,9 +357,22 @@ function normalizeOfferingResolution(
   value: ProviderInstanceOffering[] | DefaultCapacityPoolOfferingResolution
 ): DefaultCapacityPoolOfferingResolution {
   if (Array.isArray(value)) {
-    return { offerings: value, refreshSucceeded: true, catalogComplete: true };
+    return {
+      offerings: value,
+      refreshSucceeded: true,
+      catalogComplete: true,
+      catalogValidated: true,
+    };
   }
-  return value;
+  return {
+    ...value,
+    catalogValidated:
+      value.catalogValidated !== false &&
+      value.refreshSucceeded &&
+      (value.catalogComplete !== false ||
+        (value.offerings.length > 0 &&
+          value.offerings.every((offering) => offering.catalogSource === 'static'))),
+  };
 }
 
 /** GCP static offerings follow the admin boot disk policy when an environment is available. */

@@ -5,7 +5,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
 import { reconcileSessionRecoveryBindingFailure } from './session-recovery-binding-failure';
-import { isRestorableSnapshot, type SessionSnapshotRecoveryClaim } from './session-snapshot-artifacts';
+import {
+  isRestorableSnapshot,
+  type SessionSnapshotRecoveryClaim,
+} from './session-snapshot-artifacts';
 import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryAttemptsAfterClaim,
@@ -354,6 +357,8 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
     workspaceId: string;
     taskId: string;
     recoveryAttemptId?: string | null;
+    /** VM-only replay after the exact restore committed but activation did not. */
+    allowRestored?: boolean;
     now?: Date;
   }
 ): Promise<boolean> {
@@ -382,8 +387,9 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
           AND recovery.chat_session_id = snapshot.chat_session_id
           AND replacement.chat_session_id = snapshot.chat_session_id
           AND snapshot.recovery_status IN ('waking', 'restored')
-          AND snapshot.sleeping_at IS NOT NULL
-          AND snapshot.sleep_status = 'sleeping'
+          AND ((snapshot.sleeping_at IS NOT NULL AND snapshot.sleep_status = 'sleeping')
+            OR (? = 1 AND snapshot.runtime = 'vm' AND snapshot.recovery_status = 'restored'
+              AND snapshot.sleeping_at IS NULL AND snapshot.sleep_status IS NULL))
           AND snapshot.expires_at > ? AND julianday(snapshot.expires_at) IS NOT NULL
           AND (
             (snapshot.status = 'available' AND snapshot.degradation = 'none')
@@ -404,6 +410,7 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
       input.taskId,
       input.recoveryAttemptId ?? null,
       input.recoveryAttemptId ?? null,
+      input.allowRestored && input.recoveryAttemptId ? 1 : 0,
       now.toISOString()
     )
     .first<{ found: number }>();

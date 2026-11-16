@@ -112,7 +112,9 @@ func get(t *testing.T, url string, headers map[string]string) (int, string) {
 // main listener keeps working.
 func TestTunnelListenerRefusesBearerlessGitCredential(t *testing.T) {
 	h := startTunnelHarness(t)
+	exchangeToken := h.installExchange()
 	path := "/git-credential?host=github.com&workspaceId=" + relayTestWorkspaceID
+	helperBearer := map[string]string{"Authorization": "Bearer " + exchangeToken}
 
 	for _, tc := range []struct {
 		name    string
@@ -123,6 +125,8 @@ func TestTunnelListenerRefusesBearerlessGitCredential(t *testing.T) {
 			"Connection": "keep-alive, " + proxiedRequestHeader + ", X-Forwarded-Host",
 		}},
 		{name: "caller sends an empty relay marker", headers: map[string]string{proxiedRequestHeader: ""}},
+		// The helper bearer is a node-local secret; through the tunnel it is refused.
+		{name: "helper exchange bearer through the tunnel", headers: helperBearer},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			status, body := get(t, h.tunnelURL+path, tc.headers)
@@ -133,9 +137,17 @@ func TestTunnelListenerRefusesBearerlessGitCredential(t *testing.T) {
 		})
 	}
 
-	// Liveness and owner control: the same route on the main listener (the
-	// Docker helper path) still answers a bearerless loopback call.
+	// The main listener no longer trusts a bearerless loopback peer either: any
+	// process on the node could otherwise name another workspace's ID.
 	status, body := get(t, h.mainURL+path, nil)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("main listener bearerless status = %d, want 401 (body %q)", status, body)
+	}
+	assertNoCredential(t, h.relayHarness, body)
+
+	// Liveness and owner control: the same route on the main listener (the
+	// Docker helper path) answers the helper's direct call with its bearer.
+	status, body = get(t, h.mainURL+path, helperBearer)
 	if status != http.StatusOK || !strings.Contains(body, "password="+relayCanaryToken) {
 		t.Fatalf("main listener helper exchange: status %d, want 200 with credential", status)
 	}

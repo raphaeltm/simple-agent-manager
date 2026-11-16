@@ -220,12 +220,28 @@ export type PrepareAttentionAnswerResult =
  * wins the race and resolves the marker through the existing human-message
  * path.
  */
+/**
+ * Staged value of an inbox archive claim (idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9). It shares the answer
+ * claim column so an answer and an archive exclude each other through one compare-and-set; the
+ * NUL prefix keeps it out of reach of a typed or agent-offered answer.
+ */
+export const ATTENTION_ARCHIVE_CLAIM = '\u0000sam:inbox-archived';
+
+/** `answer` stages the person's answer; `archive` stages the inbox archive claim instead. */
+export type AttentionClaimMode = 'answer' | 'archive';
+
+function claimValue(mode: AttentionClaimMode, answer: string): string {
+  return mode === 'archive' ? ATTENTION_ARCHIVE_CLAIM : answer;
+}
+
 export function prepareAttentionAnswer(
   sql: SqlStorage,
   sessionId: string,
   markerId: string,
-  answer: string
+  rawAnswer: string,
+  mode: AttentionClaimMode = 'answer'
 ): PrepareAttentionAnswerResult {
+  const answer = claimValue(mode, rawAnswer);
   const rows = sql
     .exec(
       `SELECT * FROM session_attention_markers
@@ -255,8 +271,11 @@ export function prepareAttentionAnswer(
   }
 
   const options = parseAttentionOptions(marker.metadata);
-  if (options.length > 0 && !options.includes(answer)) {
-    return { status: 'invalid_option', options };
+  if (mode === 'answer') {
+    if (answer.startsWith('\u0000')) return { status: 'invalid_option', options };
+    if (options.length > 0 && !options.includes(answer)) {
+      return { status: 'invalid_option', options };
+    }
   }
 
   const claimed = sql.exec(
@@ -275,8 +294,10 @@ export function releaseAttentionAnswer(
   sql: SqlStorage,
   sessionId: string,
   markerId: string,
-  answer: string
+  rawAnswer: string,
+  mode: AttentionClaimMode = 'answer'
 ): number {
+  const answer = claimValue(mode, rawAnswer);
   return sql.exec(
     `UPDATE session_attention_markers
      SET resolved_answer = NULL
@@ -293,22 +314,26 @@ export function completeAttentionAnswer(
   sql: SqlStorage,
   sessionId: string,
   markerId: string,
-  answer: string
+  rawAnswer: string,
+  mode: AttentionClaimMode = 'answer'
 ): number {
   const now = Date.now();
+  const staged = claimValue(mode, rawAnswer);
+  // An archived question records no answer: the person chose not to act.
   return sql
     .exec(
       `UPDATE session_attention_markers
        SET resolved_at = ?, resolved_by_actor_type = 'human',
-           resolved_reason = 'structured_answer', resolved_answer = ?
+           resolved_reason = ?, resolved_answer = ?
        WHERE id = ? AND session_id = ? AND kind = 'needs_input'
          AND resolved_at IS NULL AND resolved_answer = ?
        RETURNING id`,
       now,
-      answer,
+      mode === 'archive' ? 'archived' : 'structured_answer',
+      mode === 'archive' ? null : staged,
       markerId,
       sessionId,
-      answer
+      staged
     )
     .toArray().length;
 }
@@ -400,14 +425,21 @@ export function getAttentionSummary(
 ): {
   markerId: string;
   kind: string;
+  /** `request_human_input`, `acp_interaction`, or another producer; null on legacy rows. */
+  source: string | null;
   createdAt: number;
   expiresAt: number | null;
   reason: string | null;
   options: string[];
+  /** The `request_human_input` category, when recorded. */
+  category: string | null;
+  /** For a mirrored runtime interaction: its id and kind (`permission`, `form`, `url`). */
+  interactionId: string | null;
+  interactionKind: string | null;
 } | null {
   const rows = sql
     .exec(
-      `SELECT id, kind, created_at, expires_at, reason, metadata
+      `SELECT id, kind, source, created_at, expires_at, reason, metadata
        FROM session_attention_markers
        WHERE session_id = ? AND resolved_at IS NULL
        ORDER BY CASE WHEN kind = 'needs_input' THEN 0 ELSE 1 END, created_at DESC
@@ -418,7 +450,33 @@ export function getAttentionSummary(
   if (rows.length === 0) return null;
   const summary = parseAttentionSummaryRow(rows[0]);
   const { metadata, ...publicSummary } = summary;
-  return { ...publicSummary, options: parseAttentionOptions(metadata) };
+  // The inbox reads these from `session_summaries.attention_json` (idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9).
+  return {
+    ...publicSummary,
+    options: parseAttentionOptions(metadata),
+    ...attentionSummaryMetadataFields(metadata),
+  };
+}
+
+/** Metadata fields the inbox needs; a malformed blob yields nulls, never a throw. */
+function attentionSummaryMetadataFields(metadata: string | null): {
+  category: string | null;
+  interactionId: string | null;
+  interactionKind: string | null;
+} {
+  const empty = { category: null, interactionId: null, interactionKind: null };
+  if (!metadata) return empty;
+  try {
+    const record = parseJsonRecord(metadata, 'attention.metadata');
+    const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
+    return {
+      category: text(record.category),
+      interactionId: text(record.interactionId),
+      interactionKind: record.source === 'acp_interaction' ? text(record.kind) : null,
+    };
+  } catch {
+    return empty;
+  }
 }
 
 /**

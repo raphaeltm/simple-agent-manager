@@ -554,6 +554,45 @@ Optional GitHub Environment variables `CONTAINER_ROLLOUT_TIMEOUT_MS` (default
 accept positive integer milliseconds. These are deployment runner settings, not
 Worker runtime settings. Timeout errors include the rollout ID and last status.
 
+### Container image reuse
+
+Before the API Worker is deployed, the **Resolve container images** step
+(`scripts/deploy/container-image-reuse.ts`) gives each Instant container image a
+content key. The key covers the Dockerfile, every file it copies, and a
+fingerprint of every input installed from the network: the apt package indexes
+of each suite the image installs from, every URL the build fetches, the resolved
+dependency tree of each `npm install -g` package, and the resolved PyPI
+dependencies of each `uv tool install` (`container-image-inputs.ts`,
+`container-image-fingerprints.ts`). The registry tag `inputs-<key>` in your
+account's container registry records an image built from those inputs.
+
+- **Inputs unchanged:** the deploy uses that image's digest. Nothing is built or
+  pushed, and when it is the running image Wrangler reports no change and starts
+  no rollout, so the rollout gate returns at once.
+- **Inputs changed** (including an upstream security update or dependency
+  release): the image is built and pushed under the new key, and the rollout
+  gate waits for the rollout as usual.
+- **Latest rollout failed or cancelled** (or its state cannot be read): the image
+  is rebuilt to a fresh digest even when its inputs are unchanged, so the deploy
+  starts a new rollout instead of re-pointing at the one that failed.
+- **Any doubt** (a Dockerfile command, fetched URL or npm install script outside
+  the reviewed lists in `container-image-reviewed-inputs.ts`, a failed
+  fingerprint, a registry error): the Dockerfile is left in place and Wrangler
+  builds the image as it would without this step. A failed image build fails the
+  deployment.
+
+Anyone who can push to a repository in your account's container registry can
+replace the image a tag points at, so registry write access is deploy access. That
+was already true of the deploy token, which can publish Workers too; keep
+production in a Cloudflare account, or behind a token, that staging cannot use.
+
+The step's job summary lists each image's outcome and reason. A clean install
+has no recorded images, so its first deploy builds them. To always build with
+Wrangler, set the GitHub Environment variable `CONTAINER_IMAGE_REUSE_ENABLED` to
+exactly `false`. Optional `CONTAINER_IMAGE_FINGERPRINT_TIMEOUT_MS` (default
+`180000`) bounds each fingerprint request and all of an image's lookups together, and `CONTAINER_REGISTRY_CREDENTIAL_MINUTES`
+(default `30`) sets the lifetime of each short-lived registry credential.
+
 ## First Login & Admin Access
 
 On ordinary deployments without an installer owner binding, the first genuine human to sign in becomes the **superadmin**: the account that can approve other users, manage platform credentials, and reach the admin dashboard. The promotion happens once, when that person's first session is created (`establishFirstSuperadmin`, `apps/api/src/services/first-superadmin.ts`), and only while they are the **only** real account on the instance.

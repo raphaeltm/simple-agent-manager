@@ -104,6 +104,11 @@ const AttentionSummarySchema = v.object({
   expiresAt: v.nullable(v.number()),
   reason: v.nullable(v.string()),
   options: v.array(v.string()),
+  // Added for the inbox (`getAttentionSummary`); absent on rows synced before it.
+  source: v.optional(v.nullable(v.string())),
+  category: v.optional(v.nullable(v.string())),
+  interactionId: v.optional(v.nullable(v.string())),
+  interactionKind: v.optional(v.nullable(v.string())),
 });
 
 /**

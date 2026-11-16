@@ -284,6 +284,10 @@ export interface SafeEffectiveCapacityPoolSummary {
 }
 
 export interface DefaultCapacityPoolSummary {
+  /** Actual durable refresh work; false after failure or its first-attempt deadline. */
+  catalogRefreshPending?: boolean;
+  /** A completed publication or trusted pre-upgrade catalog remains usable during refresh. */
+  catalogPublished?: boolean;
   pool: CapacityPool;
   sources: CapacitySourceIdentity[];
   candidates: CapacityPoolCandidate[];
