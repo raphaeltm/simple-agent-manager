@@ -813,6 +813,20 @@ export {
   isIdeaHumanTransition,
 } from './ideas';
 
+// Project Overview (Inbox slice F1)
+export type {
+  OverviewMergedPullRequest,
+  OverviewRunningChat,
+  OverviewRunningState,
+  ProjectOverviewResponse,
+  ProjectOverviewSection,
+} from './project-overview';
+export {
+  DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
+  DEFAULT_PROJECT_OVERVIEW_RUNNING_LIMIT,
+  MAX_PROJECT_OVERVIEW_LIMIT,
+} from './project-overview';
+
 // Knowledge Graph
 export type {
   AddObservationRequest,

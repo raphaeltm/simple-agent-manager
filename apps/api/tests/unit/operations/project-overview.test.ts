@@ -1,0 +1,299 @@
+/**
+ * projectOverviewGet against a real SQL engine. "Running" is a SQL predicate over the D1 chat
+ * index and the task table, and the project scope is a join condition, so a foreign project's
+ * rows are seeded beside the owner's and must never appear (rule 11, rule 28 section 5). The
+ * ProjectData idea snapshot is an external boundary and is mocked.
+ */
+import type { OperationContext } from '@simple-agent-manager/operations';
+import { projectOverviewGet } from '@simple-agent-manager/operations';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { createOperationPorts } from '../../../src/operation-ports';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+
+const mocks = vi.hoisted(() => ({ snapshots: vi.fn() }));
+vi.mock('../../../src/services/project-data', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
+  getIdeaWorkSnapshots: mocks.snapshots,
+}));
+
+const NOW = 1_794_000_000_000;
+
+describe('projectOverviewGet', () => {
+  let sqlite: Database.Database;
+  let env: Env;
+
+  function ctx(userId = 'owner'): OperationContext {
+    return {
+      env,
+      ports: createOperationPorts(env),
+      requestId: 'test',
+      actor: { userId, via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
+    };
+  }
+
+  function insert(table: string, row: Record<string, string | number | null>): void {
+    const columns = Object.keys(row);
+    sqlite
+      .prepare(
+        `INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`
+      )
+      .run(...Object.values(row));
+  }
+
+  function task(id: string, fields: Record<string, string | number | null> = {}): void {
+    insert('tasks', {
+      id,
+      project_id: 'p',
+      user_id: 'owner',
+      title: `Task ${id}`,
+      status: 'in_progress',
+      execution_step: 'running',
+      agent_profile_hint: 'profile-build',
+      created_at: '2026-11-16T00:00:00.000Z',
+      updated_at: '2026-11-16T00:00:00.000Z',
+      ...fields,
+    });
+  }
+
+  function chat(id: string, fields: Record<string, string | number | null> = {}): void {
+    insert('session_summaries', {
+      id,
+      project_id: 'p',
+      user_id: 'owner',
+      status: 'active',
+      topic: `Chat ${id}`,
+      task_id: `task-${id}`,
+      message_count: 3,
+      started_at: NOW - 3_600_000,
+      created_at: NOW - 3_600_000,
+      last_message_at: NOW - 60_000,
+      agent_completed_at: null,
+      attention_json: null,
+      created_by_user_id: 'owner',
+      updated_at: NOW,
+      ...fields,
+    });
+  }
+
+  /** A chat and its task, the way every chat is task-backed. */
+  function running(
+    id: string,
+    chatFields: Record<string, string | number | null> = {},
+    taskFields: Record<string, string | number | null> = {}
+  ): void {
+    task(`task-${id}`, { chat_session_id: id, ...taskFields });
+    chat(id, chatFields);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sqlite = new Database(':memory:');
+    createAllSchemaTables(sqlite, schema);
+    sqlite.exec(`
+      INSERT INTO projects (id, name, repository) VALUES ('p', 'Project', 'acme/app'), ('foreign', 'Other', 'acme/other');
+      INSERT INTO users (id, name, email) VALUES ('owner','Owner','o@example.com'), ('teammate','Mate','m@example.com'), ('outsider','Out','x@example.com');
+      INSERT INTO project_members (project_id, user_id, role, status) VALUES
+        ('p','owner','owner','active'), ('p','teammate','member','active'), ('foreign','outsider','owner','active');
+      INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type) VALUES
+        ('profile-build', 'p', 'owner', 'Opus 5.5 Build', 'claude-code'),
+        ('profile-foreign', 'foreign', 'outsider', 'Foreign profile', 'claude-code');
+    `);
+    mocks.snapshots.mockImplementation(async (_env: unknown, _projectId: string, ids: string[]) =>
+      Object.fromEntries(
+        ids.map((id) => [
+          id,
+          {
+            ideaId: id,
+            sessions: [],
+            needsInput: [],
+            fileIds: [],
+            pullRequestUrls: [],
+            updates: 0,
+            truncated: { sessions: false, files: false, pullRequests: false },
+          },
+        ])
+      )
+    );
+    env = { DATABASE: createSqliteD1(sqlite), BASE_DOMAIN: 'example.test' } as unknown as Env;
+  });
+  afterEach(() => sqlite.close());
+
+  it('lists working, starting and waiting chats and leaves idle, sleeping and finished ones out', async () => {
+    running('working');
+    running('starting', { agent_completed_at: null }, { status: 'queued', execution_step: null });
+    running('waiting', {
+      agent_completed_at: NOW - 120_000,
+      attention_json: JSON.stringify({ markerId: 'm1', kind: 'needs_input' }),
+    });
+    running('idle', { agent_completed_at: NOW - 120_000 });
+    running('sleeping-chat', { status: 'sleeping' });
+    running('sleeping-task', {}, { status: 'sleeping' });
+    // The chat index still says active, but its task finished: not running.
+    running('finished', {}, { status: 'completed', execution_step: null });
+    running('awaiting', {}, { execution_step: 'awaiting_followup' });
+
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+
+    const byId = new Map(result.running.items.map((item) => [item.sessionId, item]));
+    expect([...byId.keys()].sort()).toEqual(['starting', 'waiting', 'working']);
+    expect(result.running.total).toBe(3);
+    expect(byId.get('working')).toMatchObject({
+      state: 'working',
+      topic: 'Chat working',
+      taskId: 'task-working',
+      profile: { id: 'profile-build', name: 'Opus 5.5 Build' },
+      startedAt: NOW - 3_600_000,
+      lastActivityAt: NOW - 60_000,
+    });
+    expect(byId.get('starting')?.state).toBe('starting');
+    expect(byId.get('waiting')).toMatchObject({ state: 'waiting', waitingOnViewer: true });
+    expect(result.unavailable).toEqual([]);
+  });
+
+  it('says a question is the viewer’s only when the viewer started the chat', async () => {
+    running('waiting', {
+      agent_completed_at: NOW - 1,
+      attention_json: JSON.stringify({ markerId: 'm1' }),
+    });
+    const result = await projectOverviewGet(ctx('teammate'), { projectId: 'p' });
+    expect(result.running.items).toEqual([
+      expect.objectContaining({ sessionId: 'waiting', state: 'waiting', waitingOnViewer: false }),
+    ]);
+  });
+
+  it('never returns another project’s chats, tasks or profiles (owner control beside each attack)', async () => {
+    // Owner control: the same shape inside the project is listed.
+    running('mine');
+    // Attack 1: a running chat in a foreign project.
+    task('task-foreign-chat', { project_id: 'foreign', user_id: 'outsider' });
+    chat('foreign-chat', {
+      project_id: 'foreign',
+      user_id: 'outsider',
+      task_id: 'task-foreign-chat',
+    });
+    // Attack 2: our chat row pointing at a foreign project's running task.
+    task('task-borrowed', { project_id: 'foreign', user_id: 'outsider' });
+    chat('borrowed', { task_id: 'task-borrowed' });
+    // Attack 3: our task naming a foreign project's profile.
+    running('foreign-profile', {}, { agent_profile_hint: 'profile-foreign' });
+
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+
+    const ids = result.running.items.map((item) => item.sessionId).sort();
+    expect(ids).toEqual(['foreign-profile', 'mine']);
+    expect(result.running.items.find((i) => i.sessionId === 'foreign-profile')?.profile).toBeNull();
+  });
+
+  it('refuses a caller who is not a member, with the same answer as a missing project', async () => {
+    running('mine');
+    await expect(projectOverviewGet(ctx('outsider'), { projectId: 'p' })).rejects.toMatchObject({
+      code: 'not_found',
+    });
+    await expect(
+      projectOverviewGet(ctx('outsider'), { projectId: 'missing' })
+    ).rejects.toMatchObject({ code: 'not_found' });
+  });
+
+  it('caps the list newest first and still counts every running chat', async () => {
+    for (let i = 0; i < 12; i++) running(`chat-${i}`, { last_message_at: NOW - i * 1000 });
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+    expect(result.running.items.map((item) => item.sessionId)).toEqual([
+      'chat-0',
+      'chat-1',
+      'chat-2',
+      'chat-3',
+      'chat-4',
+    ]);
+    expect(result.running.total).toBe(12);
+  });
+
+  it('skips one malformed row and keeps the rest', async () => {
+    running('good');
+    running('bad');
+    // A start time that is not a number is a row the reader cannot trust.
+    sqlite.prepare(`UPDATE session_summaries SET started_at = 'yesterday' WHERE id = 'bad'`).run();
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+    expect(result.running.items.map((item) => item.sessionId)).toEqual(['good']);
+    expect(result.running.total).toBe(2);
+    expect(result.unavailable).toEqual([]);
+  });
+
+  it('returns the newest merged pull requests of this project only', async () => {
+    const pr = (number: number, fields: Record<string, string | number | null>) =>
+      insert('pull_requests', {
+        id: `pr-${number}-${String(fields.project_id ?? 'p')}`,
+        project_id: 'p',
+        repository: 'acme/app',
+        number,
+        url: `https://github.com/acme/app/pull/${number}`,
+        title: `PR ${number}`,
+        state: 'merged',
+        is_draft: 0,
+        created_at: '2026-11-01T00:00:00.000Z',
+        updated_at: '2026-11-01T00:00:00.000Z',
+        ...fields,
+      });
+    pr(1, { merged_at: '2026-11-10T00:00:00.000Z' });
+    pr(2, { merged_at: '2026-11-14T00:00:00.000Z' });
+    pr(3, { merged_at: '2026-11-12T00:00:00.000Z' });
+    pr(4, { merged_at: '2026-11-15T00:00:00.000Z' });
+    pr(5, { state: 'open', merged_at: null });
+    pr(6, { state: 'closed', merged_at: null });
+    pr(7, {
+      project_id: 'foreign',
+      repository: 'acme/other',
+      merged_at: '2026-11-16T00:00:00.000Z',
+    });
+    pr(8, { url: 'not a url', merged_at: '2026-11-15T12:00:00.000Z' });
+
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+
+    expect(result.recent.mergedPullRequests.map((item) => item.number)).toEqual([4, 2]);
+    expect(result.recent.mergedPullRequests[0]).toEqual({
+      number: 4,
+      url: 'https://github.com/acme/app/pull/4',
+      title: 'PR 4',
+      repository: 'acme/app',
+      mergedAt: '2026-11-15T00:00:00.000Z',
+    });
+  });
+
+  it('returns the three most recently updated ideas, open or closed, from this project only', async () => {
+    const idea = (id: string, status: string, updatedAt: string, projectId = 'p') =>
+      task(id, {
+        project_id: projectId,
+        is_idea: 1,
+        status,
+        execution_step: null,
+        agent_profile_hint: null,
+        updated_at: updatedAt,
+      });
+    idea('idea-old', 'draft', '2026-11-01T00:00:00.000Z');
+    idea('idea-done', 'completed', '2026-11-15T00:00:00.000Z');
+    idea('idea-new', 'draft', '2026-11-16T00:00:00.000Z');
+    idea('idea-mid', 'draft', '2026-11-10T00:00:00.000Z');
+    idea('idea-foreign', 'draft', '2026-11-16T01:00:00.000Z', 'foreign');
+
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+
+    expect(result.recent.ideas.map((item) => item.ideaId)).toEqual([
+      'idea-new',
+      'idea-done',
+      'idea-mid',
+    ]);
+  });
+
+  it('names a failed section instead of failing the page', async () => {
+    running('working');
+    task('idea-1', { is_idea: 1, status: 'draft', execution_step: null });
+    mocks.snapshots.mockRejectedValue(new Error('ProjectData unavailable'));
+    const result = await projectOverviewGet(ctx(), { projectId: 'p' });
+    expect(result.unavailable).toEqual(['ideas']);
+    expect(result.recent.ideas).toEqual([]);
+    expect(result.running.items.map((item) => item.sessionId)).toEqual(['working']);
+  });
+});

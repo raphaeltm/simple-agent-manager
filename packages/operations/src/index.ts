@@ -43,6 +43,7 @@ export { OperationError, operationErrorHttpStatus, toOperationHttpError } from '
 export { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from './idea-content-limit';
 export { createIdea, updateIdea } from './idea-core';
 export { ideaTaskPredicateSql } from './idea-identity';
+export { projectOverviewGet, type ProjectOverviewInput } from './project-overview';
 export {
   getIdeaWithDerivedStatus,
   type IdeaPullRequestRefresh,
