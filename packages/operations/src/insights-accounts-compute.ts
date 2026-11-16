@@ -150,8 +150,14 @@ export function waitInterval(
     outcome = 'blocked';
   } else {
     end = wait.ownerOverride?.grantedAt ?? wait.nextRetryAt;
-    if (task.terminal && task.endedAtMs !== null) end = Math.min(end, task.endedAtMs);
-    outcome = wait.phase === 'waiting' && !task.terminal && end > nowMs ? 'ongoing' : 'resumed';
+    // A run that ended before its wait did was never resumed: say so rather than "resumed".
+    const endedFirst = task.terminal && task.endedAtMs !== null && task.endedAtMs < end;
+    if (endedFirst) end = task.endedAtMs as number;
+    outcome = endedFirst
+      ? 'ended'
+      : wait.phase === 'waiting' && !task.terminal && end > nowMs
+        ? 'ongoing'
+        : 'resumed';
   }
   end = Math.max(start, Math.min(end, nowMs));
   return {
@@ -164,17 +170,33 @@ export function waitInterval(
   };
 }
 
-/** A rejected window as an interval: from its sample to its reset (unknown reset: still going). */
+/**
+ * A rejected window as an interval: from its sample to its reset. A window keeps only its latest
+ * sample, so one with no reported reset proves nothing about how long it stayed exhausted: it
+ * lasts at most its own length (a 5-hour window, 5 hours), or is a point when its length is
+ * unknown too, rather than "still going" for the whole range.
+ */
 export function windowInterval(
-  row: { limitKey: string; observedAt: number; resetsAt: number | null; window: string },
+  row: {
+    limitKey: string;
+    observedAt: number;
+    resetsAt: number | null;
+    windowMinutes: number | null;
+    window: string;
+  },
   nowMs: number
 ): StallInterval {
-  const ongoing = row.resetsAt === null || row.resetsAt > nowMs;
-  const end = ongoing ? nowMs : (row.resetsAt as number);
+  const end =
+    row.resetsAt !== null
+      ? row.resetsAt
+      : row.windowMinutes !== null && row.windowMinutes > 0
+        ? row.observedAt + row.windowMinutes * 60_000
+        : row.observedAt;
+  const ongoing = end > nowMs;
   return {
     limitKey: row.limitKey,
     startMs: row.observedAt,
-    endMs: Math.max(row.observedAt, end),
+    endMs: Math.max(row.observedAt, Math.min(end, nowMs)),
     taskId: null,
     window: row.window,
     outcome: ongoing ? 'ongoing' : 'resumed',
@@ -190,12 +212,18 @@ export interface StallEpisode {
   outcome: InsightsStallOutcome;
 }
 
-const OUTCOME_RANK: Record<InsightsStallOutcome, number> = { resumed: 0, ongoing: 1, blocked: 2 };
+const OUTCOME_RANK: Record<InsightsStallOutcome, number> = {
+  resumed: 0,
+  ended: 1,
+  ongoing: 2,
+  blocked: 3,
+};
 
 /**
  * Per account, intervals that overlap (or sit within the provider's reset tolerance of each other)
  * are one episode: four agents paused by one exhausted 5-hour window are one stall, not four.
- * Outcome: blocked if any part was blocked, else ongoing if any part still is, else resumed.
+ * Outcome: blocked if any part was blocked, else ongoing if any part still is, else ended if a
+ * run ended while waiting, else resumed.
  */
 export function mergeStallEpisodes(intervals: readonly StallInterval[]): StallEpisode[] {
   const tolerance = PROVIDER_LIMIT_POLICY.resetWindowToleranceMs;

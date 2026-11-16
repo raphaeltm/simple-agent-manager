@@ -153,10 +153,16 @@ describe('waitInterval', () => {
     });
     expect(waitInterval(override, live, T0 + 60 * MIN)?.endMs).toBe(T0 + 3 * MIN);
     const ended = { id: 't', terminal: true, endedAtMs: T0 + 7 * MIN };
+    // The run ended before the wait did: it was never resumed.
     expect(waitInterval(wait(), ended, T0 + 60 * MIN)).toMatchObject({
       endMs: T0 + 7 * MIN,
-      outcome: 'resumed',
+      outcome: 'ended',
     });
+    // Control: a run that ended after its wait was resumed first.
+    const late = { id: 't', terminal: true, endedAtMs: T0 + 90 * MIN };
+    expect(waitInterval({ ...wait(), phase: 'released' }, late, T0 + 120 * MIN)?.outcome).toBe(
+      'resumed'
+    );
   });
 
   it('a blocked wait lasts until the run ends, or now', () => {
@@ -176,8 +182,15 @@ describe('waitInterval', () => {
 });
 
 describe('windowInterval', () => {
+  const row = {
+    limitKey: 'k',
+    observedAt: T0,
+    resetsAt: T0 + 30 * MIN,
+    windowMinutes: 300,
+    window: '5h',
+  };
+
   it('ends at the reset, or now while it has not reset', () => {
-    const row = { limitKey: 'k', observedAt: T0, resetsAt: T0 + 30 * MIN, window: '5h' };
     expect(windowInterval(row, T0 + 60 * MIN)).toMatchObject({
       endMs: T0 + 30 * MIN,
       outcome: 'resumed',
@@ -186,7 +199,20 @@ describe('windowInterval', () => {
       endMs: T0 + 10 * MIN,
       outcome: 'ongoing',
     });
-    expect(windowInterval({ ...row, resetsAt: null }, T0 + 10 * MIN).outcome).toBe('ongoing');
+  });
+
+  it('an unknown reset lasts at most the window, never the whole range', () => {
+    const unknown = { ...row, resetsAt: null };
+    expect(windowInterval(unknown, T0 + 30 * 24 * 60 * MIN)).toMatchObject({
+      endMs: T0 + 300 * MIN,
+      outcome: 'resumed',
+    });
+    expect(windowInterval(unknown, T0 + 10 * MIN).outcome).toBe('ongoing');
+    // No reset and no window length: a point, not a stall that runs until now.
+    expect(windowInterval({ ...unknown, windowMinutes: null }, T0 + 60 * MIN)).toMatchObject({
+      endMs: T0,
+      outcome: 'resumed',
+    });
   });
 });
 

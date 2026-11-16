@@ -81,32 +81,39 @@ whose agent session recorded no credential appear as **Account not recorded**.
 
 ### Each account
 
-- **Runs** and **Merged a pull request**: the same runs Flow counts, attributed to the account the
-  run's agent used.
-- **Paused for limits**: how many times the account stalled on a usage limit in the range, and for
-  how long in total (**paused now** while one is still going).
+- **Runs** and **Merged**: the same runs Flow counts, attributed to the account the run's agent
+  used, and how many of them merged a pull request.
+- **Limit pauses**: how many times the account stalled on a usage limit in the range, and for how
+  long in total (**Paused now** while one is still going).
 - **Limits now** (your own accounts): the provider's last-reported windows, the same chip as the chat
   header. Open it for every window and when it resets.
-- **Spent** and **Per merged pull request** (API keys): **Not reported** for now. SAM does not yet
-  record how many tokens each run used, and it does not estimate.
+- **Spend** (API keys): **Not reported** for now. SAM does not yet record how many tokens each run
+  used, and it does not estimate.
+
+The ring around each account's icon is its colour in the chart below.
 
 ### Runs per day by account
 
 The runs of the range, by the day (7 days) or week (30 and 90 days) they ended, or started if still
-going, stacked by account. The five busiest accounts each get a colour; the rest are **Other**.
+going, stacked by account. The five busiest accounts each get a colour; the rest, and runs with no
+recorded account, are grey (**Other**).
 
 ### Stalled on a limit
 
 Each time an account ran out: when it started, which window ran out when SAM knows (**5h**,
 **Week**), how many runs it held, how long it lasted and how it ended — **resumed** (the limit
-reset, or the owner started the run anyway), **still waiting**, or **stopped retrying, needs a
-person** (SAM gave up waiting and the run needs someone to look at it). Runs paused by one exhausted
+reset, or the owner started the run anyway), **the run ended while it waited** (it was stopped or
+failed before the limit reset), **still waiting**, or **stopped retrying, needs a person** (SAM gave
+up waiting and the run needs someone to look at it). Runs paused by one exhausted
 window count as one stall, not one per run. The list shows the most recent ones.
 
 A stall is worked out each time the page loads from two records: the latest usage-limit wait of
 each task (a run paused mid-way, or held before it started), and the windows the provider reported
 as exhausted. SAM keeps only a task's latest wait and a window's latest report, so an older stall
-that a later one replaced is not shown.
+that a later one replaced is not shown. A window reported without a reset time counts for at most
+its own length. Another member's personal accounts contribute their runs' waits, but not the
+provider windows they reported, as on the project's other limit views. If a section can't be read,
+the tab says so rather than showing it empty.
 
 ## On the Overview
 

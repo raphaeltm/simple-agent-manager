@@ -4,8 +4,8 @@
  * realistic month, a stressed project (long names, every stop reason, 13 weeks, a capped idea
  * sample), an empty project, a failed read, the range switch, and the coming-soon tabs.
  * Accounts (slice A, `insights-accounts-fixtures.ts`): a realistic month, a stressed project
- * (long and hostile names, eight accounts, 13 weeks, a capped stall scan), an empty project and
- * a failed read.
+ * (long and hostile names, eight accounts, 13 weeks, a capped stall scan), an empty project, a
+ * failed read, a failed stall section, and a range switch held mid-flight.
  */
 import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
@@ -257,7 +257,8 @@ test.describe('Insights', () => {
     await expect(page).toHaveURL(new RegExp(`${BASE}/accounts`));
     const own = page.getByTestId('insights-account-cred:cc-max');
     await expect(own).toContainText('Personal Max');
-    await expect(own).toContainText('3× · 1.9 h · paused now');
+    await expect(own).toContainText('3× · 1.9 h');
+    await expect(own).toContainText('Paused now');
     // Your own account shows its current limits through the shared chip.
     await expect(own.getByTestId('credential-limit-chip')).toBeVisible();
     // A teammate's accounts are described, never named.
@@ -266,9 +267,12 @@ test.describe('Insights', () => {
     ).toContainText('Teammates’ accounts (2)');
     const key = page.getByTestId('insights-account-cred:cc-key');
     await expect(key).toContainText('API key · pay as you go');
-    await expect(key.getByText('Not reported')).toHaveCount(2);
+    await expect(key.getByText('Not reported')).toHaveCount(1);
     await expect(page.getByTestId('insights-accounts-chart')).toBeVisible();
-    await expect(page.getByTestId('insights-stall-list').locator('li')).toHaveCount(5);
+    await expect(page.getByTestId('insights-stall-list').locator('li')).toHaveCount(6);
+    await expect(page.getByTestId('insights-stall-list')).toContainText(
+      'the run ended while it waited'
+    );
     await expect(page.getByTestId('insights-stall-list')).toContainText(
       'stopped retrying, needs a person'
     );
@@ -307,15 +311,40 @@ test.describe('Insights', () => {
     await capture(page, 'insights-accounts-error');
   });
 
-  test('switching range on accounts reads that range and keeps the cards on screen', async ({
+  test('accounts with the stall read unavailable says so instead of "none"', async ({ page }) => {
+    await setupScene(page, 'realistic', [], 'partial');
+    await page.goto(`${BASE}/accounts`);
+    await expect(page.getByText('Some numbers could not be loaded: limit stalls.')).toBeVisible();
+    await expect(page.getByText('Limit stalls could not be loaded.')).toBeVisible();
+    await expect(page.getByText('No agent waited on a usage limit in this range.')).toHaveCount(0);
+    // Liveness: the accounts still show.
+    await expect(page.getByTestId('insights-account-cred:cc-max')).toBeVisible();
+    await capture(page, 'insights-accounts-partial');
+  });
+
+  test('switching range on accounts keeps the cards on screen until the new range arrives', async ({
     page,
   }) => {
     const requests: string[] = [];
     await setupScene(page, 'realistic', requests);
+    // Hold the 7-day answer so the in-between state is observable.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(/\/insights\/accounts\?range=7d/, async (route) => {
+      await held;
+      await route.fallback();
+    });
     await page.goto(`${BASE}/accounts`);
-    await expect(page.getByTestId('insights-account-cred:cc-max')).toBeVisible();
+    await expect(page.getByText('Runs per week by account')).toBeVisible();
     await page.getByRole('button', { name: '7 days' }).click();
     await expect(page).toHaveURL(/range=7d/);
+    // In flight: the 30-day cards and chart stay, nothing blanks.
+    await expect(page.getByTestId('insights-account-cred:cc-max')).toBeVisible();
+    await expect(page.getByText('Runs per week by account')).toBeVisible();
+    await expect(page.getByText('Loading accounts…')).toHaveCount(0);
+    release();
     await expect(page.getByText('Runs per day by account')).toBeVisible();
     await expect(page.getByTestId('insights-account-cred:cc-max')).toBeVisible();
     expect(requests.filter((r) => r.startsWith('accounts:'))).toEqual([

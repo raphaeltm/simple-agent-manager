@@ -18,9 +18,9 @@ import { LoadError, Loading, Notice } from '../../components/page-kit/page';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { projectAccountsQueryOptions } from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
-import { AccountCard, RunsByAccountChart, StallList } from './accounts-parts';
-import { FlowSection } from './flow-parts';
-import { rangeLabel, useInsightsRange } from './index';
+import { AccountCard, chartSeries, RunsByAccountChart, StallList } from './accounts-parts';
+import { Empty, FlowSection } from './flow-parts';
+import { useInsightsRange } from './index';
 
 const SECTION_NAMES: Record<InsightsAccountsSection, string> = {
   runs: 'runs',
@@ -55,10 +55,12 @@ export function AccountsTab() {
 
 export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
   const accounts = useMemo(() => new Map(data.accounts.map((a) => [a.key, a])), [data.accounts]);
+  const { series, colorOf } = useMemo(() => chartSeries(data), [data]);
   const until = Date.parse(data.until);
   const now = Number.isFinite(until) ? until : Date.now();
-  const rangeText = `last ${rangeLabel(data.range)}`;
   const stalled = data.stallEpisodes.total;
+  const runsFailed = data.unavailable.includes('runs');
+  const stallsFailed = data.unavailable.includes('stalls');
 
   return (
     <div
@@ -72,7 +74,7 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
         </Notice>
       )}
 
-      {data.accounts.length === 0 ? (
+      {data.accounts.length === 0 && !runsFailed ? (
         <Pane className="px-5 py-8 text-center" data-testid="insights-accounts-empty">
           <h2 className="m-0 text-[15px] font-semibold text-fg-primary">No runs in this range</h2>
           <p className="m-0 mt-1 text-[13.5px] text-fg-muted">
@@ -81,27 +83,50 @@ export function AccountsBody({ data }: { data: ProjectAccountsResponse }) {
           </p>
         </Pane>
       ) : (
-        <div className="grid min-w-0 gap-[var(--sam-space-gutter)] sm:grid-cols-2 xl:grid-cols-3">
-          {data.accounts.map((account) => (
-            <AccountCard key={account.key} account={account} rangeText={rangeText} now={now} />
-          ))}
-        </div>
+        data.accounts.length > 0 && (
+          <div className="grid min-w-0 gap-[var(--sam-space-gutter)] sm:grid-cols-2 xl:grid-cols-3">
+            {data.accounts.map((account) => (
+              <AccountCard
+                key={account.key}
+                account={account}
+                color={colorOf.get(account.key) ?? 'var(--sam-person-auto)'}
+                now={now}
+              />
+            ))}
+          </div>
+        )
       )}
 
       <div className="grid min-w-0 gap-[var(--sam-space-gutter)] lg:grid-cols-2">
         <FlowSection
           title={`Runs per ${data.bucket} by account`}
-          note={`${data.totals.runs} ${data.totals.runs === 1 ? 'run' : 'runs'}`}
+          note={
+            runsFailed
+              ? undefined
+              : `${data.totals.runs} ${data.totals.runs === 1 ? 'run' : 'runs'}`
+          }
           testId="insights-section-account-runs"
         >
-          <RunsByAccountChart data={data} />
+          {runsFailed ? (
+            <Empty>Runs could not be loaded.</Empty>
+          ) : (
+            <RunsByAccountChart data={data} series={series} />
+          )}
         </FlowSection>
         <FlowSection
           title="Stalled on a limit"
-          note={stalled > 0 ? `${stalled} ${stalled === 1 ? 'time' : 'times'}` : undefined}
+          note={
+            !stallsFailed && stalled > 0
+              ? `${stalled} ${stalled === 1 ? 'time' : 'times'}`
+              : undefined
+          }
           testId="insights-section-stalls"
         >
-          <StallList episodes={data.stallEpisodes} accounts={accounts} />
+          {stallsFailed ? (
+            <Empty>Limit stalls could not be loaded.</Empty>
+          ) : (
+            <StallList episodes={data.stallEpisodes} accounts={accounts} />
+          )}
         </FlowSection>
       </div>
 

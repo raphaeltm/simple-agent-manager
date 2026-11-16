@@ -67,7 +67,7 @@ export interface InsightsAccount {
   spend: InsightsAccountSpend | null;
 }
 
-export type InsightsStallOutcome = 'resumed' | 'blocked' | 'ongoing';
+export type InsightsStallOutcome = 'resumed' | 'ended' | 'blocked' | 'ongoing';
 
 /**
  * One stretch of time an account stalled on a usage limit: overlapping limit waits of runs on
@@ -84,7 +84,8 @@ export interface InsightsStallEpisode {
   /** Runs held by this episode (paused mid-run or held before starting). */
   runs: number;
   /**
-   * `resumed`: the wait ended (reset, or the owner started anyway); `blocked`: SAM stopped
+   * `resumed`: the wait ended (the limit reset, or the owner started anyway); `ended`: the run
+   * ended (stopped, failed or finished) while it was still waiting; `blocked`: SAM stopped
    * retrying and a person must act; `ongoing`: still waiting.
    */
   outcome: InsightsStallOutcome;

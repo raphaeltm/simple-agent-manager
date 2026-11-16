@@ -16,9 +16,9 @@
  * Round trips (rule 60, budget 6 in the Insights spec): authorization 1; settings 0 or 1 (the
  * per-isolate admin-settings cache); one D1 `batch()` carrying three statements 1; the viewer's own
  * limit windows 0 or 1 (one statement per 100 of their own accounts, so 1 in practice). At most 4;
- * measured in `insights-accounts.test.ts`. If the batch fails as a whole, each statement is retried
- * on its own so one bad section cannot blank the page; that degraded path costs three more and is
- * logged.
+ * measured at 3 in `insights-accounts.test.ts`. If the batch fails as a whole, each statement is
+ * retried on its own so one bad section cannot blank the page; that rare degraded path costs three
+ * more (at most 7 on a cold settings cache) and is logged.
  */
 import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import {
@@ -225,6 +225,7 @@ export async function projectAccounts(
           limitKey: row.ref,
           observedAt: row.observed_at,
           resetsAt: row.resets_at ?? null,
+          windowMinutes: row.window_minutes ?? null,
           window: credentialLimitWindowLabel(row.window_type, row.window_minutes ?? null),
         },
         nowMs

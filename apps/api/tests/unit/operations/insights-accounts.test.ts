@@ -6,11 +6,17 @@
  * and their keys by the shared `credentialLimitReferenceKey`, so the stored shape is the one the
  * writers produce.
  */
+import { createHash } from 'node:crypto';
+
 import type { OperationContext } from '@simple-agent-manager/operations';
 import { projectAccounts, projectFlow } from '@simple-agent-manager/operations';
-import { accountRunsStatement } from '@simple-agent-manager/operations/internal/insights-accounts-sql';
+import {
+  accountRunsStatement,
+  rejectedWindowsStatement,
+  stallWaitsStatement,
+} from '@simple-agent-manager/operations/internal/insights-accounts-sql';
 import { flowWindow } from '@simple-agent-manager/operations/internal/insights-flow';
-import { newProviderLimitWait } from '@simple-agent-manager/scheduler-core';
+import { newProviderLimitWait, PROVIDER_LIMIT_POLICY } from '@simple-agent-manager/scheduler-core';
 import { credentialLimitReferenceKey } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -18,7 +24,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  createAllSchemaTables,
+  createDeclaredIndexes,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const DAY = 86_400_000;
@@ -118,12 +128,17 @@ describe('projectAccounts', () => {
     taskId: string,
     credentialReference: string,
     observedAgo: number,
-    options: { resetsInMs?: number; phase?: 'waiting' | 'blocked' | 'released' } = {}
+    options: {
+      resetsInMs?: number;
+      phase?: 'waiting' | 'blocked' | 'released';
+      sourceAgentSessionId?: string;
+      origin?: 'callback' | 'admission';
+    } = {}
   ): Promise<void> {
     const observedAt = NOW - observedAgo;
     const built = newProviderLimitWait({
       taskId,
-      origin: 'callback',
+      origin: options.origin ?? 'callback',
       incidentId: `incident-${taskId}`,
       credentialKey: await credentialLimitReferenceKey(credentialReference),
       previous: null,
@@ -131,7 +146,13 @@ describe('projectAccounts', () => {
       resetsAt: observedAt + (options.resetsInMs ?? 30 * MIN),
       jitter: 0,
     });
-    const stored = { ...built, phase: options.phase ?? built.phase };
+    const stored = {
+      ...built,
+      phase: options.phase ?? built.phase,
+      ...(options.sourceAgentSessionId
+        ? { sourceAgentSessionId: options.sourceAgentSessionId }
+        : {}),
+    };
     sqlite
       .prepare('UPDATE tasks SET provider_limit_wait_json = ? WHERE id = ?')
       .run(JSON.stringify(stored), taskId);
@@ -337,8 +358,8 @@ describe('projectAccounts', () => {
 
     const result = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
     const max = result.accounts.find((a) => a.key === 'cred:cc-max');
-    // SAM resumes a run 10 s after the reported reset (PROVIDER_LIMIT_POLICY.resetGraceMs).
-    const GRACE = 10_000;
+    // SAM resumes a run just after the reported reset.
+    const GRACE = PROVIDER_LIMIT_POLICY.resetGraceMs;
     expect(max?.stalls).toEqual({
       episodes: 2,
       totalMs: 40 * MIN + GRACE + 10 * MIN,
@@ -368,6 +389,139 @@ describe('projectAccounts', () => {
     });
     expect(result.stallEpisodes).toMatchObject({ total: 4, truncated: false });
     expect(result.stallEpisodes.items.some((e) => e.window?.includes('Week'))).toBe(false);
+  });
+
+  it('reads a wait’s session only from this project (attack + owner control)', async () => {
+    // The wait names a session. Owner control: a session of p supplies the account's source and
+    // agent. Attack: a session in a foreign workspace must not.
+    run(
+      'own',
+      'cc-mate',
+      {},
+      { user_id: 'mate', agent_type: 'openai-codex', agent_credential_source: 'project' }
+    );
+    run(
+      'fx',
+      'cc-out',
+      { project_id: 'foreign' },
+      {
+        user_id: 'outsider',
+        agent_type: 'openai-codex',
+        agent_credential_source: 'project',
+      }
+    );
+    run('t-own', null);
+    run('t-foreign', null);
+    // Neither key has a run in p, so the wait's own metadata decides the row.
+    credential('cc-k1', 'mate', 'K1', 'oauth-token');
+    credential('cc-k2', 'mate', 'K2', 'oauth-token');
+    await wait('t-own', ref('cc-k1'), HOUR, { phase: 'released', sourceAgentSessionId: 's-own' });
+    await wait('t-foreign', ref('cc-k2'), 2 * HOUR, {
+      phase: 'released',
+      sourceAgentSessionId: 's-fx',
+    });
+    const result = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    const keyOf = (start: number) =>
+      result.stallEpisodes.items.find((e) => Date.parse(e.startedAt) === NOW - start)?.accountKey;
+    expect(keyOf(HOUR)).toBe('project:openai-codex:subscription');
+    expect(keyOf(2 * HOUR)).toBe('teammate:unknown:subscription');
+  });
+
+  it('shows a teammate’s stalls only as their kind, and not their personal windows', async () => {
+    run('m1', 'cc-mate', { completed_at: iso(HOUR) }, { user_id: 'mate' });
+    await wait('m1', ref('cc-mate'), 3 * HOUR, { phase: 'released' });
+    await rejectedWindow(ref('cc-mate'), 'claude.seven_day', 2 * HOUR, DAY, { user_id: 'mate' });
+    // A shared project credential's window stays visible to every member.
+    await rejectedWindow(ref('cc-max'), 'claude.five_hour', 5 * DAY, 30 * MIN, {
+      user_id: 'mate',
+      credential_source: 'project',
+    });
+    const result = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    const mate = result.accounts.find((a) => a.key === 'teammate:claude-code:subscription');
+    expect(mate?.stalls.episodes).toBe(1);
+    expect(result.stallEpisodes.items.map((e) => [e.accountKey, e.window])).toEqual([
+      ['teammate:claude-code:subscription', null],
+      ['cred:cc-max', '5h'],
+    ]);
+    const body = JSON.stringify(result);
+    expect(body).not.toContain('Mate Secret Name');
+    expect(body).not.toContain('cc-mate');
+    expect(body).not.toContain('Week');
+  });
+
+  it('attributes a run to its workspace’s newest session that recorded a credential', async () => {
+    run('two', 'cc-max');
+    // A newer session with no credential does not hide the account.
+    insert('agent_sessions', {
+      id: 's-two-later',
+      workspace_id: 'w-two',
+      user_id: 'owner',
+      status: 'stopped',
+      agent_type: 'claude-code',
+      agent_credential_source: 'user',
+      agent_credential_reference: null,
+      created_at: '2099-01-01T00:00:00.000Z',
+    });
+    run('three', 'cc-max', {}, { created_at: '2026-01-01T00:00:00.000Z' });
+    // A newer session with a credential wins.
+    insert('agent_sessions', {
+      id: 's-three-later',
+      workspace_id: 'w-three',
+      user_id: 'owner',
+      status: 'stopped',
+      agent_type: 'claude-code',
+      agent_credential_source: 'user',
+      agent_credential_reference: ref('cc-key'),
+      created_at: '2026-06-01T00:00:00.000Z',
+    });
+    const result = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    expect(result.accounts.map((a) => [a.key, a.runs])).toEqual([
+      ['cred:cc-key', 1],
+      ['cred:cc-max', 1],
+    ]);
+  });
+
+  it('skips a malformed run row, and an all-bad section is empty, not an error', async () => {
+    run('good', 'cc-max');
+    // A completion time that is not a date: its row fails the day check and is skipped.
+    run('bad', 'cc-key', { completed_at: 'zz-not-a-date', updated_at: 'zz-not-a-date' });
+    run('good2', 'cc-max');
+    const result = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    expect(result.accounts.map((a) => [a.key, a.runs])).toEqual([['cred:cc-max', 2]]);
+    sqlite.prepare("UPDATE tasks SET completed_at = 'zz', updated_at = 'zz'").run();
+    const allBad = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    expect(allBad).toMatchObject({ accounts: [], unavailable: [], totals: { runs: 0 } });
+  });
+
+  it('a failed batch retries each statement and marks only the failed section', async () => {
+    run('a1', 'cc-max');
+    await wait('a1', ref('cc-max'), HOUR, { phase: 'released' });
+    const real = env.DATABASE;
+    env = {
+      ...env,
+      DATABASE: {
+        ...real,
+        prepare: (sql: string) => {
+          const statement = real.prepare(sql);
+          if (!sql.includes('provider_limit_wait_json AS wait_json')) return statement;
+          const failing = {
+            all: async () => {
+              throw new Error('D1_ERROR: simulated');
+            },
+          };
+          return { ...statement, bind: () => failing, ...failing };
+        },
+        batch: async () => {
+          throw new Error('D1_ERROR: batch failed');
+        },
+      },
+    } as unknown as Env;
+    const result = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    expect(result.unavailable).toEqual(['stalls']);
+    expect(result.accounts.find((a) => a.key === 'cred:cc-max')).toMatchObject({
+      runs: 1,
+      stalls: { episodes: 0 },
+    });
   });
 
   it('skips a malformed wait or window row without failing the page', async () => {
@@ -418,6 +572,31 @@ describe('projectAccounts', () => {
     expect(result.stallEpisodes.truncated).toBe(true);
     expect(result.stallEpisodes.total).toBe(50);
     expect(result.stallEpisodes.items).toHaveLength(10);
+    // The cap keeps the newest waits: the newest is listed first, the two oldest are gone.
+    expect(Date.parse(result.stallEpisodes.items[0]?.startedAt ?? '')).toBe(NOW - HOUR);
+    const oldest = await projectAccounts(
+      {
+        ...capped,
+        ports: {
+          ...capped.ports,
+          settings: {
+            ...capped.ports.settings,
+            resolveDetailsMany: async (names: readonly string[]) =>
+              names.map((name) => ({
+                value:
+                  name === 'insights.accountsStallScanCap'
+                    ? 50
+                    : name === 'insights.accountsEpisodesListed'
+                      ? 50
+                      : null,
+              })),
+          },
+        } as OperationContext['ports'],
+      },
+      { projectId: 'p', range: '7d', nowMs: NOW }
+    );
+    const starts = oldest.stallEpisodes.items.map((e) => NOW - Date.parse(e.startedAt));
+    expect(Math.max(...starts)).toBe(50 * HOUR);
   });
 
   it('attaches the last-reported limit windows to your own accounts only', async () => {
@@ -448,6 +627,108 @@ describe('projectAccounts', () => {
     ]);
     expect(result.accounts.find((a) => a.owner === 'teammate')?.usage).toBeNull();
     expect(result.bucket).toBe('week');
+    // An allowed window is a meter reading, not a stall.
+    expect(own?.stalls).toEqual({ episodes: 0, totalMs: 0, ongoing: false });
+    expect(result.stallEpisodes.total).toBe(0);
+  });
+
+  it('ignores waits and windows that began before the range', async () => {
+    run('old', 'cc-max', { completed_at: iso(HOUR) });
+    run('new', 'cc-max', { completed_at: iso(HOUR) });
+    await wait('old', ref('cc-max'), 8 * DAY, { phase: 'released' });
+    await rejectedWindow(ref('cc-max'), 'claude.seven_day', 8 * DAY, 30 * MIN);
+    // Control: the same shapes inside the range count.
+    await wait('new', ref('cc-max'), 2 * DAY, { phase: 'released' });
+    await rejectedWindow(ref('cc-max'), 'claude.five_hour', 3 * DAY, 30 * MIN);
+    const result = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    expect(result.stallEpisodes.items.map((e) => NOW - Date.parse(e.startedAt))).toEqual([
+      2 * DAY,
+      3 * DAY,
+    ]);
+  });
+
+  it('files platform runs under the platform and admission holds under their account', async () => {
+    run('plat', null, {}, { agent_credential_source: 'platform' });
+    // An admission hold: queued, no workspace, waiting on the viewer's subscription.
+    insert('tasks', {
+      id: 'held',
+      project_id: 'p',
+      user_id: 'owner',
+      title: 'Held',
+      status: 'queued',
+      task_mode: 'task',
+      is_idea: 0,
+      created_at: iso(HOUR),
+      updated_at: iso(HOUR),
+    });
+    await wait('held', ref('cc-max'), 30 * MIN, { origin: 'admission' });
+    const result = await projectAccounts(ctx(), { projectId: 'p', range: '7d', nowMs: NOW });
+    expect(result.accounts.find((a) => a.owner === 'platform')).toMatchObject({
+      key: 'platform:claude-code:platform',
+      kind: 'platform',
+      runs: 1,
+      credentials: 1,
+      spend: null,
+    });
+    // The held task is not a run yet, but its stall is the viewer's account's, by name.
+    expect(result.accounts.find((a) => a.key === 'cred:cc-max')).toMatchObject({
+      name: 'Personal Max',
+      runs: 0,
+      stalls: { episodes: 1, ongoing: true },
+    });
+    expect(result.stallEpisodes.items[0]).toMatchObject({ runs: 1, outcome: 'ongoing' });
+  });
+
+  it('a failed limits read marks only usage', async () => {
+    run('a1', 'cc-max');
+    const base = ctx();
+    const failing: OperationContext = {
+      ...base,
+      ports: {
+        ...base.ports,
+        account: {
+          ...base.ports.account,
+          listOwnCredentialLimitsByReferences: async () => {
+            throw new Error('limits read failed');
+          },
+        },
+      } as OperationContext['ports'],
+    };
+    const result = await projectAccounts(failing, { projectId: 'p', range: '7d', nowMs: NOW });
+    expect(result.unavailable).toEqual(['usage']);
+    expect(result.accounts[0]).toMatchObject({ key: 'cred:cc-max', runs: 1, usage: null });
+  });
+
+  it('keys a long reference by the digest the limit writers store (known answer)', async () => {
+    const reference = ref(LONG_ID);
+    const expected = `sha256:${createHash('sha256').update(reference).digest('hex')}`;
+    expect(await credentialLimitReferenceKey(reference)).toBe(expected);
+    expect(await credentialLimitReferenceKey(` ${ref('cc-max')} `)).toBe(ref('cc-max'));
+  });
+
+  it('reads by index at production indexes, never scanning sessions, workspaces or credentials', () => {
+    createDeclaredIndexes(sqlite, [
+      schema.tasks,
+      schema.workspaces,
+      schema.agentSessions,
+      schema.credentialLimitWindows,
+    ]);
+    const w = flowWindow('p', '30d', NOW);
+    for (const statement of [
+      accountRunsStatement(w, 'owner'),
+      stallWaitsStatement(w, 'owner', 500),
+      rejectedWindowsStatement(w, 'owner', 500),
+    ]) {
+      const plan = (
+        sqlite.prepare(`EXPLAIN QUERY PLAN ${statement.sql}`).all(...statement.binds) as Array<{
+          detail: string;
+        }>
+      ).map((row) => row.detail);
+      // The aliases this PR's SQL gives tasks (t), workspaces (w), agent sessions (s, s2),
+      // credentials (c) and limit windows (l). Flow's own CTEs (p, a, r) are Flow's plan.
+      const scans = plan.filter((detail) => /^SCAN (t|w|s|s2|c|l)\b/.test(detail));
+      expect(scans, plan.join('\n')).toEqual([]);
+    }
   });
 
   it('refuses a non-member, a foreign project and an unknown range', async () => {
@@ -518,7 +799,8 @@ describe('projectAccounts', () => {
     expect(result.accounts.find((a) => a.key === 'cred:cc-max')?.stalls.episodes).toBeGreaterThan(
       0
     );
-    // Rule 60 budget for this read is 6 (Insights spec).
-    expect(trips).toBeLessThanOrEqual(6);
+    // Rule 60 budget for this read is 6 (Insights spec). Measured: membership, the batch, the
+    // viewer's own limit windows (settings are cached after the first call).
+    expect(trips).toBe(3);
   });
 });

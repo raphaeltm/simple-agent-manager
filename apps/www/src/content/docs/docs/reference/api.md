@@ -1015,7 +1015,7 @@ names and limit windows. Returns `ProjectAccountsResponse`
   keys, `null` otherwise.
 - `stallEpisodes`: `{ items, total, listed, truncated }`; each item is
   `{ accountKey, window, startedAt, endedAt, durationMs, runs, outcome }`, newest first, where
-  `outcome` is `resumed`, `blocked` or `ongoing`. `truncated` means the scan cap
+  `outcome` is `resumed`, `ended` (the run ended while waiting), `blocked` or `ongoing`. `truncated` means the scan cap
   (`insights.accountsStallScanCap`) left older limit waits out.
 - `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`).
 

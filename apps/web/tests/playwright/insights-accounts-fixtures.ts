@@ -13,7 +13,7 @@ import type {
   ProjectAccountsResponse,
 } from '@simple-agent-manager/shared';
 
-export type AccountsScene = 'realistic' | 'stress' | 'empty';
+export type AccountsScene = 'realistic' | 'stress' | 'empty' | 'partial';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -136,6 +136,19 @@ export function makeAccounts(
     unavailable: [],
     generatedAt: new Date(now).toISOString(),
   };
+  if (scene === 'partial') {
+    // The stall reads failed this time: the accounts still show, the stall list says so.
+    const realistic = makeAccounts(projectId, range, 'realistic', now);
+    return {
+      ...realistic,
+      accounts: realistic.accounts.map((a) => ({
+        ...a,
+        stalls: { episodes: 0, totalMs: 0, ongoing: false },
+      })),
+      stallEpisodes: { items: [], total: 0, listed: 10, truncated: false },
+      unavailable: ['stalls'],
+    };
+  }
   if (scene === 'empty') {
     return {
       ...base,
@@ -216,6 +229,7 @@ export function makeAccounts(
       episode('teammate:openai-codex:subscription', 3 * DAY, 14 * MIN, { window: 'Week' }, now),
       episode('cred:cc-key', 4 * DAY, 9 * 60 * MIN, { window: null, outcome: 'blocked' }, now),
       episode('cred:cc-max', 5 * DAY, 40 * MIN, { runs: 4 }, now),
+      episode('cred:cc-max', 6 * DAY, 12 * MIN, { outcome: 'ended' }, now),
     ];
   } else {
     const long =

@@ -96,8 +96,10 @@ export function stallWaitsStatement(w: FlowWindow, viewerId: string, cap: number
 /**
  * Limit windows the provider reported as rejected, observed in the range. One row per project ×
  * credential × window, holding only the latest sample, so a rejection a later allowed sample
- * replaced is gone (the task waits above still carry it). Binds: viewer ×3, project, since (ms),
- * cap + 1.
+ * replaced is gone (the task waits above still carry it). Like the project's limit read
+ * (`listProjectCredentialLimits`), another member's personal-credential windows are left out:
+ * only the viewer's own and shared project or platform ones. Binds: viewer ×3, project, viewer,
+ * since (ms), cap + 1.
  */
 export function rejectedWindowsStatement(
   w: FlowWindow,
@@ -111,9 +113,10 @@ export function rejectedWindowsStatement(
            l.window_type, l.window_minutes, l.observed_at, l.resets_at
       FROM credential_limit_windows l
       ${credentialJoin('l.credential_reference')}
-     WHERE l.project_id = ? AND l.status = 'rejected' AND l.observed_at >= ?
+     WHERE l.project_id = ? AND (l.user_id = ? OR l.credential_source IN ('project', 'platform'))
+       AND l.status = 'rejected' AND l.observed_at >= ?
      ORDER BY l.observed_at DESC, l.credential_reference, l.window_type
      LIMIT ?`,
-    binds: [viewerId, viewerId, viewerId, w.projectId, w.sinceMs, cap + 1],
+    binds: [viewerId, viewerId, viewerId, w.projectId, viewerId, w.sinceMs, cap + 1],
   };
 }
