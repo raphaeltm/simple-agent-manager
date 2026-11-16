@@ -22,8 +22,9 @@
  */
 import { DEFAULT_SESSION_INDEX_MAX_STALENESS_MS } from '@simple-agent-manager/shared';
 import {
+  type AskAttentionSummary,
+  openWakeErrorForChat,
   preferAttention,
-  type QuestionAttentionSummary,
   readOpenQuestionAttention,
 } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
@@ -338,19 +339,23 @@ async function readIndex(
 }
 
 /**
- * A chat holds an open, unexpired question in D1 `asks` (inbox slice G). Correlated on the row
- * being ranked; `idx_asks_open_question` answers it.
+ * A chat holds an open, unexpired question (inbox slice G) or an open wake failure (slice E) in
+ * D1 `asks`. Correlated on the row being ranked; `idx_asks_open_question` answers the first arm
+ * and the unique `(project_id, dedupe_key)` index seeks the second by the chat's exact key.
  */
-const OPEN_QUESTION_EXISTS = `EXISTS (
+const OPEN_QUESTION_EXISTS = `(EXISTS (
   SELECT 1 FROM asks a
    WHERE a.project_id = session_summaries.project_id AND a.source_session_id = session_summaries.id
      AND a.kind = 'question' AND a.status = 'open' AND a.blocking = 1
-     AND (a.expires_at IS NULL OR a.expires_at > ?))`;
+     AND (a.expires_at IS NULL OR a.expires_at > ?)) OR EXISTS (
+  SELECT 1 FROM asks w
+   WHERE w.project_id = session_summaries.project_id
+     AND ${openWakeErrorForChat('w', 'session_summaries.id')}))`;
 
 /** Each chat's attention with its open question merged in, as the ProjectData read does. */
 function withQuestionAttention(
   sessions: Record<string, unknown>[],
-  questions: ReadonlyMap<string, QuestionAttentionSummary>
+  questions: ReadonlyMap<string, AskAttentionSummary>
 ): Record<string, unknown>[] {
   if (questions.size === 0) return sessions;
   return sessions.map((session) => {

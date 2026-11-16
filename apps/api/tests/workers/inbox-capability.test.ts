@@ -22,6 +22,7 @@ import {
   type Seeded,
   testEnv,
 } from './helpers/inbox-harness';
+import { seedSignedInUser } from './helpers/seed-d1';
 
 /** The summary index is written on a debounce; flush it the way the timer would. */
 async function syncSummaries(project: DurableObjectStub<ProjectData>) {
@@ -391,6 +392,55 @@ describe('inbox capability through the real entry points', () => {
   });
 
   // Inbox slice G: what a question marker did inside ProjectData, through the real Durable Object.
+  it('a system error item: the route rejects a bad action, and an agent sign-in session can neither fix nor archive it', async () => {
+    const s = await seed();
+    const askId = `err-${crypto.randomUUID()}`;
+    const now = Date.now();
+    await testEnv.DATABASE.prepare(
+      `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
+          body_md, answer_spec_json, links_json, source_session_id, source_task_id, dedupe_key,
+          status, created_at, updated_at)
+       VALUES (?, ?, 'user', ?, 'error', 0, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`
+    )
+      .bind(
+        askId,
+        s.projectId,
+        s.ownerId,
+        "“Ship” couldn't start",
+        'The agent could not complete this request.',
+        JSON.stringify({ type: 'actions', actions: [{ id: 'retry', label: 'Retry' }] }),
+        JSON.stringify([{ kind: 'task', id: s.taskId, label: null }]),
+        s.chatSessionId,
+        s.taskId,
+        `error:task:${s.taskId}`,
+        now,
+        now
+      )
+      .run();
+    const base = `/api/projects/${s.projectId}/inbox/items/ask:${askId}`;
+
+    // The person's own session: an unknown action is refused by the route's schema.
+    expect((await post(`${base}/answer`, s.ownerCookie, { action: 'reboot' })).status).toBe(400);
+
+    // The same person through an agent sign-in session (workload identity).
+    const agentCookie = await seedSignedInUser(s.ownerId);
+    const agentToken = agentCookie.split('=')[1]!.split('.')[0]!;
+    await testEnv.DATABASE.prepare('UPDATE sessions SET hard_expires_at = ? WHERE token = ?')
+      .bind(now + 3_600_000, agentToken)
+      .run();
+    expect((await post(`${base}/answer`, agentCookie, { action: 'retry' })).status).toBe(403);
+    expect((await post(`${base}/archive`, agentCookie)).status).toBe(403);
+    const row = await testEnv.DATABASE.prepare('SELECT status FROM asks WHERE id = ?')
+      .bind(askId)
+      .first<{ status: string }>();
+    expect(row?.status).toBe('open');
+
+    // Control: the person's own session archives it.
+    const archived = await post(`${base}/archive`, s.ownerCookie);
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
+  });
+
   describe('asks-era questions inside ProjectData', () => {
     // The expiry path stops the task run on its VM; stub that edge and keep it off the network.
     beforeEach(() => {

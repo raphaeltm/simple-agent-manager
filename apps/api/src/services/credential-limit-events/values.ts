@@ -124,37 +124,12 @@ export async function fingerprint(value: ProjectEventJsonValue): Promise<string>
   return `${SHA256_PREFIX}${await sha256Hex(stableStringify(value))}`;
 }
 
-/** Length of a digest key: `sha256:` plus 64 hex characters. */
-export const CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES = SHA256_PREFIX.length + 64;
-
-/**
- * Key that stands for a credential reference everywhere in the credential-limit
- * pipeline: window rows, project-event subject ids and source-outbox guards. The
- * outbox requires the window key and the event subject to be one string, so the
- * key must fit both the window column (160 characters) and the deployment's
- * project-event filter-string limit (`PROJECT_EVENT_FILTER_MAX_STRING_BYTES`).
- * A reference no longer than a digest key is its own key; a longer one — ids from
- * the 2026-06 composable-credentials backfill embed the legacy ciphertext —
- * becomes its SHA-256 digest, which readers recompute from the full reference.
- * Keys therefore never exceed 71 bytes whatever the configured limit, and unlike
- * truncation they cannot collide or differ from what a reader looks up.
- */
-export async function credentialLimitReferenceKey(
-  value: string | null | undefined
-): Promise<string | null> {
-  if (typeof value !== 'string') return null;
-  const reference = value.trim();
-  if (!reference) return null;
-  if (encoder.encode(reference).byteLength <= CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES) {
-    return reference;
-  }
-  return `${SHA256_PREFIX}${await sha256Hex(reference)}`;
-}
-
-/** True when a stored credential reference is a digest key, not the reference itself. */
-export function isCredentialLimitReferenceDigest(key: string): boolean {
-  return key.startsWith(SHA256_PREFIX);
-}
+// One implementation for the API and the shared operations (Insights · Accounts reads the same keys).
+export {
+  CREDENTIAL_REFERENCE_DIGEST_KEY_BYTES,
+  credentialLimitReferenceKey,
+  isCredentialLimitReferenceDigest,
+} from '@simple-agent-manager/shared';
 
 export function normalizeNumber(value: number | null | undefined): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;

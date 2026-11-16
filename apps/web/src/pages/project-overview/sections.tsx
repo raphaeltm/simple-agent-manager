@@ -20,8 +20,10 @@ import {
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
+import { projectIdeaPath } from '../../lib/project-routes';
 import { formatMsSpan, formatTimeFromNow } from '../../lib/time-utils';
-import { IdeaRow } from '../ideas/parts';
+import { IdeaStateIcon, LiveDot } from '../ideas/parts';
+import { IDEA_STATE_LABELS, ideaRowLine } from '../ideas/view-model';
 import type { ViewerPausedChats } from './NeedsYouSection';
 
 /** A section's heading: its name, an optional count, and the link to its full page. */
@@ -271,6 +273,42 @@ export function RunningNowSection({
   );
 }
 
+/**
+ * A recent idea, shaped like every other Overview row (same padding, icon column, type and
+ * hover) so it lines up with the merged pull requests in the same pane. The Ideas page's own
+ * row (`IdeaRow`) is a full-width list row with dividers and counts, which is the wrong shape
+ * here.
+ */
+function RecentIdeaRow({ item, projectId }: { item: IdeaListItem; projectId: string }) {
+  return (
+    <li className="list-none">
+      <Link
+        to={projectIdeaPath(projectId, item.ideaId)}
+        className="flex min-h-12 min-w-0 items-start gap-3 rounded-lg px-2 py-2 no-underline hover:bg-surface-hover"
+        data-testid="overview-recent-idea"
+      >
+        <span className="mt-0.5 flex shrink-0">
+          <IdeaStateIcon state={item.derived.state} size="glyph" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="line-clamp-2 break-words text-[15px] font-medium leading-snug text-fg-primary">
+            {item.title}
+          </span>
+          <span className="line-clamp-1 text-[13px] text-fg-muted [overflow-wrap:anywhere]">
+            <span className="sr-only">{IDEA_STATE_LABELS[item.derived.state]}. </span>
+            {item.derived.state === 'working' && (
+              <>
+                <LiveDot />{' '}
+              </>
+            )}
+            {ideaRowLine(item)}
+          </span>
+        </span>
+      </Link>
+    </li>
+  );
+}
+
 function MergedPullRequestRow({ pr }: { pr: OverviewMergedPullRequest }) {
   const mergedAt = pr.mergedAt ? Date.parse(pr.mergedAt) : Number.NaN;
   return (
@@ -322,11 +360,11 @@ export function RecentlySection({
     <Section label="Recently" className={className}>
       <SectionHead title="Recently" to={`/projects/${projectId}/ideas`} linkLabel="Ideas" />
       {ideas.length > 0 && (
-        <div className="flex flex-col" data-testid="overview-recent-ideas">
+        <ul className="m-0 flex flex-col p-0" data-testid="overview-recent-ideas">
           {ideas.map((item) => (
-            <IdeaRow key={item.ideaId} item={item} projectId={projectId} compact />
+            <RecentIdeaRow key={item.ideaId} item={item} projectId={projectId} />
           ))}
-        </div>
+        </ul>
       )}
       {pullRequests.length > 0 && (
         <ul className="m-0 flex flex-col p-0">

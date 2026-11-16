@@ -20,7 +20,7 @@ const serviceSource = readFileSync(
   'utf8'
 );
 const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/services/submit-task-implementation.ts'),
+  resolve(process.cwd(), 'src/services/submit-vm-task.ts'),
   'utf8'
 );
 const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');

@@ -1,6 +1,7 @@
 import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-deployment';
 import type {
-  InsightsFlowSettingName,
+  InsightsInstallationSettingName,
+  InsightsPageSettingName,
   InsightsReceiptSettingName,
 } from '@simple-agent-manager/operations';
 
@@ -41,7 +42,8 @@ export type AdminSettingName =
   | ConnectorReadSettingName
   | InboxSettingName
   | InsightsReceiptSettingName
-  | InsightsFlowSettingName
+  | InsightsPageSettingName
+  | InsightsInstallationSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName

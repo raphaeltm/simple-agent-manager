@@ -37,7 +37,7 @@ const serviceSource = readFileSync(
   'utf8'
 );
 const submitRouteSource = readFileSync(
-  resolve(process.cwd(), 'src/services/submit-task-implementation.ts'),
+  resolve(process.cwd(), 'src/services/submit-vm-task.ts'),
   'utf8'
 );
 const mcpDispatchRouteSource = readFileSync(
@@ -246,12 +246,12 @@ describe('node selection to provisioning flow wiring', () => {
     expect(warmIdx).toBeGreaterThan(preferredIdx);
   });
 
-  it('preferred node check validates status is running', () => {
+  it('preferred node check accepts only creating or running status', () => {
     const section = taskRunnerSource.slice(
       taskRunnerSource.indexOf('export async function handleNodeSelection('),
       taskRunnerSource.indexOf('// Try warm pool first')
     );
-    expect(section).toContain("node.status !== 'running'");
+    expect(section).toContain("!['creating', 'running'].includes(node.status)");
     expect(section).toContain('permanent: true');
   });
 

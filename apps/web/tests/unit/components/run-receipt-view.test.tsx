@@ -153,6 +153,25 @@ describe('RunReceiptView', () => {
     expect(screen.getByText('2.3× this skill’s usual 82s (12 runs)')).toBeInTheDocument();
   });
 
+  it('says how the first push did, and nothing while it is pending or not recorded', () => {
+    const outcome = receipt().outcome;
+    const line = (ciFirstTry: RunReceipt['outcome']['ciFirstTry']) => {
+      const { unmount } = render(
+        <RunReceiptView
+          receipt={receipt({ outcome: { ...outcome, ciFirstTry } })}
+          resourceIndex={undefined}
+        />
+      );
+      const text = screen.getByText(/^PR #2771 · /).textContent;
+      unmount();
+      return text;
+    };
+    expect(line('failed')).toBe('PR #2771 · CI passed · first push failed · 40m');
+    expect(line('passed')).toBe('PR #2771 · CI passed · first push passed · 40m');
+    expect(line('pending')).toBe('PR #2771 · CI passed · 40m');
+    expect(line('not_recorded')).toBe('PR #2771 · CI passed · 40m');
+  });
+
   it('shows a teammate the kind of account, never its name', () => {
     render(
       <RunReceiptView

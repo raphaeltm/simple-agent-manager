@@ -110,7 +110,10 @@ const CLAUDE_MODELS: ModelGroup[] = [
   },
   modelGroup('Claude 4 (Previous)', [
     { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5' },
-    { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
+    {
+      id: 'claude-sonnet-4-5-20250929',
+      name: 'Claude Sonnet 4.5 (Deprecated; retires 2026-11-30)',
+    },
   ]),
 ];
 
@@ -147,6 +150,13 @@ const CODEX_MODELS: ModelGroup[] = [
 
 const OPENCODE_MODELS: ModelGroup[] = [
   modelGroup('OpenCode', [
+    { id: 'opencode/hy4-flash-free', name: 'Hy4 flash Free' },
+    { id: 'opencode/gemini-4-hydrogen', name: 'Gemini 4 Hydrogen' },
+    { id: 'opencode/longcat-2.5-free', name: 'LongCat 2.5 Free' },
+    { id: 'opencode/gemini-4-carbon', name: 'Gemini 4 Carbon' },
+    { id: 'opencode/minimax-m3.1-flash-free', name: 'MiniMax M3.1 Flash Free' },
+    { id: 'opencode/claude-fable-5-2', name: 'Claude Fable 5.2' },
+    { id: 'opencode/muse-ember-1.0', name: 'Muse Ember 1.0' },
     { id: 'opencode/muse-wonder-1.0', name: 'Muse Wonder' },
     { id: 'opencode/flint-40b-free', name: 'Flint 40B Free' },
     { id: 'opencode/beam-free', name: 'Beam Free' },
@@ -171,12 +181,15 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/qwen3.5-plus', name: 'Qwen3.5 Plus' },
     { id: 'opencode/claude-opus-4-5', name: 'Claude Opus 4.5' },
     { id: 'opencode/glm-5', name: 'GLM-5' },
-    { id: 'opencode/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+    { id: 'opencode/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash 1017' },
     { id: 'opencode/gpt-5.3-codex', name: 'GPT-5.3 Codex' },
     { id: 'opencode/minimax-m2.5', name: 'MiniMax-M2.5' },
     { id: 'opencode/gpt-5-nano', name: 'GPT-5 Nano' },
     { id: 'opencode/kimi-k2.6', name: 'Kimi K2.6' },
-    { id: 'opencode/claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+    {
+      id: 'opencode/claude-sonnet-4-5',
+      name: 'Claude Sonnet 4.5',
+    },
     { id: 'opencode/claude-opus-5-5', name: 'Claude Opus 5.5' },
     { id: 'opencode/claude-fable-5-1', name: 'Claude Fable 5.1' },
     { id: 'opencode/gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
@@ -228,10 +241,12 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/nemotron-3.5-super-vl-free', name: 'Nemotron 3.5 Super VL Free' },
     { id: 'opencode/gpt-6-sol', name: 'GPT-6 Sol' },
     { id: 'opencode/iceman-free', name: 'Iceman Free' },
-    { id: 'opencode/crouton-alpha-free', name: 'Crouton Alpha Free' },
     { id: 'opencode/inkling-2-small-free', name: 'Inkling 2 Small Free' },
   ]),
   modelGroup('OpenCode Go', [
+    { id: 'opencode-go/hy4-flash-free', name: 'Hy4 flash Free' },
+    { id: 'opencode-go/qwen4-max', name: 'Qwen4 Max' },
+    { id: 'opencode-go/longcat-2.5-free', name: 'LongCat 2.5 Free' },
     { id: 'opencode-go/iceman-contributor-free', name: 'Iceman Contributor Free' },
     { id: 'opencode-go/gemini-4-argon', name: 'Gemini 4 Argon' },
     { id: 'opencode-go/kimi-k3.1-pro', name: 'Kimi K3.1 Pro' },
@@ -242,7 +257,7 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode-go/glm-5.3-flash', name: 'GLM-5.3-Flash' },
     { id: 'opencode-go/qwen3.8-max', name: 'Qwen3.8 Max' },
     { id: 'opencode-go/kimi-k3', name: 'Kimi K3' },
-    { id: 'opencode-go/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash' },
+    { id: 'opencode-go/deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash 1017' },
     { id: 'opencode-go/longcat-2.0', name: 'LongCat-2.0' },
     { id: 'opencode-go/beam-free', name: 'Beam Free' },
     { id: 'opencode-go/step-5-preview', name: 'Step 5 Preview' },
@@ -263,7 +278,6 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode-go/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
     { id: 'opencode-go/qwen3.7-plus', name: 'Qwen3.7 Plus' },
     { id: 'opencode-go/hy4', name: 'Hy4' },
-    { id: 'opencode-go/crouton-alpha-free', name: 'Crouton Alpha Free' },
   ]),
 ];
 
@@ -271,13 +285,15 @@ const OPENCODE_MODELS: ModelGroup[] = [
 // Mistral Vibe models
 // ---------------------------------------------------------------------------
 
-// Vibe's documented configured model presets; API releases alone do not imply a preset.
+// Vibe's documented models; SAM dynamically registers raw API IDs in vibe_config.go.
 const MISTRAL_MODELS: ModelGroup[] = [
   {
     label: 'Frontier (Latest)',
     models: [
+      { id: 'mistral-large-4-0', name: 'Mistral Large 4', group: 'Frontier (Latest)' },
+      { id: 'zai-glm-5-3-flash', name: 'Z.ai GLM 5.3 Flash', group: 'Frontier (Latest)' },
       { id: 'zai-glm-5-3', name: 'Z.ai GLM 5.3', group: 'Frontier (Latest)' },
-      { id: 'mistral-large-latest', name: 'Mistral Large 3', group: 'Frontier (Latest)' },
+      { id: 'mistral-large-latest', name: 'Mistral Large (latest)', group: 'Frontier (Latest)' },
       { id: 'mistral-small-latest', name: 'Mistral Small 4', group: 'Frontier (Latest)' },
     ],
   },
@@ -303,7 +319,11 @@ const MISTRAL_MODELS: ModelGroup[] = [
 // ---------------------------------------------------------------------------
 
 const GEMINI_MODELS: ModelGroup[] = [
-  modelGroupFromTuples('Gemini 4 (Latest)', [['gemini-4-argon', 'Gemini 4 Argon']]),
+  modelGroupFromTuples('Gemini 4 (Latest)', [
+    ['gemini-4-carbon', 'Gemini 4 Carbon'],
+    ['gemini-4-hydrogen', 'Gemini 4 Hydrogen'],
+    ['gemini-4-argon', 'Gemini 4 Argon'],
+  ]),
   modelGroupFromTuples('Gemini 3', [
     ['gemini-3.8-flash', 'Gemini 3.8 Flash'],
     ['gemini-3.7-flash', 'Gemini 3.7 Flash (Deprecated; routes to 3.8)'],
