@@ -44,12 +44,18 @@ export interface ObservedComparison {
 
 const LAZY_REASONS = new Set(['nested_traversal', 'path_glob_match']);
 
-/** An empty or partial log proves nothing, so it must not read as agreement. */
-function evidenceProblems(log: ObservedLoad[], lazyOnly: boolean): string[] {
-  if (log.length === 0) {
-    return ['the log is empty: the hook did not run, or this is the wrong file'];
+/**
+ * An empty or partial log proves nothing, so it must not read as agreement. Only project
+ * loads count: a log holding nothing but the user's own ~/.claude files is no evidence
+ * about this repository.
+ */
+function evidenceProblems(projectLoads: ObservedLoad[], lazyOnly: boolean): string[] {
+  if (projectLoads.length === 0) {
+    return [
+      'the log has no project instruction loads: the hook did not run, or this is the wrong file',
+    ];
   }
-  if (!lazyOnly && !log.some((entry) => entry.load_reason === 'session_start')) {
+  if (!lazyOnly && !projectLoads.some((entry) => entry.load_reason === 'session_start')) {
     return [
       'the log has no session_start entries, so the launch set is unverified (pass --lazy-only to check lazy loads alone)',
     ];
@@ -116,7 +122,7 @@ export function compareObservedLoads(
   ];
 
   const mismatches = [
-    ...evidenceProblems(log, options.lazyOnly === true),
+    ...evidenceProblems(projectLoads, options.lazyOnly === true),
     ...launchMismatches(model, sessionStart),
     ...unpredictedLoads(model, lazy),
     ...missingLoads(model, triggers, loaded),

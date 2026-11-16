@@ -62,6 +62,26 @@ export function checkCodexEntryFiles(trackedFiles: string[]): Finding[] {
 }
 
 /**
+ * Codex concatenates AGENTS.md from the repository root down to its working directory and
+ * silently stops at the project-doc cap. Started inside a package, the root file plus that
+ * package's file must still fit.
+ */
+export function checkCodexChainSizes(
+  sizes: { file: string; bytes: number }[],
+  capBytes: number
+): Finding[] {
+  const root = sizes.find((entry) => entry.file === 'AGENTS.md');
+  if (!root) return [];
+  return sizes
+    .filter((entry) => entry.file !== 'AGENTS.md' && root.bytes + entry.bytes + 1 > capBytes)
+    .map((entry) => ({
+      check: 'codex-chain',
+      file: entry.file,
+      message: `plus the root AGENTS.md is ${root.bytes + entry.bytes + 1} bytes, over the ${capBytes}-byte Codex project-doc cap; a Codex session started in this directory would lose the end of it`,
+    }));
+}
+
+/**
  * Harnesses that do not auto-load rules reach them through the AGENTS.md of the
  * directory they work in. A workspace directory with scoped rules and no AGENTS.md
  * has no such route.

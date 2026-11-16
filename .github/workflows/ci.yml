@@ -264,6 +264,8 @@ jobs:
               - 'CLAUDE.md'
               - 'AGENTS.md'
               - '**/AGENTS.md'
+              - 'AGENTS.override.md'
+              - '**/AGENTS.override.md'
               - 'scripts/quality/agent-*'
               - 'scripts/quality/check-agent-context-budget.ts'
             web-ui:

@@ -43,6 +43,15 @@ const CLAUDE_HOOK_EVENTS = new Set([
   'WorktreeRemove',
 ]);
 
+/** Handler types from the hooks reference, with the field each one cannot run without. */
+const HANDLER_REQUIRED_FIELD: Record<string, string | null> = {
+  command: 'command',
+  http: 'url',
+  mcp_tool: null,
+  prompt: 'prompt',
+  agent: 'prompt',
+};
+
 /** `timeout` is in seconds. Anything above an hour is a millisecond value by mistake. */
 const MAX_PLAUSIBLE_TIMEOUT_SECONDS = 3600;
 
@@ -52,11 +61,17 @@ export interface HookEntryProblem {
 }
 
 function handlerProblems(handler: unknown, label: string): string[] {
-  const typed = (handler ?? {}) as { type?: unknown; command?: unknown; timeout?: unknown };
+  const typed = (handler ?? {}) as Record<string, unknown>;
   const problems: string[] = [];
-  if (typeof typed.type !== 'string') problems.push(`${label} has no type`);
-  if (typed.type === 'command' && typeof typed.command !== 'string') {
-    problems.push(`${label} has no command`);
+  if (typeof typed.type !== 'string') {
+    problems.push(`${label} has no type`);
+  } else if (!(typed.type in HANDLER_REQUIRED_FIELD)) {
+    problems.push(`${label} has unknown type "${typed.type}"`);
+  } else {
+    const required = HANDLER_REQUIRED_FIELD[typed.type];
+    if (required && typeof typed[required] !== 'string') {
+      problems.push(`${label} has no ${required}`);
+    }
   }
   if (typeof typed.timeout === 'number' && typed.timeout > MAX_PLAUSIBLE_TIMEOUT_SECONDS) {
     problems.push(`${label} timeout ${typed.timeout} is in seconds, not milliseconds`);

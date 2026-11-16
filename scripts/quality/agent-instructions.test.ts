@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { checkClaudeHookConfig } from './agent-hook-config';
 import {
+  checkCodexChainSizes,
   checkCodexEntryFiles,
   checkDirectoriesHaveIndex,
   checkLaunchRuleBaseline,
@@ -348,13 +349,17 @@ describe('compareObservedLoads', () => {
     ]);
   });
 
-  it('ignores user-level memory files', () => {
+  it('ignores user-level memory files beside a complete project launch set', () => {
     const log = parseObservedLog(
-      JSON.stringify({
-        memory_type: 'User',
-        load_reason: 'session_start',
-        file: '/home/u/.claude/CLAUDE.md',
-      })
+      [
+        line({ load_reason: 'session_start', file: 'CLAUDE.md' }),
+        line({ load_reason: 'session_start', file: '.claude/rules/02-gates.md' }),
+        JSON.stringify({
+          memory_type: 'User',
+          load_reason: 'session_start',
+          file: '/home/u/.claude/CLAUDE.md',
+        }),
+      ].join('\n')
     );
     expect(compareObservedLoads(m, log, []).mismatches).toEqual([]);
   });
@@ -478,5 +483,40 @@ describe('hardened checks', () => {
     );
     expect(compareObservedLoads(m, log, []).mismatches).toHaveLength(1);
     expect(compareObservedLoads(m, log, [], { lazyOnly: true }).mismatches).toEqual([]);
+  });
+});
+
+describe('second review round', () => {
+  it('does not read a log of only user-level files as agreement', () => {
+    // Reported in review: this single line printed "model matches the session".
+    const m = model(rule('.claude/rules/02-gates.md', null));
+    const log = parseObservedLog(
+      JSON.stringify({
+        memory_type: 'User',
+        load_reason: 'session_start',
+        file: '/home/node/.claude/CLAUDE.md',
+      })
+    );
+    expect(compareObservedLoads(m, log, []).mismatches).toHaveLength(1);
+    expect(compareObservedLoads(m, log, [], { lazyOnly: true }).mismatches).toHaveLength(1);
+  });
+
+  it('flags an unknown handler type and a prompt handler without a prompt', () => {
+    const typo = { hooks: { Stop: [{ hooks: [{ type: 'commnad', command: 'x.sh' }] }] } };
+    expect(checkClaudeHookConfig(typo)[0].message).toContain('unknown type "commnad"');
+    const noPrompt = { hooks: { Stop: [{ hooks: [{ type: 'prompt' }] }] } };
+    expect(checkClaudeHookConfig(noPrompt)[0].message).toContain('has no prompt');
+    const fine = { hooks: { Stop: [{ hooks: [{ type: 'prompt', prompt: 'Is it done?' }] }] } };
+    expect(checkClaudeHookConfig(fine)).toEqual([]);
+  });
+
+  it('flags a nested AGENTS.md that no longer fits beside the root one under the Codex cap', () => {
+    const sizes = [
+      { file: 'AGENTS.md', bytes: 25_000 },
+      { file: 'apps/api/AGENTS.md', bytes: 8_000 },
+      { file: 'packages/cli/AGENTS.md', bytes: 900 },
+    ];
+    expect(checkCodexChainSizes(sizes, 32_768).map((f) => f.file)).toEqual(['apps/api/AGENTS.md']);
+    expect(checkCodexChainSizes(sizes, 40_000)).toEqual([]);
   });
 });

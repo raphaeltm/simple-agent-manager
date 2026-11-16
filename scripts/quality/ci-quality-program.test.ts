@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { pathFilters } from './ci-job-simulator';
+import { compilePattern } from './agent-instructions';
+import { jobsRunning, pathFilters, simulate } from './ci-job-simulator';
 
 const ci = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
 const e2eSmoke = readFileSync(
@@ -197,5 +198,42 @@ describe('deterministic quality-program CI wiring', () => {
     expect(codSpeed).not.toContain("- 'apps/www/**'");
     expect(codSpeed).not.toContain("- '.github/workflows/ci.yml'");
     expect(codSpeed).not.toContain("- '.github/workflows/codspeed.yml'");
+  });
+});
+
+describe('agent instruction check selection', () => {
+  const patterns = (pathFilters()['agent-instructions'] ?? []).flat(Infinity).map(String);
+  const selects = (path: string) => patterns.some((pattern) => compilePattern(pattern).test(path));
+
+  it.each([
+    'CLAUDE.md',
+    'AGENTS.md',
+    'apps/api/AGENTS.md',
+    // An override replaces AGENTS.md for Codex, so adding one must run the check that flags it.
+    'AGENTS.override.md',
+    'packages/cli/AGENTS.override.md',
+    '.claude/rules/99-example-rule.md',
+    '.claude/settings.json',
+    '.claude/hooks/log-instructions-loaded.sh',
+    'scripts/quality/agent-instructions.ts',
+    'scripts/quality/agent-context-budget.json',
+    'scripts/quality/check-agent-context-budget.ts',
+  ])('a change to %s selects the agent-instructions filter', (path) => {
+    expect(selects(path)).toBe(true);
+  });
+
+  it('does not select the filter for ordinary source', () => {
+    expect(selects('apps/api/src/index.ts')).toBe(false);
+  });
+
+  it('runs the instruction check on a draft PR that only changes instruction files', () => {
+    const results = simulate({
+      eventName: 'pull_request',
+      draft: true,
+      filters: ['agent-instructions'],
+    });
+    expect(jobsRunning('pnpm quality:agent-context-budget --check', results)).toEqual([
+      'code-quality',
+    ]);
   });
 });

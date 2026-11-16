@@ -23,6 +23,7 @@ import { resolve } from 'node:path';
 
 import { checkClaudeHookConfig } from './agent-hook-config';
 import {
+  checkCodexChainSizes,
   checkCodexEntryFiles,
   checkDirectoriesHaveIndex,
   checkLaunchRuleBaseline,
@@ -266,6 +267,12 @@ function sourceRuleReferences(files: string[]): { file: string; ruleFile: string
   return references;
 }
 
+function agentsFileSizes(files: string[]): { file: string; bytes: number }[] {
+  return files
+    .filter((file) => file === 'AGENTS.md' || file.endsWith('/AGENTS.md'))
+    .map((file) => ({ file, bytes: bytesOf(file) }));
+}
+
 function hookFindings(): Finding[] {
   if (!existsSync(resolve(ROOT, CLAUDE_SETTINGS_FILE))) return [];
   return checkClaudeHookConfig(JSON.parse(read(CLAUDE_SETTINGS_FILE))).map((problem) => ({
@@ -317,6 +324,7 @@ function collectFindings(
     ...checkNoDuplicateBodies(model.rules),
     ...checkLaunchRuleBaseline(model, budget.launchRules),
     ...checkCodexEntryFiles(files),
+    ...checkCodexChainSizes(agentsFileSizes(files), CODEX_PROJECT_DOC_MAX_BYTES),
     ...checkDirectoriesHaveIndex(model, files),
     ...checkRuleReferencesInSource(model, sourceRuleReferences(files)),
     ...hookFindings(),
