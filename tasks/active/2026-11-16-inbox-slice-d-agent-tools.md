@@ -93,9 +93,9 @@ removing `source_session_id` from the cancel predicate reddens only the other-ch
 Remaining before staging:
 - [ ] Test: overview + session-summary-index with a non-blocking ask (blocking control) — test-engineer H1
 - [ ] Test: request_human_input alias push via fileQuestionAsk with a NOTIFICATION stub — H2
-- [ ] Test: compact-mode inbox_write matcher (ask, review, update/cancel refused, non-ask ref refused) — H3
+- [x] Test: compact-mode inbox_write matcher (ask, review, update/cancel refused, non-ask ref refused) — H3
 - [ ] Test: reconciliation candidate with only a non-blocking ask is not held (blocking control)
-- [ ] Test: cross-user isolation (colleague's items not in list/get/similar) + owner control; PR foreign-host attack
+- [x] Test: cross-user isolation (discriminating: disabling ADDRESSED_TO_CALLER reddens only it) (colleague's items not in list/get/similar) + owner control; PR foreign-host attack
 - [ ] Test: non-blocking ask survives runInboxAskSweep; non-blocking ask answered through /answer once
 - [ ] Test: get_instructions in conversation mode; liveness before attention-null assertions
 - [x] Revert unrelated list renumbering in apps/www/.../guides/agents.md (prettier)
