@@ -11,8 +11,8 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { API_URL } from '../../../src/lib/api/client';
-import { ProjectContext } from '../../../src/pages/ProjectContext';
 import { ProjectOverview } from '../../../src/pages/project-overview';
+import { ProjectContext } from '../../../src/pages/ProjectContext';
 
 const PROJECT_ID = 'proj-1';
 
