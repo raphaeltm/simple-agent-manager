@@ -72,12 +72,16 @@ export type LibraryFileCommentAnchor = {
 
 export type CommentAnchor = MessageCommentAnchor | LibraryFileCommentAnchor;
 
-/**
- * `inbox_item`: discussion on an inbox item such as a human task (slice H1). Its threads have no
- * session or file; they are scoped to the `asks` id.
- */
-export const COMMENT_ANCHOR_KINDS = ['message', 'library_file', 'inbox_item'] as const;
+export const COMMENT_ANCHOR_KINDS = ['message', 'library_file'] as const;
 export type CommentAnchorKind = (typeof COMMENT_ANCHOR_KINDS)[number];
+
+/**
+ * Every anchor kind the comment store holds: the kinds above (the `CommentAnchor` union clients
+ * render) plus `inbox_item`, discussion on an inbox item such as a human task (inbox slice H1),
+ * which is read through the task view rather than as a `CommentAnchor`.
+ */
+export const STORED_COMMENT_ANCHOR_KINDS = [...COMMENT_ANCHOR_KINDS, 'inbox_item'] as const;
+export type StoredCommentAnchorKind = (typeof STORED_COMMENT_ANCHOR_KINDS)[number];
 
 export type MessageCommentSourceMessageContext = {
   id: string;

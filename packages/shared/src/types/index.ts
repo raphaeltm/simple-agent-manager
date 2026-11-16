@@ -355,6 +355,7 @@ export type {
 export type {
   CommentAnchor,
   CommentAnchorKind,
+  StoredCommentAnchorKind,
   CommentAuthor,
   CommentAuthorKind,
   CommentMention,
@@ -394,6 +395,7 @@ export type {
 } from './comments';
 export {
   COMMENT_ANCHOR_KINDS,
+  STORED_COMMENT_ANCHOR_KINDS,
   COMMENT_AUTHOR_KINDS,
   COMMENT_STATUSES,
   MESSAGE_COMMENT_AUTHOR_KINDS,

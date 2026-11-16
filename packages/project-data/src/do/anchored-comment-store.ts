@@ -7,8 +7,8 @@
  * shapes (`MessageCommentThread`, `LibraryFileCommentThread`) lives in the kind adapters,
  * `comments.ts` and `library-file-comments.ts`.
  */
-import type { CommentAnchorKind, CommentMention } from '@simple-agent-manager/shared';
-import { COMMENT_ANCHOR_KINDS, COMMENT_STATUSES } from '@simple-agent-manager/shared';
+import type { CommentMention,StoredCommentAnchorKind } from '@simple-agent-manager/shared';
+import { COMMENT_STATUSES,STORED_COMMENT_ANCHOR_KINDS } from '@simple-agent-manager/shared';
 import { chunk, D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
@@ -33,7 +33,7 @@ const actorKind = v.nullable(v.picklist(['human', 'agent']));
 
 const ThreadRowSchema = v.object({
   id: v.string(),
-  anchor_kind: v.picklist(COMMENT_ANCHOR_KINDS),
+  anchor_kind: v.picklist(STORED_COMMENT_ANCHOR_KINDS),
   scope_key: v.string(),
   session_id: v.nullable(v.string()),
   message_id: v.nullable(v.string()),
@@ -102,7 +102,7 @@ export interface CommentReplyRecord {
 
 export interface CommentThreadRecord {
   id: string;
-  anchorKind: CommentAnchorKind;
+  anchorKind: StoredCommentAnchorKind;
   scopeKey: string;
   sessionId: string | null;
   messageId: string | null;
@@ -342,9 +342,9 @@ export function listProjectThreadCandidates(
     after?: ProjectCommentThreadCandidate | null;
   }
 ): ListProjectCommentThreadCandidatesPage {
-  const kindPlaceholders = COMMENT_ANCHOR_KINDS.map(() => '?').join(', ');
+  const kindPlaceholders = STORED_COMMENT_ANCHOR_KINDS.map(() => '?').join(', ');
   const conditions = [`t.anchor_kind IN (${kindPlaceholders})`];
-  const params: Array<string | number> = [...COMMENT_ANCHOR_KINDS];
+  const params: Array<string | number> = [...STORED_COMMENT_ANCHOR_KINDS];
   if (input.status) {
     conditions.push('t.status = ?');
     params.push(input.status);

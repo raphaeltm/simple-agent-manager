@@ -28,6 +28,7 @@ import type {
   GetProjectEventInput,
   GetProjectEventRecentStatusInput,
   GetProjectEventSubscriptionInput,
+  InboxItemCommentThread,
   LibraryFileCommentMutationResponse,
   ListProjectEventChannelsInput,
   ListProjectEventChannelSubscribersInput,
@@ -66,7 +67,6 @@ import type {
   SendAgentChannelMessageResult,
   SessionActivityTerminalReason,
   SessionUndeliveredPrompt,
-  InboxItemCommentThread,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
 

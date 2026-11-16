@@ -74,24 +74,24 @@ non-blocking work to a person and be woken when the person acts. A human task is
 
 ## Implementation checklist
 
-- [ ] Shared types/constants: task detail, activity, event source/types, anchor kind `inbox_item`
-- [ ] D1 migration 0253 (`ask_activity`, `asks.steps_checked_json`); schema.ts
-- [ ] DO migration 081 + anchor scope/rules/store/adapter for `inbox_item` + Comments inbox
-- [ ] Wake policy: `inbox_task_comment` trigger + non-throwing API decision
-- [ ] Event visibility guard for `sam.inbox`; inbox wake prompt names author + teammate input
-- [ ] Settings: openTasksPerChat, taskStepsMax, watchersPerItemMax
-- [ ] Operations: agent assign/comment/attach; get returns task detail; update/cancel accept tasks
-- [ ] Operations: person step/comment/claim/reassign/done/reopen; archive + answer delegate for tasks
-- [ ] List/get visibility: team tasks visible to all members, canAct/needs_you respect claim
-- [ ] Ports in apps/api: events, subscriptions, comment store, mentions, wake decision
-- [ ] REST routes + MCP methods (inbox_write assign/comment/attach)
-- [ ] Departing member → team handoff
-- [ ] Instruction text (one place) + size change
-- [ ] Docs: public inbox/agent docs, api-reference
-- [ ] Tests: capability (MCP assign → REST comment/steps/done → one wake each, ticks don't wake;
+- [x] Shared types/constants: task detail, activity, event source/types, anchor kind `inbox_item`
+- [x] D1 migration 0253 (`ask_activity`, `asks.steps_checked_json`); schema.ts
+- [x] DO migration 081 + anchor scope/rules/store/adapter for `inbox_item` + Comments inbox
+- [x] Wake policy: `inbox_task_comment` trigger + non-throwing API decision
+- [x] Event visibility guard for `sam.inbox`; inbox wake prompt names author + teammate input
+- [x] Settings: openTasksPerChat, taskStepsMax, watchersPerItemMax
+- [x] Operations: agent assign/comment/attach; get returns task detail; update/cancel accept tasks
+- [x] Operations: person step/comment/claim/reassign/done/reopen; archive + answer delegate for tasks
+- [x] List/get visibility: team tasks visible to all members, canAct/needs_you respect claim
+- [x] Ports in apps/api: events, subscriptions, comment store, mentions, wake decision
+- [x] REST routes + MCP methods (inbox_write assign/comment/attach)
+- [x] Departing member → team handoff
+- [x] Instruction text (one place) + size change
+- [x] Docs: public inbox/agent docs, api-reference
+- [x] Tests: capability (MCP assign → REST comment/steps/done → one wake each, ticks don't wake;
       team flow with attach), wake rule attack/owner control on real SQL, cross-project reads,
       viewer cannot complete; each guard proven discriminating
-- [ ] Publish interface on feature.inbox
+- [x] Publish interface on feature.inbox
 
 ## Acceptance criteria
 
@@ -105,6 +105,11 @@ non-blocking work to a person and be woken when the person acts. A human task is
 - Verified on staging with real Claude Code and Codex agents on a VM.
 
 ## Notes
+
+- Instruction text: +83 bytes (1,662 → 1,745 bytes for `instruction-inbox-guidance.ts`; the paragraph
+  itself grew by the clause "or for work only a person can do `assign` a task (`inbox_write` method
+  `assign`),").
+- Discrimination proofs recorded in the PR body (four guards, each turned exactly the intended test red).
 
 - Slice E (#2781) touches the same operations; rebase if it lands first. It uses D1 0248.
 - A DO migration means staging2 only (primary staging refuses new DO migration tags).

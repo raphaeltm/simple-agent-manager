@@ -22,7 +22,7 @@
  * `comments.ts` / `library-file-comments.ts` mapping records to the kind's API shape. No
  * table is recreated, and no existing predicate changes.
  */
-import type { CommentAnchorKind } from '@simple-agent-manager/shared';
+import type { StoredCommentAnchorKind } from '@simple-agent-manager/shared';
 
 export type CommentAnchorScope =
   | { kind: 'message'; sessionId: string }
@@ -31,7 +31,7 @@ export type CommentAnchorScope =
   | { kind: 'inbox_item'; itemId: string };
 
 export interface AnchorScopeParams {
-  anchorKind: CommentAnchorKind;
+  anchorKind: StoredCommentAnchorKind;
   scopeKey: string;
 }
 
@@ -60,7 +60,7 @@ export interface AnchorKindRules {
   threadLimitLabel: string;
 }
 
-export const ANCHOR_KIND_RULES: Record<CommentAnchorKind, AnchorKindRules> = {
+export const ANCHOR_KIND_RULES: Record<StoredCommentAnchorKind, AnchorKindRules> = {
   message: {
     supportsSent: true,
     threadFingerprintTag: 'thread',

@@ -190,9 +190,14 @@ export async function commentOnTask(
   if (!body) throw new OperationError('invalid_input', 'body is required');
   if (body.length > limits.answerMaxChars)
     throw new OperationError('invalid_input', `body exceeds ${limits.answerMaxChars} characters`);
-  const mentions = target.mentionUserIds?.length
-    ? await ctx.ports.inboxTasks.resolveMentions(row.projectId, target.mentionUserIds)
-    : [];
+  const [mentions, names] = await Promise.all([
+    target.mentionUserIds?.length
+      ? ctx.ports.inboxTasks.resolveMentions(row.projectId, target.mentionUserIds)
+      : Promise.resolve([]),
+    // The author's name, read once for the comment, the event and the notifications.
+    userNames(ctx, [me]),
+  ]);
+  const myName = names.get(me) ?? null;
   const [decision, created] = await Promise.all([
     ctx.ports.inboxTasks.decideCommentWake({
       projectId: row.projectId,
@@ -205,7 +210,7 @@ export async function commentOnTask(
       askId: row.id,
       threadId: target.threadId,
       body,
-      actor: { kind: 'human', id: me, name: null },
+      actor: { kind: 'human', id: me, name: myName },
       mentions,
     }),
   ]);
@@ -224,7 +229,7 @@ export async function commentOnTask(
           projectId: row.projectId,
           askId: row.id,
           eventType: 'inbox.task.commented',
-          actor: { kind: 'user', id: me, name: null },
+          actor: { kind: 'user', id: me, name: myName },
           teammateInput: decision.teammateInput,
           detail: { threadId: created.thread.id, commentId: created.commentId },
         })
@@ -246,7 +251,7 @@ export async function commentOnTask(
     threadId: created.thread.id,
     body,
     mentions,
-    actor: { userId: me, name: null },
+    actor: { userId: me, name: myName },
     participants,
     readers:
       row.assigneeKind === 'team'

@@ -6,9 +6,6 @@
  * both the writer context they already used for resource resolution and the wake grant they
  * must record on the delivery.
  */
-import { drizzle } from 'drizzle-orm/d1';
-
-import * as schema from '../db/schema';
 import type { Env } from '../env';
 import {
   type AgentWakeGrant,
@@ -17,7 +14,7 @@ import {
 } from '../lib/agent-wake-policy';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
-import { type AppDb, hasProjectCapability } from '../middleware/project-auth';
+import type { AppDb } from '../middleware/project-auth';
 import { getSessionAccess } from './project-data';
 import { requireSessionWriter, type SessionWriterContext } from './session-access';
 
@@ -98,12 +95,16 @@ export async function decideInboxTaskCommentWake(
     );
     if (!access.found || !access.ownerUserId)
       return { wake: false, teammateInput: false, reason: 'filing_chat_missing' };
-    const db = drizzle(env.DATABASE, { schema });
-    const [actorIsMember, ownerIsMember] = await Promise.all([
-      hasProjectCapability(db, input.projectId, input.actorUserId, 'task:read'),
-      hasProjectCapability(db, input.projectId, access.ownerUserId, 'task:read'),
-    ]);
-    if (!actorIsMember || !ownerIsMember)
+    // Both the author and the chat's owner must still be active members (every role reads tasks).
+    // One query for both: `IN` holds one id when the owner comments.
+    const members = await env.DATABASE.prepare(
+      `SELECT user_id FROM project_members
+        WHERE project_id = ? AND status = 'active' AND user_id IN (?, ?)`
+    )
+      .bind(input.projectId, input.actorUserId, access.ownerUserId)
+      .all<{ user_id: string }>();
+    const active = new Set((members.results ?? []).map((row) => row.user_id));
+    if (!active.has(input.actorUserId) || !active.has(access.ownerUserId))
       return { wake: false, teammateInput: false, reason: 'not_a_member' };
     const decision = decideAgentWake({
       trigger: 'inbox_task_comment',
