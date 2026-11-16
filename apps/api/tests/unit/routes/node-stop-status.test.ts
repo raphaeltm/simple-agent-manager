@@ -160,7 +160,9 @@ describe('POST /api/nodes/:id/stop', () => {
 
     const mockSelectChain: any = {};
     mockSelectChain.from = vi.fn(() => mockSelectChain);
-    mockSelectChain.where = vi.fn(() => Promise.resolve([]));
+    mockSelectChain.where = vi.fn(() =>
+      Object.assign(Promise.resolve([]), { limit: vi.fn(async () => []) })
+    );
 
     mockDeleteWhere = vi.fn(() => Promise.resolve());
 
@@ -228,7 +230,9 @@ describe('DELETE /api/nodes/:id', () => {
 
     const mockSelectChain: any = {};
     mockSelectChain.from = vi.fn(() => mockSelectChain);
-    mockSelectChain.where = vi.fn(() => Promise.resolve([]));
+    mockSelectChain.where = vi.fn(() =>
+      Object.assign(Promise.resolve([]), { limit: vi.fn(async () => []) })
+    );
     mockDeleteWhere = vi.fn(() => Promise.resolve());
 
     (drizzle as any).mockReturnValue({
@@ -318,9 +322,14 @@ describe('DELETE /api/nodes/:id', () => {
     });
     (drizzle as any).mockReturnValue({
       select: vi.fn(() => {
-        const result = selectResults[selectIndex++] ?? [];
+        let result: any[] = [];
         const chain: any = {};
-        chain.from = vi.fn(() => chain);
+        chain.from = vi.fn((table: any) => {
+          // Reservation preflights have their own table; do not consume proof fixtures.
+          result = table?.[Symbol.for('drizzle:Name')] === 'deployment_publish_jobs'
+            ? [] : (selectResults[selectIndex++] ?? []);
+          return chain;
+        });
         chain.where = vi.fn(() =>
           Object.assign(Promise.resolve(result), { limit: vi.fn(async () => result) })
         );

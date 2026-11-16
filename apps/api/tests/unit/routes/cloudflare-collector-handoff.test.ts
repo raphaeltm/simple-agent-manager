@@ -43,7 +43,8 @@ beforeEach(() => {
     )
     .run(new Date().toISOString(), new Date().toISOString());
   admitAtCallbackFence = false;
-  auth.verify.mockImplementation(async () => ({
+  auth.verify.mockImplementation(async (c) => ({
+    body: await c.req.json(),
     projectId: 'project',
     workspaceId: 'workspace',
     userId: 'user',
@@ -150,7 +151,7 @@ describe('source collector completion after verified-context handoff', () => {
   it('accepts a real builder heartbeat with no status or step after admission', async () => {
     await admit();
     sqlite.prepare("UPDATE deployment_publish_jobs SET last_heartbeat_at='2000-01-01T00:00:00.000Z'").run();
-    auth.verify.mockResolvedValue({ projectId: 'project', workspaceId: 'workspace', userId: 'user', db: drizzle(database, { schema }), assertCurrent: async () => {}, job: { attempt: 1 } });
+    auth.verify.mockImplementation(async (c) => ({ body: await c.req.json(), projectId: 'project', workspaceId: 'workspace', userId: 'user', db: drizzle(database, { schema }), assertCurrent: async () => {}, job: { attempt: 1 } }));
     expect((await collected({eventType:'publish.job.heartbeat',status:undefined,currentStep:undefined})).status).toBe(200);
     expect(row()).toMatchObject({status:'starting',current_step:'builder_start'});
     expect(sqlite.prepare('SELECT last_heartbeat_at FROM deployment_publish_jobs').get()).not.toEqual({last_heartbeat_at:'2000-01-01T00:00:00.000Z'});
