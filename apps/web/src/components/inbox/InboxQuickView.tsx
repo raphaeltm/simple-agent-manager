@@ -1,7 +1,7 @@
 import type { InboxItem } from '@simple-agent-manager/shared';
 import { Button, IconButton, paneClassName, Spinner } from '@simple-agent-manager/ui';
 import { ArrowRight, Check, X } from 'lucide-react';
-import { forwardRef, useMemo, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useMinuteClock } from '../../hooks/useMinuteClock';
 import type { answerInboxItem } from '../../lib/api';
@@ -136,6 +136,11 @@ export const InboxQuickView = forwardRef<
 >(function InboxQuickView({ style, total, onClose, onOpenItem, onOpenInbox }, ref) {
   const now = useMinuteClock();
   const list = useInboxList(null, 'needs_you');
+  const closeRef = useRef<HTMLButtonElement>(null);
+  // A dialog takes focus when it opens; the icon gets it back when it closes (InboxButton).
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
   const rows = useMemo(() => buildRows(list.items).slice(0, QUICK_VIEW_LIMIT), [list.items]);
   return (
     <div
@@ -152,6 +157,7 @@ export const InboxQuickView = forwardRef<
         )}
         <span className="flex-1 text-xs text-fg-muted">all projects</span>
         <IconButton
+          ref={closeRef}
           label="Close inbox quick view"
           icon={<X size={16} />}
           onClick={onClose}

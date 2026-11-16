@@ -6,6 +6,7 @@ import {
   agentStateShort,
   formatAge,
   type InboxRowModel,
+  type InboxView,
   isPausedOnItem,
   KIND_META,
   timeLeft,
@@ -39,8 +40,8 @@ interface MetaSegment {
 }
 
 /**
- * A wrapping line of facts joined by "·". Each dot leads its own segment, so a wrap moves the
- * dot with the fact instead of leaving it alone at the end of a line.
+ * A wrapping line of facts joined by "·". Each dot trails its fact inside one unbreakable group, so
+ * a wrap never strands a dot on a line of its own or starts a line with one.
  */
 export function InboxMetaSegments({ segments }: { segments: MetaSegment[] }) {
   return (
@@ -50,12 +51,12 @@ export function InboxMetaSegments({ segments }: { segments: MetaSegment[] }) {
           key={segment.key}
           className={`inline-flex items-center gap-1 ${segment.flexible ? 'min-w-0 max-w-full' : 'shrink-0'}`}
         >
-          {index > 0 && <span aria-hidden="true">·</span>}
           <span
             className={`${segment.flexible ? 'min-w-0 truncate' : ''} ${segment.className ?? ''}`}
           >
             {segment.text}
           </span>
+          {index < segments.length - 1 && <span aria-hidden="true">·</span>}
         </span>
       ))}
     </span>
@@ -133,11 +134,13 @@ export const InboxRow = memo(function InboxRow({
           type="button"
           onClick={() => onOpen(first)}
           aria-current={selected ? 'true' : undefined}
+          data-inbox-refs={(stack ?? [first]).map((member) => member.ref).join(' ')}
           className="flex w-full min-w-0 cursor-pointer items-start gap-3 rounded-xl border-0 bg-transparent px-3 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           <InboxKindIcon item={first} now={now} />
           <span className="min-w-0 flex-1">
             <span className="line-clamp-3 text-[15px] leading-snug font-medium break-words text-fg-primary [overflow-wrap:anywhere]">
+              <span className="sr-only">{KIND_META[first.kind].label}: </span>
               {first.title}
             </span>
             {stack ? (
@@ -168,26 +171,36 @@ export const InboxRow = memo(function InboxRow({
   );
 });
 
+const EMPTY_COPY: Record<InboxView, { title: string; body: string }> = {
+  needs_you: {
+    title: 'Nothing needs you',
+    body: 'Questions, approvals and reviews from your agents land here.',
+  },
+  blocking: { title: 'No agent is waiting on you', body: 'Asks an agent is stopped on show here.' },
+  tasks: { title: 'No tasks for you', body: 'Tasks agents assign to you show here.' },
+  reviews: { title: 'Nothing to review', body: 'Work an agent asks you to check shows here.' },
+  updates: {
+    title: 'No updates',
+    body: 'Finished tasks, pull requests and mentions show up here.',
+  },
+  archived: { title: 'Nothing archived', body: 'Items you archive are listed here.' },
+};
+
 export function InboxEmptyState({
-  archived,
+  view = 'needs_you',
   onShowUpdates,
 }: {
-  archived?: boolean;
+  view?: InboxView;
   onShowUpdates?: () => void;
 }) {
+  const copy = EMPTY_COPY[view];
   return (
     <div className="flex flex-col items-center gap-2 px-6 py-14 text-center" role="status">
       <span className="sam-well grid h-12 w-12 place-items-center rounded-full text-fg-muted">
         <Inbox size={22} aria-hidden="true" />
       </span>
-      <p className="m-0 text-[15px] font-semibold text-fg-primary">
-        {archived ? 'Nothing archived' : 'Nothing needs you'}
-      </p>
-      <p className="m-0 max-w-[280px] text-sm text-fg-muted">
-        {archived
-          ? 'Items you archive are listed here.'
-          : 'Questions, approvals and reviews from your agents land here.'}
-      </p>
+      <p className="m-0 text-[15px] font-semibold text-fg-primary">{copy.title}</p>
+      <p className="m-0 max-w-[280px] text-sm text-fg-muted">{copy.body}</p>
       {onShowUpdates && (
         <button
           type="button"

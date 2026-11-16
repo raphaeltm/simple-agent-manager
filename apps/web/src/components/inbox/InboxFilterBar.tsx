@@ -4,10 +4,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { INBOX_CHIPS, type InboxView } from './inbox-model';
 
+/** Views whose count means "waiting on you" (amber); Updates stays neutral. */
+const ATTENTION_VIEWS: ReadonlySet<InboxView> = new Set(['needs_you', 'blocking']);
+
+const CHIP =
+  'flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring sm:h-9';
+
 /**
  * One scrolling chip row: Needs you, Blocking, Tasks, Reviews, Updates. Archived is rare, so it
- * lives in the ⋯ menu instead of costing a chip. The active chip scrolls into view, so a filter
- * chosen off-screen at 375px is never hidden.
+ * lives behind ⋯ instead of costing a chip. The active chip scrolls into view, so a filter chosen
+ * off-screen at 375px is never hidden. The chips are toggle buttons (`aria-pressed`): each one
+ * filters the same list, so they are not tabs over separate panels.
  */
 export function InboxFilterBar({
   value,
@@ -20,15 +27,25 @@ export function InboxFilterBar({
 }) {
   const currentRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const firstItemRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     currentRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [value]);
 
+  useEffect(() => {
+    if (menuOpen) firstItemRef.current?.focus();
+  }, [menuOpen]);
+
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const closeMenuAndRefocus = useCallback(() => {
+    setMenuOpen(false);
+    moreRef.current?.focus();
+  }, []);
   useClickOutside(menuRef, closeMenu, menuOpen);
-  useEscapeKey(closeMenu, menuOpen);
+  useEscapeKey(closeMenuAndRefocus, menuOpen);
 
   const chips =
     value === 'archived'
@@ -38,7 +55,7 @@ export function InboxFilterBar({
   return (
     <div className="relative flex min-w-0 items-center gap-1.5">
       <div
-        role="tablist"
+        role="group"
         aria-label="Inbox filters"
         className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-0.5 [scrollbar-width:none]"
       >
@@ -50,11 +67,10 @@ export function InboxFilterBar({
               key={chip.value}
               ref={current ? currentRef : undefined}
               type="button"
-              role="tab"
-              aria-selected={current}
+              aria-pressed={current}
               aria-label={count ? `${chip.label}, ${count}` : undefined}
               onClick={() => onChange(chip.value)}
-              className={`flex h-9 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
+              className={`${CHIP} ${
                 current
                   ? 'sam-raised font-medium text-fg-primary'
                   : 'sam-well text-fg-muted hover:text-fg-primary'
@@ -65,7 +81,7 @@ export function InboxFilterBar({
               {count !== undefined && count > 0 && (
                 <span
                   aria-hidden="true"
-                  className={`font-mono text-[11px] ${current ? 'text-[var(--sam-status-success-fg)]' : ''}`}
+                  className={`font-mono text-[11px] ${ATTENTION_VIEWS.has(chip.value) ? 'text-warning-fg' : ''}`}
                 >
                   {count > 99 ? '99+' : count}
                 </span>
@@ -76,9 +92,9 @@ export function InboxFilterBar({
       </div>
       <div ref={menuRef} className="relative shrink-0">
         <button
+          ref={moreRef}
           type="button"
           aria-label="More filters"
-          aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)}
           className="sam-well grid h-11 w-11 cursor-pointer place-items-center rounded-full border-0 text-fg-muted hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring sm:h-9 sm:w-9"
@@ -86,18 +102,15 @@ export function InboxFilterBar({
           <MoreHorizontal size={16} aria-hidden="true" />
         </button>
         {menuOpen && (
-          <div
-            role="menu"
-            className="sam-glass sam-glass-rim sam-glass-live absolute top-full right-0 z-50 mt-1 flex w-48 flex-col rounded-[14px] p-1"
-          >
+          <div className="sam-glass sam-glass-rim sam-glass-live absolute top-full right-0 z-50 mt-1 flex w-48 flex-col rounded-[14px] p-1">
             <button
+              ref={firstItemRef}
               type="button"
-              role="menuitem"
               onClick={() => {
                 setMenuOpen(false);
                 onChange('archived');
               }}
-              className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[10px] border-0 bg-transparent px-3 text-left text-sm text-fg-primary hover:bg-[var(--sam-glass-v2-raised)]"
+              className="flex min-h-11 cursor-pointer items-center gap-2 rounded-[10px] border-0 bg-transparent px-3 text-left text-sm text-fg-primary hover:bg-[var(--sam-glass-v2-raised)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
             >
               <Archive size={15} aria-hidden="true" className="text-fg-muted" /> Archived
             </button>

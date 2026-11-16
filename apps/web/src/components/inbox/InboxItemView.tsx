@@ -1,6 +1,6 @@
 import type { InboxItem, InboxItemContext } from '@simple-agent-manager/shared';
-import { Check, ChevronDown, CircleAlert, Undo2 } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { Check, ChevronDown, CircleAlert, Undo2, X } from 'lucide-react';
+import { type ReactNode, type Ref, useState } from 'react';
 import { Link } from 'react-router';
 
 import {
@@ -19,7 +19,7 @@ import {
 export function InboxLinkChips({ item }: { item: InboxItem }) {
   if (item.links.length === 0) return null;
   const chip =
-    'flex h-9 max-w-[16rem] shrink-0 items-center gap-1.5 rounded-full border border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)] px-3 text-[13px] text-fg-primary no-underline';
+    'flex h-11 max-w-[16rem] shrink-0 items-center gap-1.5 rounded-full border border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)] px-3 text-[13px] text-fg-primary no-underline sm:h-9';
   return (
     <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none]">
       {item.links.map((link) => {
@@ -76,7 +76,7 @@ export function InboxContextDisclosure({ context }: { context: InboxItemContext 
         className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-xl border-0 bg-transparent px-3 text-left text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
       >
         <span className="font-medium text-fg-primary">Context</span>
-        <span className="min-w-0 flex-1 truncate text-fg-muted">
+        <span className="min-w-0 flex-1 text-fg-muted">
           {contextSummary(context.before.length, sinceCount)}
         </span>
         <ChevronDown
@@ -156,6 +156,8 @@ export interface InboxReceipt {
   tone: 'success' | 'error';
   /** Present while an archive can still be undone. */
   onUndo?: () => void;
+  /** Error receipts stay until dismissed. */
+  onDismiss?: () => void;
 }
 
 /** One line above the next item after answering or archiving. */
@@ -163,7 +165,6 @@ export function InboxReceiptLine({ receipt }: { receipt: InboxReceipt }) {
   const success = receipt.tone === 'success';
   return (
     <div
-      role="status"
       className={`flex min-w-0 items-center gap-2 border-b border-[var(--sam-hairline)] px-4 py-2 text-sm ${
         success ? 'text-[var(--sam-status-success-fg)]' : 'text-danger-fg'
       }`}
@@ -179,11 +180,33 @@ export function InboxReceiptLine({ receipt }: { receipt: InboxReceipt }) {
         <button
           type="button"
           onClick={receipt.onUndo}
-          className="flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-2 font-semibold text-fg-primary hover:underline"
+          className="flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-2 font-semibold text-fg-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
           <Undo2 size={14} aria-hidden="true" /> Undo
         </button>
       )}
+      {receipt.onDismiss && (
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={receipt.onDismiss}
+          className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-md border-0 bg-transparent text-fg-muted hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+        >
+          <X size={15} aria-hidden="true" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * An always-mounted live region for receipts: screen readers announce a change of its content
+ * reliably, but not a region that is inserted together with its text.
+ */
+export function InboxReceiptRegion({ receipt }: { receipt: InboxReceipt | null }) {
+  return (
+    <div role="status" aria-live="polite" aria-atomic="true" className="shrink-0">
+      {receipt && <InboxReceiptLine receipt={receipt} />}
     </div>
   );
 }
@@ -198,6 +221,7 @@ export function InboxItemBody({
   now,
   stackPosition,
   detail,
+  headingRef,
 }: {
   item: InboxItem;
   context: InboxItemContext | null;
@@ -205,6 +229,8 @@ export function InboxItemBody({
   stackPosition: { index: number; total: number; topic: string | null } | null;
   /** What the ask is about, right under the reason (a permission's command). */
   detail?: ReactNode;
+  /** The title takes focus when an item opens (tabIndex -1). */
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const left = timeLeft(item, now);
   const state = left !== null ? `Expires in ${left}` : agentStateLong(item);
@@ -228,7 +254,11 @@ export function InboxItemBody({
           </>
         )}
       </p>
-      <h2 className="m-0 text-lg leading-snug font-semibold break-words text-fg-primary [overflow-wrap:anywhere]">
+      <h2
+        ref={headingRef}
+        tabIndex={-1}
+        className="m-0 text-lg leading-snug font-semibold break-words text-fg-primary outline-none [overflow-wrap:anywhere]"
+      >
         {item.title}
       </h2>
       {item.body && (

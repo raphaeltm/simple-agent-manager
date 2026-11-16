@@ -79,7 +79,8 @@ export function useInboxWalk({
     []
   );
   useEffect(() => {
-    if (!receipt) return;
+    // An error stays until dismissed: the person must not miss why an item came back.
+    if (!receipt || receipt.tone === 'error') return;
     const id = receipt.id;
     const ms = receipt.archivedRef ? INBOX_RECEIPT_MS + 1_000 : INBOX_RECEIPT_MS;
     const timer = setTimeout(
@@ -225,6 +226,7 @@ export function useInboxWalk({
           receipt.archivedRef && pendingArchive?.ref === receipt.archivedRef
             ? undoArchive
             : undefined,
+        onDismiss: receipt.tone === 'error' ? () => setReceipt(null) : undefined,
       }
     : null;
 

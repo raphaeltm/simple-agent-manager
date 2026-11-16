@@ -2,6 +2,9 @@ import { Button } from '@simple-agent-manager/ui';
 
 import type { PermissionOption } from './useAcpPermissionCard';
 
+const PINNED_RANK = (kind: string): number =>
+  kind === 'allow_once' ? 0 : kind === 'reject_once' ? 1 : kind.startsWith('allow') ? 2 : 3;
+
 /**
  * The decision buttons of a permission request: one button per option the agent supplied, never
  * an inferred one. One implementation, two layouts: `inline` inside the chat card, `pinned` as the
@@ -22,6 +25,11 @@ export function PermissionOptions({
   busyOptionId?: string | null;
 }) {
   const pinned = layout === 'pinned';
+  // Pinned: the once-options share the first row and the broad grants ("always") follow, quieter,
+  // so a quick tap never lands on the widest permission.
+  const ordered = pinned
+    ? [...options].sort((a, b) => PINNED_RANK(a.kind) - PINNED_RANK(b.kind))
+    : options;
   return (
     <div
       className={
@@ -32,15 +40,19 @@ export function PermissionOptions({
       aria-label="Permission options"
       data-testid="acp-permission-options"
     >
-      {options.map((option) => {
+      {ordered.map((option) => {
         const reject = option.kind.startsWith('reject');
-        const variant = reject
-          ? pinned
-            ? 'secondary'
-            : 'danger'
-          : pinned && option.kind === 'allow_once'
-            ? 'primary'
-            : 'secondary';
+        const always = option.kind.endsWith('always');
+        const variant =
+          pinned && always
+            ? 'ghost'
+            : reject
+              ? pinned
+                ? 'secondary'
+                : 'danger'
+              : pinned && option.kind === 'allow_once'
+                ? 'primary'
+                : 'secondary';
         return (
           <Button
             key={option.id}

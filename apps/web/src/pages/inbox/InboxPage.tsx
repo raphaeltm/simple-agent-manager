@@ -1,11 +1,11 @@
 import type { InboxItem } from '@simple-agent-manager/shared';
-import { IconButton, Pane, Spinner } from '@simple-agent-manager/ui';
+import { Button, IconButton, Pane, Spinner } from '@simple-agent-manager/ui';
 import { Archive, ArrowLeft, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useInboxPermissionDetail } from '../../components/inbox/inbox-actions';
-import { buildRows, stackPosition } from '../../components/inbox/inbox-model';
+import { buildRows, hasPinnedControls, stackPosition } from '../../components/inbox/inbox-model';
 import {
   InboxAnswerControls,
   InboxPermissionSummary,
@@ -14,7 +14,7 @@ import { InboxFilterBar } from '../../components/inbox/InboxFilterBar';
 import {
   InboxItemBody,
   type InboxReceipt,
-  InboxReceiptLine,
+  InboxReceiptRegion,
 } from '../../components/inbox/InboxItemView';
 import { InboxEmptyState, InboxRow } from '../../components/inbox/InboxRow';
 import { InboxUpdatesList, useInboxUpdates } from '../../components/inbox/InboxUpdatesList';
@@ -27,8 +27,42 @@ import { projectChatPath } from '../../lib/project-routes';
 type Walk = ReturnType<typeof useInboxWalk>;
 
 /** The open item: top bar, receipt, scrolling body and pinned answer controls. */
-function ItemPane({ walk, item, now }: { walk: Walk; item: InboxItem; now: number }) {
+/** Focus the list row that holds `ref` (the row of its stack), after Back on a phone. */
+function focusRow(ref: string) {
+  requestAnimationFrame(() => {
+    const rows = document.querySelectorAll<HTMLElement>('[data-inbox-refs]');
+    for (const row of rows) {
+      if ((row.dataset.inboxRefs ?? '').split(' ').includes(ref)) {
+        row.focus();
+        return;
+      }
+    }
+  });
+}
+
+function ItemPane({
+  walk,
+  item,
+  now,
+  focusOnMount,
+}: {
+  walk: Walk;
+  item: InboxItem;
+  now: number;
+  /** An item opened by the person (not desktop's default first item) takes focus at once. */
+  focusOnMount: boolean;
+}) {
   const navigate = useNavigate();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const mounted = useRef(false);
+  // Opening, stepping and the advance after an answer all land focus on the new item's title,
+  // so a keyboard or screen reader user is never left on a button that just unmounted.
+  useEffect(() => {
+    const first = !mounted.current;
+    mounted.current = true;
+    if (first && !focusOnMount) return;
+    headingRef.current?.focus();
+  }, [item.ref, focusOnMount]);
   const permission = useInboxPermissionDetail(item);
   const index = walk.order.findIndex((candidate) => candidate.ref === item.ref);
   const position = stackPosition(walk.order, item);
@@ -50,7 +84,10 @@ function ItemPane({ walk, item, now }: { walk: Walk; item: InboxItem; now: numbe
         <IconButton
           label="Back to inbox"
           icon={<ArrowLeft size={20} />}
-          onClick={walk.close}
+          onClick={() => {
+            walk.close();
+            focusRow(item.ref);
+          }}
           showTooltip={false}
           className="md:hidden"
         />
@@ -97,14 +134,16 @@ function ItemPane({ walk, item, now }: { walk: Walk; item: InboxItem; now: numbe
           />
         )}
       </div>
-      {walk.receipt && <InboxReceiptLine receipt={walk.receipt} />}
+      <InboxReceiptRegion receipt={walk.receipt} />
       <div className="relative min-h-0 flex-1 overflow-y-auto" data-testid="inbox-item-scroll">
+        <h1 className="sr-only md:hidden">Inbox</h1>
         <div className="mx-auto flex w-full max-w-[680px] min-w-0 flex-col gap-3 px-4 py-4">
           <InboxItemBody
             item={item}
             context={context}
             now={now}
             stackPosition={position}
+            headingRef={headingRef}
             detail={
               item.answerSpec.type === 'interaction' ? (
                 <InboxPermissionSummary detail={permission.detail} />
@@ -113,14 +152,16 @@ function ItemPane({ walk, item, now }: { walk: Walk; item: InboxItem; now: numbe
           />
         </div>
       </div>
-      <div
-        className="shrink-0 border-t border-[var(--sam-hairline)] px-4 py-3"
-        data-testid="inbox-pinned-controls"
-      >
-        <div className="mx-auto w-full max-w-[680px] min-w-0">
-          <InboxAnswerControls item={item} permission={permission} handlers={handlers} />
+      {hasPinnedControls(item) && (
+        <div
+          className="shrink-0 border-t border-[var(--sam-hairline)] px-4 py-3"
+          data-testid="inbox-pinned-controls"
+        >
+          <div className="mx-auto w-full max-w-[680px] min-w-0">
+            <InboxAnswerControls item={item} permission={permission} handlers={handlers} />
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }
@@ -128,7 +169,7 @@ function ItemPane({ walk, item, now }: { walk: Walk; item: InboxItem; now: numbe
 function NoItemPane({ receipt, loading }: { receipt: InboxReceipt | null; loading: boolean }) {
   return (
     <>
-      {receipt && <InboxReceiptLine receipt={receipt} />}
+      <InboxReceiptRegion receipt={receipt} />
       <div className="m-auto px-6 text-center text-sm text-fg-muted">
         {loading ? <Spinner size="sm" /> : 'You are all caught up.'}
       </div>
@@ -153,9 +194,19 @@ function ListPane({
   const { list } = walk;
   if (!list.loaded) {
     return list.error ? (
-      <p role="alert" className="m-0 px-4 py-6 text-sm text-danger-fg">
-        Could not load the inbox: {list.error.message}
-      </p>
+      <div role="alert" className="flex flex-col items-start gap-2 px-4 py-6">
+        <p className="m-0 text-sm text-danger-fg [overflow-wrap:anywhere]">
+          Could not load the inbox: {list.error.message}
+        </p>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => void list.refetch()}
+          className="min-h-11"
+        >
+          Retry
+        </Button>
+      </div>
     ) : (
       <div className="flex justify-center py-10" role="status" aria-label="Loading inbox">
         <Spinner size="sm" />
@@ -165,7 +216,7 @@ function ListPane({
   if (rows.length === 0)
     return (
       <InboxEmptyState
-        archived={walk.view === 'archived'}
+        view={walk.view}
         onShowUpdates={walk.view === 'needs_you' ? () => walk.setView('updates') : undefined}
       />
     );
@@ -234,7 +285,8 @@ export function InboxPage({
       <Pane
         as="header"
         variant="slab"
-        className={`shrink-0 flex-col gap-3 px-3 py-3 md:flex md:px-5 md:py-4 ${itemOpenOnPhone ? 'hidden' : 'flex'}`}
+        // relative z-20: the ⋯ menu drops out of this pane and must paint over the panes below.
+        className={`relative z-20 shrink-0 flex-col gap-3 px-3 py-3 md:flex md:px-5 md:py-4 ${itemOpenOnPhone ? 'hidden' : 'flex'}`}
       >
         <div className="hidden md:block">
           <h1 className="m-0 text-2xl font-bold text-fg-primary">Inbox</h1>
@@ -260,9 +312,7 @@ export function InboxPage({
         >
           {/* On a phone with nothing open the receipt shows above the list; on desktop the item
               pane shows it. */}
-          {isMobile && !walk.itemParam && walk.receipt && (
-            <InboxReceiptLine receipt={walk.receipt} />
-          )}
+          {isMobile && <InboxReceiptRegion receipt={walk.itemParam ? null : walk.receipt} />}
           <ListPane walk={walk} showProject={showProject} projectId={projectId} now={now} />
         </Pane>
         {!updates && (
@@ -271,7 +321,12 @@ export function InboxPage({
             aria-label="Inbox item"
           >
             {walk.selected ? (
-              <ItemPane walk={walk} item={walk.selected} now={now} />
+              <ItemPane
+                walk={walk}
+                item={walk.selected}
+                now={now}
+                focusOnMount={walk.itemParam !== null}
+              />
             ) : (
               <NoItemPane
                 receipt={isMobile ? null : walk.receipt}

@@ -339,9 +339,10 @@ export function InboxAnswerControls({
     case 'approval':
       return <ApprovalControls key={item.ref} item={item} handlers={handlers} />;
     case 'acknowledge':
-      if (item.kind === 'review')
-        return <ReviewControls key={item.ref} item={item} handlers={handlers} />;
-      // Human tasks and SAM's own error items are read-only here until their slices ship.
-      return item.sessionId ? <OpenChatButton item={item} label="Open chat" /> : null;
+      // Human tasks and SAM's own error items are read-only here until their slices ship
+      // (`hasPinnedControls` hides their strip); Open chat is in the top bar.
+      return item.kind === 'review' ? (
+        <ReviewControls key={item.ref} item={item} handlers={handlers} />
+      ) : null;
   }
 }

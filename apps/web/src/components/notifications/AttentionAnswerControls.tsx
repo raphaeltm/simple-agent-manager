@@ -146,10 +146,11 @@ export function AttentionAnswerControls({
           }}
         >
           <fieldset
-            className={`relative m-0 min-w-0 overflow-y-auto border-0 p-0 ${pinned ? 'max-h-[min(32vh,18rem)]' : 'max-h-72'}`}
+            className={`relative m-0 min-w-0 overflow-y-auto border-0 p-0 ${pinned ? 'max-h-[min(32vh,12.5rem)]' : 'max-h-72'}`}
             data-testid="attention-option-list"
           >
-            <legend className="sr-only">Choose one answer</legend>
+            {/* About 4.5 rows show, so the half row says the list scrolls. */}
+            <legend className="sr-only">Choose one of {options.length} answers</legend>
             {options.map((option, index) => (
               <label
                 key={option}

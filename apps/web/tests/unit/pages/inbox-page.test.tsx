@@ -561,12 +561,15 @@ describe('InboxPage — navigation, filters and freshness', () => {
     installFetch(server);
     renderInbox();
     await screen.findByRole('button', { name: /Title ask:a/ });
-    fireEvent.click(screen.getByRole('tab', { name: /^Blocking/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Blocking/ }));
     await waitFor(() => expect(location).toBe('/inbox?filter=blocking'));
     await waitFor(() =>
       expect(server.calls.some((c) => c.path === '/api/inbox' && c.method === 'GET')).toBe(true)
     );
-    expect(screen.getByRole('tab', { name: /^Blocking/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: /^Blocking/ })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
   });
 
   it('an item archived this session is listed under Archived (⋯ menu)', async () => {
@@ -583,9 +586,12 @@ describe('InboxPage — navigation, filters and freshness', () => {
     });
     await waitFor(() => expect(archiveCalls(server)).toHaveLength(1));
     fireEvent.click(screen.getByRole('button', { name: 'More filters' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /Archived/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }));
     expect(await screen.findByRole('button', { name: /Title ask:a/ })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Archived/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: /^Archived/ })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
   });
 
   it('refreshes on window focus, without polling', async () => {
@@ -633,5 +639,35 @@ describe('InboxPage — navigation, filters and freshness', () => {
       name: 'Title ask:b',
     });
     expect(screen.getByTestId('inbox-receipt')).toHaveTextContent('Already handled somewhere else');
+  });
+});
+
+describe('InboxPage — focus', () => {
+  it('moves focus to the next item after answering, and to the row after Back on a phone', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    renderInbox(openUrl('ask:a'));
+    const first = await within(
+      await screen.findByRole('region', { name: 'Inbox item' })
+    ).findByRole('heading', { name: 'Title ask:a' });
+    await waitFor(() => expect(document.activeElement).toBe(first));
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Yes' }));
+    const next = await within(itemPane()).findByRole('heading', { name: 'Title ask:b' });
+    await waitFor(() => expect(document.activeElement).toBe(next));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to inbox' }));
+    await waitFor(() =>
+      expect((document.activeElement as HTMLElement | null)?.dataset.inboxRefs).toBe('ask:b')
+    );
+  });
+
+  it("does not steal focus for desktop's default first item", async () => {
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox();
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    expect(document.activeElement).toBe(document.body);
   });
 });

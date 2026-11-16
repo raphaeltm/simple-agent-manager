@@ -57,8 +57,8 @@ test.describe('Inbox — Mobile', () => {
 
   test('active chip scrolls into view', async ({ page }) => {
     await openInbox(page, state(), '/inbox?filter=updates');
-    const chip = page.getByRole('tab', { name: /Updates/ });
-    await expect(chip).toHaveAttribute('aria-selected', 'true');
+    const chip = page.getByRole('button', { name: /^Updates/ });
+    await expect(chip).toHaveAttribute('aria-pressed', 'true');
     const box = await chip.boundingBox();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(375);
@@ -88,9 +88,14 @@ test.describe('Inbox — Mobile', () => {
       const params = new URLSearchParams({ item: kind.ref, project: kind.project });
       await openInbox(page, state(), `/inbox?${params.toString()}`);
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
-      await expectControlsPinned(page);
+      if (kind.name === 'task' || kind.name === 'error') {
+        // Nothing to answer yet: no empty control strip (Open chat is in the top bar).
+        await expect(page.getByTestId('inbox-pinned-controls')).toHaveCount(0);
+      } else {
+        await expectControlsPinned(page);
+      }
       await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
+      await assertNoClippedOverflow(page);
       await screenshot(page, `inbox-item-${kind.name}`);
     });
   }
@@ -154,12 +159,32 @@ test.describe('Inbox — Desktop', () => {
       const params = new URLSearchParams({ item: kind.ref, project: kind.project });
       await openInbox(page, state(), `/inbox?${params.toString()}`);
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
-      await expectControlsPinned(page);
+      if (kind.name === 'task' || kind.name === 'error') {
+        // Nothing to answer yet: no empty control strip (Open chat is in the top bar).
+        await expect(page.getByTestId('inbox-pinned-controls')).toHaveCount(0);
+      } else {
+        await expectControlsPinned(page);
+      }
       await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
+      await assertNoClippedOverflow(page);
       await screenshot(page, `inbox-desktop-item-${kind.name}`);
     });
   }
+
+  test('the ⋯ menu paints over the panes and opens Archived', async ({ page }) => {
+    await openInbox(page, state());
+    await page.getByRole('button', { name: 'More filters' }).click();
+    const archived = page.getByRole('button', { name: 'Archived', exact: true });
+    await expect(archived).toBeVisible();
+    // A real click: fails if a pane paints over the menu.
+    await archived.click({ trial: true });
+    await screenshot(page, 'inbox-desktop-more-menu');
+    await archived.click();
+    await expect(page.getByRole('button', { name: /^Archived/ })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+  });
 
   test('context expanded', async ({ page }) => {
     const params = new URLSearchParams({ item: 'ask:q-vat', project: 'p-billing' });

@@ -132,6 +132,15 @@ export function formatAge(iso: string, now: number): string {
   return formatMsSpan(now - Date.parse(iso));
 }
 
+/**
+ * Whether an item has an answer area to pin. Open human tasks and SAM's own error items have
+ * nothing to answer yet (Open chat is in the top bar), so they show no empty control strip.
+ */
+export function hasPinnedControls(item: InboxItem): boolean {
+  if (item.status !== 'open' || !item.canAct) return true;
+  return !(item.answerSpec.type === 'acknowledge' && item.kind !== 'review');
+}
+
 /** A list row: one item, or a stack of items from one chat (or one group). */
 export type InboxRowModel =
   | { type: 'item'; key: string; item: InboxItem }
