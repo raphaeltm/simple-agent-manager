@@ -60,13 +60,6 @@ import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
 import * as idleCleanup from './idle-cleanup';
-import {
-  computeMessageBookkeepingAlarmTime,
-  computeBookkeepingSummaryAlarmTime,
-  flushDueMessageBookkeeping,
-  DEFAULT_MESSAGE_BOOKKEEPING,
-  flushMessageBookkeeping,
-} from './message-bookkeeping';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';
 import * as links from './links';
@@ -74,6 +67,13 @@ import * as logicalMessage from './logical-message';
 import * as logicalTranscript from './logical-transcript';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
+import {
+  computeBookkeepingSummaryAlarmTime,
+  computeMessageBookkeepingAlarmTime,
+  DEFAULT_MESSAGE_BOOKKEEPING,
+  flushDueMessageBookkeeping,
+  flushMessageBookkeeping,
+} from './message-bookkeeping';
 import * as messageContext from './message-context';
 import * as messagePersistence from './message-persistence';
 import {
@@ -81,6 +81,11 @@ import {
   type MessageIngestSource,
   sealMessageStream,
 } from './message-stream-ingest';
+import {
+  finishCompatibilitySeal,
+  readCompatibilitySeal,
+  sealMessageStreamsBounded,
+} from './message-stream-seal';
 import * as messages from './messages';
 import { runMigrations } from './migrations';
 import * as missionState from './missions';
@@ -190,7 +195,9 @@ export class ProjectData extends DurableObject<Env> {
   private archiveTranscriptLock: Promise<unknown> = Promise.resolve();
   /** Serializes cleanup state reads, external R2 work, and final progress writes (rule 45). */
   private toolPayloadCleanupLock: Promise<unknown> = Promise.resolve();
+  private alarmSchedulingLock: Promise<unknown> = Promise.resolve();
   private cachedProjectId: string | null = null;
+  private compatibilitySealExpiresAt: number | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -209,6 +216,7 @@ export class ProjectData extends DurableObject<Env> {
         this.meteredStorage.transactionSync(() => {
           runMigrations(this.sql);
         });
+        this.compatibilitySealExpiresAt = readCompatibilitySeal(this.sql)?.expiresAt ?? null;
         this.restoreAlarmSections();
         // Section memory is persisted before the alarm write. An interrupted write
         // can leave complete memory but no alarm (or an alarm later than required).
@@ -867,7 +875,19 @@ export class ProjectData extends DurableObject<Env> {
         this.messagePersistenceHooks(),
         sessionId,
         batchMessages,
-        { source, config: { ...config, enabled: config.enabled && !legacyClient } }
+        {
+          source,
+          config: {
+            ...config,
+            enabled:
+              config.enabled &&
+              !legacyClient &&
+              !(
+                this.compatibilitySealExpiresAt !== null &&
+                Date.now() < this.compatibilitySealExpiresAt
+              ),
+          },
+        }
       );
     });
   }
@@ -3524,10 +3544,36 @@ export class ProjectData extends DurableObject<Env> {
           return new Response('Invalid sessionId format', { status: 400 });
         tags.push(`session:${sessionId}`);
       }
-      if (url.searchParams.get('messageAppend') === CHAT_MESSAGE_APPEND_CAPABILITY)
+      if (url.searchParams.get('messageAppend') === CHAT_MESSAGE_APPEND_CAPABILITY) {
         tags.push(CHAT_MESSAGE_APPEND_CAPABILITY);
-      else sealMessageStream(this.sql, sessionId ?? undefined);
-      this.ctx.acceptWebSocket(pair[1], tags);
+        this.ctx.acceptWebSocket(pair[1], tags);
+      } else {
+        const config = await projectDataPorts().operations.messageMergeConfig?.(this.env);
+        const accepted = await this.withArchiveTranscriptLock(() => {
+          if (sessionId) sealMessageStream(this.sql, sessionId);
+          else {
+            const seal = sealMessageStreamsBounded(
+              this.sql,
+              config ?? DEFAULT_MESSAGE_MERGE_CONFIG
+            );
+            this.compatibilitySealExpiresAt = seal.expiresAt;
+            if (!seal.complete) return false;
+          }
+          // Register the legacy observer before releasing the mutex: a batch must see either
+          // the durable compatibility fence or this socket, never an unprotected gap.
+          this.ctx.acceptWebSocket(pair[1], tags);
+          if (!sessionId) {
+            finishCompatibilitySeal(this.sql);
+            this.compatibilitySealExpiresAt = null;
+          }
+          return true;
+        });
+        await this.recalculateAlarm();
+        if (!accepted)
+          return new Response('Chat compatibility seal is still in progress; retry', {
+            status: 503,
+          });
+      }
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
     return new Response('Not found', { status: 404 });
@@ -3977,6 +4023,14 @@ export class ProjectData extends DurableObject<Env> {
   private async recalculateAlarm(
     consumed?: ReadonlyMap<ProjectDataAlarmSection, number>
   ): Promise<void> {
+    const run = this.alarmSchedulingLock.then(() => this.recalculateAlarmLocked(consumed));
+    this.alarmSchedulingLock = run.catch(() => undefined);
+    return run;
+  }
+
+  private async recalculateAlarmLocked(
+    consumed?: ReadonlyMap<ProjectDataAlarmSection, number>
+  ): Promise<void> {
     // Clear before attempting the write: an older successful call must not erase
     // a newer failure while scheduling calls overlap.
     this.alarmSchedulingFailed = false;
@@ -3986,8 +4040,11 @@ export class ProjectData extends DurableObject<Env> {
       this.persistAlarmSections();
       // Preserve remembered times and the retry floor of a section that just threw.
       const alarmTime = earliestAlarmTime([this.alarmSections.nextDueAt()]);
-      if (alarmTime !== null) await this.meteredStorage.setAlarm(alarmTime);
-      else await this.meteredStorage.deleteAlarm();
+      const existingAlarm = await this.meteredStorage.getAlarm();
+      if (alarmTime !== null) {
+        if (existingAlarm === null || existingAlarm > alarmTime)
+          await this.meteredStorage.setAlarm(alarmTime);
+      } else if (existingAlarm !== null) await this.meteredStorage.deleteAlarm();
     } catch (error) {
       this.alarmSchedulingFailed = true;
       throw error;
@@ -4161,7 +4218,8 @@ export class ProjectData extends DurableObject<Env> {
       this.sql,
       this.env,
       projectId,
-      config?.bookkeepingFlushBatchSize
+      config?.bookkeepingFlushBatchSize,
+      config
     );
   }
 }

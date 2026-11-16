@@ -5,9 +5,13 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-import { DEFAULT_MESSAGE_BOOKKEEPING } from './message-bookkeeping';
+import { DEFAULT_MESSAGE_BOOKKEEPING, flushMessageBookkeeping } from './message-bookkeeping';
+import { DEFAULT_BOOKKEEPING_SUMMARY_RETRY } from './message-bookkeeping-summary-queue';
 
 export const DEFAULT_MESSAGE_MERGE_CONFIG = {
+  ...DEFAULT_BOOKKEEPING_SUMMARY_RETRY,
+  bookkeepingSealLeaseMs: 60_000,
+  bookkeepingSealMaxSessions: 10_000,
   enabled: false,
   maxRowBytes: 64 * 1024,
   recentIds: 200,
@@ -20,6 +24,11 @@ export interface MessageMergeConfig {
   recentIds: number;
   bookkeepingIntervalMs?: number;
   bookkeepingFlushBatchSize?: number;
+  bookkeepingSealLeaseMs?: number;
+  bookkeepingSealMaxSessions?: number;
+  bookkeepingSummaryRetryMs?: number;
+  bookkeepingSummaryMaxAttempts?: number;
+  bookkeepingSummaryMaxResidenceMs?: number;
 }
 /** Supplied by the authenticated callback adapter, never by the message body. */
 export interface MessageIngestSource {
@@ -69,18 +78,12 @@ export function readMessageIngestState(value: unknown): MessageIngestState | nul
 }
 
 /** Seal only a new canonical row; historical transcript rows are never changed. */
-export function sealMessageStream(sql: SqlStorage, sessionId?: string): void {
-  if (sessionId) {
-    sql.exec(
-      `UPDATE chat_sessions SET stream_ingest_state = json_set(stream_ingest_state, '$.open', NULL)
-      WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL AND id = ?`,
-      sessionId
-    );
-    return;
-  }
+export function sealMessageStream(sql: SqlStorage, sessionId: string): void {
+  flushMessageBookkeeping(sql, sessionId);
   sql.exec(
     `UPDATE chat_sessions SET stream_ingest_state = json_set(stream_ingest_state, '$.open', NULL)
-    WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL`
+     WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL AND id = ?`,
+    sessionId
   );
 }
 

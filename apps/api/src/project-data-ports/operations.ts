@@ -11,20 +11,40 @@ import { workerEnv } from './worker-env';
 /** Operational brakes, the stalled-task loop classifier and operator alerts. */
 export const operationsPort: OperationsPort = {
   messageMergeConfig: async (env) => {
-    const [enabled, maxRowBytes, recentIds, bookkeepingIntervalMs, bookkeepingFlushBatchSize] =
-      await Promise.all([
-        resolveAdminSetting(workerEnv(env), 'chat.messageMergingEnabled'),
-        resolveAdminSetting(workerEnv(env), 'chat.messageMergeMaxRowBytes'),
-        resolveAdminSetting(workerEnv(env), 'chat.messageMergeRecentIds'),
-        resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingIntervalMs'),
-        resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingFlushBatchSize'),
-      ]);
+    const [
+      enabled,
+      maxRowBytes,
+      recentIds,
+      bookkeepingIntervalMs,
+      bookkeepingFlushBatchSize,
+      bookkeepingSummaryRetryMs,
+      bookkeepingSummaryMaxAttempts,
+      bookkeepingSummaryMaxResidenceMs,
+      bookkeepingSealLeaseMs,
+      bookkeepingSealMaxSessions,
+    ] = await Promise.all([
+      resolveAdminSetting(workerEnv(env), 'chat.messageMergingEnabled'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageMergeMaxRowBytes'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageMergeRecentIds'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingIntervalMs'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingFlushBatchSize'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingSummaryRetryMs'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingSummaryMaxAttempts'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingSummaryMaxResidenceMs'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingSealLeaseMs'),
+      resolveAdminSetting(workerEnv(env), 'chat.messageBookkeepingSealMaxSessions'),
+    ]);
     return {
       enabled: enabled === true,
       maxRowBytes: Number(maxRowBytes),
       recentIds: Number(recentIds),
       bookkeepingIntervalMs: Number(bookkeepingIntervalMs),
       bookkeepingFlushBatchSize: Number(bookkeepingFlushBatchSize),
+      bookkeepingSealLeaseMs: Number(bookkeepingSealLeaseMs),
+      bookkeepingSealMaxSessions: Number(bookkeepingSealMaxSessions),
+      bookkeepingSummaryRetryMs: Number(bookkeepingSummaryRetryMs),
+      bookkeepingSummaryMaxAttempts: Number(bookkeepingSummaryMaxAttempts),
+      bookkeepingSummaryMaxResidenceMs: Number(bookkeepingSummaryMaxResidenceMs),
     };
   },
   rowUsageIntervalMs: async (env) =>

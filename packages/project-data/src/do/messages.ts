@@ -3,20 +3,15 @@
  * `message-search.ts`; its DO-facing entry points are re-exported here.
  */
 import type { MessageCursor } from '@simple-agent-manager/shared';
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
+import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
 import {
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   type ProjectDataArchiveSourceIntentState,
 } from '../archive/contract';
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES } from '@simple-agent-manager/shared';
-import { parsePositiveInt } from '@simple-agent-manager/worker-core';
-
-import {
-  flushMessageBookkeeping,
-  messageBookkeepingInterval,
-  BOOKKEEPING_AWAITING_SUMMARY,
-} from './message-bookkeeping';
+import { flushMessageBookkeeping, messageBookkeepingInterval } from './message-bookkeeping';
 import { messageBoundsClause } from './message-cursor';
 import {
   type MessageIngestSource,
@@ -398,9 +393,7 @@ export function persistMessageBatch(
   let bookkeepingFlushed = false;
 
   if (persisted > 0) {
-    const firstPending =
-      session.message_bookkeeping_due_at == null ||
-      session.message_bookkeeping_due_at === BOOKKEEPING_AWAITING_SUMMARY;
+    const firstPending = session.message_bookkeeping_due_at == null;
     const interval = messageBookkeepingInterval(env, context?.config.bookkeepingIntervalMs);
     const latestAt = persistedMessages.reduce(
       (latest, message) => Math.max(latest, message.createdAt),

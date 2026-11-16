@@ -8,11 +8,46 @@ import {
 
 export const MESSAGE_MERGE_SETTINGS: AdminSettingDefinition[] = [
   integerDefinition(
+    'chat.messageBookkeepingSealLeaseMs',
+    DEFAULT_MESSAGE_MERGE_CONFIG.bookkeepingSealLeaseMs,
+    'Operations',
+    'Maximum residence of a resumable global legacy compatibility fence. Expiry restarts the bounded scan; accepted sockets retain ordinary compatibility protection.',
+    { min: 1000, max: 300_000 }
+  ),
+  integerDefinition(
+    'chat.messageBookkeepingSealMaxSessions',
+    DEFAULT_MESSAGE_MERGE_CONFIG.bookkeepingSealMaxSessions,
+    'Operations',
+    'Maximum sessions folded and sealed in a legacy project socket handshake; incomplete handshakes return a retryable response.',
+    { min: 1, max: 100_000 }
+  ),
+  integerDefinition(
+    'chat.messageBookkeepingSummaryRetryMs',
+    DEFAULT_MESSAGE_MERGE_CONFIG.bookkeepingSummaryRetryMs,
+    'Operations',
+    'Delay between bounded retries of chat summary publication. Retry eligibility survives object restarts.',
+    { min: 1000, max: 300_000 }
+  ),
+  integerDefinition(
+    'chat.messageBookkeepingSummaryMaxAttempts',
+    DEFAULT_MESSAGE_MERGE_CONFIG.bookkeepingSummaryMaxAttempts,
+    'Operations',
+    'Maximum attempts per unresolved chat summary publication episode before operator-visible quarantine.',
+    { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'chat.messageBookkeepingSummaryMaxResidenceMs',
+    DEFAULT_MESSAGE_MERGE_CONFIG.bookkeepingSummaryMaxResidenceMs,
+    'Operations',
+    'Maximum age of an unresolved chat summary publication episode. Ingest does not renew this budget.',
+    { min: 1000, max: 86_400_000 }
+  ),
+  integerDefinition(
     'chat.messageBookkeepingIntervalMs',
     DEFAULT_MESSAGE_MERGE_CONFIG.bookkeepingIntervalMs,
     'Operations',
     'Maximum delay before persisted chat activity is folded into counters and timers. Clamped below half the session idle window; lifecycle boundaries flush immediately.',
-    { min: 1000, max: 60_000 }
+    { min: 10_000, max: 30_000 }
   ),
   integerDefinition(
     'chat.messageBookkeepingFlushBatchSize',

@@ -2,7 +2,7 @@
 
 exports[`canonical streamed chunks through real ProjectData persistence > measures billed writes through real workerd and guards the reporter-fixture savings 1`] = `
 [
-  6615,
-  1596,
+  6449,
+  1727,
 ]
 `;

@@ -2744,11 +2744,24 @@ export const MIGRATIONS: Migration[] = [
   {
     name: '080-chat-ingest-bookkeeping',
     run(sql) {
-      sql.exec('ALTER TABLE chat_sessions ADD COLUMN pending_message_count INTEGER NOT NULL DEFAULT 0');
+      sql.exec(
+        'ALTER TABLE chat_sessions ADD COLUMN pending_message_count INTEGER NOT NULL DEFAULT 0'
+      );
       sql.exec('ALTER TABLE chat_sessions ADD COLUMN message_ingested_at INTEGER');
       sql.exec('ALTER TABLE chat_sessions ADD COLUMN message_activity_at INTEGER');
       sql.exec('ALTER TABLE chat_sessions ADD COLUMN message_idle_after INTEGER');
       sql.exec('ALTER TABLE chat_sessions ADD COLUMN message_bookkeeping_due_at INTEGER');
+      sql.exec(`CREATE TABLE message_bookkeeping_summary_queue (
+        session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        first_queued_at INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL,
+        terminal_at INTEGER,
+        version INTEGER NOT NULL DEFAULT 1
+      )`);
+      sql.exec(`CREATE INDEX idx_message_bookkeeping_summary_eligible
+        ON message_bookkeeping_summary_queue(next_attempt_at, session_id)
+        WHERE terminal_at IS NULL`);
       // Existing sessions are NULL: there are no historical entries to build or retain.
       sql.exec(`CREATE INDEX idx_chat_sessions_message_bookkeeping_due
         ON chat_sessions(message_bookkeeping_due_at) WHERE message_bookkeeping_due_at IS NOT NULL`);

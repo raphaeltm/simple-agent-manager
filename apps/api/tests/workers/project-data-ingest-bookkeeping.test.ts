@@ -84,6 +84,10 @@ describe('ingest bookkeeping in real workerd', () => {
   )(
     'preserves the task when real ingest lands during the cleanup liveness await (merging=%s, writer=%s)',
     async (enabled, writer) => {
+      // Keep every fixture-created storage alarm ahead of workerd's native clock.
+      // Otherwise an immediately eligible background alarm can consume delivery
+      // while D1 relationships are still being seeded, before the race is armed.
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 3600000);
       const { stub, session, batch, base } = await fixture(enabled);
       const projectId = `receipt-project-${crypto.randomUUID()}`;
       const userId = `receipt-user-${crypto.randomUUID()}`;
@@ -136,7 +140,7 @@ describe('ingest bookkeeping in real workerd', () => {
             delivery: { kind: 'terminal', reason: 'synthetic_dead', nodeId },
           };
         });
-      vi.spyOn(Date, 'now').mockReturnValue(base + 61000);
+      clock.mockReturnValue(base + 61000);
       const alarm = runDurableObjectAlarm(stub);
       expect(await alarm).toBe(true);
       expect(liveness).toHaveBeenCalled();
@@ -296,6 +300,118 @@ describe('ingest bookkeeping in real workerd', () => {
       });
     }
   );
+
+  it('measures interval amortization including real due alarms in both modes', async () => {
+    const reports = [];
+    for (const intervalMs of [15000, 30000, 60000, 120000])
+      for (const enabled of [false, true]) {
+        vi.restoreAllMocks();
+        const { stub, session, batch } = await fixture(enabled);
+        const projectId = 'cost-project-' + crypto.randomUUID();
+        const userId = 'cost-user-' + crypto.randomUUID();
+        await seedUser(userId);
+        await seedInstallation(projectId, userId);
+        await seedProject(projectId, userId, projectId);
+        await stub.ensureProjectId(projectId);
+        vi.spyOn(projectDataPorts().operations, 'messageMergeConfig').mockResolvedValue({
+          enabled,
+          maxRowBytes: 65536,
+          recentIds: 200,
+          bookkeepingIntervalMs: intervalMs,
+        });
+        await runInDurableObject(stub, (instance) => {
+          const holder = instance as unknown as { env: Record<string, unknown> };
+          holder.env = { ...holder.env, SESSION_IDLE_TIMEOUT_MINUTES: '30' };
+        });
+        await stub.markAgentCompleted(session);
+        await stub.runSummarySyncForTest();
+        await runDurableObjectAlarm(stub);
+        const samples: WriteSample[] = [];
+        const collect = await profileObject(stub, 'root', samples, true);
+        const base = Date.now();
+        const clock = vi.spyOn(Date, 'now');
+        const batches = 120;
+        const batchWrites = [];
+        for (let n = 1; n <= batches; n++) {
+          clock.mockReturnValue(base + n * 2000);
+          collect();
+          const start = samples.length;
+          await stub.persistMessageBatch(session, batch(10001 + n), source);
+          collect();
+          batchWrites.push(
+            samples
+              .slice(start)
+              .filter(
+                (row) =>
+                  row.owner === 'root' &&
+                  row.phase === 'persistMessageBatch' &&
+                  !row.statement.startsWith('storage.')
+              )
+              .reduce((sum, row) => sum + row.rowsWritten, 0)
+          );
+          const alarmAt = await runInDurableObject(stub, (_instance, state) =>
+            state.storage.getAlarm()
+          );
+          if (alarmAt !== null && alarmAt <= Date.now()) await runDurableObjectAlarm(stub);
+        }
+        // Include the exact lifecycle flush and its required summary publication at window end.
+        await stub.recordSessionTurnEnd('bookkeeping-acp', {
+          reason: 'completed',
+          observedAt: Date.now(),
+        });
+        await stub.runSummarySyncForTest();
+        collect();
+        const sql = samples.filter(
+          (row) =>
+            row.owner === 'root' &&
+            !row.statement.startsWith('storage.') &&
+            !row.statement.startsWith('KV.')
+        );
+        const writes = sql.reduce((sum, row) => sum + row.rowsWritten, 0);
+        const reads = sql.reduce((sum, row) => sum + (row.rowsRead ?? 0), 0);
+        const steadyWrites = Math.min(...batchWrites);
+        const report = {
+          intervalMs,
+          enabled,
+          batches,
+          steadyWrites,
+          amortizedSqlWrites: writes / batches,
+          amortizedSqlReads: reads / batches,
+          nativeWrites: samples
+            .filter((row) => row.owner === 'root' && row.statement.startsWith('storage.'))
+            .reduce((sum, row) => sum + row.rowsWritten, 0),
+        };
+        const grouped = new Map<string, { calls: number; writes: number }>();
+        for (const row of samples.filter((row) => row.owner === 'root' && row.rowsWritten > 0)) {
+          const boundary =
+            row.phase === 'persistMessageBatch'
+              ? 'ingest'
+              : row.phase === 'recordSessionTurnEnd'
+                ? 'turn-end'
+                : row.phase;
+          const table = row.statement.startsWith('storage.')
+            ? row.statement
+            : (row.statement.match(/(?:UPDATE|INTO|FROM) ([a-z_]+)/)?.[1] ?? 'other');
+          const key = boundary + ':' + table;
+          const count = grouped.get(key) ?? { calls: 0, writes: 0 };
+          count.calls++;
+          count.writes += row.rowsWritten;
+          grouped.set(key, count);
+        }
+        reports.push({
+          ...report,
+          amortizedTotalWrites: (writes + report.nativeWrites) / batches,
+          attribution: Object.fromEntries([...grouped].sort(([a], [b]) => a.localeCompare(b))),
+        });
+        expect(steadyWrites).toBeGreaterThan(0);
+        expect(steadyWrites).toBeLessThanOrEqual(enabled ? 2 : 4);
+        expect(report.amortizedSqlWrites).toBeLessThan(enabled ? 6 : 8);
+        clock.mockRestore();
+      }
+    // Alarm section consumption may fall on either adjacent tick.
+    // Gate cost bounds above; retain exact samples as diagnostic evidence.
+    console.info('LOCAL_BOOKKEEPING_COST_SAMPLE', JSON.stringify(reports));
+  }, 120000);
 
   it('keeps a sparse deadline index out of the steady update write cost', async () => {
     const { stub, session } = await fixture(true);

@@ -2,15 +2,16 @@
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES } from '@simple-agent-manager/shared';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
+import {
+  computeBookkeepingSummaryQueueAlarmTime,
+  enqueueBookkeepingSummary,
+} from './message-bookkeeping-summary-queue';
 import type { Env } from './types';
 
 /** Serializes a short D1 commit with ingest; external liveness probes stay outside it. */
 export type MessageReceiptLock = <T>(work: () => Promise<T>) => Promise<T>;
 
-export const DEFAULT_MESSAGE_BOOKKEEPING = { intervalMs: 15_000, flushBatchSize: 100 } as const;
-/** Protocol state, outside the range of real millisecond deadlines; never a configurable limit. */
-export const BOOKKEEPING_AWAITING_SUMMARY = Number.MAX_SAFE_INTEGER;
-export const BOOKKEEPING_SUMMARY_CURSOR_KEY = 'chatBookkeepingSummaryCursor';
+export const DEFAULT_MESSAGE_BOOKKEEPING = { intervalMs: 30_000, flushBatchSize: 100 } as const;
 
 export function messageBookkeepingInterval(env: Env, configured?: number): number {
   const idleMs =
@@ -97,10 +98,10 @@ export function flushMessageBookkeeping(sql: SqlStorage, sessionId: string): boo
        last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count
          THEN message_count + pending_message_count ELSE NULL END,
        updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0,
-       message_bookkeeping_due_at = ? WHERE id = ? AND pending_message_count > 0`,
-    BOOKKEEPING_AWAITING_SUMMARY,
+       message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0`,
     sessionId
   );
+  enqueueBookkeepingSummary(sql, sessionId, Date.now());
   return true;
 }
 
@@ -122,9 +123,7 @@ export function flushDueMessageBookkeeping(
 ): number {
   const rows = sql
     .exec(
-      `SELECT id FROM chat_sessions WHERE message_bookkeeping_due_at < ?
-       AND message_bookkeeping_due_at <= ? ORDER BY message_bookkeeping_due_at LIMIT ?`,
-      BOOKKEEPING_AWAITING_SUMMARY,
+      `SELECT id FROM chat_sessions WHERE message_bookkeeping_due_at <= ? ORDER BY message_bookkeeping_due_at LIMIT ?`,
       now,
       limit
     )
@@ -136,8 +135,7 @@ export function flushDueMessageBookkeeping(
 export function computeMessageBookkeepingAlarmTime(sql: SqlStorage): number | null {
   const row = sql
     .exec(
-      'SELECT MIN(message_bookkeeping_due_at) AS due FROM chat_sessions WHERE message_bookkeeping_due_at < ?',
-      BOOKKEEPING_AWAITING_SUMMARY
+      'SELECT MIN(message_bookkeeping_due_at) AS due FROM chat_sessions WHERE message_bookkeeping_due_at IS NOT NULL'
     )
     .toArray()[0];
   return typeof row?.due === 'number' ? row.due : null;
@@ -145,14 +143,8 @@ export function computeMessageBookkeepingAlarmTime(sql: SqlStorage): number | nu
 
 export function computeBookkeepingSummaryAlarmTime(
   sql: SqlStorage,
-  env: Env,
-  now = Date.now()
+  _env: Env,
+  _now = Date.now()
 ): number | null {
-  const row = sql
-    .exec(
-      'SELECT id FROM chat_sessions WHERE message_bookkeeping_due_at = ? LIMIT 1',
-      BOOKKEEPING_AWAITING_SUMMARY
-    )
-    .toArray()[0];
-  return row ? now + parsePositiveInt(env.DO_SUMMARY_SYNC_DEBOUNCE_MS, 5000) : null;
+  return computeBookkeepingSummaryQueueAlarmTime(sql);
 }

@@ -1,61 +1,45 @@
 # Bound chat ingest bookkeeping writes
 
-Task01M7GB4125DFTECRYYCAHXAWTS. Part2, stacked locally on Part1 head3bc3e9ae4e739ed173584e71f5a47d2994219aa2. Do not open its PR until Part1 PR2765 is released. Part1 staging takes priority immediately after the foreign holder finishes and releases.
+Task 01M7GB4125DFTECRYYCAHXAWTS, Part2. Branch sam/chat-ingest-bookkeeping-hxawts, stacked on Part1 (PR2765). No Part2 PR/deploy until Part1 release; rebase only own commits onto main after that release.
 
-## Baseline and scope
-Real-workerd production indexes on10k rows, real persistMessageBatch: mergingOFF14reads/10writes; mergingON20reads/8writes. Write attribution: raw message insert3 (OFF) or merged append1 (ON); chat_sessions counter/timestamp/index update4; prompting/recovering session_state timestamps2; workspace_activity1. Idle cleanup adds writes when scheduled. Re-measure before implementation. Local samples, not production forecasts.
+## Current implementation
 
-Goal: about1–2writes per steady merged batch, with durable receipt/text/idempotency state always written. Typed admin interval with safe default, no Worker variable and no production setting changes. OFFmode must remain correct and no more expensive. Preserve reporter sequence semantics from Part1.
+- Additive migration080: durable pending logical count, server ingest/activity/idle clocks, nullable indexed bookkeeping deadline, empty bounded summary-publication queue. No historical index build, destructive migration or per-message index.
+- Every accepted batch writes text/idempotency state and durable session receipt synchronously. Steady merged batch2 SQL writes; unmerged4. First dirty receipt also indexes its finite deadline.
+- Default interval30 seconds, admin range10–30 seconds, clamped to at most half the idle window. Longer intervals below are measured options only, requiring Raphaël approval.
+- Fold canonical count/tag/time in one session UPDATE with derived idle/session/workspace rows and summary enqueue in the same synchronous transaction. No extra session UPDATE to acknowledge D1 publication.
+- Direct session/count/activity reads overlay durable pending receipts. D1 summary/list metadata may wait for the fold and publication; exact lifecycle boundaries fold immediately. Browser streaming, message text and retry state remain synchronous.
+- End turn, idle, stop, sleep/wake, materialization, archive fence and explicit row seals fold pending state. Idle decisions consult server receipt clocks after restart and external liveness awaits; final D1 commit/local stop share the ingest mutex.
+- Summary queue persists claims before D1 await, isolates each queued publication from poisoned peers, fences acknowledgements by version/attempt and retains pending new receipts. Typed retry bounds:5 seconds,12 attempts,15 minute residence; exhausted dirty entries retain state and emit operator errors, never silently renew on ingest.
+- Global legacy compatibility seal examines bounded raw rowid pages including closed sessions; durable cursor/ceiling/expiring fence resumes across503/restart. Socket acceptance and fence release share ingest mutex. Typed lease60 seconds and max10k examined sessions; no per-batch extra SQL.
+- Serialized alarm scheduling skips unchanged native deadlines when an existing alarm is early enough; persisted section state already avoids unchanged writes.
 
-## Research/checklist
-- [x] Real-workerd per-statement baseline, both modes, including scheduled idle cleanup and real session-state paths.
-- [ ] Enumerate every counter/timestamp reader and writer, archive/import/restore and lifecycle transition; preserve persisted count/tag synchronization from Part1.
-- [ ] Design durable latest count/activity truth piggybacked onto existing receipt update, bounded indexed bookkeeping flush, safe across restart and concurrent awaits.
-- [ ] Typed admin setting, provable interval shorter than minimum idle window; always exact flush at end turn, stop, sleep/idle, alarm, merged-row seal.
-- [ ] Production-ingest tests for idle deadline extension/restart, sleep/wake, recency, UI count/unread/activity, search/comment anchors, retries/text, both merge modes.
-- [ ] Required local suites, migration safety and specialist reviews.
-- [ ] Only after Part1 release: own PR, CI/CodeRabbit, coordinated bounded staging ON/OFF and strict cleanup, merge, production deploy monitor, coordinator/ideas updates.
+## Local workerd measurement
 
-## Safety constraints
-No storage/archive protection weakening; no destructive migrations or new per-message index. No production provisioning/restarts/test sessions/settings changes or Cloudflare Worker API writes. VM cadence and merging defaultOFF unchanged. Secrets by names only through exec_with_secrets; never publish raw logs/content/secrets. No foreign staging takeover based on lease expiry. Follow-ups use SAM ideas.
+Production migrations/indexes,10k historical messages,120 real batches at2 second cadence, due alarms plus end-of-turn flush/publication. Baseline with scheduled idle cleanup: ON11 SQL writes+1 native setAlarm per batch; OFF13+1. Baseline artifact01M7GMAN974JNDZKJM5PQF4770 (/engineering/cost/ingest/ingest-bookkeeping-before.snap) retained unchanged.
 
-## Baseline measured before implementation (2026-11-15)
-Existing production-index10k/30k test rerun passed. Without scheduled cleanup: mergingOFF14reads/10SQLwrites; mergingON20reads/8SQLwrites. Dedicated10k fixture with scheduled cleanup, prompting ACP mirror and workspace activity, driven through actual stub.persistMessageBatch: OFF13SQLwrites plus1storage.setAlarm; ON11SQLwrites plus1storage.setAlarm. Per-statement raw writes: individual insert3/merged append1, chat_sessions4, idle_cleanup_schedule3, session_state2, workspace_activity1. Snapshot records statement templates/counters only, not bindings/content. All are local samples, not production forecasts.
+| Interval | OFF SQL writes/batch | ON SQL writes/batch | Native writes/batch OFF / ON | Total OFF / ON |
+| --- | ---: | ---: | ---: | ---: |
+|15s|6.375|4.375|0.250 /0.250|6.625 /4.625|
+|30s (approved default)|5.383|3.375|0.150 /0.150|5.533 /3.525|
+|60s (measurement only)|4.700|2.708|0.067 /0.067|4.767 /2.775|
+|120s (measurement only)|4.533|2.533|0.067 /0.067|4.600 /2.600|
 
-Architecture constraints: migration076's archive-generation trigger observes message_count, so true deferred counters are required. Candidate sparse deadline index on a nullable chat_sessions column is updated only on clean→dirty and flush SQL variants; the steady UPDATE must not mention that indexed column. Verify in real workerd before relying on it. Durable latest-ingest clock protects idle/workspace/probe decisions and final checks after await regardless of interval. Direct reads overlay pending count/activity; all writers and archive boundaries must fold pending count/tag atomically. Summary sync must retain a durable dirty marker until consumed or emit a fresh summary-visible stamp without falsely advancing activity; bounded dirty selection cannot silently lose an omitted session.
+30s reads/batch OFF19.783 /ON25.675. Steady SQL writes OFF4 /ON2 in all intervals. Exact short-window scheduler samples vary with tick boundaries; cost regression tests assert meaningful upper bounds instead of exact timing snapshots. These are local samples, not production forecasts. The1–2 goal is met only for steady batches, NOT amortized; no claim of completed performance target.
 
-Local review research: Cloudflare recommends bounded indexed dirty discovery; status+pending LIMIT scans unbounded rows. Test specialist requires real-ingest restart-before-old-deadline, concurrent ingest during suspended cleanup, all exact flush boundaries, pending→single/system, multi-session activity order, broadcast/retry/search/anchors, both modes and interval-amortized profiles. No runtime implementation yet. Staging remains untouched.
+30s ON120-batch attribution:120 append writes+128 receipt/index writes;7 alarm folds cost chat28/idle21/state14/workspace7; queue publication45 plus turn enqueue3; scheduler24 SQL+18 native writes. Exact turn end also chat4/idle6/state4/workspace1. Numeric diagnostic evidence /tmp/ingest-bookkeeping-optimized-costs.json; publish durable final artifact after final verification.
 
-## Sparse-index experiment
-Real workerd experiment passed: first clean→dirty update touching nullable indexed deadline costs2writes; steady update omitting deadline costs1write; bounded deadline query reads at most2rows and EXPLAIN uses the partial index. Production10k fixture. Baseline plus experiment2testsPASS (26.69s). No runtime implementation yet.
+## Verification and remaining gates
 
-Candidate summary protocol: finite due deadline→flush count/tag and side effects atomically→MAX_SAFE_INTEGER summary marker, then bounded D1 publication and strict compare-and-set acknowledgement. Marker cohort needs durable rowid cursor fairness and a durable retry alarm (existing in-memory debounce alone can strand work after eviction/failure). Cursor moves after successful publication even if acknowledgement loses to new ingest. All selected queue IDs must reach D1 independently of the existing delta/backfill cap. This protocol must be tested at >page size, D1 failure, eviction and concurrent ingest before adoption.
+- [x] Both-mode baseline/per-statement measurement through actual RPCs at10k rows.
+- [x] Immediate count/work clocks, older-writer sequence-tag recovery, receipt-after-await idle races for batch/browser, restart-before-old-idle deadline.
+- [x] Real alarm summary failure→eviction→retry, pending ingest during publication, poisoned page fairness/terminal bounds.
+- [x] Bounded10k all-open and mostly-closed legacy seal, resumed503/eviction fence, targeted seal/materialization.
+- [x] Actual sleep→wake→new ingest→eviction→stale alarm in both modes:2passed; no liveness fallback needed, task/workspace preserved.
+- [ ] Finish recency/attention regression, run existing merging search/comment-anchor/idempotency regressions on final build.
+- [ ] Full quality suite, final specialist/completion/doc review, migration safety (latest4 filesPASS), final before/after artifact and honest amortized target assessment.
+- [ ] Part1 release, own rebase/PR, ready CI/CodeRabbit and bounded coordinated staging ON/OFF with strict cleanup; merge and read-only production monitor.
 
-## Work in progress checkpoint
-The next commit adds an INCOMPLETE prototype only: additive nullable deadline/pending metadata migration, synchronous fold helper, and batch receipt updates that defer derived metadata. Typecheck passes. It is not ready to run, deploy or open a PR: lifecycle guards/flushes, read overlays, summary acknowledgement/retry/fairness, alarm wiring, typed admin settings and acceptance tests remain required. Baseline assertions will intentionally change when the prototype is completed. Prioritize Part1 staging2 after coordinator grant event282c7227; do not release Part2 from this checkpoint.
+## Constraints
 
-## Pending integration map from local reviews
-Flush synchronously at central shared boundaries: sessions.terminateSession (stop/fail/internal cleanup), sessions.sleepSession/wakeSession, session-state.recordTurnEndFromActivities plus accepted idle upsert (ACP→chat resolution), index.markAgentCompleted, materialization.materializeSession, archiveSourcePrepareIntent inside first transcript lock BEFORE begin fence/hash, sealMessageStream and implicit constructor/role/cap/turn seals. Alarm bounded fold runs before workspace/idle maintenance. Do not hold transcript mutex through D1 summary/alarm I/O.
-
-Read surfaces requiring effective durable overlays: messages batch and single-message logical limits/stream counts; sessions identity and termination response; session-reads get/list/by-task; session-state-read activity/work clocks; summary delta/backfill/cursor candidates; workspace-idle checks; stale-probe selector and applyProbeOutcome after its await; idle terminalization immediately before D1 transition and again before local stop. Timer safety must consult receipt time after restart and external awaits; per-batch D1 lookups are forbidden.
-
-Summary design remains pending implementation: index sentinel equality+rowid cursor, bounded ordinary delta/backfill PLUS distinct queued page, snapshot version/count/activity CAS after D1 batch+coverage success, cursor advances even CAS loses. A sentinel must arm its own durable summary retry using existing summary cadence; do_meta scheduler carries due times across eviction. No new per-batch queue writes. Tests include >page queue fairness, D1 failures, eviction with only sentinel work and concurrent ingest while publication is suspended.
-
-Baseline artifact preserved in project library01M7GMAN974JNDZKJM5PQF4770 at /engineering/cost/ingest/ingest-bookkeeping-before.snap (copied from committed baseline; templates/counters only). Part1 current245ed7427 is all local/CI/CodeRabbit green and deploying to staging2 in43767471056; Part2 remains paused/incomplete, no PR.
-
-TDD checkpoint: added actual-RPC ON/OFF tests for immediate get/list logical count, real recordSessionTurnEnd canonical flush and browser persistMessage folding pending chunks. Built this worktree's ProjectData dist before workerd run. Prototype currently RED as expected:4new behavioral failures plus old baseline snapshot failure; sparse-index experiment remainsPASS (6tests total,5failed/1passed). This confirms missing overlays/lifecycle integration is caught, not ready for PR/deploy. Keep committed pre-change baseline artifact; do not accept the new performance snapshot until correctness gates pass.
-
-Core integration checkpoint: get/list/by-task reads overlay pending counts; browser and system single writes fold pending; accepted idle reports, shared turn-end guard, terminate/sleep/wake boundaries fold synchronously. Older-build count/tag mismatch is preserved as unknown through flush rather than falsely certifying a stale sequence watermark (new ON/OFF regression reserves10003 in an old writer and proves next browser10004). Fixture establishes prompting through real reportActivity RPC with a real turn-start timestamp. Workerd8tests:7behavior/index testsPASS, only retained BEFORE performance snapshotFAIL as expected; no snapshot update until remaining safety gates implemented. Alarm/restart/destructive-await guards, state work-clock reads, summary queue/fairness/retry, typed admin config, archive/materialization/seal integration still missing. Not deployable; no PR. Part1 staging2 rolloutcompleted and workflowbuildingCLI at22:26Z; no liveauth/allocationyet.
-
-## 23:10 durable integration checkpoint (incomplete)
-Pushed55df04b14 adds typed admin interval/flush-batch settings via existing cached operations port; bounded bookkeeping alarm and separate durable summary-retry section; fair sentinel queue page is unioned explicitly into publication independently of ordinary delta/backfill cap. Strict sampled count/ingest/update/sequence CAS acknowledgement occurs only after all D1 batches+coverage success; rowid cursor advances after successful publication even when CAS loses. c45666199 guards full-run alarm sections against empty queues (otherwise full alarm eagerly synced D1 and raced existing index tests). Summary-index13testsPASS after this fix; API typecheckPASS. New real-workerd eviction and repeated-ingest-over-entire-idle-window tests ON/OFFPASS; total11behavior/indexPASS plus intentionally unchanged BEFORE cost snapshotFAIL (12tests).
-
-Pushed3f3df1725 adds durable server-clock overlays for session work state, workspace idle CTE, probe selector/scheduler and apply-after-await version check; idle cleanup folds pending receipts before acting and terminalization checks server ingest time before authority reads and after liveness await. Agent completion and archive begin-fence boundaries fold pending counts. ProjectData buildPASS. First broader impacted run21PASS/3summary failures; all3 traced to unguarded empty-queue full alarm and fixed; focused summary rerun13PASS. Need rerun only affected other suites if further edits affect them.
-
-Still NOT ready: final idle destructive D1 commit needs explicit mutual-exclusion/receipt fence across its await (current recheck before D1 batch alone is insufficient); guard again before local stop. Materialization and targeted/global explicit seal flush protocol remains; avoid unbounded new per-session loops for global seal. Summary retry needs bounded permanent-failure/quarantine/residence handling per47 and tests for failure/eviction/concurrent ingest/>page fairness. Complete timer/recency/unread/search/comment/retry/seal tests, interval-amortized cost measurement (default interval still prototype15s), migrationsafety/fullquality/reviews. Do not update BEFORE snapshot until all correctness gates pass. No Part2 PR/deploy until Part1 release.
-
-### 23:38 UTC local correctness checkpoint
-- Shared ingest mutex now protects final idle-task D1 commit and synchronous local stop; external liveness probes stay outside. Workspace cleanup prepares all evidence first, then one mutex covers every task commit and local stop. Successfully committed task statuses synchronize even if later workspace cleanup fails.
-- Browser/single and system writers stamp the durable server receipt clock in their existing session update; no additional row write. Working-state reads overlay both the server work clock and VM activity clock.
-- Real workerd: 22 tests passed across bookkeeping/summary/sleep files (baseline snapshot deliberately skipped); additional ingest-during-liveness tests now cover batch/browser and merging ON/OFF, 4 passed; immediate activity-clock/count overlay tests2passed. SQLite lifecycle suite36passed, including task-status sync after workspace cleanup failure.
-- Remaining gates unchanged: permanent-failure queue bounds, explicit/global seal and materialization protocol, lifecycle/search/comment/retry coverage, measured amortized costs, full quality/reviews and sequential release. No Part2 PR/deployment.
+No production provisioning/restarts/test sessions/settings/default changes; no Cloudflare Worker API writes; no VM cadence changes; no archive/storage protection weakening; no new Worker variable. Secrets by name only through exec_with_secrets; no raw logs/content/values in durable artifacts. SAM ideas for follow-ups. Preserve unrelated root .codex/config.toml edit. Part1 takes priority when staging2 L5 holder releases; final diagnostic grant is one Instant/no VM35minutes/USD0.50, then release directly to security2755 task01M7FPX2RR5JSJ1CYG6QPXY9VG.

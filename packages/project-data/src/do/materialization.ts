@@ -15,6 +15,7 @@
 import { log } from '@simple-agent-manager/worker-core';
 import { parsePositiveInt } from '@simple-agent-manager/worker-core';
 
+import { flushMessageBookkeeping } from './message-bookkeeping';
 import {
   type MaterializationState,
   parseCount,
@@ -480,10 +481,7 @@ function writePage(
 
   if (head && GROUPABLE_ROLES.has(head.role)) {
     if (trailing === undefined) trailing = readTrailingGroup(sql, sessionId);
-    if (
-      trailing?.role === head.role &&
-      trailing.content.length < input.config.maxGroupChars
-    ) {
+    if (trailing?.role === head.role && trailing.content.length < input.config.maxGroupChars) {
       trailing = extendTrailingGroup(sql, trailing, head);
       index = 1;
       // Checkpoint immediately. Unlike `insertGroup`, extension is a plain
@@ -517,6 +515,7 @@ export function materializeSession(
   sessionId: string,
   config: MaterializationPassConfig = DEFAULT_PASS_CONFIG
 ): void {
+  flushMessageBookkeeping(sql, sessionId);
   const state = readMaterializationState(sql, sessionId);
   if (!state) return;
   if (state.searchIndexState === SEARCH_INDEX_STATE_PRUNED) return;
@@ -526,8 +525,7 @@ export function materializeSession(
   let watermark = initialWatermark;
   // Read once per pass, then carried forward: a same-role run spanning several
   // pages would otherwise re-read and rewrite its whole (growing) content per page.
-  let trailing: TrailingGroup | null | undefined =
-    initialWatermark === null ? null : undefined;
+  let trailing: TrailingGroup | null | undefined = initialWatermark === null ? null : undefined;
   let processed = 0;
   let drained = false;
 

@@ -22,11 +22,15 @@ import { DEFAULT_SESSION_INDEX_MAX_ROWS } from '@simple-agent-manager/shared';
 import { createModuleLogger } from '@simple-agent-manager/worker-core';
 
 import { getAttentionSummary } from './attention';
+import { DEFAULT_MESSAGE_BOOKKEEPING } from './message-bookkeeping';
 import {
-  BOOKKEEPING_AWAITING_SUMMARY,
-  BOOKKEEPING_SUMMARY_CURSOR_KEY,
-  DEFAULT_MESSAGE_BOOKKEEPING,
-} from './message-bookkeeping';
+  acknowledgeBookkeepingSummary,
+  type BookkeepingSummaryClaim,
+  claimBookkeepingSummaries,
+  rebasePublishedBookkeepingSummary,
+} from './message-bookkeeping-summary-queue';
+import { DEFAULT_MESSAGE_MERGE_CONFIG, type MessageMergeConfig } from './message-stream-ingest';
+import { projectDataPorts } from './ports';
 import type { Env } from './types';
 
 const log = createModuleLogger('session_summary_sync');
@@ -74,8 +78,32 @@ export async function syncSessionSummariesToD1(
   sql: SqlStorage,
   env: Env,
   projectId: string,
-  bookkeepingLimit: number = DEFAULT_MESSAGE_BOOKKEEPING.flushBatchSize
+  bookkeepingLimit: number = DEFAULT_MESSAGE_BOOKKEEPING.flushBatchSize,
+  bookkeepingConfig: Partial<MessageMergeConfig> = {}
 ): Promise<void> {
+  // Claim before ANY external I/O, so a failed/missing D1 project cannot monopolize a page.
+  const { claimed, terminal } = claimBookkeepingSummaries(
+    sql,
+    { ...DEFAULT_MESSAGE_MERGE_CONFIG, ...bookkeepingConfig },
+    bookkeepingLimit,
+    Date.now()
+  );
+  await Promise.all(
+    terminal.map((entry) =>
+      projectDataPorts().observability.persistPlatformError(env, {
+        source: 'api',
+        level: 'error',
+        message: 'Chat summary publication exhausted its retry budget',
+        context: {
+          projectId,
+          sessionId: entry.sessionId,
+          reason: entry.reason,
+          attempts: entry.attempts,
+        },
+      })
+    )
+  );
+
   // Look up the project owner from D1
   const projectRow = await env.DATABASE.prepare('SELECT user_id FROM projects WHERE id = ?')
     .bind(projectId)
@@ -129,28 +157,30 @@ export async function syncSessionSummariesToD1(
         .toArray()
     : readBackfillPage(sql, coverage, maxRows);
 
-  // Keep this independently bounded queue page separate from the ordinary backfill cursor.
-  // A recent delta page must never discard old dirty rows and then acknowledge them.
-  const cursor = Number(
-    sql.exec('SELECT value FROM do_meta WHERE key = ?', BOOKKEEPING_SUMMARY_CURSOR_KEY).toArray()[0]
-      ?.value ?? 0
+  // Publication candidates are isolated from ordinary backfill/delta batches. A poison
+  // row can consume only its own persisted retry budget, never the page behind it.
+  const queued: Array<Record<string, unknown> & { claim: BookkeepingSummaryClaim }> =
+    claimed.flatMap((claim) => {
+      const row = sql
+        .exec(
+          `SELECT message_ingested_at, last_message_sequence, ${SUMMARY_COLUMNS} FROM chat_sessions
+       WHERE id = ?`,
+          claim.sessionId
+        )
+        .toArray()[0];
+      return row ? [{ ...row, claim }] : [];
+    });
+  const ordinary = rows.filter(
+    (row) =>
+      !sql
+        .exec(
+          'SELECT session_id FROM message_bookkeeping_summary_queue WHERE session_id = ?',
+          row.id
+        )
+        .toArray()[0]
   );
-  const readQueue = (after: number) =>
-    sql
-      .exec(
-        `SELECT rowid AS bookkeeping_rowid, message_ingested_at, last_message_sequence, ${SUMMARY_COLUMNS}
-     FROM chat_sessions WHERE message_bookkeeping_due_at = ? AND rowid > ?
-     AND pending_message_count = 0 ORDER BY rowid LIMIT ?`,
-        BOOKKEEPING_AWAITING_SUMMARY,
-        after,
-        bookkeepingLimit
-      )
-      .toArray();
-  let queued = readQueue(cursor);
-  if (queued.length === 0 && cursor > 0) queued = readQueue(0);
-  const published = new Map(rows.map((row) => [row.id, row]));
-  for (const row of queued) published.set(row.id, row);
-  const statements = [...published.values()].map((row) => {
+  const published: Record<string, unknown>[] = [...ordinary, ...queued];
+  const statements = published.map((row) => {
     // Resolved-marker semantics must match getAttentionSummary() exactly — it
     // returns the newest UNRESOLVED marker regardless of expiry, because expiry
     // is processed separately by the DO alarm. Re-deriving that here (e.g.
@@ -210,21 +240,42 @@ export async function syncSessionSummariesToD1(
     );
   });
 
-  // Chunks touch disjoint row ids and each batch is independently idempotent
-  // (ON CONFLICT DO UPDATE), so they can go out together. Finishing sooner also
-  // narrows the window in which a concurrent sync could interleave.
   const chunks: Promise<unknown>[] = [];
-  for (let i = 0; i < statements.length; i += D1_BATCH_SIZE) {
-    chunks.push(env.DATABASE.batch(statements.slice(i, i + D1_BATCH_SIZE)));
-  }
-  await Promise.all(chunks);
-
+  for (let i = 0; i < ordinary.length; i += D1_BATCH_SIZE)
+    chunks.push(
+      env.DATABASE.batch(statements.slice(i, Math.min(i + D1_BATCH_SIZE, ordinary.length)))
+    );
+  const [ordinaryResults, queuedResults] = await Promise.all([
+    Promise.allSettled(chunks),
+    Promise.allSettled(statements.slice(ordinary.length).map((statement) => statement.run())),
+  ]);
+  const successfulQueued = queued.filter(
+    (_row, index) => queuedResults[index]?.status === 'fulfilled'
+  );
+  const queueCount = Number(
+    sql
+      .exec(
+        'SELECT COUNT(*) AS n FROM (SELECT session_id FROM message_bookkeeping_summary_queue LIMIT ?)',
+        successfulQueued.length + 1
+      )
+      .toArray()[0]?.n ?? 0
+  );
+  const publicationComplete =
+    ordinaryResults.every((result) => result.status === 'fulfilled') &&
+    successfulQueued.length === queued.length &&
+    queueCount === successfulQueued.length;
   // Coverage is written LAST and only after every row landed, so a batch that
   // throws part-way leaves the previous (older but self-consistent) coverage in
   // place. The read path then keeps using the older row until it ages out, or
   // falls back to the DO — it never reads a half-written index as complete.
-  const lastBackfillRow = isDelta ? null : rows[rows.length - 1];
-  const backfillComplete = isDelta || rows.length < maxRows;
+  const lastBackfillRow = isDelta
+    ? null
+    : publicationComplete
+      ? rows[rows.length - 1]
+      : coverage
+        ? { updated_at: coverage.backfill_cursor_updated_at, id: coverage.backfill_cursor_id }
+        : null;
+  const backfillComplete = publicationComplete && (isDelta || rows.length < maxRows);
   const coverageSyncedAt = isDelta ? syncedAt : backfillComplete ? backfillStartedAt : syncedAt;
   await writeCoverage(env, projectId, {
     syncedAt: coverageSyncedAt,
@@ -237,28 +288,20 @@ export async function syncSessionSummariesToD1(
     backfillCompletedAt: !isDelta && backfillComplete ? syncedAt : null,
   });
 
-  // D1 publication and coverage have both succeeded. A request can ingest during either
-  // await; acknowledge only the exact folded snapshot and leave renewed receipts queued.
-  for (const row of queued) {
-    sql.exec(
-      `UPDATE chat_sessions SET message_bookkeeping_due_at = NULL
-      WHERE id = ? AND message_bookkeeping_due_at = ? AND pending_message_count = 0
-        AND message_count = ? AND message_ingested_at IS ? AND updated_at = ?
-        AND last_message_sequence IS ?`,
-      row.id,
-      BOOKKEEPING_AWAITING_SUMMARY,
-      row.message_count,
-      row.message_ingested_at,
-      row.updated_at,
-      row.last_message_sequence
-    );
+  // The queue version advances only when a fold commits, in the same synchronous ingest
+  // transaction. A newer fold retains/rebases its queue entry. A newer unfurled receipt already
+  // owns a finite deadline and pending count, and atomically enqueues its next episode at fold.
+  // No second chat_sessions bookkeeping write is needed after D1 publication.
+  for (const row of successfulQueued) {
+    if (!acknowledgeBookkeepingSummary(sql, row.claim))
+      rebasePublishedBookkeepingSummary(sql, row.claim, Date.now());
   }
-  if (queued.length > 0)
-    sql.exec(
-      'INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      BOOKKEEPING_SUMMARY_CURSOR_KEY,
-      String(queued[queued.length - 1]!.bookkeeping_rowid)
-    );
+
+  if (
+    ordinaryResults.some((result) => result.status === 'rejected') ||
+    queuedResults.some((result) => result.status === 'rejected')
+  )
+    throw new Error('Chat summary publication incomplete; durable retries retained');
 
   log.info('session_summaries_synced', {
     projectId,

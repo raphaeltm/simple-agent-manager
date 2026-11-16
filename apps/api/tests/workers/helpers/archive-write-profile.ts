@@ -5,7 +5,13 @@ import { runInDurableObject } from 'cloudflare:test';
 
 import type { ProjectDataTestDouble } from '../support/expected-error-doubles';
 
-export type WriteSample = { owner: string; phase: string; statement: string; rowsWritten: number };
+export type WriteSample = {
+  owner: string;
+  phase: string;
+  statement: string;
+  rowsWritten: number;
+  rowsRead?: number;
+};
 const phase = new AsyncLocalStorage<string>();
 const normalize = (query: string) => query.replace(/\s+/g, ' ').trim();
 
@@ -13,9 +19,14 @@ const normalize = (query: string) => query.replace(/\s+/g, ' ').trim();
 export async function profileObject(
   stub: DurableObjectStub<ProjectDataTestDouble>,
   owner: string,
-  samples: WriteSample[]
+  samples: WriteSample[],
+  includeReads = false
 ): Promise<() => void> {
-  const pending: Array<{ cursor: { rowsWritten: number }; phase: string; statement: string }> = [];
+  const pending: Array<{
+    cursor: { rowsWritten: number; rowsRead: number };
+    phase: string;
+    statement: string;
+  }> = [];
   await runInDurableObject(stub, (instance) => {
     const holder = instance as unknown as {
       sql: SqlStorage;
@@ -91,6 +102,7 @@ export async function profileObject(
         phase: item.phase,
         statement: item.statement,
         rowsWritten: item.cursor.rowsWritten,
+        ...(includeReads ? { rowsRead: item.cursor.rowsRead } : {}),
       });
     pending.length = 0;
   };

@@ -25,6 +25,11 @@ export type AdminSettingName =
   | 'chat.messageMergeRecentIds'
   | 'chat.messageBookkeepingIntervalMs'
   | 'chat.messageBookkeepingFlushBatchSize'
+  | 'chat.messageBookkeepingSealLeaseMs'
+  | 'chat.messageBookkeepingSealMaxSessions'
+  | 'chat.messageBookkeepingSummaryRetryMs'
+  | 'chat.messageBookkeepingSummaryMaxAttempts'
+  | 'chat.messageBookkeepingSummaryMaxResidenceMs'
   | 'deployments.buildContextCollectionMode'
   | 'deployments.buildContextStartTimeoutMs'
   | `deployments.buildContext${'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
