@@ -67,6 +67,22 @@ function setUserStatus(status: string | null): void {
   sqlite.prepare(`UPDATE users SET status = ? WHERE id = 'user-1'`).run(status);
 }
 
+function setUserRole(role: string): void {
+  sqlite.prepare(`UPDATE users SET role = ? WHERE id = 'user-1'`).run(role);
+}
+
+/** Write the runtime `signup.requireApproval` row the admin toggle writes, or delete it. */
+function setSignupApprovalSetting(value: 'true' | 'false' | null): void {
+  sqlite.prepare(`DELETE FROM platform_settings WHERE key = 'signup.requireApproval'`).run();
+  if (value !== null) {
+    sqlite
+      .prepare(
+        `INSERT INTO platform_settings (key, value, updated_at) VALUES ('signup.requireApproval', ?, '2026-11-16T00:00:00Z')`
+      )
+      .run(value);
+  }
+}
+
 function setWorkspaceStatus(status: string): void {
   sqlite.prepare(`UPDATE workspaces SET status = ? WHERE id = 'ws-1'`).run(status);
 }
@@ -206,10 +222,57 @@ describe('validateActiveWorkspaceMcpToken', () => {
   });
 
   it.each([
-    ['pending (only gated by REST while signup approval is required)', 'pending'],
+    ['pending while signup approval is not required', 'pending'],
     ['NULL (the D1 column default is active)', null],
   ])('accepts the token when the account status is %s', async (_label, status) => {
     setUserStatus(status);
+    seed({ status: 'running' });
+
+    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+  });
+
+  it('rejects, but keeps, a pending owner token once approval is turned on, and accepts it again after approval', async () => {
+    setUserStatus('pending');
+    seed({ status: 'running' });
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).not.toBeNull();
+
+    setSignupApprovalSetting('true');
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await tokenStillStored()).toBe(true);
+
+    setUserStatus('active');
+    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+  });
+
+  it('accepts a pending owner token again when approval is turned back off', async () => {
+    setUserStatus('pending');
+    setSignupApprovalSetting('true');
+    seed({ status: 'running' });
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+
+    setSignupApprovalSetting('false');
+    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+  });
+
+  it('falls back to REQUIRE_APPROVAL when no runtime setting row exists, and the row overrides it', async () => {
+    env = { ...env, REQUIRE_APPROVAL: 'true' } as Env;
+    setUserStatus('pending');
+    seed({ status: 'running' });
+    expect(await validateActiveWorkspaceMcpToken(env, TOKEN)).toBeNull();
+    expect(await tokenStillStored()).toBe(true);
+
+    setSignupApprovalSetting('false');
+    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+  });
+
+  it.each([
+    ['an active user', 'active', 'user'],
+    ['a pending platform admin', 'pending', 'admin'],
+    ['a pending superadmin', 'pending', 'superadmin'],
+  ])('accepts %s while approval is required (same exemptions as REST)', async (_label, status, role) => {
+    setUserStatus(status);
+    setUserRole(role);
+    setSignupApprovalSetting('true');
     seed({ status: 'running' });
 
     await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
@@ -367,6 +430,19 @@ describe('MCP entry points enforce current token lifecycle authority', () => {
 
     setUserStatus('suspended');
     expect((await postMcp('/mcp', toolsList)).status).toBe(401);
+
+    setUserStatus('active');
+    expect((await postMcp('/mcp', toolsList)).status).toBe(200);
+  });
+
+  it('401s for a pending owner once signup approval is turned on, then serves again after approval', async () => {
+    setUserStatus('pending');
+    seed({ status: 'running' });
+    expect((await postMcp('/mcp', toolsList)).status).toBe(200);
+
+    setSignupApprovalSetting('true');
+    expect((await postMcp('/mcp', toolsList)).status).toBe(401);
+    expect(await tokenStillStored()).toBe(true);
 
     setUserStatus('active');
     expect((await postMcp('/mcp', toolsList)).status).toBe(200);

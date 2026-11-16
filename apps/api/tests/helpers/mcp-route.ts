@@ -112,7 +112,14 @@ export function seedActiveMcpWorkspace(
   );
   createSchemaTables(
     sqlite,
-    [schema.users, schema.projectMembers, schema.nodes, schema.workspaces].filter(
+    [
+      schema.users,
+      schema.projectMembers,
+      schema.nodes,
+      schema.workspaces,
+      // The lifecycle read joins the current `signup.requireApproval` row.
+      schema.platformSettings,
+    ].filter(
       (table) => !existing.has(getTableConfig(table).name)
     )
   );

@@ -34,9 +34,14 @@ callback token expires.
 
 ## Acceptance Criteria
 
-- [ ] Offboarding a member (final status `removed`) stops, or puts into a state that refuses every
-      callback, each non-deleted workspace in that project whose `user_id` is the removed member,
-      whatever credential source it runs on.
+- [ ] Offboarding a member (final status `removed`) stops each non-deleted workspace in that project
+      whose `user_id` is the removed member, whatever credential source it runs on. Refusing
+      callbacks alone does not meet this criterion, because values already inside a running
+      workspace stay usable.
+- [ ] List every credential already copied into such a workspace: the git token, runtime env vars
+      and files, and the MCP and callback tokens. For each one, state whether stopping the workspace
+      ends its usefulness. Revoke or rotate any that stays usable after the stop, such as a
+      long-lived project secret the member's agent could have read.
 - [ ] The offboarding preview lists those workspaces so the admin sees what will be stopped before
       applying.
 - [ ] Workspace callback authentication (`assertWorkspaceAcceptsCallback`, the AI proxy auth, git

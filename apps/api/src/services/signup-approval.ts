@@ -120,18 +120,35 @@ export async function assertSessionUserApproved(
   assertUserAllowedBySignupApproval(await isSignupApprovalRequired(env), user);
 }
 
+/**
+ * Resolve a stored `signup.requireApproval` value exactly as `getSignupApprovalConfig` does:
+ * a missing or unparseable row falls back to `REQUIRE_APPROVAL`. Lets a caller that already
+ * joined the setting row into its own query apply the gate without a second D1 read.
+ */
+export function signupApprovalRequiredFromStoredValue(
+  env: Env,
+  value: string | null | undefined
+): boolean {
+  return parseStoredBoolean(value) ?? envRequiresApproval(env);
+}
+
+/** True when signup approval denies this account (REST answers `APPROVAL_REQUIRED`). */
+export function isBlockedBySignupApproval(
+  requireApproval: boolean,
+  user: { role?: string | null; status?: string | null }
+): boolean {
+  if (!requireApproval) return false;
+  const isAdmin = user.role === 'superadmin' || user.role === 'admin';
+  return user.status !== 'active' && !isAdmin;
+}
+
 export function assertUserAllowedBySignupApproval(
   requireApproval: boolean,
   user: { role?: string | null; status?: string | null }
 ): void {
   assertUserNotSuspended(user);
 
-  if (!requireApproval) {
-    return;
-  }
-
-  const isAdmin = user.role === 'superadmin' || user.role === 'admin';
-  if (user.status !== 'active' && !isAdmin) {
+  if (isBlockedBySignupApproval(requireApproval, user)) {
     throw new AppError(403, 'APPROVAL_REQUIRED', 'Your account is pending admin approval');
   }
 }

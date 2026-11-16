@@ -31,16 +31,20 @@
  * | `users` row missing (account deleted)                 | revoke  | `user_missing`             |
  * | user `suspended` (an admin can unsuspend)             | reject  | `user_suspended`           |
  * | user status not `active`/`pending` (unrecognised)     | reject  | `user_status_unrecognized` |
+ * | user `pending` while signup approval is required      | reject  | `user_pending_approval`    |
  * | no `project_members` row for (project, user)          | revoke  | `membership_missing`       |
  * | membership `removed` (offboarded)                     | revoke  | `membership_removed`       |
  * | membership `invited` / `suspended` / other non-active | reject  | `membership_inactive`      |
  * | workspace stopping/stopped/sleeping/error/...         | reject  | `workspace_inactive`       |
  * | node missing, unassigned or ending                    | reject  | `node_inactive`            |
  *
- * User `pending` is accepted here: REST denies it only while signup approval is required
- * (`assertUserAllowedBySignupApproval`), and a pending account cannot start a workspace in
- * that mode. A NULL `users.status` (the column is `NOT NULL DEFAULT 'active'` in D1) is read
- * as `active`, the same coercion `resolveSessionStatus` applies to a session. The member's
+ * A `pending` user is gated exactly as REST gates it (`isBlockedBySignupApproval`): denied while
+ * signup approval is required unless their platform role is admin or superadmin, and accepted
+ * otherwise. The current `signup.requireApproval` row is joined into the same read, never
+ * cached, so turning approval on stops a pending owner's already-running agent on its next
+ * call, and approving the account restores it (the token is kept). A NULL `users.status` (the
+ * column is `NOT NULL DEFAULT 'active'` in D1) is read as `active`, the same coercion
+ * `resolveSessionStatus` applies to a session. The member's
  * ROLE is not checked here; tools that need a specific capability re-check it themselves
  * (`routes/mcp/orchestration-authority.ts`, `routes/project-deployment.ts`).
  *
@@ -52,6 +56,11 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { type McpTokenData, readMcpToken, revokeMcpToken } from './mcp-token';
 import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
+import {
+  isBlockedBySignupApproval,
+  SIGNUP_APPROVAL_SETTING_KEY,
+  signupApprovalRequiredFromStoredValue,
+} from './signup-approval';
 import { WORKSPACE_CALLBACK_ACTIVE_STATUSES } from './workspace-callback-identity';
 
 interface McpTokenWorkspaceRow {
@@ -60,6 +69,9 @@ interface McpTokenWorkspaceRow {
   /** `users.id` from the LEFT JOIN: NULL exactly when the owner's account row is gone. */
   joinedUserId: string | null;
   userStatus: string | null;
+  userRole: string | null;
+  /** Stored `signup.requireApproval` value, NULL when the row is absent (env default applies). */
+  signupApprovalSetting: string | null;
   /** `project_members.user_id` from the LEFT JOIN: NULL exactly when no membership row exists. */
   joinedMemberUserId: string | null;
   membershipStatus: string | null;
@@ -75,13 +87,17 @@ type McpTokenWorkspaceVerdict = { reason: string; revoke: boolean } | null;
 /** Account states that may act through an MCP token (see the module comment for `pending`). */
 const MCP_ACCEPTED_USER_STATUSES: ReadonlySet<string> = new Set(['active', 'pending']);
 
-function actorVerdict(row: McpTokenWorkspaceRow): McpTokenWorkspaceVerdict {
+function actorVerdict(row: McpTokenWorkspaceRow, requireApproval: boolean): McpTokenWorkspaceVerdict {
   if (row.joinedUserId === null) return { reason: 'user_missing', revoke: true };
   const userStatus = row.userStatus ?? 'active';
   // Recoverable: an admin can unsuspend, and the agent's token must work again when they do.
   if (userStatus === 'suspended') return { reason: 'user_suspended', revoke: false };
   if (!MCP_ACCEPTED_USER_STATUSES.has(userStatus)) {
     return { reason: 'user_status_unrecognized', revoke: false };
+  }
+  // Recoverable: approving the account (or turning approval off) makes the token work again.
+  if (isBlockedBySignupApproval(requireApproval, { role: row.userRole, status: userStatus })) {
+    return { reason: 'user_pending_approval', revoke: false };
   }
   if (row.joinedMemberUserId === null) return { reason: 'membership_missing', revoke: true };
   if (row.membershipStatus === 'removed') return { reason: 'membership_removed', revoke: true };
@@ -91,6 +107,7 @@ function actorVerdict(row: McpTokenWorkspaceRow): McpTokenWorkspaceVerdict {
 }
 
 function workspaceVerdict(
+  env: Env,
   data: McpTokenData,
   row: McpTokenWorkspaceRow | null
 ): McpTokenWorkspaceVerdict {
@@ -103,7 +120,10 @@ function workspaceVerdict(
   if ((data.callbackGeneration ?? null) !== row.callbackGeneration) {
     return { reason: 'generation_retired', revoke: true };
   }
-  const actor = actorVerdict(row);
+  const actor = actorVerdict(
+    row,
+    signupApprovalRequiredFromStoredValue(env, row.signupApprovalSetting)
+  );
   if (actor) return actor;
   if (!WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(row.status)) {
     return { reason: 'workspace_inactive', revoke: false };
@@ -142,6 +162,8 @@ export async function validateActiveWorkspaceMcpToken(
                 w.project_id AS projectId,
                 u.id AS joinedUserId,
                 u.status AS userStatus,
+                u.role AS userRole,
+                ps.value AS signupApprovalSetting,
                 pm.user_id AS joinedMemberUserId,
                 pm.status AS membershipStatus,
                 w.status AS status,
@@ -154,14 +176,15 @@ export async function validateActiveWorkspaceMcpToken(
            LEFT JOIN project_members pm
              ON pm.project_id = w.project_id
             AND pm.user_id = w.user_id
+           LEFT JOIN platform_settings ps ON ps.key = ?
           WHERE w.id = ?
           LIMIT 1`
       )
-        .bind(data.workspaceId)
+        .bind(SIGNUP_APPROVAL_SETTING_KEY, data.workspaceId)
         .first<McpTokenWorkspaceRow>()
     : null;
 
-  const verdict = workspaceVerdict(data, row);
+  const verdict = workspaceVerdict(env, data, row);
   // Only an accepted token slides its idle TTL: a token rejected while its user is
   // suspended or its workspace is stopped must still expire on the normal idle schedule.
   if (!verdict) return read.refreshIfDue();
