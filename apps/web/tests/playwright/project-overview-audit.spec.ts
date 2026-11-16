@@ -985,3 +985,106 @@ test.describe('Project Overview as the landing page, with Needs you (slice F2)',
     await expect(page.getByTestId('overview-needs-you-list')).toBeVisible();
   });
 });
+
+/**
+ * Every clipping box between a pane and the void: the pane must sit inside it with room for its
+ * shadow on both sides and below. Measured in page coordinates (rule 17), at the top of every
+ * scroller and again scrolled to the end, where the last pane's bottom shadow matters.
+ */
+async function expectPaneShadowsUnclipped(page: Page, room: number) {
+  const cuts = await page.evaluate((min) => {
+    const root = document.querySelector('[data-testid="project-overview"]');
+    const found: string[] = [];
+    for (const pane of root?.querySelectorAll<HTMLElement>('section.sam-glass') ?? []) {
+      const box = pane.getBoundingClientRect();
+      for (
+        let node = pane.parentElement;
+        node && node !== document.body;
+        node = node.parentElement
+      ) {
+        const style = getComputedStyle(node);
+        if (style.display === 'contents') continue;
+        if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
+        const clip = node.getBoundingClientRect();
+        // Edges a pane is scrolled past are not checked: only a pane in full view must clear them.
+        const inView = box.top >= clip.top && box.bottom <= clip.bottom;
+        const label = `${pane.getAttribute('aria-label')} in ${node.dataset.testid ?? node.tagName}`;
+        // The screen edge is the last clip: a pane may meet it like any other page edge.
+        if (node === document.documentElement) continue;
+        if (box.left - clip.left < min) found.push(`${label}: left ${box.left - clip.left}`);
+        if (clip.right - box.right < min) found.push(`${label}: right ${clip.right - box.right}`);
+        if (inView && clip.bottom - box.bottom < min)
+          found.push(`${label}: bottom ${clip.bottom - box.bottom}`);
+      }
+    }
+    return found;
+  }, room);
+  expect(cuts, 'a scroller cuts a pane shadow off at its edge').toEqual([]);
+}
+
+async function scrollOverviewToEnd(page: Page) {
+  for (const id of ['overview-scroll', 'overview-main', 'overview-rail']) {
+    await page.getByTestId(id).evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }
+  await page.waitForTimeout(200);
+}
+
+test.describe('Project Overview layering and spacing', () => {
+  test('pane shadows are never cut off by a scroller', async ({ page }, testInfo) => {
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
+    await page.goto(BASE);
+    await expect(page.getByRole('region', { name: 'Recently' })).toBeAttached();
+    await expect(page.getByRole('region', { name: 'Needs you' })).toBeVisible();
+    // Room for the shadow: the phone frame is 10px, the desktop gutter 14px.
+    const room = isPhone(testInfo) ? 10 : 14;
+    await expectPaneShadowsUnclipped(page, room);
+    await scrollOverviewToEnd(page);
+    await expectPaneShadowsUnclipped(page, room);
+    // The bleed pads back what it takes: the first pane still starts a gap under the app bar
+    // (phone) or at the frame (desktop), and the task box stays pinned.
+    const first = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+    if (isPhone(testInfo)) {
+      const appBar = await page.locator('header').first().boundingBox();
+      await page.getByTestId('overview-scroll').evaluate((el) => {
+        el.scrollTop = 0;
+      });
+      const top = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      expect(top!.y - (appBar!.y + appBar!.height)).toBeGreaterThanOrEqual(8);
+      expect(top!.x).toBeGreaterThanOrEqual(8);
+    } else {
+      expect(first!.y).toBeGreaterThanOrEqual(14);
+    }
+    await expectTaskBoxPinned(page);
+    await assertNoOverflow(page);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/overview-layering-end-${page.viewportSize()?.width}.png`,
+    });
+  });
+
+  test('Recently lines its ideas up with its pull requests', async ({ page }) => {
+    await setupScene(page, { scene: 'normal', budget: 'normal', automations: 'normal' });
+    await page.goto(BASE);
+    const idea = page.getByTestId('overview-recent-idea').first();
+    const pr = page.getByTestId('overview-merged-pr').first();
+    await expect(idea).toContainText('Pause subscriptions');
+    await expect(pr).toContainText('Round tax totals per line');
+    const measure = (row: typeof idea) =>
+      row.evaluate((el) => {
+        const icon = el.querySelector('svg')!.getBoundingClientRect();
+        const title = el.querySelector(':scope > span:nth-of-type(2)')!.getBoundingClientRect();
+        return { icon: icon.left, title: title.left, row: el.getBoundingClientRect().left };
+      });
+    const ideaBox = await measure(idea);
+    const prBox = await measure(pr);
+    expect(Math.abs(ideaBox.row - prBox.row)).toBeLessThanOrEqual(1);
+    expect(Math.abs(ideaBox.icon - prBox.icon)).toBeLessThanOrEqual(1);
+    expect(Math.abs(ideaBox.title - prBox.title)).toBeLessThanOrEqual(1);
+  });
+});

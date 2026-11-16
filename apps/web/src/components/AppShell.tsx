@@ -333,8 +333,14 @@ export function AppShell({ children }: AppShellProps) {
           <OnboardingProvider>
             <ChoosePathWizard />
             <div
-              className={`sam-void flex h-screen flex-col gap-2.5 ${chatImmersive ? 'p-1.5' : 'p-2.5'}`}
+              className="sam-void flex h-screen flex-col gap-[var(--sam-shell-gap)] p-[var(--sam-shell-frame)]"
               data-chat-immersive={chatImmersive ? 'on' : undefined}
+              style={{
+                // The frame and the gap under the app bar. Full-bleed pages read these to reach
+                // the screen edge and the app bar with their scrollers (`OverviewLayout`).
+                ['--sam-shell-frame' as string]: chatImmersive ? '6px' : '10px',
+                ['--sam-shell-gap' as string]: '10px',
+              }}
             >
               <SkipToContent />
               <MobileAppBar
@@ -395,12 +401,16 @@ export function AppShell({ children }: AppShellProps) {
         <OnboardingProvider>
           <ChoosePathWizard />
           <div
-            className="sam-void grid h-screen overflow-hidden p-4 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
+            className="sam-void grid h-screen overflow-hidden p-[var(--sam-shell-frame)] transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
             style={{
               gridTemplateColumns: `${navWidth}px minmax(0, 1fr)`,
               gridTemplateRows: 'minmax(0, 1fr) auto',
               // Zen collapses the nav column to nothing, so it must not keep a gutter either.
-              columnGap: navWidth > 0 ? 'var(--sam-space-gutter)' : 0,
+              columnGap: 'var(--sam-shell-gap)',
+              // The frame, and the gap between the nav and the content. Full-bleed pages read
+              // these to reach the screen edge and the nav with their scrollers (`OverviewLayout`).
+              ['--sam-shell-frame' as string]: '16px',
+              ['--sam-shell-gap' as string]: navWidth > 0 ? 'var(--sam-space-gutter)' : '0px',
               ['--sam-void-x' as string]: '58%',
             }}
           >

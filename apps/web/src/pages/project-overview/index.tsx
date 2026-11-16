@@ -69,10 +69,27 @@ function usePhoneChatControl(projectId: string) {
 
 const GUTTER = 'gap-[var(--sam-space-gutter)]';
 
+/*
+ * Nothing between a pane and the void may clip, or the pane's shadow is cut off at that box's
+ * edge (rule 80). The page has to scroll, so each scroller's box reaches out to whatever is next
+ * to it (the screen edge, the app bar or nav, the task box, the other column) and pads back the
+ * same distance: the panes stay where they were, their shadows fall inside the scroller, and a
+ * pane scrolled out of view passes under its neighbour instead of being cut in mid-air.
+ * `--sam-shell-frame` and `--sam-shell-gap` come from `AppShell`.
+ */
+const PHONE_SCROLL_BLEED =
+  '-mx-[var(--sam-shell-frame)] px-[var(--sam-shell-frame)] -mt-[var(--sam-shell-gap)] pt-[var(--sam-shell-gap)] -mb-[var(--sam-space-gutter)] pb-[var(--sam-space-gutter)]';
+const DESKTOP_MAIN_BLEED =
+  'md:-mt-[var(--sam-shell-frame)] md:pt-[var(--sam-shell-frame)] md:-ml-[var(--sam-shell-gap)] md:pl-[var(--sam-shell-gap)] md:-mr-[var(--sam-space-gutter)] md:pr-[var(--sam-space-gutter)] md:-mb-[var(--sam-space-gutter)] md:pb-[var(--sam-space-gutter)]';
+const DESKTOP_RAIL_BLEED =
+  'md:-mt-[var(--sam-shell-frame)] md:pt-[var(--sam-shell-frame)] md:-mr-[var(--sam-shell-frame)] md:pr-[var(--sam-shell-frame)] md:-mb-[var(--sam-shell-frame)] md:pb-[var(--sam-shell-frame)] md:-ml-[var(--sam-space-gutter)] md:pl-[var(--sam-space-gutter)]';
+
 /**
  * Phone: the scroller is a flex column and both column wrappers are `display: contents`, so
  * every section is a flex item ordered by `PHONE_ORDER`. Desktop: the scroller is `contents`,
- * so the two columns become grid items of the root and each scrolls on its own.
+ * so the two columns become grid items of the root and each scrolls on its own. Every scroller
+ * bleeds into its surroundings (`PHONE_SCROLL_BLEED` and the desktop pair) so it never clips a
+ * pane's shadow; the task box stacks above the scroller that reaches its top edge.
  */
 export function OverviewLayout({
   main,
@@ -89,17 +106,17 @@ export function OverviewLayout({
       data-testid="project-overview"
     >
       <div
-        className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${GUTTER} md:contents`}
+        className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${GUTTER} ${PHONE_SCROLL_BLEED} md:contents`}
         data-testid="overview-scroll"
       >
         <div
-          className={`contents md:relative md:col-start-1 md:row-start-1 md:flex md:min-h-0 md:min-w-0 md:flex-col md:overflow-y-auto ${GUTTER}`}
+          className={`contents md:relative md:col-start-1 md:row-start-1 md:flex md:min-h-0 md:min-w-0 md:flex-col md:overflow-y-auto ${GUTTER} ${DESKTOP_MAIN_BLEED}`}
           data-testid="overview-main"
         >
           {main}
         </div>
         <div
-          className={`contents md:relative md:col-start-2 md:row-span-2 md:row-start-1 md:flex md:min-h-0 md:min-w-0 md:flex-col md:overflow-y-auto ${GUTTER}`}
+          className={`contents md:relative md:col-start-2 md:row-span-2 md:row-start-1 md:flex md:min-h-0 md:min-w-0 md:flex-col md:overflow-y-auto ${GUTTER} ${DESKTOP_RAIL_BLEED}`}
           data-testid="overview-rail"
         >
           {rail}
