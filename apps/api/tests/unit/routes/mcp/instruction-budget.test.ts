@@ -257,7 +257,7 @@ describe('applyInstructionBudgets', () => {
     render,
   };
 
-  it('sends pinned policies in full with a size note when they alone exceed the total', () => {
+  it('sends only the required floor, every pinned policy in full, with a note, when that alone exceeds the total', () => {
     const out = applyInstructionBudgets({
       ...base,
       policies: pinned,
@@ -267,8 +267,40 @@ describe('applyInstructionBudgets', () => {
     for (const p of pinned) expect(out.text).toContain(p.id);
     expect(out.text).toContain('pinned policies');
     expect(out.text).toContain('Every pinned policy is sent in full');
-    // Trimming knowledge could not have reached the budget, so it was not trimmed.
-    expect(out.telemetry.observationsDroppedForBudget).toBe(0);
+    // Optional content is left out (and disclosed), so a low budget cannot inflate the payload.
+    expect(out.telemetry.observationCount).toBe(0);
+    expect(out.telemetry.observationsDroppedForBudget).toBe(knowledge.length);
+  });
+
+  it('never returns a larger payload for a lower total budget (monotonic)', () => {
+    const onDemand = Array.from({ length: 8 }, (_, i) =>
+      policy({
+        title: `Tunnel rule ${i}`,
+        category: 'rule',
+        content: 'q'.repeat(700),
+        injectMode: 'on_demand',
+      })
+    );
+    const policies = [...pinned.slice(0, 12), ...onDemand];
+    let previous = Infinity;
+    for (const total of [
+      200_000, 40_000, 25_000, 18_000, 14_000, 12_000, 10_000, 8_000, 5_000, 1_000,
+    ]) {
+      const out = applyInstructionBudgets({
+        ...base,
+        policies,
+        taskText: 'tunnel',
+        budgets: {
+          ...INSTRUCTION_BUDGET_DEFAULTS,
+          onDemandPolicyMaxPerCategory: 10,
+          totalMaxChars: total,
+        },
+      });
+      expect(out.text.length).toBeLessThanOrEqual(previous);
+      previous = out.text.length;
+      for (const p of policies.filter((x) => x.injectMode === 'pinned'))
+        expect(out.text).toContain(p.id);
+    }
   });
 
   it('trims knowledge to reach the total when that is enough, and adds no note', () => {
@@ -453,7 +485,7 @@ describe('applyInstructionBudgets trim steps and logs', () => {
         projectId: 'proj-x',
         pinnedCount: 10,
         budget: 1_000,
-        action: 'sent_in_full',
+        action: 'sent_required_only',
       })
     );
     warn.mockRestore();

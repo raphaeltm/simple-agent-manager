@@ -368,21 +368,23 @@ export function applyInstructionBudgets(input: {
   if (result.text.length > budgets.totalMaxChars) {
     const floor = attempt(0, 0, []);
     if (floor.text.length > budgets.totalMaxChars) {
-      // Trimming optional content cannot reach the budget here, so it would only discard
-      // context. Knowledge and on-demand text keep their own budgets, and their indexes
-      // still disclose anything those budgets left out.
+      // Pinned policies and the required sections alone exceed the total. Send exactly that
+      // floor: it is the smallest payload that keeps every pinned policy in full, and keeping
+      // optional content here would make a lower budget produce a larger payload than a
+      // higher one (measured on staging2: 72.8K at a 40K budget, 59.8K at 60K). The knowledge
+      // and on-demand indexes in the floor still list everything that was left out.
       requiredOverBudget = true;
       const pinnedChars = (
         formatPolicyDirectivesFor(
-          result.selection.full.filter((p) => p.injectMode !== 'on_demand')
+          floor.selection.full.filter((p) => p.injectMode !== 'on_demand')
         ) ?? ''
       ).length;
       const note =
-        `Size note: this project's ${result.selection.pinnedCount} pinned policies (${pinnedChars} characters) ` +
+        `Size note: this project's ${floor.selection.pinnedCount} pinned policies (${pinnedChars} characters) ` +
         `and the other required sections exceed the instruction size budget (${budgets.totalMaxChars} characters). ` +
-        'Every pinned policy is sent in full; knowledge and on-demand policies keep their own size budgets, ' +
-        'and their indexes list anything those left out.';
-      result = attempt(budgets.knowledgeMaxChars, budgets.onDemandPolicyMaxChars, [note]);
+        'Every pinned policy is sent in full; knowledge observations and on-demand policy text were left out, ' +
+        'and the indexes below list them.';
+      result = attempt(0, 0, [note]);
       log.warn('mcp.get_instructions.required_over_budget', {
         projectId: input.projectId,
         pinnedCount: result.selection.pinnedCount,
@@ -390,7 +392,7 @@ export function applyInstructionBudgets(input: {
         requiredChars: floor.text.length,
         totalChars: result.text.length,
         budget: budgets.totalMaxChars,
-        action: 'sent_in_full',
+        action: 'sent_required_only',
       });
     } else {
       trimmedForTotal = true;

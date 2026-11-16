@@ -315,12 +315,13 @@ Knowledge keeps its ranking (`getAllHighConfidenceKnowledge()`) and gets a size 
 out.
 
 `applyInstructionBudgets()` then checks the serialized payload against
-`instructions.totalMaxChars`. When it is over, knowledge is trimmed first and on-demand policy
-text second, but only if that brings the payload under the total. When pinned policies and the
-other required sections exceed it by themselves, trimming could not reach the total, so every
-pinned policy is sent in full, knowledge and on-demand text keep their own budgets,
-`instructions[]` gains one line saying so, and `mcp.get_instructions.required_over_budget` is
-logged. Every call logs
+`instructions.totalMaxChars` (default 120,000). When it is over, knowledge is trimmed first and
+on-demand policy text second. When pinned policies, the task and the indexes exceed it by
+themselves, only those are sent, `instructions[]` gains one line saying so, and
+`mcp.get_instructions.required_over_budget` is logged; a lower budget therefore never produces a
+larger payload. Claude Code saves a tool result over about 50,000 characters to a file (measured
+on staging2: 59,820 characters spilled), so inline delivery needs a total of about 48,000 and
+enough policies on demand. Every call logs
 `mcp.get_instructions.size` with the section sizes and counts. If the budget pass throws,
 `renderWithinBudgets()` (`instruction-payload.ts`) falls back to the unbudgeted rendering. Mission child tasks (`dispatch-description.ts`) still inherit every active policy in full,
 whatever its inject mode. The five budgets are admin settings: see [Admin settings](/docs/guides/admin-settings/#agent-instructions).

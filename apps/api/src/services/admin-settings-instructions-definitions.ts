@@ -14,8 +14,13 @@
 import { type AdminSettingDefinition, integerDefinition } from './admin-setting-definitions';
 
 export const INSTRUCTION_BUDGET_DEFAULTS = {
-  /** Serialized `get_instructions` text. Claude Code's default MCP output cap is 25,000 tokens. */
-  totalMaxChars: 60_000,
+  /**
+   * Serialized `get_instructions` text. The default bounds growth without trimming a project whose
+   * policies are all pinned today (SAM: ~101K). Claude Code keeps a tool result inline only up to
+   * about 50,000 characters (59.8K spilled on staging2, 2026-11-16), so an installation that wants
+   * inline delivery sets this to ~48,000 once enough policies are on demand.
+   */
+  totalMaxChars: 120_000,
   /** Knowledge block, entity index included. The index is kept even when it alone is larger. */
   knowledgeMaxChars: 20_000,
   /** Full text of on-demand policies that match the task. Pinned policies are not counted. */
@@ -37,7 +42,7 @@ export const INSTRUCTION_BUDGET_SETTINGS: AdminSettingDefinition[] = [
     'instructions.totalMaxChars',
     INSTRUCTION_BUDGET_DEFAULTS.totalMaxChars,
     'Collaboration',
-    'Characters of serialized get_instructions text agents receive at session start. When over, knowledge is trimmed first, then on-demand policy text, but only if that brings the payload under this size. Pinned policies and the task are never trimmed: if they alone exceed it, they are sent in full, knowledge and on-demand text keep their own budgets, and the payload says the pinned policies exceed the budget.',
+    'Characters of serialized get_instructions text agents receive at session start. When over, knowledge is trimmed first, then on-demand policy text. Pinned policies, the task and the indexes are never trimmed: if they alone exceed it, only they are sent, with a note. Claude Code saves results over about 50,000 characters to a file, so set about 48,000 for inline delivery once enough policies are on demand.',
     { min: 10_000, max: MAX_CHARS }
   ),
   integerDefinition(
