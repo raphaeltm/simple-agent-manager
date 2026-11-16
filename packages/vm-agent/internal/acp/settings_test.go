@@ -8,18 +8,41 @@ import (
 )
 
 func TestBuildCodexACPManagedConfigEnv(t *testing.T) {
+	type projectTrust struct {
+		TrustLevel string `json:"trust_level"`
+	}
+	type managedConfig struct {
+		SandboxMode     string                  `json:"sandbox_mode"`
+		ApprovalPolicy  string                  `json:"approval_policy"`
+		Model           *string                 `json:"model"`
+		BypassHookTrust *bool                   `json:"bypass_hook_trust"`
+		Projects        map[string]projectTrust `json:"projects"`
+	}
 	for _, tc := range []struct {
-		name      string
-		settings  *agentSettingsPayload
-		wantModel string
+		name         string
+		settings     *agentSettingsPayload
+		workDir      string
+		wantModel    string
+		wantProjects map[string]projectTrust
 	}{
-		{name: "nil settings"},
+		{name: "nil settings, no work dir"},
 		{name: "empty model", settings: &agentSettingsPayload{}},
 		{name: "GPT-6.1 Sol", settings: &agentSettingsPayload{Model: "gpt-6.1-sol"}, wantModel: "gpt-6.1-sol"},
 		{name: "JSON special characters", settings: &agentSettingsPayload{Model: `custom\"model\\variant`}, wantModel: `custom\"model\\variant`},
+		{
+			name:         "VM devcontainer work dir is trusted",
+			workDir:      "/workspaces/simple-agent-manager",
+			wantProjects: map[string]projectTrust{"/workspaces/simple-agent-manager": {TrustLevel: "trusted"}},
+		},
+		{
+			name:         "work dir is cleaned",
+			workDir:      " /workspaces/repo/ ",
+			wantProjects: map[string]projectTrust{"/workspaces/repo": {TrustLevel: "trusted"}},
+		},
+		{name: "relative work dir is not trusted", workDir: "repo"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			envVar, err := buildCodexACPManagedConfigEnv(tc.settings)
+			envVar, err := buildCodexACPManagedConfigEnv(tc.settings, tc.workDir)
 			if err != nil {
 				t.Fatalf("buildCodexACPManagedConfigEnv failed: %v", err)
 			}
@@ -27,22 +50,34 @@ func TestBuildCodexACPManagedConfigEnv(t *testing.T) {
 			if !strings.HasPrefix(envVar, prefix) {
 				t.Fatalf("managed config env = %q, want %q prefix", envVar, prefix)
 			}
-			var config map[string]string
+			var config managedConfig
 			if err := json.Unmarshal([]byte(strings.TrimPrefix(envVar, prefix)), &config); err != nil {
 				t.Fatalf("managed config is not valid JSON: %v", err)
 			}
-			if got := config["sandbox_mode"]; got != "danger-full-access" {
-				t.Fatalf("sandbox_mode = %q, want danger-full-access", got)
+			if config.SandboxMode != "danger-full-access" || config.ApprovalPolicy != "never" {
+				t.Fatalf("sandbox/approval = %q/%q, want danger-full-access/never", config.SandboxMode, config.ApprovalPolicy)
 			}
-			if got := config["approval_policy"]; got != "never" {
-				t.Fatalf("approval_policy = %q, want never", got)
+			// Repository hooks run in every Codex session (idea 01M7J0TXAHGRY8CWA7Y7SJZAK0).
+			if config.BypassHookTrust == nil || !*config.BypassHookTrust {
+				t.Fatalf("bypass_hook_trust = %v, want true", config.BypassHookTrust)
 			}
-			if got := config["model"]; got != tc.wantModel {
-				t.Fatalf("model = %q, want %q", got, tc.wantModel)
+			switch {
+			case tc.wantModel == "" && config.Model != nil:
+				t.Fatalf("empty model should be omitted, got %q", *config.Model)
+			case tc.wantModel != "" && (config.Model == nil || *config.Model != tc.wantModel):
+				t.Fatalf("model = %v, want %q", config.Model, tc.wantModel)
 			}
-			if tc.wantModel == "" {
-				if _, ok := config["model"]; ok {
-					t.Fatalf("empty model should be omitted: %#v", config)
+			if len(tc.wantProjects) == 0 && config.Projects != nil {
+				t.Fatalf("projects should be omitted, got %#v", config.Projects)
+			}
+			if len(tc.wantProjects) > 0 {
+				if len(config.Projects) != len(tc.wantProjects) {
+					t.Fatalf("projects = %#v, want %#v", config.Projects, tc.wantProjects)
+				}
+				for dir, want := range tc.wantProjects {
+					if config.Projects[dir] != want {
+						t.Fatalf("projects[%q] = %#v, want %#v", dir, config.Projects[dir], want)
+					}
 				}
 			}
 		})

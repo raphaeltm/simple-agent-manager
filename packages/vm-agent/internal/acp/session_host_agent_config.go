@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path"
 	"strings"
 )
 
@@ -14,19 +15,41 @@ import (
 const codexACPManagedAgentModeEnv = "INITIAL_AGENT_MODE=agent-full-access"
 const codexACPManagedCodexPathEnv = "CODEX_PATH=codex"
 
+// codexProjectTrust is one entry of Codex's `projects` table.
+type codexProjectTrust struct {
+	TrustLevel string `json:"trust_level"`
+}
+
+// codexACPManagedConfig is the CODEX_CONFIG JSON codex-acp passes to every app-server thread
+// as per-thread config overrides (codex rust-v0.160.0, app-server config_manager.rs).
 type codexACPManagedConfig struct {
 	SandboxMode    string `json:"sandbox_mode"`
 	ApprovalPolicy string `json:"approval_policy"`
 	Model          string `json:"model,omitempty"`
+	// BypassHookTrust and Projects let a repository's own Codex hooks run, as Claude Code
+	// runs a repository's .claude/settings.json hooks. Codex loads the project .codex/ layer
+	// only for a trusted project, and runs a non-managed hook only once its definition is
+	// trusted by hash, which normally takes an interactive /hooks review that a SAM session
+	// cannot give. The hooks come from the repository the user (or their agent) chose, and
+	// they can do nothing the agent cannot already do in this full-access workspace.
+	// Decision: Raphaël, 2026-11-16 (SAM idea 01M7J0TXAHGRY8CWA7Y7SJZAK0).
+	BypassHookTrust bool                         `json:"bypass_hook_trust"`
+	Projects        map[string]codexProjectTrust `json:"projects,omitempty"`
 }
 
-func buildCodexACPManagedConfigEnv(settings *agentSettingsPayload) (string, error) {
+// buildCodexACPManagedConfigEnv renders CODEX_CONFIG. workDir is the session's working
+// directory (the repository checkout); Codex looks up project trust by the cwd first.
+func buildCodexACPManagedConfigEnv(settings *agentSettingsPayload, workDir string) (string, error) {
 	config := codexACPManagedConfig{
-		SandboxMode:    "danger-full-access",
-		ApprovalPolicy: "never",
+		SandboxMode:     "danger-full-access",
+		ApprovalPolicy:  "never",
+		BypassHookTrust: true,
 	}
 	if settings != nil {
 		config.Model = settings.Model
+	}
+	if dir := strings.TrimSpace(workDir); dir != "" && path.IsAbs(dir) {
+		config.Projects = map[string]codexProjectTrust{path.Clean(dir): {TrustLevel: "trusted"}}
 	}
 
 	encoded, err := json.Marshal(config)
@@ -55,7 +78,7 @@ func (h *SessionHost) writeAgentStartupConfig(ctx context.Context, agentType str
 }
 
 func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) error {
-	managedConfigEnv, err := buildCodexACPManagedConfigEnv(startup.settings)
+	managedConfigEnv, err := buildCodexACPManagedConfigEnv(startup.settings, h.config.ContainerWorkDir)
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: %w", err)
 	}
