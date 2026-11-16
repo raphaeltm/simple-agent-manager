@@ -80,7 +80,7 @@ nothing panics, no type changes, and every call site still compiles.
 
 It is the options-struct sibling of `.claude/rules/63` (relaxing a column deletes
 the checks that used it) and `.claude/rules/71` (tightening one deletes a
-capability): here, the *default* deletes state.
+capability): here, the _default_ deletes state.
 
 The tells:
 
@@ -118,7 +118,7 @@ The tells:
    and leaves the next caller free to reintroduce the bug.
 
 6. **Ask whether the overwritten field was the right signal in the first place.**
-   The overwrite is the trigger; the reason it was *damaging* is usually that some
+   The overwrite is the trigger; the reason it was _damaging_ is usually that some
    consumer gates behaviour on a field that is merely **correlated** with the
    property it actually cares about. `agent_ws.go` gated runtime-asset injection on
    `runtime.Lightweight` ("skip the devcontainer build" — a per-workspace
@@ -135,7 +135,7 @@ The tells:
   exact upsert shape, assert the field survived. Naming each case after its call
   site is what makes a future deletion visible.
 - **A liveness assertion inside each case** (`.claude/rules/62`): assert a field
-  the caller *did* supply was applied, so a passing test cannot mean the update
+  the caller _did_ supply was applied, so a passing test cannot mean the update
   became a no-op.
 - **An explicit-override control**: the field must still be settable to its zero
   value on purpose, in both directions.

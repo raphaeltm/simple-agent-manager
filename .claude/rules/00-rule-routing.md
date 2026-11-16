@@ -121,7 +121,7 @@ work, or planning in one of these areas, open the rule yourself.
 - `71-request-context-must-not-outlive-its-request.md`: A Goroutine That Outlives Its Request Must Not Capture That Request's Context. Loads for: packages/providers; packages/vm-agent
 - `71-tightening-a-column-can-delete-a-capability.md`: A New Required Column Can Silently Delete a Capability for Every Existing Row. Loads for: apps/api; packages/worker-core; packages/project-data
 - `72-error-categories-must-match-the-recovery-action.md`: An Error Category Must Name the Recovery Action, Not the Provider's Vocabulary. Loads for: apps/api; packages/providers
-- `73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State. Loads for: **/*.go; **/*.ts; **/*.tsx; **/*.sql
+- `73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State. Loads for: `**/*.go`; `**/*.ts`; `**/*.tsx`; `**/*.sql`
 - `75-external-api-check-then-act.md`: A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure. Loads for: apps/api; packages/repo-hosting; packages/app-deployment; packages/vm-agent (internal/server/vm_jobs.go)
 - `77-library-extension-points-typed-and-exercised.md`: Implement a Library Extension Point Against the Library's Types, and Test It Through the Library. Loads for: apps/api
 - `78-snapshot-capture-must-scale-with-the-session.md`: Snapshot Capture Cost Must Scale With the Session, Not the Repository. Loads for: packages/vm-agent; apps/api (src/services/session-snapshot-capture-cleanup.ts)
