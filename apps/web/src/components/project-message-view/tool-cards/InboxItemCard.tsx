@@ -13,7 +13,6 @@ import { KIND_META } from '../../inbox/inbox-model';
 import { InboxAnswerControls } from '../../inbox/InboxAnswerControls';
 import { inboxPath } from '../../inbox/InboxButton';
 import { InboxLinkChips } from '../../inbox/InboxItemView';
-import { RenderedMarkdown } from '../../MarkdownRenderer';
 import { extractInboxItemRef } from './inbox-item-card-data';
 
 export interface InboxItemCardProps {
@@ -50,7 +49,9 @@ function statusFor(item: InboxItem): { label: string; tone: Tone } {
   const review = item.kind === 'review';
   switch (item.status) {
     case 'open':
-      return { label: review ? 'Waiting for your review' : 'Needs your answer', tone: 'open' };
+      // Amber means waiting on you; a blocking ask also has the agent stopped on it.
+      if (review) return { label: 'Waiting for your review', tone: 'open' };
+      return { label: item.blocking ? 'Agent paused on this' : 'Needs your answer', tone: 'open' };
     case 'answered':
     case 'done':
       return { label: review ? 'Reviewed' : 'Answered', tone: 'done' };
@@ -72,9 +73,10 @@ function Body({ text }: { text: string }) {
   return (
     <div>
       <div
-        className={`min-w-0 text-sm text-fg-secondary [overflow-wrap:anywhere] ${collapsible && !expanded ? 'max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_65%,transparent)]' : ''}`}
+        className={`m-0 min-w-0 text-sm whitespace-pre-wrap text-fg-secondary [overflow-wrap:anywhere] ${collapsible && !expanded ? 'max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_65%,transparent)]' : ''}`}
       >
-        <RenderedMarkdown inline content={text} />
+        {/* Agent-written and untrusted: plain text, as the Inbox shows it. */}
+        {text}
       </div>
       {collapsible && (
         <Button
@@ -94,7 +96,10 @@ function Body({ text }: { text: string }) {
 
 function OpenInboxLink({ item }: { item: InboxItem }) {
   return (
-    <Link to={inboxPath(item)} className="text-xs text-accent-fg hover:underline">
+    <Link
+      to={inboxPath(item)}
+      className="self-start text-xs text-accent underline-offset-2 hover:underline"
+    >
       Open in inbox
     </Link>
   );
@@ -116,9 +121,6 @@ function LoadedCard({ item, onChanged }: { item: InboxItem; onChanged: () => voi
             aria-hidden="true"
           />
           {item.kind === 'review' ? 'Review requested' : 'Question for you'}
-          {item.blocking && item.status === 'open' && (
-            <span className="text-xs font-normal text-fg-muted">· agent paused on this</span>
-          )}
         </span>
         <span
           className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${BADGE_CLASS[status.tone]}`}
@@ -138,7 +140,7 @@ function LoadedCard({ item, onChanged }: { item: InboxItem; onChanged: () => voi
           <p role="status" className="m-0 text-sm text-fg-muted [overflow-wrap:anywhere]">
             {receipt}
           </p>
-        ) : (
+        ) : item.status !== 'open' ? null /* The badge says how it closed. */ : (
           <InboxAnswerControls
             item={item}
             permission={permission}
@@ -206,7 +208,10 @@ export const InboxItemCard: FC<InboxItemCardProps> = ({ item, projectId }) => {
         <>
           <div className="min-w-0 flex-1 text-sm text-fg-muted" role="status">
             This inbox item is not in your inbox.{' '}
-            <Link to={`/projects/${projectId}/inbox`} className="text-accent-fg hover:underline">
+            <Link
+              to={`/projects/${projectId}/inbox`}
+              className="text-accent underline-offset-2 hover:underline"
+            >
               Open the project inbox
             </Link>
           </div>

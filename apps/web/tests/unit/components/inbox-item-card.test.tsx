@@ -148,7 +148,7 @@ describe('InboxItemCard', () => {
     });
     const { unmount } = renderCard(toolCall(FILED));
     expect(await screen.findByText('Question for you')).toBeTruthy();
-    expect(screen.getByText(/agent paused on this/)).toBeTruthy();
+    expect(screen.getByText('Agent paused on this')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Yes' })).toBeTruthy();
     unmount();
 
