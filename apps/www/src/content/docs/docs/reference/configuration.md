@@ -59,7 +59,7 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ENCRYPTION_KEY`                           | AES-256-GCM master key. Used for BetterAuth session cookies and user credential encryption unless a purpose-specific override below is set (auto-generated)                                                                                                                                                                     |
 | `BETTER_AUTH_SECRET`                       | Optional purpose-specific override for BetterAuth session cookie signing/encryption. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                                                                                                                  |
-| `BOOTSTRAP_OWNER_EMAIL`                    | Optional installer-managed Worker secret restricting first administration to this verified login email. Unset preserves manual-install behavior. Set before enabling login; preserve across updates.                                                                                                                            |
+| `BOOTSTRAP_OWNER_EMAIL`                    | Optional installer-managed Worker secret restricting first administration to this verified login email. Unset preserves manual-install behavior. Set before enabling login; preserve across updates. Also the recovery path when no superadmin remains (self-hosting guide).                                                                                                                            |
 | `CREDENTIAL_ENCRYPTION_KEY`                | Optional purpose-specific override for AES-GCM encryption of user cloud/agent credentials. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                                                                                                            |
 | `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                                                                                                                                                                                                                                        |
 | `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                                                                                                                                                                                                                                   |
@@ -885,10 +885,9 @@ aggregate operator-visible counters.
 | `MAX_NOTIFICATIONS_PER_USER`            | `500`                  | Max stored notifications per user                                      |
 | `NOTIFICATION_PAGE_SIZE`                | `50`                   | Default page size for notification list                                |
 | `MAX_NOTIFICATION_PAGE_SIZE`            | `100`                  | Max allowed page size                                                  |
-| `HUMAN_INPUT_TIMEOUT_MS`                | `7200000` (2 hr)       | Initial needs-input response window                                    |
-| `HUMAN_INPUT_ESCALATION_FRACTIONS`      | `0.25,0.75`            | Reminder points within the initial response window                     |
-| `HUMAN_INPUT_UNDELIVERED_GRACE_MS`      | `7200000` (2 hr)       | Extension without confirmed push delivery                              |
-| `HUMAN_INPUT_MAX_WAIT_MS`               | `86400000` (24 hr)     | Hard maximum needs-input marker lifetime                               |
+| `HUMAN_INPUT_ESCALATION_FRACTIONS`      | `0.25,0.75`            | Reminder points, questions asked before the inbox move only            |
+| `HUMAN_INPUT_UNDELIVERED_GRACE_MS`      | `7200000` (2 hr)       | Undelivered grace, questions asked before the inbox move only          |
+| `HUMAN_INPUT_MAX_WAIT_MS`               | `86400000` (24 hr)     | Hard limit, questions asked before the inbox move only                 |
 | `WEB_PUSH_TTL_SECONDS`                  | `86400`                | Push-service message TTL                                               |
 | `WEB_PUSH_VAPID_TTL_SECONDS`            | `43200`                | VAPID authorization-token lifetime                                     |
 | `WEB_PUSH_DELIVERY_TIMEOUT_MS`          | `10000`                | Per-attempt push-service timeout                                       |
@@ -1774,6 +1773,43 @@ SAM never lets the runtime follow a redirect for a URL a user or admin chose (AI
 
 A GitLab request SAM refuses mid-flight (a redirect to a refused host, too many redirects) answers `502 GITLAB_REQUEST_REFUSED`; one that passes `GITLAB_API_TIMEOUT_MS` answers `504 GITLAB_TIMEOUT`. GitLab token exchange and refresh are better-auth requests that refuse every redirect; SAM fetches the GitLab profile itself through the checks above.
 
+## Outbound Requests to User-Chosen URLs
+
+Some requests go to a URL the code does not fix: a browser's Web Push endpoint, the base URL of a
+user's OpenAI-compatible credential, a registry named in a deployment manifest, the issuer of an
+agent sign-in trust, and the workspace URL `check_dns_status` probes. SAM checks the host of each
+before the request (`classifyHost` in `packages/worker-core/src/network-hosts/classify.ts`):
+loopback, private ranges, carrier-grade NAT, unique-local IPv6, `localhost`, single-label names
+and `.local`/`.internal`/`.lan`-style names are private; link-local, cloud metadata hosts and
+reserved ranges are forbidden. Literal addresses are recognised in every spelling a URL parser
+accepts (decimal, hex, octal, IPv4-mapped and other IPv6 embeddings).
+
+| Request                               | Rule                                                                                                                                                                                                                                                                                  | Where                                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Web Push subscription                 | Endpoint must be HTTPS on a public host when saved; a stored endpoint that fails the check is skipped at delivery and logged as `web_push.endpoint_refused` (no URL in the log). Redirects are never followed.                                                                        | `schemas/notifications.ts`, `lib/web-push.ts`, `durable-objects/notification-push.ts` |
+| OpenAI-compatible credential base URL | Must be HTTPS on a public host when saved or updated; a stored base URL that fails the check is skipped when the AI proxy resolves an upstream (`ai_proxy_passthrough.upstream_refused`), so the request gets the usual 401 "no compatible upstream credential".                      | `routes/composable-credentials.ts`, `routes/ai-proxy-passthrough-upstream.ts`         |
+| Agent sign-in issuer keys             | Fetched through `guardedFetch` with no redirects; a refused issuer answers `503 ISSUER_KEYS_UNAVAILABLE` and logs `agent_sign_in.issuer_keys_refused`.                                                                                                                                | `services/agent-sign-in/verify.ts`                                                    |
+| Deployment-release registry lookups   | Registry, token realm and every redirect must be HTTPS on a public host.                                                                                                                                                                                                              | `packages/app-deployment/src/image-resolver-outbound.ts`                              |
+| `check_dns_status`                    | Follows only redirects that stay on the workspace's own origin, each re-checked; reports any other redirect with its status without requesting it, and reports failures as fixed categories, never raw error text. A private-domain install may reach its own private workspace host. | `routes/mcp/check-dns-status.ts`                                                      |
+
+Until a later change moves them, the AI proxy's own calls to a credential's base URL still let the
+runtime follow a redirect: the base URL itself is checked, but a public base URL that redirects
+is not re-checked per hop. `guardedFetch`, used everywhere else above, never lets the runtime
+follow a redirect. It checks every hop, keeps only `Accept`,
+`Accept-Language`, `Content-Type`, `Content-Language` and `User-Agent` on a hop to another origin,
+and refuses a 307 or 308 that would carry a request body to another origin.
+
+| Admin setting           | Default | Meaning                                                                                                                                              |
+| ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `outbound.maxRedirects` | `3`     | Redirect hops a guarded fetch follows, each re-checked, range 0–10. `0` refuses every redirect. Used by `check_dns_status`. If settings cannot be read, no redirect is followed. Category **Operations**. |
+
+The check reads names, not DNS answers: a public name that resolves to a private address passes.
+On Cloudflare the Worker's request leaves from Cloudflare's network, not from the installation's
+private network.
+
+The lint rule `sam/no-unguarded-outbound-fetch` keeps new requests on this path
+(`packages/eslint-plugin-sam/docs/rules/no-unguarded-outbound-fetch.md`).
+
 ## Admin Observability
 
 | Variable                                    | Default  | Description                         |
@@ -2172,9 +2208,40 @@ Installation admins edit these at **Admin → Settings**. They use the existing 
 | `deployments.buildContextStartTimeoutMs`   | 10,000  | Bounds control-plane wait for source collection acceptance                                                 |
 | `deployments.buildContextMaxBytes`         | 2 GiB   | Maximum raw tar (including headers) and compressed bundle bytes                                            |
 | `deployments.buildContextCollectTimeoutMs` | 120,000 | Source collection deadline                                                                                 |
-| `deployments.buildContextUploadTtlSeconds` | 300     | Presigned upload URL lifetime                                                                              |
+| `deployments.buildContextUploadTtlSeconds` | 300     | Presigned upload/download URL lifetime                                                                              |
 | `deployments.buildContextRetentionHours`   | 48      | Minimum age before abandoned/terminal bundles are deleted                                                  |
 | `deployments.buildContextCleanupBudgetMs`  | 10,000  | Work budget per daily cleanup pass                                                                         |
 | `deployments.buildContextCleanupPageSize`  | 250     | R2 listing page size; a persisted cursor resumes remaining pages                                           |
 
 Collection has no file-count cutoff. For a 100,000-file context near 1.5 GiB, tar headers add at least 49 MiB, plus filename/padding metadata. At 50 MiB/s the payload alone needs about 31 seconds to collect and another 31 seconds to upload; filesystem traversal, compression, and network conditions add time. Collection stops at its deadline rather than repeatedly processing a fixed batch. Phase timings are stored in publish-job events. The source request retains the existing overall VM publish timeout (20 minutes by default) and emits publish heartbeats throughout collection/upload.
+
+## Cloudflare application build executor
+
+Edit runtime controls in **Admin → Settings**. Instant sessions always use Cloudflare; `deployments.buildExecutor` selects the VM-session executor. These controls are independent of the default-off context shadow probe. Keep the VM setting at `node` until staging validates Cloudflare publishing from a VM with unchanged source build/save counters and a served release; that validation remains pending.
+
+| Runtime setting                           | Default   | Meaning                                                                                             |
+| ----------------------------------------- | --------- | --------------------------------------------------------------------------------------------------- |
+| `deployments.buildExecutor`               | `node`    | VM build executor (`node` or `cloudflare`); explicit Cloudflare selection never silently falls back |
+| `deployments.builderMaxConcurrent`        | 6         | Platform reservations, clamped to the deployed class capacity; maximum 6                            |
+| `deployments.builderProjectMaxConcurrent` | 2         | Per-project reservations; maximum 2                                                                 |
+| `deployments.builderReservationGraceMs` | 300,000 | Grace after the stored builder deadline before cron force-releases unconfirmed reservations with an alert; active jobs become unknown, and physical shutdown may remain unconfirmed |
+| `deployments.builderDeadlineMs`           | 1,200,000 | Absolute deadline after first admission; also capped by the overall publish-job deadline            |
+| `deployments.builderCapacityBackoffMs`    | 30,000    | Delay before retrying platform capacity errors                                                      |
+| `deployments.builderDrainLimit`           | 6         | Maximum queued jobs considered per cron tick                                                        |
+| `deployments.builderDaemonReadyTimeoutMs` | 60,000    | DinD readiness deadline                                                                             |
+| `deployments.publishCallbackMaxBodyBytes` | 1,048,576 | Maximum actual JSON bytes for authenticated publish events, image artifacts and release callbacks, for source and builder tokens. |
+| `deployments.builderCallbackTimeoutMs`    | 30,000    | Control-plane HTTP timeout; also controls bootstrap HTTP shutdown                                   |
+| `deployments.builderCallbackAttempts`     | 3         | Maximum attempts for retryable callbacks                                                            |
+| `deployments.builderCallbackRetryDelayMs` | 5,000     | Delay between retryable callbacks                                                                   |
+| `deployments.builderHeartbeatIntervalMs`  | 15,000    | Builder liveness callback interval                                                                  |
+
+Deployment topology is configured through GitHub Environment variables:
+
+| Variable                       | Default      | Meaning                                                                      |
+| ------------------------------ | ------------ | ---------------------------------------------------------------------------- |
+| `DEPLOY_BUILDER_INSTANCE_TYPE` | `standard-4` | Cloudflare Container instance type; applies on deployment                    |
+| `DEPLOY_BUILDER_MAX_INSTANCES` | 6            | `ComposeBuilderContainer` class capacity; runtime admission never exceeds it |
+
+The deploy generator mirrors actual class capacity into the Worker binding `DEPLOY_BUILDER_CLASS_MAX_INSTANCES`; do not set that binding independently. Builder images contain Docker, Compose and `sam-builder`; no installation or user credentials are baked into them. Each job receives only a job-and-attempt callback token and short-lived presigned URLs for its context and image keys. The control plane checks the builder against `VM_AGENT_REQUIRED_VERSION`, when configured, before accepting a job.
+
+Application builders have unrestricted internet egress. Package installation in Dockerfile `RUN` steps and direct presigned object transfers use normal TLS trust; there is no builder host allowlist, outbound proxy, or interception CA setting. Isolation relies on the dedicated microVM, one-job callback authority, and hard deadline. See the [security architecture](/docs/architecture/security/#application-build-executor).

@@ -5,6 +5,7 @@ import * as schema from '../db/schema';
 import { log, serializeError } from '../lib/logger';
 import { resolveAdminSetting } from './admin-settings';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
+import { withCapacityPoolRefresh } from './capacity-pool-refresh-operation';
 import {
   DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE,
   ensureCandidatesForSource,
@@ -174,8 +175,36 @@ export async function ensureDefaultPoolForCredentialSeeds(
   options: DefaultCapacityPoolsBackfillOptions,
   managedGcpMirrors: ManagedGcpCredentialMirror[] = []
 ): Promise<CapacityPoolSummary | null> {
+  return withCapacityPoolRefresh(
+    db,
+    scope,
+    options,
+    seeds.every((seed) => !seed.active),
+    (boundedOptions) =>
+      publishDefaultPoolForCredentialSeeds(
+        db,
+        scope,
+        seedSnapshotGeneration,
+        seeds,
+        boundedOptions,
+        managedGcpMirrors
+      )
+  );
+}
+
+async function publishDefaultPoolForCredentialSeeds(
+  db: Db,
+  scope: ScopeIdentity,
+  seedSnapshotGeneration: number,
+  seeds: CredentialCapacitySeed[],
+  options: DefaultCapacityPoolsBackfillOptions,
+  managedGcpMirrors: ManagedGcpCredentialMirror[]
+): Promise<CapacityPoolSummary | null> {
   const activeSeeds = seeds.filter((seed) => seed.active);
   const existingPool = await findDefaultPool(db, scope);
+  // Catalog discovery is never permission to reactivate a deliberately disabled/deleted pool.
+  if (existingPool && existingPool.status !== ACTIVE_STATUS)
+    return readDefaultPoolSummary(db, scope, { includeDisabled: true });
 
   if (activeSeeds.length === 0) {
     if (existingPool)
@@ -195,99 +224,153 @@ export async function ensureDefaultPoolForCredentialSeeds(
     status: pool.status,
     sourceGenerations: [],
   };
-  const activeSeedKeys = new Set<string>();
+  const activeSeedKeys = new Set<string>(activeSeeds.map(sourceIdentityKeyForSeed));
+  // Mark progress before provider I/O; the old complete catalog retains its independent proof.
+  await db
+    .update(schema.capacityPools)
+    .set({
+      migrationState: 'pending',
+      catalogPublishedAt:
+        pool.catalogPublishedAt ??
+        (pool.migrationState === 'complete' && pool.configurationState !== 'migration-pending'
+          ? (pool.lastReconciledAt ?? pool.updatedAt)
+          : null),
+    })
+    .where(
+      and(
+        eq(schema.capacityPools.id, pool.id),
+        eq(schema.capacityPools.revision, poolGuard.revision),
+        eq(schema.capacityPools.updatedAt, poolGuard.updatedAt)
+      )
+    );
   let publicationComplete = true;
+  let selectionRevisionAlreadyBumped = false;
   const publishBudgetMs = await resolveCandidatePublishBudgetMs(options);
 
-  const publications = await Promise.all(
-    seeds.map(async (seed) => {
-      if (seed.active && !(await isCapacitySeedStillCurrent(db, seed))) return;
-      // No credential copy: the anchor row carries no secret. The source binds to the EXACT
-      // credential via credential_source + credential_reference + external_source_ref +
-      // credential_version; the anchor only satisfies the shipped capacity_sources CHECK.
-      const materializedSeed = seed.active
-        ? await ensureCapacitySourceCredentialAnchor(db, seed)
-        : seed;
-      if (materializedSeed.active && !(await isCapacitySeedStillCurrent(db, seed))) return;
-      const existingSource = await findCapacitySourceForCredential(db, materializedSeed);
-      if (!materializedSeed.active) {
-        if (
-          existingSource &&
-          existingSource.sourceGeneration <= seedSnapshotGeneration &&
-          (await isCapacitySeedStillCurrent(db, seed, false))
-        ) {
-          await disableCapacitySourceAvailability(db, scope, existingSource);
+  const publications = [];
+  for (const seed of seeds) {
+    publications.push(
+      await (async () => {
+        if (seed.active && Date.now() >= (options.reconciliationDeadlineAt ?? Infinity)) {
+          publicationComplete = false;
+          return;
         }
-        return;
-      }
-      activeSeedKeys.add(sourceIdentityKeyForSeed(materializedSeed));
-      await options.beforeSourcePublication?.({ seed: materializedSeed, existingSource });
-      if (!(await isCapacitySeedStillCurrent(db, seed))) return;
-
-      const publication = existingSource
-        ? await updateCapacitySourceForSeed(db, existingSource, materializedSeed, scope)
-        : await insertCapacitySourceForSeed(db, materializedSeed, scope);
-      if (publication.source.status !== ACTIVE_STATUS) return;
-      // A newer publisher owns this refresh; do not certify its unfinished candidates.
-      if (!publication.published) {
-        return false;
-      }
-      poolGuard.sourceGenerations?.push({
-        id: publication.source.id,
-        generation: publication.generation,
-      });
-      if (!(await isCapacitySeedStillCurrent(db, seed))) {
-        await disableCapacitySourceAvailability(db, scope, publication.source);
-        return;
-      }
-
-      const resolvedOfferings = await resolveOfferingsForSeed(materializedSeed, options);
-      const sourceStillCurrent = await isCapacitySourceRefreshCurrent(db, publication);
-      if (!sourceStillCurrent || !(await isCapacitySeedStillCurrent(db, seed))) return;
-      const [existingCandidate] = await db
-        .select({ id: schema.capacityPoolCandidates.id })
-        .from(schema.capacityPoolCandidates)
-        .where(
-          and(
-            eq(schema.capacityPoolCandidates.poolId, pool.id),
-            eq(schema.capacityPoolCandidates.capacitySourceId, publication.source.id)
-          )
+        if (seed.active && !(await isCapacitySeedStillCurrent(db, seed))) return;
+        // No credential copy: the anchor row carries no secret. The source binds to the EXACT
+        // credential via credential_source + credential_reference + external_source_ref +
+        // credential_version; the anchor only satisfies the shipped capacity_sources CHECK.
+        const materializedSeed = seed.active
+          ? await ensureCapacitySourceCredentialAnchor(db, seed)
+          : seed;
+        if (materializedSeed.active && !(await isCapacitySeedStillCurrent(db, seed))) return;
+        const existingSource = await findCapacitySourceForCredential(db, materializedSeed);
+        // Credential lifecycle hooks/manual Refresh can re-enable a reconnected account;
+        // an old automatic continuation cannot revive disabled authority.
+        if (
+          options.refreshContinuation &&
+          materializedSeed.active &&
+          existingSource &&
+          existingSource.status !== ACTIVE_STATUS
         )
-        .limit(1);
-      // Failed catalogs can seed a newly created source only. Existing sources retain
-      // known-empty API catalogs and explicit membership, including deleted candidates.
-      if (resolvedOfferings.refreshSucceeded || (!existingSource && !existingCandidate)) {
-        const result = await ensureCandidatesForSource(
-          db,
-          pool.id,
-          publication.source.id,
-          materializedSeed.provider,
-          resolvedOfferings.offerings,
-          {
-            sourceGeneration: publication.generation,
-            sourceAuthorityGeneration: publication.source.authorityGeneration,
-            catalogComplete:
-              resolvedOfferings.refreshSucceeded && resolvedOfferings.catalogComplete !== false,
-            publishBatchSize: resolveCandidatePublishBatchSize(options),
-            // Measured from publication start, so a slow catalog fetch cannot spend it.
-            publishDeadlineAt: Date.now() + publishBudgetMs,
-            cursorStore: platformSettingsCursorStore(db, {
-              sourceId: publication.source.id,
-              generation: publication.generation,
-            }),
+          return;
+        if (!materializedSeed.active) {
+          if (
+            existingSource &&
+            existingSource.sourceGeneration <= seedSnapshotGeneration &&
+            (await isCapacitySeedStillCurrent(db, seed, false))
+          ) {
+            await disableCapacitySourceAvailability(db, scope, existingSource);
           }
-        );
-        publicationComplete &&= result.publicationComplete;
-      } else {
-        // A failed refresh cannot certify completion of an earlier bounded publication.
-        publicationComplete &&= pool.migrationState === 'complete';
-      }
-    })
-  );
+          return;
+        }
+        activeSeedKeys.add(sourceIdentityKeyForSeed(materializedSeed));
+        await options.beforeSourcePublication?.({ seed: materializedSeed, existingSource });
+        if (!(await isCapacitySeedStillCurrent(db, seed))) return;
+
+        const publication = existingSource
+          ? await updateCapacitySourceForSeed(db, existingSource, materializedSeed, scope)
+          : await insertCapacitySourceForSeed(db, materializedSeed, scope);
+        if (publication.source.status !== ACTIVE_STATUS) return;
+        // A newer publisher owns this refresh; do not certify its unfinished candidates.
+        if (!publication.published) {
+          return false;
+        }
+        poolGuard.sourceGenerations?.push({
+          id: publication.source.id,
+          generation: publication.generation,
+        });
+        if (!(await isCapacitySeedStillCurrent(db, seed))) {
+          await disableCapacitySourceAvailability(db, scope, publication.source);
+          return;
+        }
+
+        const resolvedOfferings = await resolveOfferingsForSeed(materializedSeed, options);
+        if (Date.now() >= (options.reconciliationDeadlineAt ?? Infinity)) {
+          publicationComplete = false;
+          return;
+        }
+        const sourceStillCurrent = await isCapacitySourceRefreshCurrent(db, publication);
+        if (!sourceStillCurrent || !(await isCapacitySeedStillCurrent(db, seed))) return;
+        const [existingCandidate] = await db
+          .select({ id: schema.capacityPoolCandidates.id })
+          .from(schema.capacityPoolCandidates)
+          .where(
+            and(
+              eq(schema.capacityPoolCandidates.poolId, pool.id),
+              eq(schema.capacityPoolCandidates.capacitySourceId, publication.source.id)
+            )
+          )
+          .limit(1);
+        // Failed catalogs can seed a newly created source only. Existing sources retain
+        // known-empty API catalogs and explicit membership, including deleted candidates.
+        if (resolvedOfferings.refreshSucceeded || (!existingSource && !existingCandidate)) {
+          const result = await ensureCandidatesForSource(
+            db,
+            pool.id,
+            publication.source.id,
+            materializedSeed.provider,
+            resolvedOfferings.offerings,
+            {
+              poolPublicationGuard: poolGuard,
+              sourceGeneration: publication.generation,
+              sourceAuthorityGeneration: publication.source.authorityGeneration,
+              catalogValidated: resolvedOfferings.catalogValidated,
+              catalogComplete:
+                resolvedOfferings.refreshSucceeded && resolvedOfferings.catalogComplete !== false,
+              publishBatchSize: resolveCandidatePublishBatchSize(options),
+              // Measured from publication start, so a slow catalog fetch cannot spend it.
+              publishDeadlineAt: Math.min(
+                Date.now() + publishBudgetMs,
+                options.reconciliationDeadlineAt ?? Infinity
+              ),
+              cursorStore: platformSettingsCursorStore(db, {
+                sourceId: publication.source.id,
+                generation: publication.generation,
+              }),
+            }
+          );
+          if (result.poolPublicationGuard) {
+            selectionRevisionAlreadyBumped ||=
+              result.poolPublicationGuard.revision !== poolGuard.revision;
+            poolGuard = {
+              ...result.poolPublicationGuard,
+              sourceGenerations: poolGuard.sourceGenerations,
+            };
+          }
+          publicationComplete &&=
+            result.publicationComplete &&
+            resolvedOfferings.refreshSucceeded &&
+            resolvedOfferings.catalogValidated === true;
+        } else {
+          // A failed refresh cannot certify completion of an earlier bounded publication.
+          publicationComplete = false;
+        }
+      })()
+    );
+  }
   if (publications.some((published) => published === false))
     return readDefaultPoolSummary(db, scope, { includeDisabled: true });
 
-  let selectionRevisionAlreadyBumped = false;
   for (const mirror of managedGcpMirrors) {
     // Never let generic retirement discard choices if the fenced repair deferred.
     activeSeedKeys.add(`external:${composableAttachmentReference(mirror.attachmentId)}`);

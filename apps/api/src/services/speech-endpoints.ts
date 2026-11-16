@@ -2,13 +2,13 @@
  * OpenAI-compatible speech endpoints for installations without the Workers AI binding
  * (overnight B3 A4/A5). Settings: `speech-endpoint-settings.ts`.
  *
- * Every call goes through `guardedFetch`: the host and each redirect hop are checked, cloud
+ * Every call goes through `guardedFetchWithDeadline`: the host and each redirect hop are checked, cloud
  * metadata is refused, and a private-network host needs the admin's `allowPrivateNetwork` opt-in
  * (the same policy as the LLM endpoint, `llm-chat-target.ts`). Response bodies are never logged.
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { classifyHost, guardedFetch } from '../lib/network-hosts';
+import { classifyHost, guardedFetchWithDeadline } from '../lib/network-hosts';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { resolveAdminSettingDetailsMany } from './admin-settings-resolution';
 import { outboundMaxRedirectsValue } from './outbound-fetch-settings';
@@ -124,7 +124,7 @@ export class SpeechEndpointError extends Error {
 async function send(endpoint: SpeechEndpoint, path: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers);
   if (endpoint.apiKey) headers.set('Authorization', `Bearer ${endpoint.apiKey}`);
-  const response = await guardedFetch(
+  const response = await guardedFetchWithDeadline(
     `${endpoint.baseUrl}${path}`,
     { ...init, headers },
     {

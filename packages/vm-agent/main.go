@@ -65,7 +65,7 @@ func runStandaloneMode(cfg *config.Config) {
 	// vm-agent endpoint. Without this, the agent's `git` commands prompt for a username
 	// and fail in the non-interactive container. Non-fatal — the agent can still
 	// run without git access.
-	server.ConfigureStandaloneGitCredentialHelper(cfg.GitCredentialTimeout)
+	server.ConfigureStandaloneGitCredentialHelper(cfg.WorkspaceID, cfg.GitCredentialTimeout)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

@@ -30,7 +30,9 @@ import { resolveProjectAgentDefault } from '../../src/services/project-agent-def
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const apiSrc = (rel: string) => readFileSync(resolve(process.cwd(), 'src', rel), 'utf8');
-const webSrc = (rel: string) => readFileSync(resolve(process.cwd(), '../web/src', rel), 'utf8');
+// Full paths from apps/api, so CI suite selection (scripts/quality/ci-suite-selection.test.ts)
+// can see which web files this suite reads.
+const webSrc = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const sharedSrc = (rel: string) =>
   readFileSync(resolve(process.cwd(), '../../packages/shared/src', rel), 'utf8');
 
@@ -418,9 +420,9 @@ describe('Project agent defaults — UI section (unified)', () => {
   // unified ProjectAgentCard + ProjectAgentsSection pair. Behavioral tests
   // live in apps/web/tests/unit/components/project-agents-section.test.tsx;
   // here we only assert the structural wiring to the new unified section.
-  const card = webSrc('components/ProjectAgentCard.tsx');
-  const section = webSrc('components/ProjectAgentsSection.tsx');
-  const page = webSrc('components/project-settings/ProjectSettingsAgentsTab.tsx');
+  const card = webSrc('../web/src/components/ProjectAgentCard.tsx');
+  const section = webSrc('../web/src/components/ProjectAgentsSection.tsx');
+  const page = webSrc('../web/src/components/project-settings/ProjectSettingsAgentsTab.tsx');
 
   it('ProjectAgentCard imports ModelSelect for model combobox reuse', () => {
     expect(card).toContain("from './ModelSelect'");

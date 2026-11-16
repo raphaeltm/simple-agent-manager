@@ -37,7 +37,7 @@ export const ideaRoutes = new Hono<{ Bindings: Env }>();
  * Session auth, per route rather than as `use('/*', …)`.
  *
  * `ideaUpdateRoutes` is mounted at the same base path, and Hono merges subrouters mounted at
- * the same path: a wildcard here would run on its routes too (`apps/api/.claude/rules/06-api-patterns.md`,
+ * the same path: a wildcard here would run on its routes too (`.claude/rules/06-api-patterns.md`,
  * program decision 11). Both routers happen to want the same two middlewares today, which is
  * exactly why the leak would be invisible until one of them did not.
  */

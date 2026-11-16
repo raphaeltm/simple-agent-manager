@@ -3,6 +3,8 @@ import * as v from 'valibot';
 
 import { channelOperations } from './channel-operations';
 import { connectorOperations } from './connector-operations';
+import { inboxOperations } from './inbox-operations';
+import { insightsOperations } from './insights-operations';
 import { operationalOperations } from './operational-operations';
 import { platformOperations } from './platform-operations';
 import { scheduleOperations } from './schedule-operations';
@@ -14,11 +16,13 @@ import { usageOperations } from './usage-operations';
 export const operations = [
   ...platformOperations,
   ...connectorOperations,
+  ...inboxOperations,
   ...operationalOperations,
   ...teamOperations,
   ...scheduleOperations,
   ...channelOperations,
   ...usageOperations,
+  ...insightsOperations,
 ] as const;
 
 export function operationInputJsonSchema(

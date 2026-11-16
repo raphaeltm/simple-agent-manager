@@ -1,8 +1,9 @@
 import {
-  Bell,
   Brain,
   Eye,
   FolderOpen,
+  Inbox,
+  LayoutDashboard,
   Lightbulb,
   MessageSquare,
   Monitor,
@@ -24,8 +25,7 @@ import type { SessionSummaryItem } from '../lib/api';
 const DEFAULT_MAX_CONTEXT_RESULTS = 20;
 
 const MAX_CONTEXT_RESULTS = parseInt(
-  import.meta.env.VITE_CMD_PALETTE_MAX_CONTEXT_RESULTS ||
-    String(DEFAULT_MAX_CONTEXT_RESULTS),
+  import.meta.env.VITE_CMD_PALETTE_MAX_CONTEXT_RESULTS || String(DEFAULT_MAX_CONTEXT_RESULTS)
 );
 
 // ── Types ──
@@ -67,23 +67,79 @@ interface ProjectActionItem {
 
 // Project-scoped navigation targets. `path` is appended to `/projects/:projectId/`.
 const PROJECT_NAV_ITEMS: ProjectActionItem[] = [
+  {
+    id: 'ctx-project-overview',
+    label: 'Go to Overview',
+    icon: <LayoutDashboard size={14} />,
+    path: 'overview',
+  },
   { id: 'ctx-project-chat', label: 'Go to Chat', icon: <MessageSquare size={14} />, path: 'chat' },
   { id: 'ctx-project-ideas', label: 'Go to Ideas', icon: <Lightbulb size={14} />, path: 'ideas' },
-  { id: 'ctx-project-deployments', label: 'Go to Deployments', icon: <Rocket size={14} />, path: 'deployments' },
-  { id: 'ctx-project-settings', label: 'Go to Settings', icon: <Settings size={14} />, path: 'settings' },
-  { id: 'ctx-project-library', label: 'Go to Library', icon: <FolderOpen size={14} />, path: 'library' },
-  { id: 'ctx-project-agent-context', label: 'Go to Agent Context', icon: <Brain size={14} />, path: 'agent-context' },
-  { id: 'ctx-project-notifications', label: 'Go to Notifications', icon: <Bell size={14} />, path: 'notifications' },
-  { id: 'ctx-project-automation', label: 'Go to Automation', icon: <Workflow size={14} />, path: 'automation' },
-  { id: 'ctx-project-profiles', label: 'Go to Profiles', icon: <UserCog size={14} />, path: 'profiles' },
+  {
+    id: 'ctx-project-deployments',
+    label: 'Go to Deployments',
+    icon: <Rocket size={14} />,
+    path: 'deployments',
+  },
+  {
+    id: 'ctx-project-settings',
+    label: 'Go to Settings',
+    icon: <Settings size={14} />,
+    path: 'settings',
+  },
+  {
+    id: 'ctx-project-library',
+    label: 'Go to Library',
+    icon: <FolderOpen size={14} />,
+    path: 'library',
+  },
+  {
+    id: 'ctx-project-agent-context',
+    label: 'Go to Agent Context',
+    icon: <Brain size={14} />,
+    path: 'agent-context',
+  },
+  {
+    id: 'ctx-project-inbox',
+    label: 'Go to Inbox',
+    icon: <Inbox size={14} />,
+    path: 'inbox',
+  },
+  {
+    id: 'ctx-project-automation',
+    label: 'Go to Automation',
+    icon: <Workflow size={14} />,
+    path: 'automation',
+  },
+  {
+    id: 'ctx-project-profiles',
+    label: 'Go to Profiles',
+    icon: <UserCog size={14} />,
+    path: 'profiles',
+  },
   { id: 'ctx-project-skills', label: 'Go to Skills', icon: <Zap size={14} />, path: 'skills' },
 ];
 
 // Project-scoped create actions. `?edit=new` opens the create editor on the target page.
 const PROJECT_CREATE_ITEMS: ProjectActionItem[] = [
-  { id: 'ctx-create-automation', label: 'Create Automation', icon: <Plus size={14} />, path: 'automation/new' },
-  { id: 'ctx-create-profile', label: 'Create Profile', icon: <Plus size={14} />, path: 'profiles?edit=new' },
-  { id: 'ctx-create-skill', label: 'Create Skill', icon: <Plus size={14} />, path: 'skills?edit=new' },
+  {
+    id: 'ctx-create-automation',
+    label: 'Create Automation',
+    icon: <Plus size={14} />,
+    path: 'automation/new',
+  },
+  {
+    id: 'ctx-create-profile',
+    label: 'Create Profile',
+    icon: <Plus size={14} />,
+    path: 'profiles?edit=new',
+  },
+  {
+    id: 'ctx-create-skill',
+    label: 'Create Skill',
+    icon: <Plus size={14} />,
+    path: 'skills?edit=new',
+  },
 ];
 
 // ── Hook ──
@@ -109,11 +165,14 @@ export function useCommandPaletteContext({
   const location = useLocation();
   const navigate = useNavigate();
 
-  const context: CommandPaletteContext = useMemo(() => ({
-    projectId: extractProjectId(location.pathname),
-    sessionId: extractSessionId(location.pathname),
-    taskId: extractTaskId(location.pathname),
-  }), [location.pathname]);
+  const context: CommandPaletteContext = useMemo(
+    () => ({
+      projectId: extractProjectId(location.pathname),
+      sessionId: extractSessionId(location.pathname),
+      taskId: extractTaskId(location.pathname),
+    }),
+    [location.pathname]
+  );
 
   const contextActions: ContextAction[] = useMemo(() => {
     const actions: ContextAction[] = [];
@@ -136,9 +195,7 @@ export function useCommandPaletteContext({
 
     // ── Session-scoped actions ──
     if (sessionId) {
-      const session = chatSessions.find(
-        (s) => s.id === sessionId && s.projectId === projectId,
-      );
+      const session = chatSessions.find((s) => s.id === sessionId && s.projectId === projectId);
 
       if (session?.workspaceId) {
         actions.push({
@@ -166,7 +223,7 @@ export function useCommandPaletteContext({
     if (taskId && !sessionId) {
       // Find a session linked to this task
       const linkedSession = chatSessions.find(
-        (s) => s.taskId === taskId && s.projectId === projectId,
+        (s) => s.taskId === taskId && s.projectId === projectId
       );
 
       if (linkedSession) {

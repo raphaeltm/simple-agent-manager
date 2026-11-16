@@ -22,7 +22,7 @@ Keep this root rule compact. The full historical quality-gate text is preserved 
 ## Scoped Details
 
 - Staging procedure: `.claude/rules/13-staging-verification.md`
-- Visual UI audit: `apps/web/.claude/rules/17-ui-visual-testing.md` and package-scoped copies
+- Visual UI audit: `.claude/rules/17-ui-visual-testing.md`
 - Cross-boundary tests: `.claude/rules/23-cross-boundary-contract-tests.md` and `.claude/rules/35-vertical-slice-testing.md`
-- Data migrations: `apps/api/.claude/rules/31-migration-safety.md`
-- VM/cloud-init infrastructure: `.claude/rules/22-infrastructure-merge-gate.md` plus package-scoped VM/cloud-init rules
+- Data migrations: `.claude/rules/31-migration-safety.md`
+- VM/cloud-init infrastructure: `.claude/rules/22-infrastructure-merge-gate.md` plus `.claude/rules/06-vm-agent-patterns.md`

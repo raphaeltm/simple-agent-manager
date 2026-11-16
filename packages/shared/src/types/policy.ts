@@ -24,6 +24,21 @@ export type PolicySource = (typeof POLICY_SOURCES)[number];
 export const POLICY_SCOPES = ['always', 'task'] as const;
 export type PolicyScope = (typeof POLICY_SCOPES)[number];
 
+/**
+ * Policy inject modes — how a policy reaches an agent's `get_instructions` payload.
+ *
+ * - `pinned`: always injected in full into every session. This is the default for
+ *   every policy, existing and new, so deploying inject modes changes nothing until a
+ *   project admin deliberately unpins a policy.
+ * - `on_demand`: always listed by title and id in a disclosed index, and injected in
+ *   full only when it ranks as relevant to the session's task, inside a size budget.
+ *   An on-demand policy still applies; the index tells the agent to fetch it with
+ *   `policies_read` method `get` before acting in its area.
+ */
+export const POLICY_INJECT_MODES = ['pinned', 'on_demand'] as const;
+export type PolicyInjectMode = (typeof POLICY_INJECT_MODES)[number];
+export const DEFAULT_POLICY_INJECT_MODE: PolicyInjectMode = 'pinned';
+
 /** A project policy entry stored in ProjectData DO SQLite. */
 export interface ProjectPolicy {
   id: string;
@@ -45,6 +60,8 @@ export interface ProjectPolicy {
    * so a human can see why it stopped applying.
    */
   expiresAt: number | null;
+  /** How this policy reaches agent sessions. Defaults to `pinned`. */
+  injectMode: PolicyInjectMode;
   createdAt: number;
   updatedAt: number;
 }
@@ -59,6 +76,7 @@ export interface CreatePolicyRequest {
   confidence?: number;
   scope?: PolicyScope;
   expiresAt?: number | null;
+  injectMode?: PolicyInjectMode;
 }
 
 /** Request to update an existing policy. */
@@ -71,6 +89,8 @@ export interface UpdatePolicyRequest {
   scope?: PolicyScope;
   /** Pass `null` to clear an existing expiry (make the policy permanent). */
   expiresAt?: number | null;
+  /** Omit to leave the inject mode unchanged. */
+  injectMode?: PolicyInjectMode;
 }
 
 /** Response from the list policies endpoint. */
@@ -99,4 +119,8 @@ export function isPolicySource(value: string): value is PolicySource {
 
 export function isPolicyScope(value: string): value is PolicyScope {
   return (POLICY_SCOPES as readonly string[]).includes(value);
+}
+
+export function isPolicyInjectMode(value: string): value is PolicyInjectMode {
+  return (POLICY_INJECT_MODES as readonly string[]).includes(value);
 }

@@ -21,9 +21,76 @@ Every PR that changes code MUST:
 | Environment    | Base Domain                | App URL                                | API URL                                |
 | -------------- | -------------------------- | -------------------------------------- | -------------------------------------- |
 | **Staging**    | `sammy.party`              | `https://app.sammy.party`              | `https://api.sammy.party`              |
+| **Staging 2**  | `sammy2.party`             | `https://app.sammy2.party`             | `https://api.sammy2.party`             |
 | **Production** | `simple-agent-manager.org` | `https://app.simple-agent-manager.org` | `https://api.simple-agent-manager.org` |
 
 **Staging is `sammy.party`, NOT `simple-agent-manager.org`.** When verifying PRs, always test against the staging domain.
+
+## Two Staging Installations
+
+There are two staging installations. Both run with the `staging` GitHub Environment's
+credentials, in the same Cloudflare account. Each has its own Workers, D1, KV, R2, Pages, DNS
+zone, Pulumi stack, users and data. They share the Pulumi state bucket (separate stacks), the
+account's workers.dev subdomain and the Hetzner account.
+
+| Installation | App                        | API                        | Prefix / stack      |
+| ------------ | -------------------------- | -------------------------- | ------------------- |
+| `staging`    | `https://app.sammy.party`  | `https://api.sammy.party`  | `sam` / `staging`   |
+| `staging2`   | `https://app.sammy2.party` | `https://api.sammy2.party` | `sam2` / `staging2` |
+
+**Choosing one.** Read the queue of both (`node scripts/deploy/staging-lease.mjs status staging`
+and `... status staging2`) and reserve the one that is free or has the shorter queue. Each
+installation has its own lease and queue, its own concurrency groups and its own data, so two
+agents can verify at the same time. Deploy with
+`gh workflow run deploy-staging.yml --ref <branch> -f environment=staging2 -f sam_task_id=<id>`
+(omit `environment` for `staging`). Storage activation and the agent-email DNS audit are
+primary-only, and so is the signed GitHub-trigger audit (staging2 has no GitHub App). The
+shared deployment engine (`use_shared_engine`) is not supported for staging2. A `staging2` GitHub Environment exists only because lease records are kept per
+installation; it holds no secrets and must not get any (staging2's jobs run with `staging`).
+
+**Signing in to staging2.** Use workload identity; no separate token exists for staging2. (The
+staging smoke token is also registered there, as the admin, so the deploy's smoke tests and pool
+seeding can sign in; agents should use workload identity.) Audience
+`https://api.sammy2.party/api/auth/workload-identity-login`; targets `staging2-agent-admin`
+(superadmin) or `staging2-agent-user` (ordinary user). Add the returned cookie for
+`.sammy2.party`. The issuer and allowed source project/user are the same as for `staging`.
+
+**What a fresh staging2 has.** The deploy bootstraps it on every run
+(`scripts/deploy/bootstrap-staging-installation.ts`, secondary installations only): the two users
+above, a platform cloud credential copied from `staging` (a platform GCP credential, or a GCP
+service-account key owned by one of staging's agent test accounts, otherwise any other enabled
+platform cloud credential, today Hetzner; staging's GCP credential today is workload identity, which only trusts
+`sammy.party`'s issuer, so staging2 uses Hetzner), the staging smoke token registered for
+the admin, and the shared compute pool's machines (the same ones `staging`'s pool has active, or, when the
+providers differ, the two cheapest machines per role with at least 2 vCPU and 8 GB).
+Both users are opted into the SAM AI proxy for each copied agent key
+(`providerMode: sam`), the only way a platform key is used. Today that is Claude Code, so
+start sessions with the Claude Code agent (for example set the project's default agent);
+the installation default agent has no key. There is no GitHub App: use Artifacts-backed
+projects. The shared pool is capped at 2 nodes on first seeding, because the Hetzner account
+is shared with staging and production.
+
+**Querying staging2 directly.** Same account and `$CF_TOKEN` as staging. Look the D1 id up by
+name (`sam2-staging2`): `GET /accounts/$CF_ACCOUNT_ID/d1/database?name=sam2-staging2`.
+
+**Teardown.** Actions → Teardown → `staging2` → `DELETE`. It touches only `sam2-*` resources,
+the `staging2` Pulumi stack and the `sammy2.party` zone's workspace and node records. Delete test workspaces and
+nodes first; teardown does not delete VMs. The next deploy rebuilds staging2 from nothing.
+
+**Branches that add a Durable Object migration.** Durable Object migrations only move forward.
+Once a branch deploys a tag that `origin/main` lacks (a new `[[migrations]]` entry in
+`apps/api/wrangler.toml`), every main-based branch fails the migration preflight on that
+installation until the branch merges. So `deploy-staging.yml` refuses such deploys on primary
+`staging` before reserving a place (`scripts/deploy/staging-migration-guard.mjs`, which fails closed
+when it cannot compare the two files; it runs from your branch's workflow copy, so branches must
+include it, and the deploy-time migration preflight stays the backstop). Use `staging2`. Clean-up duty: if your branch has not merged
+when you are done on `staging2`, tear it down (Actions → Teardown → `staging2` → `DELETE`, after
+deleting test workspaces and nodes) and redeploy `main` to it (`gh workflow run deploy-staging.yml
+--ref main -f environment=staging2 -f sam_task_id=<id>`) before you release. staging2 rebuilds
+from nothing, so main-based branches can use it again. Nothing does this automatically.
+
+Adding a third: one entry in `scripts/deploy/staging-installations.mjs` plus a zone in the
+staging Cloudflare account that the staging deploy token can edit.
 
 ## Why This Exists
 
@@ -35,32 +102,105 @@ Local tests run against Miniflare mocks. CI runs unit tests in isolation. Neithe
 
 All checks — including **SonarCloud Code Analysis** — MUST pass before merge. SonarCloud provides valuable feedback on code quality, duplication, and potential bugs. Treat its findings the same as any other CI failure: investigate, fix, and only merge when green.
 
-GitHub may label some checks as informational, advisory, or not strictly required by branch protection. If the check is red or reports failure, agents must still treat it as a real merge blocker. Failed Preflight Evidence, SonarCloud, lint-adjacent, quality, or evidence checks must be inspected and resolved before merge. Do not summarize them away as "non-blocking" unless the repository explicitly documents that exact check as non-blocking or a human explicitly approves the exception in the PR.
+GitHub may label some checks as informational, advisory, or not strictly required by branch protection. If the check is red or reports failure, agents must still treat it as a real merge blocker. Failed PR Evidence, SonarCloud, lint-adjacent, quality, or evidence checks must be inspected and resolved before merge. Do not summarize them away as "non-blocking" unless the repository explicitly documents that exact check as non-blocking or a human explicitly approves the exception in the PR.
 
 ### 1. Staging Deployment Must Be Green
 
 Staging deployment is **manual** — it does NOT run automatically on PRs. You must trigger it yourself:
 
-1. **Check for existing active runs** before triggering:
+1. **Read the queue of both installations** (one `gh api` call each):
 
    ```bash
-   gh run list --workflow=deploy-staging.yml --status=in_progress --status=queued --json databaseId,status,createdAt,headBranch
+   node scripts/deploy/staging-lease.mjs status staging2   # and: status staging
+   # Raw records, newest first (a `snapshot` plus newer `reservation` events):
+   gh api 'repos/raphaeltm/simple-agent-manager/deployments?environment=staging2&task=staging-lease&per_page=100' \
+     --jq '[.[] | {id, payload}]'
    ```
 
-   If there are active or queued runs, wait at least **5 minutes** from the most recent run's `createdAt` before triggering yours.
+   `status` prints the holder, whether the slot is free, and the ordered queue
+   (branch, SAM task ID, reserved-at, turn window). There are two staging
+   installations, `staging` (`sammy.party`) and `staging2` (`sammy2.party`); pick the
+   one that is free or has the shorter queue and use that name in every command
+   below. They share the `staging` credentials but nothing else. staging2 sign-in is
+   workload identity only; see "Two Staging Installations" in the full reference.
 
-2. **Trigger the deployment:**
+2. **Reserve first, then deploy only on your turn.** Reserving takes seconds and
+   deploys nothing:
 
    ```bash
-   gh workflow run deploy-staging.yml --ref <your-branch>
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging2 -f lease_action=reserve -f sam_task_id=<your-task-id>
    ```
 
-3. **Watch for completion:**
+   The run summary shows your position and estimated turn. When the slot is free
+   (holder released, or its lease expired), only the head of the queue may take it,
+   for `STAGING_LEASE_GRACE_MINUTES` (default 10); if it does not, the next entry
+   gets its own grace period and the missed one is dropped. If the holder released
+   early, the head's turn still lasts until the holder's announced expiry plus grace.
+   Schedule a one-time SAM wake (`schedules_write`, method `create`,
+   `message_session` for your session) at your turn start, persist the schedule ID,
+   and end the turn or do independent work. Do not poll, and **never dispatch a
+   deploy while another branch holds the lease or it is another branch's turn**: the
+   run is refused (your place is kept). A reservation expires after
+   `STAGING_LEASE_RESERVATION_MINUTES` (default 480) unless renewed by reserving
+   again, which keeps your place. While the holder is a branch whose workflow predates
+   the queue (its lease record is version 1), no reservation is written, because its
+   workflow cannot read queue records and would be locked out of its own lease:
+   schedule a wake at its expiry and reserve then.
+
+   On your turn, deploy (or `-f lease_action=acquire` to hold without deploying):
+
    ```bash
-   sleep 5
-   gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=1 --json databaseId,status
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging2 -f sam_task_id=<your-task-id> -f lease_hold_minutes=30
+   ```
+
+   A deploy dispatch also reserves if you are not queued yet, and goes straight
+   through when the slot is free and nobody is waiting. The `queue` job records
+   places outside any concurrency group, so no later dispatch can cancel your place;
+   only a branch that holds the lease or whose turn it is reaches the serialized
+   `lease` job. Same-branch redeploys renew the lease. Expiry is acquisition time
+   plus expected deployment time (`STAGING_LEASE_EXPECTED_DEPLOY_MINUTES`, default
+   30; zero for `acquire`) plus the live-check hold
+   (`STAGING_LEASE_DEFAULT_HOLD_MINUTES`, default 30, capped by
+   `STAGING_LEASE_MAX_HOLD_MINUTES`, default 120). Failed or cancelled runs keep the
+   lease until release or expiry.
+
+3. **Watch the run.** Keep the lease through every live check (section 2 below, and the
+   infrastructure checks where they apply); then **release** and hand over:
+
+   ```bash
+   gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=3 \
+     --json databaseId,status,conclusion,headSha
    gh run watch <run-id>
    ```
+
+   After every live check and test-resource cleanup:
+
+   ```bash
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging2 -f lease_action=release -f sam_task_id=<your-task-id>
+   ```
+
+   Confirm the release run passed and `status` shows no holder. Release also
+   removes you from the queue if you were waiting. A branch that releases and wants
+   the slot again queues behind everyone already waiting. **If you release early,
+   message the next task in the queue** (`send_durable_message` to its SAM task ID
+   from `status`) so it can take its turn before its scheduled wake. Successful
+   deployment completion is not a release. Release only after your own deploy run
+   has finished: the next holder's deploy waits for an in-flight one in the
+   `staging-apply-<installation>` group, but your live checks are no longer
+   protected once you release.
+
+   Records are GitHub deployments with task `staging-lease`, keyed by installation.
+   A malformed snapshot or an unknown record version fails closed (no one can
+   change the lease until it is fixed through a reviewed change; never delete
+   history to get around another branch); a malformed reservation is skipped and
+   reported in the run. Branches whose workflow copy predates the queue are refused
+   by every queue record ("Malformed lease record"): they cannot reserve, deploy,
+   acquire or release until they update from `origin/main`. Only the `queue` and
+   `lease` jobs receive `deployments: write`; lease writes must go through the
+   workflow.
 
 For container-backed Instant verification, `wrangler deploy` success means the
 rollout started, not that every instance serves the new image. The shared staging
@@ -129,13 +269,13 @@ After staging deployment succeeds, use Playwright to test the live app:
 
    Staging trusts:
 
-   | Value | |
-   | --- | --- |
-   | Issuer | `https://api.simple-agent-manager.org/oidc` |
-   | Source project | `01KHRJGANBBWGDY1NZ0KVF0D4J` (SAM) |
-   | Source user | `4bw1FJlXCOgSGq0TsQgpiMAhQKjGOSXx` (chats owned by this user) |
-   | Target | `toWzGjNW3IyUkCVItRQv3qSn0wI8c22y` (the staging smoke-test user) |
-   | Audience | `https://api.sammy.party/api/auth/workload-identity-login` |
+   | Value          |                                                                  |
+   | -------------- | ---------------------------------------------------------------- |
+   | Issuer         | `https://api.simple-agent-manager.org/oidc`                      |
+   | Source project | `01KHRJGANBBWGDY1NZ0KVF0D4J` (SAM)                               |
+   | Source user    | `4bw1FJlXCOgSGq0TsQgpiMAhQKjGOSXx` (chats owned by this user)    |
+   | Target         | `toWzGjNW3IyUkCVItRQv3qSn0wI8c22y` (the staging smoke-test user) |
+   | Audience       | `https://api.sammy.party/api/auth/workload-identity-login`       |
 
    a. Exchange a token (one `exec_with_secrets` call; the token never appears in output):
 
@@ -152,8 +292,17 @@ After staging deployment succeeds, use Playwright to test the live app:
    for `.sammy.party` and open the app:
 
    ```js
-   await page.context().addCookies([{ name: '__Secure-better-auth.session_token', value: 'VALUE',
-     domain: '.sammy.party', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
+   await page.context().addCookies([
+     {
+       name: '__Secure-better-auth.session_token',
+       value: 'VALUE',
+       domain: '.sammy.party',
+       path: '/',
+       httpOnly: true,
+       secure: true,
+       sameSite: 'Lax',
+     },
+   ]);
    await page.goto('https://app.sammy.party');
    ```
 

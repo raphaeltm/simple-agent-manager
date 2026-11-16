@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # Draft pull requests run only the quick checks (see `github.event.pull_request.draft`
+    # in the job conditions). Marking a PR ready for review starts the full suite on the
+    # same commit, so `ready_for_review` must trigger a run. `edited` and `labeled` are
+    # deliberately absent: see scripts/quality/pr-evidence-source.ts.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 env:
@@ -16,9 +21,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Pull requests share one group per PR and cancel superseded commits. Every other
+  # event (main pushes, manual runs) gets one group per commit, so a second main merge
+  # does not wait for the previous main run to finish. An older main run that finishes
+  # late cannot deploy over a newer one: deploy.yml serializes production runs and
+  # scripts/deploy/validate-production-dispatch.ts only deploys the current main tip.
+  # GitHub keeps one pending deploy run, so an older run's deploy can replace the tip's
+  # pending one; the gate then deploys the tip itself when the tip's CI is green, and
+  # otherwise waits for the tip's own CI completion to trigger its deploy.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   # Keep main CI runs alive so every successful main merge can trigger production deploy.
-  # Pull request runs still cancel superseded commits for faster feedback.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -35,8 +47,16 @@ jobs:
     if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 5
     runs-on: ubuntu-latest
+    # The suite outputs (api, api-unit, web, public-site, packages) select test suites by
+    # package dependency: a package's suite runs when it or anything it depends on changes.
+    # scripts/quality/ci-suite-selection.test.ts derives the expected paths from every
+    # package.json and fails when a filter misses a dependency. A main push runs every suite.
     outputs:
-      api: ${{ steps.filter.outputs.api }}
+      api: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api }}
+      api-unit: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api-unit }}
+      web: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.web }}
+      public-site: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.public-site }}
+      packages: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.packages }}
       vm-agent: ${{ steps.filter.outputs.vm-agent }}
       cli: ${{ steps.filter.outputs.cli }}
       devcontainer: ${{ steps.filter.outputs.devcontainer }}
@@ -44,8 +64,8 @@ jobs:
       infra: ${{ steps.filter.outputs.infra }}
       deploy-scripts: ${{ steps.filter.outputs.deploy-scripts }}
       ci-workflow: ${{ steps.filter.outputs.ci-workflow }}
-      marketing-site: ${{ steps.filter.outputs.marketing-site }}
       repo-quality: ${{ steps.filter.outputs.repo-quality }}
+      agent-instructions: ${{ steps.filter.outputs.agent-instructions }}
       web-ui: ${{ steps.filter.outputs.web-ui }}
       browser-install: ${{ steps.filter.outputs.browser-install }}
       go-modules: ${{ steps.filter.outputs.go-modules }}
@@ -55,19 +75,29 @@ jobs:
         id: filter
         with:
           filters: |
-            api:
+            # Inputs every package's tests share.
+            workspace-root: &workspace-root
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+              - 'tsconfig.json'
+              - 'vitest.coverage.ts'
+            # apps/api and every package it depends on (Durable Object Workers suite).
+            api: &api
+              - *workspace-root
               - 'apps/api/**'
-              - 'packages/shared/**'
-              - 'packages/worker-core/**'
+              - 'packages/agent-email/**'
+              - 'packages/ai-proxy/**'
               - 'packages/app-deployment/**'
+              - 'packages/cloud-init/**'
+              - 'packages/operations/**'
               - 'packages/project-data/**'
+              - 'packages/providers/**'
               - 'packages/repo-hosting/**'
               - 'packages/scheduler-core/**'
-              - 'packages/agent-email/**'
-              - 'packages/operations/**'
-              - 'packages/ai-proxy/**'
-              - 'packages/task-runner/**'
-              - 'packages/config/**'
+              - 'packages/shared/**'
+              - 'packages/worker-core/**'
               - 'scripts/quality/*migration*.ts'
               - 'scripts/quality/runtime-boundary*.ts'
               # Proved against the API read paths by tests/unit/config/omitted-worker-var-defaults.test.ts,
@@ -75,6 +105,81 @@ jobs:
               - 'scripts/deploy/worker-var-defaults.ts'
               - 'scripts/quality/fixtures/github-environment-variables-*.json'
               - 'scripts/quality/fixtures/worker-var-binding-audit-*.json'
+              # Cross-boundary fixtures shared with the VM agent and the web app.
+              - 'tests/fixtures/diagnostic-secret-canaries.json'
+              - 'tests/fixtures/provider-limit-rejections.json'
+            # The API unit suite also reads or imports files outside its dependencies.
+            # ci-suite-selection.test.ts scans the tests and their imports for these.
+            api-unit:
+              - *api
+              # Go sources, Makefile and `go test` runs in cross-boundary contract tests.
+              - 'packages/vm-agent/**'
+              # Omitted-worker-var defaults scan the tail worker's sources.
+              - 'apps/tail-worker/**'
+              # Lineage and start-work tests import or read these web modules.
+              - 'apps/web/src/components/ProjectAgentCard.tsx'
+              - 'apps/web/src/components/ProjectAgentsSection.tsx'
+              - 'apps/web/src/components/ideas/StartWorkSheet.tsx'
+              - 'apps/web/src/components/ideas/useStartWork.ts'
+              - 'apps/web/src/components/project-settings/ProjectSettingsAgentsTab.tsx'
+              - 'apps/web/src/components/task-hierarchy/buildHierarchyTree.ts'
+              - 'apps/web/src/lib/api/**'
+              - 'apps/web/src/lib/runtime-validation.ts'
+              - 'apps/web/src/lib/server-clock.ts'
+              - 'apps/web/src/pages/project-chat/lineageUtils.ts'
+              - 'apps/web/src/pages/project-chat/useTaskGroups.ts'
+              - 'scripts/deploy/deploy-signing-keys.ts'
+              - 'scripts/deploy/types.ts'
+              - 'scripts/deploy/vapid-keys.ts'
+              - 'scripts/quality/node-pool-boundary.ts'
+              - 'scripts/quality/node-pool-boundary/**'
+              - 'tests/fixtures/acp-activity-report-v1.json'
+              - 'tests/fixtures/deploy-release/**'
+              - 'tests/fixtures/durable-execution-protocol-v1.json'
+            web:
+              - *workspace-root
+              - 'apps/web/**'
+              - 'packages/acp-client/**'
+              - 'packages/shared/**'
+              - 'packages/terminal/**'
+              - 'packages/ui/**'
+              - 'tests/fixtures/diagnostic-secret-canaries.json'
+            # Storybook (packages/ui) and the public site (apps/www, which depends on ui).
+            public-site:
+              - *workspace-root
+              - 'apps/www/**'
+              - 'packages/ui/**'
+              - '.github/workflows/deploy-www.yml'
+              - 'scripts/quality/check-astro-templates.ts'
+              - 'scripts/quality/check-browser-evidence.ts'
+              - 'scripts/quality/check-workspace-test-surfaces.ts'
+            # Every workspace package whose tests `Test other packages` runs (all but api and
+            # web). A shared package also triggers api, web or public-site above.
+            packages:
+              - *workspace-root
+              - 'apps/installer/**'
+              - 'apps/tail-worker/**'
+              - 'apps/www/**'
+              - 'infra/**'
+              - 'packages/acp-client/**'
+              - 'packages/agent-email/**'
+              - 'packages/ai-proxy/**'
+              - 'packages/app-deployment/**'
+              - 'packages/cloud-init/**'
+              - 'packages/eslint-plugin-sam/**'
+              - 'packages/operations/**'
+              - 'packages/project-data/**'
+              - 'packages/providers/**'
+              - 'packages/repo-hosting/**'
+              - 'packages/scheduler-core/**'
+              - 'packages/shared/**'
+              - 'packages/terminal/**'
+              - 'packages/ui/**'
+              - 'packages/worker-core/**'
+              # apps/installer reads the installer protocol and source cache.
+              - 'scripts/deploy/installer-*'
+              # The www integrations catalog test checks the app's agent sign-in matrix.
+              - 'apps/web/src/components/AgentSettingsCard.tsx'
             vm-agent:
               - 'packages/vm-agent/**'
               - 'apps/api/Dockerfile.vm-agent-container'
@@ -140,13 +245,6 @@ jobs:
               - '.github/workflows/deploy-installer.yml'
               - 'scripts/quality/ci*.test.ts'
               - 'scripts/ci/run-with-apt-mirror-fallback.sh'
-            marketing-site:
-              - 'apps/www/**'
-              - '.github/workflows/deploy-www.yml'
-              # Shared sources the marketing site imports from @simple-agent-manager/ui
-              - 'packages/ui/src/glass/**'
-              - 'packages/ui/src/brand/**'
-              - 'packages/ui/package.json'
             repo-quality:
               - 'scripts/quality/check-runtime-tunables*'
               - 'scripts/quality/runtime-tunables-baseline.json'
@@ -161,6 +259,21 @@ jobs:
               - 'vitest*.ts'
               - 'eslint.config.*'
               - 'prettier.config.*'
+            # Files that decide what an agent harness loads. See
+            # scripts/quality/check-agent-context-budget.ts.
+            agent-instructions:
+              - '.claude/rules/**'
+              - '.claude/settings.json'
+              - '.claude/hooks/**'
+              - '.codex/**'
+              - 'CLAUDE.md'
+              - 'AGENTS.md'
+              - '**/AGENTS.md'
+              - 'AGENTS.override.md'
+              - '**/AGENTS.override.md'
+              - 'scripts/quality/agent-*'
+              - 'scripts/quality/check-agent-context-budget.ts'
+              - 'scripts/quality/go-optional-fields/**'
             web-ui:
               - 'apps/web/**'
               - 'packages/ui/**'
@@ -175,21 +288,26 @@ jobs:
               - '**/go.sum'
               - 'scripts/quality/check-go-vulnerability-diff.ts'
 
-  preflight-evidence:
-    name: Preflight Evidence
+  # One job for the PR-body and PR-content checks. They used to be three jobs that each
+  # spent a runner slot on checkout and install for a few seconds of work. Each check
+  # still runs when an earlier one fails, so a single run reports every evidence gap.
+  pr-evidence:
+    name: PR Evidence
     if: github.event_name == 'pull_request'
     timeout-minutes: 15
     runs-on: ubuntu-latest
-    # `pull-requests: read` + GITHUB_TOKEN let the check read the PR's CURRENT
+    # `pull-requests: read` + GITHUB_TOKEN let the checks read the PR's CURRENT
     # body/labels instead of the frozen event payload. Job-level `permissions`
     # REPLACES the top-level block, so `contents: read` must be restated for
-    # actions/checkout. Without both of these the check silently degrades to the
+    # actions/checkout. Without both of these the checks silently degrade to the
     # stale payload — see scripts/quality/ci-evidence-token-wiring.test.ts.
     permissions:
       contents: read
       pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
@@ -220,76 +338,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Validate no stale binary artifacts are tracked
+        if: ${{ !cancelled() }}
         run: pnpm quality:no-tracked-stale-binaries
 
-  specialist-review-evidence:
-    name: Specialist Review Evidence
-    if: github.event_name == 'pull_request'
-    timeout-minutes: 15
-    # See preflight-evidence above: required for live PR body/label reads.
-    permissions:
-      contents: read
-      pull-requests: read
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Validate specialist review evidence
+        if: ${{ !cancelled() }}
         run: pnpm quality:specialist-review
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-  ci-workflow:
-    name: CI Workflow
-    needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.ci-workflow == 'true'
-    timeout-minutes: 10
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Validate CI workflow wiring
-        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts check-runtime-tunables.test.ts ci-workspace-surfaces.test.ts ci-browser-install.test.ts
-
-  ui-compliance:
-    name: UI Compliance
-    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
-    timeout-minutes: 15
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Validate UI checklist evidence
+        if: ${{ !cancelled() }}
         run: node scripts/ci/check-ui-compliance.mjs
 
   lint:
@@ -379,8 +438,10 @@ jobs:
           SAM_GITLEAKS_BIN: ${{ runner.temp }}/gitleaks/gitleaks
         run: pnpm quality:gitleaks:pr
 
+  # Quick check (also runs on draft PRs). `pnpm build` is this job's first step, so a
+  # separate Build job would only repeat it on another runner.
   typecheck:
-    name: Type Check
+    name: Build and Type Check
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
     timeout-minutes: 15
@@ -404,17 +465,22 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
-  test:
-    name: Test
+  # The unit suites run in shards. One job used to run every package and took 20 to
+  # 30 min (apps/api alone ~23 min, apps/web ~11 min). Each shard writes a Vitest blob
+  # report that carries its coverage. A shard sees only part of its package, so its
+  # coverage thresholds are zeroed here; the `test` job merges the blobs and enforces
+  # the thresholds from the package's vitest.config.ts over the whole package.
+  # Shard counts are repeated in the matrix, the --shard flag and the `test` job's
+  # blob-count check; scripts/quality/ci-test-shards.test.ts keeps them in step.
+  test-api:
+    name: Test api (${{ matrix.shard }}/3)
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
-    # Normal runs took 12-20 min; on slower runners 3 runs on 2026-11-08 were
-    # cancelled at the old 20-min limit with no failing suite. After the worker
-    # was split into packages (2026-11-12) the same suites run as eight more
-    # turbo tasks and took 27 min, then hit the 30-min limit with no failing
-    # suite (run 43273493049). 45 is a stopgap until PR runs test only what
-    # changed (idea 01M77GBTAM775FAKY72RT4HMDV).
-    timeout-minutes: 45
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.api-unit == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -429,23 +495,132 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build packages
-        run: pnpm build
+      - name: Build API dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
 
-      - name: Run tests with coverage
-        # Bound both package scheduling and each Vitest pool. On the measured
-        # four-CPU runner this allows two pools of at most three workers.
+      - name: Run API unit test shard with coverage
+        working-directory: apps/api
+        env:
+          TEST_SHARD: ${{ matrix.shard }}
+        run: >-
+          pnpm exec vitest run --shard="${TEST_SHARD}/3"
+          --reporter=blob --reporter=default
+          --coverage --coverage.reporter=text-summary
+          --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
+          --coverage.thresholds.functions=0 --coverage.thresholds.lines=0
+
+      - name: Upload API blob report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-blob-api-${{ matrix.shard }}
+          path: apps/api/.vitest-reports/
+          # The blob directory is a dot-directory, which upload-artifact skips by default.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  test-web:
+    name: Test web (${{ matrix.shard }}/2)
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.web == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build web dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/web^...
+
+      - name: Run web unit test shard with coverage
+        working-directory: apps/web
+        env:
+          TEST_SHARD: ${{ matrix.shard }}
+        run: >-
+          pnpm exec vitest run --shard="${TEST_SHARD}/2"
+          --reporter=blob --reporter=default
+          --coverage --coverage.reporter=text-summary
+          --coverage.thresholds.statements=0 --coverage.thresholds.branches=0
+          --coverage.thresholds.functions=0 --coverage.thresholds.lines=0
+
+      - name: Upload web blob report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-blob-web-${{ matrix.shard }}
+          path: apps/web/.vitest-reports/
+          # The blob directory is a dot-directory, which upload-artifact skips by default.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  # Every other package is small (about 3 min together) and enforces its own
+  # thresholds in its own unsharded run. turbo builds what each package needs.
+  test-packages:
+    name: Test other packages
+    needs: [changes]
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.packages == 'true'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run package tests with coverage
         run: |
           node -e "console.log('Available test CPUs:', require('node:os').availableParallelism())"
-          pnpm test:coverage --concurrency=2 -- --maxWorkers=75%
+          pnpm test:coverage --filter='!@simple-agent-manager/api' --filter='!@simple-agent-manager/web' --concurrency=2 -- --maxWorkers=75%
 
-  build:
-    name: Build
-    needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
+  # Keeps the `Test` check name. Fails unless every selected shard passed, then enforces
+  # the coverage thresholds on the merged API and web reports. A suite that was not
+  # selected for this change must be skipped, never failed or cancelled. `!cancelled()`
+  # runs it after a failed shard (so the failure is reported here) but not in a cancelled run.
+  test:
+    name: Test
+    needs: [changes, test-api, test-web, test-packages]
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && (needs.changes.outputs.api-unit == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.packages == 'true') }}
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
+      - name: Require every selected test shard to pass
+        env:
+          API_SELECTED: ${{ needs.changes.outputs.api-unit }}
+          WEB_SELECTED: ${{ needs.changes.outputs.web }}
+          PACKAGES_SELECTED: ${{ needs.changes.outputs.packages }}
+          API_RESULT: ${{ needs.test-api.result }}
+          WEB_RESULT: ${{ needs.test-web.result }}
+          PACKAGES_RESULT: ${{ needs.test-packages.result }}
+        run: |
+          echo "test-api=$API_RESULT ($API_SELECTED) test-web=$WEB_RESULT ($WEB_SELECTED) test-packages=$PACKAGES_RESULT ($PACKAGES_SELECTED)"
+          expect() {
+            local selected="$1" result="$2"
+            if [ "$selected" = true ]; then test "$result" = success; else test "$result" = skipped; fi
+          }
+          expect "$API_SELECTED" "$API_RESULT"
+          expect "$WEB_SELECTED" "$WEB_RESULT"
+          expect "$PACKAGES_SELECTED" "$PACKAGES_RESULT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -458,13 +633,46 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build all packages
-        run: pnpm build
+      - name: Download API blob reports
+        if: needs.changes.outputs.api-unit == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: test-blob-api-*
+          path: apps/api/.vitest-reports/
+          merge-multiple: true
 
+      - name: Download web blob reports
+        if: needs.changes.outputs.web == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: test-blob-web-*
+          path: apps/web/.vitest-reports/
+          merge-multiple: true
+
+      # A missing blob would only lower coverage, so require the exact count first.
+      - name: Merge API shards and enforce API coverage thresholds
+        if: needs.changes.outputs.api-unit == 'true'
+        working-directory: apps/api
+        run: |
+          test "$(find .vitest-reports -name 'blob-*.json' | wc -l)" -eq 3
+          pnpm exec vitest run --merge-reports --coverage
+
+      - name: Merge web shards and enforce web coverage thresholds
+        if: ${{ !cancelled() && needs.changes.outputs.web == 'true' }}
+        working-directory: apps/web
+        run: |
+          test "$(find .vitest-reports -name 'blob-*.json' | wc -l)" -eq 2
+          pnpm exec vitest run --merge-reports --coverage
+
+  # The only job that runs the public-site browser tests and the Storybook audit. It
+  # runs when apps/www, packages/ui (which www depends on) or a shared root input changed.
+  # It replaced the Marketing Site job, which repeated the public-site browser tests on
+  # a second runner; that job's www lint and type check run here when root Lint and
+  # Build and Type Check (which cover apps/www) did not run.
   workspace-quality-surfaces:
     name: Workspace Quality Surfaces
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.repo-quality == 'true' || needs.changes.outputs.browser-install == 'true')
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && (needs.changes.outputs.public-site == 'true' || needs.changes.outputs.browser-install == 'true')
     timeout-minutes: 30
     # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
     # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
@@ -484,6 +692,14 @@ jobs:
 
       - name: Require test coverage scripts for every tested workspace
         run: pnpm quality:workspace-test-surfaces
+
+      - name: Lint marketing site
+        if: needs.changes.outputs.repo-quality != 'true'
+        run: pnpm --filter @simple-agent-manager/www lint
+
+      - name: Type check marketing site
+        if: needs.changes.outputs.repo-quality != 'true'
+        run: pnpm --filter @simple-agent-manager/www typecheck
 
       - name: Build Storybook production bundle
         run: pnpm --filter @simple-agent-manager/ui build-storybook
@@ -515,59 +731,12 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  marketing-site:
-    name: Marketing Site
-    needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.marketing-site == 'true' || needs.changes.outputs.browser-install == 'true')
-    # Setup/build takes ~11 minutes; leave time for the browser suite.
-    timeout-minutes: 25
-    # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
-    # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint marketing site
-        run: pnpm --filter @simple-agent-manager/www lint
-
-      - name: Type check marketing site
-        run: pnpm --filter @simple-agent-manager/www typecheck
-
-      - name: Build public docs and check internal links
-        run: pnpm --filter @simple-agent-manager/www build && pnpm --filter @simple-agent-manager/www check:links
-
-      - name: Install Chromium
-        working-directory: apps/www
-        run: bash ../../scripts/ci/run-with-apt-mirror-fallback.sh ./node_modules/.bin/playwright install --with-deps chromium
-
-      - name: Test public site in desktop and mobile browsers
-        run: pnpm --filter @simple-agent-manager/www test:browser
-
-      - name: Upload marketing browser evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: marketing-browser-evidence
-          path: .codex/tmp/playwright-screenshots/
-          if-no-files-found: ignore
-          retention-days: 7
-
   playwright-visual:
     name: Playwright Visual Tests
     needs: [changes]
-    # Visual audits are informational and only relevant to reviewing a change.
-    # Restrict to pull requests so they never run on push to main.
-    if: github.event_name == 'pull_request' && (needs.changes.outputs.web-ui == 'true' || needs.changes.outputs.browser-install == 'true')
+    # Blocking: a failure here fails the Durable Object Workers merge gate. Visual
+    # audits only matter for reviewing a change, so they never run on push to main.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft && (needs.changes.outputs.web-ui == 'true' || needs.changes.outputs.browser-install == 'true')
     timeout-minutes: 45
     # Pinned: Playwright cannot install Chromium on ubuntu-26.04 (ubuntu-latest since 2026-11-14).
     # Unpin with tasks/backlog/2026-11-15-vm-agent-reproducible-build-across-runners.md follow-ups.
@@ -626,7 +795,7 @@ jobs:
   deploy-scripts:
     name: Validate Deploy Scripts
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.deploy-scripts == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.deploy-scripts == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -699,10 +868,12 @@ jobs:
       - name: Validate agent install manifest consistency
         run: pnpm quality:agent-install-manifest
 
+  # Quick check (also runs on draft PRs). It also runs the CI wiring tests, which had
+  # their own CI Workflow job, so it runs for CI-routing changes as well.
   code-quality:
     name: Code Quality Checks
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.repo-quality == 'true' || needs.changes.outputs.ci-workflow == 'true' || needs.changes.outputs.agent-instructions == 'true')
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -738,6 +909,30 @@ jobs:
       - name: File size limit enforcement
         run: pnpm quality:file-sizes
 
+      # Every path-scoped rule can load, rules follow the code they name, the generated
+      # rule indexes are current, hook entries are well-formed, and instruction size
+      # stays under the ceilings in scripts/quality/agent-context-budget.json.
+      - name: Agent instruction delivery and budget check
+        run: pnpm quality:agent-context-budget --check
+
+      # The Codex rule-delivery hook, the Stop gate shared by Claude Code and Codex, and the
+      # instruction model, each driven through the real script against fixture repositories.
+      - name: Agent instruction and hook tests
+        run: pnpm quality:agent-tooling:test
+
+      # Rule 73, mechanical half: a non-string scalar field of an options or patch value
+      # must not be copied onto existing state without a "not supplied" check. Blocking from
+      # the start: zero findings on the tree and in 25 sampled commits since February 2026,
+      # apart from the original incident, which it reports (scripts/quality/README.md).
+      - name: Setup Go for the optional-field check
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Optional struct fields must not overwrite on absence (rule 73)
+        run: pnpm quality:go-optional-fields
+
       - name: Stale artifact check
         run: pnpm quality:stale-artifacts
       - name: Repo quality visibility report
@@ -766,12 +961,12 @@ jobs:
         run: pnpm quality:node-pool-boundary
 
       - name: CI workflow wiring tests
-        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts check-runtime-tunables.test.ts
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts check-runtime-tunables.test.ts ci-workspace-surfaces.test.ts ci-browser-install.test.ts ci-evidence-token-wiring.test.ts ci-test-shards.test.ts ci-draft-and-gate.test.ts ci-suite-selection.test.ts
 
   go-vulnerability-diff:
     name: Go Vulnerability Diff
     needs: [changes]
-    if: needs.changes.outputs.go-modules == 'true'
+    if: needs.changes.outputs.go-modules == 'true' && !github.event.pull_request.draft
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -809,15 +1004,20 @@ jobs:
         run: pnpm quality:govulncheck-diff
 
   durable-object-worker-shards:
-    name: Durable Object Workers shard (${{ matrix.shard }}/3)
+    name: Durable Object Workers shard (${{ matrix.shard }}/7)
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.api == 'true'
     # Keep per-file storage isolation and serial workerd execution within each
-    # runner. Shard the complete suite to bound wall time as the suite grows.
+    # runner. Seven shards balanced by measured per-file time (about 7 min of tests each
+    # on the slower runner class, which the timings reflect; about 4.5 on the faster one;
+    # apps/api/tests/workers/shard-timings.json). Seven keeps a Workers shard under the
+    # Test api shards plus the Test merge, so an API PR finishes in about 10 min. Refresh
+    # the timings from the workers-timings-* artifacts with
+    # tests/workers/support/update-shard-timings.ts.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6, 7]
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -836,13 +1036,13 @@ jobs:
       - name: Check Durable Object migration safety
         run: pnpm quality:do-migration-safety
 
-      - name: Build packages
-        run: pnpm build
+      - name: Build API dependencies
+        run: pnpm exec turbo run build --filter=@simple-agent-manager/api^...
 
       - name: Run Worker and Durable Object suites
         env:
           WORKERS_SHARD: ${{ matrix.shard }}
-        run: pnpm --filter @simple-agent-manager/api test:workers --shard="${WORKERS_SHARD}/3" --reporter=default --reporter=./tests/workers/timing-reporter.ts
+        run: pnpm --filter @simple-agent-manager/api test:workers --shard="${WORKERS_SHARD}/7" --reporter=default --reporter=./tests/workers/timing-reporter.ts
 
       - name: Upload per-file Workers timings
         if: always()
@@ -851,19 +1051,79 @@ jobs:
           name: workers-timings-${{ matrix.shard }}
           path: apps/api/test-results/workers-timing.json
 
-  # Preserve the existing branch-protection check name. Skipped, cancelled or
-  # failed shards must never turn this required check green for API changes.
+  # The merge gate. Ruleset "Main" requires exactly one check, named
+  # "Durable Object Workers", and the agent token cannot edit the ruleset, so this job
+  # keeps that name and now gates the whole suite instead of only the Workers shards.
+  #
+  # Two holes it closes:
+  # - A skipped job reports success. Before, this check was skipped (green) on every PR
+  #   that did not touch the API, so a red Test never blocked a merge.
+  # - Draft PRs skip the full suite. On a draft run this job carries a different name,
+  #   so the draft run never reports a "Durable Object Workers" result for the commit.
+  #   After the PR is marked ready the check stays "expected" (merge blocked) until the
+  #   ready run finishes every job, instead of inheriting the draft run's skipped jobs.
+  #
+  # PR Evidence is deliberately not a dependency: it validates PR-body text, which a
+  # human may waive, and it is not a property of the code being merged.
+  #
+  # `always()`, not `!cancelled()`: in a cancelled run this job still runs and fails.
+  # A skipped job would read as green to the ruleset.
   durable-object-workers:
-    name: Durable Object Workers
-    needs: [changes, durable-object-worker-shards]
-    if: always() && (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
+    # Only ready-PR runs and main pushes report the required name. A manual dispatch on a
+    # branch skips the PR-only jobs (Playwright Visual Tests, PR Evidence), so it must not
+    # satisfy the required check for that commit either.
+    name: ${{ (github.event_name == 'push' || (github.event_name == 'pull_request' && !github.event.pull_request.draft)) && 'Durable Object Workers' || 'Full suite gate (not a merge check for this run)' }}
+    needs:
+      - changes
+      - lint
+      - secret-scan
+      - typecheck
+      - test-api
+      - test-web
+      - test-packages
+      - test
+      - workspace-quality-surfaces
+      - playwright-visual
+      - deploy-scripts
+      - code-quality
+      - go-vulnerability-diff
+      - durable-object-worker-shards
+      - pulumi-infra
+      - vm-agent-test
+      - cli-test
+      - vm-agent-integration
+      - devcontainer
+      - devcontainer-volume-mount
+    if: always() && (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft
     timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
+      # Skipped, cancelled or failed shards must never turn this check green for API changes.
       - name: Require every Workers shard to pass
+        if: needs.changes.outputs.api == 'true'
         env:
           SHARD_RESULT: ${{ needs.durable-object-worker-shards.result }}
         run: test "$SHARD_RESULT" = success
+
+      # A job skipped by its own path filter is fine; a failed or cancelled one is not.
+      # A job skipped because something it needs failed is caught through that need,
+      # which is listed here too.
+      - name: Require every other CI job to pass
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          # Compare the printed value: `jq -e` exits 0 on empty input in some jq versions.
+          if [ "$(jq -r '.changes.result' <<<"$NEEDS_JSON")" != success ]; then
+            echo "::error::Detect Changes did not succeed"
+            exit 1
+          fi
+          failed=$(jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | "\(.key)=\(.value.result)"' <<<"$NEEDS_JSON")
+          if [ -n "$failed" ]; then
+            printf '::error::CI jobs did not pass: %s\n' "$(tr '\n' ' ' <<<"$failed")"
+            exit 1
+          fi
+          echo "Every CI job passed or was skipped by its path filter."
 
   # SAM-hosted git exists only in the self-host build: the real git CLI against the HostedGitRepo
   # Durable Object in Miniflare (apps/api/vitest.hosted-git.config.ts). Gated on the whole API
@@ -897,7 +1157,7 @@ jobs:
   pulumi-infra:
     name: Pulumi Infrastructure Tests
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.infra == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.infra == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -924,7 +1184,7 @@ jobs:
   vm-agent-test:
     name: VM Agent Test
     needs: [changes]
-    if: needs.changes.outputs.vm-agent == 'true'
+    if: needs.changes.outputs.vm-agent == 'true' && !github.event.pull_request.draft
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -950,7 +1210,7 @@ jobs:
   cli-test:
     name: CLI Test
     needs: [changes]
-    if: needs.changes.outputs.cli == 'true'
+    if: needs.changes.outputs.cli == 'true' && !github.event.pull_request.draft
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -1011,12 +1271,14 @@ jobs:
           path: packages/cli/coverage.out
           retention-days: 7
 
+  # Also runs the VM Agent E2E tests: both need the devcontainer CLI and the same
+  # fixture images, and E2E alone took about a minute on its own runner.
   vm-agent-integration:
     name: VM Agent Integration
     needs: [changes]
-    if: needs.changes.outputs.vm-agent == 'true'
+    if: needs.changes.outputs.vm-agent == 'true' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1042,30 +1304,6 @@ jobs:
         working-directory: packages/vm-agent
         run: go test -race -v -tags integration -timeout 15m ./internal/bootstrap/ ./internal/acp/
 
-  vm-agent-e2e:
-    name: VM Agent E2E
-    needs: [changes]
-    if: needs.changes.outputs.vm-agent == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: packages/vm-agent/go.sum
-
-      - name: Assert Go version
-        run: go version | grep -E '^go version go1\.26\.11 '
-
-      - name: Install devcontainers CLI
-        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
-
-      - name: Prepare devcontainer fixture images
-        run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
-
       - name: Run VM Agent E2E tests
         working-directory: packages/vm-agent
         run: go test -race -v -tags e2e -timeout 15m ./internal/e2e/
@@ -1073,7 +1311,7 @@ jobs:
   devcontainer:
     name: Devcontainer Validation
     needs: [changes]
-    if: needs.changes.outputs.devcontainer == 'true'
+    if: needs.changes.outputs.devcontainer == 'true' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -1284,7 +1522,7 @@ jobs:
   devcontainer-volume-mount:
     name: Devcontainer Volume Mount
     needs: [changes]
-    if: needs.changes.outputs.devcontainer-volume-mount == 'true'
+    if: needs.changes.outputs.devcontainer-volume-mount == 'true' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

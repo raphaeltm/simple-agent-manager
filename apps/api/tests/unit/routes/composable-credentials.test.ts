@@ -128,7 +128,7 @@ describe('composable credentials routes', () => {
     expect(whereCalls).toContain('test-user-id');
   });
 
-  describe('openai-compatible baseUrl (self-host SSRF, T5)', () => {
+  describe('openai-compatible baseUrl must be HTTPS on a public host (L5a)', () => {
     function postCredential(baseUrl: string) {
       return app.request(
         '/api/cc/credentials',
@@ -162,6 +162,7 @@ describe('composable credentials routes', () => {
       const res = await postCredential(baseUrl);
 
       expect(res.status).toBe(400);
+      expect(await res.text()).toMatch(/public host/);
       expect(insert).not.toHaveBeenCalled();
     });
 
@@ -205,6 +206,46 @@ describe('composable credentials routes', () => {
 
       expect(res.status).toBe(201);
       expect(values).toHaveBeenCalledOnce();
+    });
+
+    function patchConfigurationBaseUrl(baseUrl: string) {
+      mockDB.limit.mockResolvedValueOnce([
+        { consumerKind: 'agent', consumerTarget: 'claude-code' },
+      ]);
+      return app.request(
+        '/api/cc/configurations/cfg-1',
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ settings: { baseUrl, dialect: 'anthropic' } }),
+        },
+        env
+      );
+    }
+
+    it.each(['https://10.0.0.5/x', 'https://169.254.169.254/', 'http://llm.example.com/v1'])(
+      'refuses a PATCH that moves a configuration baseUrl to %s, updating nothing',
+      async (baseUrl) => {
+        const res = await patchConfigurationBaseUrl(baseUrl);
+
+        expect(res.status).toBe(400);
+        expect(await res.text()).toMatch(/public host|HTTPS baseUrl/);
+        expect(mockDB.set).not.toHaveBeenCalled();
+      }
+    );
+
+    it('control: a PATCH to a public HTTPS baseUrl is stored', async () => {
+      const res = await patchConfigurationBaseUrl('https://anthropic-alt.example.com/anthropic');
+
+      expect(res.status).toBe(200);
+      expect(mockDB.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settingsJson: JSON.stringify({
+            baseUrl: 'https://anthropic-alt.example.com/anthropic',
+            dialect: 'anthropic',
+          }),
+        })
+      );
     });
 
     it('control: stores an HTTPS endpoint on a public host', async () => {

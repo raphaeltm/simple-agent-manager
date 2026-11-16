@@ -17,4 +17,5 @@
 export * from '../../../src/index';
 export { default } from '../../../src/index';
 export { NodeLifecycleTestDouble, ProjectDataTestDouble } from './expected-error-doubles';
+export { LegacyMessageStorageFixture } from './legacy-message-storage-fixture';
 export { VmAgentContainerTestDouble } from './vm-agent-container-double';

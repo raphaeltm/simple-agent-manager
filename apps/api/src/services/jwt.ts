@@ -35,6 +35,7 @@ export {
   verifyCallbackToken,
   verifyLocalForwardToken,
   verifyPortAccessToken,
+  verifyPublishJobClaims,
   verifyTerminalToken,
 } from './jwt-verify';
 
@@ -252,6 +253,7 @@ export async function signNodeManagementToken(
     expiresAt: expiresAt.toISOString(),
   };
 }
+
 
 /**
  * Get port access token expiry in milliseconds.

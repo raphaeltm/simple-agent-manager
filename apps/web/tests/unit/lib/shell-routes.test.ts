@@ -15,7 +15,11 @@ describe('isProjectChatRoute', () => {
   });
 
   it('does not match the other full-bleed routes, which have no chats pane to reserve', () => {
-    for (const path of ['/projects/p1/agent', '/projects/p1/comments/message/c1']) {
+    for (const path of [
+      '/projects/p1/agent',
+      '/projects/p1/comments/message/c1',
+      '/projects/p1/overview',
+    ]) {
       expect(isFullBleedRoute(path)).toBe(true);
       expect(isProjectChatRoute(path)).toBe(false);
     }
@@ -29,5 +33,13 @@ describe('isProjectChatRoute', () => {
     ]) {
       expect(isProjectChatRoute(path)).toBe(false);
     }
+  });
+});
+
+describe('isFullBleedRoute', () => {
+  it('lays out the project Overview over the void, but not a path that only starts with it', () => {
+    expect(isFullBleedRoute('/projects/p1/overview')).toBe(true);
+    expect(isFullBleedRoute('/projects/p1/overviews')).toBe(false);
+    expect(isFullBleedRoute('/projects/p1/ideas')).toBe(false);
   });
 });

@@ -297,7 +297,10 @@ async function resolveViaGet(
  * @returns An ImageResolver that queries the OCI registry manifest API
  */
 export function createImageResolver(opts: ImageResolverOptions = {}): ImageResolver {
-  const fetchFn = opts.fetchFn ?? ((input, init) => globalThis.fetch(input, init));
+  const fetchFn =
+    opts.fetchFn ??
+    // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- only called by fetchValidated, which classifies every URL and hop
+    ((input, init) => globalThis.fetch(input, init));
   const runtime: ResolverRuntimeOptions = {
     auth: opts.auth,
     authRegistryHost: opts.authRegistryHost,

@@ -8,7 +8,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { paneClassName } from '@simple-agent-manager/ui';
 import { Paperclip } from 'lucide-react';
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
@@ -97,6 +97,17 @@ type ChatInputProps = Readonly<{
   onRemoveAttachment?: (index: number) => void;
   fileInputRef?: MutableRefObject<HTMLInputElement | null>;
   uploading?: boolean;
+  /** One line above the box, e.g. the Overview's "Started: … · Open chat" receipt. */
+  receipt?: ReactNode;
+  /**
+   * Fold the To row away while the box is empty and nothing in it has focus, so an idle
+   * composer is one row (the Overview on a phone). It unfolds on focus or once typed into.
+   */
+  collapseToolbarWhenIdle?: boolean;
+  /** Focus the text box on mount (default true). */
+  focusOnMount?: boolean;
+  /** Accessible name for the text box when the placeholder alone is not enough. */
+  inputLabel?: string;
 }>;
 
 function getComposerPlaceholder({
@@ -161,8 +172,17 @@ export function ChatInput({
   onRemoveAttachment,
   fileInputRef,
   uploading,
+  receipt,
+  collapseToolbarWhenIdle = false,
+  focusOnMount = true,
+  inputLabel,
 }: ChatInputProps) {
   const isMobile = useIsMobile();
+  // Unfolded by any touch or focus inside the composer. Folded again by a tap outside it or a
+  // completed send, never by blur: iOS Safari does not focus tapped buttons, so a blur would
+  // fold the To row away between the touch and the click that was meant for it.
+  const [unfolded, setUnfolded] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [accountsOpen, setAccountsOpen] = useState(false);
@@ -270,10 +290,44 @@ export function ChatInput({
   };
   const showOptions = optionsOpen || hasResourceErrors;
   const optionsPanelId = useId();
+  // Folded only while there is nothing to show: no text, no files, no open panel or sheet.
+  const idle =
+    value.length === 0 &&
+    (attachments?.length ?? 0) === 0 &&
+    !unfolded &&
+    !showOptions &&
+    !accountsOpen &&
+    !profileSheet.open;
+  const toolbarVisible = showToolbar && !(collapseToolbarWhenIdle && idle);
+  useEffect(() => {
+    if (!collapseToolbarWhenIdle || !unfolded) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node | null)) setUnfolded(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [collapseToolbarWhenIdle, unfolded]);
+  // A send that cleared the box is done with it: fold, and let go of the focus it held (the
+  // Send button is disabled once the box is empty, and a disabled button never blurs).
+  const wasSubmitting = useRef(submitting);
+  useEffect(() => {
+    const sent = wasSubmitting.current && !submitting && value.length === 0;
+    wasSubmitting.current = submitting;
+    if (!sent || !collapseToolbarWhenIdle) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && containerRef.current?.contains(active)) active.blur();
+    setUnfolded(false);
+  }, [submitting, value, collapseToolbarWhenIdle]);
 
   return (
     // The new-chat message box is a SAM Glass slab, like the follow-up composer in a chat.
-    <div className={`${paneClassName('slab')} shrink-0 px-3 py-3 md:px-4`}>
+    <div
+      ref={containerRef}
+      className={`${paneClassName('slab')} shrink-0 px-3 py-3 md:px-4`}
+      onFocus={() => setUnfolded(true)}
+      onPointerDown={() => setUnfolded(true)}
+    >
+      {receipt}
       {error && (
         <div role="alert" className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
@@ -308,11 +362,11 @@ export function ChatInput({
         />
       )}
 
-      {showToolbar && showOptions && (
+      {toolbarVisible && showOptions && (
         <ComposerOptionsPanel id={optionsPanelId} options={options} compact={isMobile} />
       )}
 
-      {showToolbar && accountsOpen && showAccountControl && runAccounts && (
+      {toolbarVisible && accountsOpen && showAccountControl && runAccounts && (
         <RunAccountPanel
           id={accountsPanelId}
           accounts={runAccounts}
@@ -328,7 +382,7 @@ export function ChatInput({
       )}
 
       {/* While the account list is open it is the place to choose; the nudge would repeat it. */}
-      {showToolbar && selectedProfile && profileUsages && !accountsOpen && (
+      {toolbarVisible && selectedProfile && profileUsages && !accountsOpen && (
         <ProfileUsageNudge
           usage={runUsage}
           profileUsage={selectedUsage}
@@ -339,7 +393,7 @@ export function ChatInput({
         />
       )}
 
-      {showToolbar && (
+      {toolbarVisible && (
         <div className="mb-2 flex items-center gap-2">
           {/* The account wraps under To when the toolbar is narrow (a phone). */}
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
@@ -407,8 +461,11 @@ export function ChatInput({
         fileInputRef={fileInputRef}
         uploading={uploading}
         showShortcutHint={!isMobile}
+        // Folded, attach waits in the To row that unfolds on focus, so the idle box is one line.
         showAttachButton={!showToolbar}
         attachTitle="Attach files to this task"
+        focusOnMount={focusOnMount}
+        inputLabel={inputLabel}
       />
       <ProfilePickerSheet
         open={profileSheet.open}

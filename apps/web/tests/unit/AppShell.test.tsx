@@ -88,10 +88,6 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
   listNodes: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('../../src/components/NotificationCenter', () => ({
-  NotificationCenter: () => <button type="button" aria-label="Notifications" />,
-}));
-
 vi.mock('../../src/components/RecentChatsDropdown', () => ({
   RecentChatsDropdown: () => <button type="button" aria-label="Recent chats" />,
 }));
@@ -218,6 +214,15 @@ describe('AppShell (project context)', () => {
     expect(screen.queryByText('Activity')).not.toBeInTheDocument();
   });
 
+  it('puts Overview first in the project nav, on desktop (the drawer test below checks the phone)', () => {
+    renderAppShell('/projects/proj-123/chat');
+    const projectNav = screen.getByRole('navigation', { name: 'Project navigation' });
+    const desktopLinks = within(projectNav).getAllByRole('link');
+    expect(desktopLinks[0]).toHaveTextContent('Overview');
+    expect(desktopLinks[0]).toHaveAttribute('href', '/projects/proj-123/overview');
+    expect(desktopLinks[1]).toHaveTextContent('Chat');
+  });
+
   it('shows Back to Projects toggle button when inside a project', () => {
     renderAppShell('/projects/proj-123/chat');
     expect(screen.getByText('Back to Projects')).toBeInTheDocument();
@@ -339,6 +344,12 @@ describe('AppShell (mobile)', () => {
     expect(screen.getByRole('button', { name: 'Ideas' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deployments' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Activity' })).not.toBeInTheDocument();
+    // Parity with the desktop rail: Overview leads, then Chat.
+    const items = within(drawer)
+      .getAllByRole('button')
+      .map((button) => button.textContent?.trim() ?? '')
+      .filter((label) => label === 'Overview' || label === 'Chat');
+    expect(items).toEqual(['Overview', 'Chat']);
   });
 
   it('renders icons alongside labels in mobile drawer nav items', () => {

@@ -83,6 +83,8 @@
     "quality:gitleaks:pr": "tsx scripts/quality/run-gitleaks.ts --mode=pr-range",
     "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries && pnpm quality:runtime-state-files",
     "quality:agent-context-budget": "tsx scripts/quality/check-agent-context-budget.ts",
+    "quality:go-optional-fields": "cd scripts/quality/go-optional-fields && go test ./... && go run . ../../..",
+    "quality:agent-tooling:test": "vitest run --config scripts/quality/vitest.config.ts agent-instructions.test.ts agent-codex-hook-config.test.ts agent-stop-gate.test.ts",
     "test:e2e:provider-limits": "node scripts/e2e/provider-limit-path.mjs"
   },
   "dependencies": {

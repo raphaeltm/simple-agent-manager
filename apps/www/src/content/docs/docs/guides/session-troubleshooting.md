@@ -130,10 +130,10 @@ on that icon says how many chats need attention. Open the chat and look for one 
   your answer is not treated as a stall. See
   [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 - **A question the agent asked with its `request_human_input` tool.** It shows as that tool's step
-  in the chat, and as a notification — with answer buttons if the agent offered choices. Reply in
-  the composer, or answer from the notification, where **Read question & context** shows the whole
+  in the chat, and as an item in your [Inbox](/docs/guides/inbox/) — with answer buttons if the
+  agent offered choices. Reply in the composer, or answer from the Inbox, which shows the whole
   question and the messages before it (see
-  [Read and answer an agent's question](/docs/guides/notifications/#read-and-answer-an-agents-question)).
+  [Answer an item](/docs/guides/inbox/#answer-an-item)).
   If nobody answers for about two hours (longer
   if the notification didn't reach you), the task fails but keeps its workspace, so you can still
   reply to carry on. See [Notifications](/docs/guides/notifications/#request_human_input).

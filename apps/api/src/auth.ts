@@ -2,7 +2,6 @@ import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { GithubProfile, SocialProviders } from 'better-auth/social-providers';
-import { ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -19,6 +18,7 @@ import {
   bootstrapUserDecision,
 } from './services/bootstrap-owner';
 import { emailSignInPlugins } from './services/email-sign-in';
+import { establishFirstSuperadmin, FIRST_SUPERADMIN_SETTING } from './services/first-superadmin';
 import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
 import { gitLabLoginProvider } from './services/gitlab-login-provider';
 import { keepLinkedAccountEmail } from './services/linked-account-identity';
@@ -44,10 +44,12 @@ const log = createModuleLogger('auth');
  * a single atomic UPDATE with no read-modify-write race; concurrent logins of the
  * same user are idempotent (the second is a no-op).
  *
- * Numbered params: ?1 = current user id (referenced twice), ?2 = sentinel id.
+ * Numbered params: ?1 = current user id (referenced twice), ?2 = sentinel id,
+ * ?3 = the durable ordinary-install election marker.
  * Guards: (a) skip already-superadmin rows; (d) never auto-elevate a suspended
  * account; status!='system' never mutates the sentinel; (b) the current user is the
- * only non-internal user; (c) no non-system superadmin exists anywhere.
+ * only non-internal user; (c) no non-system superadmin exists anywhere; (e) the
+ * ordinary one-time election has not already completed.
  *
  * Drizzle cannot express the correlated-subquery WHERE, so this is issued via the
  * raw D1 binding (prepare/bind/run) — the same mechanism used by
@@ -71,6 +73,10 @@ WHERE id = ?1
     WHERE u3.role = 'superadmin'
       AND u3.status != 'system'
   ) = 0
+  AND NOT EXISTS (
+    SELECT 1 FROM platform_settings election
+    WHERE election.key = ?3
+  )
 `;
 
 interface GitHubEmailResponse {
@@ -400,22 +406,9 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
               return { data: user };
             }
 
-            // Check if this is the first user (auto-superadmin)
-            const hookDb = drizzle(env.DATABASE, { schema });
-            const existing = await hookDb
-              .select({ id: schema.users.id })
-              .from(schema.users)
-              .where(ne(schema.users.id, sentinelId))
-              .limit(1)
-              .all();
-
-            if (existing.length === 0 && bootstrapOwnerEmail(env) === undefined) {
-              return {
-                data: { ...user, role: 'superadmin', status: 'active' },
-              };
-            }
-
-            // Subsequent users need approval
+            // Approval-gated users start unprivileged. The first ordinary user is elected only
+            // after their row exists, in the atomic session hook below; assigning superadmin here
+            // would race BetterAuth's later INSERT under concurrent registrations.
             return {
               data: { ...user, role: 'user', status: 'pending' },
             };
@@ -426,6 +419,19 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
         create: {
           before: async (session) => {
             if (!(await bootstrapSessionAllowed(env, session.userId))) return false;
+            if (bootstrapOwnerEmail(env) === undefined) {
+              // Fail closed for privilege, never for login: a D1 error leaves the user
+              // unpromoted (the batch is atomic) and the next sign-in retries the election.
+              try {
+                await establishFirstSuperadmin(env, session.userId);
+              } catch (err) {
+                log.error('first_superadmin_election.failed', {
+                  userId: session.userId,
+                  error: err instanceof Error ? err.message : String(err),
+                  action: 'continued_without_promotion',
+                });
+              }
+            }
             return { data: session };
           },
           // Login-time superadmin self-heal. Fires on EVERY session creation —
@@ -450,12 +456,12 @@ export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
               const sql =
                 expectedOwner === undefined
                   ? LOGIN_SELF_HEAL_SQL
-                  : LOGIN_SELF_HEAL_SQL + ' AND lower(trim(email)) = ?3 AND email_verified = 1';
+                  : LOGIN_SELF_HEAL_SQL + ' AND lower(trim(email)) = ?4 AND email_verified = 1';
               const statement = env.DATABASE.prepare(sql);
               const result = await (
                 expectedOwner === undefined
-                  ? statement.bind(userId, sentinelId)
-                  : statement.bind(userId, sentinelId, expectedOwner)
+                  ? statement.bind(userId, sentinelId, FIRST_SUPERADMIN_SETTING)
+                  : statement.bind(userId, sentinelId, FIRST_SUPERADMIN_SETTING, expectedOwner)
               ).run();
               if (result.meta.changes > 0) {
                 log.info('login_self_heal.promoted', { userId });

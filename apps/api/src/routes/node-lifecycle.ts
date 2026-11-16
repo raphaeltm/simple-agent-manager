@@ -149,7 +149,9 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
     });
   }
 
-  recordLifecycleTimings('provision', readyPayload?.provisionTimings, { nodeId });
+  await recordLifecycleTimings(c.env.DATABASE, 'provision', readyPayload?.provisionTimings, {
+    nodeId,
+  });
 
   const updatedRows = await db
     .update(schema.nodes)

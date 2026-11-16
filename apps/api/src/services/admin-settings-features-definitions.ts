@@ -1,3 +1,7 @@
+import {
+  INSIGHTS_FLOW_SETTINGS,
+  INSIGHTS_RECEIPT_SETTINGS,
+} from '@simple-agent-manager/operations';
 import { DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS } from '@simple-agent-manager/shared';
 
 import { DEFAULT_USER_ACCESS_TOKEN_LOCK_TIMEOUT_MS } from '../durable-objects/user-access-token-lock-config';
@@ -28,6 +32,7 @@ import {
   MAX_CONFIG_READ_TIMEOUT_MS,
 } from './config-read-deadline';
 import { CONNECTOR_READ_SETTINGS } from './connector-read-settings-definition';
+import { INBOX_SETTINGS } from './inbox-settings-definition';
 import { ENV_KEYS, SETTING_KEYS } from './platform-config-store';
 import { RUNTIME_SECRET_REQUEST_SETTINGS } from './runtime-secret-request-settings-definition';
 import { WORKFLOW_DEFAULTS, WORKFLOW_SETTING_DETAILS } from './workflow-defaults';
@@ -133,6 +138,33 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
       setting.name,
       setting.defaultValue,
       'Connector',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INBOX_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Chat',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_RECEIPT_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Chat',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_FLOW_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
       setting.description,
       setting.range
     )

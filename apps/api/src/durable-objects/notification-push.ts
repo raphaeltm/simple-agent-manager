@@ -13,9 +13,9 @@ import {
   MAX_WEB_PUSH_DELIVERY_BUDGET_MS,
   MAX_WEB_PUSH_NOTIFICATION_ACTIONS,
 } from '@simple-agent-manager/shared';
+import { assertOutboundUrl, OutboundRequestRefusedError } from '@simple-agent-manager/worker-core';
 
 import { createModuleLogger } from '../lib/logger';
-import { assertOutboundUrl, OutboundRequestRefusedError } from '../lib/network-hosts';
 import type { VapidKeyMaterial, WebPushSubscription } from '../lib/web-push';
 import { createVapidAuthorization, encryptWebPushPayload } from '../lib/web-push';
 import type { StoredPushSubscription } from './notification-row-schemas';
@@ -168,6 +168,7 @@ export async function deliverWebPushSubscription(
     throw new Error(`Web Push payload exceeds ${maximumPayloadBytes} bytes`);
   }
 
+  // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- endpoint checked by assertOutboundUrl below; redirect: 'manual'
   const fetcher = dependencies.fetcher ?? fetch;
   const encrypt = dependencies.encrypt ?? encryptWebPushPayload;
   const authorize = dependencies.authorize ?? createVapidAuthorization;

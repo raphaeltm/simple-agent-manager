@@ -8,7 +8,7 @@
  * proven from the instance itself: immediately before the provider delete, the instance is re-read
  * and must carry the recorded provider instance ID and every exact SAM ownership label (managed,
  * node, role, environment, installation, runtime incarnation). This is the destructive ownership
- * proof `packages/providers/.claude/rules/56` requires. A VM that does not prove ownership is
+ * proof `.claude/rules/56` requires. A VM that does not prove ownership is
  * preserved, and a credential that cannot see the VM never counts as proof it is gone.
  *
  * Every refusal on the current-credential path is a {@link NodeTeardownBlockedError} naming its

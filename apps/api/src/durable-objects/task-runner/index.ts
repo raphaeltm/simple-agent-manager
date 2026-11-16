@@ -441,7 +441,7 @@ export class TaskRunner extends DurableObject<Env> {
       const errorMessage = err instanceof Error ? err.message : String(err);
       const durationMs = Date.now() - stepStartMs;
 
-      recordRunnerPhase(state, 'error');
+      this.ctx.waitUntil(recordRunnerPhase(this.env.DATABASE, state, 'error'));
       log.error('task_runner_do.step_error', {
         taskId: state.taskId,
         step: state.currentStep,
@@ -495,7 +495,7 @@ export class TaskRunner extends DurableObject<Env> {
           state,
           'task_runner.advance_to_step'
         );
-        recordRunnerPhase(state, 'success');
+        this.ctx.waitUntil(recordRunnerPhase(this.env.DATABASE, state, 'success'));
         state.currentStep = nextStep;
         state.retryCount = 0;
         state.lastStepAt = Date.now();

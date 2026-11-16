@@ -24,6 +24,7 @@ func NewHostDocker() *HostDocker { return &HostDocker{} }
 // Save exports a source image to a docker-save archive path.
 func (d *HostDocker) Save(ctx context.Context, source, archivePath string) error {
 	cmd := exec.CommandContext(ctx, container.DockerCLIPath(), "save", "-o", archivePath, source)
+	dockerSaveAttempts.Add(1)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker save %s: %w: %s", source, err, strings.TrimSpace(string(out)))
 	}

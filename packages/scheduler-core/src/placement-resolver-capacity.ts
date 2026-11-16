@@ -94,6 +94,8 @@ export function buildCapacityPoolSelection(
   const sourceById = new Map(summary.sources.map((source) => [source.id, source]));
   const baseSelection: Omit<TaskStartCapacityPoolSelection, 'poolSnapshot' | 'candidates'> = {
     rollout,
+    catalogRefreshPending: summary.catalogRefreshPending,
+    catalogPublished: summary.catalogPublished ?? pool.migrationState === 'complete',
     poolId: pool.id,
     scope: pool.scope,
     revision: pool.revision,

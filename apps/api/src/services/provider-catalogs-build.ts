@@ -24,7 +24,7 @@ import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { resolveAdminSetting } from './admin-settings-resolution';
 import { decrypt } from './encryption';
-import { withDeadline } from './fetch-timeout';
+import { IoTimeoutError, withDeadline } from './fetch-timeout';
 import { readGcpPriceTable } from './gcp-price-table';
 import { createGcpProviderForEnv } from './gcp-provider-factory';
 import { createGcpTokenProvider, type GcpTokenOwner } from './gcp-token-provider';
@@ -50,8 +50,15 @@ import {
 export async function listProviderCatalogOfferings(
   providerName: CredentialProvider,
   provider: CloudProvider,
-  timeoutMs = DEFAULT_PROVIDER_CATALOG_TIMEOUT_MS
+  timeoutMs = DEFAULT_PROVIDER_CATALOG_TIMEOUT_MS,
+  budget: { deadlineAt?: number; signal?: AbortSignal } = {}
 ): Promise<ProviderCatalogOfferingResolution> {
+  const remainingTimeout = () => {
+    budget.signal?.throwIfAborted();
+    const remaining = Math.min(timeoutMs, (budget.deadlineAt ?? Infinity) - Date.now());
+    if (remaining <= 0) throw new IoTimeoutError('Compute catalog pass deadline reached');
+    return remaining;
+  };
   try {
     const offerings = await withDeadline(
       (signal) =>
@@ -62,7 +69,8 @@ export async function listProviderCatalogOfferings(
           },
           { signal }
         ),
-      timeoutMs
+      remainingTimeout(),
+      budget.signal
     );
     return {
       offerings,
@@ -89,7 +97,8 @@ export async function listProviderCatalogOfferings(
       return {
         offerings: await withDeadline(
           (signal) => provider.listInstanceOfferings({ preferApi: false }, { signal }),
-          timeoutMs
+          remainingTimeout(),
+          budget.signal
         ),
         refreshStatus: { succeeded: false, origin: 'static', complete: false },
       };
@@ -126,12 +135,28 @@ export function getStaticProviderCatalogOfferings(
     : offerings;
 }
 
-export async function buildProviderCatalogForCredential(input: {
+interface ProviderCatalogBuildInput {
   env: Env;
   seed: ProviderCatalogCredentialSeed;
   /** Shared GCP price-table read for a multi-credential build; read on demand when absent. */
   gcpPriceTable?: () => Promise<GcpPriceTable | null>;
-}): Promise<ProviderCatalog> {
+  /** A refresh shares one deadline across credential preparation, live lookup and fallback. */
+  deadlineAt?: number;
+}
+
+export async function buildProviderCatalogForCredential(
+  input: ProviderCatalogBuildInput
+): Promise<ProviderCatalog> {
+  if (input.deadlineAt === undefined) return buildCredentialCatalog(input);
+  const remaining = input.deadlineAt - Date.now();
+  if (remaining <= 0) throw new IoTimeoutError('Compute catalog pass deadline reached');
+  return withDeadline((signal) => buildCredentialCatalog(input, signal), remaining);
+}
+
+async function buildCredentialCatalog(
+  input: ProviderCatalogBuildInput,
+  signal?: AbortSignal
+): Promise<ProviderCatalog> {
   const providerName = input.seed.provider;
   const decryptedToken = await decrypt(
     input.seed.encryptedToken,
@@ -155,7 +180,10 @@ export async function buildProviderCatalogForCredential(input: {
   const timeoutMs = Number(
     await resolveAdminSetting(input.env, 'performance.providerCatalogTimeoutMs')
   );
-  const resolved = await listProviderCatalogOfferings(providerName, provider, timeoutMs);
+  const resolved = await listProviderCatalogOfferings(providerName, provider, timeoutMs, {
+    deadlineAt: input.deadlineAt,
+    signal,
+  });
   return buildProviderCatalog({
     seed: input.seed,
     providerName,

@@ -49,6 +49,7 @@ vi.mock('drizzle-orm/d1', () => ({
 
 // Partial: the real `sql` stays, because packages load the real D1 schema
 // (@simple-agent-manager/worker-core/schema), which a src/db/schema mock does not reach.
+
 vi.mock('drizzle-orm', async (importOriginal) => ({
   ...(await importOriginal<typeof import('drizzle-orm')>()),
   and: (...args: unknown[]) => args,

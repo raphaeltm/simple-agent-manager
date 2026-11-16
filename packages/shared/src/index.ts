@@ -1,4 +1,5 @@
 // Types
+export * from './chat-message-append';
 export * from './types';
 
 // Agents
@@ -22,6 +23,9 @@ export * from './agent-models';
 
 // Constants
 export * from './constants';
+
+// get_instructions policy line rendering (shared by the API formatter and the web size readout)
+export * from './policy-directive-format';
 
 // Mail DNS record comparison (agent email deploy step and admin setup)
 export * from './dns-mail-records';

@@ -1,4 +1,4 @@
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 import type { BuildContextDescriptor, BuildContextOwner } from './build-context-state';
@@ -42,5 +42,17 @@ export async function verifyBuildContextObject(
     head !== null &&
     head.size === descriptor.sizeBytes &&
     head.customMetadata?.sha256 === descriptor.sha256
+  );
+}
+
+export async function createBuildContextDownload(
+  r2Key: string,
+  expiresIn: number,
+  target: PresignTarget
+) {
+  return getSignedUrl(
+    target.client,
+    new GetObjectCommand({ Bucket: target.bucket, Key: target.objectKey(r2Key) }),
+    { expiresIn }
   );
 }

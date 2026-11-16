@@ -154,8 +154,25 @@ async function resolveCandidateProjectId(
   taskId: string,
   sql: SqlStorage
 ): Promise<string | null> {
+  const now = Date.now();
+  // An open question in D1 `asks` (inbox slice G) holds the check-in off, as an open question
+  // marker does in the local candidate query: the agent is waiting on a person, not stalled.
   const taskRow = await env.DATABASE.prepare(
-    `SELECT task_mode, status, project_id, workspace_id, chat_session_id, admission_state
+    `SELECT task_mode, status, project_id, workspace_id, chat_session_id, admission_state,
+            (
+              -- The task's own chat (checked against this session just below); now in epoch ms.
+              SELECT MAX(COALESCE(a.expires_at, 0)) FROM asks a
+               WHERE a.project_id = tasks.project_id AND a.source_session_id = tasks.chat_session_id
+                 AND a.kind = 'question' AND a.status = 'open'
+                 -- Only a blocking question means the agent waits on a person (inbox slice D);
+                 -- a non-blocking ask never expires and must not hold the check-in off.
+                 AND a.blocking = 1
+                 -- Past its deadline still holds for three sweep ticks: the inbox sweep may
+                 -- extend an undelivered question, and expires it within one tick otherwise.
+                 AND (a.expires_at IS NULL
+                   OR a.expires_at > CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)
+                     - 15 * 60000)
+            ) AS open_question_until
      FROM tasks WHERE id = ? LIMIT 1`
   )
     .bind(taskId)
@@ -166,6 +183,7 @@ async function resolveCandidateProjectId(
       project_id: string | null;
       workspace_id: string | null;
       chat_session_id: string | null;
+      open_question_until?: number | null;
     }>();
   if (!taskRow) {
     recordReconciliationCandidateInconclusive(sql, env, {
@@ -205,6 +223,18 @@ async function resolveCandidateProjectId(
       taskId,
       reason: 'task_not_active',
     });
+    return null;
+  }
+  if (taskRow.open_question_until !== null && taskRow.open_question_until !== undefined) {
+    // Held until the question's own deadline, so an open question costs no alarms (the alarm
+    // reads this gate time, `computeReconciliationAlarmTime`). Closing the question releases the
+    // hold at once (`releaseQuestionHold`); the deferral spends no probe attempt.
+    deferReconciliationCandidateUntil(
+      sql,
+      sessionId,
+      Math.max(taskRow.open_question_until, now + reconciliationCandidateLeaseMs(env)),
+      { questionHold: true }
+    );
     return null;
   }
   return taskRow.project_id;

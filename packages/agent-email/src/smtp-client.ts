@@ -10,6 +10,7 @@
  * - credentials are sent only over TLS, or over plaintext to a loopback host (smtp-config.ts);
  * - the whole exchange has one deadline, after which the socket is closed.
  */
+// eslint-disable-next-line sam/no-unguarded-outbound-fetch -- the installation operator chooses the SMTP relay host and port
 import { connect } from 'cloudflare:sockets';
 
 import type { SmtpConfig } from './smtp-config';

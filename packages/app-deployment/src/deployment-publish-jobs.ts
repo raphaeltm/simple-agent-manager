@@ -1,8 +1,10 @@
 import { redactCredentialTokens } from '@simple-agent-manager/worker-core';
 import { ulid } from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
-import { and, asc, desc, eq, gt, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
+
+import { publishJobTransitionPredicate } from './publish-job-transitions';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -129,6 +131,10 @@ export async function createDeploymentPublishJob(
 }
 
 export interface AppendDeploymentPublishJobEventInput {
+  expectedAttempt?: number;
+  /** Source collector authority ends at verified context handoff. */
+  sourceCollector?: boolean;
+  expectedExecutor?: 'cloudflare';
   publishJobId: string;
   projectId: string;
   environmentId: string;
@@ -136,6 +142,8 @@ export interface AppendDeploymentPublishJobEventInput {
   workspaceId: string;
   status?: string;
   expectedStatus?: string;
+  expectedReservationEpoch?: string | null;
+  expectedExecutorInstanceId?: string;
   currentStep?: string | null;
   level?: string;
   eventType: string;
@@ -162,6 +170,12 @@ export async function appendDeploymentPublishJobEvent(
   const terminal = input.terminal || (status ? PUBLISH_JOB_TERMINAL_STATUSES.has(status) : false);
   const predicate = and(
     eq(schema.deploymentPublishJobs.id, input.publishJobId),
+    input.expectedAttempt !== undefined
+      ? eq(schema.deploymentPublishJobs.attempt, input.expectedAttempt)
+      : undefined,
+    input.expectedExecutor
+      ? eq(schema.deploymentPublishJobs.executor, input.expectedExecutor)
+      : undefined,
     input.releaseId != null ? visiblePublishJobPredicate() : undefined,
     input.releaseId != null
       ? or(
@@ -172,7 +186,21 @@ export async function appendDeploymentPublishJobEvent(
     input.expectedStatus
       ? eq(schema.deploymentPublishJobs.status, input.expectedStatus)
       : undefined,
-    notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES])
+    input.expectedReservationEpoch !== undefined
+      ? sql`${schema.deploymentPublishJobs.executorNotBefore} IS ${input.expectedReservationEpoch}`
+      : undefined,
+    input.expectedExecutorInstanceId !== undefined
+      ? eq(schema.deploymentPublishJobs.executorInstanceId, input.expectedExecutorInstanceId)
+      : undefined,
+    notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES]),
+    input.sourceCollector && terminal
+      ? or(
+          ne(schema.deploymentPublishJobs.executor, 'cloudflare'),
+          eq(schema.deploymentPublishJobs.contextShadow, true),
+          inArray(schema.deploymentPublishJobs.status, ['queued', 'collecting'])
+        )
+      : undefined,
+    publishJobTransitionPredicate(status, input.currentStep, terminal)
   );
   if (input.eventType === 'publish.job.heartbeat') {
     // Heartbeats prove executor liveness independently of slow build/upload progress.
@@ -370,7 +398,7 @@ export async function failExpiredDeploymentPublishJobs(
   const deadlineCutoff = new Date(nowMs - settings.deadlineMs).toISOString();
   // SQL NULL never satisfies the heartbeat comparison: legacy agents are deadline-only.
   const expired = sql`(${schema.deploymentPublishJobs.createdAt} <= ${deadlineCutoff}
-    OR ${schema.deploymentPublishJobs.lastHeartbeatAt} <= ${stallCutoff})`;
+    OR (${schema.deploymentPublishJobs.status} <> 'context_ready' AND ${schema.deploymentPublishJobs.lastHeartbeatAt} <= ${stallCutoff}))`;
   // Disjoint status ranges use the existing (status, updated_at) index and
   // exclude terminal history. Unlike a fixed active-status list, this also
   // covers new non-terminal states introduced by later executors.

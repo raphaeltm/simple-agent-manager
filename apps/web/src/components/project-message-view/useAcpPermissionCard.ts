@@ -78,7 +78,8 @@ function usePermissionDeadline(interaction: AcpInteractionSnapshotItem, onRefres
   return { now, setNow, isPending, deadlinePassed };
 }
 
-function usePermissionDetail(params: {
+/** Loads the secure permission detail (title, description, options); shared with the inbox. */
+export function usePermissionDetail(params: {
   projectId: string;
   sessionId: string;
   interactionId: string;

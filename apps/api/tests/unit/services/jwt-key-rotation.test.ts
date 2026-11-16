@@ -32,6 +32,7 @@ import {
   verifyCallbackToken,
   verifyLocalForwardToken,
   verifyPortAccessToken,
+  verifyPublishJobClaims,
   verifyTerminalToken,
 } from '../../../src/services/jwt';
 import {
@@ -39,6 +40,7 @@ import {
   LEGACY_JWT_KEY_ID,
   parsePreviousJwtKeyUntil,
 } from '../../../src/services/jwt-keys';
+import { signPublishJobToken } from '../../../src/services/publish-job-token';
 import { verifyPlatformJwt } from '../../../src/services/jwt-verify';
 import {
   getWorkloadJWKS,
@@ -124,6 +126,25 @@ interface VerifierCase {
 const SIGNATURE_REFUSAL = { code: 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED' };
 
 const verifiers: VerifierCase[] = [
+  {
+    name: 'verifyPublishJobClaims',
+    sign: (env) =>
+      signPublishJobToken(
+        env,
+        {
+          jobId: 'job-1',
+          projectId: 'project-1',
+          environmentId: 'env-1',
+          agentProfileId: 'profile-1',
+          attempt: 1,
+        },
+        Date.now() + HOUR_MS
+      ),
+    verify: (token, env) => verifyPublishJobClaims(env, token),
+    accepted: { jobId: 'job-1', projectId: 'project-1', attempt: 1 },
+    refusal: { statusCode: 401, error: 'UNAUTHORIZED' },
+    previousAccepted: false,
+  },
   {
     name: 'verifyCallbackToken',
     sign: (env) => signCallbackToken('ws-1', env, { callbackGeneration: null }),
@@ -464,5 +485,24 @@ describe('/oidc/.well-known/jwks.json', () => {
   it('publishes only the current key after UNTIL or when UNTIL is absent', async () => {
     expect((await getWorkloadJWKS(rotatedEnv(oneHourAgo()))).keys).toHaveLength(1);
     expect((await getWorkloadJWKS(rotatedEnv(undefined))).keys).toHaveLength(1);
+  });
+});
+
+it('overlap never revives a retired runtime generation', async () => {
+  sqlite
+    .prepare(
+      "INSERT INTO workspaces (id,user_id,name,status,callback_generation) VALUES ('ws-1','user-1','workspace','running','gen-b')"
+    )
+    .run();
+  const retired = await signCallbackToken('ws-1', beforeRotationEnv(), {
+    callbackGeneration: 'gen-a',
+  });
+  const live = await signCallbackToken('ws-1', beforeRotationEnv(), {
+    callbackGeneration: 'gen-b',
+  });
+  const env = rotatedEnv(inOneHour());
+  await expect(verifyCallbackToken(retired, env)).rejects.toMatchObject({ statusCode: 401 });
+  await expect(verifyCallbackToken(live, env)).resolves.toMatchObject({
+    callbackGeneration: 'gen-b',
   });
 });

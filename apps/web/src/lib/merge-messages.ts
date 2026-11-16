@@ -7,11 +7,61 @@
  *
  * @see docs/notes/2026-03-17-chat-message-duplication-report.md
  */
-import { compareMessagePositions } from '@simple-agent-manager/shared';
+import { type ChatMessageAppend, compareMessagePositions } from '@simple-agent-manager/shared';
 
 import type { ChatMessageResponse } from './api';
 
 export type MergeStrategy = 'replace' | 'append' | 'prepend';
+
+/** Canonical rows only grow. A delayed snapshot must never erase a newer prefix. */
+function longerAssistantPrefix(
+  current: ChatMessageResponse,
+  incoming: ChatMessageResponse
+): ChatMessageResponse | null {
+  if (
+    current.role !== 'assistant' ||
+    incoming.role !== 'assistant' ||
+    current.sessionId !== incoming.sessionId ||
+    current.createdAt !== incoming.createdAt ||
+    current.sequence !== incoming.sequence
+  )
+    return null;
+  if (current.content.startsWith(incoming.content)) return current;
+  if (incoming.content.startsWith(current.content)) return incoming;
+  return null;
+}
+
+/** Apply a socket delta, detecting gaps instead of displaying an incomplete suffix. */
+export function applyMessageAppend(
+  messages: ChatMessageResponse[],
+  append: ChatMessageAppend
+): { messages: ChatMessageResponse[]; needsCatchUp: boolean } {
+  const row = messages.find((message) => message.id === append.id);
+  if (
+    !row ||
+    row.sessionId !== append.sessionId ||
+    row.role !== 'assistant' ||
+    !Number.isSafeInteger(append.offset) ||
+    append.offset < 0 ||
+    !Number.isSafeInteger(append.revision) ||
+    append.revision !== append.offset + append.content.length
+  ) {
+    return { messages, needsCatchUp: true };
+  }
+  if (row.content.length >= append.revision) {
+    return {
+      messages,
+      needsCatchUp: row.content.slice(append.offset, append.revision) !== append.content,
+    };
+  }
+  if (row.content.length !== append.offset) return { messages, needsCatchUp: true };
+  return {
+    messages: messages.map((message) =>
+      message === row ? { ...message, content: message.content + append.content } : message
+    ),
+    needsCatchUp: false,
+  };
+}
 
 /** A message the server has persisted; only those carry a sequence. */
 export function isPersistedMessage(
@@ -153,8 +203,10 @@ function mergeReplace(
   }
 
   // Add all incoming messages (authoritative for the recent range)
+  const previousById = new Map(prev.map((message) => [message.id, message]));
   for (const msg of incoming) {
-    map.set(msg.id, msg);
+    const current = map.get(msg.id) ?? previousById.get(msg.id);
+    map.set(msg.id, current ? (longerAssistantPrefix(current, msg) ?? msg) : msg);
   }
 
   // Preserve optimistic messages that haven't been confirmed yet
@@ -188,7 +240,11 @@ function mergeAppend(
 
   // Add incoming, skipping duplicates and reconciling optimistic messages
   for (const msg of incoming) {
-    if (map.has(msg.id)) continue;
+    const current = map.get(msg.id);
+    if (current) {
+      map.set(msg.id, longerAssistantPrefix(current, msg) ?? current);
+      continue;
+    }
 
     // A server-confirmed message replaces the optimistic row it stands in for;
     // otherwise a confirmed user message already loaded under another ID wins.
@@ -220,7 +276,10 @@ function mergePrepend(
 
   // Add incoming older messages, skipping duplicates
   for (const msg of incoming) {
-    if (!map.has(msg.id)) {
+    const current = map.get(msg.id);
+    if (current) {
+      map.set(msg.id, longerAssistantPrefix(current, msg) ?? current);
+    } else {
       map.set(msg.id, msg);
     }
   }

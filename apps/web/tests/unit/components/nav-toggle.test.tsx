@@ -1,10 +1,11 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   fireEvent,
   render as baseRender,
   type RenderOptions,
   screen,
 } from '@testing-library/react';
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -13,9 +14,17 @@ import { extractProjectId, NavSidebar } from '../../../src/components/NavSidebar
 import { ThemeProvider } from '../../../src/contexts/ThemeContext';
 
 // MobileNavDrawer renders the shared <ThemeSwitcher />, which calls useTheme and
-// therefore requires a ThemeProvider ancestor.
+// therefore requires a ThemeProvider ancestor. NavSidebar reads the inbox counts, so it needs a
+// QueryClient (signed out here, so no request is made).
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <QueryClientProvider client={new QueryClient()}>
+      <ThemeProvider>{children}</ThemeProvider>
+    </QueryClientProvider>
+  );
+}
 function render(ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
-  return baseRender(ui, { wrapper: ThemeProvider, ...options });
+  return baseRender(ui, { wrapper: Providers, ...options });
 }
 
 // Mock AuthProvider to provide superadmin context
@@ -225,5 +234,32 @@ describe('MobileNavDrawer — toggle', () => {
       />
     );
     expect(screen.getByTitle('Test Project')).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MobileNavDrawer — inbox count (nav parity with the desktop sidebar)
+// ---------------------------------------------------------------------------
+
+describe('MobileNavDrawer — inbox count', () => {
+  it('shows the Inbox count like the desktop sidebar, and none when zero', () => {
+    const onNavigate = vi.fn();
+    render(
+      <MobileNavDrawer
+        onClose={vi.fn()}
+        user={{ name: 'Test User', email: 'test@example.com', image: null }}
+        currentPath="/projects/p1/chat"
+        onNavigate={onNavigate}
+        onSignOut={vi.fn()}
+        navItems={[
+          { label: 'Chat', path: '/projects/p1/chat' },
+          { label: 'Inbox', path: '/projects/p1/inbox', count: 3 },
+          { label: 'Ideas', path: '/projects/p1/ideas', count: 0 },
+        ]}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox, 3' }));
+    expect(onNavigate).toHaveBeenCalledWith('/projects/p1/inbox');
+    expect(screen.getByRole('button', { name: 'Ideas' })).toBeInTheDocument();
   });
 });

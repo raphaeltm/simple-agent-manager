@@ -274,7 +274,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       )}
       {githubReauthMessage && (
         <div
-          className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg border border-border bg-surface-elevated p-4 shadow-lg"
+          className="glass-surface fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg p-4 shadow-dropdown"
           role="alert"
         >
           <p className="text-sm font-medium text-fg-primary">

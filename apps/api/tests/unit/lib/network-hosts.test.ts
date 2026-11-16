@@ -1,17 +1,15 @@
 /**
- * Host classifier and guarded fetch (self-host T5). Hosts are checked both as bare strings and
+ * Host classifier and guarded fetch (outbound-fetch guard, landing slice L5a). Hosts are checked both as bare strings and
  * through `new URL(...).hostname`, because callers pass either and URL parsers canonicalise
  * some spellings (decimal, hex, octal, IPv4-mapped) before the classifier sees them.
  */
-import { describe, expect, it, vi } from 'vitest';
-
 import {
   assertOutboundUrl,
   classifyHost,
   guardedFetch,
-  isAcceptableOperatorEndpoint,
   OutboundRequestRefusedError,
-} from '../../../src/lib/network-hosts';
+} from '@simple-agent-manager/worker-core';
+import { describe, expect, it, vi } from 'vitest';
 
 const FORBIDDEN = [
   // metadata and link-local
@@ -127,8 +125,8 @@ const PUBLIC = [
   '::ffff:8.8.8.8',
   'xn--bcher-kva.example',
   // Names that resolve to private addresses look public: the classifier sees names, not DNS
-  // answers. On a self-hosted box the egress fence (scripts/selfhost/egress-fence.ts) is what
-  // refuses the connection; these are pinned so nobody assumes the classifier covers DNS.
+  // answers, and a Worker cannot resolve a name before it connects. These are pinned so nobody
+  // assumes the classifier covers DNS (see the classify.ts header for what that leaves open).
   'localtest.me',
   '127.0.0.1.nip.io',
   '169.254.169.254.nip.io',
@@ -162,21 +160,6 @@ describe('classifyHost', () => {
     ['https://api.anthropic.com/', 'public'],
   ])('through URL parsing: %s is %s', (url, expected) => {
     expect(classifyHost(new URL(url).hostname)).toBe(expected);
-  });
-});
-
-describe('isAcceptableOperatorEndpoint', () => {
-  it.each([
-    ['https://llm.example.com/v1', true],
-    ['https://10.0.0.5/v1', true],
-    ['http://127.0.0.1:11434/v1', true],
-    ['http://ollama:11434/v1', true],
-    ['http://llm.example.com/v1', false],
-    ['https://169.254.169.254/', false],
-    ['http://metadata.google.internal/', false],
-    ['https://user:pw@llm.example.com/v1', false],
-  ])('%s -> %s', (url, expected) => {
-    expect(isAcceptableOperatorEndpoint(new URL(url))).toBe(expected);
   });
 });
 

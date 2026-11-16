@@ -1,4 +1,4 @@
-import { classifyHost } from './network-hosts';
+import { classifyHost } from '@simple-agent-manager/worker-core';
 
 const P256_PUBLIC_KEY_BYTES = 65;
 const P256_PRIVATE_KEY_BYTES = 32;

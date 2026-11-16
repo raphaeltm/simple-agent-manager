@@ -1,3 +1,4 @@
+import { assertNoReservedCloudflareBuilds } from '@simple-agent-manager/app-deployment';
 import type { ListProjectsResponse } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -159,6 +160,7 @@ crudRoutes.delete('/:id', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   const project = await requireProjectCapability(db, projectId, userId, 'project:delete');
+  await assertNoReservedCloudflareBuilds(db, { projectId });
 
   // Explicitly delete child records instead of relying on D1 CASCADE.
   // SQLite ignores REFERENCES constraints added via ALTER TABLE, so

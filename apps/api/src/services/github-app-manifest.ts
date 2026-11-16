@@ -187,6 +187,7 @@ export async function completeGitHubAppManifest(
     );
   }
 
+  // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- GitHub chooses the fixed manifest-conversion API origin; the installer supplies only its code
   const response = await fetch(
     `https://api.github.com/app-manifests/${encodeURIComponent(code)}/conversions`,
     {

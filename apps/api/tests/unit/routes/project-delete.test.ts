@@ -45,16 +45,20 @@ describe('DELETE /api/projects/:id', () => {
       select: vi.fn(() => {
         operations.push('select');
         const selectChain: any = {};
-        selectChain.from = vi.fn(() => selectChain);
+        let reservationQuery = false;
+        selectChain.from = vi.fn((table: any) => {
+          reservationQuery = table?.[Symbol.for('drizzle:Name')] === 'deployment_publish_jobs';
+          return selectChain;
+        });
         selectChain.where = vi.fn(() => selectChain);
         selectChain.orderBy = vi.fn(() => selectChain);
         selectChain.groupBy = vi.fn(() => selectChain);
         selectChain.limit = vi.fn(() => {
-          return Promise.resolve(selectResults.shift() ?? []);
+          return Promise.resolve(reservationQuery ? [] : (selectResults.shift() ?? []));
         });
         // When awaited directly (without .limit()), resolve to data
         selectChain.then = (resolve: any, reject: any) => {
-          return Promise.resolve(selectResults.shift() ?? []).then(resolve, reject);
+          return Promise.resolve(reservationQuery ? [] : (selectResults.shift() ?? [])).then(resolve, reject);
         };
         return selectChain;
       }),

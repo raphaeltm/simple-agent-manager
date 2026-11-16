@@ -607,6 +607,11 @@ describe('operation registry contract', () => {
       'sam_chat_send',
       'sam_agent_answer',
       'sam_work_stop',
+      'sam_inbox_list',
+      'sam_inbox_count',
+      'sam_inbox_item_get',
+      'sam_inbox_answer',
+      'sam_inbox_archive',
       'sam_chat_interrupt',
       'sam_chat_status',
       'sam_chat_delivery_get',
@@ -625,6 +630,7 @@ describe('operation registry contract', () => {
       'sam_channel_get',
       'sam_channel_subscription_cancel',
       'sam_usage_get',
+      'sam_run_receipt',
     ]);
     expect(operationInputJsonSchema(samTaskGet)).toMatchObject({
       type: 'object',

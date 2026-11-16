@@ -206,7 +206,7 @@ describe('Connector OAuth real Workers/KV conformance', () => {
       );
     };
     const catalog = (await readMcp(listed)) as { result: { tools: Array<{ name: string }> } };
-    expect(catalog.result.tools).toHaveLength(39);
+    expect(catalog.result.tools).toHaveLength(45);
     expect(catalog.result.tools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining([
         'sam_chat_interrupt',
@@ -217,6 +217,7 @@ describe('Connector OAuth real Workers/KV conformance', () => {
         'sam_chat_jobs_list',
         'sam_operation_get',
         'sam_idea_updates_list',
+        'sam_run_receipt',
       ])
     );
     const called = await invoke({

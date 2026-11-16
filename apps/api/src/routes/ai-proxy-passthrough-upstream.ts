@@ -14,12 +14,12 @@ import {
   PROVIDER_PRESETS,
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
+import { assertOutboundUrl, OutboundRequestRefusedError } from '@simple-agent-manager/worker-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { assertOutboundUrl, OutboundRequestRefusedError } from '../lib/network-hosts';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
 import { resolveSessionProfileCredentialContext } from '../services/composable-credentials/profile-context';

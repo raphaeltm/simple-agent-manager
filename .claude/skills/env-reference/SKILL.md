@@ -504,7 +504,7 @@ by the read-only cron-liveness check.
 
 ### Human Input and Web Push
 
-- `HUMAN_INPUT_TIMEOUT_MS` — Initial needs-input response window (default: `7200000`)
+- The question window is the admin setting `inbox.questionTimeoutMinutes` (slice G); the three `HUMAN_INPUT_*` variables below apply only to questions asked before it, held as attention markers
 - `HUMAN_INPUT_ESCALATION_FRACTIONS` — Comma-separated reminder points within the initial window (default: `0.25,0.75`)
 - `HUMAN_INPUT_UNDELIVERED_GRACE_MS` — Extension when no push delivery was confirmed (default: `7200000`)
 - `HUMAN_INPUT_MAX_WAIT_MS` — Hard maximum needs-input marker lifetime (default: `86400000`)

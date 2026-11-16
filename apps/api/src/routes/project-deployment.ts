@@ -353,6 +353,11 @@ deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => 
   const userId = mcpData.userId;
   const workspaceId = mcpData.workspaceId;
 
+  // Workspace-token liveness proves current membership; this operation additionally
+  // requires the current role to retain deployment authority before a cached or new
+  // cloud identity token can leave SAM.
+  await requireProjectCapability(db, projectId, userId, 'deployment:deploy');
+
   // Look up deployment credential
   const credRows = await db
     .select()

@@ -10,12 +10,12 @@ Always choose the smallest complete solution that meets the current need and sta
 
 Keep startup context small and load detail only when the current task needs it. Prefer indexes, skills, and scoped docs over reading broad instruction trees.
 
-- Start with this file for repo-wide basics, then load the nearest `AGENTS.md` and scoped `.claude/rules/` only for directories you will modify.
-- Treat root `.claude/rules/*.md` as compact routing and safety guidance. When a stub points to scoped copies, read only the copy for the affected app/package.
+- Start with this file for repo-wide basics. Rules in `.claude/rules/` with `paths` frontmatter load by themselves when you read or edit a matching file; the index in `.claude/rules/00-rule-routing.md` lists them.
+- Before creating a new file, working only through the shell, or planning in an area, open that area's rules from the index yourself: a path-scoped rule arrives only on file access.
 - Use skills for bulky reference material: `/changelog` for recent changes, `env-reference` for env vars, `api-reference` for routes, and specialist skills for domain reviews.
 - Search before reading large collections. Do not bulk-read all rules, task archives, specs, or docs unless the task explicitly requires a broad audit.
-- Measure instruction surface with `pnpm quality:agent-context-budget` when changing agent steering docs or scoped rule layout. In Claude Code, use `/context` to inspect loaded context and `/skill-doctor` to audit skill listing cost.
-- Keep volatile history and incident narratives out of root startup docs. Put durable lessons in scoped rules or skills, and route to them from concise root guidance.
+- Measure instruction surface with `pnpm quality:agent-context-budget` when changing agent steering docs or a rule's `paths` scope; `--check` enforces the size ceilings and that every scoped rule can load. In Claude Code, use `/context` to inspect loaded context and `/skill-doctor` to audit skill listing cost.
+- Keep volatile history and incident narratives out of root startup docs. Put durable lessons in path-scoped rules or skills (`.claude/rules/00-rule-routing.md` explains how to add one).
 - When compaction risk appears, write state to the task file, `.do-state.md`, or the PR body before continuing.
 
 Route common questions to the smallest durable source first:
@@ -25,8 +25,8 @@ Route common questions to the smallest durable source first:
 | Recent implementation history                      | `/changelog` skill, then `git log --oneline -20`                             | Long history blocks in root instructions |
 | API routes or HTTP contracts                       | `api-reference` skill, then exact files under `apps/api/`                    | Reading the whole API tree               |
 | Environment variables or secrets                   | `env-reference` skill and `apps/api/.env.example`                            | Scanning deploy docs first               |
-| UI behavior or layout                              | Nearest `apps/web/AGENTS.md` / `packages/ui/AGENTS.md`, then scoped UI rules | Loading API/DO incident rules            |
-| Durable Object, D1, KV, R2, or Cloudflare behavior | `apps/api/AGENTS.md`, scoped API rules, and `cloudflare-specialist`          | Generic root troubleshooting             |
+| UI behavior or layout                              | Nearest `apps/web/AGENTS.md` / `packages/ui/AGENTS.md` and the rules it lists | Loading API/DO incident rules            |
+| Durable Object, D1, KV, R2, or Cloudflare behavior | `apps/api/AGENTS.md`, the rules it lists, and `cloudflare-specialist`       | Generic root troubleshooting             |
 | Active work state                                  | Current task file, `.do-state.md`, and PR body                               | Reconstructing from full chat history    |
 
 A serverless monorepo platform for ephemeral AI coding agent environments on Cloudflare Workers + Hetzner Cloud VMs.
@@ -116,7 +116,7 @@ Full local-development guide: `apps/www/src/content/docs/docs/guides/local-devel
 
 Merging to `main` in the canonical repository automatically deploys to production after CI succeeds. The **Create Release** workflow (`release.yml`) tags the latest successful production deployment with a daily CalVer tag (`vYYYY.MM.DD`). Self-host forks do not update from a push alone; operators run the **Update Self-Hosted Instance** workflow to sync the latest upstream release and deploy, or manually run **Deploy Production** on `main` (the `target_commit_sha` input is optional and defaults to the current `main` tip).
 
-- **CI** (`ci.yml`): lint, typecheck, test, build on pull requests and canonical `main` pushes; fork `main` pushes are intentionally skipped
+- **CI** (`ci.yml`): lint, typecheck, test, build on pull requests and canonical `main` pushes; fork `main` pushes are intentionally skipped. Draft PRs run only quick checks; marking a PR ready (`ready_for_review`) starts the full suite, in which each test suite runs only if its package or a dependency changed (main pushes run every suite; see `scripts/quality/README.md`). The one required check, `Durable Object Workers`, gates the whole suite
 - **Deploy Staging** (`deploy-staging.yml`): manual trigger only (`workflow_dispatch`) — agents trigger this explicitly during `/do` Phase 6
 - **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment after successful canonical `main` CI, or manual `workflow_dispatch` for self-host forks (`target_commit_sha` is optional; defaults to current `main` tip)
 - **Create Release** (`release.yml`): daily CalVer tagging of the latest successful production deploy (canonical repo only)
@@ -238,6 +238,7 @@ Users select their provider mode per-agent in Settings → Agent Settings. The `
 ## Testing
 
 - **Staging authentication**: Use Playwright browser auth with the staging smoke/API token in `SAM_PLAYWRIGHT_PRIMARY_USER`. In the Playwright browser context, POST to `https://api.sammy.party/api/auth/token-login` with body `{ "token": "<value>" }`, verify a 200 response, then navigate to `https://app.sammy.party`. Do not rely on `SAM_API_URL`; it may point at production, where staging tokens correctly fail with `401 Invalid token`. See `.claude/rules/13-staging-verification.md` for full procedure.
+- **Two staging installations**: `staging` (`sammy.party`) and `staging2` (`sammy2.party`, deploy with `-f environment=staging2`). Both use the `staging` GitHub Environment's credentials and have separate data and leases; take whichever is free. staging2 is signed into by workload identity only. Details: full staging reference, "Two Staging Installations".
 - **Production authentication**: Use GitHub OAuth credentials at `/workspaces/.tmp/secure/demo-credentials.md` (outside repo)
 - **Live test cleanup required**: delete test workspaces/nodes after verification
 - **Staging verification required for every code PR** — see `.claude/rules/13-staging-verification.md`

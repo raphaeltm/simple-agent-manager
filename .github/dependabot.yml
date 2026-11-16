@@ -31,6 +31,10 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: 'gomod'
+    directory: '/scripts/quality/go-optional-fields'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'gomod'
     directory: '/scripts/quality/govulncheck-tool'
     schedule:
       interval: weekly

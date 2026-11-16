@@ -1,5 +1,12 @@
+import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-deployment';
+import type {
+  InsightsFlowSettingName,
+  InsightsReceiptSettingName,
+} from '@simple-agent-manager/operations';
+
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
+import { type InstructionBudgetSettingName } from './admin-settings-instructions-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
 import { type OutboundSettingName } from './admin-settings-outbound-definitions';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
@@ -12,6 +19,7 @@ import {
   validateConnectorSetting,
 } from './connector-settings-definition';
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
+import { type InboxSettingName } from './inbox-settings-definition';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type LlmEndpointSettingName } from './llm-endpoint-settings';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
@@ -25,15 +33,19 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
-  | 'deployments.buildContextCollectionMode'
-  | 'deployments.buildContextStartTimeoutMs'
-  | `deployments.buildContext${'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
-  | `deployments.publishJob${'StallMs' | 'DeadlineMs' | 'SweepLimit' | 'CancelTimeoutMs'}`
+  | DeploymentPublishJobSettingName
+  | 'deployments.publishCallbackMaxBodyBytes'
+  | 'chat.messageMergingEnabled'
+  | 'chat.messageMergeMaxRowBytes'
+  | 'chat.messageMergeRecentIds'
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
   | `lifecycleLatency.${LifecycleLatencySettingKey}`
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
+  | InboxSettingName
+  | InsightsReceiptSettingName
+  | InsightsFlowSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName
@@ -43,6 +55,7 @@ export type AdminSettingName =
   | SpeechEndpointSettingName
   | StalledClassifierEndpointSettingName
   | GcpCatalogSettingName
+  | InstructionBudgetSettingName
   | OperationsTelemetrySettingName
   | OutboundSettingName
   | 'operations.projectDataRowUsageIntervalMs'
@@ -92,6 +105,12 @@ export type AdminSettingName =
   | 'operations.evictionRecoveryRetryWallMs'
   | 'operations.evictionRecoveryRetryDelayMs'
   | 'operations.capacityPoolPublishBudgetMs'
+  | 'operations.capacityPoolRefreshPassBudgetMs'
+  | 'operations.capacityPoolRefreshRetryBaseMs'
+  | 'operations.capacityPoolRefreshRetryMaxMs'
+  | 'operations.capacityPoolRefreshDeadlineMs'
+  | 'operations.capacityPoolRefreshLeaseMs'
+  | 'operations.capacityPoolRefreshFailureCooldownMs'
   | 'operations.deadWakeReconcileBatchSize'
   | 'operations.resourceLinkTouchIntervalMs'
   | 'operations.resourceLinkWeakPerTarget'

@@ -5,4 +5,4 @@ description: "How to build SAM app screens and components in the SAM Glass style
 
 # SAM Glass
 
-Read the full skill at `.claude/skills/sam-glass/SKILL.md` and follow it. The guide is `docs/guides/sam-glass-design-system.md`; the mandatory rules are in `apps/web/.claude/rules/80-sam-glass.md`.
+Read the full skill at `.claude/skills/sam-glass/SKILL.md` and follow it. The guide is `docs/guides/sam-glass-design-system.md`; the mandatory rules are in `.claude/rules/80-sam-glass.md`.

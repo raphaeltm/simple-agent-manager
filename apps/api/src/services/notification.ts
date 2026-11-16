@@ -71,7 +71,7 @@ function getStub(env: NotificationEnv, userId: string): DurableObjectStub<Notifi
  * when a sessionId is available.
  *
  * Returns a frontend-relative path consumed exclusively by the React app
- * via `navigate(notification.actionUrl)` in NotificationCenter. MUST NOT
+ * via `navigate(notification.actionUrl)` in the inbox Updates list (`InboxUpdatesList`). MUST NOT
  * be used for server-side redirects, web push click_action, or external
  * integrations — those require absolute `https://app.${BASE_DOMAIN}/...` URLs.
  *
@@ -261,11 +261,15 @@ export async function notifyNeedsInput(
     options?: string[] | null;
     sessionId?: string | null;
     attentionMarkerId: string;
+    /** Overrides the category label ("Review" for an inbox review item). */
+    label?: string;
   }
 ): Promise<NotificationResponse> {
-  const categoryLabel = opts.category
-    ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
-    : 'Input';
+  const categoryLabel =
+    opts.label ??
+    (opts.category
+      ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
+      : 'Input');
 
   return sendNotification(env, userId, {
     type: 'needs_input',

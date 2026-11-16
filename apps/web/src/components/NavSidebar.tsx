@@ -2,13 +2,15 @@ import { NavItem as GlassNavItem, NavLabel } from '@simple-agent-manager/ui';
 import {
   ArrowLeft,
   ArrowRight,
-  Bell,
   Bot,
   Brain,
+  ChartColumn,
   FileCode,
   FolderKanban,
   FolderOpen,
   Home,
+  Inbox,
+  LayoutDashboard,
   Lightbulb,
   Map,
   MessageSquare,
@@ -28,17 +30,21 @@ import { useLocation } from 'react-router';
 
 import { useSamSettings } from '../hooks/useSamSettings';
 import { useAuth } from './AuthProvider';
+import { useInboxCount } from './inbox/useInbox';
 import { useOnboarding } from './onboarding';
 
 export interface NavItem {
   label: string;
   path: string;
   icon: React.ReactNode;
+  /** Shows the inbox count (all projects in the global nav, this project in the project nav). */
+  inboxCount?: true;
 }
 
 /** Global nav items shown when NOT inside a project */
 export const GLOBAL_NAV_ITEMS: NavItem[] = [
   { label: 'Home', path: '/dashboard', icon: <Home size={18} /> },
+  { label: 'Inbox', path: '/inbox', icon: <Inbox size={18} />, inboxCount: true },
   { label: 'Chats', path: '/chats', icon: <MessageSquare size={18} /> },
   { label: 'Projects', path: '/projects', icon: <FolderKanban size={18} /> },
   { label: 'Map', path: '/account-map', icon: <Map size={18} /> },
@@ -60,7 +66,12 @@ export function getGlobalNavItems(samEnabled: boolean): NavItem[] {
 
 /** Project sub-nav items — paths are relative to /projects/:id/ */
 export const PROJECT_NAV_ITEMS: NavItem[] = [
+  // First: what is going on in the project. Not the landing page yet (Inbox slice F2 makes it
+  // the index route); until then the project still opens in Chat.
+  { label: 'Overview', path: 'overview', icon: <LayoutDashboard size={18} /> },
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
+  // The inbox replaced the project Notifications page (its FYI list is the Updates chip).
+  { label: 'Inbox', path: 'inbox', icon: <Inbox size={18} />, inboxCount: true },
   // { label: 'Agent', path: 'agent', icon: <Bot size={18} /> }, // Hidden — experimental, not ready for users yet
   // MessageSquareQuote, not MessageSquare: Chat already owns the plain speech
   // bubble, and two bubbles side by side in the same rail are indistinguishable
@@ -69,9 +80,10 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Files', path: 'files', icon: <FileCode size={18} /> },
   { label: 'Library', path: 'library', icon: <FolderOpen size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
+  // How work moves from idea to merged (Insights; Flow is live, other tabs follow).
+  { label: 'Insights', path: 'insights', icon: <ChartColumn size={18} /> },
   { label: 'Deployments', path: 'deployments', icon: <Rocket size={18} /> },
   { label: 'Agent Context', path: 'agent-context', icon: <Brain size={18} /> },
-  { label: 'Notifications', path: 'notifications', icon: <Bell size={18} /> },
   // One item for everything that starts work on its own (it replaced Events and Triggers).
   { label: 'Automation', path: 'automation', icon: <Workflow size={18} /> },
   { label: 'Profiles', path: 'profiles', icon: <UserCog size={18} /> },
@@ -134,6 +146,8 @@ export function NavSidebar({
 
   const projectId = extractProjectId(location.pathname);
   const insideProject = Boolean(projectId);
+  const globalInboxCount = useInboxCount(null).data?.needsYou;
+  const projectInboxCount = useInboxCount(projectId ?? null).data?.needsYou;
   const projectToggleRef = useRef<HTMLButtonElement>(null);
   const globalToggleRef = useRef<HTMLButtonElement>(null);
   const restoreToggleFocus = useRef(false);
@@ -149,7 +163,7 @@ export function NavSidebar({
     onToggleGlobalNav?.();
   };
 
-  const renderItem = (item: NavItem, to: string, active: boolean) => (
+  const renderItem = (item: NavItem, to: string, active: boolean, inboxCount?: number) => (
     <GlassNavItem
       key={item.path}
       to={to}
@@ -157,6 +171,8 @@ export function NavSidebar({
       icon={item.icon}
       current={active}
       iconOnly={iconOnly}
+      count={item.inboxCount ? inboxCount : undefined}
+      countTone="attention"
     />
   );
 
@@ -232,7 +248,8 @@ export function NavSidebar({
               renderItem(
                 item,
                 `/projects/${projectId}/${item.path}`,
-                isProjectSubActive(item.path, projectId, location.pathname)
+                isProjectSubActive(item.path, projectId, location.pathname),
+                projectInboxCount
               )
             )}
           </nav>
@@ -258,7 +275,7 @@ export function NavSidebar({
 
             {/* Global nav items */}
             {globalItems.map((item) =>
-              renderItem(item, item.path, isActive(item.path, location.pathname))
+              renderItem(item, item.path, isActive(item.path, location.pathname), globalInboxCount)
             )}
 
             {onboardingResume}
@@ -285,7 +302,7 @@ export function NavSidebar({
       className={`flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-2 ${className ?? ''}`}
     >
       {globalItems.map((item) =>
-        renderItem(item, item.path, isActive(item.path, location.pathname))
+        renderItem(item, item.path, isActive(item.path, location.pathname), globalInboxCount)
       )}
 
       {onboardingResume}

@@ -147,6 +147,7 @@ async function fetchSecrets(agent: AgentSettings): Promise<RuntimeSecrets> {
   const nonce = hex(crypto.getRandomValues(new Uint8Array(16)));
   let response: Response;
   try {
+    // eslint-disable-next-line sam/no-unguarded-outbound-fetch -- the installer pins the loopback key-agent URL and token
     response = await fetch(agent.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-sam-key-agent': '1' },

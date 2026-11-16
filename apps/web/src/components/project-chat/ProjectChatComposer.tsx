@@ -60,6 +60,8 @@ interface ProjectChatComposerProps {
   submitLabel?: string;
   readOnly?: boolean;
   focusOnMount?: boolean;
+  /** Accessible name for the text box; the placeholder is used when absent. */
+  inputLabel?: string;
 }
 
 const TEXTAREA_MAX_HEIGHT_PX = 120;
@@ -94,6 +96,7 @@ export function ProjectChatComposer({
   submitLabel = 'Send',
   readOnly = false,
   focusOnMount = true,
+  inputLabel,
 }: ProjectChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const internalFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -132,12 +135,39 @@ export function ProjectChatComposer({
     if (focusOnMount) textareaRef.current?.focus();
   }, [focusOnMount]);
 
-  useEffect(() => {
+  const fitTextareaHeight = useCallback(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = 'auto';
     textarea.style.height = `${Math.min(textarea.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-  }, [value]);
+  }, []);
+
+  useEffect(() => {
+    fitTextareaHeight();
+  }, [value, fitTextareaHeight]);
+
+  // The height depends on the width too: a box first measured while its row was narrower
+  // (controls that leave once profiles load, a rotation) would keep a wrapped placeholder's
+  // height. Re-measure on width changes only, so setting the height cannot loop.
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || typeof ResizeObserver === 'undefined') return;
+    let width = textarea.clientWidth;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      if (textarea.clientWidth === width) return;
+      width = textarea.clientWidth;
+      // Next frame, not inside the callback: resizing the observed box there makes the browser
+      // report "ResizeObserver loop completed", which the error reporter would forward.
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fitTextareaHeight);
+    });
+    observer.observe(textarea);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [fitTextareaHeight]);
 
   const setFileInput = useCallback(
     (node: HTMLInputElement | null) => {
@@ -358,6 +388,7 @@ export function ProjectChatComposer({
           disabled={sending || disabled}
           readOnly={readOnly}
           rows={1}
+          aria-label={inputLabel}
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={showSlashPalette || showMentionPalette}

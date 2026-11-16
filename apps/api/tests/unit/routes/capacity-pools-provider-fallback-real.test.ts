@@ -46,6 +46,8 @@ function createEnv() {
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
+    schema.capacityPoolCandidateStaging,
+    schema.capacityPoolRefreshes,
   ]);
   return {
     sqlite,
@@ -62,7 +64,7 @@ afterEach(() => {
 });
 
 describe('default capacity pool route real provider fallback contract', () => {
-  it('seeds a new source on outage but does not resurrect removed candidates on another failed refresh', async () => {
+  it('keeps an unvalidated outage private and never resurrects removed published candidates on another outage', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');
     const encrypted = await encrypt('live-hetzner-token-canary', TEST_ENCRYPTION_KEY);
@@ -95,13 +97,60 @@ describe('default capacity pool route real provider fallback contract', () => {
     const text = await res.text();
     expect(text).not.toContain('live-hetzner-token-canary');
     const body = JSON.parse(text);
-    // The source and its static catalog are seeded, but nothing joins a pool on its own.
-    expect(body.effectiveSummary).toMatchObject({ scope: 'user', state: 'configured-empty' });
+    // An outage has no publication proof: fallback metadata stays private even on bootstrap.
+    expect(body.effectiveSummary).toMatchObject({ scope: 'user', state: 'migration-pending' });
+    expect(sqlite.prepare('SELECT count(*) count FROM capacity_pool_candidates').get()).toEqual({
+      count: 0,
+    });
+    expect(
+      (
+        sqlite.prepare('SELECT count(*) count FROM capacity_pool_candidate_staging').get() as {
+          count: number;
+        }
+      ).count
+    ).toBeGreaterThan(0);
+    // Publish a real validated API result before testing authority retained through an outage.
+    globalThis.fetch = vi.fn().mockImplementation(async () =>
+      Response.json({
+        server_types: [
+          {
+            id: 1,
+            name: 'cx23',
+            description: 'CX23',
+            cores: 2,
+            memory: 4,
+            disk: 40,
+            architecture: 'x86',
+            deprecated: false,
+            prices: [
+              {
+                location: 'fsn1',
+                price_monthly: { gross: '4.51', net: '3.79' },
+                price_hourly: { gross: '0.0077', net: '0.0065' },
+              },
+            ],
+          },
+        ],
+        meta: { pagination: { page: 1, per_page: 50, next_page: null } },
+      })
+    );
+    const published = await createApp().request(
+      '/api/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(published.status).toBe(200);
+    expect((await published.json()).effectiveSummary).toMatchObject({ state: 'configured-empty' });
     const seeded = sqlite.prepare('SELECT count(*) count FROM capacity_pool_candidates').get() as {
       count: number;
     };
     expect(seeded.count).toBeGreaterThan(0);
     sqlite.exec("UPDATE capacity_pool_candidates SET status='deleted'");
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        Response.json({ error: { message: 'server types unavailable' } }, { status: 503 })
+      );
     const retry = await createApp().request(
       '/api/capacity-pools/defaults/reconcile',
       { method: 'POST' },

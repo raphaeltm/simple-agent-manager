@@ -51,7 +51,10 @@ export {
   type HumanPromptDeliveryTrigger,
   isHumanPromptDeliveryTrigger,
 } from './do/agent-wake-policy';
-export { computeHumanInputSchedule, parseAttentionOptions } from './do/attention';
+export {
+  ATTENTION_ARCHIVE_CLAIM,
+  parseAttentionOptions,
+} from './do/attention';
 export { CommentNotFoundError } from './do/comment-contracts';
 export { resolveDurableExecutionConfig } from './do/durable-execution-config';
 export {
@@ -63,6 +66,11 @@ export { type KnowledgeEntityIndexEntry } from './do/knowledge';
 export { type LinkLimits, type LinkRemove, type LinkWrite, type ResourceLink } from './do/links';
 export { type LogicalActivity, type LogicalEntry } from './do/logical-transcript';
 export { type LogicalMessage } from './do/logical-transcript-model';
+export {
+  DEFAULT_MESSAGE_MERGE_CONFIG,
+  type MessageIngestSource,
+  type MessageMergeConfig,
+} from './do/message-stream-ingest';
 export {
   configureProjectDataPort,
   configureProjectDataPorts,
@@ -116,6 +124,7 @@ export { parseCountCnt, parseEnabled, parseMigrationName } from './do/row-schema
 export { type SessionAccessGrantRecord, type SessionAccessResolution } from './do/session-access';
 export { type SessionWakeProgressInput } from './do/session-wake-progress';
 export { type SessionWakeReadyInput } from './do/session-wake-ready';
+export { isSessionWakeReadyCurrent } from './do/session-wake-ready-authority';
 export { type ActivityReportOutcome } from './do/session-work-clock';
 export {
   buildSharedSessionSpeakerLine,

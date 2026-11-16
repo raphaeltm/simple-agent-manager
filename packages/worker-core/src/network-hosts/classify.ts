@@ -1,10 +1,11 @@
 /**
  * Host classification for every outbound request whose URL someone other than the code author
- * chose: a user's credential base URL, a web push endpoint, a registry, an admin's LLM endpoint.
+ * chose: a user's credential base URL, a web push endpoint, a registry, an agent sign-in issuer.
  *
- * On Cloudflare a Worker cannot reach private addresses. On a self-hosted runtime (celld on one
- * box) it shares the host network, so loopback services, private ranges and the cloud metadata
- * server are all one `fetch` away. Every host therefore falls in one of three classes:
+ * On Cloudflare a Worker's `fetch` leaves from Cloudflare's network, not from a machine on the
+ * installation's private network, so the classifier is defence in depth there; on a runtime that shares a host network (a self-hosted install)
+ * loopback services, private ranges and the cloud metadata server would be one `fetch` away.
+ * Every host falls in one of three classes:
  *
  * - `forbidden`: never a valid endpoint, for anyone: link-local (169.254/16, fe80::/10, which hold
  *   the metadata servers), named metadata hosts, unspecified, multicast, reserved and
@@ -17,9 +18,12 @@
  * dotted, decimal, hex and octal IPv4, short forms (`127.1`), trailing dots, and IPv6 including
  * IPv4-mapped, -compatible, -translated, NAT64 and 6to4 embeddings.
  *
- * A name check cannot see what a name resolves to: a public name whose DNS answer is
- * 127.0.0.1 passes as `public`. The host-level egress fence on a self-hosted box
- * (deploy/selfhost/egress-fence) is what stops that case.
+ * A name check cannot see what a name resolves to, and a Worker cannot resolve a name before it
+ * connects: a public name whose DNS answer is 127.0.0.1 passes as `public`. On Cloudflare the
+ * connection itself is made from Cloudflare's network, where private and loopback answers do
+ * not reach anything of the installation's; a self-hosted runtime needs a host-level egress
+ * fence for that case. The classifier is therefore a refusal of what the URL names, not a
+ * proof of where the connection lands.
  */
 
 export type HostClass = 'public' | 'private' | 'forbidden';
@@ -70,7 +74,7 @@ const IPV4_RANGES: ReadonlyArray<readonly [number, number, Exclude<HostClass, 'p
   [ipv4(198, 18, 0, 0), 15, 'private'], // benchmarking
 ];
 
-export function classifyIpv4(address: number): HostClass {
+function classifyIpv4(address: number): HostClass {
   for (const [start, prefix, hostClass] of IPV4_RANGES) {
     const mask = prefix === 0 ? 0 : (IPV4_MAX << (32 - prefix)) >>> 0;
     if ((address & mask) >>> 0 === start) return hostClass;
@@ -100,7 +104,7 @@ function parseIpv4Component(part: string): number | null {
  * An IPv4 literal in any `inet_aton` / WHATWG spelling (`127.0.0.1`, `2130706433`,
  * `0x7f.1`, `0177.0.0.1`, `127.1`), as a 32-bit number. Null for anything else.
  */
-export function parseIpv4Literal(host: string): number | null {
+function parseIpv4Literal(host: string): number | null {
   const parts = host.split('.');
   if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
   if (parts.length === 0 || parts.length > 4) return null;
@@ -136,7 +140,7 @@ function parseIpv6Groups(part: string): number[] | null {
 }
 
 /** An IPv6 literal (no brackets, no zone) as eight 16-bit groups. Null for anything else. */
-export function parseIpv6Literal(host: string): number[] | null {
+function parseIpv6Literal(host: string): number[] | null {
   if (!host.includes(':')) return null;
   const halves = host.split('::');
   if (halves.length > 2) return null;
@@ -202,7 +206,7 @@ function embeddedIpv4Of(groups: number[]): number | null {
   return g0 === 0x2002 ? embeddedIpv4(g1, g2) : null; // 6to4
 }
 
-export function classifyIpv6(groups: number[]): HostClass {
+function classifyIpv6(groups: number[]): HostClass {
   const value = groups.reduce((acc, group) => (acc << 16n) | BigInt(group), 0n);
   const exact = matchIpv6(value, IPV6_EXACT);
   if (exact) return exact;
@@ -237,26 +241,4 @@ export function classifyHost(hostname: string): HostClass {
   // parse above is invalid, never a name.
   if (/^(\d+|0x[0-9a-f]*)$/i.test(host.split('.').pop() ?? '')) return 'forbidden';
   return classifyName(host);
-}
-
-/** Link-local, metadata, unspecified, multicast and reserved hosts. */
-export function isForbiddenEndpointHost(hostname: string): boolean {
-  return classifyHost(hostname) === 'forbidden';
-}
-
-/** Loopback, private ranges and private-network names. */
-export function isPrivateNetworkHost(hostname: string): boolean {
-  return classifyHost(hostname) === 'private';
-}
-
-/**
- * An operator endpoint URL (LLM endpoint, S3 store): HTTPS to any host except a forbidden one,
- * or HTTP to a private host. Never userinfo, query or fragment. Whether a private host may be
- * reached at use time is a separate operator opt-in (`OutboundPolicy.allowPrivateNetwork`).
- */
-export function isAcceptableOperatorEndpoint(url: URL): boolean {
-  if (url.username || url.password || url.search || url.hash) return false;
-  const hostClass = classifyHost(url.hostname);
-  if (url.protocol === 'https:') return hostClass !== 'forbidden';
-  return url.protocol === 'http:' && hostClass === 'private';
 }

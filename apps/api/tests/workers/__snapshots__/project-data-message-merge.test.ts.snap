@@ -1,0 +1,8 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`canonical streamed chunks through real ProjectData persistence > measures billed writes through real workerd and guards the reporter-fixture savings 1`] = `
+[
+  6615,
+  1596,
+]
+`;

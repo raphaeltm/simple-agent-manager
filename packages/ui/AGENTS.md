@@ -58,3 +58,20 @@ pnpm --filter @simple-agent-manager/ui lint        # ESLint
 - Tailwind v4 uses `@tailwindcss/vite` plugin — config is in the consumer's vite config, not a `tailwind.config.js`
 - This is a peer-dependency package — consumers must provide React 19+, lucide-react, react-router, tailwindcss
 - Token values drive the entire app's visual appearance — changes here cascade everywhere
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/04-ui-standards.md`: UI Standards
+- `.claude/rules/17-ui-visual-testing.md`: Mandatory Playwright Visual Testing for UI Changes
+- `.claude/rules/37-prototype-development.md`: Prototype Development
+- `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`: Horizontal Overflow Inside `overflow-x-hidden` Is Invisible to Document-Level Checks
+- `.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`: An Object Literal in a Render Body Can Remount an Entire Subtree
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+- `.claude/rules/80-sam-glass.md`: SAM Glass
+
+<!-- END GENERATED RULE INDEX -->
