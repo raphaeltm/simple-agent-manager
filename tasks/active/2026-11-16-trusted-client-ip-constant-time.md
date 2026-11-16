@@ -15,13 +15,13 @@ Data flow: request -> clientIpFromHeaders -> rate-limit key / diagnostics / node
 Documentation: architecture/security.md header contract and missing-IP behavior. Constitution X/XI/XIII: reuse branch helpers, no tunables/dependencies added, missing trusted IP fails closed.
 
 ## Implementation checklist
-- [ ] Copy four specified helper/test files from origin/sam/selfhost-pass-2 without history.
-- [ ] Port every current IP reader and BetterAuth ipAddressHeaders by hand.
-- [ ] Extract setup-token comparison; audit touched files and centralize additional secret/token equality.
-- [ ] Add constant-time tests: UTF-8, unequal lengths, zero bytes, differences.
-- [ ] Test Cloudflare spoof rejection, trusted ingress, malformed/missing input, and reader enumeration including packages.
-- [ ] Test real BetterAuth persistence and rate limiting with spoofed XFF; prove regression tests red before fix.
-- [ ] Update public security docs and respect file/size budgets.
+- [x] Copy four specified helper/test files from origin/sam/selfhost-pass-2 without history.
+- [x] Port every current IP reader and BetterAuth ipAddressHeaders by hand.
+- [x] Extract setup-token comparison; audit touched files and centralize additional secret/token equality.
+- [x] Add constant-time tests: UTF-8, unequal lengths, zero bytes, differences.
+- [x] Test Cloudflare spoof rejection, trusted ingress, malformed/missing input, and reader enumeration including packages.
+- [x] Test real BetterAuth persistence and rate limiting with spoofed XFF; prove regression tests red before fix.
+- [x] Update public security docs and respect file/size budgets.
 - [ ] Run lint, typecheck, tests and build; specialist reviews and completion validator.
 - [ ] Check both staging queues, reserve and deploy on turn; Playwright sign-in, stored IP and rate-limit key checks; release.
 - [ ] Ready PR, request/wait CodeRabbit, resolve reviews, green CI, merge and production smoke.
@@ -31,4 +31,4 @@ Documentation: architecture/security.md header contract and missing-IP behavior.
 Valid Cloudflare IP strings remain unchanged; XFF/X-Real-IP never supply client IP. Trusted ingress's overwritten CF header resolves correctly. Every explicit reader uses the helper; BetterAuth trusts the same header. Touched secret comparisons use the helper and preserve denial behavior. Added non-test code stays below ~1,200 lines; modified sources respect rule 18. Security-auditor, cloudflare-specialist, task-completion-validator complete with findings addressed. Staging proves stored session IP and rate-limit key use actual client despite spoof XFF. All /do gates pass before merge.
 
 ## Validation evidence
-Pending.
+Baseline pnpm lint and typecheck passed (existing web hook warnings only). Before fixes, real OAuth tests: 3 failed / 7 passed, storing spoof XFF; reader/rate tests: 3 failed / 14 passed. After fixes: 5 files, 69 tests passed. BetterAuth IPv6 /64 and test-mode localhost normalization retained. API-wide secret equality audit: no additional secret/token equality in touched files beyond setup-token comparator; ID/type/status comparisons remain ordinary equality. Node heartbeat IP/DNS extracted in separate refactor commit: node-lifecycle.ts now 481 lines, auth.ts 494. No additional I/O: helper runs once per former header reader, pure bounded parsing; BetterAuth config resolves on existing createAuth path.

@@ -4,6 +4,7 @@ import type { Context } from 'hono';
 
 import type { Node } from '../db/schema';
 import type { Env } from '../env';
+import { clientIpFromHeaders } from '../lib/client-ip';
 import { log } from '../lib/logger';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 
@@ -63,7 +64,7 @@ export async function applyHeartbeatIp(params: {
   if (node.tunnelId && !deploymentTunnelIpBackfill) {
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }
-  const connectingIp = c.req.header('CF-Connecting-IP');
+  const connectingIp = clientIpFromHeaders((name) => c.req.header(name)) ?? undefined;
   let heartbeatIp: string | undefined;
   if (!node.tunnelId) {
     heartbeatIp = connectingIp;
@@ -138,5 +139,4 @@ export async function applyHeartbeatIp(params: {
       });
     }
   }
-
 }

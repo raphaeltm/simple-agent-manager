@@ -5,6 +5,12 @@ description: How SAM handles authentication, encryption, and credential manageme
 
 SAM's security model separates **platform secrets** (managed by operators) from **user credentials** (encrypted per-user in the database).
 
+## Client address trust
+
+The API reads client addresses only from `CF-Connecting-IP` (`clientIpFromHeaders`, `apps/api/src/lib/client-ip.ts`). Cloudflare overwrites this header at the edge. `X-Forwarded-For` and `X-Real-IP` are never fallback sources, because a caller can supply them. Another trusted ingress must overwrite `CF-Connecting-IP` from its TCP peer and prevent direct access to the origin; merely forwarding a caller's copy does not establish trust. There is no switch to trust arbitrary forwarding headers.
+
+Missing or malformed addresses return no IP. API rate limiters then use one shared `unknown` bucket rather than allowing callers to rotate spoofed keys (`apps/api/src/middleware/rate-limit.ts`). BetterAuth uses the same trusted header for session addresses and its rate limiting, retaining the library's address normalization (`createAuth`, `apps/api/src/auth.ts`). Setup-token verification uses the shared UTF-8 comparison helper, which folds length differences into the result and visits every byte without an early mismatch return (`constantTimeEqual`, `apps/api/src/lib/constant-time.ts`).
+
 ## Installer preview trust boundaries
 
 The isolated installer has its own origin, Worker, and session storage; it does not share marketing analytics, SAM login sessions, or SAM data bindings. The hosted operator can still replace its code. Source visibility and separation do not make a hosted bootstrap trustless.
