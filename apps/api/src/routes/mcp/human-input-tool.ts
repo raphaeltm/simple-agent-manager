@@ -1,6 +1,7 @@
 /**
- * MCP request_human_input — files the question as one D1 `asks` row (kind `question`, inbox slice
- * G, idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9) and notifies the user. The tool call itself is non-blocking.
+ * MCP request_human_input — an alias of a blocking `inbox_write` ask (inbox slice D, idea
+ * 01M7G03ZCQ6TM6CMEYDRKQ8ST9): one D1 `asks` row of kind `question` filed through the same
+ * operation (`fileAgentAsk`), which also notifies the person. The tool call is non-blocking.
  */
 import { OperationError } from '@simple-agent-manager/operations';
 import type { HumanInputCategory } from '@simple-agent-manager/shared';
@@ -13,7 +14,7 @@ import {
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { fileQuestionAsk, linkQuestionNotification } from '../../services/inbox/question-asks';
+import { fileQuestionAsk } from '../../services/inbox/question-asks';
 import * as notificationService from '../../services/notification';
 import {
   INTERNAL_ERROR,
@@ -91,14 +92,13 @@ export async function handleRequestHumanInput(
     if (options.length === 0) options = null;
   }
 
-  // Fetch task title (user_id verified against token below)
+  // The task (user_id verified against the token below) and its chat
   const taskRow = await env.DATABASE.prepare(
-    `SELECT user_id, title, chat_session_id FROM tasks WHERE id = ? AND project_id = ?`
+    `SELECT user_id, chat_session_id FROM tasks WHERE id = ? AND project_id = ?`
   )
     .bind(tokenData.taskId, tokenData.projectId)
     .first<{
       user_id: string;
-      title: string;
       chat_session_id: string | null;
     }>();
 
@@ -165,33 +165,7 @@ export async function handleRequestHumanInput(
     );
   }
 
-  let notificationScheduled = false;
-  if (env.NOTIFICATION) {
-    try {
-      const projectName = await notificationService.getProjectName(env, tokenData.projectId);
-      const notification = await notificationService.notifyNeedsInput(env, tokenData.userId, {
-        projectId: tokenData.projectId,
-        projectName,
-        taskId: tokenData.taskId,
-        taskTitle: taskRow.title,
-        context: sanitizedContext,
-        category,
-        options,
-        sessionId,
-        attentionMarkerId: question.id,
-      });
-      notificationScheduled = notification.id !== 'suppressed';
-      if (notificationScheduled) {
-        await linkQuestionNotification(env, tokenData.projectId, question.id, notification.id);
-      }
-    } catch (err) {
-      log.warn('mcp.request_human_input.notification_failed', {
-        taskId: tokenData.taskId,
-        askId: question.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  const notificationScheduled = question.notificationScheduled;
 
   log.info('mcp.request_human_input', {
     taskId: tokenData.taskId,

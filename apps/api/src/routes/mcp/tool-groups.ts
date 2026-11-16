@@ -12,7 +12,7 @@
  * Kept out of groups on purpose: library tools (the web UI and vm-agent recognise the
  * write tools by name, and `download_library_file` writes into the workspace, so it
  * cannot share a read-only tool with `list_library_files`),
- * `request_human_input`, `ops_request_action`, `request_secret`), task lifecycle and dispatch, agent
+ * `request_human_input` (an alias of `inbox_write` method `ask`), `ops_request_action`, `request_secret`), task lifecycle and dispatch, agent
  * messaging/eventing/orchestration (pending a backend unification), triggers (create and
  * update schemas disagree on nullability), hard deletes, and Operations-only tools.
  */
@@ -88,6 +88,47 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
         summary: 'link a library file, GitHub PR or another idea to an idea',
       },
       unlink: { tool: 'unlink_from_idea', summary: 'remove a file, PR or idea link from an idea' },
+    },
+  },
+  {
+    name: 'inbox_read',
+    kind: 'read',
+    requiresTask: true,
+    summary:
+      "Read the person's inbox items you and other agents filed. Check before filing a new one.",
+    methods: {
+      list: {
+        tool: 'inbox_list_items',
+        summary: 'open items from this chat, or with scope project from the whole project',
+      },
+      get: {
+        tool: 'inbox_get_item',
+        summary: "one item with its status, the person's answer and outcome",
+      },
+    },
+  },
+  {
+    name: 'inbox_write',
+    kind: 'write',
+    destructive: true,
+    requiresTask: true,
+    summary:
+      'File what you need from a person in their inbox; they read the inbox, not chats. One ask per item. You are woken in this chat when they answer.',
+    methods: {
+      ask: {
+        tool: 'inbox_ask',
+        summary:
+          'one question with one answer shape (options, text or confirm); blocking only when you cannot continue',
+      },
+      review: {
+        tool: 'inbox_review',
+        summary: 'ask the person to evaluate something you made; answered "Looks good" or a reply',
+      },
+      update: { tool: 'inbox_update_item', summary: 'edit the wording or links of your open item' },
+      cancel: {
+        tool: 'inbox_cancel_item',
+        summary: 'close your open item when it is moot, saying why',
+      },
     },
   },
   {

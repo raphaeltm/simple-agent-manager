@@ -271,6 +271,8 @@ items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 | `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                               |
 | `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                        |
 | `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                |
+| `inbox.similarMatchesMax`  | 3       | 0–20       | Similar open items an agent is shown when it files an ask or a review; 0 turns it off  |
+| `inbox.similarScanMax`     | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)   |
 | `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired  |
 | `inbox.sweepBatchSize`     | 10      | 1–50       | Items each step of the five-minute sweep handles (reminders, expiries, notice retries) |
 
