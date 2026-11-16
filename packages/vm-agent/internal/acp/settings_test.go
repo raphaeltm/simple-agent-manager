@@ -8,48 +8,24 @@ import (
 )
 
 func TestBuildCodexACPManagedConfigEnv(t *testing.T) {
-	type projectTrust struct {
-		TrustLevel string `json:"trust_level"`
-	}
 	type managedConfig struct {
-		SandboxMode     string                  `json:"sandbox_mode"`
-		ApprovalPolicy  string                  `json:"approval_policy"`
-		Model           *string                 `json:"model"`
-		BypassHookTrust *bool                   `json:"bypass_hook_trust"`
-		Projects        map[string]projectTrust `json:"projects"`
+		SandboxMode     string  `json:"sandbox_mode"`
+		ApprovalPolicy  string  `json:"approval_policy"`
+		Model           *string `json:"model"`
+		BypassHookTrust *bool   `json:"bypass_hook_trust"`
 	}
 	for _, tc := range []struct {
-		name         string
-		settings     *agentSettingsPayload
-		workDir      string
-		wantModel    string
-		wantProjects map[string]projectTrust
+		name      string
+		settings  *agentSettingsPayload
+		wantModel string
 	}{
-		{name: "nil settings, no work dir"},
+		{name: "nil settings"},
 		{name: "empty model", settings: &agentSettingsPayload{}},
 		{name: "GPT-6.1 Sol", settings: &agentSettingsPayload{Model: "gpt-6.1-sol"}, wantModel: "gpt-6.1-sol"},
 		{name: "JSON special characters", settings: &agentSettingsPayload{Model: `custom\"model\\variant`}, wantModel: `custom\"model\\variant`},
-		{
-			name:         "VM devcontainer work dir is trusted",
-			workDir:      "/workspaces/simple-agent-manager",
-			wantProjects: map[string]projectTrust{"/workspaces/simple-agent-manager": {TrustLevel: "trusted"}},
-		},
-		{
-			// The key must equal the ACP cwd byte for byte, so it is not rewritten.
-			name:         "dotted repository directory is used verbatim",
-			workDir:      "/workspaces/my.site.org",
-			wantProjects: map[string]projectTrust{"/workspaces/my.site.org": {TrustLevel: "trusted"}},
-		},
-		{
-			name:         "worktree path",
-			workDir:      "/workspaces/repo-wt/feature",
-			wantProjects: map[string]projectTrust{"/workspaces/repo-wt/feature": {TrustLevel: "trusted"}},
-		},
-		{name: "relative work dir is not trusted", workDir: "repo"},
-		{name: "filesystem root is not trusted", workDir: "/"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			envVar, err := buildCodexACPManagedConfigEnv(tc.settings, tc.workDir)
+			envVar, err := buildCodexACPManagedConfigEnv(tc.settings)
 			if err != nil {
 				t.Fatalf("buildCodexACPManagedConfigEnv failed: %v", err)
 			}
@@ -73,19 +49,6 @@ func TestBuildCodexACPManagedConfigEnv(t *testing.T) {
 				t.Fatalf("empty model should be omitted, got %q", *config.Model)
 			case tc.wantModel != "" && (config.Model == nil || *config.Model != tc.wantModel):
 				t.Fatalf("model = %v, want %q", config.Model, tc.wantModel)
-			}
-			if len(tc.wantProjects) == 0 && config.Projects != nil {
-				t.Fatalf("projects should be omitted, got %#v", config.Projects)
-			}
-			if len(tc.wantProjects) > 0 {
-				if len(config.Projects) != len(tc.wantProjects) {
-					t.Fatalf("projects = %#v, want %#v", config.Projects, tc.wantProjects)
-				}
-				for dir, want := range tc.wantProjects {
-					if config.Projects[dir] != want {
-						t.Fatalf("projects[%q] = %#v, want %#v", dir, config.Projects[dir], want)
-					}
-				}
 			}
 		})
 	}

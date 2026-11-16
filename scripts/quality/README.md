@@ -139,13 +139,18 @@ that (`.claude/rules/35-vertical-slice-testing.md`).
 ### Codex hooks
 
 Codex runs repository hooks (`.codex/config.toml` or `.codex/hooks.json`) only for a
-trusted project, and only hook definitions that have themselves been trusted. SAM's
-vm-agent grants both when it starts Codex: `CODEX_CONFIG`, which codex-acp passes to every
-app-server thread, carries `bypass_hook_trust: true` and a `projects.<work dir>` trust entry
-(`buildCodexACPManagedConfigEnv` in `packages/vm-agent/internal/acp/session_host_agent_config.go`;
-decision: SAM idea 01M7J0TXAHGRY8CWA7Y7SJZAK0). Before that change no repository hook, nor
-any other setting in `.codex/config.toml`, took effect in a SAM Codex session (probe task
-01M7HZ6Q1EVPVPCBN00AM3WN8A).
+trusted project, and only hook definitions that have themselves been trusted by hash, which
+normally takes an interactive `/hooks` review. codex-acp already marks the session's roots
+as trusted projects, so the repository's `.codex/` layer loads; SAM's vm-agent supplies the
+missing hook trust: `CODEX_CONFIG`, which codex-acp passes to every app-server thread,
+carries `bypass_hook_trust: true` (`buildCodexACPManagedConfigEnv` in
+`packages/vm-agent/internal/acp/session_host_agent_config.go`; decision: SAM idea
+01M7J0TXAHGRY8CWA7Y7SJZAK0). Before that change no repository hook ran in a SAM Codex
+session (probe task 01M7HZ6Q1EVPVPCBN00AM3WN8A).
+`TestCodexRunsRepositoryHooksWithSAMConfig`
+(`packages/vm-agent/internal/acp/session_host_codex_repo_hooks_process_test.go`) runs the
+real codex-acp and Codex CLI with that config against a synthetic model; set
+`SAM_CODEX_ACP_ADAPTER` and `SAM_CODEX_CLI` to run it.
 
 Two hooks are configured for Codex:
 

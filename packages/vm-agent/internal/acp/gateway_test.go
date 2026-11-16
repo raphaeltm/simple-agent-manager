@@ -1772,9 +1772,6 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 					{URL: "https://api.example.com/mcp", Token: "test-standalone-token"},
 				},
 				WorkspaceID: "ws-test-standalone",
-				// Instant sessions run in the standalone shape; their repository hooks
-				// need the same project trust as VM sessions.
-				ContainerWorkDir: "/workspaces/standalone-repo",
 			},
 		},
 	}
@@ -1810,7 +1807,7 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 		t.Errorf("config.toml missing SAM MCP bearer env reference: %s", data)
 	}
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
-	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol","bypass_hook_trust":true,"projects":{"/workspaces/standalone-repo":{"trust_level":"trusted"}}}`)
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol","bypass_hook_trust":true}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
 	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
@@ -1841,10 +1838,9 @@ esac
 
 	h := &SessionHost{config: SessionHostConfig{
 		GatewayConfig: GatewayConfig{
-			McpServers:       []McpServerEntry{{URL: "https://api.example.com/mcp", Token: "container-token"}},
-			WorkspaceID:      "ws-container",
-			ContainerUser:    "testuser",
-			ContainerWorkDir: "/workspaces/repo",
+			McpServers:    []McpServerEntry{{URL: "https://api.example.com/mcp", Token: "container-token"}},
+			WorkspaceID:   "ws-container",
+			ContainerUser: "testuser",
 		},
 	}}
 	startup := &agentStartup{containerID: "container-123", settings: &agentSettingsPayload{Model: "gpt-6.1-sol"}, envVars: []string{
@@ -1870,7 +1866,7 @@ esac
 		t.Fatalf("container config contract changed: %s", content)
 	}
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
-	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol","bypass_hook_trust":true,"projects":{"/workspaces/repo":{"trust_level":"trusted"}}}`)
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never","model":"gpt-6.1-sol","bypass_hook_trust":true}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
 	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {

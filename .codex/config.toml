@@ -15,8 +15,9 @@ approval_policy = "never"
 # ==============================================================================
 # Each event holds matcher groups, and each group holds a `hooks` array of handlers.
 # `timeout` is in seconds. Codex runs project hooks only for a trusted project whose hook
-# definitions are trusted; SAM's vm-agent grants both for its Codex sessions
-# (packages/vm-agent/internal/acp/session_host_agent_config.go, buildCodexACPManagedConfigEnv).
+# definitions are trusted. codex-acp trusts the session's project; SAM's vm-agent supplies
+# the hook trust (bypass_hook_trust in buildCodexACPManagedConfigEnv,
+# packages/vm-agent/internal/acp/session_host_agent_config.go).
 # `pnpm quality:agent-context-budget --check` validates these entries.
 
 # Path-scoped rule delivery: Codex loads only the root AGENTS.md by itself. This hook adds

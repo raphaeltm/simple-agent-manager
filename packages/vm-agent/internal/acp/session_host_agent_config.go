@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"path"
 	"strings"
 )
 
@@ -15,38 +14,24 @@ import (
 const codexACPManagedAgentModeEnv = "INITIAL_AGENT_MODE=agent-full-access"
 const codexACPManagedCodexPathEnv = "CODEX_PATH=codex"
 
-// codexProjectTrust is one entry of Codex's `projects` table.
-type codexProjectTrust struct {
-	TrustLevel string `json:"trust_level"`
-}
-
 // codexACPManagedConfig is the CODEX_CONFIG JSON codex-acp passes to every app-server thread
 // as per-thread config overrides (codex rust-v0.160.0, app-server config_manager.rs).
 type codexACPManagedConfig struct {
 	SandboxMode    string `json:"sandbox_mode"`
 	ApprovalPolicy string `json:"approval_policy"`
 	Model          string `json:"model,omitempty"`
-	// BypassHookTrust and Projects let a repository's own Codex hooks run, as Claude Code
-	// runs a repository's .claude/settings.json hooks. Codex loads the project .codex/ layer
-	// only for a trusted project, and runs a non-managed hook only once its definition is
-	// trusted by hash, which normally takes an interactive /hooks review that a SAM session
-	// cannot give. The hooks come from the repository the user (or their agent) chose, and
-	// they can do nothing the agent cannot already do in this full-access workspace.
+	// BypassHookTrust lets a repository's own Codex hooks run, as Claude Code runs a
+	// repository's .claude/settings.json hooks. codex-acp already marks the session's roots
+	// as trusted projects, so Codex loads the repository's .codex/ layer; but Codex runs a
+	// non-managed hook only once its definition is trusted by hash, which takes an
+	// interactive /hooks review that a SAM session cannot give. The hooks come from the
+	// repository the user (or their agent) chose, and can do nothing the agent cannot already
+	// do in this full-access workspace. It also enables hooks in the workspace's ~/.codex.
 	// Decision: Raphaël, 2026-11-16 (SAM idea 01M7J0TXAHGRY8CWA7Y7SJZAK0).
-	//
-	// Scope, stated so nobody mistakes it for "hooks only": trusting the project loads its
-	// whole .codex/ layer (config.toml, including MCP servers and features, and exec-policy
-	// rules), and bypass_hook_trust also runs user-level (~/.codex) hooks. Codex strips
-	// provider and base-URL keys from project config, and this JSON is the highest config
-	// layer, so the sandbox, approval and model settings above still win.
-	BypassHookTrust bool                         `json:"bypass_hook_trust"`
-	Projects        map[string]codexProjectTrust `json:"projects,omitempty"`
+	BypassHookTrust bool `json:"bypass_hook_trust"`
 }
 
-// buildCodexACPManagedConfigEnv renders CODEX_CONFIG. workDir is the session's working
-// directory (the repository checkout). It is used verbatim: it is the exact string sent as
-// the ACP session cwd (session_host_handshake.go), which Codex looks up project trust by.
-func buildCodexACPManagedConfigEnv(settings *agentSettingsPayload, workDir string) (string, error) {
+func buildCodexACPManagedConfigEnv(settings *agentSettingsPayload) (string, error) {
 	config := codexACPManagedConfig{
 		SandboxMode:     "danger-full-access",
 		ApprovalPolicy:  "never",
@@ -54,10 +39,6 @@ func buildCodexACPManagedConfigEnv(settings *agentSettingsPayload, workDir strin
 	}
 	if settings != nil {
 		config.Model = settings.Model
-	}
-	// "/" would trust whatever runs at the filesystem root; no SAM session uses it.
-	if path.IsAbs(workDir) && path.Clean(workDir) != "/" {
-		config.Projects = map[string]codexProjectTrust{workDir: {TrustLevel: "trusted"}}
 	}
 
 	encoded, err := json.Marshal(config)
@@ -86,7 +67,7 @@ func (h *SessionHost) writeAgentStartupConfig(ctx context.Context, agentType str
 }
 
 func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) error {
-	managedConfigEnv, err := buildCodexACPManagedConfigEnv(startup.settings, h.config.ContainerWorkDir)
+	managedConfigEnv, err := buildCodexACPManagedConfigEnv(startup.settings)
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: %w", err)
 	}

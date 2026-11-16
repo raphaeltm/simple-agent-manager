@@ -45,16 +45,15 @@ and adds its defaults for the features you leave out.
 
 Hooks your repository defines for Codex (in `.codex/config.toml` or
 `.codex/hooks.json`) run in SAM sessions, as Claude Code runs the hooks in
-`.claude/settings.json`. Codex normally waits for someone to trust the project
-and review each hook, which nobody can do in a SAM session, so SAM trusts the
-session's working directory and skips the hook review when it starts the agent.
-That loads the repository's whole `.codex/` folder: its hooks, its
-`config.toml` (MCP servers and features included) and its command rules, plus
-any hooks in the workspace's `~/.codex`. SAM's own sandbox, approval and model
-settings still take precedence, and Codex ignores provider and base-URL
-settings in a repository. Hooks run with the session's credentials, whoever
-wrote them, so review changes to `.codex/` like any other code you let the
-agent run.
+`.claude/settings.json`. The session's working directory is a trusted Codex
+project, so Codex also reads the repository's `.codex/config.toml` (MCP servers
+and features included) and its command rules. Codex normally waits for someone
+to review each hook, which nobody can do in a SAM session, so SAM skips that
+review when it starts the agent; this also covers hooks in the workspace's
+`~/.codex`. SAM's own sandbox, approval and model settings still take
+precedence, and Codex ignores provider and base-URL settings in a repository.
+Hooks run with the session's credentials, whoever wrote them, so review changes
+to `.codex/` like any other code you let the agent run.
 
 ### Gemini CLI
 
