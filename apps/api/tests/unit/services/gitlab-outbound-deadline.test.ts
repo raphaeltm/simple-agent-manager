@@ -7,8 +7,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Env } from '../../../src/env';
+import { __resetAdminSettingsCacheForTest } from '../../../src/services/admin-settings';
 import { verifyGitLabProjectAccess } from '../../../src/services/gitlab';
+import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
 import { type HeldHttpServer, settled, startHeldHttpServer } from '../../helpers/held-http-server';
 
 const platformConfig = vi.hoisted(() => ({ getGitLabOAuthConfig: vi.fn() }));
@@ -26,8 +27,11 @@ const PROJECT = {
 };
 
 let server: HeldHttpServer;
+let fixture: ReturnType<typeof createAdminSettingsEnv>;
 
 beforeEach(async () => {
+  __resetAdminSettingsCacheForTest();
+  fixture = createAdminSettingsEnv();
   server = await startHeldHttpServer();
   platformConfig.getGitLabOAuthConfig.mockResolvedValue({
     host: server.base,
@@ -44,6 +48,8 @@ afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   await server.close();
+  fixture.sqlite.close();
+  __resetAdminSettingsCacheForTest();
 });
 
 /** Answers hops 0 and 1 with a redirect after `hopMs` each; returns the third request. */
@@ -59,7 +65,7 @@ async function twoSlowRedirects(hopMs: number) {
 describe('GitLab API deadline', () => {
   it('a redirect chain cannot stretch one call past GITLAB_API_TIMEOUT_MS', async () => {
     // Each hop takes 400 ms of a 1000 ms deadline: no hop outlasts it, the chain does.
-    const env = { GITLAB_API_TIMEOUT_MS: '1000' } as Env;
+    const env = { ...fixture.env, GITLAB_API_TIMEOUT_MS: '1000' };
     const call = verifyGitLabProjectAccess(env, 'glpat', 1).catch((err: unknown) => err);
     await twoSlowRedirects(400);
     expect(await settled(call)).toBe(false);
@@ -70,7 +76,7 @@ describe('GitLab API deadline', () => {
   });
 
   it('control: the same chain completes within a deadline it fits in', async () => {
-    const env = { GITLAB_API_TIMEOUT_MS: '3000' } as Env;
+    const env = { ...fixture.env, GITLAB_API_TIMEOUT_MS: '3000' };
     const call = verifyGitLabProjectAccess(env, 'glpat', 1);
     const last = await twoSlowRedirects(400);
     vi.advanceTimersByTime(400);

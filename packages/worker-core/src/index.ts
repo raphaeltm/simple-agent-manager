@@ -56,6 +56,7 @@ export {
   type OutboundRefusalReason,
   OutboundRequestRefusedError,
 } from './network-hosts';
+export { guardedFetchWithDeadline, OutboundDeadlineError } from './network-hosts/deadline';
 export {
   DEFAULT_OPEN_QUESTION_READ_LIMIT,
   hasOpenQuestionAsk,
@@ -67,7 +68,6 @@ export {
   questionOptions,
   readOpenQuestionAttention,
 } from './question-asks';
-
 export { parsePositiveInt, requireRouteParam } from './route-helpers';
 export { mapRows, parseRow, parseRowOrNull } from './row-parsing';
 export {
@@ -112,5 +112,3 @@ export {
   SharedFlightAbandonedError,
 } from './shared-flight';
 export { ulid } from './ulid';
-
-export { guardedFetchWithDeadline, OutboundDeadlineError } from './network-hosts/deadline';
