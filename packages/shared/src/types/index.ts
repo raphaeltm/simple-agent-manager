@@ -215,7 +215,7 @@ export type {
   WorkspaceStatus,
 } from './workspace';
 // Node class runtime guards (value exports, not types)
-export { isNodeClass, isUserOwnedNodeClass } from './workspace';
+export { isNodeClass, isUserOwnedNodeClass, NODE_BILLING_ENDED_STATUSES } from './workspace';
 // Provider Catalog
 export type {
   LocationInfo,
@@ -1236,3 +1236,29 @@ export {
   INBOX_WRITE_TOOL,
   parseInboxRef,
 } from './inbox';
+
+// Admin Health & cost (Insights slice H)
+export type {
+  InstallationComputeCurrencySpend,
+  InstallationComputeProviderSpend,
+  InstallationComputeSpend,
+  InstallationComputeWeek,
+  InstallationHealthRange,
+  InstallationHealthResponse,
+  InstallationHealthSection,
+  InstallationHealthWindow,
+  InstallationLatencyIncident,
+  InstallationLatencyIncidentState,
+  InstallationLatencyState,
+  InstallationLifecycleLatency,
+  InstallationMachineDensity,
+  InstallationMachineReuse,
+  InstallationNewMachineReason,
+  InstallationNewMachineReasonKind,
+  InstallationNewMachineReasons,
+} from './insights-installation';
+export {
+  DEFAULT_INSTALLATION_HEALTH_RANGE,
+  INSTALLATION_HEALTH_RANGES,
+  isInstallationHealthRange,
+} from './insights-installation';

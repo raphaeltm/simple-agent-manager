@@ -223,13 +223,6 @@ export interface CostSummaryResponse {
     daysElapsed: number;
     daysInMonth: number;
   };
-  compute: {
-    totalNodeHours: number;
-    totalVcpuHours: number;
-    estimatedCostUsd: number;
-    activeNodes: number;
-    vcpuHourCostUsd: number;
-  };
   period: string;
   periodLabel: string;
 }

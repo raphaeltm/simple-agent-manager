@@ -1272,6 +1272,18 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 
 Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The Operations project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
 
+## Health & cost
+
+### `GET /api/admin/health-cost`
+
+Superadmin only. Backs **Admin → Health & cost**. Optional `range`: `7d`, `30d` or `month`
+(the default, the calendar month so far in UTC); any other value returns `400`. Returns
+`InstallationHealthResponse` (`packages/shared/src/types/insights-installation.ts`): `window`,
+`compute` (spend per provider and per week at each machine's recorded price), `reuse`, `density`
+(agents per busy machine), `newMachines` (reasons) and `latency` (p95 against budget per watched
+state, with open incidents). A section that fails to read is `null` and named in `unavailable`.
+See [Health & cost](/docs/guides/admin-settings/#health--cost).
+
 ## Operations Approvals
 
 These endpoints back **Admin → Approvals** and require an approved, active **superadmin**. They

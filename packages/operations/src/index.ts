@@ -127,6 +127,22 @@ export {
 export { projectAccounts, type ProjectAccountsInput } from './insights-accounts';
 export { projectFlow, type ProjectFlowInput } from './insights-flow';
 export {
+  installationHealth,
+  installationHealthBounds,
+  type InstallationHealthInput,
+  utcWeekStart,
+} from './insights-installation';
+export {
+  densityFromRuns,
+  newMachineReasonsFor,
+  NO_CANDIDATE_REASON,
+  NOT_RECORDED_REASON,
+} from './insights-installation-placements';
+export {
+  INSIGHTS_INSTALLATION_SETTINGS,
+  type InsightsInstallationSettingName,
+} from './insights-installation-settings-definition';
+export {
   getInsightsPageLimits,
   INSIGHTS_PAGE_SETTINGS,
   type InsightsPageLimits,

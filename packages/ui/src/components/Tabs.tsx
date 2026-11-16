@@ -1,4 +1,12 @@
-import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { NavLink, useLocation } from 'react-router';
 
 export interface Tab {
@@ -6,6 +14,11 @@ export interface Tab {
   label: string;
   path: string;
   icon?: ReactNode;
+  /**
+   * Optional group heading. A label is shown before the first tab of each group; consecutive
+   * tabs with the same group share it. Tabs without a group render exactly as before.
+   */
+  group?: string;
 }
 
 export interface TabsProps {
@@ -71,11 +84,19 @@ export function Tabs({ tabs, basePath, className }: TabsProps) {
     // settle back with the active tab still clipped. If it did, align the
     // tab's left edge (a real snap position), clamped to the end of the strip
     // (also a valid snap stop), so the snap keeps the tab in view.
+    // When the active tab opens a group, keep the group's label in view with it (the label is
+    // also a snap stop).
+    const previous = el.previousElementSibling;
+    const anchor =
+      previous instanceof HTMLElement && previous.dataset.tabsGroupLabel !== undefined
+        ? previous
+        : el;
     const raf = requestAnimationFrame(() => {
       const elRect = el.getBoundingClientRect();
+      const anchorRect = anchor.getBoundingClientRect();
       const listRect = list.getBoundingClientRect();
-      if (elRect.right > listRect.right + 1 || elRect.left < listRect.left - 1) {
-        const target = list.scrollLeft + (elRect.left - listRect.left);
+      if (elRect.right > listRect.right + 1 || anchorRect.left < listRect.left - 1) {
+        const target = list.scrollLeft + (anchorRect.left - listRect.left);
         list.scrollLeft = Math.max(0, Math.min(target, list.scrollWidth - list.clientWidth));
       }
     });
@@ -117,20 +138,35 @@ export function Tabs({ tabs, basePath, className }: TabsProps) {
       <div role="tablist" ref={listRef} className="flex overflow-x-auto snap-x snap-mandatory">
         {tabs.map((tab, index) => {
           const active = isActive(tab);
+          const startsGroup = Boolean(tab.group) && tab.group !== tabs[index - 1]?.group;
           return (
-            <NavLink
-              key={tab.id}
-              ref={(el) => { tabRefs.current[index] = el; }}
-              to={getFullPath(tab)}
-              role="tab"
-              aria-selected={active}
-              tabIndex={active ? 0 : -1}
-              onKeyDown={(e) => handleKeyDown(e, index)}
-              className={`sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-0 border-b-2 border-solid bg-transparent no-underline whitespace-nowrap cursor-pointer snap-start transition-[color,border-color] duration-150 ease-in-out hover:text-fg-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2 ${active ? 'text-fg-primary border-b-[var(--sam-tabs-active-border)]' : 'text-fg-muted border-b-transparent'}`}
-            >
-              {tab.icon}
-              {tab.label}
-            </NavLink>
+            <Fragment key={tab.id}>
+              {startsGroup && (
+                // A heading for the tabs that follow; not a tab, so arrow keys skip it.
+                <span
+                  role="presentation"
+                  data-tabs-group-label=""
+                  data-testid="tabs-group-label"
+                  className={`inline-flex shrink-0 snap-start items-center self-center whitespace-nowrap px-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-muted ${index > 0 ? 'ml-1 border-0 border-l border-solid border-[var(--sam-hairline)]' : ''}`}
+                >
+                  {tab.group}
+                </span>
+              )}
+              <NavLink
+                ref={(el) => {
+                  tabRefs.current[index] = el;
+                }}
+                to={getFullPath(tab)}
+                role="tab"
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
+                onKeyDown={(e) => handleKeyDown(e, index)}
+                className={`sam-type-secondary inline-flex items-center gap-2 px-4 py-2 border-0 border-b-2 border-solid bg-transparent no-underline whitespace-nowrap cursor-pointer snap-start transition-[color,border-color] duration-150 ease-in-out hover:text-fg-primary hover:bg-surface-hover focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2 ${active ? 'text-fg-primary border-b-[var(--sam-tabs-active-border)]' : 'text-fg-muted border-b-transparent'}`}
+              >
+                {tab.icon}
+                {tab.label}
+              </NavLink>
+            </Fragment>
           );
         })}
       </div>

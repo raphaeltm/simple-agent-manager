@@ -540,6 +540,66 @@ The rest control the checks themselves:
 | `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes and stored phase timings are kept                                                                                     |
 | `lifecycleLatency.evaluationSampleLimit`        | 2,000   | 10–20,000  | Most recent finished episodes the daily check reads per state                                                                                |
 
+## Health & cost
+
+**Admin → Spend and health → Health & cost** (`/admin/health-cost`, superadmins only) shows how
+this installation's machines are doing over the last 7 days, the last 30 days, or the month so far.
+Everything is computed from records SAM already keeps when the page loads; nothing extra is
+stored. The page is served by `GET /api/admin/health-cost?range=7d|30d|month`, which calls the
+shared `installationHealth` operation (`packages/operations/src/insights-installation.ts`).
+
+- **Compute spend per provider per week.** Each cloud machine's running time multiplied by the
+  hourly price recorded on it when it was created (`nodes.provider_instance_price_hourly_micros`),
+  summed per machine. Workspaces share machines, so a machine is counted once however many
+  workspaces ran on it. A machine's running time ends when it reaches `destroying`, `destroyed`,
+  `deleted` or `error`. Machines you brought yourself and Instant containers cost no provider money
+  and are left out. Costs are estimates at list prices: they include machines on people's own
+  cloud accounts as well as the platform's, and exclude discounts, storage and traffic. A machine
+  removed with an explicit delete loses its row, so its time is not counted. Each provider records
+  prices in its own currency (Hetzner in EUR, Google Cloud in USD) and SAM keeps no exchange
+  rates, so spend is shown per currency, for example "€1,234 · $567", with one weekly chart per
+  currency. A machine with no recorded price is counted under "without a price".
+- **Warm machine reuse.** The share of workspace placements that went onto a machine that already
+  existed: an earlier workspace exists on that machine, or the node decision log recorded a
+  warm-pool claim on it since its previous workspace. The note under it gives how many of those
+  placements came from the warm pool. A claim given back unused, or whose workspace was later
+  deleted, is not counted, so the warm-pool number is always part of the reuse number. The node
+  decision log keeps `operations.nodeDecisionLogRetentionDays` (14 by default), so placements older
+  than that are never credited to the warm pool. If a machine's first workspace row is
+  later removed and its next placement packed onto it without a warm-pool claim, that placement
+  reads as new, so the rate is a lower bound.
+- **Agents per busy machine.** Agents running at once on a machine, averaged over the time it had
+  at least one running. Running time comes from resource telemetry (first to last sample while a
+  workspace ran), not from the compute ledger, which runs from a workspace's creation to its
+  deletion and would count stopped workspaces that were not deleted yet.
+- **Slowest 5% vs budget.** The p95 of each [lifecycle latency](#lifecycle-latency-monitoring)
+  state in the range against its budget. A state is over budget when it has at least
+  `lifecycleLatency.minSamples` finished episodes and its p95 is above the budget. Times are the
+  watchdog's sampled lower bounds, the same ones the daily check uses (first to last sample of an
+  episode), so a state seen in only one sample reads 0s. The page also
+  shows rows stuck past their budget right now and links any open incident the watchdog or daily
+  check raised for that state. A state whose budget is 0 is not watched and not shown.
+- **Why new machines were created.** For the first workspace on each new machine, the reasons the
+  capacity check gave for turning down every existing machine it considered, in its own words. A
+  machine is counted once under each reason it recorded. "No other machine in the pool to try" means
+  there was nothing to reuse.
+
+A section that cannot be read is named at the top of the page; the others still show. These
+**Operations** settings bound how much the page reads; when a read reaches its cap the page says
+the number is a lower bound.
+
+| Setting                        | Default | Range       | What it controls                                                               |
+| ------------------------------ | ------- | ----------- | ------------------------------------------------------------------------------ |
+| `insights.healthMaxNodes`      | 5,000   | 100–50,000  | Machines read for compute spend: still running first, then most recently ended |
+| `insights.healthMaxPlacements` | 30,000  | 100–200,000 | Workspace placements read for reuse and new-machine reasons                    |
+| `insights.healthMaxRuns`       | 30,000  | 100–200,000 | Running intervals read for agents per busy machine                             |
+| `insights.healthMaxReasons`    | 30      | 5–200       | New-machine reasons listed, most common first; the rest are counted            |
+| `insights.healthSpendWeeks`    | 6       | 1–26        | Weeks shown in the compute spend chart and the reuse sparkline                 |
+
+**Admin → Costs** covers LLM spend only. Its compute card links here: the earlier flat
+vCPU-hour estimate (`COMPUTE_VCPU_HOUR_COST_USD`) was removed in favour of the per-machine prices
+above.
+
 ## Linked work
 
 These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Links that mean work (a chat working on, creating or editing something) are always kept; links that only record reading or viewing are capped.

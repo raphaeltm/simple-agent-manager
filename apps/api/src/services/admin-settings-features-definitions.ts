@@ -1,4 +1,5 @@
 import {
+  INSIGHTS_INSTALLATION_SETTINGS,
   INSIGHTS_PAGE_SETTINGS,
   INSIGHTS_RECEIPT_SETTINGS,
 } from '@simple-agent-manager/operations';
@@ -161,6 +162,15 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     )
   ),
   ...INSIGHTS_PAGE_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
+  ),
+  ...INSIGHTS_INSTALLATION_SETTINGS.map((setting) =>
     integerDefinition(
       setting.name,
       setting.defaultValue,
