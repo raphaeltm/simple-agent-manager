@@ -11,13 +11,19 @@ Codex loads a repository's `.codex/` layer only for a trusted project and runs a
 - Hook code ready on branch `sam/codex-rule-delivery-hook` (f3b156c19).
 
 ## Checklist
-- [ ] vm-agent: CODEX_CONFIG carries `bypass_hook_trust: true` and `projects.<workdir>.trust_level = "trusted"`; tests
-- [ ] Restore `.codex/hooks/rule-context.mjs`, generated `rule-scopes.json` + `--check` staleness, Codex hook entries (SessionStart, PreToolUse, Stop), `.gitignore` re-include
-- [ ] Close Codex-hook test gaps from the PR #2790 test review (deny-once with deferred rules, cd/cwd, ignored dirs, write table, patch ops, SessionStart sources, session isolation, config wiring, real-lookup smoke)
-- [ ] Docs: scripts/quality/README.md, security doc if it describes hook/trust behaviour
+- [x] vm-agent: CODEX_CONFIG carries `bypass_hook_trust: true` and `projects.<workdir>.trust_level = "trusted"`; tests
+- [x] Restore `.codex/hooks/rule-context.mjs`, generated `rule-scopes.json` + `--check` staleness, Codex hook entries (SessionStart, PreToolUse, Stop), `.gitignore` re-include
+- [x] Close Codex-hook test gaps from the PR #2790 test review (deny-once with deferred rules, cd/cwd, ignored dirs, write table, patch ops, SessionStart sources, session isolation, config wiring, real-lookup smoke)
+- [x] Docs: scripts/quality/README.md, security doc if it describes hook/trust behaviour
 - [ ] Staging: deploy, fresh VM node, Codex session on a repo with the hooks: rule text before the first edit (existing file, new file, shell), Stop gate fires; control without hooks
 - [ ] Reviews, CI, merge, deploy monitoring
 
 ## Acceptance
 - [ ] A SAM Codex session on staging runs the repository hooks (log + agent report), Stop gate continues the turn once
 - [ ] Unit tests prove CODEX_CONFIG content for VM and standalone shapes
+
+## Progress (state survives workspace restores here, not in .tmp)
+- Commits: 413910d14 restore hook+tests, 2d13120a4 pure move, 94f9c1179 CODEX_CONFIG trust, b9a3745e9 docs, c589cedf3 seed script. Draft PR #2804.
+- Staging: only `staging` (sammy.party) has Codex creds (smoke user toWzGjNW3IyUkCVItRQv3qSn0wI8c22y, auth-json); staging2 has none. Lease held by sam/build-insights-slice-f-2z1gpd until 15:30Z.
+- Staging plan: deploy branch (no nodes running at 15:02Z); as smoke user create Artifacts project; task A (claude-code) runs `scripts/diagnostics/seed-codex-hook-probe.sh <sha>` and pushes to main; task B (openai-codex) probes rule delivery + Stop gate. Helper: .tmp/staging/api.sh (recreate if lost).
+- Reviewers running: security-auditor, go-specialist.
