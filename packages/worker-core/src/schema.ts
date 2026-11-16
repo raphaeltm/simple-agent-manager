@@ -859,6 +859,33 @@ export const asks = sqliteTable(
   })
 );
 
+/**
+ * The generated brief on a Project Overview (inbox slice I, migration 0253). One row per project,
+ * the brief's only home. Written by `refreshProjectBriefIfDue` (apps/api), read by
+ * `readProjectBrief` (packages/operations). Times are epoch milliseconds.
+ */
+export const projectBriefs = sqliteTable('project_briefs', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  /** NULL when the project was quiet at the last check. */
+  briefJson: text('brief_json'),
+  refAsksJson: text('ref_asks_json').notNull().default('[]'),
+  refChatsJson: text('ref_chats_json').notNull().default('[]'),
+  refAutomationsJson: text('ref_automations_json').notNull().default('[]'),
+  fingerprint: text('fingerprint'),
+  generatedAt: integer('generated_at'),
+  checkedAt: integer('checked_at'),
+  stale: integer('stale').notNull().default(0),
+  pendingSince: integer('pending_since'),
+  /** Per-UTC-day generation budget: a daily cap by design, reset by a new day only. */
+  generationDay: text('generation_day'),
+  generationCount: integer('generation_count').notNull().default(0),
+  lastError: text('last_error'),
+  lastErrorAt: integer('last_error_at'),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export type AskRow = typeof asks.$inferSelect;
 
 export const projectRuntimeEnvVars = sqliteTable(

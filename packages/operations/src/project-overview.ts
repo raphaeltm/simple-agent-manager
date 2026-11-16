@@ -9,8 +9,10 @@
  * Round trips: authorization (1, the access port's membership read), then in parallel the
  * running query (1), the merged pull requests (1) and the recent ideas
  * (`listRecentIdeasWithDerivedStatus`: rows, repository, the ProjectData snapshot, and up to four
- * evidence reads, so at most 7). About 10, within the 20 a dashboard read may spend
- * (`.claude/rules/60`).
+ * evidence reads, so at most 7), and the brief (1: its stored row and which of the items it names
+ * are still open, one statement; settings are cached per isolate). About 11, within the 20 a
+ * dashboard read may spend (`.claude/rules/60`). The brief is only read here: making one runs
+ * after the response, in the background (`refreshProjectBriefIfDue`, apps/api).
  */
 import {
   DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT,
@@ -27,18 +29,15 @@ import * as v from 'valibot';
 
 import { authorizeProjectOperation } from './authorization';
 import { listRecentIdeasWithDerivedStatus } from './idea-list-core';
+import { readProjectBrief } from './project-brief-read';
+import { getProjectBriefSettings } from './project-brief-settings';
+import {
+  OVERVIEW_RUNNING_TASK_STATUSES,
+  OVERVIEW_STARTING_TASK_STATUSES,
+} from './project-overview-statuses';
 import type { OperationContext } from './types';
 
-/**
- * Task statuses whose chat can be running: placed but not started, and started. An allowlist
- * (`.claude/rules/79`): a status added later is not running until someone decides it is.
- * `sleeping` is deliberately absent: a sleeping chat is not running.
- */
-export const OVERVIEW_STARTING_TASK_STATUSES = ['queued', 'delegated'] as const;
-export const OVERVIEW_RUNNING_TASK_STATUSES = [
-  ...OVERVIEW_STARTING_TASK_STATUSES,
-  'in_progress',
-] as const;
+export { OVERVIEW_RUNNING_TASK_STATUSES, OVERVIEW_STARTING_TASK_STATUSES };
 
 const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
 
@@ -180,16 +179,23 @@ function toRunningChat(
   };
 }
 
-async function readRunning(
-  ctx: OperationContext,
+/**
+ * Running now for one viewer. `viewerId` only decides which rows are "waiting on the viewer" (and
+ * ranks them first); pass an id that matches nobody for a viewer-neutral read, as the brief's
+ * facts do (`project-brief-facts.ts`).
+ */
+export async function readRunningChats(
+  db: D1Database,
   projectId: string,
+  viewerId: string,
   limit: number
 ): Promise<ProjectOverviewResponse['running']> {
   const now = Date.now();
-  const result = await ctx.env.DATABASE.prepare(RUNNING_SQL)
+  const result = await db
+    .prepare(RUNNING_SQL)
     // Placeholders in order: project and clock (open questions), project and clock (pending
     // secret requests), viewer (sum), project, viewer (ranking), limit.
-    .bind(projectId, now, projectId, now, ctx.actor.userId, projectId, ctx.actor.userId, limit)
+    .bind(projectId, now, projectId, now, viewerId, projectId, viewerId, limit)
     .all<Record<string, unknown>>();
   const rows = result.results ?? [];
   const items: OverviewRunningChat[] = [];
@@ -205,7 +211,7 @@ async function readRunning(
       });
       continue;
     }
-    items.push(toRunningChat(parsed.output, ctx.actor.userId));
+    items.push(toRunningChat(parsed.output, viewerId));
   }
   // The window count is the query's, so a skipped row still counts as running.
   const windowTotal = rows[0]?.total;
@@ -298,12 +304,12 @@ export async function projectOverviewGet(
   const recentLimit = clampLimit(input.recentLimit, DEFAULT_PROJECT_OVERVIEW_RECENT_LIMIT);
 
   const unavailable: ProjectOverviewSection[] = [];
-  const [running, ideas, mergedPullRequests] = await Promise.all([
+  const [running, ideas, mergedPullRequests, brief] = await Promise.all([
     section(
       'running',
       projectId,
       { items: [], total: 0, waitingOnViewerTotal: 0 },
-      () => readRunning(ctx, projectId, runningLimit),
+      () => readRunningChats(ctx.env.DATABASE, projectId, ctx.actor.userId, runningLimit),
       unavailable
     ),
     section(
@@ -320,12 +326,25 @@ export async function projectOverviewGet(
       () => readMergedPullRequests(ctx, projectId, recentLimit),
       unavailable
     ),
+    // The brief (inbox slice I): switched off means no read at all. Settings are cached per
+    // isolate, so this section costs one D1 statement.
+    section(
+      'brief',
+      projectId,
+      null,
+      async () =>
+        (await getProjectBriefSettings(ctx)).enabled
+          ? readProjectBrief(ctx.env.DATABASE, projectId, Date.now())
+          : null,
+      unavailable
+    ),
   ]);
 
   return {
     projectId,
     running,
     recent: { ideas, mergedPullRequests },
+    brief,
     unavailable,
     generatedAt: new Date().toISOString(),
   };
