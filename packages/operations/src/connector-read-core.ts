@@ -1,6 +1,11 @@
-import { maybeJsonRecord, parsePositiveInt } from '@simple-agent-manager/worker-core';
+import {
+  maybeJsonRecord,
+  parsePositiveInt,
+  preferAttention,
+  readOpenQuestionAttention,
+} from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
-import { and, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -9,6 +14,7 @@ import { authorizeProjectOperation } from './authorization';
 import { chatTaskStates } from './chat-operational';
 import { OperationError } from './errors';
 import { ideaTaskPredicateSql } from './idea-identity';
+import { listInbox } from './inbox-list-core';
 import { getPlatformOperationLimits } from './limits';
 import type { OperationContext } from './types';
 
@@ -23,9 +29,6 @@ export function operationLink(ctx: OperationContext, projectId?: string, session
   return projectId
     ? `${base}/projects/${encodeURIComponent(projectId)}${sessionId ? `/chat/${encodeURIComponent(sessionId)}` : ''}`
     : base;
-}
-function isoFromEpochMs(value: number): string | null {
-  return Number.isFinite(value) ? new Date(value).toISOString() : null;
 }
 export function operationPageLimit(ctx: OperationContext, requested?: number) {
   const limits = getPlatformOperationLimits(ctx.env);
@@ -56,7 +59,9 @@ export async function projectsList(
       status: schema.projects.status,
       role: schema.projectMembers.role,
       runningWork: sql<number>`(select count(*) from tasks t where t.project_id = ${schema.projects.id} and t.status in ('queued','delegated','in_progress'))`,
-      needsAttention: sql<number>`(select count(*) from session_summaries ss where ss.project_id = ${schema.projects.id} and ss.created_by_user_id = ${ctx.actor.userId} and ss.attention_json is not null)`,
+      // Chats waiting on the viewer: an attention marker, or an open blocking question in `asks`
+      // (slice G; a non-blocking ask does not pause the chat, slice D).
+      needsAttention: sql<number>`(select count(*) from session_summaries ss where ss.project_id = ${schema.projects.id} and ss.created_by_user_id = ${ctx.actor.userId} and (ss.attention_json is not null or exists (select 1 from asks a where a.source_session_id = ss.id and a.project_id = ss.project_id and a.kind = 'question' and a.status = 'open' and a.blocking = 1 and (a.expires_at is null or a.expires_at > ${Date.now()}))))`,
     })
     .from(schema.projects)
     .innerJoin(
@@ -136,14 +141,27 @@ export async function chatsList(
     .limit(limit + 1);
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
-  const taskStates = await chatTaskStates(db, page);
+  const [taskStates, questions] = await Promise.all([
+    chatTaskStates(db, page),
+    // Open questions live in D1 `asks` (inbox slice G); only the chat's creator sees attention.
+    readOpenQuestionAttention(ctx.env.DATABASE, {
+      chats: page
+        .filter((row) => row.createdByUserId === ctx.actor.userId)
+        .map((row) => ({ projectId: row.projectId, sessionId: row.id })),
+      assigneeUserId: ctx.actor.userId,
+      now: Date.now(),
+    }),
+  ]);
   return {
     chats: page.map(({ attention, ...row }) => ({
       ...row,
       operational: taskStates.get(row.id) ?? null,
       attention:
-        row.createdByUserId === ctx.actor.userId && attention
-          ? (JSON.parse(attention) as unknown)
+        row.createdByUserId === ctx.actor.userId
+          ? preferAttention(
+              attention ? (JSON.parse(attention) as unknown) : null,
+              questions.get(row.id)
+            )
           : null,
       link: operationLink(ctx, row.projectId, row.id),
     })),
@@ -193,18 +211,15 @@ export async function projectGet(
     ...(await chatsList(ctx, input)),
   };
 }
-const SessionCursorSchema = v.tuple([v.pipe(v.number(), v.safeInteger()), v.string()]);
 const InboxCursorSchema = v.object({
-  // Absent while no chat without a question has been read yet: the next page starts at the top.
-  sessions: v.optional(v.nullable(SessionCursorSchema)),
-  // Absent in cursors issued before questions were listed separately: their `sessions`
-  // position covered every chat, so questions continue from that position too.
-  attention: v.optional(v.nullable(SessionCursorSchema)),
+  // The shared inbox list's own cursor (`inbox-list-core.ts`). Cursors issued before the list
+  // moved there carried `sessions`/`attention` positions instead; those restart the list.
+  items: v.optional(v.nullable(v.string())),
+  sessions: v.optional(v.unknown()),
+  attention: v.optional(v.unknown()),
   tasks: v.nullable(v.tuple([v.string(), v.string()])),
   notifications: v.nullable(v.string()),
 });
-
-type InboxSessionCursor = v.InferOutput<typeof SessionCursorSchema> | null | undefined;
 
 /** Fields of a `needs_input` notification an app needs to answer the question it announces. */
 function notificationQuestion(metadata: unknown) {
@@ -228,70 +243,12 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
     operationPageLimit(ctx, input.limit),
     parsePositiveInt(ctx.env.CONNECTOR_INBOX_SESSION_LIMIT, 5)
   );
-  // Two disjoint lists, each with its own cursor, so no chat repeats across pages: chats with an
-  // open question, and the rest by recency (checked for permission/form requests, which live
-  // outside the D1 index). A page checks at most `limit` chats, questions first, and each cursor
-  // moves only past the chats the page used.
-  const sessionPage = (page: InboxSessionCursor, withAttention: boolean) =>
-    page === null
-      ? Promise.resolve([])
-      : db
-          .select({
-            id: schema.sessionSummaries.id,
-            projectId: schema.sessionSummaries.projectId,
-            topic: schema.sessionSummaries.topic,
-            attention: schema.sessionSummaries.attentionJson,
-            updatedAt: schema.sessionSummaries.updatedAt,
-          })
-          .from(schema.sessionSummaries)
-          .where(
-            and(
-              membershipCondition(ctx, schema.sessionSummaries.projectId),
-              page
-                ? sql`(${schema.sessionSummaries.updatedAt} < ${page[0]} OR (${schema.sessionSummaries.updatedAt} = ${page[0]} AND ${schema.sessionSummaries.id} < ${page[1]}))`
-                : undefined,
-              eq(schema.sessionSummaries.createdByUserId, ctx.actor.userId),
-              withAttention
-                ? isNotNull(schema.sessionSummaries.attentionJson)
-                : isNull(schema.sessionSummaries.attentionJson),
-              ctx.actor.workspace
-                ? eq(schema.sessionSummaries.projectId, ctx.actor.workspace.projectId)
-                : undefined
-            )
-          )
-          .orderBy(desc(schema.sessionSummaries.updatedAt), desc(schema.sessionSummaries.id))
-          .limit(limit + 1);
-  // A question in a chat that is not among the most recently updated ones is not pushed out.
-  const attentionCursor = cursor?.attention === undefined ? cursor?.sessions : cursor.attention;
-  const [attentionRows, rows] = await Promise.all([
-    sessionPage(attentionCursor, true),
-    sessionPage(cursor?.sessions, false),
-  ]);
-  const withQuestion = attentionRows.slice(0, limit);
-  const recent = rows.slice(0, limit - withQuestion.length);
-  const pending = await Promise.all(
-    [...withQuestion, ...recent].map(async (row) => {
-      let attention: unknown = null;
-      if (row.attention) {
-        try {
-          attention = JSON.parse(row.attention);
-        } catch {
-          /* Corrupt legacy row does not hide other requests. */
-        }
-      }
-      return {
-        projectId: row.projectId,
-        sessionId: row.id,
-        topic: row.topic,
-        // Readers (including the SAM assistant) judge recency from this; an undated
-        // item is indistinguishable from one that is months old.
-        updatedAt: isoFromEpochMs(row.updatedAt),
-        attention,
-        interactions: await ctx.ports.connector.pendingInteractions(row.projectId, row.id),
-        link: operationLink(ctx, row.projectId, row.id),
-      };
-    })
-  );
+  // What needs the person comes from the one shared inbox list (rule 24): questions,
+  // permissions, secret requests, approvals and asks, with no Durable Object call per chat.
+  const inbox =
+    cursor?.items === null
+      ? { items: [], nextCursor: null, skipped: 0 }
+      : await listInbox(ctx, { filter: 'needs_you', limit, cursor: cursor?.items ?? undefined });
   const tasks = await db
     .select({
       id: schema.tasks.id,
@@ -336,34 +293,20 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
       )
     );
   const projectIds = new Set(accessible.map((row) => row.projectId));
-  const lastSession = recent.at(-1);
-  const lastAttention = withQuestion.at(-1);
   const lastTask = tasks.slice(0, limit).at(-1);
   const next = {
-    // Questions filled the page: the other chats have not been read, so keep their position.
-    sessions:
-      rows.length === 0
-        ? null
-        : !lastSession
-          ? cursor?.sessions
-          : rows.length > recent.length
-            ? [lastSession.updatedAt, lastSession.id]
-            : null,
-    attention:
-      attentionRows.length > withQuestion.length && lastAttention
-        ? [lastAttention.updatedAt, lastAttention.id]
-        : null,
+    items: inbox.nextCursor,
     tasks: tasks.length > limit && lastTask ? [lastTask.updatedAt, lastTask.id] : null,
     notifications: notifications.nextCursor ?? null,
   };
   return {
-    nextCursor:
-      next.sessions !== null || next.attention || next.tasks || next.notifications
-        ? JSON.stringify(next)
-        : null,
-    pending: pending.filter((row) => row.attention || row.interactions.length),
+    nextCursor: next.items || next.tasks || next.notifications ? JSON.stringify(next) : null,
+    items: inbox.items.map((item) => ({
+      ...item,
+      link: operationLink(ctx, item.projectId, item.sessionId ?? undefined),
+    })),
     coverage:
-      'Chats you created, those with an open question first; a page checks at most limit chats and nextCursor continues. A shared chat you can answer shows its questions in sam_chat_read and sam_chat_interactions. attention is the newest open question per chat; sam_chat_interactions lists all of them.',
+      'items: open inbox items you can act on across your projects (sam_inbox_list has filters), blocking ones first. Answer with sam_inbox_answer or sam_agent_answer. tasks: your finished or follow-up work. notifications: unread.',
     tasks: tasks.slice(0, limit).map((row) => ({
       ...row,
       link: operationLink(ctx, row.projectId, row.chatSessionId ?? undefined),

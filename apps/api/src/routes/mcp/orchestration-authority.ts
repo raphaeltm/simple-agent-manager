@@ -2,15 +2,16 @@
  * Current-authority gate for destructive MCP orchestration controls.
  *
  * MCP tokens are opaque KV entries with a sliding TTL and a max lifetime
- * (`services/mcp-token.ts`). Nothing in that lifecycle observes project
- * membership, so a token minted while its actor was an active member stays
- * valid after the actor is removed from the project or downgraded to a role
- * without `task:write`. Task lineage does not close that gap either: a stored
- * `parent_task_id` records who dispatched the child once, not who may control
- * it now.
+ * (`services/mcp-token.ts`). The shared token lifecycle gate
+ * (`services/mcp-token-lifecycle.ts`) refuses a token whose actor no longer has
+ * an active membership in the token's project, but it does not look at the
+ * member's ROLE: a token minted while its actor held `task:write` stays valid
+ * after the actor is downgraded to a role without it. Task lineage does not
+ * close that gap either: a stored `parent_task_id` records who dispatched the
+ * child once, not who may control it now.
  *
  * Destructive child-control tools therefore have to re-derive the actor's
- * CURRENT relational membership from D1 before any effect — stopping a child
+ * CURRENT relational membership and role from D1 before any effect — stopping a child
  * agent, writing task rows, creating chat sessions, attributing credentials, or
  * starting a runner. This mirrors `services/trigger-submit.ts`, which already
  * re-checks `task:write` on the trigger execution principal at execution time.

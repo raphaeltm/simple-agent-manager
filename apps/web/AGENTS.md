@@ -1,6 +1,6 @@
 # UI Standards
 
-Full scoped rules: `apps/web/.claude/rules/`
+Rules that apply here are listed under "Rules for this directory" at the end of this file.
 
 ## Mobile-First Requirements
 
@@ -51,3 +51,27 @@ When adding or modifying a click handler in a component with `useEffect` hooks:
 3. Check for conflicts: will any effect undo or race with the handler?
 4. Add disambiguation if the same state value can mean different things
 5. Write a behavioral test: render, simulate, assert the effect doesn't interfere
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/04-ui-standards.md`: UI Standards
+- `.claude/rules/15-nav-parity.md`: Desktop–Mobile Navigation Parity
+- `.claude/rules/16-no-page-reload-on-mutation.md`: No Page Reload on Mutation
+- `.claude/rules/17-ui-visual-testing.md`: Mandatory Playwright Visual Testing for UI Changes
+- `.claude/rules/24-no-duplicate-ui-controls.md`: No Duplicate Implementations
+- `.claude/rules/26-project-chat-first.md`: Project Chat First
+- `.claude/rules/37-prototype-development.md`: Prototype Development
+- `.claude/rules/48-stale-while-revalidate-ui.md`: Stale-While-Revalidate UI (No Hiding, No Refetch Loops)
+- `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`: Horizontal Overflow Inside `overflow-x-hidden` Is Invisible to Document-Level Checks
+- `.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`: An Object Literal in a Render Body Can Remount an Entire Subtree
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+- `.claude/rules/79-new-enum-values-audit-every-denylist.md`: A New Value in a Shared Status Enum Must Audit Every Denylist Over That Enum
+- `.claude/rules/80-sam-glass.md`: SAM Glass
+- `.claude/rules/82-typed-cards-every-harness.md`: A Typed Chat Card Must Render for Every Agent Harness
+
+<!-- END GENERATED RULE INDEX -->

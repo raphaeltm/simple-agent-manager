@@ -11,11 +11,11 @@ Always choose the smallest complete solution that meets the current need and sta
 Use this file as a compact Codex routing layer. `CLAUDE.md` remains Claude Code's baseline and a shared reference for detailed repo guidance, but Codex should read targeted sections instead of loading it wholesale by default.
 
 - Start with this file, then load the nearest path-specific `AGENTS.md` for the files you will edit. Open exact `CLAUDE.md` sections only when this file does not contain enough detail.
-- Use root `.claude/rules/*.md` as routing stubs. Read scoped `.claude/rules/` only beside the app/package you are changing.
+- Codex does not load `.claude/rules/` by itself. Before editing, open the nearest `AGENTS.md` for the directory you will change and read the rules its generated "Rules for this directory" section lists. `.claude/rules/00-rule-routing.md` indexes every path-scoped rule.
 - Prefer Codex skills for large references: `$changelog`, `$api-reference`, `$env-reference`, `$doc-sync-validator`, `$task-completion-validator`, and domain specialists.
 - Search narrowly before opening long task archives, specs, docs folders, or historical rules. Read the exact files needed for the current decision.
-- Measure instruction surface with `pnpm quality:agent-context-budget` when changing Codex/Claude steering docs or scoped rule layout. For Codex, verify active instruction files from a target path with `codex --cd <path> ...` or session logs.
-- Keep new standing guidance concise. If it needs examples, incidents, or long checklists, put those behind a scoped rule, skill, or reference file and link to it.
+- Measure instruction surface with `pnpm quality:agent-context-budget` when changing Codex/Claude steering docs or a rule's `paths` scope; `--check` enforces the size ceilings, including the 32 KiB Codex project-doc cap on this file. For Codex, verify active instruction files from a target path with `codex --cd <path> ...` or session logs.
+- Keep new standing guidance concise. If it needs examples, incidents, or long checklists, put those behind a path-scoped rule, skill, or reference file and link to it.
 - For long `/do` work, keep `.do-state.md` and the PR body current so compaction does not erase phase, reviewer, or CodeRabbit state.
 
 Route common questions to the smallest durable source first:
@@ -25,8 +25,8 @@ Route common questions to the smallest durable source first:
 | Recent implementation history                      | `$changelog`, then `git log --oneline -20`                           | Long history in startup docs          |
 | API routes or HTTP contracts                       | `$api-reference`, then exact files under `apps/api/`                 | Reading the whole API tree            |
 | Environment variables or secrets                   | `$env-reference` and `apps/api/.env.example`                         | Scanning deploy docs first            |
-| UI behavior or layout                              | Nearest app/package `AGENTS.md`, then scoped UI rules                | Loading API/DO incident rules         |
-| Durable Object, D1, KV, R2, or Cloudflare behavior | `apps/api/AGENTS.md`, scoped API rules, and `$cloudflare-specialist` | Generic root troubleshooting          |
+| UI behavior or layout                              | Nearest app/package `AGENTS.md` and the rules it lists              | Loading API/DO incident rules         |
+| Durable Object, D1, KV, R2, or Cloudflare behavior | `apps/api/AGENTS.md`, the rules it lists, and `$cloudflare-specialist` | Generic root troubleshooting          |
 | Active work state                                  | Current task file, `.do-state.md`, and PR body                       | Reconstructing from full chat history |
 
 Do not raise `project_doc_max_bytes` to hide instruction bloat unless Raphaël explicitly asks for that. Split or route guidance instead.
@@ -36,7 +36,7 @@ Do not raise `project_doc_max_bytes` to hide instruction bloat unless Raphaël e
 | What                 | Claude Code Location                                       | Codex Location                                     |
 | -------------------- | ---------------------------------------------------------- | -------------------------------------------------- |
 | Project instructions | `CLAUDE.md`                                                | `AGENTS.md` (this file)                            |
-| Modular rules        | `.claude/rules/*.md` + path-scoped `.claude/rules/` copies | Same files (shared)                                |
+| Modular rules        | `.claude/rules/*.md` (path-scoped by `paths` frontmatter)  | Same files (shared)                                |
 | Subagents / skills   | `.claude/agents/*/`                                        | `.agents/skills/*/SKILL.md` + `agents/openai.yaml` |
 | Reference skills     | `.claude/skills/*/SKILL.md`                                | `.agents/skills/*/SKILL.md`                        |
 | Slash commands       | `.claude/commands/*.md`                                    | `.codex/prompts/*.md`                              |
@@ -73,7 +73,7 @@ Skills are invoked with `$skill-name` (Codex) or dispatched as subagents (Claude
 
 ## Operational Guardrails
 
-These are Codex-facing reminders for recurring SAM workflow failures. The durable source of truth remains `CLAUDE.md`, compact root `.claude/rules/*.md`, and any path-scoped `.claude/rules/` files beside the code being changed.
+These are Codex-facing reminders for recurring SAM workflow failures. The durable source of truth remains `CLAUDE.md`, `.claude/rules/*.md`, and the rules each directory's `AGENTS.md` lists for the code being changed.
 
 | Situation                                                                                                  | Do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -136,3 +136,52 @@ Per-project data (chat sessions, messages, activity events, and canonical `proje
 - Cloudflare Workers SDK (Durable Objects, D1, KV, R2)
 - Tailwind CSS v4 (Web), Astro + Starlight (Marketing site)
 - @mastra/core (AI agent orchestration), workers-ai-provider (Workers AI bridge)
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules
+
+Codex does not load `.claude/rules/` by itself. Two steps before you edit:
+
+1. Open the `AGENTS.md` nearest the files you will change and read the rules its
+   "Rules for this directory" section lists. `.claude/rules/00-rule-routing.md` indexes
+   every path-scoped rule.
+2. The rules below apply to all work. Claude Code has them in context at launch. Read
+   the ones that bear on your task.
+
+- `.claude/rules/01-doc-sync.md`: Documentation Sync & Code Integrity
+- `.claude/rules/02-quality-gates.md`: Quality Gates
+- `.claude/rules/03-constitution.md`: Constitution Validation
+- `.claude/rules/05-preflight.md`: Agent Preflight Behavior
+- `.claude/rules/06-technical-patterns.md`: General Technical Patterns
+- `.claude/rules/07-env-and-urls.md`: Environment Variables & URL Construction
+- `.claude/rules/08-architecture.md`: Architecture & Business Logic
+- `.claude/rules/09-task-tracking.md`: Task Tracking System
+- `.claude/rules/10-e2e-verification.md`: End-to-End Capability Verification
+- `.claude/rules/11-fail-fast-patterns.md`: Fail-Fast Patterns (Constitution Principle XIII)
+- `.claude/rules/13-staging-verification.md`: Staging Deployment and Live Verification
+- `.claude/rules/14-do-workflow-persistence.md`: /do Workflow State Persistence (Anti-Compaction)
+- `.claude/rules/18-file-size-limits.md`: File Size Limits
+- `.claude/rules/19-external-service-integration.md`: External Service Integration Review
+- `.claude/rules/20-cross-origin-cors.md`: Cross-Origin Browser Requests Require Automated CORS
+- `.claude/rules/21-timeout-merge-guard.md`: Timeout Merge Guard
+- `.claude/rules/22-infrastructure-merge-gate.md`: Infrastructure Items Are Merge-Blocking
+- `.claude/rules/23-cross-boundary-contract-tests.md`: Cross-Boundary Contract Tests
+- `.claude/rules/25-review-merge-gate.md`: Merge-Blocking Review Gate
+- `.claude/rules/28-credential-resolution-fallback-tests.md`: Credential Resolution, Fallback, and Rotation Safety Tests
+- `.claude/rules/29-local-first-debugging.md`: Local-First Prototyping and Log-Driven Debugging
+- `.claude/rules/30-never-ship-broken-features.md`: Never Ship Broken Features (ABSOLUTE RULE)
+- `.claude/rules/33-staging-feature-validation.md`: Staging Feature Validation Methodology
+- `.claude/rules/35-vertical-slice-testing.md`: Vertical Slice Testing
+- `.claude/rules/38-agent-feedback-and-memory.md`: Agent Feedback, Memory, and Idea Hygiene
+- `.claude/rules/39-debug-before-redesign.md`: Debug Before Redesign (Mandatory)
+- `.claude/rules/41-credential-snapshot-resilience.md`: Credential Snapshot/Resolution Must Tolerate a Single Bad Row
+- `.claude/rules/42-no-untracked-degrading-placeholders.md`: No Untracked Behavior-Degrading Placeholders
+- `.claude/rules/59-understand-before-adding.md`: Understand the System Before Adding to It
+- `.claude/rules/60-request-io-and-bundle-budgets.md`: Request I/O and Client Bundle Budgets
+- `.claude/rules/62-tests-must-observe-the-real-trigger.md`: A Test Must Reach the Feature the Way Production Does
+- `.claude/rules/74-proxy-signals-must-match-the-condition.md`: A Gate Must Key On Its Condition, Not On A Signal That Merely Correlates
+- `.claude/rules/76-cost-decisions-must-query-billed-metrics.md`: Cost Decisions Must Query Billed Metrics
+- `.claude/rules/81-work-bounds-must-state-throughput.md`: A Work Bound Must State Its Throughput at the Outer Probable Limit
+
+<!-- END GENERATED RULE INDEX -->

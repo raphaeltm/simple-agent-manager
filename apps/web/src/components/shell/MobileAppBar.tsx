@@ -3,7 +3,7 @@ import { Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
-import { NotificationCenter } from '../NotificationCenter';
+import { InboxButton } from '../inbox/InboxButton';
 import { RecentChatsDropdown } from '../RecentChatsDropdown';
 import { IMMERSIVE_CHROME } from './chat-immersive-transition';
 
@@ -20,7 +20,7 @@ export interface ShellScreenAction {
 
 /**
  * The single floating app bar on phones: menu on the left (its drawer slides from the left),
- * the project name, Recent chats and Notifications grouped in a well because both work
+ * the project name, Recent chats and the Inbox grouped in a well because both work
  * across projects, and the screen's main toggle raised at the right edge.
  */
 export function MobileAppBar({
@@ -58,7 +58,7 @@ export function MobileAppBar({
       </Link>
       <div className="sam-well flex shrink-0 items-center rounded-[14px] p-0.5">
         <RecentChatsDropdown />
-        <NotificationCenter />
+        <InboxButton />
       </div>
       {screenAction && (
         <IconButton

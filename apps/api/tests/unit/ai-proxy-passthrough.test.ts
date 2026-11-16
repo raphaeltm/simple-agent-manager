@@ -18,6 +18,7 @@ const mockIncrementTokenUsage = vi.fn();
 const mockIncrementProviderUsage = vi.fn();
 const mockResolveForConsumer = vi.fn();
 const mockLogError = vi.fn();
+const mockLogWarn = vi.fn();
 const mockUpdateAIProxyAgentCredentialAttribution = vi.fn();
 const mockRecordProxyCredentialLimitObservationsFromHeaders = vi.fn();
 
@@ -76,7 +77,11 @@ vi.mock('@simple-agent-manager/ai-proxy/internal/ai-token-budget', () => ({
 }));
 
 vi.mock('../../src/lib/logger', () => ({
-  log: { info: vi.fn(), error: (...args: unknown[]) => mockLogError(...args), warn: vi.fn() },
+  log: {
+    info: vi.fn(),
+    error: (...args: unknown[]) => mockLogError(...args),
+    warn: (...args: unknown[]) => mockLogWarn(...args),
+  },
 }));
 
 vi.mock('../../src/lib/secrets', () => ({
@@ -804,5 +809,190 @@ describe('AI Proxy Passthrough Routes', () => {
       await expectNoResponseOrLogLeakage(res, ['custom-openai.example', 'sk-resolved-openai']);
       expect(JSON.stringify(mockLogError.mock.calls)).toContain('TypeError');
     });
+  });
+});
+
+// A stored credential whose base URL names a private, loopback or metadata host is never called
+// (outbound-fetch guard, landing slice L5a). Credentials saved before the save-time check
+// (routes/composable-credentials.ts) can still hold such a URL; resolveProxyUpstream skips them,
+// logs ai_proxy_passthrough.upstream_refused and tries the next candidate, so the request gets
+// the designed 401 instead of reaching the host or turning into a 500 (rule 41).
+function chatBody(model: string): Record<string, unknown> {
+  return { model, messages: [{ role: 'user', content: 'hi' }] };
+}
+
+function allowRequest(agentType: string): void {
+  mockVerifyAIProxyAuth.mockResolvedValueOnce({
+    userId: 'user1',
+    workspaceId: 'ws1',
+    projectId: 'proj1',
+    agentType,
+  });
+  mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+  mockCheckTokenBudget.mockResolvedValue({ allowed: true });
+}
+
+/** An openai-compatible credential whose base URL lives in its (encrypted) secret. */
+function openAiCredential(baseUrl: string): void {
+  mockResolveForConsumer.mockImplementation((_db, _userId, _key, consumer) =>
+    Promise.resolve({
+      consumer,
+      configuration: { settings: {} },
+      credential: {
+        id: 'cred-openai',
+        secret: { kind: 'openai-compatible', apiKey: 'sk-own', baseUrl },
+      },
+      source: 'user-attachment',
+    })
+  );
+}
+
+/** An api-key credential whose base URL lives on the configuration (Anthropic dialect). */
+function anthropicConfiguration(baseUrl: string): void {
+  mockResolveForConsumer.mockImplementation((_db, _userId, _key, consumer) =>
+    Promise.resolve({
+      consumer,
+      configuration: { settings: { baseUrl, dialect: 'anthropic' } },
+      credential: { id: 'cred-anthropic', secret: { kind: 'api-key', apiKey: 'sk-ant-own' } },
+      source: 'user-attachment',
+    })
+  );
+}
+
+const REFUSED_BASE_URLS: Array<[string, string]> = [
+  ['loopback literal', 'https://127.0.0.1:8443/v1'],
+  ['loopback as one decimal number', 'https://2130706433/v1'],
+  ['localhost name', 'https://localhost/v1'],
+  ['RFC 1918', 'https://10.0.0.5/v1'],
+  ['cloud metadata address', 'https://169.254.169.254/v1'],
+  ['cloud metadata name', 'https://metadata.google.internal/v1'],
+  ['IPv4-mapped loopback', 'https://[::ffff:127.0.0.1]/v1'],
+  ['plain HTTP to a public host', 'http://llm.example.com/v1'],
+];
+
+describe('stored credential with a refused base URL (OpenAI passthrough)', () => {
+  it.each(REFUSED_BASE_URLS)(
+    '%s: never calls %s and answers the designed 401',
+    async (_name, url) => {
+      allowRequest('openai-codex');
+      openAiCredential(url);
+
+      const res = await postJson(OPENAI_CHAT_COMPLETIONS_PATH, chatBody('gpt-4o'));
+
+      expect(res.status).toBe(401);
+      expect(mockFetch).not.toHaveBeenCalled();
+      // Liveness: the credential really was resolved, so the refusal is the guard's doing.
+      expect(mockResolveForConsumer).toHaveBeenCalled();
+      expect(mockLogWarn).toHaveBeenCalledWith(
+        'ai_proxy_passthrough.upstream_refused',
+        expect.objectContaining({ credentialId: 'cred-openai' })
+      );
+      // The log names the credential and the reason, never the URL.
+      expect(JSON.stringify(mockLogWarn.mock.calls)).not.toContain(new URL(url).hostname);
+    }
+  );
+
+  it('control: a public HTTPS base URL is still called', async () => {
+    allowRequest('openai-codex');
+    openAiCredential('https://llm.example.com/v1');
+    mockFetch.mockResolvedValueOnce(
+      new Response('{"id":"chatcmpl-1"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const res = await postJson(OPENAI_CHAT_COMPLETIONS_PATH, chatBody('gpt-4o'));
+
+    expect(res.status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch.mock.calls[0]?.[0]).toBe('https://llm.example.com/v1/chat/completions');
+    expect(mockLogWarn).not.toHaveBeenCalledWith(
+      'ai_proxy_passthrough.upstream_refused',
+      expect.anything()
+    );
+  });
+});
+
+describe('a refused credential is skipped, not fatal: the next candidate serves the request', () => {
+  it('with no agent type, a private codex credential is skipped and the opencode one is used', async () => {
+    // Unknown agent type: every harness that speaks the dialect is a candidate (openai-codex,
+    // then opencode), so the skip must move on to the next one rather than stop.
+    mockVerifyAIProxyAuth.mockResolvedValueOnce({
+      userId: 'user1',
+      workspaceId: 'ws1',
+      projectId: 'proj1',
+      agentType: null,
+    });
+    mockCheckRateLimit.mockResolvedValueOnce({ allowed: true, remaining: 29, resetAt: 9999 });
+    mockCheckTokenBudget.mockResolvedValue({ allowed: true });
+    mockResolveForConsumer.mockImplementation((_db, _userId, _key, consumer) => {
+      const agentType = (consumer as { agentType?: string }).agentType;
+      const baseUrl =
+        agentType === 'openai-codex' ? 'https://10.0.0.5/v1' : 'https://llm.example.com/v1';
+      return Promise.resolve({
+        consumer,
+        configuration: { settings: {} },
+        credential: {
+          id: `cred-${agentType}`,
+          secret: { kind: 'openai-compatible', apiKey: `sk-${agentType}`, baseUrl },
+        },
+        source: 'user-attachment',
+      });
+    });
+    mockFetch.mockResolvedValueOnce(
+      new Response('{"id":"chatcmpl-1"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const res = await postJson(OPENAI_CHAT_COMPLETIONS_PATH, chatBody('gpt-4o'));
+
+    expect(res.status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockFetch.mock.calls[0]?.[0]).toBe('https://llm.example.com/v1/chat/completions');
+    const refusals = mockLogWarn.mock.calls.filter(
+      ([event]) => event === 'ai_proxy_passthrough.upstream_refused'
+    );
+    expect(refusals).toEqual([
+      [
+        'ai_proxy_passthrough.upstream_refused',
+        { credentialId: 'cred-openai-codex', reason: 'host' },
+      ],
+    ]);
+  });
+});
+
+describe('stored configuration with a refused base URL (Anthropic passthrough)', () => {
+  it('a metadata base URL on the configuration is never called', async () => {
+    allowRequest('claude-code');
+    anthropicConfiguration('https://169.254.169.254/anthropic');
+
+    const res = await postJson(ANTHROPIC_MESSAGES_PATH, chatBody('claude-sonnet-5'));
+
+    expect(res.status).toBe(401);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockLogWarn).toHaveBeenCalledWith('ai_proxy_passthrough.upstream_refused', {
+      credentialId: 'cred-anthropic',
+      reason: 'host',
+    });
+  });
+
+  it('control: a public base URL on the configuration is still called', async () => {
+    allowRequest('claude-code');
+    anthropicConfiguration('https://anthropic-alt.example/anthropic');
+    mockFetch.mockResolvedValueOnce(
+      new Response('{"id":"msg_1","usage":{"input_tokens":1,"output_tokens":1}}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const res = await postJson(ANTHROPIC_MESSAGES_PATH, chatBody('claude-sonnet-5'));
+
+    expect(res.status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(String(mockFetch.mock.calls[0]?.[0])).toContain('https://anthropic-alt.example/');
   });
 });

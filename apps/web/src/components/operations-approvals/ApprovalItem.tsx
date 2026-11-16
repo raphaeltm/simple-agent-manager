@@ -80,6 +80,47 @@ function executionMessage(approval: OperationsActionApproval): string | null {
 }
 
 /**
+ * Approve / Deny for one Operations approval. One implementation, two layouts: inside
+ * `ApprovalItem` (Admin → Approvals and the chat card) and pinned at the bottom of an inbox item,
+ * where the reason and evidence stay in the body.
+ */
+export function ApprovalDecisionButtons({
+  irreversible,
+  deciding,
+  onDecide,
+  className = '',
+}: {
+  /** Approving cannot be undone: Approve is shown as a danger action. */
+  irreversible: boolean;
+  deciding: OperationsApprovalDecision | null;
+  onDecide: (decision: OperationsApprovalDecision) => void;
+  className?: string;
+}) {
+  return (
+    <div className={`grid grid-cols-2 gap-3 ${className}`}>
+      <Button
+        variant={irreversible ? 'danger' : 'primary'}
+        className="min-h-11"
+        disabled={deciding !== null}
+        loading={deciding === 'approve'}
+        onClick={() => onDecide('approve')}
+      >
+        {deciding === 'approve' ? 'Approving…' : 'Approve'}
+      </Button>
+      <Button
+        variant="secondary"
+        className="min-h-11"
+        disabled={deciding !== null}
+        loading={deciding === 'deny'}
+        onClick={() => onDecide('deny')}
+      >
+        {deciding === 'deny' ? 'Denying…' : 'Deny'}
+      </Button>
+    </div>
+  );
+}
+
+/**
  * One Operations approval: what the agent asked to do, why, and Approve / Deny while it is
  * pending. Shared by Admin → Approvals and the in-chat approval card.
  */
@@ -108,26 +149,12 @@ export function ApprovalItem({
   const result = executionMessage(approval);
   // Right under the request, so a long reason or target list never pushes them off a phone screen.
   const actions = (
-    <div className="grid grid-cols-2 gap-3 sm:max-w-md">
-      <Button
-        variant={irreversible ? 'danger' : 'primary'}
-        className="min-h-11"
-        disabled={deciding !== null}
-        loading={deciding === 'approve'}
-        onClick={() => onDecide('approve')}
-      >
-        {deciding === 'approve' ? 'Approving…' : 'Approve'}
-      </Button>
-      <Button
-        variant="secondary"
-        className="min-h-11"
-        disabled={deciding !== null}
-        loading={deciding === 'deny'}
-        onClick={() => onDecide('deny')}
-      >
-        {deciding === 'deny' ? 'Denying…' : 'Deny'}
-      </Button>
-    </div>
+    <ApprovalDecisionButtons
+      irreversible={irreversible}
+      deciding={deciding}
+      onDecide={onDecide}
+      className="sm:max-w-md"
+    />
   );
 
   return (

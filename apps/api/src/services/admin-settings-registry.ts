@@ -3,11 +3,13 @@ import { CORE_SETTINGS } from './admin-settings-core-definitions';
 import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish-definitions';
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
 import { GCP_CATALOG_SETTINGS } from './admin-settings-gcp-catalog-definitions';
+import { INSTRUCTION_BUDGET_SETTINGS } from './admin-settings-instructions-definitions';
 import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
 import { MESSAGE_MERGE_SETTINGS } from './admin-settings-message-merge-definitions';
 import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
+import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
 export {
   type AdminSettingDefinition,
   type AdminSettingName,
@@ -33,6 +35,8 @@ const definitions = [
   ...OPERATOR_SETTINGS,
   ...LIFECYCLE_LATENCY_SETTINGS,
   ...OPERATIONS_TELEMETRY_SETTINGS,
+  ...OUTBOUND_SETTINGS,
+  ...INSTRUCTION_BUDGET_SETTINGS,
 ];
 
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(

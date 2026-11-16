@@ -1322,9 +1322,13 @@ describe('Worker vars omitted because they equal the code default', () => {
   // The busy-build placement wait it bounded was removed (2026-11-08): a busy node is now ranked by
   // its startup backlog instead of waited on, so nothing reads the timeout.
   const RETIRED_WITH_BUSY_BUILD_WAIT = ['VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS'] as const;
+  // A question's window moved to the admin setting `inbox.questionTimeoutMinutes` with inbox
+  // slice G (2026-11-16): questions are D1 `asks` rows, and nothing reads the variable.
+  const RETIRED_WITH_QUESTION_ASKS = ['HUMAN_INPUT_TIMEOUT_MS'] as const;
   const RETIRED_VARS: readonly string[] = [
     ...RETIRED_WITH_ANONYMOUS_TRIALS,
     ...RETIRED_WITH_BUSY_BUILD_WAIT,
+    ...RETIRED_WITH_QUESTION_ASKS,
   ];
 
   it('pins original bindings to retained values, deliberate retunes or proven runtime defaults', () => {
@@ -1470,5 +1474,54 @@ describe('Worker vars omitted because they equal the code default', () => {
       log.mockRestore();
     }
     expect(lines).toEqual(['  Environment override: OMITTED="5" replaces code default "9"']);
+  });
+});
+
+describe('dedicated Compose builder deployment settings', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it('mirrors actual class capacity into admission and supports instance sizing overrides', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOY_BUILDER_MAX_INSTANCES', '4');
+    vi.stubEnv('DEPLOY_BUILDER_INSTANCE_TYPE', 'standard-3');
+    const generated = generateApiWorkerEnv(
+      {
+        containers: [
+          {
+            class_name: 'ComposeBuilderContainer',
+            image: './Dockerfile.compose-builder',
+            instance_type: 'standard-4',
+            max_instances: 6,
+          },
+        ],
+      },
+      outputs,
+      'staging',
+      false,
+      false,
+      null
+    );
+    expect(generated.containers).toEqual([
+      {
+        class_name: 'ComposeBuilderContainer',
+        image: './Dockerfile.compose-builder',
+        instance_type: 'standard-3',
+        max_instances: 4,
+      },
+    ]);
+    expect(generated.vars?.DEPLOY_BUILDER_CLASS_MAX_INSTANCES).toBe('4');
+  });
+  it('fails closed on an invalid builder instance type', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOY_BUILDER_INSTANCE_TYPE', 'typo');
+    expect(() =>
+      generateApiWorkerEnv(
+        { containers: [{ class_name: 'ComposeBuilderContainer', image: 'image' }] },
+        outputs,
+        'staging',
+        false,
+        false,
+        null
+      )
+    ).toThrow('DEPLOY_BUILDER_INSTANCE_TYPE');
   });
 });

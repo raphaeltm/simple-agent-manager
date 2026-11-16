@@ -236,7 +236,7 @@
 
   /* Legacy glass inside a SAM Glass pane (an ordinary page in the shell's content pane) drops
      its own blur: the frosted pane already blurred the void behind it, and blurring that again
-     only costs (apps/web/.claude/rules/80-sam-glass.md). */
+     only costs (.claude/rules/80-sam-glass.md). */
   .sam-glass :is(.glass-chrome, .glass-surface, .glass-modal, .glass-backdrop-dim) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;

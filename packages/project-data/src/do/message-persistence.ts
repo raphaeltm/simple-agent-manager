@@ -3,6 +3,7 @@ import { createModuleLogger } from '@simple-agent-manager/worker-core';
 import * as activity from './activity';
 import * as attention from './attention';
 import * as idleCleanup from './idle-cleanup';
+import type { MessageIngestMetrics } from './message-ingest-metrics';
 import type { MessageIngestSource, MessageMergeConfig } from './message-stream-ingest';
 import * as messages from './messages';
 import { observeReconciliationMessage } from './reconciliation-episode';
@@ -23,10 +24,20 @@ export type BatchMessageInput = {
 };
 
 export type MessagePersistenceHooks = {
+  recordMessageIngest?: (metrics: MessageIngestMetrics) => void;
   transactionSync?: <T>(fn: () => T) => T;
   recalculateAlarm: () => Promise<void>;
   scheduleSummarySync: () => void;
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
+  /**
+   * A person's chat message answers the chat's open questions in D1 `asks` (inbox slice G), as it
+   * resolves its attention markers. Never throws (`question-asks.ts`).
+   */
+  closeQuestionAsks?: (
+    sessionId: string,
+    messageId: string,
+    messageCreatedAt: number
+  ) => Promise<unknown>;
 };
 
 export type MessageBatchPersistenceResult = {
@@ -124,6 +135,9 @@ export async function runPersistedMessageSideEffects(
     },
     sessionId
   );
+  await closeQuestionsForHumanMessage(hooks, sessionId, [
+    { id: result.id, role, createdAt: result.now },
+  ]);
 }
 
 export async function persistMessageBatchWithSideEffects(
@@ -132,10 +146,16 @@ export async function persistMessageBatchWithSideEffects(
   hooks: MessagePersistenceHooks,
   sessionId: string,
   batchMessages: BatchMessageInput[],
-  merge?: { source?: MessageIngestSource; config: MessageMergeConfig }
+  merge?: {
+    source?: MessageIngestSource;
+    config: MessageMergeConfig;
+    metrics?: MessageIngestMetrics;
+  }
 ): Promise<MessageBatchPersistenceResult> {
   const persist = () => messages.persistMessageBatch(sql, env, sessionId, batchMessages, merge);
   const result = hooks.transactionSync ? hooks.transactionSync(persist) : persist();
+  // Publish only after the synchronous transaction commits; later effects may fail.
+  if (merge?.metrics) hooks.recordMessageIngest?.(merge.metrics);
   if (result.persisted === 0) {
     return {
       persisted: result.persisted,
@@ -187,6 +207,7 @@ export async function persistMessageBatchWithSideEffects(
   );
   for (const append of result.appends)
     hooks.broadcastEvent('message.append', { ...append }, sessionId);
+  await closeQuestionsForHumanMessage(hooks, sessionId, result.persistedMessages);
   return {
     persisted: result.persisted,
     duplicates: result.duplicates,
@@ -231,6 +252,27 @@ async function resolveAttentionForRoles(
   if (resolved > 0 && reason) {
     await hooks.recalculateAlarm();
     hooks.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason }, sessionId);
+  }
+}
+
+/**
+ * A person's message answers the chat's open questions in D1 `asks` (inbox slice G), as it
+ * resolves the chat's markers above. Run after the live broadcast, so a D1 round trip never
+ * delays it; never throws (`question-asks.ts`).
+ */
+async function closeQuestionsForHumanMessage(
+  hooks: MessagePersistenceHooks,
+  sessionId: string,
+  persistedMessages: Array<{
+    id: string;
+    role: string;
+    origin?: string | null;
+    createdAt: number;
+  }>
+): Promise<void> {
+  const firstUserMsg = persistedMessages.find((m) => m.role === 'user' && m.origin !== 'system');
+  if (firstUserMsg) {
+    await hooks.closeQuestionAsks?.(sessionId, firstUserMsg.id, firstUserMsg.createdAt);
   }
 }
 

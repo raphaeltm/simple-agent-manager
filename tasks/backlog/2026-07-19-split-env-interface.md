@@ -22,3 +22,7 @@ The composition pattern already exists: `Env extends WebhookTriggerEnv, TaskReco
 - [ ] All extracted interfaces re-exported through `env.ts`; zero consumer import changes
 - [ ] `pnpm typecheck` + full test suite green
 - [ ] `.env.example` groupings untouched (documentation-only file)
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The domain interfaces were extracted (1,535→1,461 lines). Still open: getting `env.ts` under 500 lines and removing the `FILE SIZE EXCEPTION` at `env.ts:1`. Evidence: #2681; `apps/api/src/env.ts:17-26` extends `ProjectDataEnv`, `AgentEmailEnv`, `AppDeploymentEnv`, `OperationsEnv`, `RepoHostingEnv`, `AiProxyEnv`, `WorkspaceAdmissionEnv`.

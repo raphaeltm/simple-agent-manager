@@ -1018,6 +1018,21 @@ export async function listActiveAttentionMarkers(
   );
 }
 
+/** One chat's run-receipt facts for a time window (`do/run-receipt-facts.ts`, Insights slice R). */
+export async function getRunReceiptFacts(
+  env: Env,
+  projectId: string,
+  input: Parameters<ProjectData['getRunReceiptFacts']>[0]
+): Promise<ReturnType<ProjectData['getRunReceiptFacts']>> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getRunReceiptFacts',
+    (stub) => stub.getRunReceiptFacts(input),
+    'idempotent_read'
+  );
+}
+
 export async function getMessages(
   env: Env,
   projectId: string,
@@ -3386,38 +3401,46 @@ export async function syncProviderLimitAttention(
   );
 }
 
-export async function createAttentionMarker(
+/** A question filed as a D1 `asks` row: answers SAM's check-in, shows live (inbox slice G). */
+export async function recordQuestionAsked(
   env: Env,
   projectId: string,
-  opts: {
-    sessionId: string;
-    taskId: string | null;
-    workspaceId: string | null;
-    kind: string;
-    source: string;
-    sourceNotificationId?: string | null;
-    notificationUserId?: string | null;
-    reason?: string | null;
-    metadata?: string | null;
-    expiresAt?: number | null;
-    nextEscalationAt?: number | null;
-    maxExpiresAt?: number | null;
-  }
-): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
-  const stub = await getStub(env, projectId);
-  return stub.createAttentionMarker(opts);
+  input: Parameters<ProjectData['recordQuestionAsked']>[0]
+): Promise<void> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'recordQuestionAsked',
+    (stub) => stub.recordQuestionAsked(input),
+    'mutation'
+  );
 }
 
-export async function linkAttentionNotification(
+/** The agent cancelled its blocking question in D1 `asks` (inbox slice D). */
+export async function recordQuestionWithdrawn(
   env: Env,
   projectId: string,
-  markerId: string,
-  notificationUserId: string,
-  notificationId: string
-): Promise<boolean> {
-  const stub = await getStub(env, projectId);
-  return stub.linkAttentionNotification(markerId, notificationUserId, notificationId);
+  input: Parameters<ProjectData['recordQuestionWithdrawn']>[0]
+): Promise<void> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'recordQuestionWithdrawn',
+    (stub) => stub.recordQuestionWithdrawn(input),
+    'mutation'
+  );
 }
+
+/** The task outcome of an expired question held in D1 `asks` (inbox slice G). */
+export async function expireQuestionAsk(
+  env: Env,
+  projectId: string,
+  input: Parameters<ProjectData['expireQuestionAsk']>[0]
+): Promise<{ outcome: 'expired' | 'answered_in_chat' }> {
+  const stub = await getStub(env, projectId);
+  return stub.expireQuestionAsk(input);
+}
+
 
 export async function prepareAttentionAnswer(
   env: Env,
@@ -3450,6 +3473,37 @@ export async function releaseAttentionAnswer(
 ): Promise<number> {
   const stub = await getStub(env, projectId);
   return stub.releaseAttentionAnswer(sessionId, markerId, answer);
+}
+
+/** Inbox archive claim for a question; see `ProjectData.prepareAttentionArchive`. */
+export async function prepareAttentionArchive(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+) {
+  const stub = await getStub(env, projectId);
+  return stub.prepareAttentionArchive(sessionId, markerId);
+}
+
+export async function completeAttentionArchive(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.completeAttentionArchive(sessionId, markerId);
+}
+
+export async function releaseAttentionArchive(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.releaseAttentionArchive(sessionId, markerId);
 }
 
 export async function resolveSessionAttentionMarkers(

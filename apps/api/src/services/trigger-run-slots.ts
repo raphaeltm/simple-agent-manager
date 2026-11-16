@@ -44,7 +44,7 @@ export type AdmissionSkipReason = Extract<TriggerSkipReason, 'still_running' | '
  * until its snapshot expires days later.
  *
  * Both task-status checks are denylists, so a new task status holds the slot until
- * someone decides otherwise (`packages/shared/.claude/rules/79`). The status
+ * someone decides otherwise (`.claude/rules/79`). The status
  * classification test in `trigger-admission-run-slot.test.ts` fails until it does.
  * Bind {@link EXECUTION_HOLDS_RUN_SLOT_BINDINGS} at this predicate's position.
  */

@@ -30,16 +30,8 @@ export async function listNotifications(opts?: {
   return request<ListNotificationsResponse>(`/api/notifications${qs ? `?${qs}` : ''}`);
 }
 
-export async function getNotificationUnreadCount(): Promise<{ count: number }> {
-  return request<{ count: number }>('/api/notifications/unread-count');
-}
-
 export async function markNotificationRead(id: string): Promise<void> {
   await request('/api/notifications/' + encodeURIComponent(id) + '/read', { method: 'POST' });
-}
-
-export async function markAllNotificationsRead(): Promise<void> {
-  await request('/api/notifications/read-all', { method: 'POST' });
 }
 
 export async function dismissNotification(id: string): Promise<void> {

@@ -51,7 +51,10 @@ export {
   type HumanPromptDeliveryTrigger,
   isHumanPromptDeliveryTrigger,
 } from './do/agent-wake-policy';
-export { computeHumanInputSchedule, parseAttentionOptions } from './do/attention';
+export {
+  ATTENTION_ARCHIVE_CLAIM,
+  parseAttentionOptions,
+} from './do/attention';
 export { CommentNotFoundError } from './do/comment-contracts';
 export { resolveDurableExecutionConfig } from './do/durable-execution-config';
 export {

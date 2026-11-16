@@ -42,6 +42,28 @@ export {
   type LogLevel,
   serializeError,
 } from './logger';
+export {
+  assertOutboundUrl,
+  classifyHost,
+  DEFAULT_OUTBOUND_MAX_REDIRECTS,
+  guardedFetch,
+  type HostClass,
+  MAX_OUTBOUND_REDIRECTS,
+  type OutboundPolicy,
+  type OutboundRefusalReason,
+  OutboundRequestRefusedError,
+} from './network-hosts';
+export {
+  DEFAULT_OPEN_QUESTION_READ_LIMIT,
+  hasOpenQuestionAsk,
+  type OpenQuestionQuery,
+  preferAttention,
+  QUESTION_ASK_SOURCE,
+  questionAttentionFromRow,
+  type QuestionAttentionSummary,
+  questionOptions,
+  readOpenQuestionAttention,
+} from './question-asks';
 export { parsePositiveInt, requireRouteParam } from './route-helpers';
 export { mapRows, parseRow, parseRowOrNull } from './row-parsing';
 export {

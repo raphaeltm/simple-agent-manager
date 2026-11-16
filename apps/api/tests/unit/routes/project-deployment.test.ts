@@ -52,8 +52,9 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'test-user-id',
 }));
 
+const mockRequireProjectCapability = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireProjectCapability: vi.fn().mockResolvedValue(undefined),
+  requireProjectCapability: (...args: unknown[]) => mockRequireProjectCapability(...args),
 }));
 
 vi.mock('../../../src/lib/ulid', () => ({
@@ -133,6 +134,9 @@ const mockEnv = {
 } as unknown as Env;
 
 function chainMocks() {
+  // mockReset also drops an unconsumed mockRejectedValueOnce, so one test's denial
+  // cannot leak into the next test when the route under test skips the check.
+  mockRequireProjectCapability.mockReset().mockResolvedValue(undefined);
   mockSelect.mockReturnValue({ from: mockFrom });
   mockFrom.mockReturnValue({ where: mockWhere });
   // where() returns an object with limit() and is also thenable (for DELETE)
@@ -242,6 +246,12 @@ describe('GET /:id/deployment-identity-token', () => {
     const body = await res.json();
     expect(body).toEqual({ token: 'fixture' });
     expect(mockValidateMcpToken).toHaveBeenCalledWith(mockEnv, 'mcp-token-1');
+    expect(mockRequireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'u1',
+      'deployment:deploy'
+    );
 
     // Verify signIdentityToken was called with correct audience
     expect(mockSignIdentityToken).toHaveBeenCalledWith(
@@ -254,6 +264,37 @@ describe('GET /:id/deployment-identity-token', () => {
       mockEnv,
       expect.any(Number)
     );
+  });
+
+  it('rejects a token whose actor no longer has deployment authority before cache or signing', async () => {
+    mockValidateMcpToken.mockResolvedValue({
+      projectId: 'proj-1',
+      userId: 'u1',
+      workspaceId: 'ws-1',
+    });
+    mockRequireProjectCapability.mockRejectedValueOnce(
+      Object.assign(new Error('Project capability is required'), {
+        statusCode: 403,
+        error: 'FORBIDDEN',
+      })
+    );
+
+    const app = createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/deployment-identity-token',
+      { method: 'GET', headers: { Authorization: 'Bearer stale-mcp-token' } },
+      mockEnv
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockRequireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'u1',
+      'deployment:deploy'
+    );
+    expect(mockKvGet).not.toHaveBeenCalled();
+    expect(mockSignIdentityToken).not.toHaveBeenCalled();
   });
 
   it('rejects non-MCP tokens with 403 and does not sign identity token', async () => {

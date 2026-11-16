@@ -38,7 +38,7 @@
 >   - #12: `allowedHosts: true` in `apps/web/vite.config.ts:118` is still undocumented.
 > - **Moot/dropped:** #5 (44px touch targets). Current guidance says not to demand larger touch
 >   targets (`.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md:31,73`,
->   `apps/web/.claude/rules/17-ui-visual-testing.md:69`).
+>   `.claude/rules/17-ui-visual-testing.md:69`).
 
 **Created**: 2026-04-24
 **Source**: Post-merge UI/UX specialist review + task-completion-validator of PR #804

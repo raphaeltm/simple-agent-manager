@@ -5,7 +5,7 @@
  * real BetterAuth session cookie, and reads the real `signup.requireApproval` platform setting
  * written by `setSignupApprovalConfig`. A route that applies only `requireAuth()` therefore lets a
  * pending account through here exactly as it would in production (`.claude/rules/62`;
- * `apps/api/.claude/rules/06`: auth routing tests go through the combined app).
+ * `.claude/rules/06`: auth routing tests go through the combined app).
  *
  * The pending account is a project maintainer and has a valid session, so the only thing that can
  * reject it is the approval gate. `GET /api/auth/me` returning 200 for the same cookie is the

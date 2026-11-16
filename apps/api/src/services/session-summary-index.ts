@@ -21,6 +21,11 @@
  * availability (see `listSessionsFromIndex`).
  */
 import { DEFAULT_SESSION_INDEX_MAX_STALENESS_MS } from '@simple-agent-manager/shared';
+import {
+  preferAttention,
+  type QuestionAttentionSummary,
+  readOpenQuestionAttention,
+} from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -104,6 +109,11 @@ const AttentionSummarySchema = v.object({
   expiresAt: v.nullable(v.number()),
   reason: v.nullable(v.string()),
   options: v.array(v.string()),
+  // Added for the inbox (`getAttentionSummary`); absent on rows synced before it.
+  source: v.optional(v.nullable(v.string())),
+  category: v.optional(v.nullable(v.string())),
+  interactionId: v.optional(v.nullable(v.string())),
+  interactionKind: v.optional(v.nullable(v.string())),
 });
 
 /**
@@ -265,7 +275,7 @@ async function readIndex(
         .prepare(
           `SELECT ${columns} FROM (
              SELECT ${columns}, ROW_NUMBER() OVER (
-               PARTITION BY status, attention_json IS NOT NULL
+               PARTITION BY status, (attention_json IS NOT NULL OR ${OPEN_QUESTION_EXISTS})
                ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
              ) AS status_rank
              FROM session_summaries
@@ -274,7 +284,8 @@ async function readIndex(
            WHERE status_rank <= ?
            ${recency}`
         )
-        .bind(...params, ...LIVE_SESSION_STATUSES, query.limit)
+        // The first bind is the open-question expiry clock (`OPEN_QUESTION_EXISTS`).
+        .bind(Date.now(), ...params, ...LIVE_SESSION_STATUSES, query.limit)
         .all<Record<string, unknown>>();
     } catch (err) {
       log.warn('session_index.live_read_failed', {
@@ -291,7 +302,9 @@ async function readIndex(
   // awake ones. Sessions carrying an attention marker are ranked in their own group,
   // so newer quiet chats cannot crowd out an older one that is waiting on a person. It is an extra on top of the page: if it fails, serve the page without
   // it rather than turning a good index read into a Durable Object fallback.
-  const [countRow, page, live] = await Promise.all([
+  // Open questions live in D1 `asks` (inbox slice G), not in `attention_json`; one indexed read
+  // for the project, merged into each chat's attention below.
+  const [countRow, page, live, questions] = await Promise.all([
     db
       .prepare(`SELECT COUNT(*) as cnt FROM session_summaries WHERE ${whereClause}`)
       .bind(...params)
@@ -303,18 +316,49 @@ async function readIndex(
       .bind(...params, query.limit, query.offset)
       .all<Record<string, unknown>>(),
     readLive ? readLiveRows() : null,
+    readOpenQuestionAttention(db, {
+      projectId: query.projectId,
+      assigneeUserId: query.createdByUserId ?? null,
+      now: Date.now(),
+    }),
   ]);
 
   const total = countRow?.cnt ?? 0;
   const rows = page.results ?? [];
-  const sessions = mapIndexRows(env, query.projectId, rows);
-  const liveSessions = live ? mapIndexRows(env, query.projectId, live.results ?? []) : [];
+  const sessions = withQuestionAttention(mapIndexRows(env, query.projectId, rows), questions);
+  const liveSessions = live
+    ? withQuestionAttention(mapIndexRows(env, query.projectId, live.results ?? []), questions)
+    : [];
 
   // Mirrors the DO: `rows.length` is the raw SQL-fetched count, so post-fetch
   // skips cannot make `hasMore` claim the window reached the end when it did not.
   const hasMore = query.offset + rows.length < total;
 
   return { result: { sessions: appendMissingSessions(sessions, liveSessions), total, hasMore } };
+}
+
+/**
+ * A chat holds an open, unexpired question in D1 `asks` (inbox slice G). Correlated on the row
+ * being ranked; `idx_asks_open_question` answers it.
+ */
+const OPEN_QUESTION_EXISTS = `EXISTS (
+  SELECT 1 FROM asks a
+   WHERE a.project_id = session_summaries.project_id AND a.source_session_id = session_summaries.id
+     AND a.kind = 'question' AND a.status = 'open' AND a.blocking = 1
+     AND (a.expires_at IS NULL OR a.expires_at > ?))`;
+
+/** Each chat's attention with its open question merged in, as the ProjectData read does. */
+function withQuestionAttention(
+  sessions: Record<string, unknown>[],
+  questions: ReadonlyMap<string, QuestionAttentionSummary>
+): Record<string, unknown>[] {
+  if (questions.size === 0) return sessions;
+  return sessions.map((session) => {
+    const question = typeof session.id === 'string' ? questions.get(session.id) : undefined;
+    return question
+      ? { ...session, attention: preferAttention(session.attention, question) }
+      : session;
+  });
 }
 
 /**

@@ -45,8 +45,8 @@ Also create `.do-state.md` in the repo root (local-only, snapshot-visible; never
 2. **Research the codebase.** Before writing anything:
    - Search and read to find all relevant code paths
    - Read related public docs in `apps/www/src/content/docs/docs/` and `specs/` only for affected behavior.
-   - Read `.claude/rules/00-rule-routing.md`, then load only the root rules and scoped `.claude/rules/` files that match the directories you will modify. Do not bulk-load an app/package scoped rule directory.
-   - **Review relevant post-mortems** by searching root rule stubs, matching scoped rule files, and relevant `tasks/archive/` records for the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections when a relevant incident lesson is found. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is usually a relevant post-mortem.
+   - Read `.claude/rules/00-rule-routing.md`, then read the path-scoped rules its index lists for the directories you will modify. Claude Code loads them on file access; open them yourself before planning or creating new files.
+   - **Review relevant post-mortems** by searching the rule index, the matching path-scoped rules, and relevant `tasks/archive/` records for the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections when a relevant incident lesson is found. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is usually a relevant post-mortem.
    - Use web search for external library/API docs if needed
    - Identify existing patterns, conventions, and test approaches in the affected areas
 
@@ -98,7 +98,7 @@ Execute the checklist from the task file. Follow these rules:
 1. **Work through checklist items sequentially**, checking each off in the task file as you complete it.
 
 2. **Follow project conventions:**
-   - Obey loaded root rules plus scoped rules selected through `.claude/rules/00-rule-routing.md` for the changed paths. If a file edit enters a new app/package, load that path's matching scoped rules before continuing.
+   - Obey the launch rules plus the path-scoped rules for the changed paths (`.claude/rules/00-rule-routing.md`). If a file edit enters a new app/package, read that directory's rules before continuing.
    - Respect build order: `shared` -> `providers` -> `cloud-init` -> `api` / `web`
    - Update documentation in the same commit as code changes
    - Write tests that prove the feature works
@@ -210,77 +210,85 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
 ### 6a. Standard Verification (All Code Changes)
 
-1. **Read the environment lease** (the workflow enforces the same check atomically):
+1. **Read the queue of both installations** (one `gh api` call each):
 
    ```bash
-   gh api --method GET repos/raphaeltm/simple-agent-manager/deployments \
-     -f environment=staging -f task=staging-lease -f per_page=1 \
-     --jq '.[0] | {id, payload}'
+   node scripts/deploy/staging-lease.mjs status staging2   # and: status staging
+   # Raw records, newest first (a `snapshot` plus newer `reservation` events):
+   gh api 'repos/raphaeltm/simple-agent-manager/deployments?environment=staging2&task=staging-lease&per_page=100' \
+     --jq '[.[] | {id, payload}]'
    ```
 
-   There are two staging installations, `staging` (`sammy.party`) and `staging2`
-   (`sammy2.party`). Read both leases and take whichever is free; use that name in
-   every command below. They share the `staging` credentials but nothing else, so
-   your checks cannot disturb an agent on the other one. staging2 sign-in is
+   `status` prints the holder, whether the slot is free, and the ordered queue
+   (branch, SAM task ID, reserved-at, turn window). There are two staging
+   installations, `staging` (`sammy.party`) and `staging2` (`sammy2.party`); pick the
+   one that is free or has the shorter queue and use that name in every command
+   below. They share the `staging` credentials but nothing else. staging2 sign-in is
    workload identity only; see "Two Staging Installations" in the full reference.
+   A branch that adds a Durable Object migration tag `origin/main` lacks is refused
+   on primary `staging`: use `staging2`, and if the branch has not merged when you
+   are done, tear `staging2` down and redeploy `main` before releasing (full
+   reference, "Branches that add a Durable Object migration").
 
-   Use your selected environment name in every command. The latest `staging-lease`
-   deployment payload is authoritative; ordinary deployment statuses and a quiet
-   Actions queue do not release the slot. A held foreign branch with a future
-   `expiresAt` owns live verification even after its deploy finishes. Schedule a
-   one-time SAM wake at that exact UTC expiry (`schedules_write`, method `create`,
-   `message_session` action for your session), persist the accepted schedule ID,
-   and continue independent work or end the turn. On wake re-read once and retry
-   if free; if renewed, schedule a new wake. Do not poll, wait five minutes, or
-   negotiate the slot in chat.
-
-   No record means free (first-use bootstrap). A malformed latest record or API
-   error fails closed: ownership cannot be established safely. Inspect/fix the
-   record through the normal reviewed workflow; never delete history to bypass
-   another branch's lease.
-
-2. **Acquire by deploying your branch**, with your SAM task ID:
+2. **Reserve first, then deploy only on your turn.** Reserving takes seconds and
+   deploys nothing:
 
    ```bash
    gh workflow run deploy-staging.yml --ref <your-branch> \
-     -f environment=staging -f sam_task_id=<your-task-id> -f lease_hold_minutes=30
+     -f environment=staging2 -f lease_action=reserve -f sam_task_id=<your-task-id>
    ```
 
-   The serialized lease job reads, acquires and reads back the lease before any
-   deploy/audit job. A foreign active lease fails immediately with holder branch,
-   task and expiry. Same-branch redeploys renew it. Expiry is acquisition time plus
-   expected deployment time plus live-check hold. GitHub Environment variables
-   `STAGING_LEASE_EXPECTED_DEPLOY_MINUTES` (default 30),
-   `STAGING_LEASE_DEFAULT_HOLD_MINUTES` (default 30), and
-   `STAGING_LEASE_MAX_HOLD_MINUTES` (default 120) configure durations; positive
-   integer holds above the cap are rejected. Expected deploy time may be zero.
-   Choose a hold covering your checks; renew before expiry if needed. Failed or
-   cancelled runs retain the lease until release/expiry, so failures cannot expose
-   checks to an overwrite.
+   The run summary shows your position and estimated turn. When the slot is free
+   (holder released, or its lease expired), only the head of the queue may take it,
+   for `STAGING_LEASE_GRACE_MINUTES` (default 10); if it does not, the next entry
+   gets its own grace period and the missed one is dropped. If the holder released
+   early, the head's turn still lasts until the holder's announced expiry plus grace.
+   Schedule a one-time SAM wake (`schedules_write`, method `create`,
+   `message_session` for your session) at your turn start, persist the schedule ID,
+   and end the turn or do independent work. Do not poll, and **never dispatch a
+   deploy while another branch holds the lease or it is another branch's turn**: the
+   run is refused (your place is kept). A reservation expires after
+   `STAGING_LEASE_RESERVATION_MINUTES` (default 480) unless renewed by reserving
+   again, which keeps your place. While the holder is a branch whose workflow predates
+   the queue (its lease record is version 1), no reservation is written, because its
+   workflow cannot read queue records and would be locked out of its own lease:
+   schedule a wake at its expiry and reserve then.
 
-   To reserve or renew without deploying, use `-f lease_action=acquire`. This
-   holds for just the requested live-check duration (no deploy allowance), and
-   also permits bounded lease lifecycle verification without full redeploys.
-   Audit-only runs acquire/renew through the same gate. Lease writes must go
-   through this workflow; direct `gh api` writes bypass serialization.
+   On your turn, deploy (or `-f lease_action=acquire` to hold without deploying):
 
-3. **Watch the run and verify live**, then **release early** from the holder branch:
+   ```bash
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging2 -f sam_task_id=<your-task-id> -f lease_hold_minutes=30
+   ```
+
+   A deploy dispatch also reserves if you are not queued yet, and goes straight
+   through when the slot is free and nobody is waiting. The `queue` job records
+   places outside any concurrency group, so no later dispatch can cancel your place;
+   only a branch that holds the lease or whose turn it is reaches the serialized
+   `lease` job. Same-branch redeploys renew the lease. Expiry is acquisition time
+   plus expected deployment time (`STAGING_LEASE_EXPECTED_DEPLOY_MINUTES`, default
+   30; zero for `acquire`) plus the live-check hold
+   (`STAGING_LEASE_DEFAULT_HOLD_MINUTES`, default 30, capped by
+   `STAGING_LEASE_MAX_HOLD_MINUTES`, default 120). Failed or cancelled runs keep the
+   lease until release or expiry.
+
+3. **Watch the run.** Keep the lease through every live check below; release comes last (step 9).
 
    ```bash
    gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=3 \
      --json databaseId,status,conclusion,headSha
    gh run watch <run-id>
-   # After live checks and test-resource cleanup:
-   gh workflow run deploy-staging.yml --ref <your-branch> \
-     -f environment=staging -f lease_action=release -f sam_task_id=<your-task-id>
    ```
 
-   Confirm the release job passed and the newest payload has `state: released`.
-   Release shares the same environment concurrency group and refuses a foreign
-   holder. Expiry permits another branch to acquire automatically. Do not mistake
-   successful deployment completion for a release. Only the lease job receives
-   `deployments: write`; agents can inspect records with their existing `gh api`
-   read access. Leases are keyed by installation name (`staging`, `staging2`).
+   Records are GitHub deployments with task `staging-lease`, keyed by installation.
+   A malformed snapshot or an unknown record version fails closed (no one can
+   change the lease until it is fixed through a reviewed change; never delete
+   history to get around another branch); a malformed reservation is skipped and
+   reported in the run. Branches whose workflow copy predates the queue are refused
+   by every queue record ("Malformed lease record"): they cannot reserve, deploy,
+   acquire or release until they update from `origin/main`. Only the `queue` and
+   `lease` jobs receive `deployments: write`; lease writes must go through the
+   workflow.
 
 4. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging) or `app.sammy2.party` (staging2).
 
@@ -305,6 +313,24 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 7. **Report findings** to the user with evidence (screenshots or Playwright observations).
 
 8. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT merge with known staging failures.
+
+9. **Release the lease only after every live check** (steps 4–8, plus Phase 6b
+   where it applies) and test-resource cleanup:
+
+   ```bash
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging2 -f lease_action=release -f sam_task_id=<your-task-id>
+   ```
+
+   Confirm the release run passed and `status` shows no holder. Release also
+   removes you from the queue if you were waiting. A branch that releases and wants
+   the slot again queues behind everyone already waiting. **If you release early,
+   message the next task in the queue** (`send_durable_message` to its SAM task ID
+   from `status`) so it can take its turn before its scheduled wake. Successful
+   deployment completion is not a release. Release only after your own deploy run
+   has finished: the next holder's deploy waits for an in-flight one in the
+   `staging-apply-<installation>` group, but your live checks are no longer
+   protected once you release.
 
 ### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
 
@@ -408,7 +434,7 @@ After merging to main, you MUST monitor the production deployment to completion.
      - Whether this is something the agent can fix (code issue) or requires human intervention (missing secrets, infrastructure config)
    - If it's a code issue you introduced: fix it, push to main, and monitor the next deploy
    - If it requires human intervention (missing secrets, permissions, external config): **tell the user explicitly what action they need to take** and do NOT silently move on
-   - **Exception: a fail-closed "does not match the current trusted main tip" at "Re-verify current main after deployment queue"** means a newer commit reached `main` first; your change ships with the tip. Main CI runs overlap, so this deploy run can also have displaced the tip's pending deploy. Check that a Deploy Production run for the current tip succeeded or is queued or running (`gh run list --workflow=deploy.yml --limit=5 --json headSha,status,conclusion,displayTitle` and `git ls-remote origin main`). If none exists and CI on the tip succeeded, start one with `gh workflow run deploy.yml --ref main` (it defaults to the tip and re-checks CI on that exact SHA) and monitor it. Report what you did.
+   - **A successful Deploy Production run that deployed nothing** means a newer commit reached `main` first, or the tip was already deployed: the automatic gate always deploys the current main tip, and only once the tip's own CI succeeded. Your change ships with the tip's deploy; monitor that run instead (`gh run list --workflow=deploy.yml --limit=5`).
 
 5. **Check for pre-existing deploy failures**: Before monitoring your own deploy, check if recent deploys have been failing:
    ```bash

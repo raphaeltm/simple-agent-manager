@@ -108,7 +108,6 @@ describe('persisted query allowlist', () => {
     ['workspace list', workspaceQueryKeys.list(SCOPE)],
     ['workspace ports', workspaceQueryKeys.portList(SCOPE, 'workspace-1', 'https://ws.example')],
     ['notifications list', notificationQueryKeys.list(SCOPE, { projectId: 'project-1' })],
-    ['notification unread count', notificationQueryKeys.unreadCount(SCOPE)],
     [
       'timeline progress notifications',
       notificationQueryKeys.timelineProgress(SCOPE, 'project-1', 'session-1', 10),
@@ -166,7 +165,6 @@ describe('query key shape invariant', () => {
     ['workspace list', workspaceQueryKeys.list(SCOPE)],
     ['workspace ports', workspaceQueryKeys.portList(SCOPE, 'workspace-1', 'https://ws.example')],
     ['notifications list', notificationQueryKeys.list(SCOPE, { projectId: 'project-1' })],
-    ['notification unread count', notificationQueryKeys.unreadCount(SCOPE)],
     [
       'timeline progress notifications',
       notificationQueryKeys.timelineProgress(SCOPE, 'project-1', 'session-1', 10),

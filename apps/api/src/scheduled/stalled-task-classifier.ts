@@ -8,6 +8,7 @@ import {
   DEFAULT_STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS,
   DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
+import { hasOpenQuestionAsk } from '@simple-agent-manager/worker-core';
 
 import type { Env } from '../env';
 import { redactCredentialTokens } from '../lib/credential-token-redaction';
@@ -189,8 +190,16 @@ async function isWaitingForHumanInput(
     );
   });
   try {
-    const [attentionPending, interactionPending] = await Promise.race([
+    const [questionPending, attentionPending, interactionPending] = await Promise.race([
       Promise.all([
+        // A question in D1 `asks` (inbox slice G); a failed read throws into the fail-safe catch.
+        hasOpenQuestionAsk(env.DATABASE, {
+          projectId: task.project_id,
+          sessionId: task.chat_session_id,
+          taskId: task.id,
+          now: nowMs,
+        }),
+        // A question asked before slice G is still a ProjectData marker until it resolves.
         projectDataService.hasPendingSessionHumanInput(
           env,
           task.project_id,
@@ -205,7 +214,7 @@ async function isWaitingForHumanInput(
     if (typeof attentionPending !== 'boolean' || typeof interactionPending !== 'boolean') {
       throw new Error('invalid human input probe response');
     }
-    return attentionPending || interactionPending;
+    return questionPending || attentionPending || interactionPending;
   } finally {
     if (timer) clearTimeout(timer);
   }

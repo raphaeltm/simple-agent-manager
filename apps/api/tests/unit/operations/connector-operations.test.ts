@@ -88,6 +88,18 @@ vi.mock('../../../src/services/project-data', () => ({
 
 // External runtime boundaries are mocked. Identity, current memberships, queries,
 // admission, receipts and audit use actual SQLite and the production functions.
+/** A `session_summaries.attention_json` value as `getAttentionSummary` writes it. */
+function attention(markerId: string, createdAt: number, reason: string): string {
+  return JSON.stringify({
+    markerId,
+    kind: 'needs_input',
+    createdAt,
+    expiresAt: null,
+    reason,
+    options: [],
+  });
+}
+
 describe('connector operations current membership and creator authority', () => {
   let sqlite: Database.Database;
   let env: Env;
@@ -118,6 +130,9 @@ describe('connector operations current membership and creator authority', () => 
       schema.sessionSummaries,
       schema.triggers,
       schema.platformSettings,
+      schema.asks,
+      schema.runtimeSecretRequests,
+      schema.operationsActionApprovals,
     ]);
     sqlite.exec(
       readFileSync(
@@ -150,8 +165,8 @@ describe('connector operations current membership and creator authority', () => 
     const session = sqlite.prepare(
       'INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES (?,?,?,?,?)'
     );
-    session.run('chat', 'project', 'owner', 20, '{"message":"Needs approval"}');
-    session.run('other-chat', 'secret', 'outsider', 21, '{"message":"Secret"}');
+    session.run('chat', 'project', 'owner', 20, attention('m-chat', 20, 'Needs approval'));
+    session.run('other-chat', 'secret', 'outsider', 21, attention('m-other', 21, 'Secret'));
     sqlite
       .prepare(
         "INSERT INTO tasks (id,project_id,user_id,title,status,chat_session_id,updated_at) VALUES ('task','project','owner','Work','completed','chat','2026-10-09')"
@@ -224,6 +239,43 @@ describe('connector operations current membership and creator authority', () => 
     expect((await samChatsList.run(ctx('unknown'), {})).chats).toEqual([]);
     expect((await samChatsList.run(ctx('colleague'), {})).chats[0]?.attention).toBeNull();
   });
+  it('chats and project counts show questions held in D1 asks (slice G) to the chat creator only', async () => {
+    const future = Date.now() + 3_600_000;
+    sqlite.exec(`
+      INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at)
+        VALUES ('asking','project','owner',40);
+      INSERT INTO asks (id,project_id,assignee_kind,assignee_user_id,kind,blocking,title,body_md,
+          source_session_id,status,expires_at,created_at,updated_at)
+        VALUES ('ask-1','project','user','owner','question',1,'Pick','Pick a region.','asking','open',${future},35,35);
+      -- Attack: the same chat id under another project must not reach it.
+      INSERT INTO asks (id,project_id,assignee_kind,assignee_user_id,kind,blocking,title,body_md,
+          source_session_id,status,expires_at,created_at,updated_at)
+        VALUES ('ask-foreign','secret','user','owner','question',1,'Foreign','Foreign.','chat','open',${future},99,99);
+    `);
+    const chats = Object.fromEntries(
+      (await samChatsList.run(ctx(), {})).chats.map((chat) => [chat.id, chat])
+    );
+    expect(chats.asking?.attention).toMatchObject({
+      markerId: 'ask-1',
+      kind: 'needs_input',
+      reason: 'Pick a region.',
+    });
+    // The marker question in 'chat' stays; the foreign ask is not merged into it.
+    expect(chats.chat?.attention).toMatchObject({ markerId: 'm-chat' });
+    // Another member sees no attention on the owner's chat.
+    const colleague = Object.fromEntries(
+      (await samChatsList.run(ctx('colleague'), {})).chats.map((chat) => [chat.id, chat])
+    );
+    expect(colleague.asking?.attention).toBeNull();
+    // The project count includes the chat waiting on an asks question (control: closed → not).
+    const count = async () =>
+      (await samProjectsList.run(ctx(), {})).projects.find((p) => p.id === 'project')
+        ?.needsAttention;
+    expect(await count()).toBe(2);
+    sqlite.prepare("UPDATE asks SET status = 'answered' WHERE id = 'ask-1'").run();
+    expect(await count()).toBe(1);
+  });
+
   it('chats carry their task state beside the lifecycle label, flagging a stale active label', async () => {
     sqlite.exec(`
       INSERT INTO tasks (id,project_id,user_id,title,status,execution_step,parent_task_id,updated_at)
@@ -301,16 +353,17 @@ describe('connector operations current membership and creator authority', () => 
       await samChatStart.run(ctx(), { projectId: 'project', message: 'Again' })
     ).not.toHaveProperty('agentOverrides');
   });
-  it('inbox filters other projects and limits private interaction details to creator', async () => {
-    const inbox = await samInboxGet.run(ctx(), {});
-    expect(inbox.pending).toHaveLength(1);
-    expect(inbox.notifications.map((n) => n.id)).toEqual(['visible']);
-    expect(inbox.pending[0]?.link).toContain('/projects/project/chat/chat');
-    // Undated inbox items let a months-old notification pass for news (2026-10-21).
-    expect(inbox.pending[0]?.updatedAt).toBe(new Date(20).toISOString());
-    expect(inbox.notifications[0]?.createdAt).toBe('2026-07-14T09:30:00.000Z');
+  it("inbox filters other projects and lists only the creator's questions, without a DO call per chat", async () => {
     mocks.snapshot.mockClear();
-    expect((await samInboxGet.run(ctx('colleague'), {})).pending).toEqual([]);
+    const inbox = await samInboxGet.run(ctx(), {});
+    expect(inbox.items.map((item) => item.ref)).toEqual(['attention:chat:m-chat']);
+    expect(inbox.notifications.map((n) => n.id)).toEqual(['visible']);
+    expect(inbox.items[0]?.link).toContain('/projects/project/chat/chat');
+    // Undated inbox items let a months-old notification pass for news (2026-10-21).
+    expect(inbox.items[0]?.createdAt).toBe(new Date(20).toISOString());
+    expect(inbox.notifications[0]?.createdAt).toBe('2026-07-14T09:30:00.000Z');
+    expect((await samInboxGet.run(ctx('colleague'), {})).items).toEqual([]);
+    // The shared list reads the D1 index only: no Durable Object call per chat.
     expect(mocks.snapshot).not.toHaveBeenCalled();
   });
   const writes = [
@@ -398,7 +451,7 @@ describe('connector operations current membership and creator authority', () => 
   });
   it('inbox cursor independently advances all sources without repeating exhausted sources', async () => {
     sqlite.exec(
-      "INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES ('older','project','owner',10,'{}'); INSERT INTO tasks (id,project_id,user_id,title,status,updated_at) VALUES ('older-task','project','owner','Older failure','failed','2026-10-08')"
+      `INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES ('older','project','owner',10,'${attention('m-older', 10, 'Older question')}'); INSERT INTO tasks (id,project_id,user_id,title,status,updated_at) VALUES ('older-task','project','owner','Older failure','failed','2026-10-08')`
     );
     mocks.notifications
       .mockResolvedValueOnce({
@@ -409,24 +462,16 @@ describe('connector operations current membership and creator authority', () => 
         notifications: [{ id: 'n2', projectId: 'project', title: 'Second' }],
         nextCursor: null,
       });
-    mocks.snapshot.mockResolvedValue({
-      pending: [
-        { interactionId: 'one', kind: 'permission' },
-        { interactionId: 'two', kind: 'permission' },
-      ],
-      settled: [],
-      cursor: null,
-    });
     const first = await samInboxGet.run(ctx(), { limit: 1 });
-    expect(first.pending.map((row) => row.sessionId)).toEqual(['chat']);
-    expect(first.pending[0]?.interactions).toHaveLength(2);
+    // Blocking items oldest first: the older question leads.
+    expect(first.items.map((row) => row.ref)).toEqual(['attention:older:m-older']);
     expect(first.tasks.map((row) => row.id)).toEqual(['task']);
     expect(first.nextCursor).not.toBeNull();
     const second = await samInboxGet.run(ctx(), {
       limit: 1,
       cursor: first.nextCursor ?? undefined,
     });
-    expect(second.pending.map((row) => row.sessionId)).toEqual(['older']);
+    expect(second.items.map((row) => row.ref)).toEqual(['attention:chat:m-chat']);
     expect(second.tasks.map((row) => row.id)).toEqual(['older-task']);
     expect(second.notifications.map((row) => row.id)).toEqual(['n2']);
     expect(second.nextCursor).toBeNull();
@@ -657,67 +702,10 @@ describe('connector operations current membership and creator authority', () => 
     });
     expect(run).toHaveBeenCalledTimes(1);
   });
-  it('inbox selects chats with an open question before its recency cap', async () => {
-    // Six newer chats without questions fill the five-chat recency page; the question is older.
-    const recent = sqlite.prepare(
-      'INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES (?,?,?,?,NULL)'
-    );
-    for (let index = 0; index < 6; index += 1)
-      recent.run(`recent-${index}`, 'project', 'owner', 100 + index);
-    mocks.snapshot.mockResolvedValue({ pending: [], settled: [], cursor: null });
-
-    const inbox = await samInboxGet.run(ctx(), {});
-
-    expect(inbox.pending.map((row) => row.sessionId)).toEqual(['chat']);
-    expect(inbox.pending[0]?.attention).toEqual({ message: 'Needs approval' });
-    expect(inbox.coverage).toContain('Chats you created');
-    // The question is not repeated when the recency page continues.
-    const next = await samInboxGet.run(ctx(), { cursor: inbox.nextCursor ?? undefined });
-    expect(next.pending.map((row) => row.sessionId)).not.toContain('chat');
-  });
-  it('inbox pages check at most limit chats, questions first, and show each chat once', async () => {
-    const insert = sqlite.prepare(
-      'INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES (?,?,?,?,?)'
-    );
-    // Two more questions beside the fixture's `chat` (updated_at 20), and three chats without one.
-    insert.run('question-new', 'project', 'owner', 40, '{"message":"Pick one"}');
-    insert.run('question-mid', 'project', 'owner', 30, '{"message":"Which?"}');
-    for (const [id, at] of [
-      ['recent-1', 90],
-      ['recent-2', 80],
-      ['recent-3', 70],
-    ] as const)
-      insert.run(id, 'project', 'owner', at, null);
-    const seen: string[][] = [];
-    const lookups: number[] = [];
-    let cursor: string | undefined;
-    do {
-      mocks.snapshot.mockClear();
-      const page = await samInboxGet.run(ctx(), { limit: 2, cursor });
-      lookups.push(mocks.snapshot.mock.calls.length);
-      seen.push(page.pending.map((row) => row.sessionId));
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor && seen.length < 10);
-
-    expect(seen).toEqual([
-      ['question-new', 'question-mid'],
-      ['chat', 'recent-1'],
-      ['recent-2', 'recent-3'],
-    ]);
-    expect(Math.max(...lookups)).toBeLessThanOrEqual(2);
-  });
-  it('inbox continues a cursor issued before questions were listed separately', async () => {
-    const insert = sqlite.prepare(
-      'INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES (?,?,?,?,?)'
-    );
-    insert.run('recent-a', 'project', 'owner', 30, null);
-    insert.run('question-old', 'project', 'owner', 5, '{"message":"Still waiting"}');
-    // The previous inbox listed every chat by recency and stopped after `recent-a`.
+  it('inbox restarts the shared list from a cursor issued before the list moved there', async () => {
     const cursor = JSON.stringify({ sessions: [30, 'recent-a'], tasks: null, notifications: null });
-
     const next = await samInboxGet.run(ctx(), { cursor });
-
-    expect(next.pending.map((row) => row.sessionId)).toEqual(['chat', 'question-old']);
+    expect(next.items.map((row) => row.ref)).toEqual(['attention:chat:m-chat']);
   });
   it('inbox question notifications carry the marker and options needed to answer', async () => {
     mocks.notifications.mockResolvedValue({
@@ -752,12 +740,12 @@ describe('connector operations current membership and creator authority', () => 
     });
     expect(inbox.notifications[1]).not.toHaveProperty('question');
   });
-  it('isolates a corrupt attention row and exposes batched pending choices in inbox', async () => {
+  it('isolates a corrupt attention row in the inbox and still lists the others', async () => {
+    sqlite.exec(
+      `INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES ('good','project','owner',30,'${attention('m-good', 30, 'Good')}')`
+    );
     sqlite.prepare("UPDATE session_summaries SET attention_json='bad-json' WHERE id='chat'").run();
     const inbox = await samInboxGet.run(ctx(), {});
-    expect(inbox.pending[0]).toMatchObject({
-      attention: null,
-      interactions: [{ answerOptions: [{ id: 'allow', name: 'Allow once' }] }],
-    });
+    expect(inbox.items.map((row) => row.ref)).toEqual(['attention:good:m-good']);
   });
 });

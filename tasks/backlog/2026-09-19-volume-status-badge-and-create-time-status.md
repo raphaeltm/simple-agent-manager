@@ -62,7 +62,7 @@ settled `attached`. It becomes one for any volume that is created and never atta
 - [ ] `StatusBadge`'s `statusConfig` covers every `VolumeStatus` member, with in-progress states
       visually distinct from settled ones
 - [ ] `DeploymentVolumesPanel` renders each state with the intended palette; Playwright visual
-      audit at 375px and 1280px per `apps/web/.claude/rules/17-ui-visual-testing.md`, since this
+      audit at 375px and 1280px per `.claude/rules/17-ui-visual-testing.md`, since this
       touches `packages/ui/` and `apps/web/`
 - [ ] `createEnvironmentVolume` persists a settled SAM-side status, or documents in a comment why
       the provider snapshot is authoritative on the create path
@@ -70,8 +70,8 @@ settled `attached`. It becomes one for any volume that is created and never atta
 
 ## References
 
-- `apps/api/.claude/rules/57-write-only-cross-boundary-state.md` — remote-owned state must be
+- `.claude/rules/57-write-only-cross-boundary-state.md` — remote-owned state must be
   reconciled, not just reported
-- `apps/api/.claude/rules/75-external-api-check-then-act.md` — the sibling-asymmetry requirement
+- `.claude/rules/75-external-api-check-then-act.md` — the sibling-asymmetry requirement
   that surfaced item 2
-- `packages/ui/.claude/rules/17-ui-visual-testing.md`
+- `.claude/rules/17-ui-visual-testing.md`

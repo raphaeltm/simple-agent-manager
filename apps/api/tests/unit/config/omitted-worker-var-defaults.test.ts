@@ -32,7 +32,6 @@ import {
 } from '@simple-agent-manager/project-data/internal/client/project-data-archive-routing';
 import { resolveArchiveHashPageRows } from '@simple-agent-manager/project-data/internal/do/archive-sharding';
 import {
-  computeHumanInputSchedule,
   humanInputMaxWaitMs,
   humanInputUndeliveredGraceMs,
   parseHumanInputEscalationFractions,
@@ -240,7 +239,6 @@ const READ_PATHS: readonly ReadPath[] = [
       `packages/project-data/src/do/attention-expiry.ts`,
     ],
     read: (env) => [
-      computeHumanInputSchedule(env, 0),
       parseHumanInputEscalationFractions(env.HUMAN_INPUT_ESCALATION_FRACTIONS),
       humanInputMaxWaitMs(env.HUMAN_INPUT_MAX_WAIT_MS),
       humanInputUndeliveredGraceMs(env.HUMAN_INPUT_UNDELIVERED_GRACE_MS),
