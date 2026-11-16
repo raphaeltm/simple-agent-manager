@@ -108,7 +108,7 @@ describe('content-free message ingestion counters through real workerd', () => {
   });
 
   it.each([false, true])(
-    'observes actual scoped and unscoped legacy socket admission (sessionScoped=%s)',
+    'observes actual scoped and unscoped legacy socket admission; only scoped refuses (sessionScoped=%s)',
     async (sessionScoped) => {
       const { stub, session } = await setup();
       const response = await stub.fetch(
@@ -122,16 +122,31 @@ describe('content-free message ingestion counters through real workerd', () => {
       await stub.persistMessageBatch(session, [chunk(1), chunk(2)], source);
       await stub.persistMessageBatch(session, [chunk(3)], source);
       await flush(stub);
-      expect(reports(log).at(-1)!.messageIngest).toMatchObject({
-        batches: 2,
-        eligible: 3,
-        coalesced: 0,
-        inserted: { assistant: 3 },
-        refused: { legacy_client: 2 },
-        legacySessionSocketsMax: sessionScoped ? 1 : 0,
-        legacyProjectSocketsMax: sessionScoped ? 0 : 1,
-      });
-      expect((await stub.getMessages(session, 50)).messages).toHaveLength(3);
+      // A legacy session socket refuses merging for its session. A legacy project socket gets no
+      // transcript frames, so it is counted for diagnostics but never refuses.
+      expect(reports(log).at(-1)!.messageIngest).toMatchObject(
+        sessionScoped
+          ? {
+              batches: 2,
+              eligible: 3,
+              coalesced: 0,
+              inserted: { assistant: 3 },
+              refused: { legacy_client: 2 },
+              legacySessionSocketsMax: 1,
+              legacyProjectSocketsMax: 0,
+            }
+          : {
+              batches: 2,
+              eligible: 3,
+              coalesced: 2,
+              appendStatements: 1,
+              inserted: { assistant: 1 },
+              refused: {},
+              legacySessionSocketsMax: 0,
+              legacyProjectSocketsMax: 1,
+            }
+      );
+      expect((await stub.getMessages(session, 50)).messages).toHaveLength(sessionScoped ? 3 : 1);
       response.webSocket!.close();
     }
   );

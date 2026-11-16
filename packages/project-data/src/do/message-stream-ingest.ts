@@ -69,19 +69,16 @@ export function readMessageIngestState(value: unknown): MessageIngestState | nul
   return v.parse(IngestState, JSON.parse(value));
 }
 
-/** Seal only a new canonical row; historical transcript rows are never changed. */
-export function sealMessageStream(sql: SqlStorage, sessionId?: string): void {
-  if (sessionId) {
-    sql.exec(
-      `UPDATE chat_sessions SET stream_ingest_state = json_set(stream_ingest_state, '$.open', NULL)
-      WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL AND id = ?`,
-      sessionId
-    );
-    return;
-  }
+/**
+ * Seal a session's open canonical row so later chunks start a new row; historical transcript
+ * rows are never changed. Called when a socket without the append capability subscribes to the
+ * session, because that client cannot apply later appends to a row it already holds.
+ */
+export function sealMessageStream(sql: SqlStorage, sessionId: string): void {
   sql.exec(
     `UPDATE chat_sessions SET stream_ingest_state = json_set(stream_ingest_state, '$.open', NULL)
-    WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL`
+    WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL AND id = ?`,
+    sessionId
   );
 }
 
