@@ -23,45 +23,61 @@ export function totalTokens(counts: RunTokenCounts): number {
   return counts.input + counts.output + counts.cacheRead + counts.cacheWrite;
 }
 
-/** "~$4.12 estimated", or null when spend is not shown for this account. */
-export function spendLabel(tokens: RunReceiptTokens): string | null {
-  if (tokens.state !== 'reported' || tokens.spend.state !== 'estimate') return null;
-  if (tokens.spend.usd === null) return 'No catalog price for this model';
+function formatUsd(usd: number): string {
   // Sub-cent spend reads as "<$0.01", never "$0.00", so a tiny run is not shown as free.
-  const amount =
-    tokens.spend.usd > 0 && tokens.spend.usd < 0.01 ? '<$0.01' : USD.format(tokens.spend.usd);
-  const partial = tokens.spend.unpricedModels.length > 0 ? ', some models unpriced' : '';
-  return `~${amount} estimated${partial}`;
+  return usd > 0 && usd < 0.01 ? '<$0.01' : USD.format(usd);
 }
 
-export function tokensTile(tokens: RunReceiptTokens): {
-  value: string;
-  note: string;
-  muted: boolean;
-} {
+/**
+ * The spend line under the model list, or null when spend is not shown for this account. It is
+ * always called an estimate; with unpriced models it is a floor.
+ */
+export function spendLabel(tokens: RunReceiptTokens): string | null {
+  if (tokens.state !== 'reported' || tokens.spend.state !== 'estimate') return null;
+  const { usd, unpricedModels } = tokens.spend;
+  if (usd === null) {
+    return unpricedModels.length > 1
+      ? 'No spend estimate: SAM has no price for these models'
+      : 'No spend estimate: SAM has no price for this model';
+  }
+  const floor = unpricedModels.length > 0 ? 'At least ' : '';
+  return `${floor}~${formatUsd(usd)} estimated at SAM’s model prices`;
+}
+
+/** "~$3.98" for one model's row, "no price" when unpriced, or null when spend is not shown. */
+export function modelSpendLabel(tokens: RunReceiptTokens, model: RunModelUsage): string | null {
+  if (tokens.state !== 'reported' || tokens.spend.state !== 'estimate') return null;
+  return model.estimatedSpendUsd === null ? 'no price' : `~${formatUsd(model.estimatedSpendUsd)}`;
+}
+
+export function tokensTile(
+  tokens: RunReceiptTokens,
+  context: { live: boolean; unavailable: boolean }
+): { value: string; note: string; muted: boolean } {
+  if (context.unavailable) {
+    return { value: '—', note: 'Could not be read just now', muted: true };
+  }
   if (tokens.state === 'not_reported') {
-    return {
-      value: 'Not reported',
-      note: 'This agent did not report token counts',
-      muted: true,
-    };
+    return context.live
+      ? { value: 'Not reported yet', note: 'Counted when the agent reports a turn', muted: true }
+      : { value: 'Not reported', note: 'This agent did not report token counts', muted: true };
   }
   const total = totalTokens(tokens.total);
+  const cache = tokens.total.cacheRead + tokens.total.cacheWrite;
   const source =
     tokens.source === 'ai_proxy' ? 'Measured by SAM’s AI proxy' : 'Reported by the agent';
-  const spend = spendLabel(tokens);
   return {
     value: `${formatTokens(total)}${tokens.limited ? '+' : ''}`,
-    note: [spend, source].filter(Boolean).join(' · '),
+    note: cache > 0 ? `Incl. ${formatTokens(cache)} cache · ${source}` : source,
     muted: false,
   };
 }
 
-/** "320k in · 41k out · 2.1M cache", one model's line. */
-export function modelTokenLine(model: RunModelUsage): string {
+/** The parts of one model's line, each kept whole when the line wraps. */
+export function modelTokenParts(model: RunModelUsage): string[] {
   const parts = [`${formatTokens(model.input)} in`, `${formatTokens(model.output)} out`];
   const cache = model.cacheRead + model.cacheWrite;
   if (cache > 0) parts.push(`${formatTokens(cache)} cache`);
   if (model.reasoning) parts.push(`${formatTokens(model.reasoning)} reasoning`);
-  return parts.join(' · ');
+  return parts;
 }

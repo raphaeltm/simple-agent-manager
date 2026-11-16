@@ -604,6 +604,10 @@ func (h *SessionHost) finishPrompt(
 		h.recordPromptTokenUsage(resp)
 	}
 	if cancelRequested {
+		if err == nil {
+			// Codex reports its tokens only through the rollout probe.
+			h.scheduleProviderUsageProbe()
+		}
 		h.finishPromptCancelled(attempt, reqID, info)
 		return
 	}

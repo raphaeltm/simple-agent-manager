@@ -437,9 +437,12 @@ rather than guessing.
   - Codex reports its running total for the conversation, read from its session file.
   - Other agents report nothing, and the tile says **Not reported**.
 
-  Background work Claude Code starts on its own between turns is not counted. For an API-key
-  account the tile also shows the spend, labelled as an estimate from SAM's model prices.
-  Subscription accounts show tokens only.
+  Background work Claude Code starts on its own between turns is not counted. A Codex thread's
+  total is credited to the session's model. Tokens cover the whole chat, so every task in one chat
+  shows the same totals. For an API-key account the list also shows spend, labelled as an estimate
+  from SAM's model prices (cache writes are priced as input, so it reads low for Anthropic). Only
+  the person who ran the session sees spend on their own personal key. Subscription accounts show
+  tokens only.
 - **CPU**: the run's CPU per minute, with a marker on each minute in which the agent started tool
   calls, from the same history as **Resources**.
 - **What slowed it down**: up to three items, largest first. A machine wait or setup is listed only

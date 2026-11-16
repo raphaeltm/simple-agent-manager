@@ -171,7 +171,7 @@ func (h *SessionHost) scheduleProviderUsageProbe() bool {
 			}
 			limits, _ := parseCodexRolloutRateLimits(tail, h.now().UnixMilli())
 			// The rollout's thread total is already cumulative (Insights slice U).
-			tokens := parseCodexRolloutTokenUsage(tail, threadID)
+			tokens := h.codexRolloutTokenUsage(tail, threadID)
 			return limits, sourceCodexRollout, tokens, len(limits) > 0 || tokens != nil
 		}
 	case "opencode":
@@ -191,7 +191,14 @@ func (h *SessionHost) scheduleProviderUsageProbe() bool {
 	}
 	base := h.lifecycleContext()
 	timeout := h.usageProbeTimeout()
+	// The probe's report is drained by Stop/Suspend like an ACP usage callback,
+	// so the last turn's report is not dropped by a concurrent stop.
+	if !h.beginUsageReportCallback() {
+		h.usageProbeInFlight.Store(false)
+		return false
+	}
 	go func() {
+		defer h.finishUsageReportCallback()
 		defer h.usageProbeInFlight.Store(false)
 		ctx, cancel := context.WithTimeout(base, timeout)
 		defer cancel()
@@ -204,7 +211,7 @@ func (h *SessionHost) scheduleProviderUsageProbe() bool {
 			return
 		}
 		request.payload.TokenUsage = tokens
-		h.enqueueUsageReport(request)
+		h.enqueueUsageReportFromActiveCallback(request)
 	}()
 	return true
 }
@@ -217,25 +224,6 @@ func (h *SessionHost) probeCodexRolloutRateLimits(ctx context.Context, threadID 
 		return nil, false
 	}
 	return parseCodexRolloutRateLimits(tail, h.now().UnixMilli())
-}
-
-// readCodexRolloutTail returns the trailing bytes of the thread's rollout, or
-// ok=false when the thread id is not a UUID or the read failed.
-func (h *SessionHost) readCodexRolloutTail(ctx context.Context, threadID string) ([]byte, bool) {
-	if !codexThreadIDPattern.MatchString(threadID) {
-		slog.Debug("usageProbe: codex thread id is not a UUID, skipping rollout read")
-		return nil, false
-	}
-	reader := h.codexRolloutReader
-	if reader == nil {
-		reader = h.defaultCodexRolloutTailReader
-	}
-	tail, err := reader(ctx, threadID)
-	if err != nil {
-		slog.Debug("usageProbe: codex rollout read failed", "error", err)
-		return nil, false
-	}
-	return tail, true
 }
 
 func (h *SessionHost) defaultCodexRolloutTailReader(ctx context.Context, threadID string) ([]byte, error) {

@@ -12,6 +12,7 @@
  * (`credentialLimitReferenceKey`), never a secret.
  */
 import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
+import { RUN_USAGE_MAX_TOKENS_PER_COUNTER } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -60,7 +61,14 @@ const HARNESS_UPSERT_SQL = `INSERT INTO agent_run_usage (${UPSERT_COLUMNS})
       ELSE MAX(reasoning_tokens, excluded.reasoning_tokens) END,
     workspace_id = COALESCE(excluded.workspace_id, workspace_id),
     agent_session_id = COALESCE(excluded.agent_session_id, agent_session_id),
-    updated_at = MAX(updated_at, excluded.updated_at)`;
+    updated_at = MAX(updated_at, excluded.updated_at)
+  -- A repeated or older report changes no counter: write nothing.
+  WHERE excluded.input_tokens > input_tokens
+     OR excluded.output_tokens > output_tokens
+     OR excluded.cache_read_tokens > cache_read_tokens
+     OR excluded.cache_write_tokens > cache_write_tokens
+     OR (excluded.reasoning_tokens IS NOT NULL
+         AND (reasoning_tokens IS NULL OR excluded.reasoning_tokens > reasoning_tokens))`;
 
 /** Increments: one measured upstream response added to the run's row. */
 const PROXY_UPSERT_SQL = `INSERT INTO agent_run_usage (${UPSERT_COLUMNS})
@@ -77,13 +85,16 @@ const PROXY_UPSERT_SQL = `INSERT INTO agent_run_usage (${UPSERT_COLUMNS})
     agent_session_id = COALESCE(excluded.agent_session_id, agent_session_id),
     updated_at = MAX(updated_at, excluded.updated_at)`;
 
+/** Counters are clamped to the report ceiling so summed reads stay inside SQLite's integer range. */
 function count(value: number | null | undefined): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.min(Math.floor(value), RUN_USAGE_MAX_TOKENS_PER_COUNTER)
+    : 0;
 }
 
 function optionalCount(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
-    ? Math.floor(value)
+    ? Math.min(Math.floor(value), RUN_USAGE_MAX_TOKENS_PER_COUNTER)
     : null;
 }
 
@@ -223,18 +234,26 @@ export async function recordProxyRunUsage(
   usage: MeasuredTokenUsage,
   now: number = Date.now()
 ): Promise<void> {
-  if (!scope.projectId || !scope.chatSessionId) return;
-  const statements = await bindRows(
-    env.DATABASE,
-    PROXY_UPSERT_SQL,
-    { ...scope, projectId: scope.projectId, chatSessionId: scope.chatSessionId },
-    'ai_proxy',
-    AI_PROXY_USAGE_EPOCH,
-    [{ model, ...usage }],
-    now
-  );
-  if (statements.length === 0) return;
+  if (!scope.projectId || !scope.chatSessionId) {
+    // Not a run (no project or chat bound to the workspace right now); said once per response.
+    log.info('agent_run_usage.proxy_skipped_no_run', {
+      workspaceId: scope.workspaceId,
+      hasProject: Boolean(scope.projectId),
+      hasChatSession: Boolean(scope.chatSessionId),
+    });
+    return;
+  }
   try {
+    const statements = await bindRows(
+      env.DATABASE,
+      PROXY_UPSERT_SQL,
+      { ...scope, projectId: scope.projectId, chatSessionId: scope.chatSessionId },
+      'ai_proxy',
+      AI_PROXY_USAGE_EPOCH,
+      [{ model, ...usage }],
+      now
+    );
+    if (statements.length === 0) return;
     await env.DATABASE.batch(statements);
   } catch (error) {
     log.warn('agent_run_usage.proxy_record_failed', {

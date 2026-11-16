@@ -22,7 +22,7 @@ import {
   toolKindSummary,
   unavailableSummary,
 } from './receipt-format';
-import { modelTokenLine, tokensTile } from './receipt-tokens';
+import { modelSpendLabel, modelTokenParts, spendLabel, tokensTile } from './receipt-tokens';
 import { cpuPointsForRun, ReceiptCpuLine } from './ReceiptCpuLine';
 
 // Sub-headings inside the panel sit below the panel title in the type scale.
@@ -127,7 +127,11 @@ export function RunReceiptView({
 }>) {
   const outcome = outcomeLabel(receipt);
   const account = accountTile(receipt.account);
-  const tokens = tokensTile(receipt.tokens);
+  const tokens = tokensTile(receipt.tokens, {
+    live: receipt.live,
+    unavailable: receipt.unavailable.includes('tokens'),
+  });
+  const spend = spendLabel(receipt.tokens);
   const { resources, toolCalls } = receipt;
   const from = Date.parse(receipt.createdAt);
   const to = Date.parse(receipt.endedAt);
@@ -200,18 +204,44 @@ export function RunReceiptView({
       {receipt.tokens.state === 'reported' && receipt.tokens.models.length > 0 && (
         <>
           <h3 className={sectionHeading}>Tokens by model</h3>
-          <ul className="m-0 list-none divide-y divide-[var(--sam-hairline)] p-0" data-testid="receipt-token-models">
-            {receipt.tokens.models.map((model) => (
-              <li key={model.model ?? ''} className="py-2">
-                <span className="block break-words font-semibold text-fg-primary [overflow-wrap:anywhere]">
-                  {model.model ?? 'Model not reported'}
-                </span>
-                <span className="block break-words font-mono text-[length:var(--sam-type-secondary-size)] text-fg-muted">
-                  {modelTokenLine(model)}
-                </span>
-              </li>
-            ))}
+          <ul
+            className="m-0 list-none divide-y divide-[var(--sam-hairline)] p-0"
+            data-testid="receipt-token-models"
+          >
+            {receipt.tokens.models.map((model) => {
+              const modelSpend = modelSpendLabel(receipt.tokens, model);
+              return (
+                <li key={model.model ?? ''} className="flex items-start gap-3 py-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="block break-words font-semibold text-fg-primary [overflow-wrap:anywhere]">
+                      {model.model ?? 'Model not reported'}
+                    </span>
+                    <span className="flex flex-wrap gap-x-1.5 font-mono text-[length:var(--sam-type-secondary-size)] text-fg-muted">
+                      {modelTokenParts(model).map((part, index) => (
+                        <span key={part} className="whitespace-nowrap">
+                          {index > 0 ? '· ' : ''}
+                          {part}
+                        </span>
+                      ))}
+                    </span>
+                  </span>
+                  {modelSpend && (
+                    <span className="shrink-0 font-mono text-[length:var(--sam-type-secondary-size)] text-fg-muted">
+                      {modelSpend}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
+          {spend && (
+            <p
+              className="m-0 mt-1 text-[length:var(--sam-type-caption-size)] text-fg-muted"
+              data-testid="receipt-token-spend"
+            >
+              {spend}
+            </p>
+          )}
         </>
       )}
 

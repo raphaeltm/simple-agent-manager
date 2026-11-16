@@ -972,8 +972,9 @@ operation `sam_run_receipt`). Everything is derived when you ask, from records S
   measured the run's calls, else `harness`. Each model carries `input` (excluding cache), `output`,
   `cacheRead`, `cacheWrite` and `reasoning` (null when not reported apart from output); `model` is
   null when the agent did not name it. `spend` is `estimate` (USD from SAM's model prices) only for
-  an API-key account, `not_applicable` for subscription and platform accounts, and
-  `unknown_account` when the account could not be identified. `limited` means the totals are a
+  an API-key account, `not_applicable` for subscription and platform accounts, `unknown_account`
+  when the account could not be identified, and `private` for another member's personal key.
+  Tokens are read for the task's chat session, so tasks sharing a chat share its totals. `limited` means the totals are a
   floor (`insights.receiptTokenRowsMax`).
 - `slowedDown`: up to three items, largest delay first. A machine wait or setup is listed only when
   it took at least `insights.receiptSlowFactorPercent` of the usual duration for recent runs of the

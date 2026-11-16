@@ -56,30 +56,30 @@ models[], total, spend }`. Spend only when the run's credential is an API key
 
 ## Implementation checklist
 
-- [ ] Migration `0253_agent_run_usage.sql` + drizzle table in `packages/worker-core/src/schema.ts`
-- [ ] Shared types: `RunReceiptTokens` in `packages/shared/src/types/insights-receipt.ts`; token
+- [x] Migration `0253_agent_run_usage.sql` + drizzle table in `packages/worker-core/src/schema.ts`
+- [x] Shared types: `RunReceiptTokens` in `packages/shared/src/types/insights-receipt.ts`; token
       report contract types
-- [ ] API: `tokenUsage` in `AcpSessionUsageReportSchema`; `recordHarnessRunUsage()` writer
+- [x] API: `tokenUsage` in `AcpSessionUsageReportSchema`; `recordHarnessRunUsage()` writer
       called from `handleAcpUsageCallback` (after binding + attribution checks)
-- [ ] API: AI proxy writer `recordProxyRunUsage()`; extract cache tokens from Anthropic/OpenAI
+- [x] API: AI proxy writer `recordProxyRunUsage()`; extract cache tokens from Anthropic/OpenAI
       usage (JSON + SSE); wire passthrough + platform-anthropic routes (not the SAM agent loop)
-- [ ] Operations: `insights-run-usage.ts` read (project scope in every predicate) + spend estimate
-- [ ] Receipt: parallel read, `tokens` wired, round trips stay ≤ 8
-- [ ] Web: receipt panel renders tokens per model / "not reported"; Playwright 375/1280
-- [ ] VM agent: accumulator + `tokenUsage` in `buildUsageReportRequest()`; Claude/OpenCode from
+- [x] Operations: `insights-run-usage.ts` read (project scope in every predicate) + spend estimate
+- [x] Receipt: parallel read, `tokens` wired, round trips stay ≤ 8
+- [x] Web: receipt panel renders tokens per model / "not reported"; Playwright 375/1280
+- [x] VM agent: accumulator + `tokenUsage` in `buildUsageReportRequest()`; Claude/OpenCode from
       `PromptResponse` (incl. cancelled turns); Codex from rollout `total_token_usage`; token
       reports never coalesced away
-- [ ] Docs: receipt/insights docs mention tokens sources and "not reported"
-- [ ] Post migration number + read interface on `feature.insights`
+- [x] Docs: receipt/insights docs mention tokens sources and "not reported"
+- [x] Post migration number + read interface on `feature.insights`
 
 ## Tests
 
-- [ ] Real SQL engine: project-scope attack (foreign project chat session id) + owner control
-- [ ] Same report twice → counted once; reordered reports → max; proxy additive
-- [ ] Contract test VM agent → API: Go payload JSON fixture parsed by the API schema/handler
-- [ ] Go: report builder with and without token data; Claude/OpenCode prompt-response parsing;
+- [x] Real SQL engine: project-scope attack (foreign project chat session id) + owner control
+- [x] Same report twice → counted once; reordered reports → max; proxy additive
+- [x] Contract test VM agent → API: Go payload JSON fixture parsed by the API schema/handler
+- [x] Go: report builder with and without token data; Claude/OpenCode prompt-response parsing;
       Codex rollout total parsing
-- [ ] Receipt: reported, not reported, proxy-preferred, spend only for API-key
+- [x] Receipt: reported, not reported, proxy-preferred, spend only for API-key
 
 ## Acceptance criteria
 
@@ -87,6 +87,25 @@ models[], total, spend }`. Spend only when the run's credential is an API key
 - A harness reporting nothing shows "not reported".
 - Duplicate/reordered reports never double count.
 - Old/new agent ↔ control plane combinations keep working (limits still recorded).
+
+## Review notes
+
+- Reviewers: task-completion-validator, go-specialist, security-auditor, cloudflare-specialist,
+  ui-ux-specialist. Every CRITICAL/HIGH and every MEDIUM was fixed in this PR:
+  - The Codex model key is stable per thread (configured model first).
+  - Totals restart when the credential attribution changes.
+  - The VM agent caps models and name length to match the schema.
+  - Token reports are drained on stop and probed on cancelled turns.
+  - Budget accounting runs before the run-usage write, which goes to `waitUntil`.
+  - Counters are clamped and reads sum with `TOTAL()`.
+  - Project delete removes the rows.
+  - Spend on another member's personal key is `private`.
+  - `readAccountUsage` was removed until slice A consumes it; the interface stays on the channel.
+  - The UI says when a token read failed, and says "not reported yet" while a run is live.
+  - Added route-level proxy and old-control-plane tests.
+- Retention / epoch bound deferred to idea `01M7JPRW3JPBE0C3CPMR95WAZB` (medium, no user impact).
+- Playwright receipt audit at 375 and 1280 passed. Screenshots were opened, including the middle of
+  the long model list. Migration number and interface posted on `feature.insights` (seq 31).
 
 ## Staging
 

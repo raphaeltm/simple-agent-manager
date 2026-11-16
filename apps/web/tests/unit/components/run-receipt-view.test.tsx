@@ -321,12 +321,14 @@ describe('RunReceiptView — disclosures and loading', () => {
       />
     );
     expect(screen.getByText('2.5M')).toBeInTheDocument();
-    expect(screen.getByText('~$4.12 estimated · Reported by the agent')).toBeInTheDocument();
+    expect(screen.getByText('Incl. 2.1M cache · Reported by the agent')).toBeInTheDocument();
     const models = screen.getByTestId('receipt-token-models');
-    expect(within(models).getByText('claude-opus-5-5')).toBeInTheDocument();
-    expect(within(models).getByText('300K in · 40K out · 2.1M cache')).toBeInTheDocument();
-    expect(within(models).getByText('Model not reported')).toBeInTheDocument();
-    expect(within(models).getByText('20K in · 1K out · 500 reasoning')).toBeInTheDocument();
+    const rows = within(models).getAllByRole('listitem');
+    expect(rows[0]).toHaveTextContent('claude-opus-5-5300K in· 40K out· 2.1M cache~$4.00');
+    expect(rows[1]).toHaveTextContent('Model not reported20K in· 1K out· 500 reasoningno price');
+    expect(screen.getByTestId('receipt-token-spend')).toHaveTextContent(
+      '~$4.12 estimated at SAM’s model prices'
+    );
     expect(screen.queryByText('Not reported')).not.toBeInTheDocument();
   });
 
@@ -359,5 +361,58 @@ describe('RunReceiptView — disclosures and loading', () => {
     expect(screen.getByText('1K+')).toBeInTheDocument();
     expect(screen.getByText('Measured by SAM’s AI proxy')).toBeInTheDocument();
     expect(screen.queryByText(/estimated/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('receipt-token-spend')).not.toBeInTheDocument();
+  });
+
+  it('says a failed token read could not be read, not that the agent reported nothing', () => {
+    render(
+      <RunReceiptView
+        receipt={receipt({ tokens: { state: 'not_reported' }, unavailable: ['tokens'] })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.queryByText('This agent did not report token counts')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Could not be read just now').length).toBeGreaterThan(0);
+    expect(screen.getByText('Could not read token usage just now.')).toBeInTheDocument();
+  });
+
+  it('says tokens are not reported yet while the run is live', () => {
+    render(<RunReceiptView receipt={receipt({ live: true, status: 'in_progress' })} resourceIndex={undefined} />);
+    expect(screen.getByText('Not reported yet')).toBeInTheDocument();
+  });
+
+  it('shows no money for another member’s personal key, and a floor when a model is unpriced', () => {
+    const tokens = (spend: RunReceipt['tokens'] extends infer T ? T : never) => spend;
+    const base = {
+      state: 'reported' as const,
+      source: 'harness' as const,
+      limited: false,
+      total: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, reasoning: null },
+      models: [
+        { model: 'a', input: 5, output: 2, cacheRead: 0, cacheWrite: 0, reasoning: null, estimatedSpendUsd: 0.004 },
+        { model: 'b', input: 5, output: 3, cacheRead: 0, cacheWrite: 0, reasoning: null, estimatedSpendUsd: null },
+      ],
+    };
+    const { unmount } = render(
+      <RunReceiptView
+        receipt={receipt({ tokens: tokens({ ...base, spend: { state: 'private' } }) })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.queryByTestId('receipt-token-spend')).not.toBeInTheDocument();
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+    unmount();
+    render(
+      <RunReceiptView
+        receipt={receipt({
+          tokens: tokens({ ...base, spend: { state: 'estimate', usd: 0.004, unpricedModels: ['b'] } }),
+        })}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByTestId('receipt-token-spend')).toHaveTextContent(
+      'At least ~<$0.01 estimated at SAM’s model prices'
+    );
+    expect(screen.getByText('no price')).toBeInTheDocument();
   });
 });

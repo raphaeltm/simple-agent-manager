@@ -205,7 +205,10 @@ export async function runReceipt(
             scanLimited: facts.toolCalls.scanLimited,
           }
         : null,
-    tokens: summarizeRunTokens(tokenUsage),
+    // Spend on a person's own key is theirs to see, like the account name (`readAccount`).
+    tokens: summarizeRunTokens(tokenUsage, {
+      spendVisible: account?.isOwnSession === true || account?.credentialSource !== 'user',
+    }),
     slowedDown: slowedDown(
       {
         phases,

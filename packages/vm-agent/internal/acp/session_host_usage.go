@@ -383,16 +383,6 @@ func usageReportCoalesceKey(request usageReportRequest) string {
 	}, "\x1f")
 }
 
-// tokenUsageEpochKey keeps reports of different epochs apart in the pending
-// queue. Within one epoch the newer report carries every count of the older
-// one, so replacing it loses nothing.
-func tokenUsageEpochKey(usage *tokenUsagePayload) string {
-	if usage == nil {
-		return ""
-	}
-	return "tokens:" + usage.Epoch
-}
-
 func float64PointerKey(value *float64) string {
 	if value == nil {
 		return ""

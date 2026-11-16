@@ -2,7 +2,9 @@ package acp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 )
 
@@ -34,12 +36,41 @@ type codexTurnContextPayload struct {
 	Model string `json:"model"`
 }
 
+// codexRolloutTokenUsage reads the thread total and names ONE model for the
+// whole thread. The rollout total is not split by model, and the control plane
+// keeps one row per (epoch, model), so a name that changed between reports
+// (a model switch, or a long turn pushing turn_context out of the tail) would
+// store the same cumulative total twice. The session's configured model is
+// stable for the thread, so it wins; the rollout model is only the fallback
+// when no model was configured, and the first one seen on this host is kept.
+func (h *SessionHost) codexRolloutTokenUsage(tail []byte, threadID string) *tokenUsagePayload {
+	usage := parseCodexRolloutTokenUsage(tail, threadID)
+	if usage == nil {
+		return nil
+	}
+	model := h.loadRunUsageModel()
+	if model == "" {
+		model = h.rememberCodexRolloutModel(usage.Models[0].Model)
+	}
+	usage.Models[0].Model = truncateRunUsageModel(model)
+	return usage
+}
+
+// rememberCodexRolloutModel keeps the first non-empty rollout model this host
+// reported and returns the model to report.
+func (h *SessionHost) rememberCodexRolloutModel(seen string) string {
+	h.runUsage.mu.Lock()
+	defer h.runUsage.mu.Unlock()
+	if h.runUsage.codexModel == "" {
+		h.runUsage.codexModel = seen
+	}
+	return h.runUsage.codexModel
+}
+
 // parseCodexRolloutTokenUsage returns the thread's cumulative token totals
-// from the newest `token_count` event in a rollout tail, attributed to the
-// newest `turn_context` model in the tail ("" when none is visible). It
-// returns nil when the tail has no totals. A Codex thread runs one model at a
-// time and the rollout total is not split by model, so a mid-thread model
-// switch is attributed to the latest model rather than estimated.
+// from the newest `token_count` event in a rollout tail, with the newest
+// `turn_context` model in the tail ("" when none is visible). It returns nil
+// when the tail has no totals.
 func parseCodexRolloutTokenUsage(tail []byte, threadID string) *tokenUsagePayload {
 	var totals *codexTokenUsageTotals
 	model := ""
@@ -92,4 +123,23 @@ func parseCodexRolloutTokenUsage(tail []byte, threadID string) *tokenUsagePayloa
 		return nil
 	}
 	return &tokenUsagePayload{Epoch: "codex-" + threadID, Models: []tokenModelPayload{entry}}
+}
+
+// readCodexRolloutTail returns the trailing bytes of the thread's rollout, or
+// ok=false when the thread id is not a UUID or the read failed.
+func (h *SessionHost) readCodexRolloutTail(ctx context.Context, threadID string) ([]byte, bool) {
+	if !codexThreadIDPattern.MatchString(threadID) {
+		slog.Debug("usageProbe: codex thread id is not a UUID, skipping rollout read")
+		return nil, false
+	}
+	reader := h.codexRolloutReader
+	if reader == nil {
+		reader = h.defaultCodexRolloutTailReader
+	}
+	tail, err := reader(ctx, threadID)
+	if err != nil {
+		slog.Debug("usageProbe: codex rollout read failed", "error", err)
+		return nil, false
+	}
+	return tail, true
 }

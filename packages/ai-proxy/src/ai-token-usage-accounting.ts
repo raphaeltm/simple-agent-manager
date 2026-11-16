@@ -230,7 +230,6 @@ async function incrementExtractedUsage(
   usage: ExtractedTokenUsage,
   options: TokenUsageAccountingOptions
 ): Promise<void> {
-  await recordMeasuredUsage(usage, options);
   const inputTokens = usage.inputTokens ?? options.fallbackInputTokens ?? 0;
   const outputTokens = usage.outputTokens ?? 0;
   if (inputTokens <= 0 && outputTokens <= 0) return;
@@ -245,6 +244,23 @@ async function incrementExtractedUsage(
       outputTokens,
       options.env
     );
+  }
+  // Budget accounting is the billing control and runs first; run usage is telemetry and must
+  // never delay or starve it.
+  scheduleMeasuredUsage(usage, options);
+}
+
+/**
+ * Hand the measured usage to `onMeasuredUsage` outside the response path: inside the request's
+ * `waitUntil` when there is one, so a slow D1 write never adds latency to a proxied response.
+ */
+function scheduleMeasuredUsage(usage: ExtractedTokenUsage, options: TokenUsageAccountingOptions): void {
+  if (!options.onMeasuredUsage) return;
+  const pending = recordMeasuredUsage(usage, options);
+  try {
+    options.executionCtx?.waitUntil(pending);
+  } catch {
+    // Tests and local runtimes may not provide a Cloudflare execution context.
   }
 }
 

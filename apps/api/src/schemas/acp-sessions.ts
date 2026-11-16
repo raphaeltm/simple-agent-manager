@@ -1,6 +1,7 @@
 import {
   DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT,
   RUN_USAGE_MAX_MODELS_PER_REPORT,
+  RUN_USAGE_MAX_TOKENS_PER_COUNTER,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
@@ -75,7 +76,16 @@ export const AcpSessionUsageLimitObservationSchema = v.object({
   freshnessMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
 });
 
-const TokenCountSchema = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(Number.MAX_SAFE_INTEGER));
+/**
+ * A token counter in one usage report. The ceiling (one trillion) is far above any real run and
+ * keeps summed reads well inside SQLite's integer range whatever a reporter sends.
+ */
+const TokenCountSchema = v.pipe(
+  v.number(),
+  v.integer(),
+  v.minValue(0),
+  v.maxValue(RUN_USAGE_MAX_TOKENS_PER_COUNTER)
+);
 
 /**
  * Insights slice U: cumulative token totals of one VM-agent usage epoch, per model. Optional, so an

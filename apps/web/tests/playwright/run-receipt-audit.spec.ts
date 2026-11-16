@@ -610,10 +610,13 @@ test.describe('Run receipt — chat tool rail', () => {
   test('shows measured tokens per model with an API-key spend estimate', async ({ page }) => {
     const drawer = await openReceipt(page, { receipt: makeReceipt({ tokens: TOKENS_REPORTED }) });
     await expect(drawer.getByText('2.6M')).toBeVisible();
-    await expect(drawer.getByText('~$4.12 estimated · Reported by the agent')).toBeVisible();
+    await expect(drawer.getByText('Incl. 2.2M cache · Reported by the agent')).toBeVisible();
     const models = drawer.getByTestId('receipt-token-models');
     await expect(models.getByText('claude-opus-5-5')).toBeVisible();
-    await expect(models.getByText('300K in · 40K out · 2.2M cache')).toBeVisible();
+    await expect(models.locator('li').first()).toContainText('~$3.98');
+    await expect(drawer.getByTestId('receipt-token-spend')).toHaveText(
+      '~$4.12 estimated at SAM’s model prices'
+    );
     await expect(drawer.getByText('Not reported')).toHaveCount(0);
     await assertInViewport(page);
     await capture(page, 'run-receipt-tokens');
@@ -630,6 +633,9 @@ test.describe('Run receipt — chat tool rail', () => {
     await expect(drawer.getByText('10B+')).toBeVisible();
     await expect(drawer.getByTestId('receipt-token-models').locator('li')).toHaveCount(15);
     await expect(drawer.getByText('Model not reported')).toBeVisible();
+    // The middle of the long model list is seen too, not only the panel's top and end.
+    await drawer.getByText('Model not reported').scrollIntoViewIfNeeded();
+    await screenshot(page, 'run-receipt-long-text-models');
     await assertInViewport(page);
     await capture(page, 'run-receipt-long-text');
   });

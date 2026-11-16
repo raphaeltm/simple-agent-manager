@@ -143,9 +143,7 @@ export {
   type InsightsReceiptSettingName,
 } from './insights-receipt-settings-definition';
 export {
-  type AccountModelUsage,
   estimateModelSpendUsd,
-  readAccountUsage,
   readRunUsage,
   type RunUsageModelRow,
   type RunUsageRead,

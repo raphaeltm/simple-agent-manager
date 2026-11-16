@@ -3,7 +3,9 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,8 +14,8 @@ import (
 )
 
 // The VM agent → control plane contract for token reports (rule 23). The API
-// test apps/api/tests/unit/routes/agent-run-usage-callback.test.ts sends this
-// exact file through the real route and schema.
+// test apps/api/tests/workers/run-usage-callback-vertical-slice.test.ts sends
+// this exact file through the real route and schema.
 const runUsageContractFixture = "../../../shared/tests/fixtures/vm-agent-usage-report-token-usage.json"
 
 func runUsageTestHost(t *testing.T, script promptRetryScript, agentType string) (*SessionHost, *usageCallbackCapture) {
@@ -122,7 +124,7 @@ func TestCompletedOpenCodePromptAttributesUsageToConfiguredModel(t *testing.T) {
 	report := waitForTokenPayloads(t, capture, 1)[0]
 	models := report.TokenUsage.Models
 	if len(models) != 1 || models[0].Model != "opencode-go/kimi-k2" || models[0].InputTokens != 40 ||
-		models[0].OutputTokens != 9 || models[0].CacheReadTokens != 7 ||
+		models[0].OutputTokens != 12 || models[0].CacheReadTokens != 7 ||
 		models[0].ReasoningTokens == nil || *models[0].ReasoningTokens != 3 {
 		t.Fatalf("models = %+v", models)
 	}
@@ -269,4 +271,82 @@ func promptResponseFromJSON(t *testing.T, raw string) acpsdk.PromptResponse {
 		t.Fatalf("decode prompt response: %v", err)
 	}
 	return resp
+}
+
+// A credential switch on one host restarts the totals under a new epoch: the
+// control plane keys rows by credential, so carrying earlier turns over would
+// count them under both accounts.
+func TestRunUsageAccumulatorRestartsWhenAttributionChanges(t *testing.T) {
+	t.Parallel()
+	var acc runUsageAccumulator
+	first, _ := acc.add("cred-a", []tokenModelPayload{{Model: "m", InputTokens: 10, OutputTokens: 1}})
+	second, _ := acc.add("cred-a", []tokenModelPayload{{Model: "m", InputTokens: 5, OutputTokens: 1}})
+	switched, _ := acc.add("cred-b", []tokenModelPayload{{Model: "m", InputTokens: 7, OutputTokens: 1}})
+	if first.Epoch != second.Epoch || second.Models[0].InputTokens != 15 {
+		t.Fatalf("same credential must accumulate under one epoch: %+v %+v", first, second)
+	}
+	if switched.Epoch == second.Epoch || switched.Models[0].InputTokens != 7 {
+		t.Fatalf("new credential must restart totals under a new epoch: %+v", switched)
+	}
+}
+
+// Reports never exceed the control plane's bounds, which would reject them
+// whole (and the limits they carry).
+func TestRunUsageAccumulatorCapsModelsAndNameLength(t *testing.T) {
+	t.Parallel()
+	var acc runUsageAccumulator
+	turn := make([]tokenModelPayload, 0, 20)
+	for i := 0; i < 20; i++ {
+		turn = append(turn, tokenModelPayload{Model: fmt.Sprintf("model-%02d-%s", i, strings.Repeat("x", 200)), InputTokens: 1})
+	}
+	usage, ok := acc.add("s", turn)
+	if !ok || len(usage.Models) != runUsageMaxModels {
+		t.Fatalf("models = %d, want %d", len(usage.Models), runUsageMaxModels)
+	}
+	for _, model := range usage.Models {
+		if len([]rune(model.Model)) > runUsageMaxModelChars {
+			t.Fatalf("model name not truncated: %d chars", len([]rune(model.Model)))
+		}
+	}
+}
+
+// Codex: a tail whose turn_context scrolled out, and a mid-thread model
+// switch, must keep reporting under one model key, or the same cumulative
+// total would be stored twice.
+func TestCodexRolloutTokenUsageKeepsOneModelPerThread(t *testing.T) {
+	host := NewSessionHost(SessionHostConfig{})
+	withModel := []byte(codexRolloutTokenFixture)
+	noContext := []byte(`{"timestamp":"2026-11-16T10:06:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":12000,"cached_input_tokens":4000,"output_tokens":1000,"reasoning_output_tokens":300}},"rate_limits":null}}`)
+	switched := []byte(`{"timestamp":"2026-11-16T10:07:00.000Z","type":"turn_context","payload":{"model":"gpt-6"}}
+{"timestamp":"2026-11-16T10:07:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":20000,"cached_input_tokens":4000,"output_tokens":2000,"reasoning_output_tokens":300}},"rate_limits":null}}`)
+
+	first := host.codexRolloutTokenUsage(withModel, testCodexThreadID)
+	second := host.codexRolloutTokenUsage(noContext, testCodexThreadID)
+	third := host.codexRolloutTokenUsage(switched, testCodexThreadID)
+	for _, usage := range []*tokenUsagePayload{first, second, third} {
+		if usage == nil || usage.Models[0].Model != "gpt-5.5" || usage.Epoch != "codex-"+testCodexThreadID {
+			t.Fatalf("model key changed within the thread: %+v", usage)
+		}
+	}
+	if third.Models[0].InputTokens != 16000 {
+		t.Fatalf("totals must still advance: %+v", third.Models[0])
+	}
+
+	configured := NewSessionHost(SessionHostConfig{})
+	configured.storeRunUsageModel(&agentSettingsPayload{Model: "gpt-5.5-codex"})
+	if got := configured.codexRolloutTokenUsage(switched, testCodexThreadID); got.Models[0].Model != "gpt-5.5-codex" {
+		t.Fatalf("configured model must win: %+v", got.Models[0])
+	}
+}
+
+// A cancelled turn still spent tokens; its response usage is recorded.
+func TestCancelledClaudeTurnRecordsItsTokens(t *testing.T) {
+	host, capture := runUsageTestHost(t, promptRetryScript{responses: []promptRetryResponse{
+		{stopReason: "cancelled", result: claudeQuotaResult("claude-opus-5-5", 30, 3, 0, 0)},
+	}}, "claude-code")
+	host.HandlePrompt(context.Background(), json.RawMessage(`1`), promptRetryParams(), "viewer-1", false)
+	report := waitForTokenPayloads(t, capture, 1)[0]
+	if report.TokenUsage.Models[0].InputTokens != 30 {
+		t.Fatalf("cancelled turn usage = %+v", report.TokenUsage.Models)
+	}
 }

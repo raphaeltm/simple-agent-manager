@@ -3,11 +3,7 @@
  * ON CONFLICT key, the per-column MAX and the reads' project predicates are evaluated by SQLite,
  * not a mock (rules 11, 28).
  */
-import {
-  readAccountUsage,
-  readRunUsage,
-  summarizeRunTokens,
-} from '@simple-agent-manager/operations';
+import { readRunUsage, summarizeRunTokens } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -156,29 +152,6 @@ describe('agent_run_usage writers and reads', () => {
         total: { input: 100, output: 20 },
       });
     });
-
-    it('scopes the per-account read the same way', async () => {
-      const foreign = await readAccountUsage(env.DATABASE, {
-        projectId: 'project-b',
-        sinceMs: 0,
-        maxRows: 50,
-      });
-      const own = await readAccountUsage(env.DATABASE, {
-        projectId: 'project-a',
-        sinceMs: 0,
-        maxRows: 50,
-      });
-      expect(foreign.rows).toEqual([]);
-      expect(own.rows).toEqual([
-        expect.objectContaining({
-          credentialKey: 'cc_credentials:cred-key',
-          credentialKind: 'api-key',
-          runs: 1,
-          input: 100,
-        }),
-      ]);
-      expect(own.rows[0]!.estimatedSpendUsd).toBeGreaterThan(0);
-    });
   });
 
   it('shows spend only for API-key accounts', async () => {
@@ -212,6 +185,29 @@ describe('agent_run_usage writers and reads', () => {
     expect(summarizeRunTokens(await read('project-a', 'chat-none'))).toMatchObject({
       spend: { state: 'unknown_account' },
     });
+  });
+
+  it('hides the spend of another member’s personal key', async () => {
+    await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(1_000, 100)]);
+    expect(summarizeRunTokens(await read(), { spendVisible: false })).toMatchObject({
+      spend: { state: 'private' },
+      models: [{ estimatedSpendUsd: null }],
+    });
+  });
+
+  it('never fails the read when summed counters exceed the integer range', async () => {
+    // Writes clamp each counter; rows written past the ceiling (hostile or buggy) still read.
+    sqlite.exec(`INSERT INTO agent_run_usage (project_id, chat_session_id, source, usage_epoch, model,
+      credential_key, input_tokens, created_at, updated_at) VALUES
+      ('project-a', 'chat-1', 'harness', 'e1', 'm', '', 9000000000000000000, 0, 0),
+      ('project-a', 'chat-1', 'harness', 'e2', 'm', '', 9000000000000000000, 0, 0)`);
+    await expect(read()).resolves.not.toBeNull();
+  });
+
+  it('clamps a counter to the report ceiling on write', async () => {
+    await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(Number.MAX_SAFE_INTEGER, 1)]);
+    const row = sqlite.prepare('SELECT input_tokens FROM agent_run_usage').get() as { input_tokens: number };
+    expect(row.input_tokens).toBe(1_000_000_000_000);
   });
 
   it('skips one unreadable row instead of failing the read', async () => {

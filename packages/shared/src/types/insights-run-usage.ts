@@ -33,12 +33,13 @@ export interface RunModelUsage extends RunTokenCounts {
 /**
  * Spend appears only for API-key accounts, as an estimate from SAM's model catalog prices.
  * Subscription and platform accounts show tokens only (`not_applicable`); an account SAM cannot
- * identify shows `unknown_account`.
+ * identify shows `unknown_account`; another member's personal key shows `private`.
  */
 export type RunUsageSpend =
   | { state: 'estimate'; usd: number | null; unpricedModels: string[] }
   | { state: 'not_applicable' }
-  | { state: 'unknown_account' };
+  | { state: 'unknown_account' }
+  | { state: 'private' };
 
 export type RunReceiptTokens =
   | { state: 'not_reported' }

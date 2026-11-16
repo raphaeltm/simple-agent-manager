@@ -6009,9 +6009,8 @@ export const agentRunUsage = sqliteTable(
       table.model,
       table.credentialKey
     ),
-    projectCredentialIdx: index('idx_agent_run_usage_project_credential').on(
+    projectUpdatedIdx: index('idx_agent_run_usage_project_updated').on(
       table.projectId,
-      table.credentialKey,
       table.updatedAt
     ),
   })

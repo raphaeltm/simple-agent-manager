@@ -41,6 +41,6 @@ CREATE TABLE IF NOT EXISTS agent_run_usage (
 -- The upsert key, and the per-run read (project + chat session).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_run_usage_key
   ON agent_run_usage (project_id, chat_session_id, source, usage_epoch, model, credential_key);
--- Usage per account over a window, always within one project (Accounts).
-CREATE INDEX IF NOT EXISTS idx_agent_run_usage_project_credential
-  ON agent_run_usage (project_id, credential_key, updated_at);
+-- Usage per account over a window, always within one project (Accounts): seek the window.
+CREATE INDEX IF NOT EXISTS idx_agent_run_usage_project_updated
+  ON agent_run_usage (project_id, updated_at);
