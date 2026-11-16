@@ -37,6 +37,8 @@ export interface PhaseDurationStatsInput {
   phases: readonly string[];
   /** Restrict to one operation (`workspace`, `wake`, `runner_start`, ...). Default: all. */
   operation?: string;
+  /** Rows older than `lifecycleLatency.retentionDays` (default 30) are purged, so a longer window
+   *  returns at most the retained days. */
   windowDays?: number;
   sampleLimit?: number;
   now?: number;

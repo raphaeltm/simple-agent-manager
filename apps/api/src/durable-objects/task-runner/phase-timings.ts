@@ -9,7 +9,8 @@ import type { TaskRunnerState } from './types';
  *
  * Every value (step, duration, ids) is read synchronously before the first `await`, so callers
  * hand the promise to `ctx.waitUntil` and go on mutating `state`: the telemetry write never sits
- * between a step's own state writes or delays its retry alarm.
+ * between a step's own state writes or delays its retry alarm. Best effort: a row can be lost if
+ * the object is evicted before the write lands.
  */
 export async function recordRunnerPhase(
   db: D1Database,

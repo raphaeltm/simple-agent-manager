@@ -5,6 +5,7 @@
  */
 import {
   listPhaseTimings,
+  MAX_PHASE_STATS_PHASES,
   nearestRankPercentile,
   OperationError,
   phaseDurationStats,
@@ -12,7 +13,11 @@ import {
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { applySqliteMigration, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  applySqliteMigration,
+  createSqliteD1,
+  createSqliteD1WithBindLimit,
+} from '../../helpers/sqlite-d1';
 
 const MIGRATION = new URL(
   '../../../src/db/migrations/0250_lifecycle_phase_timings.sql',
@@ -235,5 +240,22 @@ describe('insights phase timings reads', () => {
     expect(nearestRankPercentile([5], 0.9)).toBe(5);
     expect(nearestRankPercentile([1, 2, 3, 4], 0.5)).toBe(2);
     expect(nearestRankPercentile([1, 2, 3, 4], 0.9)).toBe(4);
+  });
+
+  it('accepts the largest phase list within the D1 bind-parameter limit', async () => {
+    insert({ project: 'p', phase: 'phase-63', durationMs: 7, operation: 'runner_wake' });
+    const phases = Array.from({ length: MAX_PHASE_STATS_PHASES }, (_, index) => `phase-${index}`);
+    // projectId + skill + phases + operation + since + limit stays under D1's 100.
+    expect(2 + phases.length + 3).toBeLessThanOrEqual(100);
+    const result = await phaseDurationStats(createSqliteD1WithBindLimit(sqlite, 100), {
+      projectId: 'p',
+      skillId: 'skill-1',
+      phases,
+      operation: 'runner_wake',
+      now: NOW,
+    });
+    expect(result.stats).toEqual([
+      { operation: 'runner_wake', phase: 'phase-63', count: 1, medianMs: 7, p90Ms: 7 },
+    ]);
   });
 });
