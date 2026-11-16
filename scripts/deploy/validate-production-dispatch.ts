@@ -189,7 +189,7 @@ export function isProductionDeployMarker(deployment: GithubDeployment): boolean 
  */
 export async function getLatestProductionDeployedSha(
   env: Required<Pick<ValidationEnv, 'githubRepository' | 'githubToken'>>
-): Promise<string | undefined> {
+): Promise<{ sha: string; deploymentId: number } | undefined> {
   let url: string | undefined =
     `https://api.github.com/repos/${env.githubRepository}/deployments?environment=production&per_page=100`;
 
@@ -219,7 +219,7 @@ export async function getLatestProductionDeployedSha(
         throw new Error(`GitHub returned a non-list status response for deployment ${deployment.id}`);
       }
       if ((statuses as GithubDeploymentStatus[])[0]?.state === 'success') {
-        return normalizeSha(deployment.sha);
+        return { sha: normalizeSha(deployment.sha), deploymentId: deployment.id };
       }
     }
 
@@ -365,7 +365,7 @@ export async function validateAutomaticProductionDispatch(
 
   let mainTip: string;
   let successfulRun: WorkflowRun | undefined;
-  let deployedSha: string | undefined;
+  let deployed: { sha: string; deploymentId: number } | undefined;
   try {
     mainTip = await getCurrentMainTip(github);
     successfulRun = selectSuccessfulCiRun(
@@ -373,7 +373,7 @@ export async function validateAutomaticProductionDispatch(
       mainTip,
       env.githubRepository
     );
-    deployedSha = successfulRun ? await getLatestProductionDeployedSha(github) : undefined;
+    deployed = successfulRun ? await getLatestProductionDeployedSha(github) : undefined;
   } catch (error) {
     const message = redact(error instanceof Error ? error.message : String(error));
     throw new Error(
@@ -382,6 +382,15 @@ export async function validateAutomaticProductionDispatch(
   }
 
   const header = `## Automatic production deployment gate\n\n- Triggering CI commit: \`${triggeringSha}\`\n- Current main tip (read after the deployment queue): \`${mainTip}\`\n`;
+
+  if (!successfulRun && triggeringSha === mainTip) {
+    // This run was triggered by a successful CI push run for the tip itself, so not
+    // finding it is an API or filter inconsistency, not "CI not finished". No later
+    // event would retry, so fail loudly instead of skipping.
+    throw new Error(
+      `CI for main tip ${mainTip} triggered this run as successful, but no successful CI push run was found for it. Deployment failed closed before production mutation.`
+    );
+  }
 
   if (!successfulRun) {
     append(
@@ -394,10 +403,10 @@ export async function validateAutomaticProductionDispatch(
     return { mainTip, triggeringSha, decision: 'skip-tip-ci-not-successful' };
   }
 
-  if (deployedSha === mainTip) {
+  if (deployed?.sha === mainTip) {
     append(
       env.githubStepSummary,
-      `${header}- Decision: not deployed. Production already runs the main tip.\n`
+      `${header}- Decision: not deployed. Production already runs the main tip (deployment marker ${deployed.deploymentId}).\n`
     );
     console.log(
       `::notice title=Production deploy not needed::Production already runs main tip ${mainTip}.`
@@ -408,7 +417,7 @@ export async function validateAutomaticProductionDispatch(
   append(env.githubOutput, `deploy_sha=${mainTip}\n`);
   append(
     env.githubStepSummary,
-    `${header}- CI gate: verified (${successfulRun.html_url ?? `run ${successfulRun.id}`})\n- Previously deployed: \`${deployedSha ?? 'none recorded'}\`\n- Decision: deploy the main tip\n`
+    `${header}- CI gate: verified (${successfulRun.html_url ?? `run ${successfulRun.id}`})\n- Previously deployed: \`${deployed?.sha ?? 'none recorded'}\`\n- Decision: deploy the main tip\n`
   );
   return { sha: mainTip, mainTip, triggeringSha, decision: 'deploy' };
 }

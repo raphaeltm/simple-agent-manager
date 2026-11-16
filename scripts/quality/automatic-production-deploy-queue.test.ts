@@ -340,6 +340,49 @@ describe('automatic production gate decisions', () => {
     await expect(runGate('main')).rejects.toThrow(/exact 40-character commit SHA/);
   });
 
+  it('follows deployment pagination to find the marker, and rejects untrusted next pages', async () => {
+    state.mainTip = Y;
+    state.ci.set(Y, 'success');
+    let nextUrl = `https://api.github.com/repos/${repository}/deployments?environment=production&page=2`;
+    const ciAndRef = (url: URL) =>
+      url.pathname.endsWith('/git/ref/heads/main')
+        ? Response.json({ object: { sha: Y } })
+        : Response.json({ workflow_runs: [ciRun(Y, 'success', 1)] });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input));
+        if (url.pathname.endsWith('/statuses')) return Response.json([{ state: 'success' }]);
+        if (url.pathname.endsWith('/deployments')) {
+          if (url.searchParams.get('page') === '2') {
+            return Response.json([
+              { id: 2, sha: Y, payload: { workflow: 'deploy.yml', dry_run: false } },
+            ]);
+          }
+          return Response.json([{ id: 1, sha: Y, payload: {} }], {
+            headers: { link: `<${nextUrl}>; rel="next"` },
+          });
+        }
+        return ciAndRef(url);
+      })
+    );
+
+    // The tip's marker is only on page 2, so finding it means no redeploy.
+    await expect(runGate(X)).resolves.toBeUndefined();
+
+    nextUrl = 'https://attacker.test/deployments?page=2';
+    await expect(runGate(X)).rejects.toThrow(/untrusted next-page URL.*failed closed/);
+  });
+
+  it('fails loudly when the tip itself triggered the run but its green CI run cannot be found', async () => {
+    // The workflow_run event proved the tip's CI succeeded; a missing run is an API
+    // inconsistency, and a silent skip would never be retried.
+    state.mainTip = Y;
+    state.ci.set(Y, 'in_progress');
+
+    await expect(runGate(Y)).rejects.toThrow(/no successful CI push run was found.*failed closed/);
+  });
+
   it('only runs for workflow_run events', async () => {
     await expect(
       validateAutomaticProductionDispatch({

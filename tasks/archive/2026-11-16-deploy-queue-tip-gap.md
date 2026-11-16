@@ -34,15 +34,20 @@ and a second run; design A needs only a read-only `deployments: read` on one job
 
 ## Checklist
 
-- [ ] Validator: automatic path resolves tip, checks tip CI, checks deployed marker
-- [ ] deploy.yml: pass triggering SHA, job-level read permissions, skip deploy when no SHA selected
-- [ ] Tests: out-of-order sequences via a queue simulation through the real validator; tip green/pending/failed/already deployed/API error; non-tip control
-- [ ] Update ci.yml comment and do.md Phase 7b
-- [ ] Security-auditor review; idea note
+- [x] Validator: automatic path resolves tip, checks tip CI, checks deployed marker
+- [x] deploy.yml: pass triggering SHA, job-level read permissions, skip deploy when no SHA selected
+- [x] Tests: out-of-order sequences via a queue simulation through the real validator; tip green/pending/failed/already deployed/API error; non-tip control
+- [x] Update ci.yml comment and do.md Phase 7b
+- [x] Security-auditor review (0 critical/high; LOW 1-2 fixed, LOW 3 posted to feature.ship-faster for PR #2770 owner, LOW 4 accepted); idea note
 
 ## Acceptance Criteria
 
-- [ ] After any out-of-order CI completion sequence, the green tip is deployed with no intervention
-- [ ] Only a main tip with a successful CI push run on that exact SHA is ever deployed
-- [ ] Manual dispatch path and emergency override unchanged
-- [ ] API errors fail closed (no deploy, red run)
+- [x] After any out-of-order CI completion sequence, the green tip is deployed with no intervention
+- [x] Only a main tip with a successful CI push run on that exact SHA is ever deployed
+- [x] Manual dispatch path and emergency override unchanged
+- [x] API errors fail closed (no deploy, red run)
+
+## Notes
+
+- If the tip's deploy failed (no marker), a later out-of-order CI completion retries the tip's deploy. Deploys are idempotent; previously the tip stayed undeployed until the next merge.
+- If the tip itself triggered the run but no successful CI run is found for it, the gate fails red (API inconsistency) instead of skipping silently (security-auditor LOW 1).
