@@ -65,29 +65,30 @@ from its own `sam/` branch, closing the bot PR with a link.
 - Instant containers rewrite their helper on every agent start, so no old helper survives a new image.
 - Accepted LOW residuals (go-specialist re-review): a reused bearer with a changed helper replaces the host file by rename, so a later forced re-mint can only reach the current inode, not an older pinned one (needs a deliberate digest rotation plus a template change); a digest reinstalled from a helper that survived a partial deletion revives a bearer no container holds; cross-process test-ID collisions in /tmp only affect two concurrent `go test` runs on one machine.
 - Coverage of `recoverWorkspaceRuntime` and snapshot restore is at the seam (they pass the runtime's workspace ID into `PrepareWorkspace`) plus the bootstrap layer (real Docker bind mounts); there is no single test from recovery through Docker.
-- [ ] Staging: fresh agent binary, clone/fetch/push, after restart/rebuild, Instant session, cross-workspace refusal, cleanup
+- [x] Staging: fresh agent binary, clone/fetch/push, after restart/rebuild, Instant session, cross-workspace refusal, cleanup (staging2, deploy 43799334260; evidence in PR #2759)
 
 ### #2754
 
-- [ ] Fix 7 broken tests (fixtures, expectations), reconsider `userStatus === null`
-- [ ] `suspended`/`invited` reject without revoke; `removed`/deleted user revoke
-- [ ] Drop per-tool capability map and dispatcher hook
-- [ ] Real-SQL tests for membership/status branches
-- [ ] Update `security.md` MCP token acceptance conditions
-- [ ] File backlog follow-up: stop/revoke removed member workspaces on offboarding
-- [ ] Staging: remove member B, B's agent MCP fails; active member's still works
+- [x] Fix 7 broken tests (fixtures, expectations), reconsider `userStatus === null`
+- [x] `suspended`/`invited` reject without revoke; `removed`/deleted user revoke
+- [x] Drop per-tool capability map and dispatcher hook
+- [x] Real-SQL tests for membership/status branches
+- [x] Update `security.md` MCP token acceptance conditions
+- [x] File backlog follow-up: stop/revoke removed member workspaces on offboarding (`tasks/backlog/2026-11-15-stop-removed-member-workspaces-on-offboarding.md`)
+- [x] Staging: remove member B, B's agent MCP fails; active member's still works (staging2, deploy 43809005915: member call before removal OK, after removal rejected; admin control OK)
+- [x] CodeRabbit Major fixed: pending owners rejected (kept) while signup approval is required, same predicate as REST (2d9dd31ff)
 
 ### #2753
 
-- [ ] Fix 2 failing tests
-- [ ] Migration 0242: no demotion; marker only; duplicates surfaced; test second superadmin survives
-- [ ] "Only real user" guard + tests (sole user suspended, sole user non-admin)
-- [ ] Election try/catch fails closed without blocking login
-- [ ] Document recovery path in self-hosting and admin docs
-- [ ] Staging: existing user sign-in works; D1 superadmins unchanged before/after
+- [x] Fix 2 failing tests
+- [x] Migration (finally `0246_first_superadmin_election.sql`): no demotion; marker only; duplicates surfaced; test second superadmin survives
+- [x] "Only real user" guard + tests (sole user suspended, sole user non-admin)
+- [x] Election try/catch fails closed without blocking login
+- [x] Document recovery path in self-hosting and admin docs
+- [x] Staging: existing user sign-in works; D1 superadmins unchanged before/after (staging2, deploy 43812594179; evidence in PR #2772)
 
 ## Acceptance Criteria
 
 - [ ] Each PR merged separately with specialist review evidence, staging evidence, CodeRabbit request-and-wait, and green production deploy
-- [ ] Bot PRs closed with links to replacements
+- [x] Bot PRs closed with links to replacements
 - [ ] PR URL, merge SHA and deploy result published on `feature.codex-security-fixes`
