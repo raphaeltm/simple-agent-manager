@@ -146,6 +146,10 @@ When agents call `update_task_status`, SAM creates progress notifications. To av
 | `/api/projects/:projectId/sessions/:sessionId/attention/:markerId`         | GET    | Read the full saved question (`?context=true` adds earlier messages) |
 | `/api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve` | POST   | Record and forward a structured answer                               |
 
+A push subscription's endpoint must be an HTTPS URL on a public host (the push services browsers
+use all are). SAM never follows a redirect from a push service, and a stored endpoint that is not on
+a public host is skipped at delivery (`web_push.endpoint_refused`).
+
 ### Deduplication
 
 SAM automatically deduplicates notifications:

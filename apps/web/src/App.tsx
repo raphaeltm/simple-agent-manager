@@ -24,7 +24,7 @@ import { ToastProvider } from './hooks/useToast';
 import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
 import { prefetchProjectRoute } from './lib/project-route-prefetch';
 import { queryClient } from './lib/query-client';
-import { isProjectChatRoute } from './lib/shell-routes';
+import { isProjectChatRoute, isProjectOverviewRoute } from './lib/shell-routes';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
 import { Dashboard } from './pages/Dashboard';
@@ -79,7 +79,15 @@ const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
 const loadProjectShell = memoizeRouteImport(() => import('./pages/Project'));
 const loadProjectChat = memoizeRouteImport(() => import('./pages/project-chat'));
 const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSettings'));
+const loadProjectOverview = memoizeRouteImport(() => import('./pages/project-overview'));
 const ProjectShell = lazyNamed(loadProjectShell, 'Project');
+
+/** Start a route chunk's download when the browser is idle (memoized imports make repeats free). */
+function preloadWhenIdle(load: () => Promise<unknown>) {
+  const run = () => void load().catch(() => undefined);
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run);
+  else setTimeout(run, 1);
+}
 /**
  * The project shell's chunk fallback. On a chat route it is the chat's own loading
  * layout, so the spinner is already where the project and transcript spinners that
@@ -111,12 +119,16 @@ function Project() {
     void loadProjectSettings().catch(() => undefined);
   } else if (isProjectChatRoute(pathname)) {
     void loadProjectChat().catch(() => undefined);
+  } else if (isProjectOverviewRoute(pathname)) {
+    void loadProjectOverview().catch(() => undefined);
+    // Chat is one tap from the landing page: fetch its chunk once the Overview's is under way.
+    preloadWhenIdle(loadProjectChat);
   }
   return <ProjectShell />;
 }
 const ProjectChat = lazyNamed(loadProjectChat, 'ProjectChat');
 const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'ProjectActivity');
-const ProjectOverview = lazyNamed(() => import('./pages/project-overview'), 'ProjectOverview');
+const ProjectOverview = lazyNamed(loadProjectOverview, 'ProjectOverview');
 const ProjectInsights = lazyNamed(() => import('./pages/insights'), 'ProjectInsights');
 const InsightsFlowTab = lazyNamed(() => import('./pages/insights/FlowTab'), 'FlowTab');
 const InsightsComingSoonTab = lazyNamed(
@@ -320,7 +332,8 @@ export default function App() {
                         path="/projects/:id"
                         element={page(<Project />, <ProjectRouteFallback />)}
                       >
-                        <Route index element={<Navigate to="chat" replace />} />
+                        {/* Opening a project lands on its Overview (inbox slice F2); chat is one tap away. */}
+                        <Route index element={<Navigate to="overview" replace />} />
                         <Route path="overview" element={page(<ProjectOverview />)} />
                         <Route path="insights" element={page(<ProjectInsights />)}>
                           <Route index element={<Navigate to="flow" replace />} />

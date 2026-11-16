@@ -172,7 +172,10 @@ function LocationProbe() {
   return null;
 }
 
-function renderInbox(entry = '/inbox') {
+type Entry = string | { pathname: string; search?: string; state?: unknown };
+
+function renderInbox(entry: Entry | Entry[] = '/inbox') {
+  const entries = Array.isArray(entry) ? entry : [entry];
   const client = new QueryClient({
     // Same focus default as the app's client (`lib/query-client.ts`): inbox queries must opt in.
     defaultOptions: {
@@ -182,13 +185,22 @@ function renderInbox(entry = '/inbox') {
   });
   const view = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[entry]}>
+      <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
         <Routes>
           <Route
             path="/inbox"
             element={
               <>
                 <InboxPage projectId={null} />
+                <LocationProbe />
+              </>
+            }
+          />
+          <Route
+            path="/projects/:id/inbox"
+            element={
+              <>
+                <InboxPage projectId="p1" projectName="Acme" />
                 <LocationProbe />
               </>
             }
@@ -723,5 +735,155 @@ describe('InboxPage — error items and malformed rows', () => {
     expect(await screen.findByRole('button', { name: /Title ask:ok/ })).toBeInTheDocument();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe('InboxPage — opened from the Project Overview (slice F2)', () => {
+  const fromOverview = (ref: string) =>
+    `/projects/p1/inbox?${new URLSearchParams({ item: ref, from: 'overview' }).toString()}`;
+
+  it('on a phone, Back from the item returns to the Overview, not the inbox list (fresh tab: replace)', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    renderInbox(fromOverview('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    expect(screen.queryByRole('button', { name: 'Back to inbox' })).not.toBeInTheDocument();
+    // The item pane's arrow (the header, with its own button, is hidden by CSS on a phone).
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Back to Overview' }));
+    await waitFor(() => expect(location).toBe('/projects/p1/overview'));
+  });
+
+  it('answering moves to the next item and keeps the way back to the Overview', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    renderInbox(fromOverview('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Yes' }));
+    await within(itemPane()).findByRole('heading', { name: 'Title ask:b' });
+    expect(screen.getByTestId('inbox-receipt')).toHaveTextContent('Sent “Yes”');
+    await waitFor(() => expect(location).toContain('from=overview'));
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Back to Overview' }));
+    await waitFor(() => expect(location).toBe('/projects/p1/overview'));
+  });
+
+  it('on desktop, the header offers the way back beside the list (fresh tab: replace)', async () => {
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox(fromOverview('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    fireEvent.click(
+      within(screen.getByRole('banner')).getByRole('button', { name: 'Back to Overview' })
+    );
+    await waitFor(() => expect(location).toBe('/projects/p1/overview'));
+  });
+
+  /** The Overview's entry, then the item the Overview pushed (with the state it pushes). */
+  const pushedFromOverview = (ref: string): Entry[] => [
+    '/projects/p1/overview?entry=overview',
+    {
+      pathname: '/projects/p1/inbox',
+      search: `?${new URLSearchParams({ item: ref, from: 'overview' }).toString()}`,
+      state: { samOverviewBehind: true },
+    },
+  ];
+
+  it('pops back to the Overview entry it came from, even after answering moved on', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    renderInbox(pushedFromOverview('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Yes' }));
+    await within(itemPane()).findByRole('heading', { name: 'Title ask:b' });
+    await waitFor(() => expect(location).toContain('item=ask%3Ab'));
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Back to Overview' }));
+    // The marker query exists only on the original Overview entry: this was a pop, not a push.
+    await waitFor(() => expect(location).toBe('/projects/p1/overview?entry=overview'));
+  });
+
+  it('on desktop, after opening another row, Back goes to the Overview, not the first item', async () => {
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    renderInbox(pushedFromOverview('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    // Opening a row pushes a new entry, whose previous entry is item a, not the Overview.
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'Inbox list' })).getByRole('button', {
+        name: /Title ask:b/,
+      })
+    );
+    await within(itemPane()).findByRole('heading', { name: 'Title ask:b' });
+    const header = screen.getByRole('banner');
+    fireEvent.click(within(header).getByRole('button', { name: 'Back to Overview' }));
+    await waitFor(() => expect(location).toBe('/projects/p1/overview'));
+  });
+
+  it('browsing by chip drops the way back: Back returns to the list again', async () => {
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox(fromOverview('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    expect(
+      within(screen.getByRole('banner')).getByRole('button', { name: 'Back to Overview' })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Blocking/ }));
+    await waitFor(() => expect(location).toContain('filter=blocking'));
+    expect(location).not.toContain('from=');
+    expect(screen.queryByRole('button', { name: 'Back to Overview' })).not.toBeInTheDocument();
+  });
+
+  it('the cross-project inbox never offers Back to Overview', async () => {
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox(
+      `/inbox?${new URLSearchParams({ item: 'ask:a', project: 'p1', from: 'overview' }).toString()}`
+    );
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    expect(screen.queryByRole('button', { name: 'Back to Overview' })).not.toBeInTheDocument();
+  });
+
+  it('answering marks the Overview read stale, so Running now is fresh on the way back', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    const { client } = renderInbox(fromOverview('ask:a'));
+    const overviewKey = ['auth', 'user-1', 'project-overview', 'p1'];
+    client.setQueryData(overviewKey, { projectId: 'p1' });
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    expect(client.getQueryState(overviewKey)?.isInvalidated).toBe(false);
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Yes' }));
+    await within(itemPane()).findByRole('heading', { name: 'Title ask:b' });
+    expect(client.getQueryState(overviewKey)?.isInvalidated).toBe(true);
+  });
+
+  it('opened from the inbox itself, Back stays in the inbox (control)', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox(`/projects/p1/inbox?item=ask%3Aa`);
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    expect(screen.queryByRole('button', { name: 'Back to Overview' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to inbox' }));
+    await waitFor(() => expect(location).toBe('/projects/p1/inbox'));
   });
 });
