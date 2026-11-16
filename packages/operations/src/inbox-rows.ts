@@ -8,6 +8,7 @@ import {
   ASK_STATUSES,
   type AskStatus,
   formatInboxRef,
+  INBOX_ERROR_ACTIONS,
   type InboxAgentState,
   type InboxAnswerSpec,
   type InboxItem,
@@ -43,6 +44,9 @@ export const InboxRowSchema = v.object({
   topic: v.optional(nullableText, null),
   task_status: v.optional(nullableText, null),
   task_step: v.optional(nullableText, null),
+  // `asks` rows only (other stores select NULL).
+  updated_at: v.optional(v.nullable(int), null),
+  failure_count: v.optional(v.nullable(int), null),
 });
 export type InboxRow = v.InferOutput<typeof InboxRowSchema>;
 
@@ -80,6 +84,20 @@ export const AskAnswerSpecSchema = v.variant('type', [
   }),
   v.object({ type: v.literal('text') }),
   v.object({ type: v.literal('acknowledge') }),
+  // System error items (slice E): fixes SAM can run, first is primary.
+  v.object({
+    type: v.literal('actions'),
+    actions: v.pipe(
+      v.array(
+        v.object({
+          id: v.picklist(INBOX_ERROR_ACTIONS),
+          label: v.pipe(v.string(), v.minLength(1), v.maxLength(60)),
+        })
+      ),
+      v.minLength(1),
+      v.maxLength(INBOX_ERROR_ACTIONS.length)
+    ),
+  }),
 ]);
 
 const ApprovalExtraSchema = v.object({ targetType: v.string(), targetId: v.string() });
@@ -222,6 +240,8 @@ export function inboxItemFromRow(row: InboxRow, now: number): InboxItem {
     agentState: inboxAgentState(row),
     status,
     createdAt: new Date(createdAt).toISOString(),
+    updatedAt: new Date(Math.max(row.updated_at ?? createdAt, createdAt)).toISOString(),
+    failureCount: kind === 'error' ? Math.max(1, row.failure_count ?? 1) : null,
     expiresAt: iso(expiresAt),
     dueAt: iso(row.due_at),
     answerSpec,

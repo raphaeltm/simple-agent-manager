@@ -146,15 +146,37 @@ export function mergedStatement(w: FlowWindow): FlowStatement {
 }
 
 /**
- * CI first try, per period. A pull request counts when SAM recorded the commit it opened with
- * (`pull_request_heads.from_open = 1`) in the period. Its verdict comes from that commit's
- * checks:
+ * The first-try rule, shared by Flow and the run receipt so the two cannot disagree. Tallies are
+ * over the checks of a pull request's opening commit (`pull_request_heads.from_open = 1`), joined
+ * as `c`:
  * - failed: any check reported a failure on it (`state = 'failure'` now, or `first_failed_at`
  *   set, which also catches a failure a rerun turned green);
  * - passed: no failure, at least one success, and nothing still pending, or the pull request has
  *   moved on (closed, merged, or pushed again), so a check suite that never completes cannot
  *   hold the verdict open forever;
- * - otherwise undecided, and left out of the rate.
+ * - otherwise pending: checks still running, or none reported (a repository without CI).
+ */
+export const FIRST_TRY_FAILED_SQL =
+  "coalesce(sum(c.state = 'failure' OR c.first_failed_at IS NOT NULL), 0)";
+export const FIRST_TRY_PASSED_SQL = "coalesce(sum(c.state = 'success'), 0)";
+export const FIRST_TRY_PENDING_SQL = "coalesce(sum(c.state = 'pending'), 0)";
+
+/** `'failed' | 'passed' | 'pending'` from the tallies above and a "moved on" flag. */
+export function firstTryVerdictSql(t: {
+  failed: string;
+  passed: string;
+  pending: string;
+  movedOn: string;
+}): string {
+  return `CASE WHEN ${t.failed} > 0 THEN 'failed'
+               WHEN ${t.passed} > 0 AND (${t.pending} = 0 OR ${t.movedOn}) THEN 'passed'
+               ELSE 'pending' END`;
+}
+
+/**
+ * CI first try, per period. A pull request counts when SAM recorded the commit it opened with
+ * (`pull_request_heads.from_open = 1`) in the period, and its verdict follows
+ * `firstTryVerdictSql`; a pending verdict is left out of the rate.
  */
 export function ciFirstTryStatement(w: FlowWindow): FlowStatement {
   return {
@@ -166,10 +188,9 @@ export function ciFirstTryStatement(w: FlowWindow): FlowStatement {
       ),
       verdicts AS (
         SELECT o.opened_at,
-               count(c.check_key) AS checks,
-               coalesce(sum(c.state = 'failure' OR c.first_failed_at IS NOT NULL), 0) AS failed,
-               coalesce(sum(c.state = 'success'), 0) AS passed,
-               coalesce(sum(c.state = 'pending'), 0) AS pending,
+               ${FIRST_TRY_FAILED_SQL} AS failed,
+               ${FIRST_TRY_PASSED_SQL} AS passed,
+               ${FIRST_TRY_PENDING_SQL} AS pending,
                (p.state IS NOT NULL AND (p.state <> 'open' OR p.head_sha IS NOT o.head_sha)) AS moved_on
           FROM opening o
           LEFT JOIN pull_request_checks c
@@ -179,9 +200,11 @@ export function ciFirstTryStatement(w: FlowWindow): FlowStatement {
          GROUP BY o.repository, o.pr_number
       ),
       decided AS (
-        SELECT opened_at >= ? AS current, failed = 0 AS ok
-          FROM verdicts
-         WHERE failed > 0 OR (passed > 0 AND (pending = 0 OR moved_on))
+        SELECT opened_at >= ? AS current, verdict = 'passed' AS ok
+          FROM (SELECT opened_at,
+                       ${firstTryVerdictSql({ failed: 'failed', passed: 'passed', pending: 'pending', movedOn: 'moved_on' })} AS verdict
+                  FROM verdicts)
+         WHERE verdict <> 'pending'
       )
       SELECT (SELECT count(*) FROM verdicts WHERE opened_at >= ?) AS recorded,
              coalesce(sum(current AND ok), 0) AS passed,

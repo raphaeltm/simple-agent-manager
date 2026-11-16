@@ -2,11 +2,13 @@
  * The worker side of the inbox (`OperationInboxPort`, `packages/operations/src/ports.ts`). Every
  * method delegates to the path its store already uses; nothing here answers a store a second way.
  */
-import type { OperationInboxPort } from '@simple-agent-manager/operations';
+import { OperationError, type OperationInboxPort } from '@simple-agent-manager/operations';
 import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import { retrySubtask } from '../../durable-objects/sam-session/tools/retry-subtask';
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import {
@@ -22,6 +24,9 @@ import {
   declineRuntimeSecretRequest,
   fulfillRuntimeSecretRequest,
 } from '../runtime-secret-requests';
+import { ensureSessionRecovery } from '../session-recovery';
+import { clearTriggerPageCaches } from '../trigger-cache';
+import { triggerStatusUpdates } from '../trigger-status';
 import { announceAgentAsk, checkAgentLinkTargets, withdrawAgentQuestion } from './agent-asks';
 import { readAskContext } from './ask-context';
 import { deliverInboxAskNotice } from './ask-notice';
@@ -150,6 +155,78 @@ export function createInboxPort(env: Env): OperationInboxPort {
 
     notifyAsk: (row, outcome) => deliverInboxAskNotice(env, row, outcome),
 
+    async retryTask(userId, projectId, taskId) {
+      // The existing retry: a new task with the same description, owner-only (`retrySubtask`).
+      const owned = await env.DATABASE.prepare(
+        'SELECT 1 AS ok FROM tasks WHERE id = ? AND project_id = ?'
+      )
+        .bind(taskId, projectId)
+        .first();
+      if (!owned) throw new OperationError('not_found', 'Task not found');
+      const result = (await retrySubtask(
+        { taskId },
+        {
+          env: env as unknown as Record<string, unknown>,
+          userId,
+        }
+      )) as { newTaskId?: unknown; error?: unknown };
+      if (typeof result.newTaskId !== 'string') {
+        throw new OperationError(
+          'conflict',
+          typeof result.error === 'string' ? result.error : 'The task could not be retried'
+        );
+      }
+      return { newTaskId: result.newTaskId };
+    },
+
+    async resumeTrigger(userId, projectId, triggerId) {
+      const database = db();
+      if (!(await hasProjectCapability(database, projectId, userId, 'task:write')))
+        throw new OperationError('forbidden', 'You cannot resume automations in this project');
+      const trigger = await database
+        .select()
+        .from(schema.triggers)
+        .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)))
+        .get();
+      if (!trigger) throw new OperationError('not_found', 'Automation not found');
+      if (trigger.status !== 'paused')
+        throw new OperationError('conflict', `This automation is ${trigger.status}, not paused`);
+      // The trigger PATCH route's status change, as a compare-and-set on `paused`.
+      const updated = await database
+        .update(schema.triggers)
+        .set({ ...triggerStatusUpdates(trigger, 'active'), updatedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(schema.triggers.id, triggerId),
+            eq(schema.triggers.projectId, projectId),
+            eq(schema.triggers.status, 'paused')
+          )
+        )
+        .returning({ id: schema.triggers.id });
+      if (updated.length !== 1)
+        throw new OperationError('conflict', 'The automation changed while it was being resumed');
+      clearTriggerPageCaches(projectId);
+    },
+
+    async wakeChat(userId, projectId, sessionId) {
+      await authorizeAgentWake(env, {
+        projectId,
+        sessionId,
+        actorUserId: userId,
+        trigger: 'user_followup',
+        action: 'wake the agent in this session',
+      });
+      const result = await ensureSessionRecovery(env, projectId, sessionId);
+      if (result.status !== 'waking') {
+        // The refusal reason is a fixed code (`recordSessionRecoveryRefusal`), not error text.
+        throw new OperationError(
+          'conflict',
+          result.reason === 'container_runtime_wakes_in_place'
+            ? 'This chat wakes when you send it a message'
+            : `SAM could not wake this chat (${result.reason})`
+        );
+      }
+    },
     announceAsk: (input) => announceAgentAsk(env, input),
 
     withdrawQuestion: (input) => withdrawAgentQuestion(env, input),

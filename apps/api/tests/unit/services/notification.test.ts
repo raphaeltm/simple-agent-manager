@@ -1,4 +1,4 @@
-import { MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
+import { classifyFailure, MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import {
@@ -225,8 +225,25 @@ describe('Notification Service', () => {
         type: 'error',
         urgency: 'high',
         title: 'Task failed: Deploy to prod',
-        body: 'Build failed: syntax error',
+        body: classifyFailure('Build failed: syntax error').explanation,
       }));
+    });
+
+    it('never puts the raw error text in the body', async () => {
+      await notifyTaskFailed(env, 'user-123', {
+        projectId: 'proj-1',
+        projectName: 'My Project',
+        taskId: 'task-1',
+        taskTitle: 'Deploy to prod',
+        errorMessage: 'git push failed: https://x:ghp_CANARYsecretTOKEN0123456789@github.com/o/r',
+      });
+
+      const call = createNotificationMock.mock.calls[0]![1];
+      expect(JSON.stringify(call)).not.toContain('ghp_CANARY');
+      expect(call.body).toBe(
+        classifyFailure('git push failed: https://x:ghp_CANARYsecretTOKEN0123456789@github.com/o/r')
+          .explanation
+      );
     });
 
     it('should include projectName in metadata', async () => {
@@ -241,7 +258,7 @@ describe('Notification Service', () => {
       expect(call.metadata.projectName).toBe('My Project');
     });
 
-    it('should use default error message when none provided', async () => {
+    it('should use the unknown-failure sentence when no error is provided', async () => {
       await notifyTaskFailed(env, 'user-123', {
         projectId: 'proj-1',
         projectName: 'My Project',
@@ -250,7 +267,7 @@ describe('Notification Service', () => {
       });
 
       const call = createNotificationMock.mock.calls[0]![1];
-      expect(call.body).toBe('Task encountered an error');
+      expect(call.body).toBe(classifyFailure(undefined).explanation);
     });
   });
 

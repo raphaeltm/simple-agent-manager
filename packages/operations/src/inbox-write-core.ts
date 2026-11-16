@@ -9,12 +9,14 @@
 import {
   type AcpInteractionBrowserAnswer,
   type InboxActionResponse,
+  type InboxErrorAction,
   type InboxItem,
   type ParsedInboxRef,
 } from '@simple-agent-manager/shared';
 
 import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
+import { answerErrorItem, archiveErrorItem } from './inbox-error-core';
 import { INBOX_NOT_FOUND, resolveInboxItem } from './inbox-item-core';
 import { getInboxLimits } from './inbox-settings';
 import type { InboxAskNoticeOutcome, InboxAskNoticeRow } from './ports';
@@ -29,6 +31,8 @@ export interface InboxAnswerInput {
   formContent?: Record<string, unknown>;
   decision?: 'approve' | 'deny';
   note?: string;
+  /** A system error item's fix (`retry`, `wake`, `resume`). */
+  action?: InboxErrorAction;
   /** Browser (web actor) only; never logged or returned. */
   secret?: { value: string; replaceExisting?: boolean; expectedExistingVersion?: string };
 }
@@ -253,6 +257,8 @@ export async function answerInboxItem(
   const me = ctx.actor.userId;
   switch (ref.store) {
     case 'ask':
+      // A system error has no filing agent: answering it runs its fix (inbox-error-core.ts).
+      if (item.kind === 'error') return answerErrorItem(ctx, item, ref.id, input.action);
       return answerAsk(ctx, item, ref.id, input);
     case 'attention': {
       if (item.answerSpec.type === 'interaction') {
@@ -325,6 +331,7 @@ export async function archiveInboxItem(
   const me = ctx.actor.userId;
   switch (ref.store) {
     case 'ask': {
+      if (item.kind === 'error') return archiveErrorItem(ctx, item, ref.id);
       // The notice wakes the filing agent, so the agent-wake policy decides, as for an answer.
       if (item.sessionId)
         await ctx.ports.inbox.authorizeAnswerWake(item.projectId, item.sessionId, me);
