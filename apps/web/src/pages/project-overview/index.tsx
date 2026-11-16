@@ -75,12 +75,16 @@ const GUTTER = 'gap-[var(--sam-space-gutter)]';
  * to it (the screen edge, the app bar or nav, the task box, the other column) and pads back the
  * same distance: the panes stay where they were, their shadows fall inside the scroller, and a
  * pane scrolled out of view passes under its neighbour instead of being cut in mid-air.
- * `--sam-shell-frame` and `--sam-shell-gap` come from `AppShell`.
+ * `--sam-shell-frame`, `--sam-shell-gap` and `--sam-shell-inset-start` come from `AppShell`.
+ *
+ * On desktop the two columns' boxes overlap in the gutter between them. The main column stacks
+ * above the rail (`md:z-10`) so its own scrollbar, which now sits in that gutter, stays
+ * reachable; what it covers there is only the rail's transparent padding.
  */
 const PHONE_SCROLL_BLEED =
   '-mx-[var(--sam-shell-frame)] px-[var(--sam-shell-frame)] -mt-[var(--sam-shell-gap)] pt-[var(--sam-shell-gap)] -mb-[var(--sam-space-gutter)] pb-[var(--sam-space-gutter)]';
 const DESKTOP_MAIN_BLEED =
-  'md:-mt-[var(--sam-shell-frame)] md:pt-[var(--sam-shell-frame)] md:-ml-[var(--sam-shell-gap)] md:pl-[var(--sam-shell-gap)] md:-mr-[var(--sam-space-gutter)] md:pr-[var(--sam-space-gutter)] md:-mb-[var(--sam-space-gutter)] md:pb-[var(--sam-space-gutter)]';
+  'md:-mt-[var(--sam-shell-frame)] md:pt-[var(--sam-shell-frame)] md:-ml-[var(--sam-shell-inset-start)] md:pl-[var(--sam-shell-inset-start)] md:-mr-[var(--sam-space-gutter)] md:pr-[var(--sam-space-gutter)] md:-mb-[var(--sam-space-gutter)] md:pb-[var(--sam-space-gutter)]';
 const DESKTOP_RAIL_BLEED =
   'md:-mt-[var(--sam-shell-frame)] md:pt-[var(--sam-shell-frame)] md:-mr-[var(--sam-shell-frame)] md:pr-[var(--sam-shell-frame)] md:-mb-[var(--sam-shell-frame)] md:pb-[var(--sam-shell-frame)] md:-ml-[var(--sam-space-gutter)] md:pl-[var(--sam-space-gutter)]';
 
@@ -110,7 +114,7 @@ export function OverviewLayout({
         data-testid="overview-scroll"
       >
         <div
-          className={`contents md:relative md:col-start-1 md:row-start-1 md:flex md:min-h-0 md:min-w-0 md:flex-col md:overflow-y-auto ${GUTTER} ${DESKTOP_MAIN_BLEED}`}
+          className={`contents md:relative md:z-10 md:col-start-1 md:row-start-1 md:flex md:min-h-0 md:min-w-0 md:flex-col md:overflow-y-auto ${GUTTER} ${DESKTOP_MAIN_BLEED}`}
           data-testid="overview-main"
         >
           {main}

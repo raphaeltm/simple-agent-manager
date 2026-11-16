@@ -407,10 +407,13 @@ export function AppShell({ children }: AppShellProps) {
               gridTemplateRows: 'minmax(0, 1fr) auto',
               // Zen collapses the nav column to nothing, so it must not keep a gutter either.
               columnGap: 'var(--sam-shell-gap)',
-              // The frame, and the gap between the nav and the content. Full-bleed pages read
-              // these to reach the screen edge and the nav with their scrollers (`OverviewLayout`).
+              // The frame, the gap between the nav and the content, and how far the content's
+              // left edge is from the nav or, in Zen, the screen edge. Full-bleed pages read these
+              // to reach the screen edge and the nav with their scrollers (`OverviewLayout`).
               ['--sam-shell-frame' as string]: '16px',
               ['--sam-shell-gap' as string]: navWidth > 0 ? 'var(--sam-space-gutter)' : '0px',
+              ['--sam-shell-inset-start' as string]:
+                navWidth > 0 ? 'var(--sam-space-gutter)' : 'var(--sam-shell-frame)',
               ['--sam-void-x' as string]: '58%',
             }}
           >

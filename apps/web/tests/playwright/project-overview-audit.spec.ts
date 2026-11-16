@@ -1060,11 +1060,71 @@ test.describe('Project Overview layering and spacing', () => {
       expect(top!.x).toBeGreaterThanOrEqual(8);
     } else {
       expect(first!.y).toBeGreaterThanOrEqual(14);
+      // The two columns' boxes overlap in the gutter; the main column's scrollbar lives there,
+      // so the main column, not the rail, must own that strip.
+      const owner = await page.getByTestId('overview-main').evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.right - 3, box.top + box.height / 2);
+        return hit?.closest('[data-testid^="overview-"]')?.getAttribute('data-testid');
+      });
+      expect(owner).toBe('overview-main');
     }
     await expectTaskBoxPinned(page);
     await assertNoOverflow(page);
     await page.screenshot({
       path: `../../.codex/tmp/playwright-screenshots/overview-layering-end-${page.viewportSize()?.width}.png`,
+    });
+  });
+
+  for (const mode of ['focus', 'zen'] as const) {
+    test(`desktop ${mode} mode: pane shadows are not cut off either`, async ({
+      page,
+    }, testInfo) => {
+      test.skip(isPhone(testInfo), 'focus modes are desktop-only');
+      await page.addInitScript((value) => {
+        localStorage.setItem('sam:focus-mode', value);
+      }, mode);
+      await setupScene(page, {
+        scene: 'busy',
+        budget: 'stressed',
+        automations: 'failing',
+        inbox: STRESS_INBOX,
+      });
+      await page.goto(BASE);
+      await expect(page.getByRole('region', { name: 'Needs you' })).toBeVisible();
+      // Liveness: the mode really applied (Zen hides the nav; Focus narrows it).
+      const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      expect(needs!.x).toBeLessThan(mode === 'zen' ? 40 : 120);
+      await expectPaneShadowsUnclipped(page, 14);
+      await scrollOverviewToEnd(page);
+      await expectPaneShadowsUnclipped(page, 14);
+    });
+  }
+
+  test('light theme: pane shadows are not cut off either', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('sam-theme', 'light');
+    });
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
+    await page.goto(BASE);
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.getAttribute('data-ui-theme')))
+      .toBe('sam-light');
+    await expect(page.getByRole('region', { name: 'Needs you' })).toBeVisible();
+    await expectPaneShadowsUnclipped(page, 10);
+    await page.waitForTimeout(400);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/overview-layering-light-top-${page.viewportSize()?.width}.png`,
+    });
+    await scrollOverviewToEnd(page);
+    await expectPaneShadowsUnclipped(page, 10);
+    await page.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/overview-layering-light-end-${page.viewportSize()?.width}.png`,
     });
   });
 

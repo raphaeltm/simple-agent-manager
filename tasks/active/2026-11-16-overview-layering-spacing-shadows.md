@@ -30,7 +30,7 @@ layout (PR #2793) that is about to be in production.
    dividers, bold, chevron, 32px tinted icon) next to the Overview's own rows (px-2, 18px
    icon, no dividers): different icon column and text edge in one pane.
 
-Looked at and left alone: gaps between panes (14px everywhere, consistent), profile picker and
+Looked at and left alone: the composer options panel's Effort select (reviewer suspected a clip; measured 128px in a 128px track, 13px inside its panel), gaps between panes (14px everywhere, consistent), profile picker and
 options popovers (correct stacking), Budgets / This week / Automations content.
 
 ## Checklist
@@ -42,8 +42,10 @@ options popovers (correct stacking), Budgets / This week / Automations content.
 - [x] Playwright: pane shadows unclipped (measured, top and scrolled to end, both viewports)
 - [x] Playwright: Recently idea and PR rows share icon column and text edge
 - [x] Both checks proven red on the pre-fix code
-- [ ] Inbox page and Ideas page re-checked (shared InboxRow / IdeaStateIcon)
-- [ ] Light theme checked
+- [x] Inbox page and Ideas page re-checked (inbox, ideas-list, ideas-ui, focus-mode, chat-immersive, sam-glass-chat audits: 225 passed)
+- [x] Light theme checked (Playwright case + screenshots)
+- [x] Review fix: Zen mode inset (`--sam-shell-inset-start`) + Focus/Zen Playwright cases (Zen red without the fix)
+- [x] Review fix: main column above the rail (`md:z-10`) so its gutter scrollbar is reachable (hit-test assertion red without it)
 - [ ] Before/after screenshots posted on the PR
 - [ ] ui-ux-specialist and task-completion-validator reviews
 - [ ] CI green, merged, production deploy watched
