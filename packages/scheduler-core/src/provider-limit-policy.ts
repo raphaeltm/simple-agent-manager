@@ -45,6 +45,9 @@ export const ProviderLimitWaitSchema = v.object({
       profileId: v.optional(v.nullable(v.string())),
       skillId: v.optional(v.nullable(v.string())),
       runConfigurationId: v.optional(v.nullable(v.string())),
+      sourceCredentialReference: v.optional(v.string()),
+      repairAttempts: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+      repairExpiresAt: v.optional(timestamp),
       agentType: v.optional(v.string()),
       expiresAt: v.optional(timestamp),
       /** Durable owner approval awaiting recovery acknowledgement. */

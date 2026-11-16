@@ -172,6 +172,26 @@ for (const viewport of [
       await screenshot(page, `provider-force-resume-pending-${viewport.name}`);
     });
 
+    test('accepted but unconfirmed resume stays in progress', async ({ page }) => {
+      await openHeldChat(page, 'callback');
+      await page.route('**/api/projects/*/tasks/task-1/provider-limit/start-anyway', (route) =>
+        route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'RECOVERY_ACCEPTED_PENDING',
+            message: 'Resume accepted, but the runner did not confirm; refresh shortly',
+          }),
+        })
+      );
+      const notice = page.getByTestId('provider-limit-notice');
+      await notice.getByRole('button', { name: 'Resume anyway' }).click();
+      await expect(notice.getByRole('button', { name: 'Waking…' })).toBeDisabled();
+      await expect(notice.getByRole('alert')).toHaveCount(0);
+      await assertNoOverflow(page);
+      await screenshot(page, `provider-force-resume-unconfirmed-${viewport.name}`);
+    });
+
     test('saved session error remains readable with long text and permits retry', async ({
       page,
     }) => {

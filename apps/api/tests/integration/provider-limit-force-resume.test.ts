@@ -56,6 +56,34 @@ describe('callback provider hold owner force resume', () => {
     expect(boundary.start).not.toHaveBeenCalled();
   }
 
+  it('the SQL approval fence trusts receipt expiry and source, not disagreeing struct fields', async () => {
+    expect((await resume()).status).toBe(202);
+    const { providerLimitRecoveryApprovalIsCurrent } =
+      await import('../../src/services/provider-limit-recovery-approval');
+    const approval = {
+      receipt: task().provider_limit_wait_json as string,
+      ownerUserId: 'user-1',
+      snapshotId: 'snapshot-1',
+      expiresAt: 0,
+      sourceCredentialReference: 'cc_credentials:wrong-struct',
+    };
+    expect(await providerLimitRecoveryApprovalIsCurrent(env, 'task-1', 'project-1', approval)).toBe(
+      true
+    );
+    const expired = JSON.parse(approval.receipt);
+    expired.ownerOverride.expiresAt = 1;
+    const receipt = JSON.stringify(expired);
+    d1.prepare('UPDATE tasks SET provider_limit_wait_json=?').run(receipt);
+    expect(
+      await providerLimitRecoveryApprovalIsCurrent(env, 'task-1', 'project-1', {
+        ...approval,
+        receipt,
+        expiresAt: Date.now() + 86400000,
+        sourceCredentialReference: 'cc_credentials:account-1',
+      })
+    ).toBe(false);
+  });
+
   it.each([true, false])(
     'retains the run account over the default with profile=%s',
     async (hasProfile) => {
@@ -164,7 +192,7 @@ describe('callback provider hold owner force resume', () => {
         receipt: task().provider_limit_wait_json,
         ownerUserId: 'user-1',
         snapshotId: 'snapshot-1',
-        expiresAt: held.deadlineAt,
+        expiresAt: wait().ownerOverride!.expiresAt!,
         sourceCredentialReference: 'cc_credentials:account-1',
       }
     );
@@ -188,7 +216,7 @@ describe('callback provider hold owner force resume', () => {
         profileId: 'profile-1',
         skillId: null,
         agentType: 'claude-code',
-        expiresAt: held.deadlineAt,
+        expiresAt: wait().ownerOverride!.expiresAt!,
       },
     });
     expect(wait().scheduleKey).not.toBe(held.scheduleKey);
@@ -310,7 +338,7 @@ describe('callback provider hold owner force resume', () => {
         receipt: task().provider_limit_wait_json,
         ownerUserId: 'user-1',
         snapshotId: 'snapshot-1',
-        expiresAt: wait().deadlineAt,
+        expiresAt: wait().ownerOverride!.expiresAt!,
         sourceCredentialReference: 'cc_credentials:account-1',
       },
     });

@@ -1,6 +1,7 @@
 import { Button } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
+import { ApiClientError } from '../lib/api/client';
 import { resumeProviderLimitTask, startProviderLimitTaskAnyway } from '../lib/api/tasks';
 import { queryClient } from '../lib/query-client';
 
@@ -55,6 +56,15 @@ export function ProviderLimitResume({
       setState('done');
       void queryClient.invalidateQueries();
     } catch (cause) {
+      if (
+        action === 'resume-anyway' &&
+        cause instanceof ApiClientError &&
+        cause.code === 'RECOVERY_ACCEPTED_PENDING'
+      ) {
+        setState('done');
+        void queryClient.invalidateQueries();
+        return;
+      }
       setError(cause instanceof Error ? cause.message : copy.failed);
       setState('idle');
     }

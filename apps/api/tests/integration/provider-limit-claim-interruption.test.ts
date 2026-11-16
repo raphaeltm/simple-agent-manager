@@ -1,6 +1,7 @@
 /** Claim acquisition is not runner acknowledgement; interrupted claims retain consent. */
 import '../helpers/provider-limit-owner-resume-harness';
 
+import { parseProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
@@ -121,7 +122,7 @@ describe('owner-approved recovery claim interruption', () => {
     expect(boundary.start.mock.calls[0]?.[1]).toMatchObject({
       taskId: 'task-1',
       recoveryAttemptId: 'raced-claim',
-      providerLimitRecoveryApproval: { receipt },
+      providerLimitRecoveryApproval: { receipt: spentReceipt(receipt as string) },
     });
     expect(harness.task()).toMatchObject({
       status: 'queued',
@@ -168,9 +169,15 @@ describe('owner-approved recovery claim interruption', () => {
       status: 'delegated',
       workspace_id: 'replacement',
       admission_state: 'provider_limit_recovery_pending',
-      provider_limit_wait_json: receipt,
+      provider_limit_wait_json: spentReceipt(receipt as string),
     });
     expect(boundary.start).not.toHaveBeenCalled();
     expect(harness.claim()).toEqual(claim);
   });
 });
+
+function spentReceipt(receipt: string): string {
+  const next = parseProviderLimitWait(receipt)!;
+  next.ownerOverride!.repairAttempts = (next.ownerOverride!.repairAttempts ?? 0) + 1;
+  return JSON.stringify(next);
+}

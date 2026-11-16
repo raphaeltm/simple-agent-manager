@@ -14,6 +14,7 @@ import {
   SessionStatusCapsules,
 } from '../../../src/components/project-message-view/SessionStatusBanners';
 import type { UseSessionLifecycleResult } from '../../../src/components/project-message-view/useSessionLifecycle.types';
+import { ApiClientError } from '../../../src/lib/api/client';
 
 const mocks = vi.hoisted(() => ({
   resume: vi.fn(),
@@ -252,6 +253,20 @@ describe('saved waiting callback force-resume notice', () => {
     view.rerender(<SessionStatusBanners lc={held()} projectId="project-1" />);
     expect(screen.getByRole('button', { name: 'Waking…' })).toBeDisabled();
     expect(mocks.startAnyway).toHaveBeenCalledTimes(1);
+  });
+  it('keeps accepted but unconfirmed recovery visibly in progress on 409', async () => {
+    mocks.startAnyway.mockRejectedValueOnce(
+      new ApiClientError(
+        'RECOVERY_ACCEPTED_PENDING',
+        'Resume accepted, but the runner did not confirm',
+        409
+      )
+    );
+    render(<SessionStatusBanners lc={held()} projectId="project-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Resume anyway' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Waking…' })).toBeDisabled());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(mocks.invalidate).toHaveBeenCalledOnce();
   });
   it('shows errors and supports a safe retry', async () => {
     mocks.startAnyway.mockRejectedValueOnce(new Error('Selected account changed'));

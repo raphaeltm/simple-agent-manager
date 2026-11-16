@@ -1,15 +1,15 @@
 import {
-  type ProviderLimitWait,
-} from '@simple-agent-manager/scheduler-core';
-import {
-  DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS,
-} from '@simple-agent-manager/shared';
+  dispatchOwnerApprovedRecovery,
+  withinRecoveryRpcBudget,
+} from './provider-limit-owner-dispatch';
+export { resolveProviderLimitRecoveryRpcTimeoutMs } from './provider-limit-owner-dispatch';
+import { type ProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import { maybeJsonRecord } from '@simple-agent-manager/worker-core';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { parsePositiveInt } from '../lib/route-helpers';
+import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getSelectedAgentCredentialReference } from './agent-credential-selection';
 import {
@@ -23,29 +23,13 @@ import {
   resolveProviderLimitProfileId,
 } from './provider-limit-approval-context';
 import {
-  acknowledgeProviderLimitRecovery,
-  confirmProviderLimitRecoveryRunner,
-} from './provider-limit-force-resume';
-import {
   loadProviderLimitRecoveryApproval,
-  type ProviderLimitRecoveryApproval,
   providerLimitRecoveryApprovalD1Fence,
-  providerLimitRecoveryApprovalIsCurrent,
 } from './provider-limit-recovery-approval';
 import { requireSessionWriter } from './session-access';
-import {
-  canRepairSessionRecoveryRunner,
-  ensureSessionRecovery,
-  startMissingSessionRecoveryRunner,
-} from './session-recovery';
-import { getTaskRunnerStatus, nudgeTaskRunnerDO } from './task-runner-do';
-
-export function resolveProviderLimitRecoveryRpcTimeoutMs(env: Env): number {
-  return parsePositiveInt(
-    env.PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS,
-    DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS
-  );
-}
+import { sessionRecoveryMaxAttempts } from './session-snapshot-recovery-budget';
+import { sessionRecoveryClaimLeaseMs } from './session-snapshot-recovery-conditions';
+import { getTaskRunnerStatus } from './task-runner-do';
 
 /** Canonical SQLite representation of recovery progress, excluding lease-only timestamps. */
 const OWNER_RECOVERY_PROGRESS_SQL = `json_object(
@@ -97,6 +81,38 @@ export async function repairOwnerApprovedRecovery(
   // Preserve this bounded intent while that exact runner finishes; this read
   // neither acknowledges consent nor authorizes any new recovery side effect.
   if (valid && (await materializedOwnerRecoveryIsCurrent(env, task, receipt))) return;
+  // The original provider deadline may be days away. Repair gets one existing
+  // claim-lease window and a non-decaying episode budget, including the click.
+  const repairDeadline =
+    approval?.repairExpiresAt ??
+    Math.min(wait.deadlineAt, (approval?.grantedAt ?? now) + sessionRecoveryClaimLeaseMs(env));
+  if (
+    valid &&
+    (now >= repairDeadline || (approval?.repairAttempts ?? 0) >= sessionRecoveryMaxAttempts(env))
+  ) {
+    // A positive current runner may still be provisioning before workspace materialization.
+    // The short timer forbids NEW dispatches; its already-started attempt keeps the original deadline.
+    if (await materializedOwnerRecoveryIsCurrent(env, task, receipt, true)) return;
+    log.warn('provider_limit.owner_repair_exhausted', {
+      taskId: task.id,
+      projectId: task.projectId,
+      chatSessionId: task.chatSessionId,
+      snapshotId: approval?.snapshotId,
+      attempts: approval?.repairAttempts ?? 0,
+      deadline: repairDeadline,
+      action: 'block_retaining_snapshot',
+    });
+    await blockRevokedOwnerApproval(
+      env,
+      task,
+      wait,
+      receipt,
+      recoveryProgress,
+      'Blocked: automatic recovery did not confirm within its repair budget. Review saved work before resuming.'
+    );
+    return;
+  }
+
   // Resolve canonical profile IDs here too: the task's raw hint is not an ID.
   const profileId = await resolveProviderLimitProfileId(db, env, {
     projectId: task.projectId,
@@ -170,18 +186,47 @@ export async function repairOwnerApprovedRecovery(
     !(await pendingRecoveryScopeIsCurrent(env, task, wait, snapshot, receipt))
   )
     return;
-  if (!valid || !snapshot || !task.chatSessionId) {
+  if (!valid || !snapshot || !task.chatSessionId || !approval || approval.expiresAt === undefined) {
     await blockRevokedOwnerApproval(env, task, wait, receipt, recoveryProgress);
     return;
   }
-  await dispatchOwnerApprovedRecovery(env, task, wait, snapshot, receipt, task.chatSessionId);
+  // Spend before dispatch with the exact receipt CAS. Concurrent sweeps lose
+  // this CAS. Accounting fields are excluded from consent identity, so a lost
+  // nudge cannot revoke an in-flight attempt; newer consent still supersedes it.
+  const next: ProviderLimitWait = {
+    ...wait,
+    ownerOverride: {
+      ...approval,
+      repairExpiresAt: repairDeadline,
+      repairAttempts: (approval.repairAttempts ?? 0) + 1,
+    },
+  };
+  const nextReceipt = JSON.stringify(next);
+  const spent = await env.DATABASE.prepare(
+    `UPDATE tasks SET provider_limit_wait_json=?
+    WHERE id=? AND provider_limit_wait_json IS ? AND admission_state='provider_limit_recovery_pending'
+      AND status=? AND workspace_id IS ?
+      AND (julianday('now')-julianday('1970-01-01'))*86400000 < ?`
+  )
+    .bind(nextReceipt, task.id, receipt, task.status, task.workspaceId, repairDeadline)
+    .run();
+  if (!spent.meta.changes) return;
+  await dispatchOwnerApprovedRecovery(
+    env,
+    { ...task, providerLimitWaitJson: nextReceipt },
+    next,
+    snapshot,
+    nextReceipt,
+    task.chatSessionId
+  );
 }
 
 /** A materialized or completed restore still belongs to its exact live recovery attempt. */
 async function materializedOwnerRecoveryIsCurrent(
   env: Env,
   task: schema.Task,
-  receipt: string
+  receipt: string,
+  includeUnmaterialized = false
 ): Promise<boolean> {
   const approval = await loadProviderLimitRecoveryApproval(env, task.id, receipt);
   if (!approval) return false;
@@ -193,7 +238,8 @@ async function materializedOwnerRecoveryIsCurrent(
        AND t.admission_state='provider_limit_recovery_pending' AND t.provider_limit_wait_json IS ?
        AND s.recovery_status IN ('waking','restored') AND s.recovery_task_id=t.id
        AND s.recovery_attempt_id IS NOT NULL AND s.recovery_attempt_id!=''
-       AND s.recovery_workspace_id=t.workspace_id
+       AND (s.recovery_workspace_id=t.workspace_id
+         ${includeUnmaterialized ? 'OR (s.recovery_workspace_id IS NULL AND t.workspace_id IS NULL)' : ''})
        ${fence.sql}`
   )
     .bind(approval.snapshotId, task.id, task.projectId, task.userId, receipt, ...fence.params)
@@ -321,9 +367,9 @@ async function blockRevokedOwnerApproval(
   task: schema.Task,
   wait: ProviderLimitWait,
   receipt: string,
-  recoveryProgress: string | null
+  recoveryProgress: string | null,
+  reason = 'Blocked: the approved provider limit recovery expired or its authority changed.'
 ): Promise<void> {
-  const reason = 'Blocked: the approved provider limit recovery expired or its authority changed.';
   const blocked = await env.DATABASE.prepare(
     `UPDATE tasks SET provider_limit_wait_json=?,admission_state='provider_limit_blocked',
          admission_reason=?,admission_next_retry_at=NULL
@@ -361,82 +407,6 @@ async function blockRevokedOwnerApproval(
 }
 
 /** Retry only the approved task; an ambiguous response preserves its pending receipt. */
-async function dispatchOwnerApprovedRecovery(
-  env: Env,
-  task: schema.Task,
-  wait: ProviderLimitWait,
-  snapshot: SavedProviderLimitSnapshot,
-  receipt: string,
-  chatSessionId: string
-): Promise<void> {
-  const approval: ProviderLimitRecoveryApproval = {
-    receipt,
-    ownerUserId: task.userId,
-    snapshotId: snapshot.id,
-    expiresAt: wait.deadlineAt,
-    sourceCredentialReference: snapshot.agent_credential_reference,
-  };
-  // The timeout bounds only this sweep's wait. The same durable approval guards
-  // any late claim/start, while acknowledgement stays exclusively in this caller.
-  const accepted = await withinRecoveryRpcBudget(env, async () => {
-    if (snapshot.recovery_status === 'waking') {
-      if (
-        await nudgeTaskRunnerDO(
-          env,
-          task.id,
-          'Retry owner-approved provider limit recovery',
-          approval
-        )
-      )
-        return snapshot.recovery_attempt_id;
-      const status = await getTaskRunnerStatus(env, task.id);
-      if (
-        !snapshot.recovery_attempt_id ||
-        !canRepairSessionRecoveryRunner(status, {
-          taskId: task.id,
-          projectId: task.projectId,
-          userId: task.userId,
-          chatSessionId,
-          recoveryAttemptId: snapshot.recovery_attempt_id,
-        })
-      )
-        return false;
-      const result = await startMissingSessionRecoveryRunner(
-        env,
-        task.projectId,
-        chatSessionId,
-        {
-          taskId: task.id,
-          projectId: task.projectId,
-          chatSessionId,
-          requiredProjectMemberId: task.userId,
-          providerLimitApproval: approval,
-        },
-        snapshot.recovery_attempt_id
-      );
-      return result.status === 'waking'
-        ? confirmProviderLimitRecoveryRunner(env, task.id, task.projectId, chatSessionId, approval)
-        : null;
-    }
-    const result = await ensureSessionRecovery(env, task.projectId, chatSessionId, {
-      taskId: task.id,
-      projectId: task.projectId,
-      chatSessionId,
-      requiredProjectMemberId: task.userId,
-      providerLimitApproval: approval,
-    });
-    return result.status === 'waking'
-      ? confirmProviderLimitRecoveryRunner(env, task.id, task.projectId, chatSessionId, approval)
-      : null;
-  });
-  if (
-    !accepted ||
-    !(await providerLimitRecoveryApprovalIsCurrent(env, task.id, task.projectId, approval))
-  )
-    return;
-  await acknowledgeProviderLimitRecovery(env, task.id, receipt, false, accepted);
-}
-
 /** Persisted consent covers only this owner, task scope and original deadline. */
 function pendingApprovalMatchesTask(
   task: schema.Task,
@@ -454,7 +424,9 @@ function pendingApprovalMatchesTask(
     approval.skillId === task.skillId &&
     (approval.runConfigurationId ?? null) === task.agentConfigurationId &&
     approval.agentType &&
-    approval.expiresAt === wait.deadlineAt &&
+    approval.expiresAt !== undefined &&
+    approval.expiresAt <= wait.deadlineAt &&
+    approval.expiresAt > now &&
     wait.deadlineAt > now &&
     task.chatSessionId &&
     wait.sourceAgentSessionId &&
@@ -471,22 +443,4 @@ function profileMatchesApproval(
     (profileId === null || profile !== null) &&
     (profile === null || profile.agentType === null || profile.agentType === approval?.agentType)
   );
-}
-
-/** Timing out neither releases a claim nor revokes the owner's durable consent. */
-async function withinRecoveryRpcBudget<T>(
-  env: Env,
-  operation: () => Promise<T>
-): Promise<T | false> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      operation(),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), resolveProviderLimitRecoveryRpcTimeoutMs(env));
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }

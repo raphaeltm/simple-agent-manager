@@ -117,17 +117,23 @@ export async function findRecoveryAuthorityFailure(
   // Owner force-resume can approve a previously unguarded human-message wake.
   // Keep its existing claim, while making that approval revocable at every
   // external runner boundary rather than only when the owner clicked.
-  const ownerApproval = await env.DATABASE.prepare(
-    `SELECT t.provider_limit_wait_json,
+  // Only snapshot-restoration runners can receive this consent. Ordinary
+  // runners add no task read; an installed approval already checks membership
+  // and the complete current receipt in the shared SQL fence above.
+  const ownerApproval =
+    !approval && input.config.resumeSnapshotChatSessionId
+      ? await env.DATABASE.prepare(
+          `SELECT t.provider_limit_wait_json,
       EXISTS (SELECT 1 FROM project_members m JOIN users u ON u.id=m.user_id
         WHERE m.project_id=t.project_id AND m.user_id=t.user_id AND m.status='active'
         AND m.role IN ('owner','admin','maintainer') AND u.status='active') AS member_active
      FROM tasks t WHERE t.id=? AND t.project_id=? AND t.user_id=?
        AND json_valid(t.provider_limit_wait_json)
        AND json_type(t.provider_limit_wait_json,'$.ownerOverride.expiresAt')='integer'`
-  )
-    .bind(input.taskId, input.projectId, input.userId)
-    .first<{ provider_limit_wait_json: string; member_active: number }>();
+        )
+          .bind(input.taskId, input.projectId, input.userId)
+          .first<{ provider_limit_wait_json: string; member_active: number }>()
+      : null;
   if (
     ownerApproval &&
     !ownerApproval.member_active &&

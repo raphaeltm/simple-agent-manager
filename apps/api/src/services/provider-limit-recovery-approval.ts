@@ -24,6 +24,13 @@ export function providerLimitRecoveryApprovalCondition(
 ): SQL | undefined {
   if (!approval) return undefined;
   const task = sql.raw(taskAlias);
+  const expiresAt = sql`json_extract(${approval.receipt},'$.ownerOverride.expiresAt')`;
+  // Older receipts predate the explicit field; their source ID still selects
+  // canonical persisted authority. Never trust a caller-supplied struct reference.
+  const sourceReference = sql`COALESCE(json_extract(${approval.receipt},'$.ownerOverride.sourceCredentialReference'),
+    (SELECT receipt_source.agent_credential_reference FROM agent_sessions receipt_source
+     WHERE receipt_source.id=json_extract(${approval.receipt},'$.sourceAgentSessionId')
+       AND receipt_source.user_id=json_extract(${approval.receipt},'$.ownerOverride.ownerUserId')))`;
   const committed = allowCommittedRun
     ? sql`(${task}.status='in_progress' AND
       ROUND((julianday(${task}.started_at)-julianday('1970-01-01'))*86400000) >=
@@ -33,7 +40,7 @@ export function providerLimitRecoveryApprovalCondition(
       AND json_extract(${task}.provider_limit_wait_json,'$.ownerOverride.firstInjection.credentialGeneration')>0
       AND json_extract(${task}.provider_limit_wait_json,'$.ownerOverride.firstInjection.authorizedAt') >=
         json_extract(${approval.receipt},'$.ownerOverride.grantedAt')
-      AND json_extract(${task}.provider_limit_wait_json,'$.ownerOverride.firstInjection.authorizedAt') < ${approval.expiresAt}
+      AND json_extract(${task}.provider_limit_wait_json,'$.ownerOverride.firstInjection.authorizedAt') < ${expiresAt}
       AND EXISTS (SELECT 1 FROM workspaces committed_workspace JOIN agent_sessions committed_agent
         ON committed_agent.workspace_id=committed_workspace.id
         WHERE committed_workspace.id=${task}.workspace_id AND committed_workspace.user_id=${task}.user_id
@@ -45,7 +52,7 @@ export function providerLimitRecoveryApprovalCondition(
           AND committed_workspace.id=json_extract(${task}.provider_limit_wait_json,'$.ownerOverride.firstInjection.workspaceId')
           AND committed_agent.id=json_extract(${task}.provider_limit_wait_json,'$.ownerOverride.firstInjection.agentSessionId')
           AND committed_agent.user_id=${task}.user_id
-          AND committed_agent.agent_credential_reference IS ${approval.sourceCredentialReference}
+          AND committed_agent.agent_credential_reference IS ${sourceReference}
           AND committed_agent.agent_credential_generation >= json_extract(${task}.provider_limit_wait_json,'$.ownerOverride.firstInjection.credentialGeneration')
           AND committed_agent.agent_profile_id IS json_extract(${approval.receipt},'$.ownerOverride.profileId')
           AND committed_agent.skill_id IS json_extract(${approval.receipt},'$.ownerOverride.skillId')
@@ -61,19 +68,21 @@ export function providerLimitRecoveryApprovalCondition(
         AND approved_snapshot.user_id=${task}.user_id
         AND approved_source_workspace.project_id=${task}.project_id
         AND approved_source_workspace.user_id=${task}.user_id
-        AND approved_agent.agent_credential_reference IS ${approval.sourceCredentialReference}
+        AND approved_agent.agent_credential_reference IS ${sourceReference}
         AND approved_agent.agent_credential_generation=json_extract(${approval.receipt},'$.sourceCredentialGeneration')
         AND approved_agent.agent_profile_id IS json_extract(${approval.receipt},'$.ownerOverride.profileId')
         AND approved_agent.agent_type=json_extract(${approval.receipt},'$.ownerOverride.agentType'))`;
   const progress = requireCommittedRun
     ? committed
-    : sql`((${approval.expiresAt} >
+    : sql`((${expiresAt} >
     (julianday('now')-julianday('1970-01-01'))*86400000 AND ${source}) OR ${committed})`;
   return sql`${task}.user_id=${approval.ownerUserId}
     AND ${task}.status NOT IN ('completed','failed','cancelled')
     AND json_valid(${task}.provider_limit_wait_json)
-    AND json_remove(${task}.provider_limit_wait_json,'$.ownerOverride.firstInjection')=
-        json_remove(${approval.receipt},'$.ownerOverride.firstInjection')
+    /* Repair accounting cannot revoke an already-dispatched attempt. Identity,
+       authority and the original consent expiry remain byte-matched. */
+    AND json_remove(${task}.provider_limit_wait_json,'$.ownerOverride.firstInjection','$.ownerOverride.repairAttempts','$.ownerOverride.repairExpiresAt')=
+        json_remove(${approval.receipt},'$.ownerOverride.firstInjection','$.ownerOverride.repairAttempts','$.ownerOverride.repairExpiresAt')
     AND ${task}.agent_profile_hint IS json_extract(${approval.receipt},'$.ownerOverride.profileId')
     AND ${task}.skill_id IS json_extract(${approval.receipt},'$.ownerOverride.skillId')
     AND ${task}.agent_configuration_id IS json_extract(${approval.receipt},'$.ownerOverride.runConfigurationId')

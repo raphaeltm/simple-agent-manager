@@ -702,7 +702,7 @@ describe('owner consent survives credential release and placed recovery', () => 
       ).toEqual({ status: 'queued', workspace_id: null });
       const response = await prepared.act();
       expect(response.status, await response.clone().text()).toBe(409);
-      expect(await response.json()).toMatchObject({ error: 'CONFLICT' });
+      expect(await response.json()).toMatchObject({ error: 'RECOVERY_ACCEPTED_PENDING' });
       const pending = await intent(f);
       expect(pending.admission_state).toBe('provider_limit_recovery_pending');
       expect(pending.wait).toMatchObject({
@@ -725,7 +725,7 @@ describe('owner consent survives credential release and placed recovery', () => 
         userId: f.userId,
         config: {
           recoveryAttemptId: currentAttempt,
-          providerLimitRecoveryApproval: { receipt: pending.provider_limit_wait_json },
+          providerLimitRecoveryApproval: { receipt: (await intent(f)).provider_limit_wait_json },
         },
       });
       expect((await intent(f)).admission_state).toBeNull();

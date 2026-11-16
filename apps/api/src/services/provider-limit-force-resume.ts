@@ -1,3 +1,11 @@
+import {
+  acknowledgeProviderLimitRecovery,
+  confirmProviderLimitRecoveryRunner,
+} from './provider-limit-recovery-ack';
+export {
+  acknowledgeProviderLimitRecovery,
+  confirmProviderLimitRecoveryRunner,
+} from './provider-limit-recovery-ack';
 /** Owner recovery of a saved callback hold. Reuses the existing claim and runner. */
 import type { ProviderLimitWait } from '@simple-agent-manager/scheduler-core';
 import { drizzle } from 'drizzle-orm/d1';
@@ -6,7 +14,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { errors } from '../middleware/error';
+import { AppError, errors } from '../middleware/error';
 import { getSelectedAgentCredentialReference } from './agent-credential-selection';
 import { resolveProfileCredentialContext } from './composable-credentials/profile-context';
 import { credentialLimitReferenceKey } from './credential-limit-events/values';
@@ -15,17 +23,14 @@ import {
   parseProviderLimitSnapshotRow,
   resolveProviderLimitProfileId,
 } from './provider-limit-approval-context';
-import {
-  loadProviderLimitRecoveryApproval,
-  type ProviderLimitRecoveryApproval,
-  providerLimitRecoveryApprovalD1Fence,
-} from './provider-limit-recovery-approval';
+import { type ProviderLimitRecoveryApproval } from './provider-limit-recovery-approval';
 import { requireSessionWriter } from './session-access';
 import {
   canRepairSessionRecoveryRunner,
   ensureSessionRecovery,
   type SessionRecoveryResult,
 } from './session-recovery';
+import { sessionRecoveryClaimLeaseMs } from './session-snapshot-recovery-conditions';
 import { getTaskRunnerStatus, nudgeTaskRunnerDO } from './task-runner-do';
 
 export function canResumeProviderLimitTaskAnyway(
@@ -44,6 +49,41 @@ export function canResumeProviderLimitTaskAnyway(
 }
 
 export async function forceResumeSavedProviderLimitTask(
+  env: Env,
+  task: schema.Task,
+  ownerUserId: string,
+  wait: ProviderLimitWait
+) {
+  try {
+    return await grantSavedProviderLimitResume(env, task, ownerUserId, wait);
+  } catch (error) {
+    log.warn('provider_limit.force_resume_refused', {
+      taskId: task.id,
+      projectId: task.projectId,
+      chatSessionId: task.chatSessionId,
+      ownerUserId,
+      snapshotId: wait.ownerOverride?.snapshotId ?? null,
+      expectedOwnerUserId: task.userId,
+      receivedOwnerUserId: ownerUserId,
+      expectedAdmissionState: 'provider_limit_waiting',
+      receivedAdmissionState: task.admissionState,
+      expectedSessionStatus: 'sleeping',
+      receivedTaskStatus: task.status,
+      code: error instanceof AppError ? error.error : 'UNAVAILABLE',
+      action:
+        error instanceof AppError && error.error === 'RECOVERY_ACCEPTED_PENDING'
+          ? 'await_durable_repair'
+          : 'refuse',
+    });
+    throw error;
+  }
+}
+
+function acceptedRecoveryPending(message: string) {
+  return new AppError(409, 'RECOVERY_ACCEPTED_PENDING', message);
+}
+
+async function grantSavedProviderLimitResume(
   env: Env,
   task: schema.Task,
   ownerUserId: string,
@@ -102,6 +142,7 @@ export async function forceResumeSavedProviderLimitTask(
     throw errors.conflict('Provider wait expired while resuming; refresh and review');
   const grantIso = new Date(grantNow).toISOString();
   const retainedSnapshot = snapshot;
+  const approvalExpiresAt = Math.min(wait.deadlineAt, grantNow + sessionRecoveryClaimLeaseMs(env));
   const overridden = JSON.stringify({
     ...wait,
     phase: 'released',
@@ -111,6 +152,9 @@ export async function forceResumeSavedProviderLimitTask(
       profileId,
       skillId: task.skillId,
       runConfigurationId: task.agentConfigurationId,
+      sourceCredentialReference: snapshot.agent_credential_reference ?? undefined,
+      repairAttempts: 1,
+      repairExpiresAt: approvalExpiresAt,
       agentType: snapshot.agent_type,
       expiresAt: wait.deadlineAt,
       recoveryPending: true,
@@ -169,6 +213,18 @@ export async function forceResumeSavedProviderLimitTask(
   if (!changed.meta.changes)
     throw errors.conflict('Task changed while resuming; refresh and try again');
 
+  log.info('provider_limit.force_resume_granted', {
+    taskId: task.id,
+    projectId: task.projectId,
+    chatSessionId: task.chatSessionId,
+    snapshotId: snapshot.id,
+    ownerUserId,
+    expectedAdmissionState: 'provider_limit_waiting',
+    receivedAdmissionState: 'provider_limit_recovery_pending',
+    recoveryAttemptId: snapshot.recovery_attempt_id,
+    action: 'resume_saved_session',
+  });
+
   const recoveryApproval = {
     receipt: overridden,
     ownerUserId,
@@ -190,7 +246,9 @@ export async function forceResumeSavedProviderLimitTask(
         recoveryApproval
       );
     } catch {
-      throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
+      throw acceptedRecoveryPending(
+        'Resume accepted, but the runner did not confirm; refresh shortly'
+      );
     }
     if (!nudged) {
       await handleRefusedRecoveryNudge(env, task, snapshot.recovery_attempt_id, restoreHold);
@@ -205,7 +263,9 @@ export async function forceResumeSavedProviderLimitTask(
     );
   }
   if (!confirmedRecoveryAttemptId)
-    throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
+    throw acceptedRecoveryPending(
+      'Resume accepted, but the runner did not confirm; refresh shortly'
+    );
   await acknowledgeProviderLimitRecovery(
     env,
     task.id,
@@ -247,28 +307,6 @@ export async function forceResumeSavedProviderLimitTask(
   }
 }
 
-/** A waking claim is not a runner receipt. Confirm one exact attempt before ACK. */
-export async function confirmProviderLimitRecoveryRunner(
-  env: Env,
-  taskId: string,
-  projectId: string,
-  chatSessionId: string,
-  approval: ProviderLimitRecoveryApproval
-): Promise<string | null> {
-  const claim = await env.DATABASE.prepare(
-    `SELECT recovery_attempt_id FROM session_snapshots
-     WHERE id=? AND project_id=? AND chat_session_id=? AND user_id=?
-       AND recovery_task_id=? AND recovery_status IN ('waking','restored')`
-  )
-    .bind(approval.snapshotId, projectId, chatSessionId, approval.ownerUserId, taskId)
-    .first();
-  const attempt = claim?.recovery_attempt_id;
-  if (typeof attempt !== 'string' || !attempt) return null;
-  return (await nudgeTaskRunnerDO(env, taskId, 'Confirm owner-approved recovery runner', approval))
-    ? attempt
-    : null;
-}
-
 async function ensureApprovedRecoveryRunner(
   env: Env,
   task: schema.Task,
@@ -303,7 +341,9 @@ async function ensureApprovedRecoveryRunner(
     approval
   ).catch(() => null);
   if (!attempt)
-    throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
+    throw acceptedRecoveryPending(
+      'Resume accepted, but the runner did not confirm; refresh shortly'
+    );
   return attempt;
 }
 
@@ -317,7 +357,9 @@ async function handleRefusedRecoveryNudge(
   try {
     status = await getTaskRunnerStatus(env, task.id);
   } catch {
-    throw errors.conflict('Resume accepted, but the runner did not confirm; refresh shortly');
+    throw acceptedRecoveryPending(
+      'Resume accepted, but the runner did not confirm; refresh shortly'
+    );
   }
   // Claim-before-runner crashes need the pending receipt for bounded repair.
   if (
@@ -329,48 +371,9 @@ async function handleRefusedRecoveryNudge(
       recoveryAttemptId: recoveryAttemptId ?? '',
     })
   )
-    throw errors.conflict('Resume accepted; the recovery runner will be repaired shortly');
+    throw acceptedRecoveryPending('Resume accepted; the recovery runner will be repaired shortly');
   await restoreHold();
   throw errors.conflict('The existing recovery runner is unavailable; try again shortly');
-}
-
-/** Exact approval CAS: a newer rejection/approval must retain its own intent. */
-export async function acknowledgeProviderLimitRecovery(
-  env: Env,
-  taskId: string,
-  receipt: string,
-  requireCommittedRun = false,
-  expectedRecoveryAttemptId?: string | null
-) {
-  if (
-    !requireCommittedRun &&
-    (typeof expectedRecoveryAttemptId !== 'string' || !expectedRecoveryAttemptId)
-  )
-    return;
-  const approval = await loadProviderLimitRecoveryApproval(env, taskId, receipt);
-  if (!approval) return;
-  const fence = providerLimitRecoveryApprovalD1Fence('tasks', approval, true, requireCommittedRun);
-  // A claim can advance after the DO's authority read but before its ACK.
-  // Clear only the attempt that this caller actually nudged.
-  const claimFence =
-    expectedRecoveryAttemptId === undefined
-      ? { sql: '', params: [] }
-      : {
-          sql: `AND EXISTS (SELECT 1 FROM session_snapshots acknowledged_snapshot
-      WHERE acknowledged_snapshot.id=? AND acknowledged_snapshot.project_id=tasks.project_id
-        AND acknowledged_snapshot.chat_session_id=tasks.chat_session_id
-        AND acknowledged_snapshot.user_id=tasks.user_id
-        AND acknowledged_snapshot.recovery_task_id=tasks.id
-        AND acknowledged_snapshot.recovery_status IN ('waking','restored')
-        AND acknowledged_snapshot.recovery_attempt_id IS ?)`,
-          params: [approval.snapshotId, expectedRecoveryAttemptId],
-        };
-  await env.DATABASE.prepare(
-    `UPDATE tasks SET admission_state=NULL,admission_reason=NULL,admission_next_retry_at=NULL
-     WHERE id=? AND admission_state='provider_limit_recovery_pending' ${fence.sql} ${claimFence.sql}`
-  )
-    .bind(taskId, ...fence.params, ...claimFence.params)
-    .run();
 }
 
 /** Resolve and validate the exact account/profile the saved session used. */
@@ -407,10 +410,24 @@ async function resolveSavedProviderLimitSelection(
     (await credentialLimitReferenceKey(snapshot.agent_credential_reference)) !==
       wait.credentialKey ||
     (await credentialLimitReferenceKey(reference)) !== wait.credentialKey
-  )
+  ) {
+    log.warn('provider_limit.force_resume_selection_refused', {
+      taskId: task.id,
+      projectId: task.projectId,
+      chatSessionId: task.chatSessionId,
+      snapshotId: snapshot.id,
+      expectedProfileId: snapshot.agent_profile_id,
+      receivedProfileId: profileId,
+      expectedAgentType: snapshot.agent_type,
+      receivedAgentType: profile?.agentType ?? null,
+      expectedCredentialGeneration: wait.sourceCredentialGeneration,
+      receivedCredentialGeneration: snapshot.agent_credential_generation,
+      action: 'refuse_changed_selection',
+    });
     throw errors.conflict(
       'The selected account or profile changed; review the provider hold before resuming'
     );
+  }
 
   return profileId;
 }
