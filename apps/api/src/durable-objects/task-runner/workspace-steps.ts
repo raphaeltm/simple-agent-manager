@@ -5,7 +5,9 @@
  * Handles workspace_creation; workspace_dispatch, workspace_ready and attachment_transfer live in
  * sibling modules and are re-exported here so the DO's step table keeps one import site.
  */
-import { isResolvedResourceReservation } from '@simple-agent-manager/scheduler-core';
+import {
+  isResolvedResourceReservation,
+} from '@simple-agent-manager/scheduler-core';
 import {
   type CredentialSource,
   DEFAULT_WORKSPACE_PROFILE,

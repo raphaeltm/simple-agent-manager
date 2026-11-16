@@ -20,8 +20,12 @@ import {
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
-import { type TrustedWorkspaceNodeCapacityRow } from '../../services/workspace-admission-sql';
-import { loadActiveWorkspaceReservationUsage } from '../../services/workspace-reservation-usage';
+import {
+  type TrustedWorkspaceNodeCapacityRow,
+} from '../../services/workspace-admission-sql';
+import {
+  loadActiveWorkspaceReservationUsage,
+} from '../../services/workspace-reservation-usage';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export interface ReusableNodeSelection {
