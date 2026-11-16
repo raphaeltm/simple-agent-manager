@@ -22,6 +22,7 @@ import {
   toolKindSummary,
   unavailableSummary,
 } from './receipt-format';
+import { modelTokenLine, tokensTile } from './receipt-tokens';
 import { cpuPointsForRun, ReceiptCpuLine } from './ReceiptCpuLine';
 
 // Sub-headings inside the panel sit below the panel title in the type scale.
@@ -126,6 +127,7 @@ export function RunReceiptView({
 }>) {
   const outcome = outcomeLabel(receipt);
   const account = accountTile(receipt.account);
+  const tokens = tokensTile(receipt.tokens);
   const { resources, toolCalls } = receipt;
   const from = Date.parse(receipt.createdAt);
   const to = Date.parse(receipt.endedAt);
@@ -169,12 +171,7 @@ export function RunReceiptView({
       <PhaseBar phases={receipt.phases} live={receipt.live} />
 
       <div className="mt-4 grid grid-cols-1 gap-2.5 min-[360px]:grid-cols-2">
-        <StatTile
-          label="Tokens"
-          value="Not reported"
-          note="Token counts are not recorded for runs yet"
-          muted
-        />
+        <StatTile label="Tokens" value={tokens.value} note={tokens.note} muted={tokens.muted} />
         <StatTile label="Account" value={account.value} note={account.note} />
         <StatTile
           label="Peak memory"
@@ -199,6 +196,24 @@ export function RunReceiptView({
           }
         />
       </div>
+
+      {receipt.tokens.state === 'reported' && receipt.tokens.models.length > 0 && (
+        <>
+          <h3 className={sectionHeading}>Tokens by model</h3>
+          <ul className="m-0 list-none divide-y divide-[var(--sam-hairline)] p-0" data-testid="receipt-token-models">
+            {receipt.tokens.models.map((model) => (
+              <li key={model.model ?? ''} className="py-2">
+                <span className="block break-words font-semibold text-fg-primary [overflow-wrap:anywhere]">
+                  {model.model ?? 'Model not reported'}
+                </span>
+                <span className="block break-words font-mono text-[length:var(--sam-type-secondary-size)] text-fg-muted">
+                  {modelTokenLine(model)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
       <h3 className={sectionHeading}>CPU and tool calls</h3>
       {points.length >= 2 ? (

@@ -1,4 +1,7 @@
-import { DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT,
+  RUN_USAGE_MAX_MODELS_PER_REPORT,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 const UsageIdentifierSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(160));
@@ -72,6 +75,30 @@ export const AcpSessionUsageLimitObservationSchema = v.object({
   freshnessMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
 });
 
+const TokenCountSchema = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(Number.MAX_SAFE_INTEGER));
+
+/**
+ * Insights slice U: cumulative token totals of one VM-agent usage epoch, per model. Optional, so an
+ * old agent (no field) and a new agent (field present) both pass; an old control plane strips it.
+ */
+export const AcpSessionTokenUsageSchema = v.object({
+  epoch: UsageIdentifierSchema,
+  models: v.pipe(
+    v.array(
+      v.object({
+        // '' or absent: the harness did not say which model ran.
+        model: v.optional(v.pipe(v.string(), v.maxLength(160))),
+        inputTokens: TokenCountSchema,
+        outputTokens: TokenCountSchema,
+        cacheReadTokens: v.optional(TokenCountSchema),
+        cacheWriteTokens: v.optional(TokenCountSchema),
+        reasoningTokens: v.optional(TokenCountSchema),
+      })
+    ),
+    v.maxLength(RUN_USAGE_MAX_MODELS_PER_REPORT)
+  ),
+});
+
 export const AcpSessionUsageReportSchema = v.object({
   nodeId: UsageIdentifierSchema,
   agentType: v.optional(UsageIdentifierSchema),
@@ -84,6 +111,7 @@ export const AcpSessionUsageReportSchema = v.object({
     v.array(AcpSessionUsageLimitObservationSchema),
     v.maxLength(DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT)
   ),
+  tokenUsage: v.optional(AcpSessionTokenUsageSchema),
 });
 
 export const AcpSessionForkSchema = v.object({

@@ -30,6 +30,7 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
+import { proxyRunUsageRecorder } from '../services/agent-run-usage';
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import {
   AIProxyAuthError,
@@ -274,6 +275,11 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
       userId,
       format: 'anthropic',
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
+      onMeasuredUsage: proxyRunUsageRecorder(c.env, auth, {
+        model: modelId,
+        credentialReference: upstreamAuth.credentialReference,
+        credentialSource: upstreamAuth.credentialSource,
+      }),
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });

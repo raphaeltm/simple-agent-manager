@@ -68,6 +68,7 @@ const SECTION_LABEL: Record<RunReceiptSection, string> = {
   waiting: 'all the questions the agent asked',
   comparison: 'the comparison with recent runs',
   account: 'the account',
+  tokens: 'token usage',
 };
 
 /** "tool calls and the account", for the parts of the receipt that could not be read. */
