@@ -35,10 +35,19 @@ export const inboxErrorsPort: InboxErrorsPort = {
       // `ensureSessionRecovery` wakes VM chats; an Instant chat wakes when it gets a message, so
       // offering Wake there would be a button that always refuses.
       const snapshot = await env.DATABASE.prepare(
-        'SELECT runtime FROM session_snapshots WHERE chat_session_id = ?'
+        'SELECT runtime FROM session_snapshots WHERE chat_session_id = ? AND project_id = ?'
       )
-        .bind(input.sessionId)
+        .bind(input.sessionId, input.projectId)
         .first<{ runtime: string | null }>();
+      // The chat's own task, not the task that sent the undelivered message (a parent wake's
+      // sender is the child). Without one the item cannot be tied to the chat, so the
+      // ProjectData object keeps its own marker instead (`wake-failure.ts`).
+      const bound = await env.DATABASE.prepare(
+        'SELECT id FROM tasks WHERE project_id = ? AND chat_session_id = ?'
+      )
+        .bind(input.projectId, input.sessionId)
+        .first<{ id: string }>();
+      if (!bound) return null;
       const canWake = snapshot?.runtime !== 'cf-container';
       return await fileAndNotify(env, {
         projectId: input.projectId,
@@ -48,7 +57,7 @@ export const inboxErrorsPort: InboxErrorsPort = {
         title: `Couldn't wake ${quotedName(input.topic, 'a chat')}`,
         body: 'SAM could not restart the agent for this chat, so the message waiting for it was not delivered.',
         actions: canWake ? ['wake', 'open_chat'] : ['open_chat'],
-        sourceTaskId: input.taskId,
+        sourceTaskId: bound.id,
         sourceSessionId: input.sessionId,
         links: [{ kind: 'chat', id: input.sessionId, label: null }],
       });

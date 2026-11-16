@@ -23,9 +23,9 @@
 import { DEFAULT_SESSION_INDEX_MAX_STALENESS_MS } from '@simple-agent-manager/shared';
 import {
   type AskAttentionSummary,
+  openWakeErrorPredicate,
   preferAttention,
   readOpenQuestionAttention,
-  WAKE_FAILED_KEY_PREFIX,
 } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
@@ -341,7 +341,7 @@ async function readIndex(
 /**
  * A chat holds an open, unexpired question (inbox slice G) or an open wake failure (slice E) in
  * D1 `asks`. Correlated on the row being ranked; `idx_asks_open_question` and
- * `idx_asks_open_error_session` answer the two arms.
+ * `idx_asks_open_wake_error` answer the two arms.
  */
 const OPEN_QUESTION_EXISTS = `(EXISTS (
   SELECT 1 FROM asks a
@@ -350,7 +350,7 @@ const OPEN_QUESTION_EXISTS = `(EXISTS (
      AND (a.expires_at IS NULL OR a.expires_at > ?)) OR EXISTS (
   SELECT 1 FROM asks w
    WHERE w.project_id = session_summaries.project_id AND w.source_session_id = session_summaries.id
-     AND w.kind = 'error' AND w.status = 'open' AND w.dedupe_key LIKE '${WAKE_FAILED_KEY_PREFIX}%'))`;
+     AND ${openWakeErrorPredicate('w')}))`;
 
 /** Each chat's attention with its open question merged in, as the ProjectData read does. */
 function withQuestionAttention(

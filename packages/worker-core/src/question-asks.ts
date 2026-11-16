@@ -36,6 +36,15 @@ export interface QuestionAttentionSummary {
  */
 export const WAKE_FAILED_ASK_SOURCE = 'session_wake';
 export const WAKE_FAILED_KEY_PREFIX = 'error:wake:';
+/**
+ * Open wake-failure items, as an index-seekable key range (a prefix `LIKE` is not, on a BINARY
+ * column). Identical to the WHERE of `idx_asks_open_wake_error` (migration 0248), which is what
+ * lets SQLite use that partial index; keep the two in step. `alias` is the asks table alias.
+ */
+export function openWakeErrorPredicate(alias: string): string {
+  const a = alias ? `${alias}.` : '';
+  return `${a}kind = 'error' AND ${a}status = 'open' AND ${a}dedupe_key >= 'error:wake:' AND ${a}dedupe_key < 'error:wake;'`;
+}
 
 export interface WakeFailedAttentionSummary {
   markerId: string;
@@ -158,7 +167,7 @@ export async function readOpenQuestionAttention(
   let rows: Record<string, unknown>[];
   try {
     // Two indexed arms in one round trip: open questions (`idx_asks_open_question`) and open
-    // wake failures (`idx_asks_open_error_session`). Questions sort first, so a chat's first
+    // wake failures (`idx_asks_open_wake_error`). Questions sort first, so a chat's first
     // row is its newest question when it has one.
     const result = await db
       .prepare(
@@ -168,8 +177,7 @@ export async function readOpenQuestionAttention(
               AND ${scope.join(' AND ')}
            UNION ALL
            SELECT 1 AS rank, ${columns} FROM asks
-            WHERE kind = 'error' AND status = 'open'
-              AND dedupe_key LIKE '${WAKE_FAILED_KEY_PREFIX}%'
+            WHERE ${openWakeErrorPredicate('')}
               AND ${scope.join(' AND ')}
          ) ORDER BY rank, created_at DESC, id DESC
          LIMIT ?`

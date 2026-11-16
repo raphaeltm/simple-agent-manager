@@ -9,6 +9,7 @@
 
 import type { CreateNotificationRequest, NotificationResponse } from '@simple-agent-manager/shared';
 import {
+  classifyFailure,
   type HumanInputCategory,
   MAX_NOTIFICATION_BODY_LENGTH,
   MAX_NOTIFICATION_TITLE_LENGTH,
@@ -184,7 +185,10 @@ export async function notifyTaskFailed(
     type: 'error',
     urgency: NOTIFICATION_TYPE_URGENCY.error ?? 'high',
     title: `Task failed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
-    body: opts.errorMessage ?? 'Task encountered an error',
+    // With an inbox item, the body is its plain sentence: never the agent's raw error text.
+    body: opts.inboxRef
+      ? classifyFailure(opts.errorMessage).explanation
+      : (opts.errorMessage ?? 'Task encountered an error'),
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,

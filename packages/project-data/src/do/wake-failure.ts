@@ -1,6 +1,7 @@
 import { createModuleLogger, serializeError } from '@simple-agent-manager/worker-core';
 
 import * as activity from './activity';
+import { createAttentionMarker } from './attention';
 import { persistSystemMessage } from './messages';
 import { projectDataPorts } from './ports';
 import type { Env } from './types';
@@ -31,7 +32,7 @@ export async function raiseSessionWakeFailure(
 ): Promise<{ askId: string | null; messageId: string | null; inserted: boolean }> {
   const session = sql
     .exec(
-      `SELECT id, task_id, workspace_id, created_by_user_id, topic
+      `SELECT id, task_id, workspace_id, created_by_user_id, topic, status
          FROM chat_sessions
         WHERE id = ?
         LIMIT 1`,
@@ -39,6 +40,8 @@ export async function raiseSessionWakeFailure(
     )
     .toArray()[0];
   if (!session) return { askId: null, messageId: null, inserted: false };
+  // An archived chat is a normal ending: nobody is waiting on it (policy a974b04f).
+  if (session.status === 'archived') return { askId: null, messageId: null, inserted: false };
 
   const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
   const taskId = input.taskId ?? text(session.task_id);
@@ -53,7 +56,7 @@ export async function raiseSessionWakeFailure(
       filed = await projectDataPorts().inboxErrors.fileWakeFailure(env, {
         projectId,
         sessionId: input.sessionId,
-        taskId,
+        taskId: text(session.task_id) ?? taskId,
         createdByUserId: text(session.created_by_user_id),
         topic: text(session.topic),
       });
@@ -74,7 +77,40 @@ export async function raiseSessionWakeFailure(
     });
     return { askId: filed.id, messageId: null, inserted: false };
   }
-  const markerId = filed?.id ?? null;
+  let markerId = filed?.id ?? null;
+  if (!filed) {
+    // One visible failure at a time, as before: an open marker already shows it.
+    const existing = sql
+      .exec(
+        `SELECT id FROM session_attention_markers
+          WHERE session_id = ? AND kind = ? AND resolved_at IS NULL LIMIT 1`,
+        input.sessionId,
+        WAKE_FAILED_ATTENTION_KIND
+      )
+      .toArray()[0];
+    if (typeof existing?.id === 'string') {
+      return { askId: null, messageId: null, inserted: false };
+    }
+    // The inbox item could not be filed (D1 unavailable, no one to address it to): fall back to
+    // the chat's own marker so the failure never goes invisible. Readers still show it.
+    try {
+      markerId = createAttentionMarker(sql, {
+        sessionId: input.sessionId,
+        taskId,
+        workspaceId,
+        kind: WAKE_FAILED_ATTENTION_KIND,
+        source: 'session_wake',
+        reason: input.reason,
+        metadata: JSON.stringify({ deliveryId: input.deliveryId ?? null, detail: detail ?? null }),
+      }).id;
+    } catch (error) {
+      log.error('wake_failure.attention_marker_create_failed', {
+        sessionId: input.sessionId,
+        reason: input.reason,
+        ...serializeError(error),
+      });
+    }
+  }
 
   const persisted = persistSystemMessage(sql, input.sessionId, message);
   activity.recordActivityEventInternal(

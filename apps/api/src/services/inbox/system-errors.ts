@@ -104,6 +104,8 @@ export function taskFailureError(
     ],
     // Failed children of one parent stack together.
     groupKey: row.parent_task_id ? `task:${row.parent_task_id}` : null,
+    // A task fails once per run; a re-report (callback and sweep both filing) is not a second.
+    failureCount: 1,
   };
 }
 
@@ -200,10 +202,19 @@ export async function runInboxSystemErrorSweep(
   const candidates = await env.DATABASE.prepare(
     `SELECT ${FAILED_TASK_COLUMNS} FROM tasks t JOIN projects p ON p.id = t.project_id
       WHERE t.status = 'failed' AND t.updated_at > ?
-        -- Any error item filed since the task last changed: open, archived or already closed
+        -- Normal endings with no error (\`lifecycleOutcome\`) never fill the batch.
+        AND t.error_message IS NOT NULL AND TRIM(t.error_message) != ''
+        -- Not while its item is open or archived (key held): a later write to the failed task
+        -- (an edit) is not another failure.
+        AND NOT EXISTS (SELECT 1 FROM asks k
+          WHERE k.project_id = t.project_id AND k.dedupe_key = 'error:task:' || t.id)
+        -- Nor when an item was filed since the task last changed and has closed already
         -- (a retried task stays failed; its closed item must not be filed again).
+        -- Only this task's own item (its first link is the task): a wake or sleep item of the
+        -- task's chat carries the same source task.
         AND NOT EXISTS (SELECT 1 FROM asks a
           WHERE a.kind = 'error' AND a.source_task_id = t.id AND a.project_id = t.project_id
+            AND a.links_json LIKE '[{"kind":"task","id":"' || t.id || '"%'
             AND a.created_at >= CAST((julianday(t.updated_at) - 2440587.5) * 86400000 AS INTEGER))
       ORDER BY t.updated_at DESC LIMIT ?`
   )
@@ -230,7 +241,8 @@ export async function runInboxSystemErrorSweep(
             answer_json = CASE WHEN status = 'open' THEN '{"resolution":"recovered"}' ELSE answer_json END,
             resolved_at = CASE WHEN status = 'open' THEN ? ELSE resolved_at END,
             notified_at = COALESCE(notified_at, ?), dedupe_key = NULL, updated_at = ?
-      WHERE kind = 'error' AND dedupe_key IS NOT NULL AND dedupe_key LIKE 'error:task:%'
+      WHERE kind = 'error' AND dedupe_key IS NOT NULL
+        AND dedupe_key >= 'error:task:' AND dedupe_key < 'error:task;'
         AND status IN ('open', 'archived')
         AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = asks.source_task_id
           AND t.project_id = asks.project_id AND t.status != 'failed')`
@@ -267,7 +279,9 @@ async function fileUndeliveredAskAnswers(
   const result = await env.DATABASE.prepare(
     `SELECT a.id, a.project_id, a.source_session_id, a.resolved_by_user_id
        FROM asks a
-      WHERE a.notified_at IS NULL AND a.status IN ('answered', 'done', 'archived')
+      -- The status list is \`idx_asks_unnotified\`'s, term for term, so the index applies.
+      WHERE a.notified_at IS NULL AND a.status IN ('answered', 'done', 'archived', 'expired')
+        AND a.status != 'expired'
         AND a.kind != 'error' AND a.source_session_id IS NOT NULL
         AND a.resolved_by_user_id IS NOT NULL
         AND a.resolved_at > ? AND a.resolved_at <= ?
@@ -330,7 +344,7 @@ export async function loadChatForError(
   sessionId: string
 ): Promise<{ taskId: string | null; topic: string | null; createdBy: string | null } | null> {
   const row = await env.DATABASE.prepare(
-    `SELECT ss.task_id, ss.topic, ss.created_by_user_id,
+    `SELECT ss.task_id, ss.topic, ss.created_by_user_id, ss.status,
         (SELECT t.id FROM tasks t WHERE t.project_id = ss.project_id AND t.chat_session_id = ss.id)
           AS bound_task_id
        FROM session_summaries ss WHERE ss.id = ? AND ss.project_id = ?`
@@ -340,8 +354,11 @@ export async function loadChatForError(
       task_id: string | null;
       topic: string | null;
       created_by_user_id: string | null;
+      status: string | null;
       bound_task_id: string | null;
     }>();
+  // An archived chat is a normal ending: it files nothing (policy a974b04f).
+  if (row?.status === 'archived') return null;
   if (row) {
     return {
       // `createAsk` requires the chat to be the task's own; prefer the task bound to it now.
@@ -351,7 +368,7 @@ export async function loadChatForError(
     };
   }
   const session = await projectDataService.getSession(env, projectId, sessionId);
-  if (!session) return null;
+  if (!session || session.status === 'archived') return null;
   const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
   const bound = await env.DATABASE.prepare(
     'SELECT id FROM tasks WHERE project_id = ? AND chat_session_id = ?'
@@ -376,10 +393,11 @@ export async function fileSleepLossError(
 ): Promise<SystemErrorFiled | null> {
   try {
     const chat = await loadChatForError(env, input.projectId, input.sessionId);
-    const name = quotedName(chat?.topic, 'A chat');
+    if (!chat) return null;
+    const name = quotedName(chat.topic, 'A chat');
     return await fileAndNotify(env, {
       projectId: input.projectId,
-      assigneeUserId: chat?.createdBy ?? input.userId,
+      assigneeUserId: chat.createdBy ?? input.userId,
       source: 'sleep',
       subjectId: input.sessionId,
       title: `${name} went to sleep without saving its latest work`,
@@ -387,7 +405,7 @@ export async function fileSleepLossError(
         ? 'SAM could not save a fresh snapshot, so it slept the chat from its last complete one; changes made after that snapshot may be lost.'
         : 'SAM could not save a snapshot before it shut the workspace down, so unsaved files and uncommitted work may be lost.',
       actions: ['open_chat'],
-      sourceTaskId: chat?.taskId ?? null,
+      sourceTaskId: chat.taskId,
       sourceSessionId: input.sessionId,
       links: [{ kind: 'chat', id: input.sessionId, label: null }],
     });

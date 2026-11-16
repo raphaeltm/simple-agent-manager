@@ -7,7 +7,7 @@
 --                  the API reports null for it.
 --
 -- Failed tasks are found by a cron step that scans recently failed tasks
--- (`apps/api/src/services/inbox/system-error-sweep.ts`); the partial index keeps that scan to the
+-- (`apps/api/src/services/inbox/system-errors.ts`, `automation-errors.ts`); the partial index keeps that scan to the
 -- failed rows of the lookback window.
 --
 -- Two partial indexes on asks keep that step off the rest of the table: error items by task
@@ -18,7 +18,9 @@
 --
 -- A failed chat wake is an open error item (dedupe key error:wake:<sessionId>) instead of a
 -- ProjectData wake_failed attention marker; the chat list reads it per chat
--- (`packages/worker-core/src/question-asks.ts`), so open error items get a per-chat index.
+-- (`packages/worker-core/src/question-asks.ts`, `openWakeErrorPredicate`), so open wake items get
+-- a per-chat index whose WHERE is the reader's predicate term for term (a key range: a prefix LIKE
+-- cannot seek a BINARY column).
 --
 -- Additive only: one column with a default and five partial indexes. Existing rows are unaffected.
 ALTER TABLE asks ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 1;
@@ -32,5 +34,5 @@ CREATE INDEX idx_asks_error_key ON asks (dedupe_key) WHERE kind = 'error' AND de
 CREATE INDEX idx_trigger_executions_failed_completed ON trigger_executions (completed_at)
   WHERE status = 'failed';
 
-CREATE INDEX idx_asks_open_error_session ON asks (project_id, source_session_id, created_at)
-  WHERE kind = 'error' AND status = 'open';
+CREATE INDEX idx_asks_open_wake_error ON asks (project_id, source_session_id, created_at)
+  WHERE kind = 'error' AND status = 'open' AND dedupe_key >= 'error:wake:' AND dedupe_key < 'error:wake;';

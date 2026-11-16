@@ -21,9 +21,10 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 | **operations_approval** | High    | An agent in the Operations project asks to run an operational action, such as restarting something on a machine. Shown as **Approval Needed**, to superadmins only; approve or deny it on the card in that chat or in **Admin → Approvals** ([Operations debugger tools](/docs/guides/admin-settings/#operations-debugger-tools))                                                                                                |
 | **secret_request**      | High    | An agent asks you to supply a secret value through the card in its chat ([details](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret))                                                                                                                                                                                                                                                                           |
 
-A permission request, question, or link card that an agent puts in the chat while it waits does
-**not** send a notification. Those show up as **Needs input** beside the chat in the project's
-session list — see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
+A permission request, form, or link card that an agent puts in the chat while it waits sends one
+**needs_input** notification per request, to the person who started the chat; it opens the request
+in the inbox. The chat also shows **Needs input** beside it in the project's session list — see
+[When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 
 **Settings → Notifications** still lists a **PR Created** switch, but SAM no longer sends that
 notification: SAM doesn't open pull requests itself, so a pull request link arrives in the agent's

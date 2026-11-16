@@ -29,6 +29,13 @@ vi.mock('../../../src/services/project-data', async () => ({
 vi.mock('../../../src/durable-objects/sam-session/tools/retry-subtask', () => ({
   retrySubtask: edges.retrySubtask,
 }));
+const wake = vi.hoisted(() => ({ authorize: vi.fn(), ensure: vi.fn() }));
+vi.mock('../../../src/services/agent-wake-authorization', () => ({
+  authorizeAgentWake: wake.authorize,
+}));
+vi.mock('../../../src/services/session-recovery', () => ({
+  ensureSessionRecovery: wake.ensure,
+}));
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -98,6 +105,8 @@ beforeEach(() => {
   edges.acceptPromptDelivery.mockReset().mockResolvedValue({ message: { id: 'd' } });
   edges.retrySubtask.mockReset();
   edges.createNotification.mockReset().mockResolvedValue({ id: 'n-1' });
+  wake.authorize.mockReset().mockResolvedValue(undefined);
+  wake.ensure.mockReset().mockResolvedValue({ status: 'waking', taskId: 'task-wake' });
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
   // The shipped migrations, not the drizzle mirror: the partial indexes are under test too.
@@ -530,6 +539,36 @@ describe('failing automations', () => {
     expect(errorAsks()[0]).toMatchObject({ status: 'done', dedupe_key: null });
   });
 
+  it('in the real order (filed at 2, auto-paused at the next fire) the same item gains Resume', async () => {
+    trigger('tr-order');
+    await run('tr-order', 'failed');
+    await run('tr-order', 'failed');
+    await runInboxAutomationErrorSweep(env);
+    expect(errorAsks()[0]!.answer_spec_json).toBe(JSON.stringify({ type: 'acknowledge' }));
+    await run('tr-order', 'failed');
+    await runInboxAutomationErrorSweep(env);
+    // The auto-pause statement of `trigger-admission.ts` (no run is recorded for it).
+    sqlite
+      .prepare(
+        `UPDATE triggers SET status = 'paused', next_fire_at = NULL, updated_at = ?
+          WHERE id = 'tr-order' AND project_id = ? AND status = 'active'`
+      )
+      .run(new Date().toISOString(), P1);
+    await runInboxAutomationErrorSweep(env);
+    const rows = errorAsks();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      title: 'Automation “Nightly tr-order” was paused after 3 failed runs',
+      failure_count: 3,
+    });
+    expect(JSON.parse(String(rows[0]!.answer_spec_json))).toEqual({
+      type: 'actions',
+      actions: [{ id: 'resume', label: 'Resume' }],
+    });
+    // Only the first filing notified.
+    expect(edges.createNotification).toHaveBeenCalledTimes(1);
+  });
+
   it('closes by itself after a clean run', async () => {
     trigger('tr-heal');
     await run('tr-heal', 'failed');
@@ -603,5 +642,104 @@ describe('an answer whose agent notice the inbox sweep gave up on', () => {
     expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
     expect(errorAsks()).toHaveLength(1);
     expect(errorAsks()[0]!.failure_count).toBe(1);
+  });
+});
+
+describe('fixes found in review', () => {
+  it('an edit to a failed task with an open item is not another failure', async () => {
+    task('t-touch');
+    await markTaskFailedIfNonTerminal(env.DATABASE, 't-touch', 'Task runner startup failed');
+    await runInboxSystemErrorSweep(env);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    sqlite
+      .prepare(`UPDATE tasks SET title = 'Renamed', updated_at = ? WHERE id = 't-touch'`)
+      .run(new Date().toISOString());
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
+    expect(errorAsks()).toHaveLength(1);
+    expect(errorAsks()[0]!.failure_count).toBe(1);
+    expect(edges.createNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('error items are not held to the per-chat cap that bounds an agent', async () => {
+    task('t-capped');
+    // The chat already holds the most open items an agent may file (`inbox.openItemsPerChat`).
+    for (let i = 0; i < 20; i += 1) {
+      insert('asks', {
+        id: `q-${i}`,
+        project_id: P1,
+        assignee_kind: 'user',
+        assignee_user_id: 'owner',
+        kind: 'review',
+        blocking: 0,
+        title: `Review ${i}`,
+        status: 'open',
+        source_session_id: 'chat-t-capped',
+        source_task_id: 't-capped',
+        created_at: i + 1,
+        updated_at: i + 1,
+      });
+    }
+    await markTaskFailedIfNonTerminal(env.DATABASE, 't-capped', 'Task runner startup failed');
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(1);
+    expect(taskItem('t-capped')).toBeDefined();
+  });
+});
+
+describe('the wake action', () => {
+  function wakeItem(sessionId: string, actions: string[]) {
+    task('t-wake', { status: 'in_progress', chat_session_id: sessionId });
+    insert('asks', {
+      id: 'w-1',
+      project_id: P1,
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      kind: 'error',
+      blocking: 0,
+      title: "Couldn't wake “Ship”",
+      body_md: 'SAM could not restart the agent for this chat.',
+      answer_spec_json: JSON.stringify({
+        type: 'actions',
+        actions: actions.map((id) => ({ id, label: id })),
+      }),
+      source_session_id: sessionId,
+      source_task_id: 't-wake',
+      dedupe_key: `error:wake:${sessionId}`,
+      status: 'open',
+      created_at: 1,
+      updated_at: 1,
+    });
+    return 'ask:w-1';
+  }
+
+  it('runs the existing wake with the person’s authority and leaves the item open until the chat wakes', async () => {
+    const ref = wakeItem('chat-w', ['wake', 'open_chat']);
+    await expect(
+      answerInboxItem(ctx('owner'), { projectId: P1, ref, action: 'wake' })
+    ).resolves.toEqual({ ref, outcome: 'wake_requested', agentNotified: false });
+    expect(wake.authorize).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ projectId: P1, sessionId: 'chat-w', actorUserId: 'owner' })
+    );
+    expect(wake.ensure).toHaveBeenCalledWith(env, P1, 'chat-w');
+    expect(sqlite.prepare(`SELECT status FROM asks WHERE id = 'w-1'`).get()).toEqual({
+      status: 'open',
+    });
+  });
+
+  it('a refused wake is a 409 and the item stays open; a refused authorization runs nothing', async () => {
+    const ref = wakeItem('chat-r', ['wake']);
+    wake.ensure.mockResolvedValueOnce({ status: 'unavailable', reason: 'snapshot_expired' });
+    await expect(
+      answerInboxItem(ctx('owner'), { projectId: P1, ref, action: 'wake' })
+    ).rejects.toMatchObject({ code: 'conflict' });
+    wake.authorize.mockRejectedValueOnce(new Error('You cannot wake the agent in this session'));
+    wake.ensure.mockClear();
+    await expect(
+      answerInboxItem(ctx('owner'), { projectId: P1, ref, action: 'wake' })
+    ).rejects.toThrow();
+    expect(wake.ensure).not.toHaveBeenCalled();
+    expect(sqlite.prepare(`SELECT status FROM asks WHERE id = 'w-1'`).get()).toEqual({
+      status: 'open',
+    });
   });
 });

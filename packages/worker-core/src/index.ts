@@ -47,6 +47,7 @@ export {
   DEFAULT_OPEN_QUESTION_READ_LIMIT,
   hasOpenQuestionAsk,
   type OpenQuestionQuery,
+  openWakeErrorPredicate,
   preferAttention,
   QUESTION_ASK_SOURCE,
   questionAttentionFromRow,
