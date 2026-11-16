@@ -144,9 +144,11 @@ export function FlowBody({
           label={`Rework within ${rework.windowDays} days`}
           value={rework.of > 0 ? formatPercent(rework.rate) : 'No merges'}
           detail={
-            rework.of > 0
-              ? `${rework.count} of ${rework.of} merges had a follow-up`
-              : 'Nothing merged in this range'
+            reworkDelta
+              ? `${reworkDelta.text} ${previous}`
+              : rework.of > 0
+                ? `${rework.count} of ${rework.of} merges had a follow-up`
+                : 'Nothing merged in this range'
           }
           tone={reworkDelta?.tone}
         />

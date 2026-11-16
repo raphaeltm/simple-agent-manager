@@ -76,13 +76,13 @@ export function countDelta(current: number, previous: number): { text: string; t
   };
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
 /** "W46" for a week bucket, "Mon 16" for a day bucket (UTC, the server's bucket clock). */
 export function bucketLabel(start: string, bucket: 'day' | 'week'): string {
   const date = new Date(`${start}T00:00:00.000Z`);
   if (Number.isNaN(date.getTime())) return start;
-  if (bucket === 'day') {
-    return date.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
-  }
+  if (bucket === 'day') return `${WEEKDAYS[date.getUTCDay()]} ${date.getUTCDate()}`;
   return `W${isoWeek(date)}`;
 }
 

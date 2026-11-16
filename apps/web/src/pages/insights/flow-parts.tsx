@@ -94,6 +94,8 @@ const SERIES = [
 
 export function RunsChart({ runs }: { runs: FlowRuns }) {
   const max = Math.max(1, ...runs.buckets.map(bucketTotal));
+  // 90 days is 14 weeks: on a phone, totals above the bars and every other label would collide.
+  const dense = runs.buckets.length > 8;
   const total = runs.buckets.reduce((sum, b) => sum + bucketTotal(b), 0);
   const { stopped, prOpen, noPullRequest } = runs.other;
   const extras = [
@@ -119,7 +121,11 @@ export function RunsChart({ runs }: { runs: FlowRuns }) {
           >
             {runs.buckets.map((b) => (
               <div key={b.start} className="flex h-full min-w-0 flex-1 flex-col items-center gap-1">
-                <span className="font-mono text-[11px] text-fg-muted">{bucketTotal(b) || ''}</span>
+                <span
+                  className={`font-mono text-[11px] text-fg-muted ${dense ? 'max-sm:invisible' : ''}`}
+                >
+                  {bucketTotal(b) || ''}
+                </span>
                 <div
                   className="flex w-full max-w-[36px] flex-1 flex-col-reverse overflow-hidden rounded-[5px]"
                   data-intentional-clip="rounded bar ends"
@@ -136,10 +142,10 @@ export function RunsChart({ runs }: { runs: FlowRuns }) {
             ))}
           </div>
           <div className="flex min-w-0 gap-1.5 sm:gap-2" aria-hidden="true">
-            {runs.buckets.map((b) => (
+            {runs.buckets.map((b, index) => (
               <span
                 key={b.start}
-                className="min-w-0 flex-1 text-center font-mono text-[10.5px] text-fg-muted [overflow-wrap:anywhere]"
+                className={`min-w-0 flex-1 whitespace-nowrap text-center font-mono text-[10.5px] text-fg-muted ${dense && index % 2 === 1 ? 'max-sm:invisible' : ''}`}
               >
                 {bucketLabel(b.start, runs.bucket)}
               </span>

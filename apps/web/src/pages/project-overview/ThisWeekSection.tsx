@@ -44,8 +44,9 @@ function Stat({
     <div className="sam-well flex min-w-0 flex-col gap-0.5 rounded-[var(--sam-radius-control)] px-2.5 py-2">
       <span className="text-[12px] leading-tight text-fg-muted">{label}</span>
       <span className="text-[19px] font-bold leading-tight text-fg-primary">{value}</span>
+      {/* A flat change says nothing in a cell this small; the line keeps its height. */}
       <span className={`text-[11.5px] ${delta ? TONE_CLASS[delta.tone] : 'text-fg-muted'}`}>
-        {delta?.text ?? ' '}
+        {delta && delta.tone !== 'flat' ? delta.text : '\u00a0'}
       </span>
     </div>
   );
