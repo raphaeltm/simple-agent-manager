@@ -267,6 +267,54 @@ describe('projectOverviewGet', () => {
     expect(mate.running.waitingOnViewerTotal).toBe(1);
   });
 
+  /** An agent question held in D1 `asks` (inbox slice G): not copied into the chat summary. */
+  function question(
+    id: string,
+    sessionId: string,
+    fields: Record<string, string | number | null> = {}
+  ): void {
+    const now = Date.now();
+    insert('asks', {
+      id,
+      project_id: 'p',
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      kind: 'question',
+      blocking: 1,
+      title: 'Which region?',
+      source_session_id: sessionId,
+      status: 'open',
+      expires_at: now + HOUR,
+      created_at: now,
+      updated_at: now,
+      ...fields,
+    });
+  }
+
+  it('reads a chat paused on an open question ask as waiting, ranked first and counted', async () => {
+    // Idle chats with no attention marker: only the ask can make them show.
+    const idle = { agent_completed_at: NOW - 120_000, last_message_at: NOW - 10 * HOUR };
+    running('asked', idle);
+    question('ask-1', 'asked');
+    running('fresh', {}, {});
+    // Controls: an expired and an answered question leave the chat idle (not shown).
+    running('expired-q', idle);
+    question('ask-expired', 'expired-q', { expires_at: Date.now() - 1 });
+    running('answered-q', idle);
+    question('ask-answered', 'answered-q', { status: 'answered' });
+    // Attack: another project's open question naming this project's chat id.
+    running('foreign-q', idle);
+    question('ask-foreign', 'foreign-q', { project_id: 'foreign' });
+
+    const result = await projectOverviewGet(ctx(), { projectId: 'p', runningLimit: 1 });
+    // The cap is 1: the waiting chat outranks the newer working one.
+    expect(result.running.items).toEqual([
+      expect.objectContaining({ sessionId: 'asked', state: 'waiting', waitingOnViewer: true }),
+    ]);
+    expect(result.running.total).toBe(2);
+    expect(result.running.waitingOnViewerTotal).toBe(1);
+  });
+
   it('skips one malformed row and keeps the rest', async () => {
     running('good');
     running('bad');

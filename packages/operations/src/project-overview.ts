@@ -43,12 +43,20 @@ export const OVERVIEW_RUNNING_TASK_STATUSES = [
 const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
 
 /**
+ * The chat is paused on a person: a ProjectData attention marker (synced to
+ * `session_summaries.attention_json`), or an open question held in D1 `asks` (inbox slice G),
+ * which is not copied into the summary. `open_questions` is the CTE at the head of `RUNNING_SQL`.
+ */
+const PAUSED_ON_PERSON_SQL = `(ss.attention_json IS NOT NULL
+      OR ss.id IN (SELECT session_id FROM open_questions))`;
+
+/**
  * 1 for a chat paused on a question the viewer must answer (they started it, it is past
  * starting), else 0. Ranked first so the cap can never hide the one exception the page exists to
  * surface (`apps/api/.claude/rules/65`), and summed so the page can say how many there are.
  * Binds the viewer id; it appears twice in `RUNNING_SQL` (the sum and the ranking).
  */
-const WAITING_ON_VIEWER_SQL = `(CASE WHEN ss.attention_json IS NOT NULL AND ss.created_by_user_id = ?
+const WAITING_ON_VIEWER_SQL = `(CASE WHEN ${PAUSED_ON_PERSON_SQL} AND ss.created_by_user_id = ?
       AND t.status NOT IN (${sqlList(OVERVIEW_STARTING_TASK_STATUSES)}) THEN 1 ELSE 0 END)`;
 
 /**
@@ -58,11 +66,20 @@ const WAITING_ON_VIEWER_SQL = `(CASE WHEN ss.attention_json IS NOT NULL AND ss.c
  * open question. The task join carries `project_id` so a task id cannot reach across projects
  * (rule 11), and a profile name is shown only for this project's profiles or the task creator's
  * own global ones, so a hint naming someone else's global profile reveals nothing. `COUNT(*) OVER ()` gives the total without a second round trip.
+ * `open_questions` reads this project's open, unexpired question asks once
+ * (`idx_asks_open_question`), bound to the project like every other predicate here.
  */
 const RUNNING_SQL = `
+  WITH open_questions AS (
+    SELECT DISTINCT source_session_id AS session_id
+      FROM asks
+     WHERE project_id = ? AND kind = 'question' AND status = 'open'
+       AND source_session_id IS NOT NULL
+       AND (expires_at IS NULL OR expires_at > ?)
+  )
   SELECT ss.id, ss.task_id, ss.topic, ss.started_at, ss.created_at, ss.last_message_at,
          ss.agent_completed_at, ss.created_by_user_id,
-         CASE WHEN ss.attention_json IS NULL THEN 0 ELSE 1 END AS has_attention,
+         CASE WHEN ${PAUSED_ON_PERSON_SQL} THEN 1 ELSE 0 END AS has_attention,
          t.status AS task_status, t.agent_profile_hint,
          ap.name AS profile_name,
          COUNT(*) OVER () AS total,
@@ -77,7 +94,7 @@ const RUNNING_SQL = `
      AND t.status IN (${sqlList(OVERVIEW_RUNNING_TASK_STATUSES)})
      AND (
        t.status IN (${sqlList(OVERVIEW_STARTING_TASK_STATUSES)})
-       OR ss.attention_json IS NOT NULL
+       OR ${PAUSED_ON_PERSON_SQL}
        OR (ss.agent_completed_at IS NULL
            AND (t.execution_step IS NULL OR t.execution_step <> 'awaiting_followup'))
      )
@@ -160,8 +177,9 @@ async function readRunning(
   limit: number
 ): Promise<ProjectOverviewResponse['running']> {
   const result = await ctx.env.DATABASE.prepare(RUNNING_SQL)
-    // Placeholders in order: viewer (sum), project, viewer (ranking), limit.
-    .bind(ctx.actor.userId, projectId, ctx.actor.userId, limit)
+    // Placeholders in order: project and clock (open questions), viewer (sum), project,
+    // viewer (ranking), limit.
+    .bind(projectId, Date.now(), ctx.actor.userId, projectId, ctx.actor.userId, limit)
     .all<Record<string, unknown>>();
   const rows = result.results ?? [];
   const items: OverviewRunningChat[] = [];
