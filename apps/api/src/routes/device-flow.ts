@@ -233,7 +233,7 @@ deviceFlowRoutes.post(
 
     await c.env.KV.delete(`device:${deviceCode}`);
 
-    return buildSessionLoginResponse(c.env, user);
+    return buildSessionLoginResponse(c.env, user, c.req.raw.headers);
   }
 );
 

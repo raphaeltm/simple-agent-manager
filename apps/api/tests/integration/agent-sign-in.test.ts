@@ -217,7 +217,12 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       ENDPOINT,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip },
+        headers: {
+          'content-type': 'application/json',
+          'cf-connecting-ip': ip,
+          'x-forwarded-for': '198.51.100.66',
+          'x-real-ip': '198.51.100.67',
+        },
         body: JSON.stringify({ token, target }),
       },
       env
@@ -280,6 +285,19 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
   }
 
   describe('success', () => {
+    it.each(['', 'not-an-ip'])(
+      'does not store spoofed forwarding headers when ingress IP is %j',
+      async (ip) => {
+        const response = await exchange(await issuer.sign(), TARGET_ID, ip);
+        expect(response.status).toBe(200);
+        expect((await me(cookieFrom(response))).status).toBe(200);
+        expect(sqlite.prepare('SELECT ip_address FROM sessions').all()).toEqual([
+          { ip_address: '' },
+        ]);
+        expect(auditRows()).toHaveLength(1);
+      }
+    );
+
     it('signs the agent in as the allowed target with a short session and an audit record', async () => {
       expect(isAgentSignInEnabled(env)).toBe(true);
       const token = await issuer.sign();
@@ -288,6 +306,9 @@ describe('agent sign-in through workload identity (vertical slice)', () => {
       expect(response.status).toBe(200);
       const body = (await response.json()) as { user: { id: string }; sessionCookie: string };
       expect(body.user.id).toBe(TARGET_ID);
+      expect(sqlite.prepare('SELECT ip_address FROM sessions').all()).toEqual([
+        { ip_address: '203.0.113.7' },
+      ]);
       const setCookie = response.headers.get('set-cookie') ?? '';
       expect(setCookie).toMatch(/Max-Age=3600/);
       expect(setCookie).toMatch(/HttpOnly/);
