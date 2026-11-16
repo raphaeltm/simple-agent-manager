@@ -56,24 +56,24 @@ account. Prototype: Library `/product/analytics/analytics-prototypes.html?s=acco
 
 ## Implementation checklist
 
-- [ ] Move `credentialLimitReferenceKey` (+ `sha256Hex` it needs) to `packages/shared`; API imports it
-- [ ] Shared types `packages/shared/src/types/insights-accounts.ts` (response, account, episode)
-- [ ] Export a parameterised `runsCte` from `insights-flow-sql.ts` (account columns opt-in)
-- [ ] `packages/operations/src/insights-accounts-sql.ts`: runs-by-account, waits, rejected windows
-- [ ] `packages/operations/src/insights-accounts.ts`: `projectAccounts(ctx, { projectId, range })`
+- [x] Move `credentialLimitReferenceKey` (+ `sha256Hex` it needs) to `packages/shared`; API imports it
+- [x] Shared types `packages/shared/src/types/insights-accounts.ts` (response, account, episode)
+- [x] Export a parameterised `runsCte` from `insights-flow-sql.ts` (account columns opt-in)
+- [x] `packages/operations/src/insights-accounts-sql.ts`: runs-by-account, waits, rejected windows
+- [x] `packages/operations/src/insights-accounts.ts`: `projectAccounts(ctx, { projectId, range })`
       (authorize, settings, one batch with per-statement fallback, row isolation, episode merge,
       own meters, privacy grouping)
-- [ ] Settings `insights.accountsStallScanCap`, `insights.accountsEpisodesListed` (Operations group)
-- [ ] REST `GET /api/projects/:projectId/insights/accounts?range=` in `routes/project-insights.ts`
-- [ ] Tests on a real SQL engine: foreign-project attack + owner control per statement, malformed
+- [x] Settings `insights.accountsStallScanCap`, `insights.accountsEpisodesListed` (Operations group)
+- [x] REST `GET /api/projects/:projectId/insights/accounts?range=` in `routes/project-insights.ts`
+- [x] Tests on a real SQL engine: foreign-project attack + owner control per statement, malformed
       rows (good/bad/good), privacy (teammate name never returned), episode merge, round-trip
       budget, route-level test
-- [ ] Web: `getProjectAccounts`, query options, `AccountsTab.tsx` + parts, route; delete
+- [x] Web: `getProjectAccounts`, query options, `AccountsTab.tsx` + parts, route; delete
       `ComingSoonTab` accounts entry (no dead code)
-- [ ] Playwright visual audit 375/1280: normal, empty, stress (many accounts/long names), error
-- [ ] Docs: Insights section of the project guide (`apps/www/.../guides/`)
+- [x] Playwright visual audit 375/1280: normal, empty, stress (many accounts/long names), error
+- [x] Docs: Insights section of the project guide (`apps/www/.../guides/`)
 - [ ] Staging: real project with runs, limit-hit account if staging has one
-- [ ] Post read shape on `feature.insights` for slice U
+- [x] Post read shape on `feature.insights` for slice U
 
 ## Acceptance criteria
 
@@ -87,3 +87,19 @@ account. Prototype: Library `/product/analytics/analytics-prototypes.html?s=acco
 - [ ] ≤ 6 round trips, measured in a test
 - [ ] Range control switches 7/30/90 without blanking the page; refresh keeps data visible
 - [ ] No horizontal overflow at 375 and 1280; placeholder code for Accounts removed
+
+## Implementation notes
+
+- Main is branch-protected (required check), so the task file was committed on the feature branch.
+- Flow's batch runner and row parser were near-copies of what Accounts needed: extracted to
+  `insights-batch.ts` and used by both. Flow's settings file became `insights-page-settings.ts`
+  (one resolver for both tabs).
+- Discrimination checks run (each predicate deleted once, then restored): workspace project join in
+  `runsCte({account:true})` → "attributes runs…" red; waits `t.project_id = ?` → "merges overlapping…"
+  red; windows `l.project_id = ?` → "merges overlapping…" red; SQL own-name gate → "keeps another
+  member's credential name in the database" red; display-layer name gate → compute "names only the
+  viewer's own credential" + "keeps project and platform accounts apart" red.
+- The admin settings store is unreadable in the better-sqlite3 harness (it falls back to defaults),
+  so the scan-cap test overrides the settings port directly.
+- Playwright: Chromium's system libraries were installed per-user (apt-get download + dpkg-deb -x
+  into `.tmp/pwlibs`, `LD_LIBRARY_PATH`), no sudo.

@@ -1,13 +1,13 @@
 ---
 title: Insights
-description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks and the ideas that have waited longest.
+description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks, the ideas that have waited longest, and which accounts carried the work.
 ---
 
 **Insights** is a project page, in the project's navigation on desktop and on a phone. It shows how
 work moves from idea to merged pull request, over the last **7**, **30** or **90 days** (the range
 control at the top right; the range stays in the page's address, so a link keeps it).
 
-It has four tabs. **Flow** is described below. **Agent setups**, **Accounts** and **People** are
+It has four tabs. **Flow** and **Accounts** are described below. **Agent setups** and **People** are
 coming; until then each says what it will show.
 
 Every number is worked out from what SAM already records about tasks, ideas, pull requests and
@@ -65,6 +65,49 @@ Open ideas a person filed in the range, oldest first (ideas an automation or inc
 left out, as on the Ideas page), with how many runs worked on each and where it stands
 (not started, pull request open with CI red, stuck, and so on). Select one to open it.
 
+## Accounts
+
+Which account each run used, and how often an account's usage limit paused the work. An account
+is a stored credential: a Claude or ChatGPT subscription login, an API key, or SAM's own platform
+credential.
+
+### Whose accounts you see
+
+Your own accounts are listed one by one, by the name you gave them in Settings. Other members'
+accounts are never named: they appear grouped by kind, for example **Teammates' accounts (2)** for
+two other people's Codex subscriptions, the same way the chat header shows only the kind of
+account another person's run used. Shared project credentials appear as **Project account**. Runs
+whose agent session recorded no credential appear as **Account not recorded**.
+
+### Each account
+
+- **Runs** and **Merged a pull request**: the same runs Flow counts, attributed to the account the
+  run's agent used.
+- **Paused for limits**: how many times the account stalled on a usage limit in the range, and for
+  how long in total (**paused now** while one is still going).
+- **Limits now** (your own accounts): the provider's last-reported windows, the same chip as the chat
+  header. Open it for every window and when it resets.
+- **Spent** and **Per merged pull request** (API keys): **Not reported** for now. SAM does not yet
+  record how many tokens each run used, and it does not estimate.
+
+### Runs per day by account
+
+The runs of the range, by the day (7 days) or week (30 and 90 days) they ended, or started if still
+going, stacked by account. The five busiest accounts each get a colour; the rest are **Other**.
+
+### Stalled on a limit
+
+Each time an account ran out: when it started, which window ran out when SAM knows (**5h**,
+**Week**), how many runs it held, how long it lasted and how it ended — **resumed** (the limit
+reset, or the owner started the run anyway), **still waiting**, or **stopped retrying, needs a
+person** (SAM gave up waiting and the run needs someone to look at it). Runs paused by one exhausted
+window count as one stall, not one per run. The list shows the most recent ones.
+
+A stall is worked out each time the page loads from two records: the latest usage-limit wait of
+each task (a run paused mid-way, or held before it started), and the windows the provider reported
+as exhausted. SAM keeps only a task's latest wait and a window's latest report, so an older stall
+that a later one replaced is not shown.
+
 ## On the Overview
 
 The [Project Overview](/docs/guides/project-overview/) shows a small **This week** pane with three of
@@ -74,6 +117,7 @@ whichever affected more work.
 
 ## For administrators
 
-How many ideas "idea to merged" looks at, how many flaky checks and waiting ideas are listed, and
-the rework window are runtime settings under **Admin → Settings → Operations**
-(`insights.flow*`). See [Admin settings](/docs/guides/admin-settings/).
+How many ideas "idea to merged" looks at, how many flaky checks and waiting ideas are listed, the
+rework window, how many limit waits the Accounts tab examines and how many stalls it lists are
+runtime settings under **Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`).
+See [Admin settings](/docs/guides/admin-settings/).
