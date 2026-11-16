@@ -387,6 +387,7 @@ export {
   getInboxItem,
   listInbox,
 } from './inbox';
+export { getProjectFlow } from './insights';
 export {
   addObservation,
   createKnowledgeEntity,
@@ -469,7 +470,6 @@ export {
 } from './notifications';
 export type { ListPoliciesResponse, ProjectPolicy } from './policies';
 export { deletePolicy, getPolicy, listPolicies, updatePolicy } from './policies';
-export { getProjectFlow } from './insights';
 export { getProjectOverview } from './project-overview';
 export type {
   AccountMapResponse,

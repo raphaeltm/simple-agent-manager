@@ -143,6 +143,7 @@ export {
   workspacePortsQueryOptions,
   workspaceQueryKeys,
 } from './infrastructure';
+export { insightsQueryKeys, projectFlowQueryOptions } from './insights';
 export {
   libraryFileQueryOptions,
   type LibraryIndexQueryData,
@@ -163,7 +164,6 @@ export {
   notificationsListQueryOptions,
   timelineProgressNotificationsQueryOptions,
 } from './notifications';
-export { insightsQueryKeys, projectFlowQueryOptions } from './insights';
 export { projectOverviewQueryKeys, projectOverviewQueryOptions } from './project-overview';
 export {
   instantRuntimeEnabledQueryOptions,

@@ -4,8 +4,6 @@
  * Split out of `idea-list-core.ts` so the aggregation reads as one story: every function here
  * is one batched query plus the plain-data mapping of its rows. Nothing here derives state.
  */
-import { chunk, D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
-
 import { ideaTaskPredicateSql } from './idea-core';
 import { IDEA_OPEN_STATUSES } from './idea-transitions';
 import type { OperationContext } from './types';
@@ -16,14 +14,6 @@ export const DEFAULT_IDEA_LIST_OPEN_LIMIT = 100;
 export const DEFAULT_IDEA_LIST_CLOSED_LIMIT = 20;
 /** How much of the plan travels with a list row as its one-line summary. */
 export const DEFAULT_IDEA_SUMMARY_MAX_LENGTH = 180;
-
-/**
- * The platform's bound-parameter ceiling covers the whole statement, not just the `IN (…)`
- * list. The widest query here binds one project id beside the list; the margin is wider than
- * that so another predicate can be added without silently crossing the ceiling.
- */
-const RESERVED_BIND_PARAMETERS = 4;
-const MAX_IDS_PER_QUERY = D1_MAX_BOUND_PARAMETERS - RESERVED_BIND_PARAMETERS;
 
 export interface IdeaRow {
   id: string;
@@ -181,16 +171,17 @@ export async function readSessionTasks(
   taskIds: readonly string[]
 ): Promise<Map<string, SessionTaskRow>> {
   const byId = new Map<string, SessionTaskRow>();
-  for (const ids of chunk([...new Set(taskIds)], MAX_IDS_PER_QUERY)) {
-    const placeholders = ids.map(() => '?').join(', ');
-    const result = await ctx.env.DATABASE.prepare(
-      `SELECT id, status, error_message, output_pr_url, agent_profile_hint FROM tasks
-        WHERE project_id = ? AND id IN (${placeholders})`
-    )
-      .bind(projectId, ...ids)
-      .all<SessionTaskRow>();
-    for (const row of result.results ?? []) byId.set(row.id, row);
-  }
+  const ids = [...new Set(taskIds)];
+  if (ids.length === 0) return byId;
+  // One statement for any number of ids: the list travels as one JSON bind, so it never meets
+  // the bound-parameter ceiling and never splits into sequential round trips (rule 60).
+  const result = await ctx.env.DATABASE.prepare(
+    `SELECT id, status, error_message, output_pr_url, agent_profile_hint FROM tasks
+      WHERE project_id = ? AND id IN (SELECT value FROM json_each(?))`
+  )
+    .bind(projectId, JSON.stringify(ids))
+    .all<SessionTaskRow>();
+  for (const row of result.results ?? []) byId.set(row.id, row);
   return byId;
 }
 
@@ -199,15 +190,14 @@ export async function readAgentProfileNames(
   profileIds: readonly string[]
 ): Promise<Map<string, string>> {
   const names = new Map<string, string>();
-  for (const ids of chunk([...new Set(profileIds)], MAX_IDS_PER_QUERY)) {
-    const placeholders = ids.map(() => '?').join(', ');
-    const result = await ctx.env.DATABASE.prepare(
-      `SELECT id, name FROM agent_profiles WHERE id IN (${placeholders})`
-    )
-      .bind(...ids)
-      .all<{ id: string; name: string }>();
-    for (const row of result.results ?? []) names.set(row.id, row.name);
-  }
+  const ids = [...new Set(profileIds)];
+  if (ids.length === 0) return names;
+  const result = await ctx.env.DATABASE.prepare(
+    `SELECT id, name FROM agent_profiles WHERE id IN (SELECT value FROM json_each(?))`
+  )
+    .bind(JSON.stringify(ids))
+    .all<{ id: string; name: string }>();
+  for (const row of result.results ?? []) names.set(row.id, row.name);
   return names;
 }
 
@@ -218,19 +208,18 @@ export async function readAssociatedPullRequests(
   taskIds: readonly string[]
 ): Promise<Map<string, string[]>> {
   const byTask = new Map<string, string[]>();
-  for (const ids of chunk([...new Set(taskIds)], MAX_IDS_PER_QUERY)) {
-    const placeholders = ids.map(() => '?').join(', ');
-    const result = await ctx.env.DATABASE.prepare(
-      `SELECT task_id, pr_url FROM task_pull_request_associations
-        WHERE project_id = ? AND task_id IN (${placeholders})`
-    )
-      .bind(projectId, ...ids)
-      .all<{ task_id: string; pr_url: string }>();
-    for (const row of result.results ?? []) {
-      const existing = byTask.get(row.task_id);
-      if (existing) existing.push(row.pr_url);
-      else byTask.set(row.task_id, [row.pr_url]);
-    }
+  const ids = [...new Set(taskIds)];
+  if (ids.length === 0) return byTask;
+  const result = await ctx.env.DATABASE.prepare(
+    `SELECT task_id, pr_url FROM task_pull_request_associations
+      WHERE project_id = ? AND task_id IN (SELECT value FROM json_each(?))`
+  )
+    .bind(projectId, JSON.stringify(ids))
+    .all<{ task_id: string; pr_url: string }>();
+  for (const row of result.results ?? []) {
+    const existing = byTask.get(row.task_id);
+    if (existing) existing.push(row.pr_url);
+    else byTask.set(row.task_id, [row.pr_url]);
   }
   return byTask;
 }

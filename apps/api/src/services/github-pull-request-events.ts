@@ -92,6 +92,7 @@ async function ingestLifecycleWebhook(
     closedAt: string(pr?.closed_at),
     createdAt,
     updatedAt,
+    opened: action === 'opened',
   };
   await Promise.all(
     projects.map((project) => upsertPullRequestSnapshot(env, project.id, snapshot))
@@ -182,6 +183,7 @@ async function ingestChecksWebhook(
         `INSERT INTO pull_request_checks (project_id, repository, head_sha, check_key, state, updated_at, first_failed_at)
          SELECT ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'failure' THEN ? END WHERE ? = 1 OR EXISTS (
            SELECT 1 FROM pull_requests WHERE project_id = ? AND repository = ? AND head_sha = ?)
+           OR EXISTS (${openingHeadExistsSql()})
          ON CONFLICT(project_id, repository, head_sha, check_key) DO UPDATE SET
            state = CASE WHEN ${CHECK_OBSERVATION_IS_NEWER_SQL} THEN excluded.state ELSE pull_request_checks.state END,
            updated_at = CASE WHEN ${CHECK_OBSERVATION_IS_NEWER_SQL} THEN excluded.updated_at ELSE pull_request_checks.updated_at END,
@@ -204,6 +206,11 @@ async function ingestChecksWebhook(
           checksState,
           updatedAt,
           Number(associated),
+          project.id,
+          repositoryFullName,
+          sha,
+          // A late result for the commit a pull request opened with is still kept after a push
+          // moved the pull request on: GitHub no longer associates it, and Insights reads it.
           project.id,
           repositoryFullName,
           sha

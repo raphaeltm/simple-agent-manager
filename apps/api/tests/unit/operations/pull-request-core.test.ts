@@ -170,19 +170,20 @@ describe('pull request state refresh', () => {
     expect(sqlite.prepare('SELECT head_sha FROM pull_request_checks').all()).toEqual([
       { head_sha: otherSha },
     ]);
-    // SAM knew this pull request at an earlier commit it never recorded as a head, so the new
-    // head is not the one it opened with: its first try stays "not recorded".
+    // A refresh is not GitHub's opened event, so the new head is not marked as the one the pull
+    // request opened with: its first try stays "not recorded".
     expect(sqlite.prepare('SELECT head_sha, from_open FROM pull_request_heads').all()).toEqual([
       { head_sha: 'c'.repeat(40), from_open: 0 },
     ]);
   });
 
-  it('marks the head of a pull request SAM had only as a URL as the one it opened with', async () => {
+  it('marks only the head that GitHub’s opened event carried as the one it opened with', async () => {
     await ensurePullRequest(env, 'p1', repo, url(3));
-    const snapshot = (sha: string, updatedAt: string) => ({
+    await ensurePullRequest(env, 'p1', repo, url(4));
+    const snapshot = (number: number, sha: string, updatedAt: string, opened?: boolean) => ({
       repository: repo,
-      number: 3,
-      url: url(3),
+      number,
+      url: url(number),
       title: 'Opened by an agent',
       state: 'open' as const,
       isDraft: false,
@@ -194,13 +195,38 @@ describe('pull request state refresh', () => {
       closedAt: null,
       createdAt: '2026-10-23T10:00:00Z',
       updatedAt,
+      ...(opened ? { opened } : {}),
     });
-    await upsertPullRequestSnapshot(env, 'p1', snapshot('d'.repeat(40), '2026-10-24T00:00:00Z'));
-    // The same head observed again later keeps its earliest time and its opening mark.
-    await upsertPullRequestSnapshot(env, 'p1', snapshot('d'.repeat(40), '2026-10-24T00:05:00Z'));
+    // #3: the opened event. The same head seen again later keeps its earliest time and its mark.
+    await upsertPullRequestSnapshot(
+      env,
+      'p1',
+      snapshot(3, 'd'.repeat(40), '2026-10-24T00:00:00Z', true)
+    );
+    await upsertPullRequestSnapshot(env, 'p1', snapshot(3, 'd'.repeat(40), '2026-10-24T00:05:00Z'));
+    // #4: SAM had only its URL, then a refresh (no opened event) saw a later commit. That is not
+    // the commit it opened with, so it is not marked: its first try stays "not recorded".
+    await upsertPullRequestSnapshot(env, 'p1', snapshot(4, 'e'.repeat(40), '2026-10-24T00:00:00Z'));
     expect(
-      sqlite.prepare('SELECT head_sha, first_seen_at, from_open FROM pull_request_heads').all()
-    ).toEqual([{ head_sha: 'd'.repeat(40), first_seen_at: '2026-10-24T00:00:00Z', from_open: 1 }]);
+      sqlite
+        .prepare(
+          'SELECT pr_number, head_sha, first_seen_at, from_open FROM pull_request_heads ORDER BY pr_number'
+        )
+        .all()
+    ).toEqual([
+      {
+        pr_number: 3,
+        head_sha: 'd'.repeat(40),
+        first_seen_at: '2026-10-24T00:00:00Z',
+        from_open: 1,
+      },
+      {
+        pr_number: 4,
+        head_sha: 'e'.repeat(40),
+        first_seen_at: '2026-10-24T00:00:00Z',
+        from_open: 0,
+      },
+    ]);
   });
 
   it('shares one installation budget across concurrent projects and caps each read', async () => {

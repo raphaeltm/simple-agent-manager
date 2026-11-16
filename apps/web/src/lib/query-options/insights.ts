@@ -5,7 +5,7 @@
  * `INSIGHTS_STALE_TIME_MS` and refetches in the background after that (stale-while-revalidate).
  */
 import type { InsightsRange } from '@simple-agent-manager/shared';
-import { keepPreviousData, queryOptions } from '@tanstack/react-query';
+import { queryOptions } from '@tanstack/react-query';
 
 import { getProjectFlow } from '../api';
 import { INSIGHTS_STALE_TIME_MS } from '../query-stale-times';
@@ -25,7 +25,8 @@ export function projectFlowQueryOptions(
     queryKey: insightsQueryKeys.flow(queryScope, projectId, range),
     queryFn: () => getProjectFlow(projectId, range),
     staleTime: INSIGHTS_STALE_TIME_MS,
-    // Switching range keeps the last range on screen until the new one arrives.
-    placeholderData: keepPreviousData,
+    // Switching range keeps the last range on screen until the new one arrives, but never
+    // another project's numbers (and idea links) under this project's page.
+    placeholderData: (previous) => (previous?.projectId === projectId ? previous : undefined),
   });
 }

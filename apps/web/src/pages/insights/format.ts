@@ -35,6 +35,16 @@ export function formatPercent(rate: number | null): string {
 export type DeltaTone = 'better' | 'worse' | 'flat';
 
 /**
+ * Colour for a change. Green means better; a worse change stays muted (the arrow says which
+ * way), because amber means "waiting on you" in SAM Glass and red means broken.
+ */
+export const DELTA_TONE_CLASS: Record<DeltaTone, string> = {
+  better: 'text-[var(--sam-status-success-fg)]',
+  worse: 'text-fg-muted',
+  flat: 'text-fg-muted',
+};
+
+/**
  * Change against the previous range, worded for the reader: "▼ 0.4 days vs previous 30 days".
  * `lowerIsBetter` decides the tone. Returns null when either side is missing.
  */

@@ -12,7 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createOperationPorts } from '../../../src/operation-ports';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { ingestPullRequestWebhook } from '../../../src/services/github-pull-request-events';
+import {
+  createAllSchemaTables,
+  createDeclaredIndexes,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({ snapshots: vi.fn() }));
 vi.mock('../../../src/services/project-data', async (importOriginal) => ({
@@ -143,8 +148,10 @@ describe('projectFlow', () => {
     vi.clearAllMocks();
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
+    // Production's unique keys: the webhook ingest upserts against them.
+    createDeclaredIndexes(sqlite, [schema.pullRequests, schema.pullRequestHeads]);
     sqlite.exec(`
-      INSERT INTO projects (id, name, repository) VALUES ('p', 'Project', 'acme/app'), ('foreign', 'Other', 'acme/app');
+      INSERT INTO projects (id, name, repository, user_id) VALUES ('p', 'Project', 'acme/app', 'owner'), ('foreign', 'Other', 'acme/app', 'outsider');
       INSERT INTO users (id, name, email) VALUES ('owner','Owner','o@example.com'), ('outsider','Out','x@example.com');
       INSERT INTO project_members (project_id, user_id, role, status) VALUES
         ('p','owner','owner','active'), ('foreign','outsider','owner','active');
@@ -439,5 +446,164 @@ describe('projectFlow', () => {
       .run(Buffer.from('x'), daysAgo(4), daysAgo(1));
     const result = await projectFlow(ctx(), { projectId: 'p', range: '30d', nowMs: NOW });
     expect(result.waitingIdeas.items.map((i) => i.ideaId)).toEqual(['good']);
+  });
+  it('derives first try and flaky checks from what the real webhook ingest stored', async () => {
+    const at = (msAgo: number) => new Date(NOW - msAgo).toISOString().replace('.000Z', 'Z');
+    const pullRequest = (
+      number: number,
+      action: string,
+      headSha: string,
+      updatedAt: string,
+      extra: Record<string, unknown> = {}
+    ) => ({
+      action,
+      repository: { id: 91, full_name: 'acme/app' },
+      pull_request: {
+        number,
+        html_url: prUrl(number),
+        title: `Change ${number}`,
+        state: 'open',
+        draft: false,
+        merged: false,
+        head: { ref: `topic-${number}`, sha: headSha },
+        base: { ref: 'main' },
+        user: { login: 'agent' },
+        created_at: at(3 * DAY),
+        updated_at: updatedAt,
+        merged_at: null,
+        closed_at: null,
+        ...extra,
+      },
+    });
+    const checkRun = (id: number, headSha: string, conclusion: string, updatedAt: string) => ({
+      action: 'completed',
+      repository: { id: 91, full_name: 'acme/app' },
+      check_run: {
+        id,
+        name: 'unit tests',
+        app: { id: 12 },
+        head_sha: headSha,
+        conclusion,
+        updated_at: updatedAt,
+        pull_requests: [],
+      },
+    });
+    const ingest = (event: string, payload: Record<string, unknown>) =>
+      ingestPullRequestWebhook(env, event, payload);
+
+    // #20 opens at a; unit tests fail, a rerun passes (flaky); then a push moves it to b.
+    await ingest('pull_request', pullRequest(20, 'opened', sha('a'), at(3 * DAY)));
+    await ingest('check_run', checkRun(1, sha('a'), 'failure', at(3 * DAY - HOUR)));
+    await ingest('check_run', checkRun(2, sha('a'), 'success', at(3 * DAY - 2 * HOUR)));
+    await ingest('pull_request', pullRequest(20, 'synchronize', sha('b'), at(2 * DAY)));
+    await ingest('check_run', checkRun(3, sha('b'), 'success', at(2 * DAY - HOUR)));
+    // #21 opens at c and passes on the first try, then merges.
+    await ingest('pull_request', pullRequest(21, 'opened', sha('c'), at(DAY)));
+    await ingest('check_run', checkRun(4, sha('c'), 'success', at(DAY - HOUR)));
+    await ingest(
+      'pull_request',
+      pullRequest(21, 'closed', sha('c'), at(DAY - 2 * HOUR), {
+        state: 'closed',
+        merged: true,
+        merged_at: at(DAY - 2 * HOUR),
+        closed_at: at(DAY - 2 * HOUR),
+      })
+    );
+
+    const result = await projectFlow(ctx(), { projectId: 'p', range: '30d', nowMs: NOW });
+
+    // #20 failed on its opening commit (the rerun does not wash it out); #21 passed.
+    expect(result.tiles.ciFirstTry).toMatchObject({ count: 1, of: 2, rate: 0.5, recorded: 2 });
+    expect(result.flakyChecks.items).toEqual([{ name: 'unit tests', flips: 1, commits: 3 }]);
+    expect(result.merged.count).toBe(1);
+  });
+
+  it('stays within its round-trip budget on a busy project', async () => {
+    // Count every D1 statement execution, every batch, and every Durable Object call.
+    const real = env.DATABASE;
+    let trips = 0;
+    const wrap = <T extends Record<string, unknown>>(statement: T): T => ({
+      ...statement,
+      all: async (...a: unknown[]) => {
+        trips += 1;
+        return (statement.all as (...x: unknown[]) => unknown)(...a);
+      },
+      first: async (...a: unknown[]) => {
+        trips += 1;
+        return (statement.first as (...x: unknown[]) => unknown)(...a);
+      },
+      run: async (...a: unknown[]) => {
+        trips += 1;
+        return (statement.run as (...x: unknown[]) => unknown)(...a);
+      },
+      // drizzle reads through `raw()`.
+      raw: async (...a: unknown[]) => {
+        trips += 1;
+        return (statement.raw as (...x: unknown[]) => unknown)(...a);
+      },
+    });
+    env = {
+      ...env,
+      DATABASE: {
+        ...real,
+        prepare: (sql: string) => {
+          const statement = real.prepare(sql) as unknown as Record<string, unknown>;
+          return {
+            ...wrap(statement),
+            bind: (...params: unknown[]) =>
+              wrap((statement.bind as (...p: unknown[]) => Record<string, unknown>)(...params)),
+          };
+        },
+        batch: async (statements: unknown[]) => {
+          trips += 1;
+          return (real.batch as (s: unknown[]) => unknown)(statements);
+        },
+      },
+    } as unknown as Env;
+
+    // 60 ideas updated in range, each with two chats whose tasks have pull requests: 120 task
+    // ids, past the 100-parameter bind ceiling, so a read that split its ids would show here.
+    for (let i = 0; i < 60; i += 1) {
+      idea(`I${i}`, { created_at: daysAgo(20), updated_at: daysAgo(2) });
+      for (const slot of [0, 1])
+        run(`t-${i}-${slot}`, { output_pr_url: prUrl(1000 + i * 2 + slot) });
+      pullRequest(1000 + i * 2, { state: 'merged', merged_at: daysAgo(3) });
+    }
+    mocks.snapshots.mockImplementation(async (_env: unknown, _projectId: string, ids: string[]) =>
+      Object.fromEntries(
+        ids.map((id) => [
+          id,
+          {
+            ideaId: id,
+            sessions: [0, 1].map((slot) => ({
+              sessionId: `s-${id}-${slot}`,
+              topic: null,
+              sessionStatus: 'stopped',
+              sessionTaskId: `t-${id.slice(1)}-${slot}`,
+              lastActivityAt: NOW - DAY,
+              relations: ['works_on'],
+              strong: true,
+              linkedAt: NOW - 2 * DAY,
+            })),
+            needsInput: [],
+            fileIds: [],
+            pullRequestUrls: [],
+            updates: 0,
+            truncated: { sessions: false, files: false, pullRequests: false },
+          },
+        ])
+      )
+    );
+
+    await projectFlow(ctx(), { projectId: 'p', range: '30d', nowMs: NOW }); // warm settings
+    trips = 0;
+    mocks.snapshots.mockClear();
+    const result = await projectFlow(ctx(), { projectId: 'p', range: '30d', nowMs: NOW });
+
+    // The linkage is really read: ideas whose tasks' pull requests merged have a median.
+    expect(result.tiles.ideaToMerged.count).toBe(60);
+    expect(mocks.snapshots).toHaveBeenCalledTimes(1);
+    // Rule 60 budget for this read is 12 (Insights spec): D1 trips plus the one DO call.
+    expect(trips + mocks.snapshots.mock.calls.length).toBeLessThanOrEqual(12);
   });
 });

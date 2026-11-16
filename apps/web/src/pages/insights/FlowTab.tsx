@@ -7,7 +7,6 @@ import type {
   FlowSection as FlowSectionName,
   ProjectFlowResponse,
 } from '@simple-agent-manager/shared';
-import { Spinner } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 
 import { LoadError, Loading, Notice } from '../../components/page-kit/page';
@@ -52,18 +51,10 @@ export function FlowTab() {
     }
     return <Loading label="Loading insights…" />;
   }
-  return <FlowBody data={data} projectId={projectId} refreshing={query.isFetching} />;
+  return <FlowBody data={data} projectId={projectId} />;
 }
 
-export function FlowBody({
-  data,
-  projectId,
-  refreshing,
-}: {
-  data: ProjectFlowResponse;
-  projectId: string;
-  refreshing: boolean;
-}) {
+export function FlowBody({ data, projectId }: { data: ProjectFlowResponse; projectId: string }) {
   const { ideaToMerged, ciFirstTry, waitingOnPerson, rework } = data.tiles;
   const previous = `vs previous ${rangeLabel(data.range)}`;
   const ideaDelta = durationDelta(ideaToMerged.medianMs, ideaToMerged.previousMedianMs);
@@ -76,20 +67,11 @@ export function FlowBody({
       className="flex min-w-0 flex-col gap-[var(--sam-space-gutter)]"
       data-testid="insights-flow"
     >
-      {(refreshing || data.unavailable.length > 0) && (
-        <div className="flex min-w-0 flex-col gap-2">
-          {refreshing && (
-            <span className="flex items-center gap-2 text-[12.5px] text-fg-muted" role="status">
-              <Spinner size="sm" /> Updating…
-            </span>
-          )}
-          {data.unavailable.length > 0 && (
-            <Notice>
-              Some numbers could not be loaded:{' '}
-              {data.unavailable.map((s) => SECTION_NAMES[s]).join(', ')}.
-            </Notice>
-          )}
-        </div>
+      {data.unavailable.length > 0 && (
+        <Notice>
+          Some numbers could not be loaded:{' '}
+          {data.unavailable.map((s) => SECTION_NAMES[s]).join(', ')}.
+        </Notice>
       )}
 
       <div className="grid min-w-0 grid-cols-2 gap-[var(--sam-space-gutter)] lg:grid-cols-4">

@@ -12,10 +12,14 @@ import {
   type InsightsRange,
   isInsightsRange,
 } from '@simple-agent-manager/shared';
-import { Pane, SegmentedControl, type Tab, Tabs } from '@simple-agent-manager/ui';
+import { Pane, SegmentedControl, Spinner, type Tab, Tabs } from '@simple-agent-manager/ui';
+import { useIsFetching } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 import { Outlet, useOutletContext, useSearchParams } from 'react-router';
 
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { useQueryScope } from '../../hooks/useQueryScope';
+import { insightsQueryKeys } from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
 
 export const INSIGHTS_TABS: Tab[] = [
@@ -65,6 +69,9 @@ export function ProjectInsights() {
     [setParams]
   );
   const outletContext = useMemo<InsightsOutletContext>(() => ({ range }), [range]);
+  const isMobile = useIsMobile();
+  // A background refresh shows here, in the header, so it never shifts the figures below.
+  const refreshing = useIsFetching({ queryKey: insightsQueryKeys.all(useQueryScope()) }) > 0;
 
   return (
     <div
@@ -79,13 +86,21 @@ export function ProjectInsights() {
               {project?.name ? `${project.name} · ` : ''}how work moves from idea to merged
             </p>
           </div>
-          <SegmentedControl<InsightsRange>
-            label="Range"
-            value={range}
-            onChange={setRange}
-            options={RANGE_OPTIONS}
-            className="w-full shrink-0 sm:w-[280px]"
-          />
+          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
+            {refreshing && (
+              <span role="status" aria-label="Updating" className="flex">
+                <Spinner size="sm" />
+              </span>
+            )}
+            <SegmentedControl<InsightsRange>
+              label="Range"
+              value={range}
+              onChange={setRange}
+              options={RANGE_OPTIONS}
+              size={isMobile ? 'lg' : 'md'}
+              className="w-full sm:w-[280px]"
+            />
+          </div>
         </div>
         <Tabs tabs={INSIGHTS_TABS} basePath={`/projects/${projectId}/insights`} />
       </Pane>

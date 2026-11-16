@@ -1,15 +1,17 @@
 -- Insights slice F (idea 01M7HTS38KX2G78JD0ESAGMKKH): make "CI passed on the first try" and
 -- "flaky checks" derivable at read time (`projectFlow`, packages/operations/src/insights-flow.ts).
 --
--- Additive only (rule 31): one new table with no foreign keys, one new nullable column.
+-- Additive only (rule 31): one new table, one new nullable column. Nothing references the new
+-- table, so it is not a CASCADE parent.
 --
 -- 1. pull_request_heads: every head commit SAM saw for a pull request, written by
 --    `upsertPullRequestSnapshot` (webhook lifecycle events and GitHub refreshes). `first_seen_at`
 --    is GitHub's `updated_at` of the observation that carried the head, so a late delivery cannot
---    move it later. `from_open` is 1 when SAM had no earlier head for the pull request when it
---    recorded this one: SAM saw the pull request from its first commit. Pull requests that existed
---    before this migration never get a `from_open` row, so their first try reads "not recorded"
---    rather than being estimated from a later head.
+--    move it later. `from_open` is 1 only for the head GitHub's `pull_request.opened` event carried:
+--    the commit the pull request opened with. Pull requests opened before this migration (or whose
+--    `opened` event SAM missed) never get a `from_open` row, so their first try reads "not
+--    recorded" rather than being estimated from a later head. One small row per push; deleted with
+--    the project (ON DELETE CASCADE, like pull_requests).
 --    Existing rows: none are backfilled; there is no history to backfill from (old heads' check rows
 --    were already deleted). Nothing that worked before depends on this table.
 --
@@ -17,7 +19,7 @@
 --    Never cleared, so a failed check that passes on a rerun keeps the evidence. NULL on every
 --    existing row (no failure history was kept), which reads as "no failure recorded".
 CREATE TABLE IF NOT EXISTS pull_request_heads (
-  project_id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   repository TEXT NOT NULL,
   pr_number INTEGER NOT NULL,
   head_sha TEXT NOT NULL,

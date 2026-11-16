@@ -30,8 +30,9 @@ Three numbers for the last 7 days, each with its change from the 7 days before:
 - **CI first try**: the share of pull requests whose first commit passed every check with no
   failure and no rerun.
 
-Under them is the **top blocker**: the most common reason runs stopped before finishing, or the
-flakiest check, whichever affected more work. **Insights** opens the full
+Under them is the **top blocker**: the most common reason runs stopped before finishing (other than
+a person or coordinator stopping them on purpose), or the flakiest check, whichever affected more
+work. **Insights** opens the full
 [Insights](/docs/guides/insights/) page on its 7-day range.
 
 ### Budgets

@@ -17,6 +17,7 @@ import { useQueryScope } from '../../hooks/useQueryScope';
 import { projectFlowQueryOptions } from '../../lib/query-options';
 import {
   countDelta,
+  DELTA_TONE_CLASS,
   type DeltaTone,
   durationDelta,
   formatDurationShort,
@@ -24,12 +25,6 @@ import {
   rateDelta,
 } from '../insights/format';
 import { Section, SectionHead, SectionNote } from './sections';
-
-const TONE_CLASS: Record<DeltaTone, string> = {
-  better: 'text-[var(--sam-status-success-fg)]',
-  worse: 'text-warning-fg',
-  flat: 'text-fg-muted',
-};
 
 function Stat({
   label,
@@ -45,8 +40,15 @@ function Stat({
       <span className="text-[12px] leading-tight text-fg-muted">{label}</span>
       <span className="text-[19px] font-bold leading-tight text-fg-primary">{value}</span>
       {/* A flat change says nothing in a cell this small; the line keeps its height. */}
-      <span className={`text-[11.5px] ${delta ? TONE_CLASS[delta.tone] : 'text-fg-muted'}`}>
-        {delta && delta.tone !== 'flat' ? delta.text : '\u00a0'}
+      <span className={`text-[11.5px] ${delta ? DELTA_TONE_CLASS[delta.tone] : 'text-fg-muted'}`}>
+        {delta && delta.tone !== 'flat' ? (
+          <>
+            {delta.text}
+            <span className="sr-only"> compared with the 7 days before</span>
+          </>
+        ) : (
+          '\u00a0'
+        )}
       </span>
     </div>
   );
@@ -88,11 +90,11 @@ export function ThisWeekBody({ data }: { data: ProjectFlowResponse }) {
         />
       </div>
       <div
-        className="flex min-w-0 items-start gap-2 rounded-[var(--sam-radius-control)] border border-solid border-[var(--sam-hairline)] px-2.5 py-2"
+        className="sam-well flex min-w-0 items-start gap-2 rounded-[var(--sam-radius-control)] px-2.5 py-2"
         data-testid="overview-this-week-blocker"
       >
         {blocker ? (
-          <TriangleAlert size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-warning-fg" />
+          <TriangleAlert size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-danger-fg" />
         ) : (
           <CircleCheck
             size={16}

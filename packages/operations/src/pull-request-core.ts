@@ -38,6 +38,11 @@ export interface PullRequestSnapshot extends ParsedPullRequestUrl {
   closedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * True only when this snapshot is GitHub's `pull_request.opened` webhook, whose head is by
+   * definition the commit the pull request opened with. Refreshes and later events leave it unset.
+   */
+  opened?: boolean;
 }
 
 function refreshedState(pr: Record<string, unknown>): PullRequestState['state'] {
@@ -114,7 +119,7 @@ export async function upsertPullRequestSnapshot(
       now
     )
     .run();
-  if (pr.headSha) await recordPullRequestHead(env, projectId, pr, previous);
+  if (pr.headSha) await recordPullRequestHead(env, projectId, pr);
   if (pr.headSha) {
     await env.DATABASE.prepare(
       `UPDATE pull_requests SET
@@ -194,20 +199,18 @@ export function openingHeadExistsSql(alias?: 'c'): string {
 /**
  * Records the head commit an observation carried (`pull_request_heads`, migration 0251).
  *
- * `from_open` is 1 when SAM had no head for this pull request before this observation (a new
- * pull request, or a URL-only placeholder from `ensurePullRequest`): this is the commit the pull
- * request opened with. A pull request SAM first saw at a later commit never gets one, so its
- * first try reads "not recorded" instead of being guessed from a later commit.
+ * `from_open` is 1 only for the head GitHub's `opened` event carried: the commit the pull
+ * request opened with, exactly. Nothing else may set it. A pull request whose `opened` event
+ * SAM never received (it predates the table, or the delivery was missed) has no such row, and
+ * its first try reads "not recorded" instead of being guessed from a later commit.
  * `first_seen_at` keeps the earliest GitHub clock that carried the head, so delivery order
  * cannot move it later.
  */
 async function recordPullRequestHead(
   env: OperationsEnv,
   projectId: string,
-  pr: PullRequestSnapshot,
-  previous: { head_sha: string | null } | null
+  pr: PullRequestSnapshot
 ): Promise<void> {
-  const fromOpen = previous?.head_sha ? 0 : 1;
   await env.DATABASE.prepare(
     `INSERT INTO pull_request_heads (project_id, repository, pr_number, head_sha, first_seen_at, from_open)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -215,7 +218,7 @@ async function recordPullRequestHead(
        first_seen_at = min(pull_request_heads.first_seen_at, excluded.first_seen_at),
        from_open = max(pull_request_heads.from_open, excluded.from_open)`
   )
-    .bind(projectId, pr.repository, pr.number, pr.headSha, pr.updatedAt, fromOpen)
+    .bind(projectId, pr.repository, pr.number, pr.headSha, pr.updatedAt, pr.opened ? 1 : 0)
     .run();
 }
 

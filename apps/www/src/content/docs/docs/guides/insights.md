@@ -21,8 +21,10 @@ their checks. Nothing is estimated: when SAM has no record for something, the pa
   the idea being filed to that merge. Ideas are matched to pull requests the same way the
   [Ideas](/docs/guides/ideas/) page matches them.
 - **CI passes first try**: of the pull requests opened in the range, the share whose first commit
-  passed every check with no failure and no rerun. A pull request counts once its checks have
-  finished, or once it has moved on (merged, closed or pushed again). Pull requests SAM did not see
+  passed every check with no failure and no rerun. A pull request counts as failed as soon as any
+  check on that commit fails, and as passed once its checks have finished or it has moved on
+  (merged, closed or pushed again). Until then it is left out, and the figure says **Waiting on
+  CI**. Pull requests SAM did not see
   from their first commit are left out, and when there are none the figure reads **Not recorded**.
 - **Waiting on a person, median**: how long questions agents filed for people (asks in the Inbox) waited
   for an answer. A question still open counts up to now.
@@ -36,23 +38,25 @@ Each figure shows its change against the range before it, for example
 ### Runs per week by outcome
 
 A run is a task an agent worked on to completion, not a conversation. Each bar is a week (a day on
-the 7-day range) split into runs that **merged**, ended with their pull request **closed without
+the 7-day range), counting runs by when they ended, split into runs that **merged**, ended with their pull request **closed without
 merge**, or **failed**. A line underneath counts the rest: runs that were stopped, runs whose pull
 request is still open, and runs that finished without a pull request.
 
 ### Why runs stopped before finishing
 
-Runs that did not end with a merge, grouped by why: waiting on a person, a pull request waiting to
-merge, CI failing, a usage limit, no machine available, workspace setup failing, running past the
-time limit, the agent stopping, a session expiring while asleep, a pull request closed, or a person
-or coordinator stopping it. The reason is worked out from the task's own record each time the page
+Runs in the range that ended without a merge, and runs still going that are waiting on a person,
+grouped by why: waiting on a person, a pull request waiting to merge, CI failing, a usage limit, no
+machine available, workspace setup failing, running past the time limit, the agent stopping, a
+session expiring while asleep, a pull request closed, a person or coordinator stopping it, or
+another error. The reason is worked out from the task's own record each time the page
 loads.
 
 ### Flaky checks
 
 A check is flaky when it failed and then passed **on the same commit**: nothing in the code changed,
 so the failure was not caused by it. The list shows the checks that did this most often, and on how
-many of the commits they ran on.
+many of the commits they ran on. SAM keeps check results for each pull request's current commit
+and the commit it opened with, so a flip on a commit that was later pushed over is not counted.
 
 ### Ideas waiting longest
 
@@ -62,7 +66,9 @@ Open ideas filed in the range, oldest first, with how many runs worked on each a
 ## On the Overview
 
 The [Project Overview](/docs/guides/project-overview/) shows a small **This week** pane with three of
-these numbers and the top blocker, and links here.
+these numbers and the top blocker, and links here. The top blocker is the most common reason runs
+stopped (other than a person or coordinator stopping them on purpose) or the flakiest check,
+whichever affected more work.
 
 ## For administrators
 

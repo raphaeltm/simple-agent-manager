@@ -6,12 +6,14 @@
  * Everything is derived at read time; nothing is stored. Definitions live beside their SQL in
  * `insights-flow-sql.ts` and `insights-flow-stop-reasons.ts`.
  *
- * Round trips (rule 60, budget 12): authorization 1; settings 1 (cached per isolate); one D1
- * `batch()` carrying seven aggregate statements 1; the idea evidence the Ideas list uses
- * (`ideaItemsWithPullRequests`: link caps, repository, one ProjectData RPC, linked tasks, their
- * pull request associations, profile names, pull request states) at most 7; the rework statement
- * 1. At most 11. If the batch fails as a whole, each statement is retried on its own so one bad
- * section cannot blank the page; that degraded path costs six more and is logged.
+ * Round trips (rule 60, budget 12 in the Insights spec): authorization 1; settings 0 or 1 (the
+ * per-isolate admin-settings cache); one D1 `batch()` carrying seven aggregate statements 1; the
+ * idea evidence the Ideas list uses (`ideaItemsWithPullRequests`: repository, one ProjectData RPC,
+ * linked tasks, their pull request associations, profile names when any task has one, pull request
+ * states, each one statement whatever the number of ids) at most 6; the rework statement 1. At
+ * most 10; measured 8 with 120 linked tasks (`insights-flow.test.ts`, "stays within its
+ * round-trip budget"). If the batch fails as a whole, each statement is retried on its own so one
+ * bad section cannot blank the page; that degraded path costs six more and is logged.
  */
 import {
   DEFAULT_INSIGHTS_RANGE,

@@ -948,6 +948,25 @@ Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequ
 Optional query `runningLimit` and `recentLimit` (defaults 5 and 3, at most 20). Requires project
 membership.
 
+### `GET /api/projects/:projectId/insights/flow`
+
+Insights · Flow for one project (`projectFlow`, `packages/operations/src/insights-flow.ts`). Query
+`range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). Requires project
+membership. Returns `ProjectFlowResponse` (`packages/shared/src/types/insights-flow.ts`):
+`{ projectId, range, since, until, tiles, merged, runs, stopReasons, flakyChecks, waitingIdeas, topBlocker, unavailable, generatedAt }`.
+
+- `tiles.ideaToMerged`, `tiles.waitingOnPerson`: `{ medianMs, previousMedianMs, count }` (the
+  former also has `sampled: { ideas, cap, truncated }`).
+- `tiles.ciFirstTry`, `tiles.rework`: `{ count, of, rate, previousRate }`, plus `recorded`
+  (pull requests seen from their first commit) and `windowDays` respectively. A `null` rate means
+  there is nothing to measure, never zero.
+- `merged`: `{ count, previous }`. `runs`: `{ bucket: 'day' | 'week', buckets: [{ start, merged, closed, failed }], other: { stopped, prOpen, noPullRequest } }`.
+- `stopReasons`: `[{ reason, count }]`, most first, from the vocabulary in `FLOW_STOP_REASONS`.
+- `flakyChecks`, `waitingIdeas`: `{ items, total }`. `topBlocker`: a stop reason or a flaky check, or
+  null.
+- `unavailable`: sections whose read failed this time (`runs`, `ci`, `flaky`, `asks`, `ideas`,
+  `rework`, `merged`); they come back empty rather than failing the whole response.
+
 ### `POST /api/projects/:id/tasks`
 
 Create a task record.

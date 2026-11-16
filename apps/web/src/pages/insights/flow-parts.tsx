@@ -14,13 +14,7 @@ import { Lightbulb, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
-import { bucketLabel, bucketTotal, daysSince, type DeltaTone } from './format';
-
-const TONE_CLASS: Record<DeltaTone, string> = {
-  better: 'text-[var(--sam-status-success-fg)]',
-  worse: 'text-warning-fg',
-  flat: 'text-fg-muted',
-};
+import { bucketLabel, bucketTotal, daysSince, DELTA_TONE_CLASS, type DeltaTone } from './format';
 
 /** One figure: its label, the value, and a line under it (a change or what it counts). */
 export function Tile({
@@ -42,12 +36,13 @@ export function Tile({
       aria-label={label}
       data-testid={testId}
     >
-      <span className="text-[13px] text-fg-muted">{label}</span>
+      {/* Two lines reserved on phones, so the figures in a row line up. */}
+      <span className="text-[13px] text-fg-muted max-sm:min-h-[2.8em]">{label}</span>
       <span className="text-[22px] font-bold leading-tight text-fg-primary [overflow-wrap:anywhere] sm:text-[26px]">
         {value}
       </span>
       {detail && (
-        <span className={`text-[12.5px] ${tone ? TONE_CLASS[tone] : 'text-fg-muted'}`}>
+        <span className={`text-[12.5px] ${tone ? DELTA_TONE_CLASS[tone] : 'text-fg-muted'}`}>
           {detail}
         </span>
       )}
@@ -88,7 +83,7 @@ export function Empty({ children }: { children: ReactNode }) {
 
 const SERIES = [
   { key: 'merged', label: 'Merged', color: 'bg-[var(--sam-color-success)]' },
-  { key: 'closed', label: 'Closed without merge', color: 'bg-[var(--sam-color-warning)]' },
+  { key: 'closed', label: 'Closed without merge', color: 'bg-[var(--sam-color-purple)]' },
   { key: 'failed', label: 'Failed', color: 'bg-[var(--sam-color-danger)]' },
 ] as const;
 
@@ -153,6 +148,7 @@ export function RunsChart({ runs }: { runs: FlowRuns }) {
           </div>
         </>
       )}
+      {total > 0 && <p className="m-0 text-[12.5px] text-fg-muted">{peakSummary(runs, total)}</p>}
       <div className="flex flex-wrap gap-x-4 gap-y-1">
         {SERIES.map((s) => (
           <span key={s.key} className="flex items-center gap-1.5 text-[12.5px] text-fg-muted">
@@ -166,6 +162,12 @@ export function RunsChart({ runs }: { runs: FlowRuns }) {
       )}
     </div>
   );
+}
+
+/** "153 runs · busiest W44 with 31": the totals a phone hides above the bars, in words. */
+function peakSummary(runs: FlowRuns, total: number): string {
+  const peak = runs.buckets.reduce((best, b) => (bucketTotal(b) > bucketTotal(best) ? b : best));
+  return `${total} ${total === 1 ? 'run' : 'runs'} · busiest ${bucketLabel(peak.start, runs.bucket)} with ${bucketTotal(peak)}`;
 }
 
 export function StopReasons({ reasons }: { reasons: FlowStopReasonCount[] }) {
@@ -212,7 +214,7 @@ export function FlakyChecks({ items, total }: { items: FlowFlakyCheck[]; total: 
             <TriangleAlert
               size={16}
               aria-hidden="true"
-              className="mt-0.5 shrink-0 text-warning-fg"
+              className="mt-0.5 shrink-0 text-danger-fg"
             />
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="line-clamp-2 break-words text-[13.5px] font-semibold text-fg-primary [overflow-wrap:anywhere]">
@@ -296,7 +298,6 @@ export function WaitingIdeas({
                     {runs} · {ideaStateText(idea)}
                   </span>
                 </span>
-                <span className="shrink-0 font-mono text-[12.5px] text-fg-muted">{days} d</span>
               </Link>
             </li>
           );

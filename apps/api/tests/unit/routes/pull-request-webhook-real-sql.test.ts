@@ -282,6 +282,42 @@ describe('verified GitHub PR webhooks', () => {
     ]);
   });
 
+  it('keeps a late result for the opening commit after a push moved the pull request on', async () => {
+    const opening = 'a'.repeat(40);
+    const pushed = 'b'.repeat(40);
+    await deliver('pull_request', pr('opened'));
+    await deliver(
+      'pull_request',
+      pr('synchronize', { head: { ref: 'topic', sha: pushed }, updated_at: '2026-10-23T10:02:00Z' })
+    );
+    // GitHub no longer associates the old commit with the pull request (empty pull_requests).
+    const late = (sha: string) => ({
+      action: 'completed',
+      repository: { id: 91, full_name: 'acme/widget' },
+      check_run: {
+        id: 7,
+        name: 'unit tests',
+        app: { id: 12 },
+        head_sha: sha,
+        conclusion: 'failure',
+        updated_at: '2026-10-23T10:04:00Z',
+        pull_requests: [],
+      },
+    });
+    await deliver('check_run', late(opening));
+    // Control: the same late result for a commit that is neither current nor the opening one.
+    await deliver('check_run', late('c'.repeat(40)));
+    expect(
+      sqlite
+        .prepare(
+          "SELECT head_sha, state, first_failed_at FROM pull_request_checks WHERE project_id = 'p1'"
+        )
+        .all()
+    ).toEqual([
+      { head_sha: opening, state: 'failure', first_failed_at: '2026-10-23T10:04:00.000Z' },
+    ]);
+  });
+
   it('remembers a failure that a rerun turned green, whatever order GitHub delivers them in', async () => {
     await deliver('pull_request', pr('opened'));
     const run = (conclusion: 'failure' | 'success', updatedAt: string, id: number) => ({

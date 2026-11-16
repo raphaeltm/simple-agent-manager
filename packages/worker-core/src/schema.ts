@@ -1442,14 +1442,16 @@ export const pullRequestChecks = sqliteTable(
 
 /**
  * Every head commit SAM saw for a pull request (migration 0251), written by
- * `upsertPullRequestSnapshot`. `fromOpen` = SAM had no earlier head for the pull request when it
- * recorded this one, so this is the commit the pull request opened with. Insights reads it for
- * "CI passed on the first try"; old-head check deletes keep that commit's checks.
+ * `upsertPullRequestSnapshot`. `fromOpen` = this head came in GitHub's `pull_request.opened`
+ * event, so it is the commit the pull request opened with. Insights reads it for "CI passed on
+ * the first try"; old-head check deletes keep that commit's checks.
  */
 export const pullRequestHeads = sqliteTable(
   'pull_request_heads',
   {
-    projectId: text('project_id').notNull(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
     repository: text('repository').notNull(),
     prNumber: integer('pr_number').notNull(),
     headSha: text('head_sha').notNull(),
