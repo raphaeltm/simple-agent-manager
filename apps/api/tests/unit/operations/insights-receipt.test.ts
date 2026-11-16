@@ -377,6 +377,90 @@ describe('runReceipt', () => {
     expect(JSON.stringify(receipt)).not.toContain('FOREIGN');
   });
 
+  describe('CI first try (the Flow rule, on the opening commit SAM recorded)', () => {
+    const OWN_HEAD = 'a'.repeat(40);
+    function head(projectId: string, sha = OWN_HEAD, fromOpen = 1) {
+      insert('pull_request_heads', {
+        project_id: projectId,
+        repository: 'acme/app',
+        pr_number: 2771,
+        head_sha: sha,
+        first_seen_at: iso(T0 + 20 * MIN),
+        from_open: fromOpen,
+      });
+    }
+    async function firstTry() {
+      return (await runReceipt(ctx(), { projectId: 'p', taskId: 'task-own' })).outcome.ciFirstTry;
+    }
+
+    it('is passed when every check on the opening commit succeeded', async () => {
+      head('p');
+      expect(await firstTry()).toBe('passed');
+    });
+
+    it('is failed when a check failed on the opening commit, even after a green rerun', async () => {
+      head('p');
+      sqlite
+        .prepare(`UPDATE pull_request_checks SET first_failed_at = ? WHERE check_key = 'test'`)
+        .run(iso(T0 + 34 * MIN));
+      expect(await firstTry()).toBe('failed');
+    });
+
+    it('is pending while checks run, and when the repository reports none', async () => {
+      head('p');
+      sqlite.exec(`UPDATE pull_requests SET state = 'open', merged_at = NULL WHERE id = 'pr-own'`);
+      sqlite.exec(`UPDATE pull_request_checks SET state = 'pending' WHERE check_key = 'test'`);
+      expect(await firstTry()).toBe('pending');
+      sqlite.exec(`DELETE FROM pull_request_checks WHERE project_id = 'p'`);
+      expect(await firstTry()).toBe('pending');
+    });
+
+    it('decides a pending suite once the pull request moved on', async () => {
+      head('p');
+      sqlite.exec(`UPDATE pull_request_checks SET state = 'pending' WHERE check_key = 'test'`);
+      // pr-own is merged: a suite that never completes cannot hold the verdict open.
+      expect(await firstTry()).toBe('passed');
+    });
+
+    it('is not recorded when SAM did not see the pull request from its first commit', async () => {
+      head('p', OWN_HEAD, 0);
+      expect(await firstTry()).toBe('not_recorded');
+    });
+
+    it('never reads a foreign project’s opening commit for the same repository and number', async () => {
+      head('foreign');
+      expect(await firstTry()).toBe('not_recorded');
+      // Owner control: the same row in the owner's project is read.
+      head('p');
+      expect(await firstTry()).toBe('passed');
+    });
+
+    it('never counts a foreign project’s failing check on the same commit', async () => {
+      head('p');
+      insert('pull_request_checks', {
+        project_id: 'foreign',
+        repository: 'acme/app',
+        head_sha: OWN_HEAD,
+        check_key: 'deploy',
+        state: 'failure',
+        first_failed_at: iso(T0 + 30 * MIN),
+        updated_at: iso(T0 + 30 * MIN),
+      });
+      expect(await firstTry()).toBe('passed');
+      // Owner control: the same failure in the owner's project decides it.
+      insert('pull_request_checks', {
+        project_id: 'p',
+        repository: 'acme/app',
+        head_sha: OWN_HEAD,
+        check_key: 'deploy',
+        state: 'failure',
+        first_failed_at: iso(T0 + 30 * MIN),
+        updated_at: iso(T0 + 30 * MIN),
+      });
+      expect(await firstTry()).toBe('failed');
+    });
+  });
+
   it('hides the account name from a teammate but keeps the account kind', async () => {
     const receipt = await runReceipt(ctx('teammate'), { projectId: 'p', taskId: 'task-own' });
     expect(receipt.account).toMatchObject({

@@ -958,8 +958,9 @@ operation `sam_run_receipt`). Everything is derived when you ask, from records S
   overlaps counted once) and `ci` (from the agent's last message until the pull request's last
   check finished). `durationMs` is null when SAM has no record to measure the phase from.
 - `outcome`: `pullRequest` (`{ number, url, title, repository, state, mergedAt }` or null), `checks`
-  (state on the latest head, or null), `ciFirstTry` (always `not_recorded`: SAM does not keep which
-  checks ran on earlier pushes) and `terminalReason`.
+  (state on the latest head, or null), `ciFirstTry` (`passed`, `failed` or `pending` for the pull
+  request's opening commit, by the Insights · Flow rule `firstTryVerdictSql`; `not_recorded` without
+  a pull request or when SAM did not see it from its first commit) and `terminalReason`.
 - `account`: `agentType`, `credentialSource`, `credentialScope`, and `accountName`, which is only
   filled in for the person who ran the session.
 - `resources`: peak memory and CPU from resource history, with the memory and CPU the run
