@@ -1,0 +1,225 @@
+import type { ToolCallItem } from '@simple-agent-manager/acp-client';
+import type { InboxItem } from '@simple-agent-manager/shared';
+import { Button, Spinner } from '@simple-agent-manager/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Inbox } from 'lucide-react';
+import { type FC, useMemo, useState } from 'react';
+import { Link } from 'react-router';
+
+import { useQueryScope } from '../../../hooks/useQueryScope';
+import { inboxQueryKeys, inboxItemQueryOptions } from '../../../lib/query-options/inbox';
+import { useInboxPermissionDetail } from '../../inbox/inbox-actions';
+import { KIND_META } from '../../inbox/inbox-model';
+import { InboxAnswerControls } from '../../inbox/InboxAnswerControls';
+import { inboxPath } from '../../inbox/InboxButton';
+import { InboxLinkChips } from '../../inbox/InboxItemView';
+import { RenderedMarkdown } from '../../MarkdownRenderer';
+import { extractInboxItemRef } from './inbox-item-card-data';
+
+export interface InboxItemCardProps {
+  item: ToolCallItem;
+  /** Project of the conversation; the item is read and answered within it. */
+  projectId?: string;
+}
+
+/**
+ * How often an open card re-reads its item, which can be answered from the Inbox or another tab.
+ * TanStack pauses this while the tab is hidden. Override via VITE_INBOX_ITEM_CARD_REFRESH_MS.
+ */
+const DEFAULT_INBOX_ITEM_CARD_REFRESH_MS = 15_000;
+const configuredRefreshMs = Number.parseInt(
+  import.meta.env.VITE_INBOX_ITEM_CARD_REFRESH_MS ?? '',
+  10
+);
+const INBOX_ITEM_CARD_REFRESH_MS =
+  Number.isFinite(configuredRefreshMs) && configuredRefreshMs > 0
+    ? configuredRefreshMs
+    : DEFAULT_INBOX_ITEM_CARD_REFRESH_MS;
+
+const CARD_CLASS = 'glass-surface my-1 rounded-md border border-border-default';
+
+type Tone = 'open' | 'done' | 'muted';
+
+const BADGE_CLASS: Record<Tone, string> = {
+  open: 'bg-warning-tint text-warning-fg',
+  done: 'bg-success/10 text-success',
+  muted: 'bg-surface text-fg-muted',
+};
+
+function statusFor(item: InboxItem): { label: string; tone: Tone } {
+  const review = item.kind === 'review';
+  switch (item.status) {
+    case 'open':
+      return { label: review ? 'Waiting for your review' : 'Needs your answer', tone: 'open' };
+    case 'answered':
+    case 'done':
+      return { label: review ? 'Reviewed' : 'Answered', tone: 'done' };
+    case 'archived':
+      return { label: 'Archived', tone: 'muted' };
+    case 'cancelled':
+      return { label: 'Withdrawn by the agent', tone: 'muted' };
+    case 'expired':
+      return { label: 'Expired', tone: 'muted' };
+  }
+}
+
+/** Long reasons start collapsed, so they do not bury the answer buttons. */
+const COLLAPSIBLE_BODY_CHARS = 600;
+
+function Body({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = text.length > COLLAPSIBLE_BODY_CHARS;
+  return (
+    <div>
+      <div
+        className={`min-w-0 text-sm text-fg-secondary [overflow-wrap:anywhere] ${collapsible && !expanded ? 'max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_65%,transparent)]' : ''}`}
+      >
+        <RenderedMarkdown inline content={text} />
+      </div>
+      {collapsible && (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="mt-1"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function OpenInboxLink({ item }: { item: InboxItem }) {
+  return (
+    <Link to={inboxPath(item)} className="text-xs text-accent-fg hover:underline">
+      Open in inbox
+    </Link>
+  );
+}
+
+/** The loaded item: its question or review, links, and the same controls as the Inbox. */
+function LoadedCard({ item, onChanged }: { item: InboxItem; onChanged: () => void }) {
+  const permission = useInboxPermissionDetail(item);
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const status = statusFor(item);
+  const Icon = KIND_META[item.kind]?.icon ?? Inbox;
+  return (
+    <div className={CARD_CLASS} data-testid="inbox-item-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-default px-4 py-2">
+        <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-fg-primary">
+          <Icon
+            size={16}
+            className={`shrink-0 ${status.tone === 'open' ? 'text-warning-fg' : 'text-fg-muted'}`}
+            aria-hidden="true"
+          />
+          {item.kind === 'review' ? 'Review requested' : 'Question for you'}
+          {item.blocking && item.status === 'open' && (
+            <span className="text-xs font-normal text-fg-muted">· agent paused on this</span>
+          )}
+        </span>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${BADGE_CLASS[status.tone]}`}
+        >
+          {status.label}
+        </span>
+      </div>
+      <div className="flex flex-col gap-2 px-4 pt-3">
+        <p className="m-0 text-sm font-medium text-fg-primary [overflow-wrap:anywhere]">
+          {item.title}
+        </p>
+        {item.body && item.body !== item.title && <Body text={item.body} />}
+        <InboxLinkChips item={item} />
+      </div>
+      <div className="flex flex-col gap-2 px-4 pb-3 pt-3">
+        {receipt ? (
+          <p role="status" className="m-0 text-sm text-fg-muted [overflow-wrap:anywhere]">
+            {receipt}
+          </p>
+        ) : (
+          <InboxAnswerControls
+            item={item}
+            permission={permission}
+            handlers={{
+              onAnswered: (text) => {
+                setReceipt(text);
+                onChanged();
+              },
+              onStale: onChanged,
+            }}
+          />
+        )}
+        <OpenInboxLink item={item} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Renders an `inbox_write` ask or review as the inbox item it filed, so the person can answer it
+ * in the conversation as well as from the Inbox. The card and the inbox item are two views of one
+ * `asks` record: everything shown is read from the inbox, the transcript supplies only the
+ * reference, and an answer in either place closes both.
+ */
+export const InboxItemCard: FC<InboxItemCardProps> = ({ item, projectId }) => {
+  const ref = useMemo(() => extractInboxItemRef(item), [item]);
+  const scope = useQueryScope();
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    ...inboxItemQueryOptions(scope ?? '', projectId ?? '', ref?.ref ?? ''),
+    enabled: Boolean(scope && projectId && ref),
+    // Closed items cannot change; one that failed to load waits for Retry.
+    refetchInterval: (q) =>
+      q.state.data?.item.status === 'open' && !q.state.error ? INBOX_ITEM_CARD_REFRESH_MS : false,
+  });
+
+  if (!ref) return null;
+
+  if (!projectId) {
+    return (
+      <div className={`${CARD_CLASS} flex items-center gap-2.5 px-3 py-2.5`} role="note">
+        <Inbox size={18} className="shrink-0 text-fg-muted" aria-hidden="true" />
+        <div className="min-w-0 text-sm text-fg-muted">
+          The agent filed an item in your inbox. Answer it from your Inbox.
+        </div>
+      </div>
+    );
+  }
+
+  const loaded = query.data?.item;
+  if (loaded) {
+    return (
+      <LoadedCard
+        item={loaded}
+        onChanged={() => {
+          if (scope) void queryClient.invalidateQueries({ queryKey: inboxQueryKeys.all(scope) });
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className={`${CARD_CLASS} flex flex-wrap items-center gap-2.5 px-3 py-2.5`}>
+      {query.error ? (
+        <>
+          <div className="min-w-0 flex-1 text-sm text-fg-muted" role="status">
+            This inbox item is not in your inbox.{' '}
+            <Link to={`/projects/${projectId}/inbox`} className="text-accent-fg hover:underline">
+              Open the project inbox
+            </Link>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => void query.refetch()}>
+            Retry
+          </Button>
+        </>
+      ) : (
+        <div className="flex items-center gap-2.5" role="status">
+          <Spinner size="sm" />
+          <span className="text-sm text-fg-muted">Loading inbox item…</span>
+        </div>
+      )}
+    </div>
+  );
+};

@@ -46,6 +46,12 @@ export function buildInboxAskPrompt(
     return answer ? `The person answered ${question}:\n\n${answer}` : `The person answered ${question}.`;
   }
   const item = `inbox item ${row.id} ("${row.title}")`;
+  if (row.kind === 'review' && outcome === 'answered') {
+    // A review is answered "Looks good" (no text) or with a reply (inbox slice D).
+    return answer
+      ? `The person reviewed your ${item} and replied:\n\n${answer}`
+      : `The person reviewed your ${item}: it looks good.`;
+  }
   switch (outcome) {
     case 'answered':
       return answer
