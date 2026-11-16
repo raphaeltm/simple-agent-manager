@@ -3416,6 +3416,21 @@ export async function recordQuestionAsked(
   );
 }
 
+/** The agent cancelled its blocking question in D1 `asks` (inbox slice D). */
+export async function recordQuestionWithdrawn(
+  env: Env,
+  projectId: string,
+  input: Parameters<ProjectData['recordQuestionWithdrawn']>[0]
+): Promise<void> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'recordQuestionWithdrawn',
+    (stub) => stub.recordQuestionWithdrawn(input),
+    'mutation'
+  );
+}
+
 /** The task outcome of an expired question held in D1 `asks` (inbox slice G). */
 export async function expireQuestionAsk(
   env: Env,

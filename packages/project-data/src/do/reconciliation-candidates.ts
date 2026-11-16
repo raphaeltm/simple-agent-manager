@@ -164,6 +164,9 @@ async function resolveCandidateProjectId(
               SELECT MAX(COALESCE(a.expires_at, 0)) FROM asks a
                WHERE a.project_id = tasks.project_id AND a.source_session_id = tasks.chat_session_id
                  AND a.kind = 'question' AND a.status = 'open'
+                 -- Only a blocking question means the agent waits on a person (inbox slice D);
+                 -- a non-blocking ask never expires and must not hold the check-in off.
+                 AND a.blocking = 1
                  -- Past its deadline still holds for three sweep ticks: the inbox sweep may
                  -- extend an undelivered question, and expires it within one tick otherwise.
                  AND (a.expires_at IS NULL

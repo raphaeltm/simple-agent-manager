@@ -271,6 +271,8 @@ items agents file (`packages/operations/src/inbox-settings-definition.ts`).
 | `inbox.linksMax`                   | 20      | 0–100      | Links one item may carry                                                                  |
 | `inbox.openItemsPerChat`           | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                           |
 | `inbox.answerMaxChars`             | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                   |
+| `inbox.similarMatchesMax`          | 3       | 0–20       | Similar open items an agent is shown when it files an ask or a review; 0 turns it off     |
+| `inbox.similarScanMax`             | 50      | 1–500      | Newest open items of the project compared when an agent files (rows read per filing)      |
 | `inbox.noticeRetryMinutes`         | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired     |
 | `inbox.automationFailureThreshold` | 2       | 1–20       | Failed runs in a row that file an inbox error item for an automation's owner              |
 | `inbox.errorSweepBatchSize`        | 10      | 1–50       | Error items one five-minute sweep files at most (failed tasks, automations, lost answers) |
@@ -306,6 +308,18 @@ Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-api
 | `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                |
 | `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                    |
 | `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown |
+
+## Insights flow
+
+Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow tab
+(`packages/operations/src/insights-flow-settings.ts`).
+
+| Setting                          | Default | Range  | What it limits                                                                                      |
+| -------------------------------- | ------- | ------ | --------------------------------------------------------------------------------------------------- |
+| `insights.flowIdeaSampleCap`     | 100     | 10–500 | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short |
+| `insights.flowWaitingIdeasLimit` | 5       | 1–20   | Ideas shown under "Ideas waiting longest"                                                           |
+| `insights.flowFlakyChecksLimit`  | 5       | 1–20   | Checks shown under "Flaky checks"                                                                   |
+| `insights.flowReworkWindowDays`  | 7       | 1–30   | Days after a merge in which another pull request on the same branch or idea counts as rework        |
 
 ## Node provisioning
 

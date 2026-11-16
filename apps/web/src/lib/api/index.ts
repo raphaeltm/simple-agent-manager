@@ -381,6 +381,7 @@ export {
   setProjectIdeaStatus,
 } from './ideas';
 export { answerInboxItem, archiveInboxItem, getInboxCount, getInboxItem, listInbox } from './inbox';
+export { getProjectFlow } from './insights';
 export { getRunReceipt } from './insights-receipt';
 export {
   addObservation,

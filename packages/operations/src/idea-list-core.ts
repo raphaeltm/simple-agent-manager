@@ -368,6 +368,24 @@ export async function listRecentIdeasWithDerivedStatus(
   return listItems(ctx, rows, evidence, snapshots);
 }
 
+/**
+ * Ideas list items for rows the caller already read, with every pull request recorded for each
+ * idea: the same evidence and derived state as the Ideas list, in its fixed number of round
+ * trips. Insights reads it for "idea to merged", rework and "ideas waiting longest".
+ */
+export async function ideaItemsWithPullRequests(
+  ctx: OperationContext,
+  projectId: string,
+  rows: readonly IdeaRow[]
+): Promise<Array<{ item: IdeaListItem; pullRequests: IdeaPullRequest[] }>> {
+  const { evidence, snapshots } = await collectEvidence(ctx, projectId, rows, 'none');
+  const items = listItems(ctx, rows, evidence, snapshots);
+  return items.map((item) => ({
+    item,
+    pullRequests: evidence.get(item.ideaId)?.pullRequests ?? [],
+  }));
+}
+
 export interface GetIdeaInput {
   projectId: string;
   ideaId: string;

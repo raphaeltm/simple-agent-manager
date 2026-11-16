@@ -28,6 +28,7 @@ import {
   serializeRejection,
 } from './instruction-formatting';
 import { buildInstructionIdeaSlice, type InstructionIdeaContext } from './instruction-idea-context';
+import { INBOX_TURN_END_INSTRUCTION } from './instruction-inbox-guidance';
 import { renderWithinBudgets } from './instruction-payload';
 
 export { handleRequestHumanInput } from './human-input-tool';
@@ -339,6 +340,8 @@ export async function handleGetInstructions(
             'Push your changes to the output branch before calling the SAM MCP `complete_task` tool.',
             'If you encounter blockers, report them via the SAM MCP `update_task_status` tool with a clear description.',
           ]),
+      // How to reach a person; the inbox tools need a task-backed agent token.
+      ...(tokenData.taskId ? [INBOX_TURN_END_INSTRUCTION] : []),
       // Event tools need a task-backed agent token.
       ...(tokenData.taskId
         ? buildEventingInstructions({

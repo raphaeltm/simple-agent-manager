@@ -31,13 +31,15 @@ function ask(
     .prepare(
       `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
           body_md, source_session_id, source_task_id, status, dedupe_key, created_at, updated_at)
-       VALUES (?, ?, 'user', 'owner', ?, 0, 'Couldn''t wake “Ship”', 'SAM could not restart the agent.',
+       VALUES (?, ?, 'user', 'owner', ?, ?, 'Couldn''t wake “Ship”', 'SAM could not restart the agent.',
           ?, 'task-1', ?, ?, ?, ?)`
     )
     .run(
       id,
       row.project ?? 'p1',
       row.kind ?? 'error',
+      // A request_human_input question is blocking (slice D); error items never are.
+      (row.kind ?? 'error') === 'question' ? 1 : 0,
       session,
       row.status ?? 'open',
       row.dedupe === undefined ? `error:wake:${session}` : row.dedupe,

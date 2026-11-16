@@ -2887,6 +2887,20 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
+   * The agent cancelled its blocking question in D1 `asks` (`inbox_write` method `cancel`, inbox
+   * slice D): the chat stops showing it as paused, as when a question is answered. Nothing is
+   * stored here; the row is already closed.
+   */
+  async recordQuestionWithdrawn(input: { sessionId: string; askId: string }): Promise<void> {
+    if (releaseQuestionHold(this.sql, input.sessionId)) await this.recalculateAlarm();
+    this.broadcastEvent(
+      'attention.resolved',
+      { sessionId: input.sessionId, markerId: input.askId, reason: 'cancelled' },
+      input.sessionId
+    );
+  }
+
+  /**
    * The outcome of an expired question held in D1 `asks` (the inbox sweep expired the row): the
    * same task outcome a question marker's expiry has. A chat message from the person after the
    * question answered it, so then the task is left alone.

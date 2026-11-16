@@ -648,19 +648,21 @@ describe('Task Reconciliation Module', () => {
           projectId?: string;
           sessionId?: string;
           status?: string;
-          expiresAt?: number;
+          expiresAt?: number | null;
+          blocking?: 0 | 1;
         } = {}
       ) {
         d1.prepare(
           `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
               source_session_id, status, expires_at, created_at, updated_at)
-           VALUES (?, ?, 'user', 'user-1', 'question', 1, 'q', ?, ?, ?, 1, 1)`
+           VALUES (?, ?, 'user', 'user-1', 'question', ?, 'q', ?, ?, ?, 1, 1)`
         ).run(
           id,
           overrides.projectId ?? 'project-1',
+          overrides.blocking ?? 1,
           overrides.sessionId ?? 'session-1',
           overrides.status ?? 'open',
-          overrides.expiresAt ?? Date.now() + 2 * 60 * 60_000
+          overrides.expiresAt === undefined ? Date.now() + 2 * 60 * 60_000 : overrides.expiresAt
         );
       }
       function gate() {
@@ -697,6 +699,8 @@ describe('Task Reconciliation Module', () => {
         ['expired more than three sweep ticks ago', { expiresAt: Date.now() - 16 * 60_000 }],
         ['in another project', { projectId: 'project-2' }],
         ['in another chat', { sessionId: 'session-2' }],
+        // Inbox slice D: a non-blocking ask never expires; the agent works on, so SAM still checks in.
+        ['non-blocking (never expires)', { blocking: 0 as const, expiresAt: null }],
       ])('does not hold for a question that is %s (control)', async (_label, overrides) => {
         setupTaskSession();
         seedAsk('q-1', overrides);

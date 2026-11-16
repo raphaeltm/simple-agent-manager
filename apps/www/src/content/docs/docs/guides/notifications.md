@@ -89,7 +89,9 @@ shared-chat notifications are pushed when push is on.
 
 ### request_human_input
 
-Agents can signal when they need your input using the `request_human_input` MCP tool. This creates a **high-urgency** notification that appears immediately.
+Agents can signal when they need your input using the `request_human_input` MCP tool, or by filing an
+ask or a review in your [Inbox](/docs/guides/inbox/#what-agents-file) with `inbox_write`. Each creates a
+**high-urgency** notification that appears immediately (a review is titled **Review needed**).
 
 The agent specifies:
 

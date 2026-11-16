@@ -308,11 +308,15 @@ export async function notifyNeedsInput(
     attentionMarkerId: string;
     /** The ask's inbox item, when it has one: the notification opens it. */
     inboxRef?: string | null;
+    /** Overrides the category label ("Review" for an inbox review item). */
+    label?: string;
   }
 ): Promise<NotificationResponse> {
-  const categoryLabel = opts.category
-    ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
-    : 'Input';
+  const categoryLabel =
+    opts.label ??
+    (opts.category
+      ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
+      : 'Input');
 
   return sendNotification(env, userId, {
     type: 'needs_input',

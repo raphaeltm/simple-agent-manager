@@ -27,6 +27,7 @@ import {
 import { ensureSessionRecovery } from '../session-recovery';
 import { clearTriggerPageCaches } from '../trigger-cache';
 import { triggerStatusUpdates } from '../trigger-status';
+import { announceAgentAsk, checkAgentLinkTargets, withdrawAgentQuestion } from './agent-asks';
 import { readAskContext } from './ask-context';
 import { deliverInboxAskNotice } from './ask-notice';
 
@@ -226,6 +227,11 @@ export function createInboxPort(env: Env): OperationInboxPort {
         );
       }
     },
+    announceAsk: (input) => announceAgentAsk(env, input),
+
+    withdrawQuestion: (input) => withdrawAgentQuestion(env, input),
+
+    checkLinkTargets: (projectId, links) => checkAgentLinkTargets(env, projectId, links),
   };
 }
 

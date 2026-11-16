@@ -127,7 +127,8 @@ export function questionAttentionFromRow(row: Record<string, unknown>): {
 }
 
 /**
- * The newest open question per chat, as attention summaries. Bound to the project in the
+ * The newest open blocking question per chat, as attention summaries (what a chat paused on a
+ * person shows). Bound to the project in the
  * predicate (rule 11). Never throws: a failed read returns an empty map and logs, because every
  * caller is enriching a read that is still worth serving without the question badge.
  */
@@ -191,14 +192,16 @@ export async function readOpenQuestionAttention(
   }
   let rows: Record<string, unknown>[];
   try {
-    // Two indexed arms in one round trip: open questions (`idx_asks_open_question`) and open
+    // Two indexed arms in one round trip: open blocking questions (`idx_asks_open_question`;
+    // only a blocking question pauses a chat, a non-blocking ask of slice D lets it work on) and open
     // wake failures (by dedupe key, `idx_asks_project_dedupe`). Questions sort first, so a
     // chat's first row is its newest question when it has one.
     const result = await db
       .prepare(
         `SELECT * FROM (
            SELECT 0 AS rank, ${columns} FROM asks
-            WHERE kind = 'question' AND status = 'open' AND (expires_at IS NULL OR expires_at > ?)
+            WHERE kind = 'question' AND status = 'open' AND blocking = 1
+              AND (expires_at IS NULL OR expires_at > ?)
               AND ${scope.join(' AND ')}
            UNION ALL
            SELECT 1 AS rank, ${columns} FROM asks
@@ -287,7 +290,10 @@ export function preferAttention(marker: unknown, ask: AskAttentionSummary | unde
   return ask;
 }
 
-/** Whether the chat has an open, unexpired question from this task (the stalled-task guard). */
+/**
+ * Whether the chat has an open, unexpired blocking question from this task (the stalled-task
+ * guard): only a blocking question means the agent is waiting on a person.
+ */
 export async function hasOpenQuestionAsk(
   db: D1Database,
   input: { projectId: string; sessionId: string; taskId: string; now: number }
@@ -296,7 +302,7 @@ export async function hasOpenQuestionAsk(
     .prepare(
       `SELECT 1 AS open FROM asks
         WHERE project_id = ? AND source_session_id = ? AND kind = 'question' AND status = 'open'
-          AND (source_task_id IS NULL OR source_task_id = ?)
+          AND blocking = 1 AND (source_task_id IS NULL OR source_task_id = ?)
           AND (expires_at IS NULL OR expires_at > ?)
         LIMIT 1`
     )

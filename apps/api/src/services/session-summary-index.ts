@@ -346,7 +346,7 @@ async function readIndex(
 const OPEN_QUESTION_EXISTS = `(EXISTS (
   SELECT 1 FROM asks a
    WHERE a.project_id = session_summaries.project_id AND a.source_session_id = session_summaries.id
-     AND a.kind = 'question' AND a.status = 'open'
+     AND a.kind = 'question' AND a.status = 'open' AND a.blocking = 1
      AND (a.expires_at IS NULL OR a.expires_at > ?)) OR EXISTS (
   SELECT 1 FROM asks w
    WHERE w.project_id = session_summaries.project_id

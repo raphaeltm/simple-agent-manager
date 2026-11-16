@@ -66,7 +66,8 @@ const AttentionSummarySchema = v.object({
 
 const LinkSchema = v.object({
   kind: v.pipe(v.string(), v.minLength(1), v.maxLength(40)),
-  id: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+  // A URL kind (`pr`, `preview`) keeps its URL here, so allow a URL's length.
+  id: v.pipe(v.string(), v.minLength(1), v.maxLength(500)),
   label: v.optional(v.nullable(v.pipe(v.string(), v.maxLength(200))), null),
 });
 export const InboxLinksSchema = v.array(LinkSchema);

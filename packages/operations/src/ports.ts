@@ -20,6 +20,7 @@ import type {
   AgentProfile,
   CredentialLimitsResponse,
   InboxItemContext,
+  InboxLink,
   NotificationResponse,
   NotificationType,
   SessionStateSnapshot,
@@ -33,6 +34,7 @@ import type * as schema from '@simple-agent-manager/worker-core/schema';
 import type { ConnectorAnswerChoice } from './connector-answer-input';
 import type { ConnectorReadSettingName } from './connector-read-settings-definition';
 import type { InboxSettingName } from './inbox-settings-definition';
+import type { InsightsFlowSettingName } from './insights-flow-settings';
 import type { InsightsReceiptSettingName } from './insights-receipt-settings-definition';
 import type {
   AgentActivityTask,
@@ -84,7 +86,8 @@ export type OperationSettingName =
   | 'collaboration.ideaAgentNoteMinIntervalSeconds'
   | 'collaboration.ideaUpdatePageSize'
   | InboxSettingName
-  | InsightsReceiptSettingName;
+  | InsightsReceiptSettingName
+  | InsightsFlowSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;
 
@@ -498,6 +501,38 @@ export interface OperationInboxPort {
    * `task:write`; throws an `OperationError` when it is refused or the trigger is not paused.
    */
   resumeTrigger(userId: string, projectId: string, triggerId: string): Promise<void>;
+  /**
+   * An agent filed an ask (`fileAgentAsk`): a blocking question pauses its chat live and pushes
+   * to the person, as `request_human_input` always did; other items reach the person's inbox.
+   * Never throws; false when no notification was scheduled.
+   */
+  announceAsk(input: InboxAskAnnouncement): Promise<{ notificationScheduled: boolean }>;
+  /** The agent cancelled a blocking question: its chat stops showing it as paused. Never throws. */
+  withdrawQuestion(input: { projectId: string; sessionId: string; askId: string }): Promise<void>;
+  /**
+   * Whether each link names a thing of this project, in input order: null when it does, else
+   * a short reason the agent can act on. Read with the platform's access; nothing is copied.
+   */
+  checkLinkTargets(projectId: string, links: readonly InboxLink[]): Promise<Array<string | null>>;
+}
+
+/** What `announceAsk` needs about an ask an agent just filed. */
+export interface InboxAskAnnouncement {
+  projectId: string;
+  sessionId: string;
+  taskId: string;
+  askId: string;
+  kind: 'question' | 'review';
+  blocking: boolean;
+  title: string;
+  /** The agent's full text: the question, or the reason for a review. */
+  body: string;
+  options: string[];
+  category: string | null;
+  createdAt: number;
+  expiresAt: number | null;
+  /** The person the agent works for (the assignee). */
+  userId: string;
 }
 
 export interface OperationPorts {

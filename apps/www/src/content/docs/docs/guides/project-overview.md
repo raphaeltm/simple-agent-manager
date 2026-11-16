@@ -1,6 +1,6 @@
 ---
 title: Project Overview
-description: See what is running in a project, how much your agent accounts have left, which automations need fixing and what happened recently, and start a task without leaving the page.
+description: See what is running in a project, how this week went, how much your agent accounts have left, which automations need fixing and what happened recently, and start a task without leaving the page.
 ---
 
 The **Overview** is the first item in a project's navigation, on desktop and on a phone. It
@@ -20,6 +20,20 @@ long it has been running and the profile it runs with, for example **1h 20m · O
 
 Sleeping chats and chats whose agent has finished its turn are not listed. Tap a row to open the
 chat, or **Chats** to see them all. When more are running than fit, the section says how many more.
+
+### This week
+
+Three numbers for the last 7 days, each with its change from the 7 days before:
+
+- **Merged**: pull requests merged in the project.
+- **Idea → merged**: the median time from an idea being filed to its first pull request merging.
+- **CI first try**: the share of pull requests whose first commit passed every check with no
+  failure and no rerun.
+
+Under them is the **top blocker**: the most common reason runs stopped before finishing (other than
+a person or coordinator stopping them on purpose), or the flakiest check, whichever affected more
+work. **Insights** opens the full
+[Insights](/docs/guides/insights/) page on its 7-day range.
 
 ### Budgets
 
