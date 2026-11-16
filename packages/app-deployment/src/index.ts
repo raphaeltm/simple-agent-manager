@@ -19,6 +19,11 @@ export {
   verifyBuildContextObject,
 } from './build-context-upload';
 export * from './cloudflare-build-admission';
+export {
+  assertNoReservedCloudflareBuilds,
+  CLOUDFLARE_BUILD_DELETION_CONFLICT,
+  isCloudflareBuildDeletionConflict,
+} from './cloudflare-build-admission';
 export * from './cloudflare-build-executor';
 export type {
   ComposeImageArtifactDescriptor,

@@ -255,7 +255,7 @@ export class ComposeBuilderContainer extends Container<Env> {
       }
       signal.throwIfAborted();
       // Private SDK transport to this microVM's port; this is not an Internet HTTP endpoint.
-      const health = await this.fetchBootstrap('http://builder/health', { signal });
+      const health = await this.fetchBootstrap('http://builder/health', { signal }); // NOSONAR S5332: private workerd getTcpPort transport to this DO's guest, never public HTTP.
       const version: unknown = await health.json();
       if (
         !health.ok ||
@@ -291,7 +291,8 @@ export class ComposeBuilderContainer extends Container<Env> {
         deadline
       );
       // Launch never traverses public HTTP; Container SDK routes inside its private port transport.
-      const response = await this.fetchBootstrap('http://builder/start', {
+      const startUrl = 'http://builder/start'; // NOSONAR S5332: private workerd getTcpPort transport to this DO's guest, never public HTTP.
+      const response = await this.fetchBootstrap(startUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,

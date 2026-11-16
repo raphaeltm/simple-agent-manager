@@ -1,3 +1,4 @@
+import { errors } from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
 import { and, eq, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
@@ -137,4 +138,46 @@ export async function releaseCloudflareBuildReservation(
       )
     )
     .returning();
+}
+
+/** Friendly preflight; the deletion trigger remains the atomic race fence. */
+export async function assertNoReservedCloudflareBuilds(
+  db: Db,
+  scope: { nodeId: string } | { projectId: string } | { environmentId: string }
+): Promise<void> {
+  const j = schema.deploymentPublishJobs;
+  const predicate =
+    'nodeId' in scope
+      ? eq(j.nodeId, scope.nodeId)
+      : 'projectId' in scope
+        ? eq(j.projectId, scope.projectId)
+        : eq(j.environmentId, scope.environmentId);
+  const [reserved] = await db
+    .select({ id: j.id })
+    .from(j)
+    .where(
+      and(
+        predicate,
+        eq(j.executor, 'cloudflare'),
+        eq(j.contextShadow, false),
+        isNotNull(j.executorInstanceId)
+      )
+    )
+    .limit(1);
+  if (reserved) throw errors.conflict(CLOUDFLARE_BUILD_DELETION_CONFLICT);
+}
+
+export const CLOUDFLARE_BUILD_DELETION_CONFLICT =
+  'A Cloudflare build is still stopping or running. Wait for it to stop before deleting this resource.';
+
+/** D1/Drizzle wrap SQLite trigger errors in causes. Match only our fixed marker. */
+export function isCloudflareBuildDeletionConflict(error: unknown): boolean {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current.message.includes('cloudflare_build_reservation_held')) return true;
+    current = current.cause;
+  }
+  return false;
 }

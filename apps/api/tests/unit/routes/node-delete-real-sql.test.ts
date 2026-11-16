@@ -39,7 +39,10 @@ vi.mock('../../../src/services/node-lifecycle', () => ({
   finalizeDeletion: (...args: unknown[]) => mocks.finalizeDeletion(...args),
 }));
 
+import { drizzle } from 'drizzle-orm/d1';
+
 import { nodesRoutes } from '../../../src/routes/nodes';
+import { deleteOwnedNode } from '../../../src/routes/nodes/delete';
 
 const TERMINATION_PROOF_AT = '2026-09-04T09:00:00.000Z';
 const ORIGINAL_INCARNATION = 'runtime-node-1';
@@ -136,6 +139,53 @@ describe('DELETE /api/nodes/:id managed-node proof predicates — real SQL verti
   });
 
   afterEach(() => sqlite.close());
+
+  it.each(['DELETE', 'POST'])(
+    'rejects owner/manual %s before provider teardown or attestation when a builder is reserved',
+    async (method) => {
+      seedNode();
+      sqlite.exec(`INSERT INTO deployment_publish_jobs
+      (id,node_id,executor,context_shadow,executor_instance_id,status)
+      VALUES ('job','node-1','cloudflare',0,'job','succeeded')`);
+      const response = await app.request(
+        `/api/nodes/node-1${method === 'POST' ? '/manual-deletion' : ''}`,
+        {
+          method,
+          ...(method === 'POST'
+            ? {
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmed: true }),
+              }
+            : {}),
+        },
+        env
+      );
+      expect(response.status).toBe(409);
+      expect(mocks.deleteNodeResources).not.toHaveBeenCalled();
+      expect(mocks.finalizeDeletion).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT runtime_termination_attested_at FROM nodes').get()).toEqual({
+        runtime_termination_attested_at: null,
+      });
+      expect(sqlite.prepare('SELECT id FROM deployment_publish_jobs').get()).toEqual({ id: 'job' });
+    }
+  );
+
+  it('the shared Operations delete_node entry point rejects before provider teardown', async () => {
+    seedNode();
+    sqlite.exec(`INSERT INTO deployment_publish_jobs
+      (id,node_id,executor,context_shadow,executor_instance_id,status)
+      VALUES ('job','node-1','cloudflare',0,'job','building')`);
+    await expect(
+      deleteOwnedNode(
+        env,
+        drizzle(env.DATABASE, { schema }),
+        await mocks.requireNodeOwnership(),
+        'user-1'
+      )
+    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(mocks.deleteNodeResources).not.toHaveBeenCalled();
+    expect(mocks.finalizeDeletion).not.toHaveBeenCalled();
+  });
 
   it('deletes only workspaces carrying the matching proof and the exact node incarnation', async () => {
     seedNode();
