@@ -30,9 +30,7 @@ describe('stripMarkdown', () => {
   });
 
   it('handles mixed markdown', () => {
-    expect(stripMarkdown('**README.md** Task Title Generator')).toBe(
-      'README.md Task Title Generator'
-    );
+    expect(stripMarkdown('**README.md** Task Title Generator')).toBe('README.md Task Title Generator');
   });
 
   it('strips heading at start of line in mixed content', () => {
@@ -54,9 +52,7 @@ describe('stripMarkdown', () => {
   // Regression: single-marker italic patterns must NOT be stripped because
   // they corrupt snake_case identifiers common in LLM-generated titles.
   it('preserves snake_case identifiers with underscores', () => {
-    expect(stripMarkdown('fix user_profile_update handler')).toBe(
-      'fix user_profile_update handler'
-    );
+    expect(stripMarkdown('fix user_profile_update handler')).toBe('fix user_profile_update handler');
   });
 
   it('preserves asterisks in glob patterns', () => {

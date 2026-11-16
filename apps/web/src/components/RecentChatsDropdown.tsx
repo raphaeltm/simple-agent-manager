@@ -70,7 +70,7 @@ export function RecentChatsDropdown() {
       navigate(`/projects/${projectId}/chat/${sessionId}`);
       setIsOpen(false);
     },
-    [navigate]
+    [navigate],
   );
 
   const handleViewAll = useCallback(() => {
@@ -109,7 +109,9 @@ export function RecentChatsDropdown() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--sam-hairline)]">
               <h3 className="text-[15px] font-semibold text-fg-primary">Recent Chats</h3>
               {activeCount > 0 && (
-                <span className="text-xs text-fg-muted">{activeCount} active</span>
+                <span className="text-xs text-fg-muted">
+                  {activeCount} active
+                </span>
               )}
             </div>
 
@@ -195,7 +197,7 @@ export function RecentChatsDropdown() {
               </div>
             )}
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

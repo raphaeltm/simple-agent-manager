@@ -171,7 +171,7 @@ describe('fuzzyFilterFiles', () => {
     const results = fuzzyFilterFiles(files, 'files');
     expect(results.length).toBeGreaterThan(0);
     // The file named "files.ts" should rank high
-    expect(results.some((r) => r.path.endsWith('files.ts'))).toBe(true);
+    expect(results.some(r => r.path.endsWith('files.ts'))).toBe(true);
   });
 
   it('respects limit parameter', () => {

@@ -776,7 +776,11 @@ test.describe('Project Overview as the landing page, with Needs you (slice F2)',
       const running = await page.getByRole('region', { name: 'Running now' }).boundingBox();
       expect(needs!.x + needs!.width).toBeLessThanOrEqual(running!.x);
     }
-    await expect(page.getByText('chat page')).toHaveCount(0);
+    // Settled, not bounced: still on the Overview after the page has finished loading.
+    await page.waitForTimeout(600);
+    expect(new URL(page.url()).pathname).toBe(BASE);
+    await expect(page.getByRole('region', { name: 'Running now' })).toBeVisible();
+    await expect(page.getByPlaceholder('Start a task…')).toBeVisible();
   });
 
   test('40 open items: the first screen shows Needs you and the start of Running now', async ({
@@ -900,6 +904,8 @@ test.describe('Project Overview as the landing page, with Needs you (slice F2)',
       : page.getByRole('button', { name: 'Back to Overview' }).first();
     await back.click();
     await expect(page).toHaveURL(new RegExp(`${BASE}$`));
+    // Back popped the Overview's own entry rather than pushing a second one.
+    expect(await page.evaluate(() => (history.state as { idx?: number } | null)?.idx)).toBe(0);
     await expect(
       page.getByRole('region', { name: 'Needs you' }).getByRole('link', { name: /All 2/ })
     ).toBeVisible();
@@ -923,5 +929,34 @@ test.describe('Project Overview as the landing page, with Needs you (slice F2)',
       await page.getByRole('link', { name: 'Chat', exact: true }).first().click();
     }
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/chat`));
+  });
+
+  test('desktop: after opening a second row, Back still goes to the Overview', async ({
+    page,
+  }, testInfo) => {
+    test.skip(isPhone(testInfo), 'the list sits beside the item on desktop only');
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: ROUND_TRIP_INBOX,
+    });
+    await page.goto(BASE);
+    await needsYouRows(page);
+    await page.getByRole('button', { name: /Should EU prices include VAT/ }).click();
+    const pane = page.getByRole('region', { name: 'Inbox item' });
+    await expect(
+      pane.getByRole('heading', { name: 'Should EU prices include VAT?' })
+    ).toBeVisible();
+    await page
+      .getByRole('region', { name: 'Inbox list' })
+      .getByRole('button', { name: /Please check the new pricing page/ })
+      .click();
+    await expect(
+      pane.getByRole('heading', { name: 'Please check the new pricing page before I open the PR' })
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Back to Overview' }).first().click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}$`));
+    await expect(page.getByTestId('overview-needs-you-list')).toBeVisible();
   });
 });

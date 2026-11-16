@@ -91,15 +91,13 @@ describe('library-search — matchFile across fields', () => {
   });
 
   it('matches on directory path', () => {
-    const f = buildIndex([makeFile({ filename: 'a.txt', directory: '/marketing/brand/' })])
-      .files[0]!;
+    const f = buildIndex([makeFile({ filename: 'a.txt', directory: '/marketing/brand/' })]).files[0]!;
     const m = matchFile(f, 'marketing');
     expect(m).not.toBeNull();
   });
 
   it('matches on description', () => {
-    const f = buildIndex([makeFile({ filename: 'a.txt', description: 'annual budget summary' })])
-      .files[0]!;
+    const f = buildIndex([makeFile({ filename: 'a.txt', description: 'annual budget summary' })]).files[0]!;
     const m = matchFile(f, 'budget');
     expect(m).not.toBeNull();
   });

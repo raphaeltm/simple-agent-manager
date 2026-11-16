@@ -26,6 +26,13 @@ export const projectOverviewPath = (projectId: string) => `${projectRoot(project
 export const INBOX_FROM_PARAM = 'from';
 export const INBOX_FROM_OVERVIEW = 'overview';
 
+/**
+ * History state on an inbox entry whose previous history entry is the Overview: the Overview
+ * pushed it. Moving between items replaces the entry and keeps the state; opening another item
+ * pushes a new entry without it. Back pops only while it is set, so it can never pop to an item.
+ */
+export const OVERVIEW_BEHIND_STATE = 'samOverviewBehind';
+
 /** One item in the project inbox's item view, opened from the Overview's Needs you. */
 export const projectInboxItemFromOverviewPath = (projectId: string, ref: string) => {
   const params = new URLSearchParams({ item: ref, [INBOX_FROM_PARAM]: INBOX_FROM_OVERVIEW });

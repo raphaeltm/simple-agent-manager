@@ -364,6 +364,13 @@ describe('projectOverviewGet', () => {
     ]);
     expect(result.running.total).toBe(1);
     expect(result.running.waitingOnViewerTotal).toBe(1);
+
+    // A teammate sees the chat as paused too, but not on them: it is the creator's to answer.
+    const mate = await projectOverviewGet(ctx('teammate'), { projectId: 'p' });
+    expect(mate.running.items).toEqual([
+      expect.objectContaining({ sessionId: 'secret-wait', state: 'waiting', waitingOnViewer: false }),
+    ]);
+    expect(mate.running.waitingOnViewerTotal).toBe(0);
   });
 
   it('skips one malformed row and keeps the rest', async () => {

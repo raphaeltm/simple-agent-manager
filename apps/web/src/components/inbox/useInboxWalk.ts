@@ -1,6 +1,6 @@
 import type { InboxItem } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { useLocation, useSearchParams } from 'react-router';
 
 import { INBOX_FROM_PARAM } from '../../lib/project-routes';
 import { isStaleInboxError } from './inbox-actions';
@@ -34,6 +34,10 @@ export function useInboxWalk({
   isMobile: boolean;
 }) {
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  // A replace keeps the entry's history state (it is the same entry); a push starts clean.
+  const entryStateRef = useRef<unknown>(location.state);
+  entryStateRef.current = location.state;
   const view = parseInboxView(params.get('filter'));
   const itemParam = params.get('item');
   const projectParam = projectId ?? params.get('project');
@@ -106,7 +110,7 @@ export function useInboxWalk({
           }
           return next;
         },
-        { replace }
+        { replace, state: replace ? entryStateRef.current : undefined }
       );
     },
     [projectId, setParams]

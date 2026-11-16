@@ -26,5 +26,5 @@ export function isProjectChatRoute(pathname: string): boolean {
  * redirects to it (inbox slice F2: opening a project lands on its Overview).
  */
 export function isProjectOverviewRoute(pathname: string): boolean {
-  return /^\/projects\/(?!new\/?$|invite\/)[^/]+(?:\/overview)?\/?$/.test(pathname);
+  return /^\/projects\/(?!new\/?$|invite(?:\/|$))[^/]+(?:\/overview)?\/?$/.test(pathname);
 }

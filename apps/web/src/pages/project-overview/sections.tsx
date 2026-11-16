@@ -22,6 +22,7 @@ import { Link } from 'react-router';
 
 import { formatMsSpan, formatTimeFromNow } from '../../lib/time-utils';
 import { IdeaRow } from '../ideas/parts';
+import type { ViewerPausedChats } from './NeedsYouSection';
 
 /** A section's heading: its name, an optional count, and the link to its full page. */
 export function SectionHead({
@@ -67,17 +68,22 @@ export function SectionHead({
 export function Section({
   label,
   className = '',
+  focusTarget,
   children,
 }: {
   label: string;
   className?: string;
+  /** Lets a section take focus (Needs you does, when the person comes back to it). */
+  focusTarget?: string;
   children: ReactNode;
 }) {
   return (
     <Pane
       as="section"
+      tabIndex={focusTarget ? -1 : undefined}
+      data-focus-target={focusTarget}
       aria-label={label}
-      className={`flex min-w-0 shrink-0 flex-col px-1.5 pt-1 pb-2 ${className}`}
+      className={`flex min-w-0 shrink-0 flex-col px-1.5 pt-1 pb-2 outline-none ${className}`}
     >
       {children}
     </Pane>
@@ -91,14 +97,19 @@ export function SectionNote({ children }: { children: ReactNode }) {
 
 /**
  * Whether the chat is paused on something the viewer must answer. The viewer's own inbox decides
- * (`pausedSessionIds`, from the Needs you list), so Running now and Needs you can never word the
- * same chat differently (inbox slice F2). Until that list has loaded, the read's own flag stands in.
+ * (`viewerPaused`, from the Needs you list), so Running now and Needs you word the same chat the
+ * same way (inbox slice F2). The Overview read's own flag stands in until that list has loaded,
+ * and also counts while the list has unfetched pages (its item may be past the first page).
  */
-function isPausedOnViewer(chat: OverviewRunningChat, pausedSessionIds: ReadonlySet<string> | null) {
+export function isPausedOnViewer(
+  chat: OverviewRunningChat,
+  viewerPaused: ViewerPausedChats | null
+): boolean {
   if (chat.state === 'starting') return false;
-  return pausedSessionIds
-    ? pausedSessionIds.has(chat.sessionId)
-    : chat.state === 'waiting' && chat.waitingOnViewer;
+  const readSaysYou = chat.state === 'waiting' && chat.waitingOnViewer;
+  if (!viewerPaused) return readSaysYou;
+  if (viewerPaused.ids.has(chat.sessionId)) return true;
+  return !viewerPaused.complete && readSaysYou;
 }
 
 function RunningIcon({ chat, pausedOnYou }: { chat: OverviewRunningChat; pausedOnYou: boolean }) {
@@ -201,7 +212,7 @@ export function RunningNowSection({
   /** Running chats waiting on the viewer, including those past the cap. */
   waitingOnViewerTotal: number;
   /** Chats paused on one of the viewer's open inbox items; null until the inbox has loaded. */
-  pausedSessionIds: ReadonlySet<string> | null;
+  pausedSessionIds: ViewerPausedChats | null;
   loading: boolean;
   unavailable: boolean;
   className?: string;

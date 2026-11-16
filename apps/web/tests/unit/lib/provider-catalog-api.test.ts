@@ -28,7 +28,10 @@ describe('provider catalog API client', () => {
     await getProviderCatalog({ scope: 'project', projectId: 'project 1/with/slash' });
 
     expect(mocks.request).toHaveBeenNthCalledWith(1, '/api/providers/catalog?scope=user');
-    expect(mocks.request).toHaveBeenNthCalledWith(2, '/api/providers/catalog?scope=installation');
+    expect(mocks.request).toHaveBeenNthCalledWith(
+      2,
+      '/api/providers/catalog?scope=installation'
+    );
     expect(mocks.request).toHaveBeenNthCalledWith(
       3,
       '/api/providers/catalog?scope=project&projectId=project+1%2Fwith%2Fslash'

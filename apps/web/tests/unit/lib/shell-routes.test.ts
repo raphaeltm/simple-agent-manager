@@ -57,6 +57,7 @@ describe('isProjectOverviewRoute', () => {
       '/projects',
       '/projects/new',
       '/projects/invite/tok',
+      '/projects/invite',
       '/projects/p1/overviews',
       '/projects/p1/chat',
       '/projects/p1/inbox',

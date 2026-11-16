@@ -7,7 +7,7 @@
 import type { ProjectOverviewResponse } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../../../src/hooks/useToast';
@@ -110,6 +110,10 @@ let overviewBody: ProjectOverviewResponse;
 let extraRoutes: Record<string, unknown>;
 /** This project's open inbox items for the viewer, in server (inbox) order. */
 let inboxItems: Record<string, unknown>[];
+/** The inbox list's next cursor: set when there are more pages than the Overview reads. */
+let inboxNextCursor: string | null;
+/** When set, the next inbox list read waits on this promise (controlled refetch ordering). */
+let inboxGate: Promise<void> | null;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -146,7 +150,7 @@ function route(path: string, method: string): Response {
     case `/api/projects/${PROJECT_ID}/overview`:
       return json(200, overviewBody);
     case `/api/projects/${PROJECT_ID}/inbox`:
-      return json(200, { items: inboxItems, nextCursor: null, skipped: 0 });
+      return json(200, { items: inboxItems, nextCursor: inboxNextCursor, skipped: 0 });
     case `/api/projects/${PROJECT_ID}/inbox/count`:
       return json(200, {
         needsYou: inboxItems.length,
@@ -278,12 +282,22 @@ function inboxItem(ref: string, fields: Record<string, unknown> = {}): Record<st
   };
 }
 
+/** Stands in for the inbox item view: its Back is the browser's. */
+function InboxStub() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      inbox page back
+    </button>
+  );
+}
+
 function renderOverview() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const context = { projectId: PROJECT_ID, project: null, reload: async () => {} };
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <MemoryRouter initialEntries={[`/projects/${PROJECT_ID}/overview`]}>
@@ -291,7 +305,7 @@ function renderOverview() {
             <Routes>
               <Route path="/projects/:id/overview" element={<ProjectOverview />} />
               <Route path="/projects/:id/chat/:sessionId" element={<div>chat page</div>} />
-              <Route path="/projects/:id/inbox" element={<div>inbox page</div>} />
+              <Route path="/projects/:id/inbox" element={<InboxStub />} />
             </Routes>
             <LocationProbe />
           </ProjectContext.Provider>
@@ -299,6 +313,7 @@ function renderOverview() {
       </ToastProvider>
     </QueryClientProvider>
   );
+  return { ...view, queryClient };
 }
 
 async function typeAndSend(text: string) {
@@ -318,6 +333,8 @@ describe('Project Overview', () => {
     recorded = [];
     extraRoutes = {};
     inboxItems = [];
+    inboxNextCursor = null;
+    inboxGate = null;
     viewport.isMobile = false;
     overviewBody = overview([EXISTING]);
     submitResponse = {
@@ -343,6 +360,11 @@ describe('Project Overview', () => {
           path,
           body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
         });
+        if (inboxGate && path === `/api/projects/${PROJECT_ID}/inbox`) {
+          const gate = inboxGate;
+          inboxGate = null;
+          await gate;
+        }
         return route(path, method);
       })
     );
@@ -661,6 +683,94 @@ describe('Project Overview', () => {
       // And its item is in Needs you.
       const section = await screen.findByRole('region', { name: 'Needs you' });
       expect(within(section).getByText('STRIPE_KEY')).toBeInTheDocument();
+    });
+    it('keeps the read\'s "waiting on you" while the inbox has pages it did not fetch', async () => {
+      // More open items than one page: the chat's paused item may be past the first page.
+      overviewBody = overview([
+        {
+          ...EXISTING,
+          sessionId: 'sess-deep',
+          topic: 'Paused past page one',
+          state: 'waiting',
+          waitingOnViewer: true,
+        },
+      ]);
+      inboxItems = [inboxItem('ask:other')];
+      inboxNextCursor = 'page-2';
+      renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      const running = screen.getByRole('region', { name: 'Running now' });
+      const row = await within(running).findByRole('link', { name: /Paused past page one/ });
+      expect(within(row).getByText('Paused on this')).toHaveClass('text-warning-fg');
+    });
+
+    it('trusts the complete inbox over the read: no item for the chat, not worded as yours', async () => {
+      overviewBody = overview([
+        {
+          ...EXISTING,
+          sessionId: 'sess-deep',
+          topic: 'Read says waiting',
+          state: 'waiting',
+          waitingOnViewer: true,
+        },
+        // An item that is not paused (the agent is still working) does not make a chat paused.
+        { ...EXISTING, sessionId: 'sess-task', topic: 'Has a task for you' },
+      ]);
+      inboxItems = [
+        inboxItem('ask:task', {
+          kind: 'task',
+          blocking: false,
+          agentState: 'working',
+          sessionId: 'sess-task',
+          answerSpec: { type: 'acknowledge' },
+        }),
+      ];
+      renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      const running = screen.getByRole('region', { name: 'Running now' });
+      const waiting = await within(running).findByRole('link', { name: /Read says waiting/ });
+      expect(within(waiting).getByText('Waiting for an answer')).not.toHaveClass('text-warning-fg');
+      const task = within(running).getByRole('link', { name: /Has a task for you/ });
+      expect(within(task).queryByText('Paused on this')).not.toBeInTheDocument();
+    });
+
+    it('a refetch keeps the rows mounted (no unmount, no spinner)', async () => {
+      inboxItems = [inboxItem('ask:q1', { title: 'Question 1?' }), inboxItem('ask:q2')];
+      const { queryClient } = renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      const before = screen.getAllByTestId('inbox-row')[0];
+      let release = () => {};
+      inboxGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await act(async () => {
+        void queryClient.invalidateQueries({ queryKey: ['auth', 'user-1', 'inbox'] });
+      });
+      // Mid-refetch: the same row node is still on the page.
+      await waitFor(() => expect(inboxGate).toBeNull());
+      expect(screen.getAllByTestId('inbox-row')[0]).toBe(before);
+      expect(screen.queryByTestId('overview-needs-you-quiet')).not.toBeInTheDocument();
+      inboxItems = [inboxItem('ask:q1', { title: 'Question 1?' })];
+      await act(async () => {
+        release();
+      });
+      await waitFor(() => expect(screen.getAllByTestId('inbox-row')).toHaveLength(1));
+      expect(screen.getAllByTestId('inbox-row')[0]).toBe(before);
+    });
+
+    it('coming back from an item puts focus on its row', async () => {
+      inboxItems = [
+        inboxItem('ask:q1', { title: 'Question 1?' }),
+        inboxItem('ask:q2', { title: 'Question 2?' }),
+      ];
+      renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      fireEvent.click(screen.getByRole('button', { name: /Question 2\?/ }));
+      fireEvent.click(await screen.findByRole('button', { name: 'inbox page back' }));
+      await screen.findByTestId('overview-needs-you-list');
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Question 2\?/ }))
+      );
     });
   });
 });

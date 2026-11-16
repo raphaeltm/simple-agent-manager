@@ -190,11 +190,7 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({
             onClick={handleCopyMarkdown}
             data-testid="copy-markdown-btn"
           >
-            {copied ? (
-              <Check size={14} style={{ color: 'var(--sam-color-success)' }} />
-            ) : (
-              <Copy size={14} />
-            )}
+            {copied ? <Check size={14} style={{ color: 'var(--sam-color-success)' }} /> : <Copy size={14} />}
           </button>
           {onDiagnose && (
             <Button
@@ -242,14 +238,12 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({
           <div className="text-xs font-medium text-fg-primary">Automatic VM evidence</div>
           <div className="mt-1 text-xs text-fg-muted">
             Status: {entry.incident.status}
-            {entry.incident.createdAt &&
-              ` · Captured: ${formatTimestamp(entry.incident.createdAt)}`}
+            {entry.incident.createdAt && ` · Captured: ${formatTimestamp(entry.incident.createdAt)}`}
           </div>
           {entry.incident.artifacts && entry.incident.artifacts.length > 0 && (
             <div className="mt-2">
               <div className="text-xs text-fg-muted">
-                {entry.incident.artifacts.length} artifact
-                {entry.incident.artifacts.length !== 1 ? 's' : ''} available
+                {entry.incident.artifacts.length} artifact{entry.incident.artifacts.length !== 1 ? 's' : ''} available
               </div>
             </div>
           )}

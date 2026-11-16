@@ -2,7 +2,7 @@ import type { InboxItem } from '@simple-agent-manager/shared';
 import { Button, IconButton, Pane, Spinner } from '@simple-agent-manager/ui';
 import { Archive, ArrowLeft, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 
 import { useInboxPermissionDetail } from '../../components/inbox/inbox-actions';
 import { buildRows, hasPinnedControls, stackPosition } from '../../components/inbox/inbox-model';
@@ -25,6 +25,7 @@ import { useMinuteClock } from '../../hooks/useMinuteClock';
 import {
   INBOX_FROM_OVERVIEW,
   INBOX_FROM_PARAM,
+  OVERVIEW_BEHIND_STATE,
   projectChatPath,
   projectOverviewPath,
 } from '../../lib/project-routes';
@@ -34,19 +35,22 @@ type Walk = ReturnType<typeof useInboxWalk>;
 /**
  * An item opened from the project Overview's Needs you (`?from=overview`): Back goes to the
  * Overview, in-app, so the page is not reloaded and shows the reduced count from the shared inbox
- * queries. The Overview's entry is normally right behind this one (the item was pushed, and the
- * walk replaces entries as it moves on), so Back pops it; on a fresh tab it is replaced in.
+ * queries. When this history entry sits right on top of the Overview's (`OVERVIEW_BEHIND_STATE`:
+ * the Overview pushed it and the walk has only replaced it since), Back pops it; otherwise (a
+ * second item opened from the list, a fresh tab) it replaces this entry with the Overview.
  */
 function useReturnToOverview(projectId: string | null) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const fromOverview = Boolean(projectId) && params.get(INBOX_FROM_PARAM) === INBOX_FROM_OVERVIEW;
+  const overviewBehind =
+    (location.state as Record<string, unknown> | null)?.[OVERVIEW_BEHIND_STATE] === true;
   const returnToOverview = useCallback(() => {
     if (!projectId) return;
-    const historyIndex = (window.history.state as { idx?: number } | null)?.idx ?? 0;
-    if (historyIndex > 0) navigate(-1);
+    if (overviewBehind) navigate(-1);
     else navigate(projectOverviewPath(projectId), { replace: true });
-  }, [navigate, projectId]);
+  }, [navigate, overviewBehind, projectId]);
   return { fromOverview, returnToOverview };
 }
 

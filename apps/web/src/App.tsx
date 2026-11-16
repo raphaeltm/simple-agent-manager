@@ -81,6 +81,13 @@ const loadProjectChat = memoizeRouteImport(() => import('./pages/project-chat'))
 const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSettings'));
 const loadProjectOverview = memoizeRouteImport(() => import('./pages/project-overview'));
 const ProjectShell = lazyNamed(loadProjectShell, 'Project');
+
+/** Start a route chunk's download when the browser is idle (memoized imports make repeats free). */
+function preloadWhenIdle(load: () => Promise<unknown>) {
+  const run = () => void load().catch(() => undefined);
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run);
+  else setTimeout(run, 1);
+}
 /**
  * The project shell's chunk fallback. On a chat route it is the chat's own loading
  * layout, so the spinner is already where the project and transcript spinners that
@@ -114,6 +121,8 @@ function Project() {
     void loadProjectChat().catch(() => undefined);
   } else if (isProjectOverviewRoute(pathname)) {
     void loadProjectOverview().catch(() => undefined);
+    // Chat is one tap from the landing page: fetch its chunk once the Overview's is under way.
+    preloadWhenIdle(loadProjectChat);
   }
   return <ProjectShell />;
 }

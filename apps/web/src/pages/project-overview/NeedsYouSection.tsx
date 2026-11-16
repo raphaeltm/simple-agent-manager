@@ -8,7 +8,7 @@
 import type { InboxItem } from '@simple-agent-manager/shared';
 import { Pane } from '@simple-agent-manager/ui';
 import { ChevronRight } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 import { buildRows, isPausedOnItem } from '../../components/inbox/inbox-model';
@@ -16,8 +16,21 @@ import { InboxRow } from '../../components/inbox/InboxRow';
 import { useInboxCount, useInboxList } from '../../components/inbox/useInbox';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useMinuteClock } from '../../hooks/useMinuteClock';
-import { projectInboxItemFromOverviewPath } from '../../lib/project-routes';
+import {
+  OVERVIEW_BEHIND_STATE,
+  projectInboxItemFromOverviewPath,
+} from '../../lib/project-routes';
 import { Section, SectionHead } from './sections';
+
+/**
+ * Chats paused on one of the viewer's open inbox items, from the loaded list. `complete` is false
+ * when the list has further pages the Overview did not fetch (more than one page of items): a
+ * paused item may then sit past the first page, so the Overview read's own flag still counts.
+ */
+export interface ViewerPausedChats {
+  ids: ReadonlySet<string>;
+  complete: boolean;
+}
 
 /** Rows shown before "All N": three keep Running now on a phone's first screen. */
 export const NEEDS_YOU_ROWS_PHONE = 3;
@@ -31,41 +44,73 @@ export const NEEDS_YOU_ROWS_DESKTOP = 5;
 export function useNeedsYou(projectId: string) {
   const list = useInboxList(projectId, 'needs_you');
   const count = useInboxCount(projectId);
-  const pausedSessionIds = useMemo(() => {
+  const complete = list.loaded && !list.hasNextPage;
+  const pausedSessionIds = useMemo<ViewerPausedChats | null>(() => {
     if (!list.loaded) return null;
     const ids = new Set<string>();
     for (const item of list.items) {
       if (item.sessionId && isPausedOnItem(item)) ids.add(item.sessionId);
     }
-    return ids;
-  }, [list.items, list.loaded]);
-  return { list, count, pausedSessionIds };
+    return { ids, complete };
+  }, [list.items, list.loaded, complete]);
+  return useMemo(() => ({ list, count, pausedSessionIds }), [list, count, pausedSessionIds]);
 }
 
 export type NeedsYou = ReturnType<typeof useNeedsYou>;
+
+/** Approximate height of one row, so a loading list reserves its space instead of jumping. */
+const ROW_HEIGHT_PX = 64;
+
+/**
+ * The item last opened from Needs you. Coming back to the Overview puts keyboard focus on its row
+ * (or, once answered, on the section), as the inbox's own Back does for its list. Read once.
+ */
+let returnFocusRef: string | null = null;
+
+/** `data-focus-target` of the Needs you section, in whichever form it is rendered. */
+const FOCUS_TARGET = 'needs-you';
+
+function focusReturnTarget() {
+  const ref = returnFocusRef;
+  returnFocusRef = null;
+  const container = document.querySelector<HTMLElement>(`[data-focus-target="${FOCUS_TARGET}"]`);
+  if (!ref || !container) return;
+  const rows = container.querySelectorAll<HTMLElement>('[data-inbox-refs]');
+  for (const row of rows) {
+    if ((row.dataset.inboxRefs ?? '').split(' ').includes(ref)) {
+      row.focus();
+      return;
+    }
+  }
+  container.focus();
+}
 
 /** The section when there is no list to show: one quiet line, not an empty panel. */
 function QuietLine({
   projectId,
   text,
   className,
-  alert,
+  announce,
 }: {
   projectId: string;
   text: string;
   className: string;
-  alert?: boolean;
+  /** Announce the text (a settled answer); a loading line stays silent. */
+  announce: boolean;
 }) {
   return (
     <Pane
       as="section"
+      tabIndex={-1}
+      data-focus-target={FOCUS_TARGET}
       aria-label="Needs you"
-      className={`flex min-h-12 min-w-0 shrink-0 items-center gap-2 px-3.5 ${className}`}
+      className={`flex min-h-12 min-w-0 shrink-0 items-center gap-2 px-3.5 outline-none ${className}`}
       data-testid="overview-needs-you-quiet"
     >
+      <h2 className="sr-only">Needs you</h2>
       <p
-        role={alert ? 'alert' : 'status'}
-        className={`m-0 min-w-0 flex-1 text-sm ${alert ? 'text-danger-fg' : 'text-fg-muted'}`}
+        role={announce ? 'status' : undefined}
+        className="m-0 min-w-0 flex-1 text-sm text-fg-muted"
       >
         {text}
       </p>
@@ -95,11 +140,37 @@ export function NeedsYouSection({
   const navigate = useNavigate();
   const { list, count } = needsYou;
   const rows = useMemo(() => buildRows(list.items), [list.items]);
-  const shown = rows.slice(0, isMobile ? NEEDS_YOU_ROWS_PHONE : NEEDS_YOU_ROWS_DESKTOP);
+  const limit = isMobile ? NEEDS_YOU_ROWS_PHONE : NEEDS_YOU_ROWS_DESKTOP;
+  const shown = rows.slice(0, limit);
   const open = useCallback(
-    (item: InboxItem) => navigate(projectInboxItemFromOverviewPath(projectId, item.ref)),
+    (item: InboxItem) => {
+      returnFocusRef = item.ref;
+      // The inbox item view's Back pops back here while this state is on its entry.
+      navigate(projectInboxItemFromOverviewPath(projectId, item.ref), {
+        state: { [OVERVIEW_BEHIND_STATE]: true },
+      });
+    },
     [navigate, projectId]
   );
+  // Back from an item: once the list has loaded, put focus where the person left.
+  useEffect(() => {
+    if (list.loaded) focusReturnTarget();
+  }, [list.loaded]);
+
+  const expected = count.data?.needsYou ?? 0;
+  if (!list.loaded && !list.error && expected > 0) {
+    // The count already says there are items: hold their space so nothing below jumps.
+    return (
+      <Section label="Needs you" className={className}>
+        <SectionHead title="Needs you" count={expected} tone="attention" />
+        <div
+          aria-busy="true"
+          style={{ minHeight: Math.min(expected, limit) * ROW_HEIGHT_PX }}
+          data-testid="overview-needs-you-loading"
+        />
+      </Section>
+    );
+  }
 
   if (rows.length === 0) {
     const text = list.loaded
@@ -112,7 +183,7 @@ export function NeedsYouSection({
         projectId={projectId}
         text={text}
         className={className}
-        alert={!list.loaded && Boolean(list.error)}
+        announce={list.loaded || Boolean(list.error)}
       />
     );
   }
@@ -121,7 +192,7 @@ export function NeedsYouSection({
   const total = count.data?.needsYou ?? list.items.length;
   const inbox = `/projects/${projectId}/inbox`;
   return (
-    <Section label="Needs you" className={className}>
+    <Section label="Needs you" className={className} focusTarget={FOCUS_TARGET}>
       <SectionHead
         title="Needs you"
         count={total}
