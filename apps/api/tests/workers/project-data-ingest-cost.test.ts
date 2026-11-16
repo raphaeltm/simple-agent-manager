@@ -94,7 +94,10 @@ describe('message ingest row cost in real workerd', () => {
           maxRowBytes: 65536,
           recentIds: 200,
         });
+        // Every production ProjectData object carries its project id before any RPC reaches it
+        // (`ensureProjectId`, through the service layer's memo), and reads it from memory after.
         const stub = projectDataStub(`ingest-cost-${crypto.randomUUID()}`);
+        await stub.ensureProjectId('cost-project');
         const session = await stub.createSession('cost-workspace', 'Existing topic');
         const now = Date.now();
         await runInDurableObject(stub, (_instance, state) => {
