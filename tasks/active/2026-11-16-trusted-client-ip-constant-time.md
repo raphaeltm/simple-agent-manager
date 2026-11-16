@@ -22,7 +22,7 @@ Documentation: architecture/security.md header contract and missing-IP behavior.
 - [x] Test Cloudflare spoof rejection, trusted ingress, malformed/missing input, and reader enumeration including packages.
 - [x] Test real BetterAuth persistence and rate limiting with spoofed XFF; prove regression tests red before fix.
 - [x] Update public security docs and respect file/size budgets.
-- [ ] Run lint, typecheck, tests and build; specialist reviews and completion validator.
+- [x] Run lint, typecheck, tests and build; specialist reviews and completion validator.
 - [ ] Check both staging queues, reserve and deploy on turn; Playwright sign-in, stored IP and rate-limit key checks; release.
 - [ ] Ready PR, request/wait CodeRabbit, resolve reviews, green CI, merge and production smoke.
 - [ ] Publish PR/blockers/completion to channel; update idea with PR/commit.
@@ -37,3 +37,5 @@ Review repair: 17 obsolete source-text assertions in node-ip-validation.test.ts 
 
 Adjacent main-layout gap: token/device/workload sign-ins invoke internalAdapter outside BetterAuth request context; real workload login red proof stored empty IP.
 - [x] Thread inbound headers through three existing routes into session-factory; persist validated helper IP for normal/capped sessions; test real workload persistence with spoof XFF and missing/malformed controls plus token/device caller payloads.
+
+Final pre-PR validation (2026-11-16): root lint 22/22 tasks; typecheck 36/36; build 18/18; final immutable-head root test 39/39 package tasks passed. First broad run overlapped final test/factory edits and observed old cached module against new assertions in two route tests; final unchanged-head rerun passed. All local reviewers PASS/ADDRESSED through 3deaf9155: security, Cloudflare, completion, tests, docs, constitution. Task stays active pending staging/release evidence.
