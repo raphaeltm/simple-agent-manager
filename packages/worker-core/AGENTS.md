@@ -73,5 +73,6 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md`: Making a Scoping Column Nullable Silently Deletes Every Check That Used It
 - `.claude/rules/69-emergency-config-paths-need-their-own-coverage.md`: A Code Path That Only Activates Under an Emergency Configuration Needs Tests In That Configuration
 - `.claude/rules/71-tightening-a-column-can-delete-a-capability.md`: A New Required Column Can Silently Delete a Capability for Every Existing Row
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 
 <!-- END GENERATED RULE INDEX -->

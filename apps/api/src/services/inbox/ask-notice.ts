@@ -35,8 +35,25 @@ export function buildInboxAskPrompt(
   outcome: InboxAskNoticeOutcome
 ): string {
   // Title and answer were bounded when written (`inbox.titleMaxChars`, `inbox.answerMaxChars`).
-  const item = `inbox item ${row.id} ("${row.title}")`;
   const answer = answerText(row.answerJson);
+  if (row.kind === 'question') {
+    // A request_human_input question (slice G). Its expiry stops the task instead of a notice
+    // (`deliverInboxAskNotice`).
+    const question = `your question ("${row.title}")`;
+    if (outcome === 'archived') {
+      return `The person archived ${question} from their inbox and will not act on it. Do not wait for an answer: continue without it, or end your turn and say what is left undone.`;
+    }
+    return answer
+      ? `The person answered ${question}:\n\n${answer}`
+      : `The person answered ${question}.`;
+  }
+  const item = `inbox item ${row.id} ("${row.title}")`;
+  if (row.kind === 'review' && outcome === 'answered') {
+    // A review is answered "Looks good" (no text) or with a reply (inbox slice D).
+    return answer
+      ? `The person reviewed your ${item} and replied:\n\n${answer}`
+      : `The person reviewed your ${item}: it looks good.`;
+  }
   switch (outcome) {
     case 'answered':
       return answer
@@ -81,6 +98,9 @@ export async function deliverInboxAskNotice(
 ): Promise<boolean> {
   // Nothing filed it from a chat, so there is no agent to tell.
   if (!row.sourceSessionId) return true;
+  if (row.kind === 'question' && outcome === 'expired') {
+    return expireQuestion(env, { ...row, sourceSessionId: row.sourceSessionId });
+  }
   const creatorUserId = row.resolvedByUserId ?? row.assigneeUserId;
   if (!creatorUserId || !row.sourceTaskId) {
     // The delivery guard needs both; without them the notice could wake an unrelated chat.
@@ -110,7 +130,13 @@ export async function deliverInboxAskNotice(
       messageClass: 'deliver',
       sourceKind: 'inbox_ask',
       ttlMs: config.ttlMs,
-      metadata: { askId: row.id, outcome, creatorUserId },
+      // `questionAskId` clears the chat's question live (`durability-foundation.ts`).
+      metadata: {
+        askId: row.id,
+        outcome,
+        creatorUserId,
+        ...(row.kind === 'question' ? { questionAskId: row.id } : {}),
+      },
       notice: safeNotice(() => askNotice(row, outcome), { askId: row.id }),
     });
     return true;
@@ -120,6 +146,41 @@ export async function deliverInboxAskNotice(
       projectId: row.projectId,
       sessionId: row.sourceSessionId,
       outcome,
+      ...serializeError(error),
+    });
+    return false;
+  }
+}
+
+/**
+ * An expired question has the outcome a question marker's expiry had: the asking task stops and
+ * its work is preserved (`ProjectData.expireQuestionAsk`). `notified_at` records that this ran;
+ * a failed call leaves it NULL and the sweep retries it. True when it ran.
+ */
+async function expireQuestion(
+  env: Env,
+  row: InboxAskNoticeRow & { sourceSessionId: string }
+): Promise<boolean> {
+  try {
+    const result = await projectDataService.expireQuestionAsk(env, row.projectId, {
+      askId: row.id,
+      sessionId: row.sourceSessionId,
+      taskId: row.sourceTaskId,
+      workspaceId: row.sourceWorkspaceId,
+      createdAt: row.createdAt ?? 0,
+    });
+    log.info('inbox_ask.question_expired', {
+      askId: row.id,
+      projectId: row.projectId,
+      sessionId: row.sourceSessionId,
+      outcome: result.outcome,
+    });
+    return true;
+  } catch (error) {
+    log.error('inbox_ask.question_expiry_failed', {
+      askId: row.id,
+      projectId: row.projectId,
+      sessionId: row.sourceSessionId,
       ...serializeError(error),
     });
     return false;

@@ -11,6 +11,8 @@ import {
 import { DocumentCard } from './DocumentCard';
 import { extractHumanInputRequest, isHumanInputCardTool } from './human-input-card-data';
 import { HumanInputCard } from './HumanInputCard';
+import { extractInboxItemRef, isInboxItemCardTool } from './inbox-item-card-data';
+import { InboxItemCard } from './InboxItemCard';
 import { extractSecretRequestId, isSecretRequestCardTool } from './secret-request-card-data';
 import { SecretRequestCard } from './SecretRequestCard';
 import { isTypedCardToolName } from './typed-card-tools';
@@ -79,6 +81,12 @@ function resolveToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
   // generic card shows it instead.
   if (isHumanInputCardTool(item)) {
     return item.status !== 'failed' && extractHumanInputRequest(item) ? HumanInputCard : null;
+  }
+  // Agent inbox item (`inbox_write` ask or review): the card needs the item reference from the
+  // result. Update and cancel results have none, so they keep the generic card, as does a call
+  // that is running or failed.
+  if (isInboxItemCardTool(item)) {
+    return item.status !== 'failed' && extractInboxItemRef(item) ? InboxItemCard : null;
   }
   // Agent secret request: the card needs the request ID from the result. While the call runs, or
   // when it failed (bad name, override, cap), the generic card shows it and the error instead.

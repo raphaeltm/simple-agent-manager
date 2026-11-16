@@ -49,6 +49,13 @@ function app() {
   return app;
 }
 const path = '/api/projects/p-1/sessions/s-1/attention/a-1';
+/**
+ * A D1 with no `asks` row for the id, so the route reads the question as a marker: the
+ * marker-era path questions asked before inbox slice G keep until they resolve.
+ */
+const MARKER_ERA_ENV = {
+  DATABASE: { prepare: () => ({ bind: () => ({ first: async () => null }) }) },
+};
 const fullReason = 'A complete, very old question. '.repeat(100);
 describe('notification question reader route', () => {
   beforeEach(() => {
@@ -86,7 +93,7 @@ describe('notification question reader route', () => {
     });
   });
   it('returns full canonical text and options without reading transcript until requested', async () => {
-    const response = await app().request(path, {}, { DATABASE: {} });
+    const response = await app().request(path, {}, MARKER_ERA_ENV);
     expect(response.status).toBe(200);
     const result = await response.json();
     expect(result.request).toMatchObject({
@@ -102,7 +109,7 @@ describe('notification question reader route', () => {
     const base = await mocks.marker();
     const read = async (metadata: string | null) => {
       mocks.marker.mockResolvedValue({ ...base, metadata });
-      return (await (await app().request(path, {}, { DATABASE: {} })).json()).request.category;
+      return (await (await app().request(path, {}, MARKER_ERA_ENV)).json()).request.category;
     };
     expect(await read(JSON.stringify({ category: 'approval', options: ['Go'] }))).toBe('approval');
     expect(await read(JSON.stringify({ options: ['Go'] }))).toBeNull();
@@ -111,7 +118,7 @@ describe('notification question reader route', () => {
     expect(await read(null)).toBeNull();
   });
   it('reads a small window before the request, not the latest conversation page', async () => {
-    const response = await app().request(path + '?context=true', {}, { DATABASE: {} });
+    const response = await app().request(path + '?context=true', {}, MARKER_ERA_ENV);
     expect((await response.json()).messages[0].content).toBe('Previous context');
     expect(mocks.messages).toHaveBeenCalledWith(
       expect.anything(),
@@ -134,7 +141,7 @@ describe('notification question reader route', () => {
     'makes settled, expired, in-flight and unsupported requests read-only: %j',
     async (override) => {
       mocks.marker.mockResolvedValue({ ...(await mocks.marker()), ...override });
-      const response = await app().request(path, {}, { DATABASE: {} });
+      const response = await app().request(path, {}, MARKER_ERA_ENV);
       expect((await response.json()).request.canAnswer).toBe(false);
     }
   );
@@ -143,12 +150,12 @@ describe('notification question reader route', () => {
       session: { topic: null },
       access: { found: true, role: 'reader' },
     });
-    const response = await app().request(path, {}, { DATABASE: {} });
+    const response = await app().request(path, {}, MARKER_ERA_ENV);
     expect((await response.json()).request.canAnswer).toBe(false);
   });
   it('keeps downgraded project members and grantees without an active owner read-only', async () => {
     mocks.capability.mockResolvedValue({ membership: { role: 'viewer' } });
-    expect((await (await app().request(path, {}, { DATABASE: {} })).json()).request.canAnswer).toBe(
+    expect((await (await app().request(path, {}, MARKER_ERA_ENV)).json()).request.canAnswer).toBe(
       false
     );
     mocks.capability.mockResolvedValue({ membership: { role: 'maintainer' } });
@@ -157,11 +164,11 @@ describe('notification question reader route', () => {
       access: { found: true, role: 'grantee', ownerUserId: 'owner-1', grant: { id: 'grant-1' } },
     });
     mocks.ownerCapability.mockResolvedValue(false);
-    expect((await (await app().request(path, {}, { DATABASE: {} })).json()).request.canAnswer).toBe(
+    expect((await (await app().request(path, {}, MARKER_ERA_ENV)).json()).request.canAnswer).toBe(
       false
     );
     mocks.ownerCapability.mockResolvedValue(true);
-    expect((await (await app().request(path, {}, { DATABASE: {} })).json()).request.canAnswer).toBe(
+    expect((await (await app().request(path, {}, MARKER_ERA_ENV)).json()).request.canAnswer).toBe(
       true
     );
   });
@@ -169,7 +176,7 @@ describe('notification question reader route', () => {
     await app().request(
       path + '?context=true&limit=7',
       {},
-      { DATABASE: {}, CHAT_SESSION_MESSAGE_MAX: '5', CHAT_SESSION_MESSAGE_LIMIT: '3' }
+      { ...MARKER_ERA_ENV, CHAT_SESSION_MESSAGE_MAX: '5', CHAT_SESSION_MESSAGE_LIMIT: '3' }
     );
     expect(mocks.messages).toHaveBeenCalledWith(
       expect.anything(),
@@ -181,7 +188,7 @@ describe('notification question reader route', () => {
   it.each(['', 'bad', '0', '-1'])(
     'uses the context default for invalid limit %j',
     async (limit) => {
-      await app().request(path + '?context=true&limit=' + limit, {}, { DATABASE: {} });
+      await app().request(path + '?context=true&limit=' + limit, {}, MARKER_ERA_ENV);
       expect(mocks.messages).toHaveBeenCalledWith(
         expect.anything(),
         'p-1',
@@ -216,7 +223,7 @@ describe('notification question reader route', () => {
         },
       ],
     });
-    const result = await (await app().request(path + '?context=true', {}, { DATABASE: {} })).json();
+    const result = await (await app().request(path + '?context=true', {}, MARKER_ERA_ENV)).json();
     expect(result.messages.map((m: { id: string }) => m.id)).toEqual(['m-older', 'm-newer']);
     expect(result.messages[1].content).toBe('First streamed chunk. Second streamed chunk.');
     expect(result.messages[0].truncated).toBe(true);
@@ -224,16 +231,16 @@ describe('notification question reader route', () => {
   it('rejects missing and cross-session markers', async () => {
     for (const marker of [null, { sessionId: 'other', kind: 'needs_input' }]) {
       mocks.marker.mockResolvedValue(marker);
-      expect((await app().request(path, {}, { DATABASE: {} })).status).toBe(404);
+      expect((await app().request(path, {}, MARKER_ERA_ENV)).status).toBe(404);
     }
   });
   it('checks project and session access before reading a question', async () => {
     mocks.capability.mockRejectedValue(Object.assign(new Error('Forbidden'), { statusCode: 403 }));
-    expect((await app().request(path, {}, { DATABASE: {} })).status).toBe(403);
+    expect((await app().request(path, {}, MARKER_ERA_ENV)).status).toBe(403);
     expect(mocks.marker).not.toHaveBeenCalled();
     mocks.capability.mockResolvedValue({ membership: { role: 'owner' } });
     mocks.access.mockResolvedValue({ session: null, access: { found: false } });
-    expect((await app().request(path, {}, { DATABASE: {} })).status).toBe(404);
+    expect((await app().request(path, {}, MARKER_ERA_ENV)).status).toBe(404);
     expect(mocks.marker).not.toHaveBeenCalled();
   });
 });

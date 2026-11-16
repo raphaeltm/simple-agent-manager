@@ -409,8 +409,16 @@ describe('Notification DO Web Push migration and delivery', () => {
     await vi.waitFor(async () => {
       expect(await notification.hasConfirmedPushDelivery(userId, pushed.id)).toBe(true);
     });
-    const [marker] = await projectData.listActiveAttentionMarkers(sessionId);
-    if (!marker) throw new Error('Expected an active needs_input marker');
+    // Inbox slice G: the question is one D1 `asks` row; the notification points at it.
+    const marker = {
+      id: String((pushed.metadata as { attentionMarkerId: string }).attentionMarkerId),
+    };
+    expect(await projectData.listActiveAttentionMarkers(sessionId)).toEqual([]);
+    expect(
+      await env.DATABASE.prepare('SELECT kind, status, notification_id FROM asks WHERE id = ?')
+        .bind(marker.id)
+        .first()
+    ).toEqual({ kind: 'question', status: 'open', notification_id: pushed.id });
     const signedBrowserSessionToken = `${browserSessionToken}.${await makeSignature(
       browserSessionToken,
       env.BETTER_AUTH_SECRET || env.ENCRYPTION_KEY
@@ -454,11 +462,13 @@ describe('Notification DO Web Push migration and delivery', () => {
       alreadyResolved: false,
       answer: 'Ship now',
     });
-    expect(promptCalls()).toHaveLength(1);
-    expect(JSON.parse(String(promptCalls()[0]?.[1]?.body))).toEqual({
-      prompt: 'Ship now',
-      messageId: marker.id,
-    });
+    // The answer goes to the agent as one durable prompt (the wake path), not a direct live prompt.
+    const snapshot = await projectData.getDurableExecutionSnapshot(sessionId);
+    expect(
+      snapshot.deliveries.filter(
+        (delivery: { id: string }) => delivery.id === `inbox-ask:${marker.id}`
+      )
+    ).toEqual([expect.objectContaining({ sourceKind: 'inbox_ask', sourceTaskId: taskId })]);
 
     const replayResponse = await resolveAttention(marker.id, 'Ship now');
     expect(replayResponse.status).toBe(200);
@@ -468,8 +478,15 @@ describe('Notification DO Web Push migration and delivery', () => {
       answer: 'Ship now',
     });
     expect((await resolveAttention(marker.id, 'Wait')).status).toBe(409);
-    expect(promptCalls()).toHaveLength(1);
+    const answered = await env.DATABASE.prepare(
+      'SELECT status, answer_json, notified_at FROM asks WHERE id = ?'
+    )
+      .bind(marker.id)
+      .first<{ status: string; answer_json: string; notified_at: number | null }>();
+    expect(answered).toMatchObject({ status: 'answered', answer_json: '{"text":"Ship now"}' });
+    expect(answered?.notified_at).not.toBeNull();
 
+    // Overlap control: a question still held as a marker answers through its own path.
     const freeFormMarker = await projectData.createAttentionMarker({
       sessionId,
       taskId,
@@ -486,25 +503,16 @@ describe('Notification DO Web Push migration and delivery', () => {
       alreadyResolved: false,
       answer: 'Use the canary deployment',
     });
-    expect(promptCalls()).toHaveLength(2);
-    expect(JSON.parse(String(promptCalls()[1]?.[1]?.body))).toEqual({
+    const freeFormPrompts = promptCalls().filter(
+      (call) => JSON.parse(String(call[1]?.body)).messageId === freeFormMarker.id
+    );
+    expect(freeFormPrompts).toHaveLength(1);
+    expect(JSON.parse(String(freeFormPrompts[0]?.[1]?.body))).toEqual({
       prompt: 'Use the canary deployment',
       messageId: freeFormMarker.id,
     });
     expect(await projectData.listActiveAttentionMarkers(sessionId)).toEqual([]);
     await runInDurableObject(projectData, async (instance) => {
-      const rows = (instance as unknown as { sql: SqlStorage }).sql
-        .exec(
-          'SELECT resolved_reason, resolved_answer FROM session_attention_markers WHERE id = ?',
-          marker.id
-        )
-        .toArray();
-      expect(rows).toEqual([
-        expect.objectContaining({
-          resolved_reason: 'structured_answer',
-          resolved_answer: 'Ship now',
-        }),
-      ]);
       const freeFormRows = (instance as unknown as { sql: SqlStorage }).sql
         .exec(
           'SELECT resolved_reason, resolved_answer FROM session_attention_markers WHERE id = ?',

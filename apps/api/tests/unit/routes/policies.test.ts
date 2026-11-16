@@ -111,7 +111,8 @@ describe('policy routes', () => {
         null,
         0.9,
         'always',
-        null
+        null,
+        'pinned'
       );
     });
 
@@ -173,8 +174,62 @@ describe('policy routes', () => {
         null,
         expect.any(Number),
         'always',
-        null
+        null,
+        'pinned'
       );
+    });
+  });
+
+  describe('inject mode (pinned / on_demand)', () => {
+    const post = (body: Record<string, unknown>) =>
+      app.request(
+        BASE,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category: 'rule', title: 'T', content: 'C', ...body }),
+        },
+        makeEnv()
+      );
+    const patch = (body: Record<string, unknown>) =>
+      app.request(
+        `${BASE}/policy-1`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        makeEnv()
+      );
+
+    it('creates an on-demand policy when asked', async () => {
+      mocks.createPolicy.mockResolvedValueOnce({ id: 'p', now: 1 });
+      const res = await post({ injectMode: 'on_demand' });
+      expect(res.status).toBe(201);
+      expect(mocks.createPolicy.mock.calls[0]?.at(-1)).toBe('on_demand');
+    });
+
+    it('rejects an unknown inject mode before calling the service', async () => {
+      const res = await post({ injectMode: 'sometimes' });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { message: string }).message).toContain('injectMode must be one of');
+      expect(mocks.createPolicy).not.toHaveBeenCalled();
+    });
+
+    it('updates only the inject mode, in both directions', async () => {
+      mocks.updatePolicy.mockResolvedValue(true);
+      expect((await patch({ injectMode: 'on_demand' })).status).toBe(200);
+      expect((await patch({ injectMode: 'pinned' })).status).toBe(200);
+      expect(mocks.updatePolicy.mock.calls.map((c) => c[3])).toEqual([
+        { injectMode: 'on_demand' },
+        { injectMode: 'pinned' },
+      ]);
+    });
+
+    it('rejects an unknown inject mode on update', async () => {
+      const res = await patch({ injectMode: 'never' });
+      expect(res.status).toBe(400);
+      expect(mocks.updatePolicy).not.toHaveBeenCalled();
     });
   });
 
@@ -316,7 +371,8 @@ describe('policy routes', () => {
         null,
         expect.any(Number),
         'task',
-        expiresAt
+        expiresAt,
+        'pinned'
       );
     });
 

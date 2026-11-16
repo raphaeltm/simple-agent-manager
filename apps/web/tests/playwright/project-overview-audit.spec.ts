@@ -25,6 +25,7 @@ import {
   screenshot,
 } from './audit-helpers';
 import { RUNS, SCHEDULES, TRIGGERS } from './automation-fixtures';
+import { makeFlow } from './insights-fixtures';
 
 const PROJECT_ID = 'proj-overview';
 const USER_ID = 'user-overview';
@@ -422,6 +423,15 @@ async function setupScene(page: Page, options: SceneOptions) {
           status: 'queued',
         });
       }
+      if (sub === '/insights/flow')
+        return respond(
+          200,
+          makeFlow(
+            PROJECT_ID,
+            '7d',
+            options.scene === 'quiet' ? 'empty' : options.scene === 'busy' ? 'stress' : 'realistic'
+          )
+        );
       if (sub === '/agent-profiles') return respond(200, { items: PROFILES });
       if (sub === '/agent-profiles/picker')
         return respond(200, { usageWindowDays: 30, usage: [], hiddenProfileIds: [] });
@@ -524,6 +534,18 @@ test.describe('Project Overview', () => {
     await expect(page.getByTestId('overview-budget-exceptions')).toContainText('5-hour window');
     await expect(page.getByTestId('overview-automation-failing')).toBeVisible();
     await expect(page.getByTestId('overview-recent-ideas')).toBeVisible();
+    const week = page.getByRole('region', { name: 'This week' });
+    await expect(week).toContainText('Merged');
+    await expect(week).toContainText('28');
+    await expect(week).toContainText('1.6d');
+    await expect(week).toContainText('64%');
+    await expect(page.getByTestId('overview-this-week-blocker')).toContainText(
+      'Flaky check: apps/api › snapshot-retry.test.ts'
+    );
+    await expect(week.getByRole('link', { name: /Insights/ })).toHaveAttribute(
+      'href',
+      `/projects/${PROJECT_ID}/insights/flow?range=7d`
+    );
     await expectTaskBoxPinned(page);
     await capture(page, 'overview-normal');
   });
@@ -552,6 +574,9 @@ test.describe('Project Overview', () => {
     await expect(page.getByText('Nothing is running.')).toBeVisible();
     await expect(page.getByText('No ideas or merged pull requests yet.')).toBeVisible();
     await expect(page.getByText('No automations yet.')).toBeVisible();
+    await expect(page.getByTestId('overview-this-week-blocker')).toContainText(
+      'Nothing stopped runs this week.'
+    );
     // Healthy accounts get rings and no words.
     await expect(page.getByTestId('overview-budgets')).toBeVisible();
     await expect(page.getByTestId('overview-budget-exceptions')).toHaveCount(0);

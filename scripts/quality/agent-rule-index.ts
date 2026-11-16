@@ -25,7 +25,8 @@ export function describeScope(rule: RuleFile): string {
   const other: string[] = [];
   for (const pattern of rule.paths ?? []) {
     if (pattern.startsWith('**/') || !pattern.includes('/')) {
-      other.push(pattern);
+      // Backticks: a bare `**/*.go` is read as emphasis by Markdown and by Prettier.
+      other.push(pattern.includes('*') ? `\`${pattern}\`` : pattern);
       continue;
     }
     const segments = pattern.split('/');

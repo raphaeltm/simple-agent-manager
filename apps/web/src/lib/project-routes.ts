@@ -19,6 +19,10 @@ export const projectPath = (projectId: string) => projectRoot(projectId);
 export const projectChatPath = (projectId: string, sessionId: string) =>
   `${projectRoot(projectId)}/chat/${encodeURIComponent(sessionId)}`;
 
+/** The project's Agent Context page (memory and policies). */
+export const projectAgentContextPath = (projectId: string) =>
+  `${projectRoot(projectId)}/agent-context`;
+
 /** One idea's page. */
 export const projectIdeaPath = (projectId: string, ideaId: string) =>
   `${projectRoot(projectId)}/ideas/${encodeURIComponent(ideaId)}`;

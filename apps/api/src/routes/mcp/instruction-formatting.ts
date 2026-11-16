@@ -5,6 +5,8 @@
  * 800-line hard file-size limit (rule 18).
  */
 
+import { formatPolicyDirectiveLine } from '@simple-agent-manager/shared';
+
 import type { KnowledgeEntityIndexEntry } from '../../durable-objects/project-data/knowledge';
 
 // ─── Policy Formatting Helpers ──────────────────────────────────────────────
@@ -17,19 +19,6 @@ export interface PolicyEntry {
   confidence: number;
   scope?: string;
   expiresAt?: number | null;
-}
-
-/**
- * Render a policy's shelf life as a short inline annotation.
- *
- * A policy that is going to lapse must not read like a permanent gate, so the
- * agent is told when it expires. Date-only (no time) keeps the annotation to a
- * few tokens — this renders once per policy in every session.
- */
-function formatPolicyLifecycle(entry: PolicyEntry): string {
-  if (entry.expiresAt === null || entry.expiresAt === undefined) return '';
-  const date = new Date(entry.expiresAt).toISOString().slice(0, 10);
-  return entry.scope === 'task' ? ` (task-scoped, expires ${date})` : ` (expires ${date})`;
 }
 
 /**
@@ -53,22 +42,14 @@ export function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
   if (entries.length === 0) return null;
 
   // Group by category
-  const grouped = new Map<
-    string,
-    { id: string; title: string; content: string; lifecycle: string }[]
-  >();
+  const grouped = new Map<string, PolicyEntry[]>();
   for (const entry of entries) {
     let group = grouped.get(entry.category);
     if (!group) {
       group = [];
       grouped.set(entry.category, group);
     }
-    group.push({
-      id: entry.id,
-      title: entry.title,
-      content: entry.content,
-      lifecycle: formatPolicyLifecycle(entry),
-    });
+    group.push(entry);
   }
 
   // Category display order and labels
@@ -84,11 +65,9 @@ export function formatPolicyDirectives(entries: PolicyEntry[]): string | null {
     const label = categoryLabels[category] || category;
     lines.push(`### ${label}`);
     for (const item of items) {
-      // The id MUST be rendered in full — `policies_write` method `update` / `policies_write` method `remove` resolve it with
-      // `WHERE id = ?` (exact match), so an abbreviated id would not address the row.
-      // The lifecycle annotation sits between the title and the id so a temporary policy
-      // reads as temporary at a glance rather than as a permanent gate.
-      lines.push(`- **${item.title}**${item.lifecycle} (id: ${item.id}): ${item.content}`);
+      // One renderer, shared with the web Policies tab's size readout (see the shared
+      // module for why the id is rendered in full).
+      lines.push(formatPolicyDirectiveLine(item));
     }
     lines.push('');
   }
@@ -125,8 +104,8 @@ export function buildPolicyInstructions(hasPolicies: boolean, isConversation: bo
       'Before saving a policy, decide whether it is standing or one-shot. If it is tied to a specific workflow, ' +
         'wave, migration, or dated piece of work — anything that will be finished later — pass `scope: "task"` and an ' +
         '`expiresAt` (epoch ms) to `policies_write` method `add` so it stops being injected once that work is done. Only genuinely ' +
-        'permanent guidance should be saved with the default `scope: "always"`. Policies without an expiry are loaded ' +
-        'into every future session in this project forever, so an un-expiring one-shot policy is a real cost.'
+        'permanent guidance should be saved with the default `scope: "always"`. A pinned policy without an expiry (every new ' +
+        'policy is pinned) is loaded into every future session in this project forever, so an un-expiring one-shot policy is a real cost.'
     );
   }
 
@@ -192,7 +171,9 @@ export function formatKnowledgeDirectives(entries: KnowledgeEntry[]): string | n
 export function formatKnowledgeEntityIndex(
   entityIndex: KnowledgeEntityIndexEntry[],
   injected: KnowledgeEntry[],
-  totalEntities: number
+  totalEntities: number,
+  /** Observations the size budget left out of the ranked block (instruction-budget.ts). */
+  droppedForBudget = 0
 ): string | null {
   if (entityIndex.length === 0) return null;
 
@@ -212,6 +193,9 @@ export function formatKnowledgeEntityIndex(
       'The block above shows only the highest-ranked observations, capped per entity — it is NOT everything ' +
       `this project knows.${notInjected > 0 ? ` ${notInjected} of the entities listed here have no observations shown above at all.` : ''} ` +
       `${truncated ? `A further ${totalEntities - entityIndex.length} entities are not listed; \`knowledge_read\` method \`search\` still reaches them. ` : ''}` +
+      // Only rendered when the size budget actually dropped something, so an unbudgeted
+      // payload is byte-identical to the pre-budget one.
+      `${droppedForBudget > 0 ? `To fit the size budget, ${droppedForBudget} lower-ranked observations were left out of the block above. ` : ''}` +
       'Each entry below is `EntityName (type, N observations)`. To read anything not shown in full, call ' +
       '`knowledge_read` method `search` with the entity name, or `knowledge_read` method `relevant` with a description of what you are about to do. ' +
       'Do this before decisions that touch one of these topics.\n',

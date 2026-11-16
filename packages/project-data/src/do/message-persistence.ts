@@ -29,6 +29,15 @@ export type MessagePersistenceHooks = {
   recalculateAlarm: () => Promise<void>;
   scheduleSummarySync: () => void;
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
+  /**
+   * A person's chat message answers the chat's open questions in D1 `asks` (inbox slice G), as it
+   * resolves its attention markers. Never throws (`question-asks.ts`).
+   */
+  closeQuestionAsks?: (
+    sessionId: string,
+    messageId: string,
+    messageCreatedAt: number
+  ) => Promise<unknown>;
 };
 
 export type MessageBatchPersistenceResult = {
@@ -126,6 +135,9 @@ export async function runPersistedMessageSideEffects(
     },
     sessionId
   );
+  await closeQuestionsForHumanMessage(hooks, sessionId, [
+    { id: result.id, role, createdAt: result.now },
+  ]);
 }
 
 export async function persistMessageBatchWithSideEffects(
@@ -195,6 +207,7 @@ export async function persistMessageBatchWithSideEffects(
   );
   for (const append of result.appends)
     hooks.broadcastEvent('message.append', { ...append }, sessionId);
+  await closeQuestionsForHumanMessage(hooks, sessionId, result.persistedMessages);
   return {
     persisted: result.persisted,
     duplicates: result.duplicates,
@@ -239,6 +252,27 @@ async function resolveAttentionForRoles(
   if (resolved > 0 && reason) {
     await hooks.recalculateAlarm();
     hooks.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason }, sessionId);
+  }
+}
+
+/**
+ * A person's message answers the chat's open questions in D1 `asks` (inbox slice G), as it
+ * resolves the chat's markers above. Run after the live broadcast, so a D1 round trip never
+ * delays it; never throws (`question-asks.ts`).
+ */
+async function closeQuestionsForHumanMessage(
+  hooks: MessagePersistenceHooks,
+  sessionId: string,
+  persistedMessages: Array<{
+    id: string;
+    role: string;
+    origin?: string | null;
+    createdAt: number;
+  }>
+): Promise<void> {
+  const firstUserMsg = persistedMessages.find((m) => m.role === 'user' && m.origin !== 'system');
+  if (firstUserMsg) {
+    await hooks.closeQuestionAsks?.(sessionId, firstUserMsg.id, firstUserMsg.createdAt);
   }
 }
 

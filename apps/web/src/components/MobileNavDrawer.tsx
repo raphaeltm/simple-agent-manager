@@ -20,6 +20,8 @@ export interface MobileNavItem {
   label: string;
   path: string;
   icon?: ReactNode;
+  /** Items waiting on the user (the inbox), shown as an amber count. */
+  count?: number;
 }
 
 interface MobileNavDrawerProps {
@@ -93,6 +95,8 @@ export function MobileNavDrawer({
         icon={item.icon}
         current={isNavItemActive(item.path, currentPath)}
         onClick={() => onNavigate(item.path)}
+        count={item.count}
+        countTone="attention"
         size="lg"
       />
     ));
@@ -120,7 +124,9 @@ export function MobileNavDrawer({
           <PersonAvatar name={user.name || user.email} person="you" size={32} />
         )}
         <div className="min-w-0 flex-1">
-          <p className="m-0 truncate text-sm font-semibold text-fg-primary">{user.name || 'User'}</p>
+          <p className="m-0 truncate text-sm font-semibold text-fg-primary">
+            {user.name || 'User'}
+          </p>
           <p className="m-0 truncate text-xs text-fg-muted">{user.email}</p>
         </div>
         <IconButton
@@ -153,7 +159,9 @@ export function MobileNavDrawer({
             onClick={onToggleGlobalNav}
             data-testid="mobile-nav-toggle"
             className={`flex min-h-11 w-full shrink-0 cursor-pointer items-center gap-3 rounded-[11px] border-none bg-transparent px-3 text-left text-[15px] text-fg-muted transition-colors hover:bg-[var(--sam-glass-v2-raised)] hover:text-fg-primary ${FOCUS_RING}`}
-            aria-label={showGlobalNav ? `Back to ${projectName} navigation` : 'Show global navigation'}
+            aria-label={
+              showGlobalNav ? `Back to ${projectName} navigation` : 'Show global navigation'
+            }
           >
             {showGlobalNav ? (
               <>
