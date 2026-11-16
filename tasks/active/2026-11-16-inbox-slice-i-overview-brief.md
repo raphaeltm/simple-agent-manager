@@ -41,21 +41,21 @@ refreshed in the background. Nothing on the page may depend on it.
   with links built from ids.
 
 ## Checklist
-- [ ] Migration + drizzle schema `project_briefs`
-- [ ] Shared types for the brief in `ProjectOverviewResponse`
-- [ ] Settings (enabled, minIntervalMinutes, dailyCap, checkIntervalSeconds) in operations + admin registry
-- [ ] Operations: brief read in `projectOverviewGet` (1 statement, closed-claim filter, section isolation)
-- [ ] Operations: facts + fingerprint (one D1 batch), member-visible only, lengths capped
-- [ ] API: prompt, output parser/validator, generator with CAS check/claim, daily cap, min interval
-- [ ] API route: waitUntil refresh after the read
-- [ ] Web: BriefSection (phone one line expand in place; desktop above Needs you; dimmed with age when
+- [x] Migration + drizzle schema `project_briefs`
+- [x] Shared types for the brief in `ProjectOverviewResponse`
+- [x] Settings (enabled, minIntervalMinutes, dailyCap, checkIntervalSeconds) in operations + admin registry
+- [x] Operations: brief read in `projectOverviewGet` (1 statement, closed-claim filter, section isolation)
+- [x] Operations: facts + fingerprint (one D1 batch), member-visible only, lengths capped
+- [x] API: prompt, output parser/validator, generator with CAS check/claim, daily cap, min interval
+- [x] API route: waitUntil refresh after the read
+- [x] Web: BriefSection (phone one line expand in place; desktop above Needs you; dimmed with age when
       stale/refreshing; hidden when null), refetch while refreshing
-- [ ] Model constant registered (rule 52 test)
-- [ ] Tests: real-trigger (answer via route → claim dropped), min interval, daily cap, invalid output,
+- [x] Model constant registered (rule 52 test)
+- [x] Tests: real-trigger (answer via route → claim dropped), min interval, daily cap, invalid output,
       unknown id, number, prompt injection, quiet, disabled, fetch mocked at network edge
-- [ ] Playwright audit 375/1280: fresh, stale/refreshing, quiet-hidden, unavailable, long, phone expanded;
+- [x] Playwright audit 375/1280: fresh, stale/refreshing, quiet-hidden, unavailable, long, phone expanded;
       three Needs you rows on first phone screen
-- [ ] Docs (apps/www overview/admin settings)
+- [x] Docs (apps/www overview/admin settings)
 - [ ] Staging: real inbox items + running agent; answer → claim drops; switch off → page without brief
 
 ## Acceptance criteria
@@ -64,3 +64,11 @@ refreshed in the background. Nothing on the page may depend on it.
 - Daily cap stops generation; page renders.
 - Invalid/unknown-id/number/injection outputs never render raw.
 - Switch off → no brief, nothing else changes.
+
+## Progress notes
+- PR #2821. Reviews: security-auditor (2 MEDIUM + LOWs fixed in d2aa23119), cloudflare-specialist
+  (2 HIGH query plans + MEDIUMs fixed in d2aa23119), ui-ux-specialist (fixed d2aa23119, e1e0f708a;
+  re-scored ≥4), task-completion-validator PASS (MEDIUMs fixed: checklist, non-blocking test).
+- Staging: pending (primary staging lease reserved; queue position 6 at 21:3xZ).
+- Playwright in this workspace needs locally extracted libs:
+  LD_LIBRARY_PATH=.tmp/pwlibs/root/usr/lib/x86_64-linux-gnu:.tmp/pwlibs/root/lib/x86_64-linux-gnu

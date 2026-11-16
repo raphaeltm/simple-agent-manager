@@ -39,8 +39,12 @@ const ReplySchema = v.object({
   ),
 });
 
+/**
+ * Cardinal number words and multipliers. Ordinals and words like "once" or "single" are ordinary
+ * prose and stay allowed; this targets counts, which belong on the tiles.
+ */
 const NUMBER_WORDS =
-  /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|hundreds|thousand|thousands|million|millions|dozen|dozens|couple|half|once|twice|thrice|single|double|triple|first|second|third|fourth|fifth)\b/i;
+  /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|hundreds|thousand|thousands|million|millions|dozen|dozens|twice|thrice|half)\b/i;
 /** Any decimal digit, in any script. */
 const DIGITS = /\p{Nd}/u;
 const LINK_OR_MARKUP =

@@ -276,7 +276,8 @@ describe('Overview brief through the real entry points', () => {
       .run();
     const view = await viewOverview(s);
     expect(gatewayCalls()).toHaveLength(1);
-    expect(view.running.total).toBeGreaterThanOrEqual(0);
+    // Liveness: the page itself still rendered its sections.
+    expect(view.running.items.map((chat) => chat.sessionId)).toContain(s.chatSessionId);
   });
 
   it('switching the feature off hides the brief and stops model calls; nothing else on the page changes', async () => {
@@ -397,5 +398,59 @@ describe('Overview brief through the real entry points', () => {
     expect(refs[0]?.url).toBeUndefined();
     const text = briefText(view.brief);
     expect(text).not.toMatch(/https?:|<|javascript/i);
+  });
+
+  it('a page view responds while the model call is still running: generation never blocks the page', async () => {
+    const s = await seed();
+    await soloProject(s);
+    await askAndRun(s);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let modelStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      modelStarted = resolve;
+    });
+    fetchMock.mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : ((input as Request).url ?? String(input));
+      if (GATEWAY.test(url)) {
+        modelStarted();
+        await held;
+        return Response.json({
+          choices: [
+            { message: { content: reply([{ parts: [{ ref: 'a1' }, { text: ' waits.' }] }]) } },
+          ],
+        });
+      }
+      return Response.json({ ok: true });
+    });
+
+    const response = await Promise.race([
+      app().request(
+        `/api/projects/${s.projectId}/overview`,
+        { headers: { Cookie: s.ownerCookie } },
+        testEnv,
+        executionCtx
+      ),
+      new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 5_000)),
+    ]);
+    expect(response).not.toBe('blocked');
+    expect((response as Response).status).toBe(200);
+    // The model call is in flight, held, after the response went out.
+    await started;
+    expect(gatewayCalls()).toHaveLength(1);
+    const pending = await testEnv.DATABASE.prepare(
+      'SELECT pending_since IS NOT NULL AS pending, brief_json FROM project_briefs WHERE project_id = ?'
+    )
+      .bind(s.projectId)
+      .first();
+    expect(pending).toEqual({ pending: 1, brief_json: null });
+
+    release();
+    await Promise.all(background);
+    background = [];
+    const after = await viewOverview(s);
+    expect(after.brief?.sentences).toHaveLength(1);
   });
 });

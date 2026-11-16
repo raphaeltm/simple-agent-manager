@@ -182,6 +182,9 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
     return 'unchanged';
   }
 
+  // Quiet: store "nothing to say" with this fingerprint. Its generated_at starts the minimum
+  // interval like a brief would, so a project that turns busy again soon after shows just its
+  // tiles until the interval passes (no model call is spent on the quiet state).
   if (briefFactsAreQuiet(facts)) {
     await db
       .prepare(
