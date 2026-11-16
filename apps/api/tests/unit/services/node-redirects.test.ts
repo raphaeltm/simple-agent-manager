@@ -7,13 +7,30 @@ vi.mock('../../../src/services/telemetry', () => ({ recordNodeRoutingMetric: vi.
 
 import { probeLiveRuntimeSession } from '../../../src/durable-objects/vm-agent-container-runtime';
 import type { Env } from '../../../src/env';
-import { nodeAgentRequest } from '../../../src/services/node-agent';
+import { fetchNodeAgent, nodeAgentRequest } from '../../../src/services/node-agent';
 import { probeNodeHealthForTaskLiveness } from '../../../src/services/task-runtime-liveness-node-probe';
 
 const env = { BASE_DOMAIN: 'example.com' } as Env;
 afterEach(() => vi.unstubAllGlobals());
 
 describe('node redirect boundary', () => {
+  it('preserves a cache revalidation response and its confinement headers', async () => {
+    const response = new Response(null, {
+      status: 304,
+      headers: { etag: '"readme-etag"', 'X-SAM-File-Confinement': 'workdir' },
+    });
+    const fetchMock = vi.fn(async () => response);
+    vi.stubGlobal('fetch', fetchMock);
+    const cached = await fetchNodeAgent('node', env, 'https://node.example/files', {}, 1000);
+    expect(cached).toBe(response);
+    expect(cached.headers.get('X-SAM-File-Confinement')).toBe('workdir');
+    expect(cached.headers.get('etag')).toBe('"readme-etag"');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://node.example/files',
+      expect.objectContaining({ redirect: 'manual' })
+    );
+  });
+
   it.each([200, 307])('treats node status %s without following its Location', async (status) => {
     const requests: Request[] = [];
     vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {

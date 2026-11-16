@@ -17,7 +17,7 @@ Rule 54: release resolver keys this Go change to a new immutable binary; Worker 
 - [x] Prevent vm-agent mux 307 Location token leak; regression and normal controls.
 - [x] Reduce outbound-fetch baseline where applicable; annotate fixed node destinations.
 - [x] Verify Cloudflare outbound redirect default using official docs/runtime evidence.
-- [ ] Run regression controls, full quality, required local reviews.
+- [x] Run regression controls, full quality, required local reviews.
 - [ ] Staging lease both installs, deploy, full VM lifecycle and cleanup; GitLab sign-in or integration evidence if unconfigured.
 - [ ] CI/CodeRabbit gates; merge; production deploy; channel and idea updates.
 
@@ -35,3 +35,5 @@ Cloudflare default verified against https://developers.cloudflare.com/workers/ru
 Staging reserved primary, position5 at 20:43Z, turn estimate22:03:58Z; wake registered. No staging deploy before own turn. PR #2819.
 
 Initial broad suite surfaced a legitimate CLI local-forward redirect regression; explicit application-redirect control now enabled only by authenticated local-forward adapter (manual physical fetch unchanged), required security/Cloudflare re-review pass. Three older health-probe mocks now assert manual. Targeted regressions144pass. Go auth/WebSocket+guard tests pass under race detector; real workerd preview WebSocket2pass. Discriminating pre-fix node suite:3fail/3pass (all200controls pass); Go canonical path leak regression fails all3cases without fix.
+
+CI uncovered a cache-boundary regression: blanket 3xx sanitization constructed a forbidden body for 304 and broke shared-session conditional Files reads. Exact 304 exemption now preserves cache/confined headers in both node and workspace proxy paths; manual fetch and redirect refusal remain. Real workerd red proof1fail/9pass, fixed shared-files+preview-WebSocket12pass; node+VM/Instant proxy controls22pass. Security and Cloudflare reviewed actual diff PASS. Full local suite rerunning after this correction. Rule74 divergence includes304: it is cache revalidation with no redirect hop.

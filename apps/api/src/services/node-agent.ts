@@ -273,7 +273,14 @@ export async function nodeAgentRequest(
  * Go's mux can echo a query JWT into both before the route consumes it.
  */
 function nodeResponse(response: Response, allowApplicationRedirects = false): Response {
-  if (allowApplicationRedirects || response.status < 300 || response.status >= 400) return response;
+  // 304 is cache revalidation, not a followable hop; retain confinement/ETag headers.
+  if (
+    allowApplicationRedirects ||
+    response.status === 304 ||
+    response.status < 300 ||
+    response.status >= 400
+  )
+    return response;
   void response.body?.cancel().catch(() => undefined);
   return new Response('Node redirect refused', { status: response.status });
 }

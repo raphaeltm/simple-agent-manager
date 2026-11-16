@@ -124,6 +124,28 @@ describe('cf-container workspace port routes', () => {
   });
 
   it.each(['vm', 'cf-container'] as const)(
+    'preserves %s control cache revalidation',
+    async (runtime) => {
+      nodeRuntime = runtime;
+      mockGetSession.mockResolvedValue({ user: { id: 'user-1', status: 'active' } });
+      const cached = () => new Response(null, { status: 304, headers: { etag: '"cached"' } });
+      proxyHttp.mockImplementation(async () => cached());
+      vi.mocked(fetch).mockImplementation(async () => cached());
+      const response = await worker.default.fetch(
+        new Request(`https://ws-${WORKSPACE_ID}.workspaces.example.com/files`),
+        containerEnv()
+      );
+      expect(response.status).toBe(304);
+      expect(response.headers.get('etag')).toBe('"cached"');
+      const forwarded =
+        runtime === 'cf-container'
+          ? (proxyHttp.mock.calls[0]![0] as Request)
+          : new Request(vi.mocked(fetch).mock.calls[0]![0], vi.mocked(fetch).mock.calls[0]![1]);
+      expect(forwarded.redirect).toBe('manual');
+    }
+  );
+
+  it.each(['vm', 'cf-container'] as const)(
     'refuses old %s agent token-bearing redirects',
     async (runtime) => {
       nodeRuntime = runtime;

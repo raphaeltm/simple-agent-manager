@@ -443,7 +443,8 @@ function refuseNodeRedirect(
   targetPort: number | null,
   upstream: URL
 ): Response | null {
-  if (response.status < 300 || response.status >= 400) return null;
+  // Cache revalidation cannot trigger a follow and must preserve its response headers.
+  if (response.status === 304 || response.status < 300 || response.status >= 400) return null;
   const location = response.headers.get('location') ?? '';
   const token = upstream.searchParams.get('token');
   if (targetPort !== null && !(token && location.includes(token))) return null;
