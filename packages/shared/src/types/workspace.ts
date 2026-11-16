@@ -193,6 +193,12 @@ export interface NodeResponse {
 
 /** Full system info from on-demand VM Agent endpoint */
 export interface NodeSystemInfo {
+  /** Uncached process-local publish command attempts; absent on older agents. */
+  publishExecution?: {
+    processIncarnation: string;
+    composeBuildAttempts: number;
+    dockerSaveAttempts: number;
+  };
   cpu: {
     loadAvg1: number;
     loadAvg5: number;

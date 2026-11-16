@@ -3,6 +3,9 @@ import './repo-hosting-wiring';
 
 export { McpRateCounter } from './durable-objects/mcp-rate-counter';
 export { WorkspaceBootLog } from './durable-objects/workspace-boot-log';
+// SDK 0.3.7 requires this helper when reconstructing a running Container.
+// Builders register no outbound interceptors, so their network traffic stays direct.
+export { ContainerProxy } from '@cloudflare/containers';
 import { adminAgentEmailRoutes } from './routes/admin-agent-email';
 import { cliOperationReceiptRoutes } from './routes/cli-operation-receipts';
 import { cliProjectMetadataRoutes } from './routes/cli-project-metadata';
@@ -548,3 +551,5 @@ export default {
     await handleInboundAgentEmail(message, env);
   },
 };
+
+export { ComposeBuilderContainer } from './durable-objects/compose-builder-container';

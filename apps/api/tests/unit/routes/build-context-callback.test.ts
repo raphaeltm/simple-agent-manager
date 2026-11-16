@@ -6,6 +6,9 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError, errors } from '../../../src/middleware/error';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+vi.mock('../../../src/services/cloudflare-build-executor', () => ({
+  dispatchCloudflareBuild: vi.fn(async () => true),
+}));
 const lifecycle = vi.hoisted(() => vi.fn(async () => undefined));
 const signed = vi.hoisted(() => vi.fn(async () => 'https://signed.invalid/object'));
 vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl: signed }));
@@ -48,7 +51,13 @@ function request(operation: string, body: unknown = {}, project = 'project', tok
     {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ attempt: 1, sizeBytes: 100, sha256, ...(body as object) }),
+      body: JSON.stringify({
+        attempt: 1,
+        sizeBytes: 100,
+        sha256,
+        projectName: 'fixture',
+        ...(body as object),
+      }),
     },
     env,
     {
