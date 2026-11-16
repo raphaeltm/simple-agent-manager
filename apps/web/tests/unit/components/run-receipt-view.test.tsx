@@ -241,6 +241,23 @@ describe('RunReceiptView', () => {
 });
 
 describe('RunReceiptView — disclosures and loading', () => {
+  it('reads a zero wait as 0s, not 0ms', () => {
+    const base = receipt();
+    render(
+      <RunReceiptView
+        receipt={{
+          ...base,
+          phases: base.phases.map((phase) =>
+            phase.key === 'waiting' ? { ...phase, durationMs: 0 } : phase
+          ),
+        }}
+        resourceIndex={undefined}
+      />
+    );
+    expect(screen.getByText('0s')).toBeInTheDocument();
+    expect(screen.queryByText('0ms')).not.toBeInTheDocument();
+  });
+
   it('marks a waiting time that hit the question cap as a floor', () => {
     const base = receipt();
     render(

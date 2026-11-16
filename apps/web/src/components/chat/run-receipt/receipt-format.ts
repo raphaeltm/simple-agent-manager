@@ -57,7 +57,8 @@ export function toolKindLabel(kind: string): string {
 
 /** A missing duration on a live run has not happened yet; on a finished run it was not recorded. */
 export function formatDuration(ms: number | null, live = false): string {
-  if (ms !== null) return formatElapsed(ms);
+  // Sub-second durations read as whole seconds: "0s" for no wait, never "0ms".
+  if (ms !== null) return ms < 1000 ? (ms === 0 ? '0s' : '<1s') : formatElapsed(ms);
   return live ? 'not yet' : 'not recorded';
 }
 
