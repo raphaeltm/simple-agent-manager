@@ -303,6 +303,28 @@ describe('validateActiveWorkspaceMcpToken', () => {
     await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
   });
 
+  it.each(['true', 'false'])(
+    'treats an unparseable stored setting as REQUIRE_APPROVAL=%s, like REST',
+    async (requireApprovalEnv) => {
+      env = { ...env, REQUIRE_APPROVAL: requireApprovalEnv } as Env;
+      setUserStatus('pending');
+      sqlite
+        .prepare(
+          `INSERT INTO platform_settings (key, value, updated_at) VALUES ('signup.requireApproval', 'garbage', '2026-11-16T00:00:00Z')`
+        )
+        .run();
+      seed({ status: 'running' });
+
+      const result = await validateActiveWorkspaceMcpToken(env, TOKEN);
+      if (requireApprovalEnv === 'true') {
+        expect(result).toBeNull();
+        expect(await tokenStillStored()).toBe(true);
+      } else {
+        expect(result).toMatchObject(TOKEN_DATA);
+      }
+    }
+  );
+
   it.each([
     ['an active user', 'active', 'user'],
     ['a pending platform admin', 'pending', 'admin'],

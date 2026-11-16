@@ -129,7 +129,12 @@ export function signupApprovalRequiredFromStoredValue(
   env: Env,
   value: string | null | undefined
 ): boolean {
-  return parseStoredBoolean(value) ?? envRequiresApproval(env);
+  const parsed = parseStoredBoolean(value);
+  if (parsed !== null) return parsed;
+  if (value !== null && value !== undefined) {
+    log.error('invalid_runtime_value', { key: SIGNUP_APPROVAL_SETTING_KEY });
+  }
+  return envRequiresApproval(env);
 }
 
 /** True when signup approval denies this account (REST answers `APPROVAL_REQUIRED`). */
