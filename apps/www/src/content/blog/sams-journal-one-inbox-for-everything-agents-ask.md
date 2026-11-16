@@ -29,20 +29,20 @@ On a desktop, the inbox icon at the top of the navigation opens a quick view. Wh
   <figcaption>The permission with a deadline comes first. Three asks from one chat share a single row.</figcaption>
 </figure>
 
-Everything else opens on the Inbox page, where the item shows the agent's reason, links to what it mentioned, and the messages around the ask. That part comes later in this entry. First, how the list is built.
+Everything else opens on the Inbox page, where the item shows the agent's full message and the conversation around the ask. That part comes later in this entry. First, how the list is built.
 
-## Four stores, one query, no copies
+## Four stores, one query, no new copy
 
 The four kinds of ask were built at different times, so they live in four different places in SAM's database. SAM's shared data sits in **D1**, Cloudflare's SQLite database:
 
-- **Questions** live in `asks`, a new table with one row per question.
+- **Questions** asked from today on live in `asks`, a new table with one row per question.
 - **Permission requests** live in the chat list's index of "this chat needs you", the `attention_json` column of `session_summaries`.
 - **Secret requests** live in `runtime_secret_requests`.
 - **Approvals** live in `operations_action_approvals`.
 
 The tempting design is an inbox table that every feature copies its asks into. We did not do that. A copy has to be updated every time the original changes: when you answer in the chat instead of the Inbox, when an ask expires, when a teammate answers first. Every one of those is a chance for the two to disagree, and the result would be an Inbox showing questions that were already answered.
 
-So the Inbox keeps no copy. It reads all four stores at once, with one SQL statement that stacks four `SELECT`s using `UNION ALL`:
+So the Inbox adds no copy of its own. It reads all four stores at once, with one SQL statement that stacks four `SELECT`s using `UNION ALL`:
 
 ```mermaid
 flowchart LR
@@ -53,11 +53,12 @@ flowchart LR
     U --> L["Your Inbox,<br/>sorted and grouped"]
 ```
 
-Each `SELECT` returns the same columns (`store`, `item_id`, `title`, `created_at`, `tier`, and so on) and is already filtered to you and to projects where you are an active member. Here is the secret-request branch, lightly trimmed:
+Each `SELECT` returns the same columns (`store`, `item_id`, `title`, `created_at`, `tier`, and so on) and is already filtered to you and to projects where you are an active member. Here is the secret-request branch, with some columns left out:
 
 ```typescript title="packages/operations/src/inbox-list-core.ts"
 parts.push({
   sql: `SELECT 'secret' AS store, r.id AS item_id, r.project_id AS project_id,
+      -- (columns left out here)
       r.requesting_chat_session_id AS session_id, 'secret' AS kind,
       1 AS blocking, r.env_key AS title, r.reason AS body,
       r.created_at AS created_at, r.expires_at AS expires_at,
@@ -69,30 +70,31 @@ parts.push({
 });
 ```
 
-`member(...)` is a `JOIN` on `project_members` with `status = 'active'`, so someone who leaves a project stops seeing its asks immediately. The four parts are joined with `UNION ALL` and run as one D1 round trip. The unread count on the inbox icon is the same statement wrapped in `COUNT(*)`, so the number and the list cannot disagree.
+`member(...)` is a `JOIN` on `project_members` with `status = 'active'`, so someone who leaves a project stops seeing its asks immediately. The four parts are joined with `UNION ALL` and run as one D1 round trip. The number on the inbox icon runs the same four `SELECT`s wrapped in `COUNT(*)`, so the badge and the list follow the same rules about what you can act on.
 
-Because the Inbox reads the record each ask lives in, it stays correct without any syncing. Answer a question in its chat card and the Inbox shows it as answered on its next refresh, which happens when you open it, when you come back to the tab, and when a notification arrives over the app's live WebSocket connection. There is no polling timer.
+Questions, secrets and approvals are read straight from their own rows. Permission requests are the one exception: they come from the chat list's existing index, which each chat keeps up to date in the background, so a permission can linger for a moment after it is answered. Answer a question in its chat card and it drops out of the Inbox on its next refresh, which happens when you open it, when you come back to the tab, and when a notification about an ask arrives over the app's live WebSocket connection. There is no polling timer.
 
 ## Sorting: deadlines first, then grouped by chat
 
 The order follows one rule: what costs you most to ignore comes first.
 
-1. **Tier 0**: asks with a live deadline. A permission request times out, so it goes to the top.
+1. **Tier 0**: permission requests, which time out within minutes.
 2. **Tier 1**: asks an agent is stopped on.
-3. **Tier 2**: everything else.
+3. **Tier 2**: everything else. Today every ask stops an agent, so this tier is for kinds of ask still to come.
 
-Inside a tier, asks from the same chat stay together as a **stack** ("3 from Ship billing"), and stacks are ordered by their oldest item. That grouping is a SQL window function, which computes a value over a group of rows without collapsing them into one:
+Asks from the same chat stay together as a **stack** ("3 from Ship billing"), and stacks are ordered by their oldest item. On the server, that grouping is a SQL window function, which computes a value over a group of rows without collapsing them into one. Simplified, it looks like this:
 
 ```sql
 SELECT items.*,
-  MIN(created_at) OVER (PARTITION BY tier, stack_key) AS stack_anchor
+  MIN(created_at) OVER (PARTITION BY tier, stack_key) AS stack_anchor,
+  store || ':' || item_id AS sort_ref
 FROM items
 ORDER BY tier, stack_anchor, stack_key, created_at, sort_ref
 ```
 
 Every row in a stack gets its stack's oldest `created_at` as `stack_anchor`, so sorting by it keeps the stack together and puts the oldest stack first.
 
-Long lists are paged with **keyset pagination**. Instead of "skip the first 50 rows", the next page asks for rows that sort after the last one you saw: `WHERE (tier, stack_anchor, stack_key, created_at, sort_ref) > (?, ?, ?, ?, ?)`. Offsets go wrong when rows disappear between pages, and in an inbox rows disappear constantly, because answering them is the point.
+Long lists are paged with **keyset pagination**. Instead of "skip the first 25 rows", the next page asks for rows that sort after the last one you saw: `WHERE (tier, stack_anchor, stack_key, created_at, sort_ref) > (?, ?, ?, ?, ?)`. Offsets go wrong when rows disappear between pages, and in an inbox rows disappear constantly, because answering them is the point.
 
 One more safeguard: each row is checked against a schema before it is shown. A row that fails, say one with malformed JSON from an older version, is skipped and logged instead of breaking the whole list. One bad record should hide only itself.
 
@@ -101,8 +103,8 @@ One more safeguard: each row is checked against a schema before it is shown. A r
 On the Inbox page, opening an item shows the full ask with its answer controls pinned to the bottom of the screen. On a phone it takes the whole screen:
 
 <figure>
-  <img class="shot-dark" src="/images/blog/sams-journal-one-inbox-for-everything-agents-ask/question-phone-dark.png" width="375" height="667" alt="A question opened full screen on a phone. The header reads 1 of 3 from Ship billing. The question asks whether EU prices should include VAT, followed by the agent's reason and link chips for an idea and a policy. A collapsed Context line sits above three pinned answer buttons and a Type a different answer link." loading="lazy" decoding="async" />
-  <img class="shot-light" src="/images/blog/sams-journal-one-inbox-for-everything-agents-ask/question-phone-light.png" width="375" height="667" alt="A question opened full screen on a phone. The header reads 1 of 3 from Ship billing. The question asks whether EU prices should include VAT, followed by the agent's reason and link chips for an idea and a policy. A collapsed Context line sits above three pinned answer buttons and a Type a different answer link." loading="lazy" decoding="async" />
+  <img class="shot-dark" src="/images/blog/sams-journal-one-inbox-for-everything-agents-ask/question-phone-dark.png" width="375" height="667" alt="A question opened full screen on a phone. The header reads 1 of 3 from Ship billing, with the status Paused, waiting on this. The title asks whether EU prices should include VAT, and the agent's full message repeats the question and explains that it wrote both versions. A collapsed Context line sits above three pinned answer buttons: Include VAT, Show VAT separately and Ask the accountant first." loading="lazy" decoding="async" />
+  <img class="shot-light" src="/images/blog/sams-journal-one-inbox-for-everything-agents-ask/question-phone-light.png" width="375" height="667" alt="A question opened full screen on a phone. The header reads 1 of 3 from Ship billing, with the status Paused, waiting on this. The title asks whether EU prices should include VAT, and the agent's full message repeats the question and explains that it wrote both versions. A collapsed Context line sits above three pinned answer buttons: Include VAT, Show VAT separately and Ask the accountant first." loading="lazy" decoding="async" />
   <figcaption>The answer buttons stay in thumb reach however long the question is.</figcaption>
 </figure>
 
@@ -125,11 +127,11 @@ if ((claimed.meta?.changes ?? 0) !== 1) {
 }
 ```
 
-If the update changed no rows, someone else got there first, and SAM reports their answer instead of sending a second one. If it did change the row, the answer goes to the agent as a queued message, which wakes the chat if it had gone to sleep in the meantime. In the browser, an item that was answered elsewhere simply closes itself.
+If the update changed no rows, someone else got there first: SAM sends nothing and tells you it was already handled. If it did change the row, the answer goes to the agent as a queued message, which wakes the chat if it had gone to sleep in the meantime. In the browser, an item that was answered elsewhere simply closes itself.
 
 ## Archive, with a few seconds to change your mind
 
-**Archive** means "I'm not going to act on this". It is not silent: the agent is told, a permission is denied and a secret request is declined. Because it reaches the agent, a slip of the thumb has to be undoable. So the Inbox hides the item, shows "Archived · Undo" for five seconds, and only then sends the request.
+**Archive** means "I'm not going to act on this". It is not silent: the agent is told, a permission is denied, a secret request is declined and an approval is denied. Because it reaches the agent, a slip of the thumb has to be undoable. So the Inbox hides the item, shows "Archived · the agent will be told" with an **Undo** button for five seconds, and only then sends the request.
 
 That delay raises a question: what if you close the tab during those five seconds? The pending archive is sent early when the page is hidden or closed, using `fetch` with `keepalive`, which lets a request finish after the page that started it has gone:
 
