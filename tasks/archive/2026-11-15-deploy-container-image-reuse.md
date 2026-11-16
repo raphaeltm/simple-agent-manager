@@ -71,9 +71,9 @@ Absent: build with Wrangler's flags, push, use the new digest. Overrides go to `
 - [x] Workflow: install pinned uv, run resolve step, keep rollout snapshot/wait untouched
 - [x] Workflow: build only linux vm-agent binaries
 - [x] Docs: deploy docs / self-hosting mention of image reuse and how to force a rebuild
-- [ ] Staging: two deploys without image change (second skips push and rollout), one with a change
-- [ ] Instant (cf-container) session + VM session on staging
-- [ ] Idea note with before/after durations
+- [x] Staging: two deploys without image change (second skips push and rollout), one with a change
+- [x] Instant (cf-container) session + VM session on staging
+- [x] Idea note with before/after durations (written at merge)
 
 ## Acceptance criteria
 
@@ -86,3 +86,28 @@ Absent: build with Wrangler's flags, push, use the new digest. Overrides go to `
 
 - `installer-engine-prebuilt.ts` `imageContextKey` ignores floating inputs (prebuilt images can be stale).
   Deferred to `tasks/backlog/2026-11-15-installer-prebuilt-image-key-floating-inputs.md`.
+
+## Staging evidence
+
+| Run | Installation | What changed | Resolve images | Deploy API Worker | Rollout wait | Deploy job |
+|---|---|---|---|---|---|---|
+| 43725591242 (baseline, main) | staging | n/a | n/a | 376 s | 347 s | ~1260 s |
+| 43748378393 | staging | new key: both built | 415 s | 18 s | 409 s | 1214 s |
+| 43749548337 | staging | nothing: both reused, "No changes to be made" | 11 s | 12 s | 1 s | 371 s |
+| 43751675486 | staging | sandbox Dockerfile edited | 114 s | 16 s | 144 s | 602 s |
+| 43804232117 | staging2 | first deploy there: both built | 352 s | 15 s | 346 s | 1088 s |
+
+- Miss path: push dominates (run 1: sandbox 104 s, vm-agent 202 s of 415 s; builds 33 s / 58 s; fingerprints ~7 s per image).
+- The sandbox key `be5335006db9203b` was identical on staging (run 3) and staging2, so keys reproduce across installations.
+- staging2 sessions on PR head 0d7b5ada: VM session (claude-code, lightweight) replied correctly; VM node agent
+  7bea824b healthy (linux-only build). Instant session replied correctly when started 90 s after project creation.
+- Primary staging was unusable for main-based branches from 2026-11-15 ~23:00Z (DO migration tag v23 deployed by
+  open PR #2721).
+
+## Findings filed
+
+- Instant session started within seconds of creating an Artifacts project: git-token fetch fails, standalone clone
+  runs unauthenticated, `launch_failed` ("could not read Username"). Filed:
+  `tasks/backlog/2026-11-16-instant-artifacts-new-project-clone-race.md`.
+- Follow-up suggested by PR #2777's security review: production fail-fast in `deploy-reusable.yml` when
+  `target_commit_sha` is empty (recorded on idea 01M7FYGMEESYH3AJZJ0CT3NKCZ).
