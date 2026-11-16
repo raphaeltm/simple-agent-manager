@@ -15,6 +15,7 @@
  * a VM-agent callback, so .claude/rules/34 does not apply. The handler still
  * asserts the caller's project capability explicitly before touching data.
  */
+import { TASK_READABLE_SQL } from '@simple-agent-manager/operations';
 import type { ProjectCommentListResponse } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -66,9 +67,30 @@ projectCommentRoutes.get('/', async (c) => {
             columns: { id: true, filename: true },
           });
 
+    // Task discussion (inbox slice H1) shares the one ranked read above. A team task is readable
+    // by every member; a person's task only by its assignee and the person whose chat filed it,
+    // so threads on items this viewer cannot read are dropped here (the DO cannot read D1).
+    const itemIds = [...new Set(inbox.inboxItemThreads.map((thread) => thread.itemId))];
+    const readableItems =
+      itemIds.length === 0
+        ? []
+        : ((
+            await c.env.DATABASE.prepare(
+              `SELECT a.id, a.title FROM asks a
+                WHERE a.project_id = ? AND a.kind = 'task'
+                  AND a.id IN (${itemIds.map(() => '?').join(', ')})
+                  AND ${TASK_READABLE_SQL}`
+            )
+              .bind(projectId, ...itemIds, userId, userId)
+              .all<{ id: string; title: string }>()
+          ).results ?? []);
+    const readable = new Set(readableItems.map((item) => item.id));
+
     const response: ProjectCommentListResponse = {
       messageThreads: inbox.messageThreads,
       fileThreads: inbox.fileThreads,
+      inboxItemThreads: inbox.inboxItemThreads.filter((thread) => readable.has(thread.itemId)),
+      inboxItems: readableItems.map((item) => ({ ref: `ask:${item.id}`, id: item.id, title: item.title })),
       sessions: inbox.sessions,
       files,
       hasMore: inbox.hasMore,

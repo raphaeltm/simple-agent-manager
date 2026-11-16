@@ -7,6 +7,7 @@
  * reactions are outside this slice. Message comments carry structured
  * @mentions of project members (`CommentMention`); library-file comments do not.
  */
+import type { InboxItemCommentThread } from './inbox-tasks';
 import type { SessionViewerAccess } from './session-access';
 
 export const COMMENT_STATUSES = ['open', 'sent', 'resolved'] as const;
@@ -338,10 +339,16 @@ export interface ProjectCommentListResponse {
   sessions: ProjectCommentSessionRef[];
   /** Filenames for every file referenced by `fileThreads`. Same reasoning. */
   files: ProjectCommentFileRef[];
+  /**
+   * Discussion on human tasks (inbox slice H1), limited to tasks the viewer may read, with the
+   * task titles. Optional for clients built before the field existed.
+   */
+  inboxItemThreads?: InboxItemCommentThread[];
+  inboxItems?: Array<{ ref: string; id: string; title: string }>;
   /** True when the row or byte budget kept the response from covering every thread. */
   hasMore: boolean;
   /**
-   * Total threads in the project across both anchor kinds, matching the same
+   * Total threads in the project across every anchor kind, matching the same
    * status filter. Present so a truncated list can never be read as a complete
    * one (.claude/rules/65-capped-selection-must-rank-and-disclose.md).
    */
