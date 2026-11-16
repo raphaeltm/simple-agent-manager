@@ -94,12 +94,12 @@ Remaining before staging:
 - [x] Test: overview + session-summary-index with a non-blocking ask (blocking control) — test-engineer H1
 - [x] Test: request_human_input alias push via fileQuestionAsk with a NOTIFICATION stub — H2
 - [x] Test: compact-mode inbox_write matcher (ask, review, update/cancel refused, non-ask ref refused) — H3
-- [ ] Test: reconciliation candidate with only a non-blocking ask is not held (blocking control)
+- [x] Test: reconciliation candidate with only a non-blocking ask is not held (blocking control)
 - [x] Test: cross-user isolation (discriminating: disabling ADDRESSED_TO_CALLER reddens only it) (colleague's items not in list/get/similar) + owner control; PR foreign-host attack
-- [ ] Test: non-blocking ask survives runInboxAskSweep; non-blocking ask answered through /answer once
-- [ ] Test: get_instructions in conversation mode; liveness before attention-null assertions
+- [x] Test: non-blocking ask survives runInboxAskSweep; non-blocking ask answered through /answer once
+- [x] Test: get_instructions in conversation mode; liveness before attention-null assertions
 - [x] Revert unrelated list renumbering in apps/www/.../guides/agents.md (prettier)
 - [x] Docs: say inbox tools need a task-backed session (as request_human_input did)
-- [ ] PR body (preflight, review table, discrimination, I/O per call: ask 10 round trips with 0 links,
+- [x] PR body (preflight, review table, discrimination, I/O per call: ask 10 round trips with 0 links,
       +1 per link; instruction paragraph 1,072 bytes)
 - [ ] Mark ready + CodeRabbit; staging (Claude Code + Codex on VM, one Instant)
