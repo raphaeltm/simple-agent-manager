@@ -59,7 +59,8 @@ async function recordSnapshotTraceForCallback(
 
 export const lifecycleTimingsRoutes = new Hono<{ Bindings: Env }>();
 // Callback JWT only, no session-cookie middleware. Sleep/wake summaries persist a bounded
-// step trace (session_snapshot_traces); provisioning summaries are log-only.
+// step trace (session_snapshot_traces). Every summary also stores one row per phase in
+// lifecycle_phase_timings (`recordLifecycleTimings`).
 lifecycleTimingsRoutes.post(
   '/:id/lifecycle-timings',
   bodyLimit({
@@ -91,10 +92,16 @@ lifecycleTimingsRoutes.post(
       throw errors.badRequest('Invalid lifecycle operation');
     }
     const outcome = 'outcome' in body && body.outcome === 'error' ? 'error' : 'success';
-    recordLifecycleTimings(
+    await recordLifecycleTimings(
+      c.env.DATABASE,
       operation,
       body.phases,
-      { workspaceId, nodeId: workspace.nodeId, chatSessionId: workspace.chatSessionId },
+      {
+        projectId: workspace.projectId,
+        workspaceId,
+        nodeId: workspace.nodeId,
+        chatSessionId: workspace.chatSessionId,
+      },
       outcome
     );
     if (operation !== 'workspace') {

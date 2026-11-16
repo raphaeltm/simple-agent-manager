@@ -468,6 +468,11 @@ trigger are configured, files them as incidents for that project's agents to inv
   **Lifecycle latency regression: _entity_ _state_** when the p95 is over the state's budget, or more
   than `lifecycleLatency.regressionPercent` of its p95 over the previous 7 days. Every run logs a
   `lifecycle_latency.daily_summary` line with those numbers for every watched state.
+- **Phase timings are stored.** The phase durations the VM agent reports for provisioning,
+  workspace setup, sleep and wake, and the TaskRunner's step durations, are written to
+  `lifecycle_phase_timings` (migration `0250_lifecycle_phase_timings.sql`) by
+  `recordLifecycleTimings` and `recordRunnerPhase`, one row per phase, as well as being logged.
+  The daily check purges them with the same `lifecycleLatency.retentionDays`.
 
 Watched states and their **Operations** budgets, in minutes. Set a budget to 0 to turn off both the
 watchdog and the daily check for that state.
@@ -494,7 +499,7 @@ The rest control the checks themselves:
 | `lifecycleLatency.observationsPerSourcePerTick` | 200     | 10–1,000   | Rows in watched states sampled per table in one run, oldest first. A truncated sample is logged and does not close episodes it could not see |
 | `lifecycleLatency.regressionPercent`            | 200     | 101–10,000 | How far above its previous 7-day p95 a state's 24-hour p95 must be to count as a regression                                                  |
 | `lifecycleLatency.minSamples`                   | 5       | 1–10,000   | Fewest finished episodes in a window before the daily check judges it                                                                        |
-| `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes are kept                                                                                                              |
+| `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes and stored phase timings are kept                                                                                     |
 | `lifecycleLatency.evaluationSampleLimit`        | 2,000   | 10–20,000  | Most recent finished episodes the daily check reads per state                                                                                |
 
 ## Linked work
