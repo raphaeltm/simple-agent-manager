@@ -73,13 +73,12 @@ export async function readAskContext(
     }),
   ]);
   const after = (createdAt: number) => createdAt > input.askedAt;
-  const activityCount = latestPage.entries.reduce(
-    (count, entry) =>
-      entry.kind === 'activity' && after(entry.createdAt)
-        ? count + Math.max(1, entry.toolCalls)
-        : count,
-    0
-  );
+  // A span that started before the ask and ran on after it (the agent asked mid tool run) still
+  // shows work since asking: count at least one for it, and every tool call of a later span.
+  const activityCount = latestPage.entries.reduce((count, entry) => {
+    if (entry.kind !== 'activity' || !after(entry.updatedAt)) return count;
+    return count + (after(entry.createdAt) ? Math.max(1, entry.toolCalls) : 1);
+  }, 0);
   const oldest = latestPage.entries.at(-1);
   return {
     before: toMessages(beforePage, () => true),
