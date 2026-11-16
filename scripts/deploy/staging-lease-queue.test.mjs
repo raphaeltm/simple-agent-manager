@@ -229,7 +229,7 @@ test('concurrent reservations, including one made while the lease job writes, al
   assert.deepEqual(await order(db, T0 + 3 * MIN), ['b', 'c', 'd']);
 });
 
-test('a version 1 record from an older workflow is honoured as the holder, and the queue forms behind it', async () => {
+test('a live version 1 hold from an older workflow is honoured and never covered by a queue record', async () => {
   const legacy = {
     id: 7,
     task: LEASE_TASK,
@@ -246,9 +246,22 @@ test('a version 1 record from an older workflow is honoured as the holder, and t
   };
   const db = store([legacy]);
   assert.equal(await holder(db, T0), 'old');
-  assert.equal((await dispatch(db, 'b', 'deploy', T0)).refused, true);
-  assert.equal((await dispatch(db, 'c', 'deploy', T0 + 31 * MIN)).refused, true);
-  assert.equal((await dispatch(db, 'b', 'deploy', T0 + 32 * MIN)).lease.holder.branch, 'b');
+  // Writing a queue record now would lock the old workflow out of renewing or releasing.
+  for (const action of ['deploy', 'reserve']) {
+    const waiting = await dispatch(db, 'b', action, T0);
+    assert.equal(waiting.queued.proceed, false);
+    assert.match(waiting.queued.lines.at(-1), /No reservation written/);
+  }
+  assert.equal(db.records.length, 1, 'nothing written over the legacy hold');
+  assert.equal(olderWorkflowReads(db.records).branch, 'old');
+  // The holder itself, once updated from main, may renew or release through the new workflow.
+  assert.equal((await dispatch(db, 'old', 'acquire', T0 + MIN)).lease.holder.branch, 'old');
+  const db2 = store([legacy]);
+  assert.equal((await dispatch(db2, 'old', 'release', T0 + MIN)).lease.written, true);
+  // After the legacy hold expires, the queue works normally.
+  assert.equal((await dispatch(db, 'c', 'deploy', T0 + 32 * MIN)).lease.holder.branch, 'c');
+  assert.equal((await dispatch(db, 'b', 'deploy', T0 + 33 * MIN)).refused, true);
+  assert.deepEqual(await order(db, T0 + 34 * MIN), ['b']);
   const released = store([
     {
       ...legacy,

@@ -159,6 +159,20 @@ export async function runQueue({
     };
   }
   let turns = plan.turns;
+  const legacy = state.legacyHold && turns.holder ? turns.holder : null;
+  if (plan.append && legacy) {
+    // Transition: the holder's workflow predates the queue and refuses any queue record, so
+    // writing one would lock it out of renewing or releasing its own live lease. Leave it alone.
+    return {
+      proceed: false,
+      refused: action !== 'reserve',
+      warnings,
+      lines: [
+        `Holder: ${legacy.branch} (SAM task ${legacy.taskId || 'not supplied'}) until ${legacy.expiresAt}, with a workflow from before the queue.`,
+        `No reservation written: that workflow cannot read queue records, so queueing behind it would lock it out of its own lease. Schedule a wake at ${legacy.expiresAt} and reserve then.`,
+      ],
+    };
+  }
   if (plan.append) {
     const entry = {
       branch,

@@ -131,7 +131,10 @@ Staging deployment is **manual** — it does NOT run automatically on PRs. You m
    deploy while another branch holds the lease or it is another branch's turn**: the
    run is refused (your place is kept). A reservation expires after
    `STAGING_LEASE_RESERVATION_MINUTES` (default 480) unless renewed by reserving
-   again, which keeps your place.
+   again, which keeps your place. While the holder is a branch whose workflow predates
+   the queue (its lease record is version 1), no reservation is written, because its
+   workflow cannot read queue records and would be locked out of its own lease:
+   schedule a wake at its expiry and reserve then.
 
    On your turn, deploy (or `-f lease_action=acquire` to hold without deploying):
 

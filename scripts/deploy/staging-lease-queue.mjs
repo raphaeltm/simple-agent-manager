@@ -147,6 +147,8 @@ function baseState(parsed) {
     promisedAt: held ? null : lease.expiresAt,
     queue: [],
     seenThrough: parsed.id,
+    // Held by a pre-queue workflow copy, which cannot read queue records (see runQueue).
+    legacyHold: held,
   };
 }
 
