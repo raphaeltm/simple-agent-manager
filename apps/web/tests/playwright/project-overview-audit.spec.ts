@@ -7,6 +7,11 @@
  * busy one under stress (12 running, an account at 6% of its week, two failing automations,
  * very long titles and names), an empty quiet project, a sent task (receipt, new row, no
  * navigation), a failed start, and the phone composer unfolded on focus.
+ *
+ * Inbox slice F2: the Overview is the landing page and Needs you is its first section, fed by
+ * the inbox routes (`/api/projects/:id/inbox`, `/count`, item reads and answers). Scenes add
+ * 40 open items with long titles, a stack from one chat, an expiring permission and a failed
+ * start; nothing needs you; and a brand-new empty project.
  */
 import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 import type {
@@ -25,6 +30,7 @@ import {
   screenshot,
 } from './audit-helpers';
 import { RUNS, SCHEDULES, TRIGGERS } from './automation-fixtures';
+import { KIND_ITEMS, MANY_ITEMS } from './inbox-fixtures';
 
 const PROJECT_ID = 'proj-overview';
 const USER_ID = 'user-overview';
@@ -324,8 +330,41 @@ function overviewBody(scene: 'normal' | 'busy' | 'quiet'): ProjectOverviewRespon
   };
 }
 
+type InboxFixture = Record<string, unknown> & { ref: string };
+
+/** Inbox items for this project: the fixtures' items, all moved into the audited project. */
+function projectItems(items: InboxFixture[]): InboxFixture[] {
+  return items.map((item) => ({
+    ...item,
+    projectId: PROJECT_ID,
+    projectName: 'Acme Billing',
+    // The three-item stack is the "Ship billing" chat, which Running now lists as paused.
+    ...(item.stackKey === 'stack-ship' ? { sessionId: 'sess-0' } : {}),
+  }));
+}
+
+/** A few items for a normal day: the expiring permission, the approval, a stack of three. */
+const NORMAL_INBOX = projectItems(KIND_ITEMS.slice(0, 5) as InboxFixture[]);
+/** 40 open items: every kind, a three-item stack, a failed start, long titles, fillers. */
+const STRESS_INBOX = projectItems(MANY_ITEMS as InboxFixture[]);
+/** Two questions from one chat and a review: answerable without any secondary read. */
+const ROUND_TRIP_INBOX = projectItems(
+  KIND_ITEMS.filter((item) =>
+    ['ask:q-vat', 'ask:q-regions', 'ask:review-1'].includes(item.ref)
+  ) as InboxFixture[]
+);
+/** A start that failed (slice E's `error` item with Retry) first, then a normal day. */
+const FAILED_START_INBOX = [
+  ...projectItems(KIND_ITEMS.filter((item) => item.kind === 'error') as InboxFixture[]),
+  ...NORMAL_INBOX,
+];
+
 interface SceneOptions {
   scene: 'normal' | 'busy' | 'quiet';
+  /** This project's open inbox items for the viewer (Needs you). Default: none. */
+  inbox?: InboxFixture[];
+  /** A brand-new project: no profiles, accounts, automations or items. */
+  brandNew?: boolean;
   budget: Budget;
   /** Which automations exist: the normal set, two failing ones, or none. */
   automations: 'normal' | 'failing' | 'none';
@@ -348,6 +387,8 @@ async function setupScene(page: Page, options: SceneOptions) {
         : Object.values(TRIGGERS);
   const runs: Record<string, unknown[]> = { ...RUNS, 'trg-deps-2': RUNS['trg-deps'] ?? [] };
   let submitted = false;
+  const answered = new Set<string>();
+  const openItems = () => (options.inbox ?? []).filter((item) => !answered.has(item.ref));
 
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
     const url = new URL(route.request().url());
@@ -357,7 +398,8 @@ async function setupScene(page: Page, options: SceneOptions) {
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path === '/api/cc/credentials') return respond(200, { credentials: ROWS.credentials });
+    if (path === '/api/cc/credentials')
+      return respond(200, { credentials: options.brandNew ? [] : ROWS.credentials });
     if (path === '/api/cc/configurations')
       return respond(200, { configurations: ROWS.configurations });
     if (path === '/api/cc/attachments') return respond(200, { attachments: ROWS.attachments });
@@ -382,6 +424,30 @@ async function setupScene(page: Page, options: SceneOptions) {
       });
     if (path === '/api/projects')
       return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    const inbox = path.match(/^\/api(?:\/projects\/[^/]+)?\/inbox(\/count)?$/);
+    if (inbox && method === 'GET') {
+      const items = openItems();
+      if (inbox[1])
+        return respond(200, {
+          needsYou: items.length,
+          blocking: items.filter((item) => item.blocking).length,
+        });
+      return respond(200, { items, nextCursor: null, skipped: 0 });
+    }
+    const inboxItem = path.match(/^\/api\/projects\/[^/]+\/inbox\/items\/([^/]+)(\/answer)?$/);
+    if (inboxItem) {
+      const ref = decodeURIComponent(inboxItem[1] ?? '');
+      const item = (options.inbox ?? []).find((candidate) => candidate.ref === ref);
+      if (!item) return respond(404, { error: 'NOT_FOUND', message: 'Inbox item not found' });
+      if (inboxItem[2]) {
+        answered.add(ref);
+        return respond(200, { ref, outcome: 'answered', agentNotified: true });
+      }
+      return respond(200, {
+        item: answered.has(ref) ? { ...item, status: 'answered' } : item,
+        context: { before: [], since: { messages: [], activityCount: 0, truncated: false } },
+      });
+    }
     const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (match) {
       const sub = match[2] ?? '';
@@ -422,7 +488,8 @@ async function setupScene(page: Page, options: SceneOptions) {
           status: 'queued',
         });
       }
-      if (sub === '/agent-profiles') return respond(200, { items: PROFILES });
+      if (sub === '/agent-profiles')
+        return respond(200, { items: options.brandNew ? [] : PROFILES });
       if (sub === '/agent-profiles/picker')
         return respond(200, { usageWindowDays: 30, usage: [], hiddenProfileIds: [] });
       if (sub === '/skills') return respond(200, { items: [] });
@@ -515,11 +582,17 @@ async function expectTaskBoxPinned(page: Page) {
 
 test.describe('Project Overview', () => {
   test('normal project', async ({ page }) => {
-    await setupScene(page, { scene: 'normal', budget: 'normal', automations: 'normal' });
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+    });
     await page.goto(BASE);
     const running = page.getByRole('region', { name: 'Running now' });
     await expect(running.getByRole('link', { name: /Ship billing/ })).toBeVisible();
-    await expect(running.getByText('Waiting on you')).toBeVisible();
+    // The inbox's own phrase: its item is in Needs you.
+    await expect(running.getByText('Paused on this')).toBeVisible();
     await expect(page.getByTestId('overview-budgets')).toBeVisible();
     await expect(page.getByTestId('overview-budget-exceptions')).toContainText('5-hour window');
     await expect(page.getByTestId('overview-automation-failing')).toBeVisible();
@@ -529,7 +602,12 @@ test.describe('Project Overview', () => {
   });
 
   test('busy project under stress', async ({ page }) => {
-    await setupScene(page, { scene: 'busy', budget: 'stressed', automations: 'failing' });
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
     await page.goto(BASE);
     const running = page.getByRole('region', { name: 'Running now' });
     await expect(running.getByTestId('overview-running-row')).toHaveCount(5);
@@ -564,6 +642,7 @@ test.describe('Project Overview', () => {
       budget: 'normal',
       automations: 'normal',
       submit: 'ok',
+      inbox: NORMAL_INBOX,
     });
     await page.goto(BASE);
     await expect(page.getByRole('link', { name: /Ship billing/ })).toBeVisible();
@@ -661,5 +740,188 @@ test.describe('Project Overview', () => {
     await page.getByPlaceholder('Start a task…').click();
     await expect(page.getByRole('button', { name: /^To / })).toBeVisible();
     await capture(page, 'overview-composer-focused');
+  });
+});
+
+/** The rows of Needs you, once the list (not the quiet "checking" line) has rendered. */
+async function needsYouRows(page: Page) {
+  await expect(page.getByTestId('overview-needs-you-list')).toBeVisible();
+  return page.getByTestId('overview-needs-you-list').getByTestId('inbox-row');
+}
+
+test.describe('Project Overview as the landing page, with Needs you (slice F2)', () => {
+  test('opening a project lands on the Overview, Needs you first', async ({ page }, testInfo) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+    });
+    await page.goto(`/projects/${PROJECT_ID}`);
+    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/overview$`));
+    const rows = await needsYouRows(page);
+    // Five items, one a stack of three: three rows on either size.
+    await expect(rows).toHaveCount(3);
+    await expect(
+      page.getByRole('region', { name: 'Needs you' }).getByRole('link', { name: /All 5/ })
+    ).toHaveAttribute('href', `/projects/${PROJECT_ID}/inbox`);
+    if (isPhone(testInfo)) {
+      // Needs you comes before Running now in the phone column.
+      const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      const running = await page.getByRole('region', { name: 'Running now' }).boundingBox();
+      expect(needs!.y).toBeLessThan(running!.y);
+    } else {
+      // Desktop: Needs you in the main column, Running now in the rail to its right.
+      const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      const running = await page.getByRole('region', { name: 'Running now' }).boundingBox();
+      expect(needs!.x + needs!.width).toBeLessThanOrEqual(running!.x);
+    }
+    await expect(page.getByText('chat page')).toHaveCount(0);
+  });
+
+  test('40 open items: the first screen shows Needs you and the start of Running now', async ({
+    page,
+  }, testInfo) => {
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+    });
+    await page.goto(BASE);
+    const rows = await needsYouRows(page);
+    await expect(rows).toHaveCount(isPhone(testInfo) ? 3 : 5);
+    await expect(
+      page.getByRole('region', { name: 'Needs you' }).getByRole('link', { name: /All 40/ })
+    ).toBeVisible();
+    // The stack from one chat reads as one row.
+    await expect(page.getByText(/3 from Ship billing/)).toBeVisible();
+    if (isPhone(testInfo)) {
+      // 375x667: three rows and the Running now heading above the pinned task box, and no
+      // title-only strip above Needs you.
+      const box = await page.locator('[data-testid="project-overview"] > div').last().boundingBox();
+      for (let i = 0; i < 3; i += 1) {
+        const row = await rows.nth(i).boundingBox();
+        expect(row!.y + row!.height).toBeLessThanOrEqual(box!.y);
+      }
+      const runningHead = await page
+        .getByRole('region', { name: 'Running now' })
+        .getByRole('heading', { name: /Running now/ })
+        .boundingBox();
+      expect(runningHead!.y + runningHead!.height).toBeLessThanOrEqual(box!.y);
+      const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+      const appBar = await page.locator('header').first().boundingBox();
+      expect(needs!.y - (appBar!.y + appBar!.height)).toBeLessThanOrEqual(16);
+    }
+    await expectTaskBoxPinned(page);
+    await capture(page, 'overview-f2-stress-40-items');
+  });
+
+  test('a failed start waits in Needs you with its Retry', async ({ page }) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: FAILED_START_INBOX,
+    });
+    await page.goto(BASE);
+    const rows = await needsYouRows(page);
+    await expect(rows.first()).toContainText('Couldn’t start');
+    await expect(rows.first()).toContainText('never started');
+    await capture(page, 'overview-f2-failed-start-item');
+    await rows.first().getByRole('button').click();
+    await expect(page).toHaveURL(/from=overview/);
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+  });
+
+  test('nothing needs you: one quiet line', async ({ page }) => {
+    await setupScene(page, { scene: 'normal', budget: 'normal', automations: 'normal', inbox: [] });
+    await page.goto(BASE);
+    const quiet = page.getByTestId('overview-needs-you-quiet');
+    await expect(quiet).toContainText('Nothing needs you.');
+    const height = (await quiet.boundingBox())!.height;
+    expect(height).toBeLessThanOrEqual(56);
+    // Liveness: the rest of the page is there.
+    await expect(page.getByRole('region', { name: 'Running now' })).toBeVisible();
+    await capture(page, 'overview-f2-nothing-needs-you');
+  });
+
+  test('a brand-new empty project', async ({ page }) => {
+    await setupScene(page, {
+      scene: 'quiet',
+      budget: 'healthy',
+      automations: 'none',
+      inbox: [],
+      brandNew: true,
+    });
+    await page.goto(`/projects/${PROJECT_ID}`);
+    await expect(page).toHaveURL(new RegExp(`/overview$`));
+    await expect(page.getByTestId('overview-needs-you-quiet')).toContainText('Nothing needs you.');
+    await expect(page.getByText('Nothing is running.')).toBeVisible();
+    await expectTaskBoxPinned(page);
+    await capture(page, 'overview-f2-brand-new');
+  });
+
+  test('answer from Needs you, then back: the count is lower and the page did not reload', async ({
+    page,
+  }, testInfo) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: ROUND_TRIP_INBOX,
+    });
+    await page.goto(BASE);
+    await needsYouRows(page);
+    await expect(
+      page.getByRole('region', { name: 'Needs you' }).getByRole('link', { name: /All 3/ })
+    ).toBeVisible();
+    // A marker survives only if the page is not reloaded.
+    await page.evaluate(() => {
+      (window as unknown as { __noReload: boolean }).__noReload = true;
+    });
+    await page.getByRole('button', { name: /Should EU prices include VAT/ }).click();
+    await expect(page).toHaveURL(/\/inbox\?/);
+    await expect(page).toHaveURL(/from=overview/);
+    const pane = page.getByRole('region', { name: 'Inbox item' });
+    await expect(
+      pane.getByRole('heading', { name: 'Should EU prices include VAT?' })
+    ).toBeVisible();
+    await screenshot(page, 'overview-f2-item-from-overview');
+    await pane.getByRole('button', { name: 'Include VAT' }).click();
+    await expect(page.getByTestId('inbox-receipt')).toContainText('Include VAT');
+    // Straight to the next item in the stack.
+    await expect(
+      pane.getByRole('heading', { name: 'Which region should new staging nodes default to?' })
+    ).toBeVisible();
+    await screenshot(page, 'overview-f2-after-answer-receipt');
+    const back = isPhone(testInfo)
+      ? pane.getByRole('button', { name: 'Back to Overview' })
+      : page.getByRole('button', { name: 'Back to Overview' }).first();
+    await back.click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}$`));
+    await expect(
+      page.getByRole('region', { name: 'Needs you' }).getByRole('link', { name: /All 2/ })
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)
+    ).toBe(true);
+    await capture(page, 'overview-f2-back-count-reduced');
+  });
+
+  test('chat is one tap away', async ({ page }, testInfo) => {
+    await setupScene(page, { scene: 'normal', budget: 'normal', automations: 'normal', inbox: [] });
+    await page.goto(BASE);
+    await expect(page.getByTestId('overview-needs-you-quiet')).toBeVisible();
+    if (isPhone(testInfo)) {
+      await page
+        .locator('header')
+        .first()
+        .getByRole('button', { name: 'Chat', exact: true })
+        .click();
+    } else {
+      await page.getByRole('link', { name: 'Chat', exact: true }).first().click();
+    }
+    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/chat`));
   });
 });

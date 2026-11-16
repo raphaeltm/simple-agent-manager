@@ -1,5 +1,5 @@
 import { IconButton, paneClassName } from '@simple-agent-manager/ui';
-import { Loader2, MessageSquare } from 'lucide-react';
+import { History, Loader2, MessageSquare } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
@@ -70,7 +70,7 @@ export function RecentChatsDropdown() {
       navigate(`/projects/${projectId}/chat/${sessionId}`);
       setIsOpen(false);
     },
-    [navigate],
+    [navigate]
   );
 
   const handleViewAll = useCallback(() => {
@@ -87,7 +87,9 @@ export function RecentChatsDropdown() {
         label={`Recent chats${activeCount > 0 ? ` (${activeCount} active)` : ''}`}
         aria-expanded={isOpen}
         aria-haspopup="true"
-        icon={<MessageSquare size={20} strokeWidth={1.75} />}
+        // History, not a speech bubble: on a phone the Overview puts a Chat control (a bubble) in
+        // the app bar's primary slot right beside this (inbox slice F2, as prototyped).
+        icon={<History size={20} strokeWidth={1.75} />}
         count={activeCount > 99 ? '99+' : activeCount || undefined}
         countTone="active"
         showTooltip={false}
@@ -107,9 +109,7 @@ export function RecentChatsDropdown() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--sam-hairline)]">
               <h3 className="text-[15px] font-semibold text-fg-primary">Recent Chats</h3>
               {activeCount > 0 && (
-                <span className="text-xs text-fg-muted">
-                  {activeCount} active
-                </span>
+                <span className="text-xs text-fg-muted">{activeCount} active</span>
               )}
             </div>
 
@@ -195,7 +195,7 @@ export function RecentChatsDropdown() {
               </div>
             )}
           </div>,
-          document.body,
+          document.body
         )}
     </div>
   );
