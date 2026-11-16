@@ -155,7 +155,8 @@ export async function fileSystemError(
       ...(input.groupKey ? { groupKey: input.groupKey } : {}),
       dedupeKey,
     });
-    if (filed.created && input.failureCount === undefined) return { ...filed, created: true };
+    // A new item already holds this failure (count 1 unless the thing reports its own count).
+    if (filed.created && (input.failureCount ?? 1) === 1) return { ...filed, created: true };
     // Same thing failed again (or reports its own count): update the open item in place. An
     // archived item stays archived (the person said they will not act) until the thing recovers
     // and releases the key.
@@ -259,6 +260,9 @@ async function loadErrorTarget(
   return target;
 }
 
+/** An error item whose Retry is running: closed to other answers, its dedupe key still held. */
+const RETRY_CLAIM_ANSWER = JSON.stringify({ resolution: 'retrying' });
+
 /** Run the fix an error item offers, with the answering person's authority. */
 export async function answerErrorItem(
   ctx: OperationContext,
@@ -279,14 +283,46 @@ export async function answerErrorItem(
 
   switch (action) {
     case 'retry': {
-      await ctx.ports.inbox.retryTask(me, item.projectId, target.subjectId);
-      await resolveSystemError(ctx, {
-        projectId: item.projectId,
-        source: target.source,
-        subjectId: target.subjectId,
-        resolution: 'retried',
-        resolvedByUserId: me,
-      });
+      // Claim before the side effect: a retry starts a new task (and a workspace), so two
+      // overlapping answers (a double click, two tabs) must not both run it. The key stays held
+      // while claimed, so the sweep does not re-file the still-failed task.
+      const claimed = await ctx.env.DATABASE.prepare(
+        `UPDATE asks SET status = 'done', answer_json = ?, resolved_by_user_id = ?,
+            resolved_at = ?, updated_at = ?
+          WHERE id = ? AND project_id = ? AND kind = 'error' AND status = 'open'`
+      )
+        .bind(RETRY_CLAIM_ANSWER, me, Date.now(), Date.now(), askId, item.projectId)
+        .run();
+      if ((claimed.meta?.changes ?? 0) !== 1)
+        throw new OperationError('conflict', 'This item is already being fixed');
+      try {
+        await ctx.ports.inbox.retryTask(me, item.projectId, target.subjectId);
+      } catch (error) {
+        // Refused or failed: hand the item back to the person, still open.
+        await ctx.env.DATABASE.prepare(
+          `UPDATE asks SET status = 'open', answer_json = NULL, resolved_by_user_id = NULL,
+              resolved_at = NULL, updated_at = ?
+            WHERE id = ? AND project_id = ? AND status = 'done' AND answer_json = ?`
+        )
+          .bind(Date.now(), askId, item.projectId, RETRY_CLAIM_ANSWER)
+          .run();
+        throw error;
+      }
+      const now = Date.now();
+      await ctx.env.DATABASE.prepare(
+        `UPDATE asks SET answer_json = ?, dedupe_key = NULL, notified_at = COALESCE(notified_at, ?),
+            updated_at = ?
+          WHERE id = ? AND project_id = ? AND status = 'done' AND answer_json = ?`
+      )
+        .bind(
+          JSON.stringify({ resolution: 'retried' }),
+          now,
+          now,
+          askId,
+          item.projectId,
+          RETRY_CLAIM_ANSWER
+        )
+        .run();
       return { ref: item.ref, outcome: 'retried', agentNotified: false };
     }
     case 'wake': {

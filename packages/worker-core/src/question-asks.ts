@@ -37,13 +37,14 @@ export interface QuestionAttentionSummary {
 export const WAKE_FAILED_ASK_SOURCE = 'session_wake';
 export const WAKE_FAILED_KEY_PREFIX = 'error:wake:';
 /**
- * Open wake-failure items, as an index-seekable key range (a prefix `LIKE` is not, on a BINARY
- * column). Identical to the WHERE of `idx_asks_open_wake_error` (migration 0248), which is what
- * lets SQLite use that partial index; keep the two in step. `alias` is the asks table alias.
+ * One chat's open wake-failure item, probed by its exact dedupe key so SQLite seeks the unique
+ * `(project_id, dedupe_key)` index (`idx_asks_project_dedupe`) instead of walking the project's
+ * error items. `sessionIdSql` is the SQL expression for the chat id (a column or `?`); `alias`
+ * is the asks table alias.
  */
-export function openWakeErrorPredicate(alias: string): string {
+export function openWakeErrorForChat(alias: string, sessionIdSql: string): string {
   const a = alias ? `${alias}.` : '';
-  return `${a}kind = 'error' AND ${a}status = 'open' AND ${a}dedupe_key >= 'error:wake:' AND ${a}dedupe_key < 'error:wake;'`;
+  return `${a}kind = 'error' AND ${a}status = 'open' AND ${a}dedupe_key = '${WAKE_FAILED_KEY_PREFIX}' || ${sessionIdSql}`;
 }
 
 export interface WakeFailedAttentionSummary {
@@ -164,11 +165,35 @@ export async function readOpenQuestionAttention(
   }
   const columns = `id, kind, source_session_id, title, body_md, answer_spec_json, category,
                 created_at, expires_at`;
+  // The wake arm probes each chat's exact key when the chats are known (one unique-index seek per
+  // chat); a project-wide read takes the project's wake-key range on the same index.
+  const wakeScope: string[] = [];
+  const wakeParams: unknown[] = [];
+  if (query.projectId) {
+    wakeScope.push('project_id = ?');
+    wakeParams.push(query.projectId);
+  }
+  if (query.sessionIds) {
+    wakeScope.push(`dedupe_key IN (SELECT '${WAKE_FAILED_KEY_PREFIX}' || value FROM json_each(?))`);
+    wakeParams.push(JSON.stringify(query.sessionIds));
+  } else {
+    wakeScope.push(`dedupe_key >= '${WAKE_FAILED_KEY_PREFIX}' AND dedupe_key < 'error:wake;'`);
+  }
+  if (query.chats) {
+    wakeScope.push(`EXISTS (SELECT 1 FROM json_each(?) chat
+      WHERE json_extract(chat.value, '$[0]') = asks.project_id
+        AND json_extract(chat.value, '$[1]') = asks.source_session_id)`);
+    wakeParams.push(JSON.stringify(query.chats.map((chat) => [chat.projectId, chat.sessionId])));
+  }
+  if (query.assigneeUserId) {
+    wakeScope.push('assignee_user_id = ?');
+    wakeParams.push(query.assigneeUserId);
+  }
   let rows: Record<string, unknown>[];
   try {
     // Two indexed arms in one round trip: open questions (`idx_asks_open_question`) and open
-    // wake failures (`idx_asks_open_wake_error`). Questions sort first, so a chat's first
-    // row is its newest question when it has one.
+    // wake failures (by dedupe key, `idx_asks_project_dedupe`). Questions sort first, so a
+    // chat's first row is its newest question when it has one.
     const result = await db
       .prepare(
         `SELECT * FROM (
@@ -177,12 +202,12 @@ export async function readOpenQuestionAttention(
               AND ${scope.join(' AND ')}
            UNION ALL
            SELECT 1 AS rank, ${columns} FROM asks
-            WHERE ${openWakeErrorPredicate('')}
-              AND ${scope.join(' AND ')}
+            WHERE kind = 'error' AND status = 'open' AND source_session_id IS NOT NULL
+              AND ${wakeScope.join(' AND ')}
          ) ORDER BY rank, created_at DESC, id DESC
          LIMIT ?`
       )
-      .bind(query.now, ...scopeParams, ...scopeParams, limit)
+      .bind(query.now, ...scopeParams, ...wakeParams, limit)
       .all<Record<string, unknown>>();
     rows = result.results ?? [];
   } catch (error) {

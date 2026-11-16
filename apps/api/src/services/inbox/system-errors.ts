@@ -141,7 +141,18 @@ export async function fileAndNotify(
   input: SystemErrorInput,
   type: 'error' | 'cron_failure' = 'error'
 ): Promise<SystemErrorFiled | null> {
-  const filed = await fileSystemError(systemErrorDeps(env), input);
+  let filed: SystemErrorFiled | null;
+  try {
+    // Building the ports is inside the guard too: filing must never throw into its caller.
+    filed = await fileSystemError(systemErrorDeps(env), input);
+  } catch (error) {
+    log.error('inbox.system_error_file_failed', {
+      projectId: input.projectId,
+      source: input.source,
+      ...serializeError(error),
+    });
+    return null;
+  }
   if (filed) await notifyFiled(env, input, filed, type);
   return filed;
 }
@@ -180,16 +191,27 @@ export interface InboxSystemErrorSweepStats {
 }
 
 /**
+ * Pages of the failed-task window one sweep tick may read, each `4 × inbox.errorSweepBatchSize`
+ * rows. Rows the classifier skips (a parent stop, an expected expiry) stay in the window until they
+ * age out of it; paging past them keeps them from holding every slot (rule 47, rule 81).
+ */
+const TASK_SWEEP_MAX_PAGES = 5;
+
+/**
  * One cron step: file items for genuinely failed tasks of the lookback window that have none,
  * then close task items whose task is no longer failed (retried in place, or reset by a person).
  *
- * Budget (rule 47): one indexed scan of failed tasks updated inside `inbox.errorLookbackMinutes`
- * (`idx_tasks_failed_updated`), newest first, at most four times `inbox.errorSweepBatchSize` rows;
- * at most `inbox.errorSweepBatchSize` filings (about five D1 round trips each); one UPDATE for
- * the closes (`idx_asks_error_key`). A candidate leaves the set once it has an item (the NOT EXISTS,
- * `idx_asks_error_task`) or once it ages out
- * of the window, so a task that cannot be filed (its owner left the project) or a normal ending
- * is never retried past the window.
+ * Budget (rule 47): indexed pages of failed tasks updated inside `inbox.errorLookbackMinutes`
+ * (`idx_tasks_failed_updated`), newest first, `4 × inbox.errorSweepBatchSize` rows each, at most
+ * `TASK_SWEEP_MAX_PAGES` pages; it stops early once `inbox.errorSweepBatchSize` items are filed
+ * (about five D1 round trips each) or the window is exhausted; then one UPDATE for the closes,
+ * driven from the tasks changed inside the window (`tasks(updated_at, id)`, then the unique
+ * dedupe-key index). A candidate leaves the set once it has an item (the NOT EXISTS,
+ * `idx_asks_error_task`) or once it ages out of the window. A failure a person set themselves is
+ * excluded in SQL; the other normal endings (classified in code) are paged past. Throughput at the
+ * defaults (batch 10, lookback 30 min): 200 rows read and 10 items filed per minute, so normal
+ * endings starve genuine failures only past 200 of them in 30 minutes, installation-wide, and a
+ * filing backlog drains at 600 items an hour.
  */
 export async function runInboxSystemErrorSweep(
   env: Env,
@@ -198,65 +220,96 @@ export async function runInboxSystemErrorSweep(
   const deps = systemErrorDeps(env);
   const limits = await getInboxLimits(deps);
   const since = new Date(now - limits.errorLookbackMinutes * 60_000).toISOString();
-  const candidates = await env.DATABASE.prepare(
-    `SELECT ${FAILED_TASK_COLUMNS} FROM tasks t JOIN projects p ON p.id = t.project_id
-      WHERE t.status = 'failed' AND t.updated_at > ?
-        -- Normal endings with no error (\`lifecycleOutcome\`) never fill the batch.
-        AND t.error_message IS NOT NULL AND TRIM(t.error_message) != ''
-        -- Not while its item is open or archived (key held): a later write to the failed task
-        -- (an edit) is not another failure.
-        AND NOT EXISTS (SELECT 1 FROM asks k
-          WHERE k.project_id = t.project_id AND k.dedupe_key = 'error:task:' || t.id)
-        -- Nor when an item was filed since the task last changed and has closed already
-        -- (a retried task stays failed; its closed item must not be filed again).
-        -- Only this task's own item (its first link is the task): a wake or sleep item of the
-        -- task's chat carries the same source task.
-        AND NOT EXISTS (SELECT 1 FROM asks a
-          WHERE a.kind = 'error' AND a.source_task_id = t.id AND a.project_id = t.project_id
-            AND a.links_json LIKE '[{"kind":"task","id":"' || t.id || '"%'
-            AND a.created_at >= CAST((julianday(t.updated_at) - 2440587.5) * 86400000 AS INTEGER))
-      ORDER BY t.updated_at DESC LIMIT ?`
-  )
-    .bind(since, limits.errorSweepBatchSize * 4)
-    .all<FailedTaskRow>();
-  const rows = candidates.results ?? [];
+  const pageSize = limits.errorSweepBatchSize * 4;
+  let cursor: { updatedAt: string; id: string } | null = null;
+  let scanned = 0;
   let filed = 0;
   let skippedNormal = 0;
-  for (const row of rows) {
-    if (filed >= limits.errorSweepBatchSize) break;
-    const verdict = classifyTaskFailure(row);
-    if (!verdict.file) {
-      skippedNormal += 1;
-      continue;
+  // Each half of this step is isolated (rule 53): a failed scan still lets the closes and the
+  // undelivered-answer filing run.
+  try {
+    for (let page = 0; page < TASK_SWEEP_MAX_PAGES && filed < limits.errorSweepBatchSize; page++) {
+      const candidates: { results?: Array<FailedTaskRow & { updated_at: string }> } =
+        await env.DATABASE.prepare(
+          `SELECT ${FAILED_TASK_COLUMNS}, t.updated_at
+           FROM tasks t JOIN projects p ON p.id = t.project_id
+          WHERE t.status = 'failed' AND t.updated_at > ?
+            ${cursor ? 'AND (t.updated_at, t.id) < (?, ?)' : ''}
+            -- Normal endings with no error (\`lifecycleOutcome\`) never fill the batch.
+            AND t.error_message IS NOT NULL AND TRIM(t.error_message) != ''
+            -- Nor one a person set themselves (\`classifyTaskFailure\` 'set_by_person').
+            AND COALESCE((SELECT e.actor_type FROM task_status_events e
+              WHERE e.task_id = t.id AND e.to_status = 'failed'
+              ORDER BY e.created_at DESC LIMIT 1), '') != 'user'
+            -- Not while its item is open or archived (key held): a later write to the failed
+            -- task (an edit) is not another failure.
+            AND NOT EXISTS (SELECT 1 FROM asks k
+              WHERE k.project_id = t.project_id AND k.dedupe_key = 'error:task:' || t.id)
+            -- Nor when an item was filed since the task last changed and has closed already
+            -- (a retried task stays failed; its closed item must not be filed again).
+            -- Only this task's own item (its first link is the task): a wake or sleep item of
+            -- the task's chat carries the same source task.
+            AND NOT EXISTS (SELECT 1 FROM asks a
+              WHERE a.kind = 'error' AND a.source_task_id = t.id AND a.project_id = t.project_id
+                AND a.links_json LIKE '[{"kind":"task","id":"' || t.id || '"%'
+                AND a.created_at >= CAST((julianday(t.updated_at) - 2440587.5) * 86400000 AS INTEGER))
+          ORDER BY t.updated_at DESC, t.id DESC LIMIT ?`
+        )
+          .bind(since, ...(cursor ? [cursor.updatedAt, cursor.id] : []), pageSize)
+          .all<FailedTaskRow & { updated_at: string }>();
+      const rows = candidates.results ?? [];
+      scanned += rows.length;
+      for (const row of rows) {
+        if (filed >= limits.errorSweepBatchSize) break;
+        const verdict = classifyTaskFailure(row);
+        if (!verdict.file) {
+          skippedNormal += 1;
+          continue;
+        }
+        const result = await fileAndNotify(env, taskFailureError(row, verdict));
+        if (result) filed += 1;
+      }
+      const last = rows.at(-1);
+      if (rows.length < pageSize || !last) break;
+      cursor = { updatedAt: last.updated_at, id: last.id };
     }
-    const result = await fileAndNotify(env, taskFailureError(row, verdict));
-    if (result) filed += 1;
+  } catch (error) {
+    log.error('inbox.system_error_scan_failed', serializeError(error));
   }
 
-  // A task that left `failed` (retried in place or reset) recovered: close its item.
-  const closed = await env.DATABASE.prepare(
-    `UPDATE asks
-        SET status = CASE WHEN status = 'open' THEN 'done' ELSE status END,
-            answer_json = CASE WHEN status = 'open' THEN '{"resolution":"recovered"}' ELSE answer_json END,
-            resolved_at = CASE WHEN status = 'open' THEN ? ELSE resolved_at END,
-            notified_at = COALESCE(notified_at, ?), dedupe_key = NULL, updated_at = ?
-      WHERE kind = 'error' AND dedupe_key IS NOT NULL
-        AND dedupe_key >= 'error:task:' AND dedupe_key < 'error:task;'
-        AND status IN ('open', 'archived')
-        AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = asks.source_task_id
-          AND t.project_id = asks.project_id AND t.status != 'failed')`
-  )
-    .bind(now, now, now)
-    .run();
+  // A task that left `failed` (retried in place, reset, or recovered) closes its item. Driven
+  // from the tasks that changed inside the lookback window (`tasks(updated_at, id)`), not from
+  // every held key, so the cost follows how often tasks change rather than how many items are
+  // still open (rule 47). A task that recovers while this sweep is down for longer than the
+  // window keeps its item open; Retry on it is then refused and the person archives it.
+  let closed = 0;
+  try {
+    const result = await env.DATABASE.prepare(
+      `UPDATE asks
+          SET status = CASE WHEN status = 'open' THEN 'done' ELSE status END,
+              answer_json = CASE WHEN status = 'open' THEN '{"resolution":"recovered"}' ELSE answer_json END,
+              resolved_at = CASE WHEN status = 'open' THEN ? ELSE resolved_at END,
+              notified_at = COALESCE(notified_at, ?), dedupe_key = NULL, updated_at = ?
+        WHERE kind = 'error' AND status IN ('open', 'archived')
+          AND (project_id, dedupe_key) IN (
+            SELECT t.project_id, 'error:task:' || t.id FROM tasks t
+             WHERE t.updated_at > ? AND t.status != 'failed')`
+    )
+      .bind(now, now, now, since)
+      .run();
+    closed = result.meta?.changes ?? 0;
+  } catch (error) {
+    log.error('inbox.system_error_close_failed', serializeError(error));
+  }
 
-  const undelivered = await fileUndeliveredAskAnswers(env, limits, now);
+  let undelivered = 0;
+  try {
+    undelivered = await fileUndeliveredAskAnswers(env, limits, now);
+  } catch (error) {
+    log.error('inbox.undelivered_answer_sweep_failed', serializeError(error));
+  }
 
-  const stats = {
-    scanned: rows.length,
-    filed: filed + undelivered,
-    skippedNormal,
-    closed: closed.meta?.changes ?? 0,
-  };
+  const stats = { scanned, filed: filed + undelivered, skippedNormal, closed };
   if (stats.filed > 0 || stats.closed > 0) log.info('inbox.system_error_sweep', stats);
   return stats;
 }
@@ -284,6 +337,14 @@ async function fileUndeliveredAskAnswers(
         AND a.kind != 'error' AND a.source_session_id IS NOT NULL
         AND a.resolved_by_user_id IS NOT NULL
         AND a.resolved_at > ? AND a.resolved_at <= ?
+        -- Not while the chat's delivery item (open or archived) was written after it was
+        -- answered: one chat has one delivery item and a repeat filing rewrites its links, so a
+        -- link alone would let two given-up asks swap the item every tick. A unique-index seek.
+        AND NOT EXISTS (SELECT 1 FROM asks d
+          WHERE d.project_id = a.project_id
+            AND d.dedupe_key = 'error:delivery:' || a.source_session_id
+            AND d.updated_at >= a.resolved_at)
+        -- Nor once an item (since closed) linked it.
         AND NOT EXISTS (SELECT 1 FROM asks e
           WHERE e.kind = 'error' AND e.project_id = a.project_id
             AND e.links_json LIKE '%"kind":"ask","id":"' || a.id || '"%')
@@ -302,18 +363,23 @@ async function fileUndeliveredAskAnswers(
     }>();
   let filed = 0;
   for (const row of result.results ?? []) {
-    const chat = await loadChatForError(env, row.project_id, row.source_session_id).catch(
-      () => null
-    );
+    let chat: Awaited<ReturnType<typeof loadChatForError>>;
+    try {
+      chat = await loadChatForError(env, row.project_id, row.source_session_id);
+    } catch {
+      continue; // Unreadable now; the next tick tries again inside the window.
+    }
+    // An archived chat (or one that no longer exists) is a normal ending: nothing to tell.
+    if (!chat) continue;
     const filedItem = await fileAndNotify(env, {
       projectId: row.project_id,
       assigneeUserId: row.resolved_by_user_id,
       source: 'delivery',
       subjectId: row.source_session_id,
-      title: `Your answer didn't reach the agent in ${quotedName(chat?.topic, 'a chat')}`,
+      title: `Your answer didn't reach the agent in ${quotedName(chat.topic, 'a chat')}`,
       body: 'SAM kept trying but could not hand your answer to the agent; open the chat and tell it again if it still needs it.',
       actions: ['open_chat'],
-      sourceTaskId: chat?.taskId ?? null,
+      sourceTaskId: chat.taskId,
       sourceSessionId: row.source_session_id,
       links: [
         { kind: 'chat', id: row.source_session_id, label: null },
@@ -413,17 +479,19 @@ export async function fileSleepLossError(
 /**
  * The person's answer to a permission, form or link request was never confirmed delivered to the
  * agent after the InteractionStore's retry window (`interaction-store.ts:recordDelivery`,
- * `delivery_unconfirmed`). One item per chat; never throws.
+ * `delivery_unconfirmed`). One item per chat. Returns `skipped` for a chat that files nothing (an
+ * archived chat, no recorded creator) and `failed` when the item could not be written, so the
+ * caller's outbox job can retry instead of losing it. Never throws.
  */
 export async function fileUndeliveredAnswerError(
   env: Env,
   input: { projectId: string; sessionId: string }
-): Promise<SystemErrorFiled | null> {
+): Promise<'filed' | 'skipped' | 'failed'> {
   try {
     const chat = await loadChatForError(env, input.projectId, input.sessionId);
-    if (!chat?.createdBy) return null;
+    if (!chat?.createdBy) return 'skipped';
     const name = quotedName(chat.topic, 'a chat');
-    return await fileAndNotify(env, {
+    const filed = await fileAndNotify(env, {
       projectId: input.projectId,
       assigneeUserId: chat.createdBy,
       source: 'delivery',
@@ -435,12 +503,13 @@ export async function fileUndeliveredAnswerError(
       sourceSessionId: input.sessionId,
       links: [{ kind: 'chat', id: input.sessionId, label: null }],
     });
+    return filed ? 'filed' : 'failed';
   } catch (error) {
     log.error('inbox.undelivered_answer_file_failed', {
       projectId: input.projectId,
       sessionId: input.sessionId,
       ...serializeError(error),
     });
-    return null;
+    return 'failed';
   }
 }

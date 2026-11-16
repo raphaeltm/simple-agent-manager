@@ -479,6 +479,8 @@ taskCallbackRoute.post(
               // File the inbox error item first so the notification opens it (slice E). Filing
               // never throws; a normal ending files nothing and keeps the chat link.
               const filed = await fileTaskFailure(c.env, projectId, taskId);
+              // The sweep filed it first and already told the person: one notification per item.
+              if (filed && !filed.created) return;
               await notificationService.notifyTaskFailed(c.env, task.userId, {
                 projectId,
                 projectName,

@@ -56,7 +56,6 @@ export async function raiseSessionWakeFailure(
       filed = await projectDataPorts().inboxErrors.fileWakeFailure(env, {
         projectId,
         sessionId: input.sessionId,
-        taskId: text(session.task_id) ?? taskId,
         createdByUserId: text(session.created_by_user_id),
         topic: text(session.topic),
       });

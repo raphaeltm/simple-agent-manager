@@ -481,7 +481,6 @@ export interface InboxErrorsPort {
     input: {
       projectId: string;
       sessionId: string;
-      taskId: string | null;
       createdByUserId: string | null;
       topic: string | null;
     }

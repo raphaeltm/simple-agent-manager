@@ -856,11 +856,6 @@ export const asks = sqliteTable(
       .on(table.resolvedAt)
       .where(sql`notified_at IS NULL AND status IN ('answered', 'done', 'archived', 'expired')`),
     // System error items (migration 0248).
-    openWakeErrorIdx: index('idx_asks_open_wake_error')
-      .on(table.projectId, table.sourceSessionId, table.createdAt)
-      .where(
-        sql`kind = 'error' AND status = 'open' AND dedupe_key >= 'error:wake:' AND dedupe_key < 'error:wake;'`
-      ),
     errorTaskIdx: index('idx_asks_error_task')
       .on(table.sourceTaskId, table.createdAt)
       .where(sql`kind = 'error'`),
@@ -3472,6 +3467,10 @@ export const triggerExecutions = sqliteTable(
     failedCompletedIdx: index('idx_trigger_executions_failed_completed')
       .on(table.completedAt)
       .where(sql`status = 'failed'`),
+    // Inbox automation sweep (migration 0248): an automation's newest finished run.
+    finishedSequenceIdx: index('idx_trigger_executions_trigger_finished')
+      .on(table.triggerId, table.sequenceNumber)
+      .where(sql`status IN ('completed', 'failed')`),
     queueExpiryIdx: index('idx_trigger_queue_expiry')
       .on(table.queueExpiresAt)
       .where(sql`status IN ('waiting','queued')`),

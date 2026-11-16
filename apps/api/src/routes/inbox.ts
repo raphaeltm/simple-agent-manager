@@ -31,6 +31,7 @@ import {
   INBOX_FILTERS,
   type InboxErrorAction,
   type InboxFilter,
+  parseInboxRef,
 } from '@simple-agent-manager/shared';
 import { type Context, Hono } from 'hono';
 
@@ -235,13 +236,23 @@ projectInboxRoutes.post('/items/:ref/answer', ...session, async (c) => {
 
 projectInboxRoutes.post('/items/:ref/archive', ...session, async (c) => {
   assertBrowserJsonWrite(c, 'inbox');
+  const projectId = requireRouteParam(c, 'projectId');
+  const ref = requireRouteParam(c, 'ref');
+  // A system error item is SAM's alert to the person, and archiving it keeps later repeats quiet:
+  // an agent's sign-in session may not dismiss it. One read, for agent sign-in sessions only.
+  if (c.get('auth')?.session.agentSignIn && (await isErrorItemRef(c.env, projectId, ref)))
+    assertNotAgentSignInSession(c);
   const ctx = webOperationContext(c, getUserId(c));
-  return c.json(
-    await run(() =>
-      archiveInboxItem(ctx, {
-        projectId: requireRouteParam(c, 'projectId'),
-        ref: requireRouteParam(c, 'ref'),
-      })
-    )
-  );
+  return c.json(await run(() => archiveInboxItem(ctx, { projectId, ref })));
 });
+
+async function isErrorItemRef(env: Env, projectId: string, ref: string): Promise<boolean> {
+  const parsed = parseInboxRef(ref);
+  if (parsed?.store !== 'ask') return false;
+  const row = await env.DATABASE.prepare(
+    `SELECT 1 AS ok FROM asks WHERE id = ? AND project_id = ? AND kind = 'error'`
+  )
+    .bind(parsed.id, projectId)
+    .first();
+  return Boolean(row);
+}

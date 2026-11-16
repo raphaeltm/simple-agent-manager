@@ -1071,7 +1071,6 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     const wakeItem = await inboxErrorsPort.fileWakeFailure(env as never, {
       projectId: PROJECT,
       sessionId: CHAT,
-      taskId: TASK,
       createdByUserId: USER,
       topic: 'Ship it',
     });
@@ -1116,6 +1115,13 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     expect(errorAsk('error:task:task-genuine')).toMatchObject({ status: 'open' });
     expect(errorAsk(`error:task:${TASK}`)).toBeUndefined();
     expect(await fileTaskFailure(env, PROJECT, TASK)).toBeNull();
+    // Nor did the person get an error notification for the waiting task; the genuine one did.
+    const errorNoticeTasks = notified.mock.calls
+      .map(([, n]) => n as { type?: string; title?: string; taskId?: string | null })
+      // Task-failure notices only: the failed-wake item filed above also names this task.
+      .filter((n) => n.type === 'error' && !n.title?.startsWith("Couldn't wake"))
+      .map((n) => n.taskId);
+    expect(errorNoticeTasks).toEqual(['task-genuine']);
 
     // The blocked task sleeps and the block is presented to the chat (the real path that
     // resolves the wake_failed marker): it supersedes the failed-wake item too.
@@ -1132,6 +1138,60 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     expect(listActiveAttentionMarkers(sql, CHAT)).toEqual([
       expect.objectContaining({ kind: 'provider_limit_blocked' }),
     ]);
+  });
+
+  it('a genuine agent_prompt_failed callback files one task error item inline, linked from its notification', async () => {
+    for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
+      applySqliteMigration(d1, new URL(`../../src/db/migrations/${file}`, import.meta.url));
+    d1.prepare(
+      "INSERT OR IGNORE INTO users (id,email,name,role,status) VALUES (?, 'u1@x.test', 'One', 'user', 'active')"
+    ).run(USER);
+    d1.prepare(
+      "UPDATE projects SET user_id = ?, name = 'One', repository = 'o/one' WHERE id = ?"
+    ).run(USER, PROJECT);
+    d1.prepare(
+      "INSERT OR REPLACE INTO project_members (project_id,user_id,role,status) VALUES (?, ?, 'owner', 'active')"
+    ).run(PROJECT, USER);
+    const notified = vi.fn().mockResolvedValue({ id: 'n-1' });
+    Object.assign(env, {
+      NOTIFICATION: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          createNotification: notified,
+          claimNotificationDeduplication: vi.fn().mockResolvedValue(true),
+        }),
+      },
+    });
+
+    d1.prepare("UPDATE tasks SET title = 'Ship it' WHERE id = ?").run(TASK);
+    // The exact report a staging VM agent sent when its agent could not start.
+    const response = await callback({ toStatus: 'failed', errorMessage: 'agent_prompt_failed' });
+    expect(response.status).toBe(200);
+    await Promise.all(deliveries.splice(0));
+    expect(d1.prepare('SELECT status FROM tasks WHERE id=?').get(TASK)).toEqual({
+      status: 'failed',
+    });
+    const items = d1
+      .prepare(
+        "SELECT id, assignee_user_id AS assignee, title, status FROM asks WHERE kind = 'error'"
+      )
+      .all() as Array<{ id: string; assignee: string; title: string; status: string }>;
+    expect(items).toEqual([
+      expect.objectContaining({
+        assignee: USER,
+        status: 'open',
+        title: "“Ship it” couldn't start",
+      }),
+    ]);
+    const errorNotices = notified.mock.calls.filter(
+      ([, n]) => (n as { type?: string }).type === 'error'
+    );
+    expect(errorNotices).toHaveLength(1);
+    expect(errorNotices[0]?.[1]).toMatchObject({
+      actionUrl: `/projects/${PROJECT}/inbox?item=${encodeURIComponent(`ask:${items[0]?.id}`)}`,
+    });
+    // The sweep after it files nothing more.
+    expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
   });
 
   it.each(['stale', 'expired', 'unrelated', 'future', 'ambiguous', 'auth'] as const)(

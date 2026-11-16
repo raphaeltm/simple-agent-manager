@@ -56,6 +56,13 @@ async function notifyInteractionOwner(
     const { loadChatForError } = await import('../services/inbox/system-errors');
     const chat = await loadChatForError(env, row.project_id, row.chat_session_id);
     if (!chat?.createdBy) return;
+    // Only a current member hears about the project's chats (a removed creator does not).
+    const member = await env.DATABASE.prepare(
+      `SELECT 1 AS ok FROM project_members WHERE project_id = ? AND user_id = ? AND status = 'active'`
+    )
+      .bind(row.project_id, chat.createdBy)
+      .first();
+    if (!member) return;
     await notificationService.notifyInteractionRequested(env, chat.createdBy, {
       projectId: row.project_id,
       projectName: await notificationService.getProjectName(env, row.project_id),
@@ -92,23 +99,25 @@ export async function resolveInteractionAttention(
     'system',
     `${ACP_INTERACTION_ATTENTION_SOURCE}:${row.state}`
   );
-  const resolved = sql.exec(
+  // The person answered but the agent never confirmed it (`recordDelivery`, outcome
+  // `unconfirmed`): their inbox says so (slice E). Filed before the projection is marked resolved,
+  // so a failed write throws and this outbox job retries it, and once the projection is resolved
+  // it is never filed again. Loaded on use: the filing service builds a large worker graph.
+  if (row.state === 'delivery_unconfirmed' && row.attention_projection_state !== 'resolved') {
+    const { fileUndeliveredAnswerError } = await import('../services/inbox/system-errors');
+    const outcome = await fileUndeliveredAnswerError(env, {
+      projectId: row.project_id,
+      sessionId: row.chat_session_id,
+    });
+    if (outcome === 'failed') throw new Error('undelivered answer item not filed');
+  }
+  sql.exec(
     `UPDATE interactions
        SET attention_projection_state = 'resolved', updated_at = ?
        WHERE interaction_id = ? AND attention_projection_state IS NOT 'resolved'`,
     nowMs(),
     interactionId
-  ).rowsWritten;
-  // The person answered but the agent never confirmed it (`recordDelivery`, outcome
-  // `unconfirmed`): their inbox says so (slice E). Once, on this projection. Never throws.
-  if (resolved > 0 && row.state === 'delivery_unconfirmed') {
-    // Loaded on use: the filing service builds operation ports (a large worker graph).
-    const { fileUndeliveredAnswerError } = await import('../services/inbox/system-errors');
-    await fileUndeliveredAnswerError(env, {
-      projectId: row.project_id,
-      sessionId: row.chat_session_id,
-    });
-  }
+  );
 }
 
 function projectDataStub(env: Env, projectId: string): DurableObjectStub<ProjectData> {

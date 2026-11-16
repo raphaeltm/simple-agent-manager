@@ -1057,7 +1057,7 @@ describe('ProjectData durable prompt delivery', () => {
     // The failure is one inbox error item (slice E), never an attention marker.
     expect(fileWakeFailure).toHaveBeenCalledWith(
       {},
-      expect.objectContaining({ projectId: 'project-1', sessionId: 'chat-1', taskId: 'task-1' })
+      expect.objectContaining({ projectId: 'project-1', sessionId: 'chat-1' })
     );
     expect(sql.exec(`SELECT COUNT(*) AS n FROM session_attention_markers`).toArray()[0]).toEqual({
       n: 0,
@@ -1198,7 +1198,7 @@ describe('ProjectData durable prompt delivery', () => {
     });
     expect(fileWakeFailure).toHaveBeenCalledWith(
       {},
-      expect.objectContaining({ projectId: 'project-1', sessionId: 'chat-1', taskId: 'task-1' })
+      expect.objectContaining({ projectId: 'project-1', sessionId: 'chat-1' })
     );
     expect(sql.exec(`SELECT COUNT(*) AS n FROM session_attention_markers`).toArray()[0]).toEqual({
       n: 0,

@@ -185,10 +185,9 @@ export async function notifyTaskFailed(
     type: 'error',
     urgency: NOTIFICATION_TYPE_URGENCY.error ?? 'high',
     title: `Task failed: ${truncate(opts.taskTitle, MAX_NOTIFICATION_TITLE_LENGTH)}`,
-    // With an inbox item, the body is its plain sentence: never the agent's raw error text.
-    body: opts.inboxRef
-      ? classifyFailure(opts.errorMessage).explanation
-      : (opts.errorMessage ?? 'Task encountered an error'),
+    // The classified plain sentence, never the agent's raw error text (it can carry command
+    // fragments, URLs or echoed tokens, and the push body shows on a lock screen).
+    body: classifyFailure(opts.errorMessage).explanation,
     projectId: opts.projectId,
     taskId: opts.taskId,
     sessionId: opts.sessionId,
