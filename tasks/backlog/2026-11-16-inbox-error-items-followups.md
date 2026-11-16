@@ -62,6 +62,11 @@ failed-wake item was finished in the same PR):
     whether a run of an automation should file only through its automation item (the threshold
     then governs when the person hears), and stack or suppress the run items accordingly.
 
+12. Archiving a chat leaves its task's error items open (seen on staging2: twelve archived test
+    chats, six task items still in Needs you). Spec section 7 says an archived chat's open items
+    are cancelled with the reason shown; no slice implements that yet for any ask kind, so it
+    belongs with the asks-wide archive handling rather than to error items alone.
+
 ## Acceptance Criteria
 
 - [ ] Human prompt deliveries that fail terminally on an awake chat file one `delivery` error item
@@ -73,3 +78,4 @@ failed-wake item was finished in the same PR):
 - [ ] A VM-agent failure callback files and notifies inline even when the workspace is already gone
 - [ ] Cancelled automation runs do not count toward the automation item's failure streak
 - [ ] Decide and implement how failed automation runs relate to the automation item (one alert per failure, not two)
+- [ ] Archiving a chat cancels its open asks, error items included (spec section 7)
