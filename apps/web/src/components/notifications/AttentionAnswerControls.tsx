@@ -126,7 +126,7 @@ export function AttentionAnswerControls({
       type="button"
       disabled={busy}
       onClick={() => setTyping(true)}
-      className="flex min-h-11 min-w-0 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-border-default bg-transparent px-3 text-sm text-fg-secondary hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-60"
+      className="flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed whitespace-nowrap border-border-default bg-transparent px-3 text-sm text-fg-secondary hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-60"
     >
       <PenLine size={15} aria-hidden="true" />
       Type a different answer
@@ -146,7 +146,7 @@ export function AttentionAnswerControls({
           }}
         >
           <fieldset
-            className={`relative m-0 min-w-0 overflow-y-auto border-0 p-0 ${pinned ? 'max-h-[min(40vh,18rem)]' : 'max-h-72'}`}
+            className={`relative m-0 min-w-0 overflow-y-auto border-0 p-0 ${pinned ? 'max-h-[min(32vh,18rem)]' : 'max-h-72'}`}
             data-testid="attention-option-list"
           >
             <legend className="sr-only">Choose one answer</legend>
@@ -170,8 +170,12 @@ export function AttentionAnswerControls({
               </label>
             ))}
           </fieldset>
-          <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-2">
-            <Button type="submit" disabled={!picked || busy} className="min-h-11">
+          <div className="flex min-w-0 flex-wrap gap-2">
+            <Button
+              type="submit"
+              disabled={!picked || busy}
+              className="min-h-11 min-w-[6rem] flex-1"
+            >
               {busy ? 'Sending…' : 'Send'}
             </Button>
             {typeDifferent}

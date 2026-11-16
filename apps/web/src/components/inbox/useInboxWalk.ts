@@ -57,8 +57,15 @@ export function useInboxWalk({
   const orderRef = useRef(order);
   orderRef.current = order;
 
+  // Where each answered or archived item handed over to. The URL catches up a render later; until
+  // then the hidden ref in the URL resolves to its successor, so no "nothing open" frame flashes.
+  const handedOver = useRef(new Map<string, string | null>());
+  const effectiveParam =
+    itemParam && hidden.has(itemParam) && handedOver.current.has(itemParam)
+      ? (handedOver.current.get(itemParam) ?? null)
+      : itemParam;
   const selectedRef =
-    itemParam ?? (!isMobile && view !== 'updates' ? (order[0]?.ref ?? null) : null);
+    effectiveParam ?? (!isMobile && view !== 'updates' ? (order[0]?.ref ?? null) : null);
   const listed = order.find((item) => item.ref === selectedRef) ?? null;
   const detail = useInboxItem(
     listed?.projectId ?? projectParam,
@@ -129,6 +136,7 @@ export function useInboxWalk({
   const advancePast = useCallback(
     (ref: string) => {
       const next = nextAfter(orderRef.current, ref);
+      handedOver.current.set(ref, next?.ref ?? null);
       setHidden((current) => new Set(current).add(ref));
       navigateTo(next, true);
     },
@@ -196,7 +204,7 @@ export function useInboxWalk({
     (item: InboxItem) => {
       advancePast(item.ref);
       scheduleArchive(item);
-      showReceipt('Archived. The agent will be told you will not act on it.', 'success', item.ref);
+      showReceipt('Archived · the agent will be told', 'success', item.ref);
     },
     [advancePast, scheduleArchive, showReceipt]
   );
@@ -228,7 +236,7 @@ export function useInboxWalk({
     order,
     selected,
     selectedRef,
-    itemParam,
+    itemParam: effectiveParam,
     detail,
     receipt: visibleReceipt,
     open: (item: InboxItem) => navigateTo(item, false),

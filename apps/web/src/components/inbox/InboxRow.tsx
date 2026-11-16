@@ -30,8 +30,36 @@ export function InboxKindIcon({ item }: { item: InboxItem }) {
   );
 }
 
-function Dot() {
-  return <span aria-hidden="true">·</span>;
+interface MetaSegment {
+  key: string;
+  text: string;
+  /** Long, agent- or user-written text that may truncate; short facts never do. */
+  flexible?: boolean;
+  className?: string;
+}
+
+/**
+ * A wrapping line of facts joined by "·". Each dot leads its own segment, so a wrap moves the
+ * dot with the fact instead of leaving it alone at the end of a line.
+ */
+export function InboxMetaSegments({ segments }: { segments: MetaSegment[] }) {
+  return (
+    <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-fg-muted">
+      {segments.map((segment, index) => (
+        <span
+          key={segment.key}
+          className={`inline-flex items-center gap-1 ${segment.flexible ? 'min-w-0 max-w-full' : 'shrink-0'}`}
+        >
+          {index > 0 && <span aria-hidden="true">·</span>}
+          <span
+            className={`${segment.flexible ? 'min-w-0 truncate' : ''} ${segment.className ?? ''}`}
+          >
+            {segment.text}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
 }
 
 /** Second line: project (cross-project only) · chat · age · agent state or time left. */
@@ -47,29 +75,14 @@ export function InboxMetaLine({
   const left = minutesLeft(item, now);
   const state = left !== null ? `${left}m left` : agentStateShort(item);
   const amber = left !== null || isPausedOnItem(item);
-  return (
-    <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-fg-muted">
-      {showProject && item.projectName && (
-        <>
-          <span className="min-w-0 max-w-full truncate">{item.projectName}</span>
-          <Dot />
-        </>
-      )}
-      {item.topic && (
-        <>
-          <span className="min-w-0 max-w-full truncate">{item.topic}</span>
-          <Dot />
-        </>
-      )}
-      <span className="shrink-0">{formatAge(item.createdAt, now)}</span>
-      {state && (
-        <>
-          <Dot />
-          <span className={`shrink-0 ${amber ? 'text-warning-fg' : ''}`}>{state}</span>
-        </>
-      )}
-    </span>
-  );
+  const segments: MetaSegment[] = [];
+  if (showProject && item.projectName)
+    segments.push({ key: 'project', text: item.projectName, flexible: true });
+  if (item.topic) segments.push({ key: 'topic', text: item.topic, flexible: true });
+  segments.push({ key: 'age', text: formatAge(item.createdAt, now) });
+  if (state)
+    segments.push({ key: 'state', text: state, className: amber ? 'text-warning-fg' : '' });
+  return <InboxMetaSegments segments={segments} />;
 }
 
 /**
@@ -128,22 +141,22 @@ export function InboxRow({
               {first.title}
             </span>
             {stack ? (
-              <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-fg-muted">
-                <span className="shrink-0 font-medium text-fg-secondary">{stack.length} from</span>
-                <span className="min-w-0 max-w-full truncate">{first.topic ?? 'one chat'}</span>
-                {showProject && first.projectName && (
-                  <>
-                    <Dot />
-                    <span className="min-w-0 max-w-full truncate">{first.projectName}</span>
-                  </>
-                )}
-                {stack.some(isPausedOnItem) && (
-                  <>
-                    <Dot />
-                    <span className="shrink-0 text-warning-fg">paused</span>
-                  </>
-                )}
-              </span>
+              <InboxMetaSegments
+                segments={[
+                  {
+                    key: 'count',
+                    text: `${stack.length} from ${first.topic ?? 'one chat'}`,
+                    flexible: true,
+                    className: 'font-medium text-fg-secondary',
+                  },
+                  ...(showProject && first.projectName
+                    ? [{ key: 'project', text: first.projectName, flexible: true }]
+                    : []),
+                  ...(stack.some(isPausedOnItem)
+                    ? [{ key: 'paused', text: 'paused', className: 'text-warning-fg' }]
+                    : []),
+                ]}
+              />
             ) : (
               <InboxMetaLine item={first} showProject={showProject} now={now} />
             )}

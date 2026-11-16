@@ -163,7 +163,7 @@ function ListPane({
     );
   return (
     <>
-      <ul className="m-0 flex flex-col gap-1 p-2" aria-label="Inbox items">
+      <ul className="m-0 flex flex-col gap-1 p-2" aria-label="Items">
         {rows.map((row) => (
           <InboxRow
             key={row.key}
@@ -250,7 +250,11 @@ export function InboxPage({
           className={`relative min-h-0 min-w-0 flex-col overflow-y-auto md:flex ${itemOpenOnPhone && !updates ? 'hidden' : 'flex'}`}
           aria-label="Inbox list"
         >
-          {!walk.selected && walk.receipt && <InboxReceiptLine receipt={walk.receipt} />}
+          {/* On a phone with nothing open the receipt shows above the list; on desktop the item
+              pane shows it. */}
+          {isMobile && !walk.itemParam && walk.receipt && (
+            <InboxReceiptLine receipt={walk.receipt} />
+          )}
           <ListPane walk={walk} showProject={showProject} projectId={projectId} now={now} />
         </Pane>
         {!updates && (
@@ -262,7 +266,7 @@ export function InboxPage({
               <ItemPane walk={walk} item={walk.selected} now={now} />
             ) : (
               <NoItemPane
-                receipt={walk.receipt}
+                receipt={isMobile ? null : walk.receipt}
                 loading={Boolean(walk.itemParam) && walk.detail.isLoading}
               />
             )}
