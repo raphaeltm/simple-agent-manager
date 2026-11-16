@@ -19,6 +19,7 @@ import type {
   AgentEffort,
   AgentProfile,
   CredentialLimitsResponse,
+  InboxItemContext,
   NotificationResponse,
   NotificationType,
   SessionStateSnapshot,
@@ -31,6 +32,7 @@ import type * as schema from '@simple-agent-manager/worker-core/schema';
 
 import type { ConnectorAnswerChoice } from './connector-answer-input';
 import type { ConnectorReadSettingName } from './connector-read-settings-definition';
+import type { InboxSettingName } from './inbox-settings-definition';
 import type {
   AgentActivityTask,
   LimitKey,
@@ -79,7 +81,8 @@ export type OperationSettingName =
   | 'collaboration.ideaUpdateBodyMaxLength'
   | 'collaboration.ideaUpdateQuoteMaxLength'
   | 'collaboration.ideaAgentNoteMinIntervalSeconds'
-  | 'collaboration.ideaUpdatePageSize';
+  | 'collaboration.ideaUpdatePageSize'
+  | InboxSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;
 
@@ -384,8 +387,100 @@ export interface OperationMissionPort {
   startOrchestration(projectId: string, missionId: string): Promise<void>;
 }
 
+/** A question or permission held as a ProjectData attention marker, with the reader's access. */
+export interface InboxAttentionMarker {
+  id: string;
+  sessionId: string;
+  taskId: string | null;
+  source: string | null;
+  reason: string | null;
+  options: string[];
+  category: string | null;
+  interactionId: string | null;
+  interactionKind: string | null;
+  createdAt: number;
+  expiresAt: number | null;
+  resolvedAt: number | null;
+  topic: string | null;
+  /** The reader may read the chat (owner or an active grantee). */
+  canRead: boolean;
+  /** The reader may answer for the agent in the chat. */
+  canWrite: boolean;
+}
+
+/** An `asks` row as the notice path needs it (`packages/worker-core/src/schema.ts:asks`). */
+export interface InboxAskNoticeRow {
+  id: string;
+  projectId: string;
+  kind: string;
+  title: string;
+  status: string;
+  answerJson: string | null;
+  sourceSessionId: string | null;
+  sourceTaskId: string | null;
+  resolvedByUserId: string | null;
+  assigneeUserId: string | null;
+}
+
+export type InboxAskNoticeOutcome = 'answered' | 'done' | 'archived' | 'expired';
+
+/**
+ * The inbox's reach into other areas (`apps/api/src/services/inbox/`). Every answer and archive
+ * goes through the path that store already answers through; none is re-implemented here.
+ */
+export interface OperationInboxPort {
+  /** Project roles that hold a capability (the role table lives in the worker). */
+  rolesWithCapability(capability: 'task:write' | 'secret:read' | 'secret:write'): readonly string[];
+  /** One marker with the reader's access, or null when it does not exist in that chat. */
+  attentionMarker(
+    projectId: string,
+    sessionId: string,
+    markerId: string,
+    userId: string
+  ): Promise<InboxAttentionMarker | null>;
+  /** Transcript around an ask; null when the reader cannot read the chat. */
+  context(input: {
+    projectId: string;
+    sessionId: string;
+    askedAt: number;
+    userId: string;
+  }): Promise<InboxItemContext | null>;
+  /** Resolve a question with reason `archived` and tell the agent the person will not act. */
+  archiveAttention(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    markerId: string
+  ): Promise<{ agentNotified: boolean }>;
+  fulfilSecret(
+    userId: string,
+    projectId: string,
+    requestId: string,
+    secret: { value: string; replaceExisting: boolean; expectedExistingVersion: string | null }
+  ): Promise<{ agentNotified: boolean }>;
+  declineSecret(
+    userId: string,
+    projectId: string,
+    requestId: string
+  ): Promise<{ agentNotified: boolean }>;
+  decideApproval(
+    userId: string,
+    approvalId: string,
+    decision: 'approve' | 'deny',
+    note: string | null
+  ): Promise<{ outcome: string; agentNotified: boolean }>;
+  /** Authorizes waking the agent in a chat for this actor (`authorizeAgentWake`); throws when refused. */
+  authorizeAnswerWake(projectId: string, sessionId: string, userId: string): Promise<void>;
+  /**
+   * Queues the filing agent's notice that an ask closed; true when queued. Never throws. The
+   * caller records `notified_at`; a sweep retries a notice that was not queued.
+   */
+  notifyAsk(row: InboxAskNoticeRow, outcome: InboxAskNoticeOutcome): Promise<boolean>;
+}
+
 export interface OperationPorts {
   config: OperationConfigPort;
+  inbox: OperationInboxPort;
   projectData: OperationProjectDataPort;
   settings: OperationSettingsPort;
   access: OperationAccessPort;

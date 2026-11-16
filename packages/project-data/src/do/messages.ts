@@ -82,7 +82,11 @@ function parseArchiveSourceIntentState(value: unknown): ProjectDataArchiveSource
     : null;
 }
 
-function assertTranscriptWriteAllowed(sql: SqlStorage, sessionId: string, operation: string): void {
+export function assertTranscriptWriteAllowed(
+  sql: SqlStorage,
+  sessionId: string,
+  operation: string
+): void {
   let row: Record<string, unknown> | undefined;
   try {
     row = sql

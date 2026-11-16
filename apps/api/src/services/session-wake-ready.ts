@@ -34,6 +34,8 @@ export async function signalSessionWakeReadyBestEffort(
         );
       }),
     ]);
+    const accepted =
+      typeof released === 'number' && Number.isSafeInteger(released) && released >= 0;
     log.info('session_wake.ready_signaled', {
       projectId: input.projectId,
       sessionId: input.chatSessionId,
@@ -43,8 +45,9 @@ export async function signalSessionWakeReadyBestEffort(
       signalStartedAt: readyAt,
       signaledAt: Date.now(),
       released,
+      accepted,
     });
-    return true;
+    return accepted;
   } catch (error) {
     log.warn('session_wake.ready_signal_failed', {
       sessionId: input.chatSessionId,

@@ -734,11 +734,12 @@ describe('evicted source cleanup through real writers and real SQL', () => {
         VALUES ('conversation', 'project', 'user', 'chat', 'workspace', 'Conversation', 'Work', 'sleeping', 0, 'conversation', 0, 'user', '2026-11-05T00:00:00Z', '2026-11-05T00:00:00Z');
     `);
     // The user picked machines: the wake places on the pool, and nothing joins it on its own.
+    // Prepare the validated bundled catalog; this preservation/wake fixture's synthetic
+    // credential is not encrypted for a live cloud-provider lookup.
     await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
       userId: 'user',
       projectId: 'project',
       includeInstallation: true,
-      env,
     });
     await capture('workspace', 'node', false); // live pre-stop capture
     await capture('workspace', 'node', true); // final capture after docker stop
