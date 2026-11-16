@@ -33,3 +33,10 @@ Classification: external-api-change, business-logic-change. No new integration, 
 - [x] New regression assertions failed against original catalog (5 failures), then passed after update.
 
 Release gates remain tracked in PR and SAM: staging, full CI, CodeRabbit, merge and production smoke.
+
+## CI consumer correction
+CI's marketing integration drift test caught the stale Mistral Large 3 badge in `apps/www/src/data/integrations/agents.json` (the initial docs search missed the separate integration data directory). Updated copy to describe the moving default alias without pinning a version, and explicitly list selectable Large 4 / GLM Flash. Existing drift test proves the failure and fix. Marketing: 63 tests, lint, template validation (2 existing baseline errors; zero new errors), and production build all passed. Local Playwright at 375x667 and 1280x800 asserted correct copy and no horizontal overflow. Screenshots under `tasks/evidence/2026-11-16-model-catalog/` reviewed: readable labels, wrapping, expanded FAQ, no clipping; existing layout preserved. Additional independent test/docs review PASS.
+
+CodeRabbit requested by ready-label trusted workflow 43844728938; request succeeded as human identity, then CodeRabbit replied “Review limit reached”. Best-effort gate complete without review; no retry.
+
+Release still pending: both staging installations leased by other tasks. Scheduled earliest lease expiry wake at 2026-11-16T11:03:15Z. PR #2785 remains open; no merge claimed.
