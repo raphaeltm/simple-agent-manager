@@ -54,6 +54,7 @@ import { createOperationPorts } from '../../../../src/operation-ports';
 import { __resetAdminSettingsCacheForTest } from '../../../../src/services/admin-settings';
 import { buildInboxAskPrompt } from '../../../../src/services/inbox/ask-notice';
 import { fileQuestionAsk } from '../../../../src/services/inbox/question-asks';
+import { runInboxAskSweep } from '../../../../src/services/inbox/sweep';
 import {
   applySqliteMigration,
   createAllSchemaTables,
@@ -560,6 +561,20 @@ describe('request_human_input alias', () => {
         metadata: expect.objectContaining({ attentionMarkerId: filed.id, options: ['Yes', 'No'] }),
       })
     );
+  });
+});
+
+describe('expiry', () => {
+  it('a non-blocking ask and a review outlive the question window; a blocking ask expires', async () => {
+    const later = await ask(chat1, { title: 'Rename later?', blocking: false });
+    const review = await fileAgentReview(ctxFor('owner', P1), chat1, { title: 'Review the PR' });
+    const blocking = await ask(chat1, { title: 'Ship it?' });
+    // Far past every question limit (default 24 h hard limit).
+    await runInboxAskSweep(env, Date.now() + 3 * 24 * 60 * 60_000);
+    expect(askRow(later.id).status).toBe('open');
+    expect(askRow(review.id).status).toBe('open');
+    // Control: the sweep ran and expired the blocking question.
+    expect(askRow(blocking.id).status).toBe('expired');
   });
 });
 
