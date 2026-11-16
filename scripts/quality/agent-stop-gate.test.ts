@@ -249,7 +249,7 @@ describe('Stop gate: output contract and failure safety', () => {
 
   it('uses only Node built-ins, so it runs without node_modules', () => {
     const source = readFileSync(join(ROOT, SCRIPT), 'utf8');
-    const imports = [...source.matchAll(/from '([^']+)'/g)].map((match) => match[1]);
+    const imports = [...source.matchAll(/from '([^']+)'/g)].map((match) => match[1] ?? '');
     expect(imports.length).toBeGreaterThan(0);
     expect(imports.every((specifier) => specifier.startsWith('node:'))).toBe(true);
   });

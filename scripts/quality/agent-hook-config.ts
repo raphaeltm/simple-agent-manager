@@ -273,7 +273,7 @@ export function checkCodexHookConfig(config: unknown): HookEntryProblem[] {
 export function hookCommandScripts(command: string): string[] {
   const scripts = new Set<string>();
   for (const match of command.matchAll(/(\.(?:claude|codex)\/hooks\/[A-Za-z0-9._-]+)/g)) {
-    scripts.add(match[1]);
+    if (match[1]) scripts.add(match[1]);
   }
   return [...scripts];
 }

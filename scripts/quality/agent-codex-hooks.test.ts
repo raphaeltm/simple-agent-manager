@@ -256,7 +256,8 @@ describe('Codex rule-context hook', () => {
     const delivered = new Set<string>();
     let run = first;
     for (let call = 0; call < 10 && context(run) !== ''; call++) {
-      for (const match of context(run).matchAll(/===== (\S+) =====/g)) delivered.add(match[1]);
+      for (const match of context(run).matchAll(/===== (\S+) =====/g))
+        delivered.add(match[1] ?? '');
       run = hook(repo, bash('cat apps/api/wrangler.toml'), {
         SAM_CODEX_RULE_CONTEXT_MAX_BYTES: budget,
       });
@@ -289,7 +290,7 @@ describe('Codex rule-context hook', () => {
 
   it('uses only Node built-ins, so it runs without node_modules', () => {
     const source = readFileSync(join(ROOT, HOOK), 'utf8');
-    const imports = [...source.matchAll(/from '([^']+)'/g)].map((match) => match[1]);
+    const imports = [...source.matchAll(/from '([^']+)'/g)].map((match) => match[1] ?? '');
     expect(imports.length).toBeGreaterThan(0);
     expect(imports.every((specifier) => specifier.startsWith('node:'))).toBe(true);
   });
@@ -304,9 +305,10 @@ describe('generated Codex rule lookup', () => {
     const model = new InstructionModel(rules, { claude: null, agents: null });
     const scopes = codexRuleScopes(model);
     expect(scopes.map((scope) => scope.path)).toEqual(['.claude/rules/a.md']);
-    const regex = new RegExp(scopes[0].patterns[0].regex);
+    const [scoped] = rules;
+    const regex = new RegExp(scopes[0]?.patterns[0]?.regex ?? '(?!)');
     for (const file of ['apps/api/src/index.ts', 'apps/api-old/x.ts', 'apps/api']) {
-      expect(regex.test(file)).toBe(model.loadsOnAccess(rules[0], file));
+      expect(regex.test(file)).toBe(scoped !== undefined && model.loadsOnAccess(scoped, file));
     }
   });
 
