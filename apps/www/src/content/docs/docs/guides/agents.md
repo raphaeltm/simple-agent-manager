@@ -146,9 +146,9 @@ SAM picks the account for a run in this order, most specific first (`explainReso
 
 1. The account you chose for this chat ([Using another account for one chat](#using-another-account-for-one-chat)).
 1. Your account for this profile.
-2. Your account for this project.
-3. Your default account for the agent.
-4. SAM's platform account, where the agent has one.
+1. Your account for this project.
+1. Your default account for the agent.
+1. SAM's platform account, where the agent has one.
 
 Pins are per person. Yours change which of your accounts runs your work; they never change a
 teammate's.
@@ -842,7 +842,9 @@ change.
 | `resolve_incident`                                                                                                 | Terminally resolve or reject a claimed private incident; resolved outcomes require a PR/task/Idea ship-or-track reference                                                                                                                                                                                                                                                      |
 | `update_task_status`                                                                                               | Report progress                                                                                                                                                                                                                                                                                                                                                                |
 | `complete_task`                                                                                                    | Mark current work as done. Pass the pull request URL as `evidence.prUrl`; it is saved on the task alongside optional test, staging, CI, manual verification, and note evidence.                                                                                                                                                                                                |
-| `request_human_input`                                                                                              | Record a user decision request and notify the user; the tool call itself is non-blocking                                                                                                                                                                                                                                                                                       |
+| `request_human_input`                                                                                              | Alias of `inbox_write` method `ask` with blocking on: files one question in the person's inbox and notifies them; non-blocking                                                                                                                                                                                                                                                 |
+| `inbox_write`                                                                                                      | File what you need from a person in their inbox: `ask` (one question, one answer shape), `review`, and `update` / `cancel` of your own open item                                                                                                                                                                                                                               |
+| `inbox_read`                                                                                                       | `list` open items from this chat or project (check before filing), `get` one item with its answer and outcome                                                                                                                                                                                                                                                                  |
 
 `tasks_read` method `get` keeps `outputPrUrl`, `outputSummary`, and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. The SAM session (Anthropic tool) variant returns a single `finalAssistantMessage` (the latest assistant message, content capped to 2,000 characters) instead of the full array. If session diagnostics are unavailable, task details still return and the diagnostic fields are empty/null.
 
