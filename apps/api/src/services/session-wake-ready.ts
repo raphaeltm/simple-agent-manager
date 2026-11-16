@@ -22,15 +22,6 @@ export async function signalSessionWakeReadyBestEffort(
 ): Promise<boolean> {
   const readyAt = Date.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  // The runtime is committed ready: the chat woke, so its failed-wake inbox item closes by
-  // itself (slice E), whether or not the scheduling signal below lands. Run beside the signal so
-  // the D1 write cannot delay readiness; it never throws.
-  const closeWakeItem = resolveSystemErrorFor(env, {
-    projectId: input.projectId,
-    source: 'wake',
-    subjectId: input.chatSessionId,
-    resolution: 'recovered',
-  });
   try {
     const stub = env.PROJECT_DATA.get(
       env.PROJECT_DATA.idFromName(input.projectId)
@@ -68,6 +59,14 @@ export async function signalSessionWakeReadyBestEffort(
     return false;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
-    await closeWakeItem;
+    // The runtime is committed ready: the chat woke, so its failed-wake inbox item closes by
+    // itself (slice E), whether or not the scheduling signal landed. After the signal, so the D1
+    // write cannot delay readiness or reorder the queued deliveries; it never throws.
+    await resolveSystemErrorFor(env, {
+      projectId: input.projectId,
+      source: 'wake',
+      subjectId: input.chatSessionId,
+      resolution: 'recovered',
+    });
   }
 }
