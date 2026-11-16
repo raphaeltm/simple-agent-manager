@@ -52,6 +52,7 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/51-vm-agent-no-host-mime-dependency.md`: VM Agent Behavior Must Not Depend on Host-Provided MIME/OS Databases
 - `.claude/rules/52-model-catalog-lifecycle.md`: Model Catalog Lifecycle (Adding and Retiring Provider Models)
 - `.claude/rules/65-capped-selection-must-rank-and-disclose.md`: A Capped Selection Must Rank By Its Purpose, And Must Disclose What It Dropped
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 - `.claude/rules/79-new-enum-values-audit-every-denylist.md`: A New Value in a Shared Status Enum Must Audit Every Denylist Over That Enum
 - `.claude/rules/82-typed-cards-every-harness.md`: A Typed Chat Card Must Render for Every Agent Harness
 

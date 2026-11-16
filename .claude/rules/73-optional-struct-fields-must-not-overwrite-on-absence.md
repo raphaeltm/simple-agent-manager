@@ -1,4 +1,28 @@
+---
+paths:
+  - '**/*.go'
+  - '**/*.ts'
+  - '**/*.tsx'
+  - '**/*.sql'
+---
+
 # A Zero-Valued Optional Field Must Not Overwrite Existing State
+
+## Enforcement
+
+- **Go, blocking in CI:** `pnpm quality:go-optional-fields`
+  (`scripts/quality/go-optional-fields/`) reports a non-string scalar field of an options
+  or patch value that is copied onto existing state with no "not supplied" check, or
+  guarded only by its own truthiness. It reports the original incident at every commit
+  where it existed. A deliberate full replacement opts out with
+  `//sam:optional-field-ok <reason>` on or above the line.
+- **TypeScript:** strict null checks reject the direct form (assigning `boolean | undefined`
+  to `boolean`). Defaulting an absent field on an update path (`patch.flag ?? false`,
+  spreads, `Object.assign`) is not checked: the same syntax is the normal way to create a
+  record, so a lint could not tell them apart. That part, the stored-override-layer shape
+  below, and the tests the rule requires remain review judgment.
+- The check cannot prove that a consumer gates on the right signal (requirement 6). The
+  per-call-site, explicit-override and consumer tests below stay required.
 
 ## When This Applies
 

@@ -219,6 +219,7 @@ describe('agent instruction check selection', () => {
     '.codex/config.toml',
     '.codex/hooks/rule-context.mjs',
     '.codex/hooks/rule-scopes.json',
+    'scripts/quality/go-optional-fields/main.go',
     'scripts/quality/agent-instructions.ts',
     'scripts/quality/agent-context-budget.json',
     'scripts/quality/check-agent-context-budget.ts',
