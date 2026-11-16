@@ -909,11 +909,15 @@ describe('Project Overview', () => {
       // Agent-written text is rendered as text, never markup.
       expect(automation.textContent).toBe('Nightly <script>alert(1)</script> build');
       expect(brief.querySelector('script')).toBeNull();
-      const pr = within(brief).getByRole('link', { name: 'Round tax totals' });
+      const pr = within(brief).getByRole('link', { name: /Round tax totals/ });
       expect(pr).toHaveAttribute('href', 'https://github.com/acme/billing/pull/2771');
       expect(pr).toHaveAttribute('rel', 'noopener noreferrer');
       expect(within(brief).queryByTestId('overview-brief-toggle')).toBeNull();
-      expect(within(brief).queryByTestId('overview-brief-age')).toBeNull();
+      // The age line is always there, so a stale brief never changes the pane's height.
+      expect(within(brief).getByTestId('overview-brief-age')).toHaveTextContent(
+        'Written 25 min ago'
+      );
+      expect(within(pr).getByText('(opens in a new tab)')).toBeInTheDocument();
       // Desktop DOM order: the brief comes before Needs you.
       const main = screen.getByTestId('overview-main');
       const regions = within(main)
@@ -922,19 +926,27 @@ describe('Project Overview', () => {
       expect(regions.indexOf('Project brief')).toBeLessThan(regions.indexOf('Needs you'));
     });
 
-    it('folds to one sentence on a phone and expands in place to two', async () => {
+    it('folds to one sentence on a phone; tapping the line opens it in place, and only then are names links', async () => {
       viewport.isMobile = true;
       overviewBody = { ...overview([EXISTING]), brief: briefOf() };
       renderOverview();
       const brief = await screen.findByRole('region', { name: 'Project brief' });
-      expect(within(brief).getByRole('link', { name: 'Pick a deploy target' })).toBeInTheDocument();
-      expect(within(brief).queryByRole('link', { name: /Nightly/ })).toBeNull();
-      const toggle = within(brief).getByTestId('overview-brief-toggle');
-      expect(toggle).toHaveAttribute('aria-expanded', 'false');
-      fireEvent.click(toggle);
+      // Folded: the line is one button named by its sentence; names are not links yet.
+      const line = within(brief).getByRole('button', { name: /Pick a deploy target/ });
+      expect(line).toHaveAttribute('aria-expanded', 'false');
+      expect(within(brief).queryByRole('link')).toBeNull();
+      expect(within(brief).queryByText(/Nightly/)).toBeNull();
+      fireEvent.click(within(brief).getByText('Pick a deploy target'));
+      const toggle = within(brief).getByRole('button', { name: 'Project brief details' });
       expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      expect(within(brief).getByRole('link', { name: 'Pick a deploy target' })).toBeInTheDocument();
       expect(within(brief).getByRole('link', { name: /Nightly/ })).toBeInTheDocument();
-      expect(within(brief).queryByRole('link', { name: 'Round tax totals' })).toBeNull();
+      expect(within(brief).queryByRole('link', { name: /Round tax totals/ })).toBeNull();
+      fireEvent.click(toggle);
+      expect(within(brief).getByRole('button', { name: /Pick a deploy target/ })).toHaveAttribute(
+        'aria-expanded',
+        'false'
+      );
     });
 
     it('keeps a stale brief visible, dimmed with its age, and refetches to catch up', async () => {

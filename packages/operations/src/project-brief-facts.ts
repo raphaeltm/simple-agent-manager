@@ -13,13 +13,15 @@
  * - an account is included only when the credential is the project's or the platform's, never a
  *   member's own.
  *
- * Round trips: seven reads issued together (background only: a page view never waits on them).
+ * Round trips: seven reads issued together (workerd runs six at once; background only: a page
+ * view never waits on them).
  */
 import { DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES } from '@simple-agent-manager/shared';
 import { log } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import { ideaTaskPredicateSql } from './idea-identity';
+import { BRIEF_ACCOUNT_LIVE_SQL, BRIEF_ASK_VISIBLE_SQL } from './project-brief-sql';
 import { readRunningChats } from './project-overview';
 import { sanitizeUserInput } from './sanitize-user-input';
 
@@ -46,14 +48,32 @@ export interface BriefFacts {
 }
 
 /** Clean an untrusted title for the model: no control characters, one line, capped. */
+/** Control and invisible format characters (zero-width, bidi, tag characters used to smuggle text). */
+const INVISIBLE = /[\p{Cc}\p{Cf}]/gu;
+
+/** Clean an untrusted title for the model: no control or invisible characters, one line, capped. */
 export function briefText(value: string | null | undefined, fallback: string): string {
   const cleaned = sanitizeUserInput(value ?? '')
     .replace(/\s+/g, ' ')
+    .replace(INVISIBLE, '')
     .trim();
   if (!cleaned) return fallback;
-  return cleaned.length > BRIEF_FACT_TEXT_MAX_CHARS
-    ? `${cleaned.slice(0, BRIEF_FACT_TEXT_MAX_CHARS - 1).trimEnd()}…`
+  const chars = Array.from(cleaned);
+  return chars.length > BRIEF_FACT_TEXT_MAX_CHARS
+    ? `${chars
+        .slice(0, BRIEF_FACT_TEXT_MAX_CHARS - 1)
+        .join('')
+        .trimEnd()}…`
     : cleaned;
+}
+
+/**
+ * The SQL date of a cutoff, as a lower bound an index can use on a text timestamp. Both stored
+ * forms (`2026-11-16T10:00:00.000Z` and `2026-11-16 10:00:00`) sort at or after their own date,
+ * so this never excludes a row the exact `julianday` filter keeps.
+ */
+function datePrefix(iso: string): string {
+  return iso.slice(0, 10);
 }
 
 export function briefAge(createdAtMs: number, now: number): BriefAge {
@@ -64,41 +84,36 @@ export function briefAge(createdAtMs: number, now: number): BriefAge {
   return 'older';
 }
 
-/**
- * Open asks every member may see (see the module comment). Blocking first, then oldest first:
- * the order the inbox itself puts them in, and the order the brief should mention them.
- */
-const ASKS_SQL = `
+/** Blocking first, then oldest first: the inbox's own order, and the order to mention them in. */
+export const BRIEF_ASKS_SQL = `
   SELECT a.id, a.kind, a.title, a.blocking, a.created_at
     FROM asks a
-   WHERE a.project_id = ? AND a.status = 'open'
-     AND (a.expires_at IS NULL OR a.expires_at > ?)
-     AND ((a.assignee_kind = 'team' AND a.claimed_by_user_id IS NULL)
-       OR NOT EXISTS (
-         SELECT 1 FROM project_members pm
-          WHERE pm.project_id = a.project_id AND pm.status = 'active'
-            AND pm.user_id <> COALESCE(
-              CASE WHEN a.assignee_kind = 'team' THEN a.claimed_by_user_id
-                   ELSE a.assignee_user_id END, '')))
+   WHERE a.project_id = ? AND ${BRIEF_ASK_VISIBLE_SQL}
    ORDER BY a.blocking DESC, a.created_at ASC, a.id ASC
    LIMIT ?`;
 
-/** Chats whose task failed recently. `julianday` reads both ISO and SQLite timestamp forms. */
-const FAILED_CHATS_SQL = `
+/**
+ * Chats whose task failed recently. Driven from the project's failed tasks
+ * (`idx_tasks_project_status_priority_updated`) into their chat (`idx_session_summaries_task`);
+ * `CROSS JOIN` fixes that order, since D1 keeps no planner statistics. The date prefix lets the
+ * index bound the range; `julianday` then reads both timestamp forms exactly.
+ */
+export const BRIEF_FAILED_CHATS_SQL = `
   SELECT ss.id, ss.topic, t.title
     FROM tasks t
-    JOIN session_summaries ss ON ss.task_id = t.id AND ss.project_id = t.project_id
+    CROSS JOIN session_summaries ss ON ss.task_id = t.id AND ss.project_id = t.project_id
    WHERE t.project_id = ? AND t.status = 'failed'
-     AND julianday(t.updated_at) >= julianday(?)
+     AND t.updated_at >= ? AND julianday(t.updated_at) >= julianday(?)
    ORDER BY t.updated_at DESC, t.id DESC
    LIMIT ?`;
 
 /**
  * Automations whose newest finished runs all failed: the Automation page's own rule
  * (`failureStreak` ≥ `DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES`, apps/web automation model). Each
- * trigger reads only its newest few finished runs, by its own index.
+ * trigger walks its newest runs backwards on `idx_trigger_executions_trigger_sequence` and stops
+ * after a few finished ones, with no sort over its history.
  */
-const FAILING_AUTOMATIONS_SQL = `
+export const BRIEF_FAILING_AUTOMATIONS_SQL = `
   SELECT t.id, t.name, t.status
     FROM triggers t
    WHERE t.project_id = ? AND t.status <> 'disabled'
@@ -112,27 +127,26 @@ const FAILING_AUTOMATIONS_SQL = `
    LIMIT ?`;
 
 /** Shared accounts near or past a limit. A member's own credential is never a project fact. */
-const ACCOUNTS_SQL = `
-  SELECT credential_reference, credential_source, provider, last_event_level
-    FROM credential_limit_windows
-   WHERE project_id = ? AND credential_source IN ('project', 'platform')
-     AND last_event_level IN ('warning', 'critical', 'rejected')
-     AND (resets_at IS NULL OR resets_at > ?)
-   ORDER BY credential_reference ASC, window_type ASC`;
+export const BRIEF_ACCOUNTS_SQL = `
+  SELECT w.credential_reference, w.credential_source, w.provider, w.last_event_level
+    FROM credential_limit_windows w
+   WHERE w.project_id = ? AND ${BRIEF_ACCOUNT_LIVE_SQL}
+   ORDER BY w.credential_reference ASC, w.window_type ASC`;
 
-const MERGED_PULL_REQUESTS_SQL = `
+export const BRIEF_MERGED_PULL_REQUESTS_SQL = `
   SELECT number, url, title
     FROM pull_requests
-   WHERE project_id = ? AND state = 'merged' AND julianday(merged_at) >= julianday(?)
+   WHERE project_id = ? AND state = 'merged'
+     AND merged_at >= ? AND julianday(merged_at) >= julianday(?)
    ORDER BY merged_at DESC
    LIMIT ?`;
 
-const NEW_IDEAS_SQL = `
+export const BRIEF_NEW_IDEAS_SQL = `
   SELECT tasks.id, tasks.title
     FROM tasks
    WHERE tasks.project_id = ? AND ${ideaTaskPredicateSql()}
      AND tasks.status NOT IN ('completed', 'cancelled')
-     AND julianday(tasks.created_at) >= julianday(?)
+     AND tasks.created_at >= ? AND julianday(tasks.created_at) >= julianday(?)
    ORDER BY tasks.created_at DESC, tasks.id DESC
    LIMIT ?`;
 
@@ -217,14 +231,14 @@ export async function readBriefFacts(
       .then((result) => result.results ?? []);
   const threshold = DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES;
   const [asks, running, failed, automations, accounts, pulls, ideas] = await Promise.all([
-    all(ASKS_SQL, projectId, now, limit),
+    all(BRIEF_ASKS_SQL, projectId, now, limit),
     // A viewer id that matches nobody: the facts are the same for every member.
     readRunningChats(db, projectId, '', limit),
-    all(FAILED_CHATS_SQL, projectId, failedCutoff, limit),
-    all(FAILING_AUTOMATIONS_SQL, projectId, threshold, threshold, limit),
-    all(ACCOUNTS_SQL, projectId, now),
-    all(MERGED_PULL_REQUESTS_SQL, projectId, recentCutoff, limit),
-    all(NEW_IDEAS_SQL, projectId, recentCutoff, limit),
+    all(BRIEF_FAILED_CHATS_SQL, projectId, datePrefix(failedCutoff), failedCutoff, limit),
+    all(BRIEF_FAILING_AUTOMATIONS_SQL, projectId, threshold, threshold, limit),
+    all(BRIEF_ACCOUNTS_SQL, projectId, now),
+    all(BRIEF_MERGED_PULL_REQUESTS_SQL, projectId, datePrefix(recentCutoff), recentCutoff, limit),
+    all(BRIEF_NEW_IDEAS_SQL, projectId, datePrefix(recentCutoff), recentCutoff, limit),
   ]);
 
   // One line per account, at its worst window.

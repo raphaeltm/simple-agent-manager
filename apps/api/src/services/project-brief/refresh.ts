@@ -5,8 +5,9 @@
  * Each call walks one decision, and logs which way it went (`project_brief.refresh`):
  *
  * 1. `disabled`: the admin switch is off.
- * 2. `not_due`: another check ran within `checkIntervalSeconds`. Decided by one compare-and-set
- *    write on `checked_at`, so concurrent page views make one check, not one each.
+ * 2. `not_due`: another check ran within `checkIntervalSeconds`. A read decides the common case;
+ *    a compare-and-set write on `checked_at` then makes concurrent views make one check, not one
+ *    each.
  * 3. Read the facts (`readBriefFacts`) and fingerprint the ones that matter.
  *    `unchanged`: same fingerprint as the stored brief.
  *    `quiet`: nothing needs anyone and nothing is happening; an empty brief is stored, no model.
@@ -17,7 +18,8 @@
  *    reply (`parseBriefReply`), and write it under the claim. `generated` or `failed`.
  *
  * Cost bound: at most `dailyCap` model calls per project per UTC day, and never two within
- * `minIntervalMinutes`. The count is taken when the call is claimed, so failures spend it too.
+ * `minIntervalMinutes`. The count is taken when the call is claimed, so failures (and attempts
+ * whose isolate was cancelled) spend it too, and their claim time counts toward the interval.
  */
 import {
   BRIEF_PENDING_TTL_MS,
@@ -40,6 +42,14 @@ import { buildBriefPrompt } from './prompt';
 export const BRIEF_MAX_OUTPUT_TOKENS = 400;
 /** One model call's time budget. Background only, so it never delays a page. */
 export const BRIEF_MODEL_TIMEOUT_MS = 20_000;
+/**
+ * The whole refresh must finish inside `waitUntil`'s window (about 30 s after the response). The
+ * model call gets what is left of this budget, and is not started with less than
+ * `BRIEF_MODEL_MIN_MS`: the claim is released with a recorded reason instead of being cancelled
+ * mid-call and silently spending a daily slot.
+ */
+export const BRIEF_REFRESH_BUDGET_MS = 26_000;
+export const BRIEF_MODEL_MIN_MS = 5_000;
 /** Characters of a provider error kept for the operator. */
 const BRIEF_ERROR_MAX_CHARS = 300;
 
@@ -68,7 +78,8 @@ const CLAIM_CHECK_SQL = `
    WHERE project_briefs.checked_at IS NULL OR project_briefs.checked_at <= ?3`;
 
 const READ_STATE_SQL = `
-  SELECT fingerprint, generated_at, stale, last_error_at FROM project_briefs WHERE project_id = ?`;
+  SELECT fingerprint, generated_at, stale, last_error_at, pending_since
+    FROM project_briefs WHERE project_id = ?`;
 
 /**
  * The generation claim. SQLite evaluates every SET expression against the row as it was, so the
@@ -81,7 +92,7 @@ const CLAIM_GENERATION_SQL = `
          generation_day = ?2,
          updated_at = ?1
    WHERE project_id = ?3
-     AND (pending_since IS NULL OR pending_since <= ?4)
+     AND (pending_since IS NULL OR (pending_since <= ?4 AND pending_since <= ?6))
      AND (CASE WHEN generation_day = ?2 THEN generation_count ELSE 0 END) < ?5
      AND (generated_at IS NULL OR generated_at <= ?6)
      AND (last_error_at IS NULL OR last_error_at <= ?6)`;
@@ -91,6 +102,7 @@ const StateRow = v.object({
   generated_at: v.nullable(v.number()),
   stale: v.nullable(v.number()),
   last_error_at: v.nullable(v.number()),
+  pending_since: v.nullable(v.number()),
 });
 
 function utcDay(now: number): string {
@@ -106,13 +118,21 @@ async function markStale(db: D1Database, projectId: string, now: number): Promis
     .run();
 }
 
-async function callModel(env: Env, messages: ReturnType<typeof buildBriefPrompt>['messages']) {
+async function callModel(
+  env: Env,
+  projectId: string,
+  messages: ReturnType<typeof buildBriefPrompt>['messages'],
+  timeoutMs: number
+) {
+  // The brief's model is a non-reasoning-by-default model whose controls the task-title path
+  // already knows; a change of model must add its controls there too.
   const controls = getTaskTitleModelControls(DEFAULT_PROJECT_BRIEF_MODEL);
   return fetchWorkersAIChatCompletion(env, {
     modelId: DEFAULT_PROJECT_BRIEF_MODEL,
     maxTokens: BRIEF_MAX_OUTPUT_TOKENS,
-    timeoutMs: BRIEF_MODEL_TIMEOUT_MS,
-    metadata: { source: 'project-brief', modelId: DEFAULT_PROJECT_BRIEF_MODEL },
+    timeoutMs,
+    // projectId attributes this platform spend in AI Gateway logs.
+    metadata: { source: 'project-brief', modelId: DEFAULT_PROJECT_BRIEF_MODEL, projectId },
     responseLabel: 'project_brief.gateway_response',
     reasoningEffort: controls.reasoningEffort,
     chatTemplateKwargs: controls.chatTemplateKwargs,
@@ -121,13 +141,26 @@ async function callModel(env: Env, messages: ReturnType<typeof buildBriefPrompt>
   });
 }
 
+class BriefDeadlineError extends Error {
+  constructor() {
+    super('not enough of the refresh budget left for a model call');
+  }
+}
+
 async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
+  const startedAt = Date.now();
   const { env, projectId, settings } = input;
   const db = env.DATABASE;
   const now = input.now ?? Date.now();
   if (!settings.enabled) return 'disabled';
 
   const checkCutoff = now - settings.checkIntervalSeconds * 1000;
+  // A read first: most page views are inside the check interval and must not cost a primary write.
+  const last = await db
+    .prepare(`SELECT checked_at FROM project_briefs WHERE project_id = ?`)
+    .bind(projectId)
+    .first<{ checked_at: number | null }>();
+  if (last?.checked_at != null && last.checked_at > checkCutoff) return 'not_due';
   const claimed = await db.prepare(CLAIM_CHECK_SQL).bind(projectId, now, checkCutoff).run();
   if ((claimed.meta?.changes ?? 0) !== 1) return 'not_due';
 
@@ -154,7 +187,7 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
       .prepare(
         `UPDATE project_briefs
             SET brief_json = NULL, ref_asks_json = '[]', ref_chats_json = '[]',
-                ref_automations_json = '[]', fingerprint = ?, generated_at = ?, stale = 0,
+                ref_automations_json = '[]', ref_accounts_json = '[]', fingerprint = ?, generated_at = ?, stale = 0,
                 updated_at = ?
           WHERE project_id = ? AND pending_since IS NULL`
       )
@@ -166,7 +199,12 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
   const minCutoff = now - settings.minIntervalMinutes * 60_000;
   // A failed attempt waits out the same interval as a success, so a model that keeps failing
   // costs at most one call per interval rather than one per check.
-  const lastAttempt = Math.max(state.output.generated_at ?? 0, state.output.last_error_at ?? 0);
+  // An attempt that never reported back (its isolate was cancelled) still counts.
+  const lastAttempt = Math.max(
+    state.output.generated_at ?? 0,
+    state.output.last_error_at ?? 0,
+    state.output.pending_since ?? 0
+  );
   if (lastAttempt > minCutoff) {
     await markStale(db, projectId, now);
     return 'deferred';
@@ -190,14 +228,21 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
   const prompt = buildBriefPrompt(facts);
   let reason: string;
   try {
-    const reply = await callModel(env, prompt.messages);
+    const remaining = BRIEF_REFRESH_BUDGET_MS - (Date.now() - startedAt);
+    if (remaining < BRIEF_MODEL_MIN_MS) throw new BriefDeadlineError();
+    const reply = await callModel(
+      env,
+      projectId,
+      prompt.messages,
+      Math.min(BRIEF_MODEL_TIMEOUT_MS, remaining)
+    );
     const parsed = parseBriefReply(reply, prompt.handles);
     if (parsed.ok) {
       const written = await db
         .prepare(
           `UPDATE project_briefs
               SET brief_json = ?, ref_asks_json = ?, ref_chats_json = ?, ref_automations_json = ?,
-                  fingerprint = ?, generated_at = ?, stale = 0, pending_since = NULL,
+                  ref_accounts_json = ?, fingerprint = ?, generated_at = ?, stale = 0, pending_since = NULL,
                   last_error = NULL, updated_at = ?
             WHERE project_id = ? AND pending_since = ?`
         )
@@ -206,6 +251,7 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
           JSON.stringify(parsed.refAsks),
           JSON.stringify(parsed.refRunningChats),
           JSON.stringify(parsed.refAutomations),
+          JSON.stringify(parsed.refAccounts),
           fingerprint,
           now,
           Date.now(),
@@ -221,11 +267,13 @@ async function refresh(input: BriefRefreshInput): Promise<BriefRefreshOutcome> {
     reason = parsed.reason;
   } catch (error) {
     reason =
-      error instanceof WorkersAIGatewayError
-        ? `gateway_${error.status}`
-        : error instanceof Error && error.name === 'TimeoutError'
-          ? 'timeout'
-          : 'model_call_failed';
+      error instanceof BriefDeadlineError
+        ? 'deadline'
+        : error instanceof WorkersAIGatewayError
+          ? `gateway_${error.status}`
+          : error instanceof Error && error.name === 'TimeoutError'
+            ? 'timeout'
+            : 'model_call_failed';
     log.warn('project_brief.model_call_failed', {
       projectId,
       reason,

@@ -193,10 +193,16 @@ export {
   type ProjectEventErrorKind,
 } from './ports';
 export {
+  BRIEF_ASKS_SQL,
   BRIEF_FACT_TEXT_MAX_CHARS,
+  BRIEF_FAILED_CHATS_SQL,
+  BRIEF_FAILING_AUTOMATIONS_SQL,
+  BRIEF_MERGED_PULL_REQUESTS_SQL,
+  BRIEF_NEW_IDEAS_SQL,
   type BriefFacts,
   briefFactsAreQuiet,
   briefFactsFingerprint,
+  briefText,
   readBriefFacts,
 } from './project-brief-facts';
 export {

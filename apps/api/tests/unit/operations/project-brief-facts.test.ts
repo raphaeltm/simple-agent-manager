@@ -5,16 +5,25 @@
  * Each attack case has an owner-path control.
  */
 import {
+  BRIEF_FAILED_CHATS_SQL,
+  BRIEF_FAILING_AUTOMATIONS_SQL,
+  BRIEF_MERGED_PULL_REQUESTS_SQL,
+  BRIEF_NEW_IDEAS_SQL,
   briefFactsAreQuiet,
   briefFactsFingerprint,
   readBriefFacts,
+  briefText,
   readProjectBrief,
 } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  createAllSchemaTables,
+  createDeclaredIndexes,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const NOW = 1_794_000_000_000;
 const ISO_NOW = new Date(NOW).toISOString();
@@ -256,7 +265,7 @@ describe('project brief facts and read', () => {
   describe('readProjectBrief', () => {
     function storeBrief(
       sentences: unknown[],
-      refs: { asks?: string[]; chats?: string[]; automations?: string[] } = {},
+      refs: { asks?: string[]; chats?: string[]; automations?: string[]; accounts?: string[] } = {},
       fields: Record<string, string | number | null> = {}
     ) {
       insert('project_briefs', {
@@ -265,6 +274,7 @@ describe('project brief facts and read', () => {
         ref_asks_json: JSON.stringify(refs.asks ?? []),
         ref_chats_json: JSON.stringify(refs.chats ?? []),
         ref_automations_json: JSON.stringify(refs.automations ?? []),
+        ref_accounts_json: JSON.stringify(refs.accounts ?? []),
         fingerprint: 'f',
         generated_at: NOW - 60_000,
         checked_at: NOW - 60_000,
@@ -362,6 +372,109 @@ describe('project brief facts and read', () => {
         )
         .run();
       expect(await readProjectBrief(db, 'p', NOW)).toBeNull();
+    });
+
+    it('drops an ask claim once a second member joins: they must not see, through the brief, an ask their inbox hides (owner control first)', async () => {
+      ask('mine');
+      storeBrief([about('ask', 'mine')], { asks: ['mine'] });
+      expect(await readProjectBrief(db, 'p', NOW)).not.toBeNull();
+      addTeammate();
+      expect(await readProjectBrief(db, 'p', NOW)).toBeNull();
+    });
+
+    it('drops a claim about an expired ask the sweep has not closed yet', async () => {
+      ask('expiring', { expires_at: NOW + 1_000 });
+      storeBrief([about('ask', 'expiring')], { asks: ['expiring'] });
+      expect(await readProjectBrief(db, 'p', NOW)).not.toBeNull();
+      expect(await readProjectBrief(db, 'p', NOW + 2_000)).toBeNull();
+    });
+
+    it('re-checks a named account, and never sends its credential reference to the page', async () => {
+      window('cc_credentials:shared-anthropic', 'project', 'critical');
+      storeBrief(
+        [
+          {
+            parts: [
+              {
+                ref: {
+                  kind: 'account',
+                  id: 'cc_credentials:shared-anthropic',
+                  label: "the project's anthropic account",
+                },
+              },
+              { text: ' is almost out of usage.' },
+            ],
+          },
+        ],
+        { accounts: ['cc_credentials:shared-anthropic'] }
+      );
+      const brief = await readProjectBrief(db, 'p', NOW);
+      expect(brief?.sentences[0]?.parts[0]).toEqual({
+        ref: { kind: 'account', id: 'account', label: "the project's anthropic account" },
+      });
+      expect(JSON.stringify(brief)).not.toContain('cc_credentials:');
+      // Back to calm: the claim is no longer true.
+      sqlite.prepare(`UPDATE credential_limit_windows SET last_event_level = 'ok'`).run();
+      expect(await readProjectBrief(db, 'p', NOW)).toBeNull();
+    });
+
+    it('reads a malformed ref list as empty instead of failing the read', async () => {
+      ask('open-ask');
+      storeBrief([about('chat', 'failed-earlier')], {}, { ref_asks_json: 'not json' });
+      expect(await readProjectBrief(db, 'p', NOW)).not.toBeNull();
+    });
+  });
+
+  it('strips invisible and smuggling characters from titles', () => {
+    const tagged = `Ship${String.fromCodePoint(0xe0041, 0xe0042)} it\u2060 now\ufeff`;
+    expect(briefText(tagged, 'x')).toBe('Ship it now');
+  });
+
+  describe('query plans at production indexes (rule 69)', () => {
+    function plan(sql: string, params: unknown[]): string {
+      return (
+        sqlite.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as Array<{ detail: string }>
+      )
+        .map((row) => row.detail)
+        .join('\n');
+    }
+    beforeEach(() => {
+      createDeclaredIndexes(sqlite, Object.values(schema).filter(isTable));
+    });
+    function isTable(value: unknown): value is Parameters<typeof createDeclaredIndexes>[1][number] {
+      return (
+        typeof value === 'object' &&
+        value !== null &&
+        Symbol.for('drizzle:IsDrizzleTable') in (value as object)
+      );
+    }
+
+    it('reads each trigger’s newest runs without sorting its history', () => {
+      const detail = plan(BRIEF_FAILING_AUTOMATIONS_SQL, ['p', 3, 3, 8]).split('\n');
+      // Each trigger's runs come straight off the new index, newest first.
+      const te = detail.findIndex((line) => line.startsWith('SEARCH te'));
+      expect(detail[te]).toBe(
+        'SEARCH te USING INDEX idx_trigger_executions_trigger_sequence (trigger_id=?)'
+      );
+      // The only sort is the outer one over this project's (capped) triggers by name.
+      expect(detail.filter((line) => line.includes('TEMP B-TREE'))).toEqual([
+        'USE TEMP B-TREE FOR LAST TERM OF ORDER BY',
+      ]);
+    });
+
+    it('drives failed chats from the project’s failed tasks, not its whole chat history', () => {
+      const detail = plan(BRIEF_FAILED_CHATS_SQL, ['p', '2026-11-15', '2026-11-15T00:00:00Z', 8]);
+      expect(detail).toMatch(/SEARCH t USING INDEX \S+ \(project_id=\? AND status=\?/);
+      expect(detail).toMatch(/SEARCH ss USING INDEX idx_session_summaries_task \(task_id=\?\)/);
+    });
+
+    it('bounds merged pull requests and new ideas by date in the index', () => {
+      expect(
+        plan(BRIEF_MERGED_PULL_REQUESTS_SQL, ['p', '2026-11-09', '2026-11-09T00:00:00Z', 8])
+      ).toMatch(/merged_at>\?/);
+      expect(plan(BRIEF_NEW_IDEAS_SQL, ['p', '2026-11-09', '2026-11-09T00:00:00Z', 8])).toMatch(
+        /created_at>\?/
+      );
     });
   });
 });

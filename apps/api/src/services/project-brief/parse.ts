@@ -55,6 +55,7 @@ export type BriefParseResult =
       refAsks: string[];
       refRunningChats: string[];
       refAutomations: string[];
+      refAccounts: string[];
       dropped: number;
     }
   | { ok: false; reason: string };
@@ -92,6 +93,7 @@ export function parseBriefReply(
   const refAsks = new Set<string>();
   const refRunningChats = new Set<string>();
   const refAutomations = new Set<string>();
+  const refAccounts = new Set<string>();
   let dropped = 0;
 
   for (const sentence of parsed.output.sentences) {
@@ -147,6 +149,7 @@ export function parseBriefReply(
     for (const handle of cited) {
       if (handle.ref.kind === 'ask') refAsks.add(handle.ref.id);
       if (handle.ref.kind === 'automation') refAutomations.add(handle.ref.id);
+      if (handle.ref.kind === 'account') refAccounts.add(handle.ref.id);
       if (handle.ref.kind === 'chat' && handle.runningChat) refRunningChats.add(handle.ref.id);
     }
   }
@@ -165,6 +168,7 @@ export function parseBriefReply(
     refAsks: [...refAsks],
     refRunningChats: [...refRunningChats],
     refAutomations: [...refAutomations],
+    refAccounts: [...refAccounts],
     dropped,
   };
 }

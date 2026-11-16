@@ -28,6 +28,7 @@ import {
   assertNoOverflow,
   makeMockUser,
   screenshot,
+  seedTheme,
 } from './audit-helpers';
 import { RUNS, SCHEDULES, TRIGGERS } from './automation-fixtures';
 import { KIND_ITEMS, MANY_ITEMS } from './inbox-fixtures';
@@ -1085,11 +1086,16 @@ test.describe('Project Overview brief (inbox slice I)', () => {
       expect(Math.abs(briefBox!.x - needs!.x)).toBeLessThanOrEqual(1);
       await expect(brief.getByRole('link', { name: 'Pause subscriptions' })).toBeVisible();
     }
-    await expect(brief.getByRole('link', { name: /Pick a deploy target/ })).toHaveAttribute(
-      'href',
-      `/projects/${PROJECT_ID}/inbox?item=ask%3Aask-deploy&from=overview`
-    );
-    await expect(brief.getByTestId('overview-brief-age')).toHaveCount(0);
+    if (isPhone(testInfo)) {
+      // Folded, the names are not links yet: the line is the control that opens it.
+      await expect(brief.getByRole('link')).toHaveCount(0);
+    } else {
+      await expect(brief.getByRole('link', { name: /Pick a deploy target/ })).toHaveAttribute(
+        'href',
+        `/projects/${PROJECT_ID}/inbox?item=ask%3Aask-deploy&from=overview`
+      );
+    }
+    await expect(brief.getByTestId('overview-brief-age')).toHaveText('Written 25 min ago');
     await capture(page, 'overview-brief-fresh');
   });
 
@@ -1104,16 +1110,58 @@ test.describe('Project Overview brief (inbox slice I)', () => {
     });
     await page.goto(BASE);
     const brief = page.getByRole('region', { name: 'Project brief' });
-    const toggle = brief.getByRole('button', { name: 'Show more of the brief' });
-    await toggle.click();
-    await expect(brief.getByRole('button', { name: 'Show less of the brief' })).toHaveAttribute(
+    const needsBefore = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+    // The folded line is the control: tapping its text opens it (a 44px target), not a link.
+    const line = brief.getByRole('button', { name: /Pick a deploy target/ });
+    const lineBox = await line.boundingBox();
+    expect(lineBox!.height).toBeGreaterThanOrEqual(44);
+    await brief.getByText('Pick a deploy target for the billing fix').click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}$`));
+    await expect(brief.getByRole('button', { name: 'Project brief details' })).toHaveAttribute(
       'aria-expanded',
       'true'
     );
+    const needsAfter = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+    expect(needsAfter!.y).toBe(needsBefore!.y);
     await expect(brief.getByRole('link', { name: /Weekly dependency bump/ })).toBeVisible();
     await expect(brief.getByRole('link', { name: /Round tax totals/ })).toHaveCount(0);
     // Expanding happens in place: Needs you above did not move.
     await capture(page, 'overview-brief-phone-expanded');
+  });
+
+  test('going stale does not change the brief pane height (no layout jump)', async ({ page }) => {
+    // setupScene reads `brief` from these options on every request, so a reload sees the change.
+    const options: SceneOptions = {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture(),
+    };
+    await setupScene(page, options);
+    await page.goto(BASE);
+    const brief = page.getByRole('region', { name: 'Project brief' });
+    await expect(page.getByTestId('overview-brief-text')).toHaveAttribute('data-stale', 'false');
+    const fresh = await brief.boundingBox();
+    options.brief = briefFixture({ stale: true });
+    await page.reload();
+    await expect(page.getByTestId('overview-brief-text')).toHaveAttribute('data-stale', 'true');
+    const dimmed = await brief.boundingBox();
+    expect(dimmed!.height).toBe(fresh!.height);
+  });
+
+  test('light theme: the dimmed brief stays readable', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture({ stale: true }),
+    });
+    await page.goto(BASE);
+    await expect(page.getByTestId('overview-brief-text')).toHaveAttribute('data-stale', 'true');
+    await capture(page, 'overview-brief-stale-light');
   });
 
   test('stale and refreshing: the old text stays, dimmed with its age', async ({ page }) => {
@@ -1147,7 +1195,7 @@ test.describe('Project Overview brief (inbox slice I)', () => {
     await expect(brief).toBeVisible();
     if (isPhone(testInfo)) {
       await expectThreeRowsOnFirstPhoneScreen(page);
-      await brief.getByRole('button', { name: 'Show more of the brief' }).click();
+      await brief.getByTestId('overview-brief-toggle').click();
     }
     const paneBox = await brief.boundingBox();
     expect(paneBox!.x + paneBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width);

@@ -7,18 +7,19 @@
 -- every fact it is built from is in D1.
 --
 -- brief_json is NULL when the project was quiet at the last check (nothing to say). The ref_*
--- columns list the asks, running chats and automations the brief names, so the read can drop a
--- claim whose item has since closed. Times are epoch milliseconds. generation_day/count is the
+-- columns list the asks, running chats, automations and accounts the brief names, so the read can
+-- drop a claim that is no longer true (or no longer visible to every member). Times are epoch milliseconds. generation_day/count is the
 -- per-UTC-day generation budget (a daily cap by design: it resets on a new day, not on success).
 --
--- Additive only (rule 31): a new table. Deleting a project deletes its brief (it has no meaning
--- without the project and nothing references it).
+-- Additive only (rule 31): a new table and two indexes. Deleting a project deletes its brief (it
+-- has no meaning without the project and nothing references it).
 CREATE TABLE IF NOT EXISTS project_briefs (
   project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
   brief_json TEXT,
   ref_asks_json TEXT NOT NULL DEFAULT '[]',
   ref_chats_json TEXT NOT NULL DEFAULT '[]',
   ref_automations_json TEXT NOT NULL DEFAULT '[]',
+  ref_accounts_json TEXT NOT NULL DEFAULT '[]',
   fingerprint TEXT,
   generated_at INTEGER,
   checked_at INTEGER,
@@ -30,3 +31,12 @@ CREATE TABLE IF NOT EXISTS project_briefs (
   last_error_at INTEGER,
   updated_at INTEGER NOT NULL
 );
+
+-- The brief's facts read each trigger's newest finished runs and a project's failed tasks' chats
+-- on every check (readBriefFacts, packages/operations/src/project-brief-facts.ts). Without these,
+-- the first walks and sorts every execution of every trigger (90 days of history), and the second
+-- walks the project's whole chat history.
+CREATE INDEX IF NOT EXISTS idx_trigger_executions_trigger_sequence
+  ON trigger_executions(trigger_id, sequence_number, created_at);
+CREATE INDEX IF NOT EXISTS idx_session_summaries_task
+  ON session_summaries(task_id);

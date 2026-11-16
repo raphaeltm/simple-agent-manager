@@ -3,7 +3,8 @@
  * section 4.3): how the project is advancing and what is in the way, in at most three short
  * sentences that name real items.
  *
- * - Phone: one line under Needs you; the chevron expands it in place to two sentences.
+ * - Phone: one line under Needs you; tapping it opens it in place to two sentences, and only
+ *   then do the names become links.
  * - Desktop: above Needs you, up to three sentences, always open.
  * - Stale (the facts moved since it was written) or refreshing: the text stays, dimmed, with its
  *   age, so nothing jumps while a new one is made.
@@ -14,12 +15,8 @@
  * item's kind and id; the model never supplies a URL. A pull request links to the URL SAM stored
  * for it, only when it is https.
  */
-import type {
-  OverviewBrief,
-  OverviewBriefPart,
-  OverviewBriefRef,
-} from '@simple-agent-manager/shared';
-import { ChevronDown, Sparkles } from 'lucide-react';
+import type { OverviewBrief, OverviewBriefRef } from '@simple-agent-manager/shared';
+import { ChevronDown, ExternalLink, Sparkles } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { Link } from 'react-router';
 
@@ -47,8 +44,13 @@ export const BRIEF_SENTENCES_DESKTOP = 3;
 export const BRIEF_LABEL_MAX_CHARS = 60;
 
 function shortLabel(label: string): string {
-  return label.length > BRIEF_LABEL_MAX_CHARS
-    ? `${label.slice(0, BRIEF_LABEL_MAX_CHARS - 1).trimEnd()}…`
+  // By code point, so a long name never ends in half an emoji.
+  const chars = Array.from(label);
+  return chars.length > BRIEF_LABEL_MAX_CHARS
+    ? `${chars
+        .slice(0, BRIEF_LABEL_MAX_CHARS - 1)
+        .join('')
+        .trimEnd()}…`
     : label;
 }
 
@@ -82,8 +84,20 @@ function refTarget(
   }
 }
 
-function BriefRef({ projectId, briefRef }: { projectId: string; briefRef: OverviewBriefRef }) {
-  const target = refTarget(projectId, briefRef);
+/**
+ * One named item. `plain` renders the name without a link: the folded phone line is itself the
+ * control that opens the brief, so a tap on it never navigates by accident.
+ */
+function BriefRef({
+  projectId,
+  briefRef,
+  plain,
+}: {
+  projectId: string;
+  briefRef: OverviewBriefRef;
+  plain: boolean;
+}) {
+  const target = plain ? null : refTarget(projectId, briefRef);
   const label = briefRef.label || 'this item';
   const shown = shortLabel(label);
   const full = shown === label ? undefined : label;
@@ -102,21 +116,45 @@ function BriefRef({ projectId, briefRef }: { projectId: string; briefRef: Overvi
         rel="noopener noreferrer"
         className={LINK_CLASS}
         title={full}
-        aria-label={full}
       >
         {shown}
+        <ExternalLink
+          size={12}
+          aria-hidden="true"
+          className="ml-0.5 inline-block align-baseline text-fg-muted"
+        />
+        <span className="sr-only"> (opens in a new tab)</span>
       </a>
     );
   }
   return (
-    <Link to={target.to} state={target.state} className={LINK_CLASS} title={full} aria-label={full}>
+    <Link to={target.to} state={target.state} className={LINK_CLASS} title={full}>
       {shown}
     </Link>
   );
 }
 
-function Part({ projectId, part }: { projectId: string; part: OverviewBriefPart }): ReactNode {
-  return 'ref' in part ? <BriefRef projectId={projectId} briefRef={part.ref} /> : part.text;
+function Sentences({
+  projectId,
+  sentences,
+  plain,
+}: {
+  projectId: string;
+  sentences: OverviewBrief['sentences'];
+  plain: boolean;
+}): ReactNode {
+  return sentences.map((sentence, index) => (
+    <span key={index}>
+      {index > 0 ? ' ' : ''}
+      {sentence.parts.map((part, partIndex) =>
+        'ref' in part ? (
+          <BriefRef key={partIndex} projectId={projectId} briefRef={part.ref} plain={plain} />
+        ) : (
+          part.text
+        )
+      )}
+    </span>
+  ));
 }
 
 export function ProjectBriefSection({
@@ -134,68 +172,90 @@ export function ProjectBriefSection({
   const textId = useId();
   if (!brief || brief.sentences.length === 0) return null;
 
+  const collapsed = isMobile && !expanded;
   const limit = isMobile
-    ? expanded
-      ? BRIEF_SENTENCES_PHONE_EXPANDED
-      : 1
+    ? collapsed
+      ? 1
+      : BRIEF_SENTENCES_PHONE_EXPANDED
     : BRIEF_SENTENCES_DESKTOP;
   const sentences = brief.sentences.slice(0, limit);
-  const collapsed = isMobile && !expanded;
-  const canExpand = isMobile;
   const dimmed = brief.stale || brief.refreshing;
   const age = formatTimeFromNow(Date.parse(brief.generatedAt), now);
+  // Always one line, so going stale or fresh again never moves the sections below.
+  const ageText = brief.refreshing
+    ? `Updating · written ${age}`
+    : dimmed
+      ? `Written ${age} · out of date`
+      : `Written ${age}`;
+  const textClass = `m-0 min-w-0 break-words text-[15px] leading-relaxed text-fg-primary transition-opacity md:leading-normal ${collapsed ? 'line-clamp-1' : ''} ${dimmed ? 'opacity-75' : ''}`;
+
+  const body = (
+    <>
+      <Sparkles
+        size={16}
+        aria-hidden="true"
+        className="mt-[3px] shrink-0 text-accent"
+        strokeWidth={1.75}
+      />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span
+          id={textId}
+          className={collapsed ? textClass : `block ${textClass}`}
+          data-testid="overview-brief-text"
+          data-stale={dimmed ? 'true' : 'false'}
+        >
+          <span className="sr-only">Summary by SAM: </span>
+          <Sentences projectId={projectId} sentences={sentences} plain={collapsed} />
+        </span>
+        <span
+          className="line-clamp-1 break-words text-xs text-fg-muted"
+          data-testid="overview-brief-age"
+        >
+          {ageText}
+        </span>
+      </span>
+    </>
+  );
 
   return (
     <Section label="Project brief" className={className}>
-      <div className="flex min-w-0 items-start gap-2 px-2 py-1.5" data-testid="overview-brief">
-        <Sparkles
-          size={16}
-          aria-hidden="true"
-          className="mt-[3px] shrink-0 text-accent"
-          strokeWidth={1.75}
-        />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p
-            id={textId}
-            className={`m-0 min-w-0 break-words text-[15px] leading-relaxed text-fg-secondary transition-opacity ${collapsed ? 'line-clamp-1' : ''} ${dimmed ? 'opacity-60' : ''}`}
-            data-testid="overview-brief-text"
-            data-stale={dimmed ? 'true' : 'false'}
-          >
-            {sentences.map((sentence, index) => (
-              <span key={index}>
-                {index > 0 ? ' ' : ''}
-                {sentence.parts.map((part, partIndex) => (
-                  <Part key={partIndex} projectId={projectId} part={part} />
-                ))}
-              </span>
-            ))}
-          </p>
-          {dimmed && (
-            <span className="text-xs text-fg-muted" data-testid="overview-brief-age">
-              {brief.refreshing
-                ? `Updating · written ${age}`
-                : `Written ${age} · things have moved since`}
-            </span>
-          )}
-        </div>
-        {canExpand && (
-          <button
-            type="button"
-            onClick={() => setExpanded((open) => !open)}
-            aria-expanded={expanded}
-            aria-controls={textId}
-            aria-label={expanded ? 'Show less of the brief' : 'Show more of the brief'}
-            className="-my-2 -mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-none bg-transparent text-fg-muted hover:text-fg-primary"
+      {collapsed ? (
+        // Folded on a phone: the whole line opens the brief in place (its names become links
+        // once open). The button's name is the sentence itself.
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          aria-expanded={false}
+          aria-controls={textId}
+          className="flex min-h-11 w-full min-w-0 items-start gap-2 rounded-md border-none bg-transparent px-2 py-1.5 text-left"
+          data-testid="overview-brief"
+        >
+          {body}
+          <span
+            className="-my-1 flex h-9 w-9 shrink-0 items-center justify-center text-fg-muted"
             data-testid="overview-brief-toggle"
           >
-            <ChevronDown
-              size={18}
-              aria-hidden="true"
-              className={`transition-transform ${expanded ? 'rotate-180' : ''}`}
-            />
-          </button>
-        )}
-      </div>
+            <ChevronDown size={18} aria-hidden="true" />
+          </span>
+        </button>
+      ) : (
+        <div className="flex min-w-0 items-start gap-2 px-2 py-1.5" data-testid="overview-brief">
+          {body}
+          {isMobile && (
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              aria-expanded={true}
+              aria-controls={textId}
+              aria-label="Project brief details"
+              className="-my-2 -mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-none bg-transparent text-fg-muted hover:text-fg-primary"
+              data-testid="overview-brief-toggle"
+            >
+              <ChevronDown size={18} aria-hidden="true" className="rotate-180" />
+            </button>
+          )}
+        </div>
+      )}
     </Section>
   );
 }

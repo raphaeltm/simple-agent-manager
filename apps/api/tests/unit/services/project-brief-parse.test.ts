@@ -49,6 +49,7 @@ describe('parseBriefReply', () => {
       refAsks: ['ask-1'],
       refRunningChats: ['chat-1'],
       refAutomations: ['trigger-1'],
+      refAccounts: [],
       brief: {
         sentences: [
           {

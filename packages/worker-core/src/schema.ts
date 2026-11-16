@@ -873,6 +873,7 @@ export const projectBriefs = sqliteTable('project_briefs', {
   refAsksJson: text('ref_asks_json').notNull().default('[]'),
   refChatsJson: text('ref_chats_json').notNull().default('[]'),
   refAutomationsJson: text('ref_automations_json').notNull().default('[]'),
+  refAccountsJson: text('ref_accounts_json').notNull().default('[]'),
   fingerprint: text('fingerprint'),
   generatedAt: integer('generated_at'),
   checkedAt: integer('checked_at'),
@@ -3509,6 +3510,12 @@ export const triggerExecutions = sqliteTable(
       .on(table.triggerId, table.status)
       .where(sql`status IN ('queued', 'running')`),
     triggerIdIdx: index('idx_trigger_executions_trigger_id').on(table.triggerId),
+    /** Newest runs of one trigger without a sort (migration 0253; the Overview brief's facts). */
+    triggerSequenceIdx: index('idx_trigger_executions_trigger_sequence').on(
+      table.triggerId,
+      table.sequenceNumber,
+      table.createdAt
+    ),
     queueExpiryIdx: index('idx_trigger_queue_expiry')
       .on(table.queueExpiresAt)
       .where(sql`status IN ('waiting','queued')`),
@@ -4420,6 +4427,8 @@ export const sessionSummaries = sqliteTable(
       table.updatedAt
     ),
     projectIdx: index('idx_session_summaries_project').on(table.projectId, table.updatedAt),
+    /** A task's chat (migration 0253; the Overview brief's failed chats). */
+    taskIdx: index('idx_session_summaries_task').on(table.taskId),
     projectCreatorIdx: index('idx_session_summaries_project_creator').on(
       table.projectId,
       table.createdByUserId,
