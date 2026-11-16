@@ -69,6 +69,8 @@ interface MockTaskRow {
   completed_at?: string | null;
   execution_step?: string | null;
   terminal_transition_id?: string | null;
+  /** The candidate query's open-question probe over D1 `asks` (inbox slice G). */
+  open_question?: number;
 }
 
 interface MockWorkspaceRow {
@@ -623,6 +625,39 @@ describe('Task Reconciliation Module', () => {
     it('excludes failed tasks', async () => {
       const candidates = await candidatesForTask('task', 'failed');
       expect(candidates).toHaveLength(0);
+    });
+
+    it('holds the check-in one lease while the chat has an open question in D1 asks', async () => {
+      setupTaskSession();
+      const env = envWithRows({
+        'task-1': { task_mode: 'task', status: 'in_progress', open_question: 1 },
+      });
+      await expect(getReconciliationCandidates(sql, env)).resolves.toEqual([]);
+      const gate = JSON.parse(
+        String(
+          db
+            .prepare(`SELECT value FROM do_meta WHERE key = 'taskReconciliationGate:session-1'`)
+            .get()?.value
+        )
+      ) as { attempts: number; nextAttemptAt: number };
+      // Deferred, without spending a probe attempt.
+      expect(gate.attempts).toBe(0);
+      expect(gate.nextAttemptAt).toBeGreaterThan(Date.now());
+      // The query that decided it carries the session and the time.
+      const query = vi
+        .mocked(env.DATABASE.prepare)
+        .mock.calls.find(([sql]) => String(sql).includes('open_question'));
+      expect(String(query?.[0])).toContain("a.kind = 'question' AND a.status = 'open'");
+    });
+
+    it('control: without an open question the same session is a candidate', async () => {
+      setupTaskSession();
+      await expect(
+        getReconciliationCandidates(
+          sql,
+          envWithRows({ 'task-1': { task_mode: 'task', status: 'in_progress', open_question: 0 } })
+        )
+      ).resolves.toEqual([expect.objectContaining({ sessionId: 'session-1' })]);
     });
 
     it('excludes sessions with active needs_input marker', async () => {

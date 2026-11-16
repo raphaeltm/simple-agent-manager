@@ -161,13 +161,13 @@ async function resolveCandidateProjectId(
     `SELECT task_mode, status, project_id, workspace_id, chat_session_id, admission_state,
             EXISTS (
               SELECT 1 FROM asks a
-               WHERE a.project_id = tasks.project_id AND a.source_session_id = ?
+               WHERE a.project_id = tasks.project_id AND a.source_session_id = ?2
                  AND a.kind = 'question' AND a.status = 'open'
-                 AND (a.expires_at IS NULL OR a.expires_at > ?)
+                 AND (a.expires_at IS NULL OR a.expires_at > ?3)
             ) AS open_question
-     FROM tasks WHERE id = ? LIMIT 1`
+     FROM tasks WHERE id = ?1 LIMIT 1`
   )
-    .bind(sessionId, now, taskId)
+    .bind(taskId, sessionId, now)
     .first<{
       task_mode: string | null;
       admission_state?: string | null;

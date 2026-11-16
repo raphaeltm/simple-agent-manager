@@ -180,14 +180,156 @@ describe('inbox capability through the real entry points', () => {
     vi.unstubAllGlobals();
   });
 
-  it('a request_human_input question reaches the right inbox and archiving tells the agent', async () => {
+  it('a request_human_input question is one asks row that reaches the right inbox; archiving tells the agent', async () => {
     const s = await seed();
     const result = await callTool(s.token, 'request_human_input', {
       context: 'Should I deploy the billing fix to staging first?',
       category: 'decision',
       options: ['Staging first', 'Straight to prod'],
     });
-    expect(result).toBeTruthy();
+    const askId = (result.humanInputRequest as { id: string }).id;
+    // One record: an asks row, no attention marker, no attention_json copy.
+    const row = await testEnv.DATABASE.prepare(
+      'SELECT kind, status, project_id, source_session_id, blocking FROM asks WHERE id = ?'
+    )
+      .bind(askId)
+      .first();
+    expect(row).toEqual({
+      kind: 'question',
+      status: 'open',
+      project_id: s.projectId,
+      source_session_id: s.chatSessionId,
+      blocking: 1,
+    });
+    expect(await s.project.listActiveAttentionMarkers(s.chatSessionId)).toEqual([]);
+    await syncSummaries(s.project);
+    const summary = await testEnv.DATABASE.prepare(
+      'SELECT attention_json FROM session_summaries WHERE id = ?'
+    )
+      .bind(s.chatSessionId)
+      .first<{ attention_json: string | null }>();
+    expect(summary?.attention_json ?? null).toBeNull();
+    // The chat's own reads still show it as the chat's question (ProjectData session read).
+    expect(await s.project.getSession(s.chatSessionId)).toMatchObject({
+      attention: { markerId: askId, kind: 'needs_input', source: 'request_human_input' },
+    });
+
+    const ref = `ask:${askId}`;
+    const owner = await get<ListBody>('/api/inbox', s.ownerCookie);
+    const mine = owner.body.items.filter((item) => item.projectId === s.projectId);
+    expect(mine.map((item) => item.ref)).toEqual([ref]);
+    expect(mine[0]).toMatchObject({ kind: 'question', canAct: true });
+    const colleague = await get<ListBody>('/api/inbox', s.colleagueCookie);
+    expect(colleague.body.items.map((item) => item.ref)).not.toContain(ref);
+    const count = await get<{ needsYou: number; blocking: number }>(
+      `/api/projects/${s.projectId}/inbox/count`,
+      s.ownerCookie
+    );
+    expect(count.body).toEqual({ needsYou: 1, blocking: 1 });
+
+    // The agent ends its turn and the chat sleeps; archiving queues one wake-capable prompt.
+    expect(await s.project.sleepSession(s.chatSessionId)).toBe(true);
+    const archived = await post(
+      `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
+      s.ownerCookie
+    );
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
+    const snapshot = await s.project.getDurableExecutionSnapshot(s.chatSessionId);
+    const notices = snapshot.deliveries.filter(
+      (delivery: { id: string }) => delivery.id === `inbox-ask:${askId}`
+    );
+    expect(notices).toEqual([
+      expect.objectContaining({ sourceKind: 'inbox_ask', sourceTaskId: s.taskId }),
+    ]);
+    const { messages } = await s.project.getMessages(s.chatSessionId, 50);
+    expect(
+      messages.filter((message: { content: string }) =>
+        message.content.includes('archived your question')
+      )
+    ).toHaveLength(1);
+    // The item leaves the inbox; a late answer loses.
+    const after = await get<ListBody>('/api/inbox', s.ownerCookie);
+    expect(after.body.items.map((entry) => entry.ref)).not.toContain(ref);
+    const late = await post(
+      `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}/answer`,
+      s.ownerCookie,
+      { answer: 'Staging first' }
+    );
+    expect(late.status).toBe(409);
+  });
+
+  it('answering an asks question of a sleeping chat queues the answer once as a wake', async () => {
+    const s = await seed();
+    const result = await callTool(s.token, 'request_human_input', {
+      context: 'Ship the billing fix now?',
+      options: ['Yes', 'No'],
+    });
+    const askId = (result.humanInputRequest as { id: string }).id;
+    expect(await s.project.sleepSession(s.chatSessionId)).toBe(true);
+    // The chat card path and the inbox path meet at the same compare-and-set.
+    const [inbox, card] = await Promise.all([
+      post(
+        `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(`ask:${askId}`)}/answer`,
+        s.ownerCookie,
+        { answer: 'Yes' }
+      ),
+      SELF.fetch(
+        `https://api.${testEnv.BASE_DOMAIN}/api/projects/${s.projectId}/sessions/${s.chatSessionId}/attention/${askId}/resolve`,
+        {
+          method: 'POST',
+          headers: { Cookie: s.ownerCookie, 'Content-Type': 'application/json', Origin: ORIGIN },
+          body: JSON.stringify({ answer: 'No' }),
+        }
+      ),
+    ]);
+    const statuses = [inbox.status, card.status].sort();
+    expect(statuses).toEqual([200, 409]);
+    const row = await testEnv.DATABASE.prepare(
+      'SELECT status, answer_json, notified_at FROM asks WHERE id = ?'
+    )
+      .bind(askId)
+      .first<{ status: string; answer_json: string; notified_at: number | null }>();
+    expect(row?.status).toBe('answered');
+    expect(row?.notified_at).not.toBeNull();
+    const winner = (JSON.parse(row!.answer_json) as { text: string }).text;
+    const snapshot = await s.project.getDurableExecutionSnapshot(s.chatSessionId);
+    expect(
+      snapshot.deliveries.filter((delivery: { id: string }) => delivery.id === `inbox-ask:${askId}`)
+    ).toEqual([expect.objectContaining({ sourceKind: 'inbox_ask', sourceTaskId: s.taskId })]);
+    const { messages } = await s.project.getMessages(s.chatSessionId, 50);
+    const answers = messages.filter((message: { content: string }) =>
+      message.content.startsWith('The person answered your question')
+    );
+    expect(answers).toHaveLength(1);
+    expect(answers[0]!.content).toContain(winner);
+    // The chat card reads the settled question.
+    const read = await SELF.fetch(
+      `https://api.${testEnv.BASE_DOMAIN}/api/projects/${s.projectId}/sessions/${s.chatSessionId}/attention/${askId}`,
+      { headers: { Cookie: s.ownerCookie } }
+    );
+    expect(await read.json()).toMatchObject({
+      request: { id: askId, resolvedAnswer: winner, canAnswer: false },
+    });
+  });
+
+  // Overlap (slice G): a question asked before the deploy is still a ProjectData marker and stays
+  // answerable and archivable through its own path until it resolves or expires.
+  it('a marker-era question reaches the right inbox and archiving tells the agent', async () => {
+    const s = await seed();
+    await s.project.createAttentionMarker({
+      sessionId: s.chatSessionId,
+      taskId: s.taskId,
+      workspaceId: s.workspaceId,
+      kind: 'needs_input',
+      source: 'request_human_input',
+      reason: 'Should I deploy the billing fix to staging first?',
+      metadata: JSON.stringify({
+        category: 'decision',
+        options: ['Staging first', 'Straight to prod'],
+      }),
+      expiresAt: Date.now() + 3_600_000,
+    });
     // The colleague's private chat also has an open question; it must not reach the owner.
     await s.project.createAttentionMarker({
       sessionId: s.colleagueSessionId,
