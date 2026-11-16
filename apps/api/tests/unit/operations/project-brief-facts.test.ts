@@ -11,8 +11,8 @@ import {
   BRIEF_NEW_IDEAS_SQL,
   briefFactsAreQuiet,
   briefFactsFingerprint,
-  readBriefFacts,
   briefText,
+  readBriefFacts,
   readProjectBrief,
 } from '@simple-agent-manager/operations';
 import Database from 'better-sqlite3';
