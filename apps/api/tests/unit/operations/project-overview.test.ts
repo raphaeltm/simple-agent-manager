@@ -305,6 +305,9 @@ describe('projectOverviewGet', () => {
     // Attack: another project's open question naming this project's chat id.
     running('foreign-q', idle);
     question('ask-foreign', 'foreign-q', { project_id: 'foreign' });
+    // A non-blocking ask (inbox slice D) does not pause its chat: it stays idle (not shown).
+    running('nonblocking-q', idle);
+    question('ask-nonblocking', 'nonblocking-q', { blocking: 0, expires_at: null });
 
     const result = await projectOverviewGet(ctx(), { projectId: 'p', runningLimit: 1 });
     // The cap is 1: the waiting chat outranks the newer working one.

@@ -206,9 +206,9 @@ test.describe('Project sidebar scroll — short laptop (1280x600)', () => {
     // an unmounted nav would also satisfy "nothing is clipped".
     const nav = page.locator(PROJECT_NAV);
     await expect(nav.getByRole('link', { name: 'Chat', exact: true })).toBeVisible();
-    // 13 items: Overview joined at the top (Inbox slice F1); 12 after Events and Triggers merged
-    // into Automation.
-    expect(await nav.getByRole('link').count()).toBe(13);
+    // 14 items: Insights joined after Ideas (Insights slice F); Overview joined at the top (Inbox
+    // slice F1); Inbox replaced Notifications; Events and Triggers merged into Automation.
+    expect(await nav.getByRole('link').count()).toBe(14);
 
     await assertNoVerticalClipping(page, PROJECT_NAV);
   });

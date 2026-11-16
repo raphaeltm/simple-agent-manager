@@ -48,13 +48,13 @@ The item shows its kind and the agent's state, the ask, the agent's reason, link
 files or pull requests it mentioned, and **Context**: the messages before the ask and what the agent
 has done since. The answer controls stay pinned at the bottom:
 
-| Kind | Answer |
-| --- | --- |
-| Question | One of the agent's options, or **Type a different answer** when it allows free text. With more than five options they become a list with one **Send** button. |
-| Permission | The exact options the agent's tool offered, such as **Allow once**, **Always allow in this chat** or **Deny**. The command it wants to run is shown above them. |
-| Secret | The secure value field; it is saved encrypted and never shown to the agent ([details](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)). **Decline** says you will not supply it. |
-| Approval | **Approve** or **Deny** (superadmins, Operations project). |
-| Review | **Looks good**, or **Reply** with a comment. |
+| Kind       | Answer                                                                                                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Question   | One of the agent's options, or **Type a different answer** when it allows free text. With more than five options they become a list with one **Send** button.                                       |
+| Permission | The exact options the agent's tool offered, such as **Allow once**, **Always allow in this chat** or **Deny**. The command it wants to run is shown above them.                                     |
+| Secret     | The secure value field; it is saved encrypted and never shown to the agent ([details](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)). **Decline** says you will not supply it. |
+| Approval   | **Approve** or **Deny** (superadmins, Operations project).                                                                                                                                          |
+| Review     | **Looks good**, or **Reply** with a comment.                                                                                                                                                        |
 
 After you answer, a one-line receipt confirms what was sent and the next item opens. Answering the
 last item of a stack moves on to the next stack; answering the last item leaves an empty Inbox. If
@@ -65,6 +65,37 @@ closes by itself. If sending fails, the item stays open with the error.
 
 **Open chat** (the speech bubble at the top) opens the conversation the ask came from. An answer
 given in the chat card is the same answer, so the Inbox catches up.
+
+## What agents file
+
+Agents file items with their `inbox_write` tool, and read what is already open with `inbox_read`
+(`apps/api/src/routes/mcp/inbox-tools.ts`, over `packages/operations/src/inbox-agent-core.ts`).
+Every session is told that people read their inbox, not chats: an agent that ends its turn with a
+question only in its message has asked nobody, so it files an item instead
+(`apps/api/src/routes/mcp/instruction-inbox-guidance.ts`). Nothing is filed on an agent's behalf.
+The tools need a session started from a task or a project chat, as `request_human_input` always did;
+a chat opened directly on a workspace has no inbox to file into.
+
+- **Ask** (`ask`): one question with one way to answer it: options, free text, or Yes / No. A
+  blocking ask means the agent is stopped until you answer: the chat shows **paused on this**, you
+  get a push, and it expires on the question schedule in
+  [Admin settings](/docs/guides/admin-settings/#inbox). A non-blocking ask lets the agent keep
+  working and never expires. `request_human_input` files a blocking ask.
+- **Review** (`review`): something the agent wants you to evaluate, such as a pull request or a
+  preview. Answer **Looks good** or reply. It never expires.
+- The agent may edit the wording or links of its own open item, or withdraw it when it is no longer
+  needed (`cancel`, with a reason). A withdrawn item leaves your inbox and the agent is not told
+  anything new.
+
+Each item carries a one-sentence title, the agent's reason, and links to ideas, Library files,
+policies, knowledge, other chats, pull requests of the project's repository, or previews of its
+workspaces. Each link is checked to belong to the project when the item is filed, and opens with
+your own access. Related items from one chat share a group and stack together. When an agent files
+an item that looks like one already open (same group, or a title with most words in common), it is
+shown the open one so it can point you there instead of filing a duplicate.
+
+An item you answer in the chat card or in the Inbox is the same record: answering either closes
+both, and the agent is woken in its chat with your answer.
 
 ## Archive
 

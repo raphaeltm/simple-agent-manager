@@ -15,6 +15,12 @@ export {
   isHumanInputCardTool,
 } from './human-input-card-data';
 export { HumanInputCard, type HumanInputCardProps } from './HumanInputCard';
+export {
+  extractInboxItemRef,
+  type InboxItemCardRef,
+  isInboxItemCardTool,
+} from './inbox-item-card-data';
+export { InboxItemCard, type InboxItemCardProps } from './InboxItemCard';
 export { matchToolCard, type ToolCardProps } from './registry';
 export {
   extractSecretRequestId,

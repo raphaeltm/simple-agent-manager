@@ -1,9 +1,12 @@
 import { Breadcrumb, PageLayout, Spinner } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Check, ChevronDown, Copy, Download, ExternalLink } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
-import { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from '../lib/api/cli';
+import { getCliDownloadUrl, getCliVersion } from '../lib/api/cli';
+import { API_URL } from '../lib/api/client';
+import { PUBLIC_WEBSITE_URL } from '../lib/public-website';
 
 /* ── Platform definitions ── */
 
@@ -27,28 +30,26 @@ const PLATFORMS: PlatformDownload[] = [
   { os: 'linux', arch: 'arm64', label: 'Linux ARM64', filename: 'sam-linux-arm64' },
 ];
 
-const QUICK_START_STEPS = [
+/** Matches the CLI guide (apps/www/src/content/docs/docs/guides/cli.md). */
+const QUICK_START_STEPS: { title: string; code: string; note?: string }[] = [
   {
-    title: 'Authenticate',
-    code: `# Copy your session cookie from the browser, then:
-printf '%s' "$SAM_SESSION_COOKIE" | sam auth login \\
-  --api-url https://api.simple-agent-manager.org \\
-  --session-cookie-stdin`,
-    note: 'Session cookies expire. Personal access tokens are coming soon.',
+    title: 'Sign in',
+    code: `sam auth login --api-url ${API_URL}`,
+    note: 'Opens your browser to authorize the CLI. Check that the code matches the one in your terminal.',
   },
   {
-    title: 'Dispatch a task',
-    code: `sam --project <PROJECT_ID> tasks dispatch \\
-  --agent sam \\
-  --prompt "Fix the flaky test in auth.test.ts"`,
+    title: 'Pick a project',
+    code: `sam projects
+sam project use <project-name>`,
   },
   {
     title: 'Start a chat',
-    code: `sam --project <PROJECT_ID> chat "What changed in the last 3 PRs?"`,
+    code: `sam chat new "Find out why the checkout tests are flaky"`,
   },
   {
-    title: 'Check task status',
-    code: `sam --project <PROJECT_ID> task status <TASK_ID>`,
+    title: 'Submit a task and wait for it',
+    code: `sam tasks submit --mode task --prompt "Add retries to the webhook sender, then open a pull request"
+sam tasks wait <task-id> --timeout 30m`,
   },
 ];
 
@@ -109,15 +110,10 @@ function CodeBlock({ code }: { code: string }) {
 export function ToolsCli() {
   const detected = useMemo(() => detectPlatform(), []);
   const [showAll, setShowAll] = useState(false);
-  const [version, setVersion] = useState<CliVersionInfo | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    getCliVersion()
-      .then(setVersion)
-      .catch(() => setVersion({ available: false, version: null, buildDate: null }))
-      .finally(() => setLoading(false));
-  }, []);
+  // Public build metadata, the same for every user, so the key needs no identity scope.
+  const versionQuery = useQuery({ queryKey: ['cli', 'version'], queryFn: getCliVersion });
+  const version = versionQuery.data;
+  const loading = versionQuery.isLoading;
 
   // PLATFORMS is a non-empty const array — fallback to first entry if detection doesn't match
   const primaryMatch = PLATFORMS.find((p) => p.os === detected.os && p.arch === detected.arch);
@@ -132,7 +128,7 @@ export function ToolsCli() {
   const curlOneLiner = `curl -fsSL "${getCliDownloadUrl(primary.os, primary.arch)}" -o sam && chmod +x sam && sudo mv sam /usr/local/bin/`;
 
   return (
-    <PageLayout title="SAM CLI" maxWidth="lg">
+    <PageLayout maxWidth="lg">
       <Breadcrumb
         segments={[
           { label: 'Home', path: '/dashboard' },
@@ -161,8 +157,7 @@ export function ToolsCli() {
         )}
       </div>
       <p className="text-sm text-fg-muted m-0 mb-7 leading-relaxed">
-        Dispatch tasks, chat with agents, and port-forward workspace services — all from your
-        terminal.
+        Start, follow and reply to chats and tasks from a terminal or a script.
       </p>
 
       {/* ── Download section ── */}
@@ -235,14 +230,31 @@ export function ToolsCli() {
             </div>
           ))}
         </div>
+
+        <p className="text-[13px] text-fg-muted m-0 mt-5 leading-relaxed">
+          For scripts and CI, create an API token under{' '}
+          <Link to="/settings/access" className="text-accent">
+            Settings → Access
+          </Link>{' '}
+          and set it as <code className="font-mono">SAM_API_TOKEN</code>, with{' '}
+          <code className="font-mono">SAM_API_URL</code> set to{' '}
+          <code className="font-mono break-all">{API_URL}</code>. Pass{' '}
+          <code className="font-mono">--project</code> on every command, because{' '}
+          <code className="font-mono">sam project use</code> is not saved in that mode.
+        </p>
       </section>
 
       {/* ── Footer links ── */}
       <div className="flex gap-5 flex-wrap text-[13px]">
-        <Link to="/tools" className="text-fg-muted no-underline flex items-center gap-1">
-          <ExternalLink size={12} />
-          All tools
-        </Link>
+        <a
+          href={`${PUBLIC_WEBSITE_URL}/docs/guides/cli/`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-fg-muted no-underline flex items-center gap-1 hover:text-fg-primary"
+        >
+          <ExternalLink size={12} aria-hidden="true" />
+          Full CLI guide
+        </a>
         {!loading && version?.available && version.buildDate && (
           <span className="text-fg-muted opacity-60">
             Built {new Date(version.buildDate).toLocaleDateString()}

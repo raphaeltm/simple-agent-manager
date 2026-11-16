@@ -261,11 +261,15 @@ export async function notifyNeedsInput(
     options?: string[] | null;
     sessionId?: string | null;
     attentionMarkerId: string;
+    /** Overrides the category label ("Review" for an inbox review item). */
+    label?: string;
   }
 ): Promise<NotificationResponse> {
-  const categoryLabel = opts.category
-    ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
-    : 'Input';
+  const categoryLabel =
+    opts.label ??
+    (opts.category
+      ? opts.category.charAt(0).toUpperCase() + opts.category.slice(1).replaceAll('_', ' ')
+      : 'Input');
 
   return sendNotification(env, userId, {
     type: 'needs_input',

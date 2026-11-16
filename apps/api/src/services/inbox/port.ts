@@ -22,6 +22,7 @@ import {
   declineRuntimeSecretRequest,
   fulfillRuntimeSecretRequest,
 } from '../runtime-secret-requests';
+import { announceAgentAsk, checkAgentLinkTargets, withdrawAgentQuestion } from './agent-asks';
 import { readAskContext } from './ask-context';
 import { deliverInboxAskNotice } from './ask-notice';
 
@@ -148,6 +149,12 @@ export function createInboxPort(env: Env): OperationInboxPort {
     },
 
     notifyAsk: (row, outcome) => deliverInboxAskNotice(env, row, outcome),
+
+    announceAsk: (input) => announceAgentAsk(env, input),
+
+    withdrawQuestion: (input) => withdrawAgentQuestion(env, input),
+
+    checkLinkTargets: (projectId, links) => checkAgentLinkTargets(env, projectId, links),
   };
 }
 

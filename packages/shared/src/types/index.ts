@@ -844,6 +844,30 @@ export type {
   RunReceiptWaitingInterval,
 } from './insights-receipt';
 export { RUN_RECEIPT_PHASE_KEYS } from './insights-receipt';
+// Insights · Flow (Insights slice F)
+export type {
+  FlowFlakyCheck,
+  FlowMedian,
+  FlowRate,
+  FlowRuns,
+  FlowRunsBucket,
+  FlowSection,
+  FlowStopReason,
+  FlowStopReasonCount,
+  FlowTopBlocker,
+  FlowWaitingIdea,
+  InsightsRange,
+  ProjectFlowResponse,
+} from './insights-flow';
+export {
+  DEFAULT_INSIGHTS_RANGE,
+  FLOW_DELIBERATE_STOP_REASONS,
+  FLOW_STOP_REASON_LABELS,
+  FLOW_STOP_REASONS,
+  INSIGHTS_RANGE_DAYS,
+  INSIGHTS_RANGES,
+  isInsightsRange,
+} from './insights-flow';
 
 // Knowledge Graph
 export type {
@@ -1160,9 +1184,12 @@ export type {
   AskKind,
   AskStatus,
   InboxActionResponse,
+  InboxAgentItem,
+  InboxAgentLinkKind,
   InboxAgentState,
   InboxAnswerRequest,
   InboxAnswerSpec,
+  InboxAskAnswerShape,
   InboxContextMessage,
   InboxCountResponse,
   InboxFilter,
@@ -1172,6 +1199,7 @@ export type {
   InboxItemResponse,
   InboxLink,
   InboxListResponse,
+  InboxSimilarItem,
   InboxStore,
   ParsedInboxRef,
 } from './inbox';
@@ -1180,9 +1208,14 @@ export {
   ASK_KINDS,
   ASK_STATUSES,
   formatInboxRef,
+  INBOX_AGENT_LINK_KINDS,
   INBOX_AGENT_STATES,
+  INBOX_AGENT_URL_LINK_KINDS,
+  INBOX_ASK_ANSWER_SHAPES,
+  INBOX_CONFIRM_OPTIONS,
   INBOX_FILTERS,
   INBOX_ITEM_KINDS,
   INBOX_STORES,
+  INBOX_WRITE_TOOL,
   parseInboxRef,
 } from './inbox';
