@@ -459,7 +459,7 @@ describe('chat linked work — the Related panel', () => {
   });
 
   it('keeps the list on screen through a refetch, and through one that fails', async () => {
-    // The two halves of stale-while-revalidate (`apps/web/.claude/rules/48-...`):
+    // The two halves of stale-while-revalidate (`.claude/rules/48-...`):
     // `isLoading` is `isPending`, not `isFetching`, so a refresh shows no spinner; and
     // `isError` requires `data === undefined`, so a failed refresh does not replace what the
     // user is already reading. A cache invalidation is how a refetch actually happens here —

@@ -65,3 +65,16 @@ package through the worker adapters.
 - Depends on `shared`, `worker-core`, `drizzle-orm` and `valibot` (catalog) and `postal-mime`.
 - No function accepts the worker `Env`. Add a field to `AgentEmailEnv` only if the package reads it.
 - A new dependency on worker code is a new port, not an import.
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/51-runtime-boundary-validation.md`: Runtime boundary validation
+- `.claude/rules/60-request-io-and-bundle-budgets.md`: Request I/O and Client Bundle Budgets
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
+
+<!-- END GENERATED RULE INDEX -->

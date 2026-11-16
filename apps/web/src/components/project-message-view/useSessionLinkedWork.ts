@@ -9,7 +9,7 @@
  *
  * Stale-while-revalidate: `isLoading` is true only before the first result. A refetch leaves
  * the previous lists in place, so nothing the user is looking at unmounts
- * (`apps/web/.claude/rules/48-stale-while-revalidate-ui.md`).
+ * (`.claude/rules/48-stale-while-revalidate-ui.md`).
  */
 import type {
   CappedList,

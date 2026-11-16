@@ -99,6 +99,6 @@ export type ValidatedBody<T extends GenericSchema | GenericSchemaAsync> = InferO
  * Upper bound for a caller-echoed resource identifier (a ULID, a UUID). Matches the
  * existing bound in `schemas/report.ts`. It is a shape guard, not a check of anything:
  * the value's real validation is the scoped `WHERE id = ? AND project_id = ?` lookup
- * that follows (`apps/api/.claude/rules/51-runtime-boundary-validation.md`).
+ * that follows (`.claude/rules/51-runtime-boundary-validation.md`).
  */
 export const MAX_RESOURCE_ID_LENGTH = 128;

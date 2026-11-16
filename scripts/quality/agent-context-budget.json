@@ -1,0 +1,6 @@
+{
+  "claudeLaunchBytes": 180000,
+  "codexLaunchBytes": 32768,
+  "firstAccessBatchBytes": { "default": 16384, "overrides": {} },
+  "heaviestFileBytes": 310000
+}

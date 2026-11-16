@@ -20,7 +20,7 @@
  * The product decision is that such an environment keeps deploying to the node
  * it is already on. This module implements that adoption as ONE atomic
  * reservation write that repeats every invariant in its own predicate
- * (`apps/api/.claude/rules/69-aggregate-capacity-at-final-reservation.md`):
+ * (`.claude/rules/69-aggregate-capacity-at-final-reservation.md`):
  * the environment must already be on this node, the node must be a running,
  * healthy, deployment-role node owned by the release's user, that user must
  * still be an active project member allowed to deploy, the node must

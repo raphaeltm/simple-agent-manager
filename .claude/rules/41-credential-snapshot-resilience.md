@@ -1,3 +1,13 @@
+---
+paths:
+  - 'apps/api/**'
+  - 'packages/vm-agent/**'
+  - 'packages/shared/src/composable-credentials/**'
+  - 'packages/ai-proxy/**'
+  - 'packages/repo-hosting/**'
+  - 'packages/operations/**'
+---
+
 # Credential Snapshot/Resolution Must Tolerate a Single Bad Row
 
 ## When This Applies

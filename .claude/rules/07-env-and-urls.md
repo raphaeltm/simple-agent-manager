@@ -1,3 +1,19 @@
+---
+paths:
+  - 'apps/api/wrangler.toml'
+  - 'apps/tail-worker/wrangler.toml'
+  - 'apps/installer/wrangler.json'
+  - 'apps/api/.env.example'
+  - 'apps/api/src/env.ts'
+  - 'scripts/deploy/**'
+  - '.github/workflows/**'
+  - 'infra/**'
+  - 'scripts/quality/check-wrangler-bindings.ts'
+  - 'scripts/quality/check-runtime-tunables.ts'
+  - 'scripts/quality/do-migration-compatibility.test.ts'
+  - 'apps/api/tests/unit/config/omitted-worker-var-defaults.test.ts'
+---
+
 # Environment Variables & URL Construction
 
 ## Environment Variable Naming

@@ -27,11 +27,11 @@ AGENT_SOURCE_PATH="${VM_AGENT_SOURCE_PATH:-packages/vm-agent}"
 
 # Paths under the agent that CANNOT change the compiled binary. Excluding them is
 # the difference between "the agent changed" and "something inside its directory
-# changed": `packages/vm-agent/.claude/rules/` holds this repo's own agent rules,
+# changed": `.claude/rules/` holds this repo's own agent rules,
 # and `.claude/rules/02` MANDATES a rule update on every bug fix — so without this
 # exclusion a vm-agent bug fix rotates the release twice, and a docs-only commit
 # rotates it for nothing. That is not hypothetical: commit df8e03ee7 touched only
-# `packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md` and would
+# `.claude/rules/54-vm-agent-rollout-compatibility.md` and would
 # have evicted the entire node pool.
 #
 # This list EXCLUDES rather than includes on purpose. An unrecognised new file

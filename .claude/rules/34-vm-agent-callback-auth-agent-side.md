@@ -1,3 +1,10 @@
+---
+paths:
+  - 'packages/vm-agent/**'
+  - 'apps/api/src/routes/deploy-release-callback.ts'
+  - 'apps/api/src/routes/projects/agent-activity-callback.ts'
+---
+
 # VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE)
 
 ## The Problem
@@ -27,10 +34,12 @@ Any route that is called by the VM agent over HTTP with a callback JWT Bearer to
 
 ## Terminal Callback Classification
 
-A terminal response has the scope of the identity that was rejected. A live node
-with no active workspace left in one project should acknowledge that project's
-ACP heartbeat without refreshing a session; it must not return a node-terminal
-response. Only rejection of the node's own identity can stop node-wide delivery.
+A terminal response has the scope of the identity that was rejected. Only a callback
+bound to the node's own identity (for example `/ready` or `/heartbeat`) may stop
+all node reporters. A `401`/`403`/`404`/`410` for one project, task, or workspace
+must leave the node heartbeat, other projects' ACP heartbeats, error reporter, and
+message reporters running. The 2026-09-25 multi-project outage came from a
+project-scoped `410` latching the whole node for seven hours.
 
 Callback JWT routes are not allowed to convert designed terminal callback states into server faults:
 
@@ -41,36 +50,25 @@ Callback JWT routes are not allowed to convert designed terminal callback states
 
 ## Every Credential Sink Checks the Workspace Lifecycle
 
-Callback JWTs and workspace MCP tokens have no revocation list. A stopped, sleeping or deleted
-workspace's credential stays cryptographically valid until it expires, so every sink must re-read
-the lifecycle in D1. On 2026-11-08 the AI proxy (`verifyAIProxyAuth`) and every MCP entry point
-were found accepting credentials for inactive workspaces, while the `/api/workspaces` callbacks
-were fenced correctly.
+The API refuses a workspace's callback token (AI proxy and workspace callbacks) and its MCP token
+once the workspace stops being `creating`/`running`/`recovery` or its node starts ending. There is
+no revocation list; each use re-reads D1. On the agent side:
 
-1. A sink that returns secrets, spends credentials, or mutates state requires an active workspace
-   on a live node: `assertWorkspaceAcceptsCallback` / `assertWorkspaceCallbackResourceById` for
-   callback tokens, `validateActiveWorkspaceMcpToken` for MCP tokens. Re-check the incarnation
-   (`assertWorkspaceCallbackIdentityCurrent`) before a secret leaves.
-2. `verifyCallbackToken` rejects tokens with no `scope` or `iat`. Do not add `scope === undefined`
-   branches. Still check `payload.scope` after verifying, because tests and future refactors can
-   bypass `expectedScope`.
-3. Test the sink with a real SQL engine: the same token is accepted while the workspace is active
-   and refused after it stops, with one case per refused workspace and node state.
-4. A lifecycle check alone does not retire a credential when the same workspace ID runs again.
-   On 2026-11-08 a VM restart kept its callback token and an Instant wake left the previous
-   container's tokens valid, because both were checked only against the workspace's status. Every
-   credential minted for a runtime carries the row's `callback_generation` (`cgen` claim, MCP
-   `callbackGeneration`); the reactivating write rotates it; `verifyCallbackToken` and
-   `validateActiveWorkspaceMcpToken` refuse a retired generation. When you add a path that starts a
-   new runtime for an existing workspace or node, rotate the generation in that write and mint the
-   runtime's credentials from it, and make sure no process of the old runtime keeps running (a VM
-   rebuild reuses the devcontainer, so the agent restarts the old agent processes in place;
-   never remove the session host, or task liveness reads the task as dead). When you add a path that renews or delivers to an existing
-   runtime, carry the generation it verified or bound, never a fresh read. Never verify a callback
-   JWT outside `verifyCallbackToken` (`tests/unit/services/callback-credential-generation.test.ts`
-   enforces this). VM node rows are deliberately not rotated: their token stays with the host's VM
-   agent, outside devcontainers. A path that exposes a VM node token to workspace processes, or
-   reuses a VM node ID for a new runtime, must start rotating `nodes.callback_generation`.
+- An agent process running during a stop or sleep will see 403 from the AI proxy, 401 from MCP and
+  410 from workspace callbacks. Treat these as terminal for that workspace and do not retry in a loop.
+- Callback tokens must carry `scope` and `iat`. The API mints every token; never construct one here.
+- A restart or rebuild retires the previous runtime's credentials (credential generation, `cgen`).
+  The control plane delivers the new runtime's token in the request body; install it
+  unconditionally (not "later expiry wins"), exchange each session's sam-mcp token, then restart
+  the agent process of every SessionHost of the workspace in place (their running processes hold
+  the revoked credentials), all before provisioning (`workspace_mcp_token_rotation.go`,
+  `workspace_reprovision.go` `restartSessionAgentsForWorkspace`,
+  `SessionHost.RestartAgentProcessForCredentialRotation`). Never stop or remove the SessionHost:
+  the control plane's task-liveness probe fails a task whose agent host is stopped
+  (`task_agent_host_stopped`). Session MCP lists, overrides and task context are kept. Any local
+  check that accepts a workspace JWT must also require the current token's `cgen`
+  (`git_credential_callback_auth.go`).
+- Full rule and tests: `.claude/rules/34-vm-agent-callback-auth.md`.
 
 ### How to Identify VM Agent Callback Routes
 

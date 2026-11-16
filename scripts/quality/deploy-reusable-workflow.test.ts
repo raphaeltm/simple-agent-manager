@@ -532,7 +532,7 @@ describe('deploy reusable workflow', () => {
       ['a test-only commit', 'agentTestOnlyCommit' as const],
     ])('does not rotate the release for %s', (_label, key) => {
       // Found in review, against this repo's own history: commit df8e03ee7 changed
-      // ONLY packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md
+      // ONLY .claude/rules/54-vm-agent-rollout-compatibility.md
       // and the prefix-only pathspec treated it as a new agent release, which would
       // have evicted the whole pool for a documentation edit.
       withAgentReleaseRepo((repo) => {

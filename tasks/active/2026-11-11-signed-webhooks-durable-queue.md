@@ -227,5 +227,5 @@ extra field mapping and per-automation limits stay out of scope.
 ## References
 
 - Idea `01M75HV6542HC5D1VNQ4SGT6PE`; Library `/engineering/research/inbound-webhooks-signed-providers-design.md`
-- `.claude/rules/13-staging-verification.md`, `apps/api/.claude/rules/47-control-loop-io-budget.md`,
-  `packages/shared/.claude/rules/79-new-enum-values-audit-every-denylist.md`
+- `.claude/rules/13-staging-verification.md`, `.claude/rules/47-control-loop-io-budget.md`,
+  `.claude/rules/79-new-enum-values-audit-every-denylist.md`

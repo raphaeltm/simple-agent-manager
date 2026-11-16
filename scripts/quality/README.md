@@ -59,6 +59,35 @@ Boundary guidance and sanctioned Valibot patterns are in
 `.claude/rules/51-runtime-boundary-validation.md`. Current helpers live in
 `packages/worker-core/src/runtime-validation.ts` and `apps/api/src/schemas/_validator.ts`.
 
+## Agent instruction delivery and budget
+
+`pnpm quality:agent-context-budget` reports what each agent harness loads and when. The
+model is in `scripts/quality/agent-instructions.ts`:
+
+- Claude Code loads `CLAUDE.md` and every `.claude/rules/*.md` without `paths` frontmatter
+  at launch. A rule with `paths` loads when a matching file is read, written or edited.
+- Codex loads the root `AGENTS.md` at launch (32 KiB cap) and nothing else by itself.
+
+`--check` runs in the Code Quality Checks job. It fails when a `paths` pattern matches no
+file, when a rule names source files outside its own scope (the rule was left behind by a
+code move), when two rule files are copies, when a Claude Code hook entry is malformed
+(Claude Code skips such an entry without an error), when a generated rule index is stale,
+or when a ceiling in `scripts/quality/agent-context-budget.json` is exceeded. `--write`
+regenerates the rule index in `.claude/rules/00-rule-routing.md` and the "Rules for this
+directory" section of each `AGENTS.md`.
+
+The static model is only as good as its match with the harness.
+`.claude/hooks/log-instructions-loaded.sh` records every instruction file a Claude Code
+session loads in `.tmp/instruction-loads/<session>.jsonl`. Compare a session with the model:
+
+```bash
+pnpm quality:agent-context-budget --observed .tmp/instruction-loads/<session>.jsonl \
+  --accessed apps/api/src/index.ts,packages/project-data/src/do/index.ts
+```
+
+A mismatch means the model is wrong about the harness. Use a fresh session: a rule that
+was already in context at launch is not loaded a second time when its `paths` match.
+
 ## Runtime workflow state
 
 `pnpm quality:runtime-state-files` rejects committed or staged `.do-state.md` and

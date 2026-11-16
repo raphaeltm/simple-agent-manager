@@ -24,7 +24,7 @@ You are a documentation synchronization validator for the Simple Agent Manager p
 | `apps/www/src/content/docs/docs/reference/configuration.md`  | Public configuration and secrets reference                    |
 | `apps/www/src/content/docs/docs/architecture/security.md`    | Public security architecture                                  |
 | `AGENTS.md`                                                  | Agent task patterns (non-Claude agents)                       |
-| `.claude/rules/*.md`                                         | Compact root behavioral rules and routing stubs (Claude Code) |
+| `.claude/rules/*.md`                                         | Behavioral rules; `paths` frontmatter scopes a rule to files |
 | `apps/*/.claude/rules/*.md`, `packages/*/.claude/rules/*.md` | Path-scoped full behavioral rules (Claude Code)               |
 
 ### Code Sources (documentation must match)
@@ -266,5 +266,5 @@ Actual code
 - Version numbers should match (constitution version, package.json, etc.)
 - Consider semantic meaning - minor wording differences may be acceptable
 - AGENTS.md is for implementation patterns (non-Claude agents), CLAUDE.md is for project overview
-- Root `.claude/rules/*.md` contains compact auto-loaded rules and routing stubs; full domain rules may live under app/package `.claude/rules/` directories
+- `.claude/rules/*.md` holds every rule once; rules without `paths` frontmatter load at launch, rules with it load on access to matching files
 ```

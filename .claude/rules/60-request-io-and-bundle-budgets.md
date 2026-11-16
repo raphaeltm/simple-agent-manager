@@ -1,3 +1,17 @@
+---
+paths:
+  - 'apps/api/**'
+  - 'apps/web/**'
+  - 'packages/worker-core/**'
+  - 'packages/scheduler-core/**'
+  - 'packages/project-data/**'
+  - 'packages/operations/**'
+  - 'packages/app-deployment/**'
+  - 'packages/ai-proxy/**'
+  - 'packages/agent-email/**'
+  - 'packages/repo-hosting/**'
+---
+
 # Request I/O and Client Bundle Budgets
 
 ## When This Applies

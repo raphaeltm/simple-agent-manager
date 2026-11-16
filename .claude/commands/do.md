@@ -45,8 +45,8 @@ Also create `.do-state.md` in the repo root (local-only, snapshot-visible; never
 2. **Research the codebase.** Before writing anything:
    - Search and read to find all relevant code paths
    - Read related public docs in `apps/www/src/content/docs/docs/` and `specs/` only for affected behavior.
-   - Read `.claude/rules/00-rule-routing.md`, then load only the root rules and scoped `.claude/rules/` files that match the directories you will modify. Do not bulk-load an app/package scoped rule directory.
-   - **Review relevant post-mortems** by searching root rule stubs, matching scoped rule files, and relevant `tasks/archive/` records for the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections when a relevant incident lesson is found. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is usually a relevant post-mortem.
+   - Read `.claude/rules/00-rule-routing.md`, then read the path-scoped rules its index lists for the directories you will modify. Claude Code loads them on file access; open them yourself before planning or creating new files.
+   - **Review relevant post-mortems** by searching the rule index, the matching path-scoped rules, and relevant `tasks/archive/` records for the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections when a relevant incident lesson is found. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is usually a relevant post-mortem.
    - Use web search for external library/API docs if needed
    - Identify existing patterns, conventions, and test approaches in the affected areas
 
@@ -98,7 +98,7 @@ Execute the checklist from the task file. Follow these rules:
 1. **Work through checklist items sequentially**, checking each off in the task file as you complete it.
 
 2. **Follow project conventions:**
-   - Obey loaded root rules plus scoped rules selected through `.claude/rules/00-rule-routing.md` for the changed paths. If a file edit enters a new app/package, load that path's matching scoped rules before continuing.
+   - Obey the launch rules plus the path-scoped rules for the changed paths (`.claude/rules/00-rule-routing.md`). If a file edit enters a new app/package, read that directory's rules before continuing.
    - Respect build order: `shared` -> `providers` -> `cloud-init` -> `api` / `web`
    - Update documentation in the same commit as code changes
    - Write tests that prove the feature works
