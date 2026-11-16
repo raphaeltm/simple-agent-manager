@@ -18,16 +18,19 @@ use ordinary individual-row persistence. Older Workers ignore the header.
 
 Clients connect to `GET /api/projects/:projectId/sessions/ws`. With `sessionId`, the socket
 subscribes to that chat session and receives its transcript frames (`message.new`,
-`messages.batch`, `message.append`) and its lifecycle events. Without `sessionId`, it is a project
-socket: it receives session lifecycle, attention, comment and access events for every session,
-but no transcript frames.
+`messages.batch`, `message.append`), its lifecycle events and project-wide events. Without
+`sessionId`, it is a project socket: it receives every non-transcript event for every session
+(lifecycle, attention, comments, access, activity and other project events), but no transcript
+frames.
 
 A client can add `messageAppend=message-append-v1` to advertise canonical message append support.
 A session socket without this capability keeps the individual-row stream and disables merging for
 its session only; project sockets never affect merging. The server never sends `message.append`
 to a socket without the capability. If such a session socket connects while a merged batch is
 being delivered, the server closes it with code `4409` instead; the client should reconnect and
-read the newest messages, which contain the complete row.
+read the newest messages, which contain the complete row. This covers text that arrives after the
+socket connects. A client without the capability that read a row over REST before connecting,
+while the row grew, keeps its shorter copy until it next reconnects or reloads.
 
 With merging enabled, `messages.batch` introduces a canonical row under its first chunk's ID.
 Later `message.append` events carry `{ id, sessionId, content, offset, revision }`: `content` is

@@ -461,8 +461,6 @@ export type {
   PersistMessageItem,
   PersistMessageRequest,
   PlanEntry,
-  ProjectWebSocketEvent,
-  ProjectWebSocketEventType,
   RecentChatsResponse,
   RemoveWorktreeResponse,
   SessionActivitySource,

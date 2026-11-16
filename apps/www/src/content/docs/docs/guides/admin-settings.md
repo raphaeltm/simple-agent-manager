@@ -95,8 +95,8 @@ rollout through successive row-usage windows.
 
 Existing message rows and their comment anchors remain unchanged. Tool, user, system, thinking,
 plan and typed-card rows keep their existing storage format. A browser built before merging
-existed disables merging only for a chat it has open, until that tab is refreshed. Its
-session-list connection does not affect merging.
+existed disables merging only for a chat it has open, until that chat is closed or the tab is
+refreshed. Its session-list connection does not affect merging.
 
 To roll back, save `false` for `chat.messageMergingEnabled`. The next batch seals any open merged
 row and stores new chunks individually; retry receipts remain available. Previously merged rows

@@ -62,8 +62,35 @@ async function openSocket(
   return { ws, frames, closeCode: () => code };
 }
 
-async function settle(until: () => boolean = () => false): Promise<void> {
-  for (let i = 0; i < 40 && !until(); i++) await new Promise((r) => setTimeout(r, 25));
+/** Wait for a socket-side condition; fails loudly rather than letting a later assertion guess. */
+async function settle(until: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!until()) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+/** Chunks for a second session, through the DO RPC the callback route calls: the reporter
+ * route binds one workspace to one session, so it cannot address a second one. */
+function persistToOther(f: Startup, sessionId: string, contents: string[], first: number) {
+  const source = {
+    workspaceId: f.workspace,
+    callbackGeneration: null,
+    outboxIncarnation: f.incarnation,
+  };
+  return f.stub.persistMessageBatch(
+    sessionId,
+    contents.map((content, index) => ({
+      messageId: `${f.prefix}-other-${first + index}`,
+      role: 'assistant',
+      content,
+      toolMetadata: null,
+      timestamp: f.now,
+      sequence: first + index,
+    })),
+    source
+  );
 }
 
 function transcriptFrames(socket: BrowserSocket): Frame[] {
@@ -97,8 +124,8 @@ function legacyTranscript(initial: Row[], socket: BrowserSocket, reread: Row[]):
 }
 
 /** The transcript a current chat view builds by applying appends at their offsets. */
-function capableTranscript(socket: BrowserSocket): Row[] {
-  const byId = new Map<string, Row>();
+function capableTranscript(socket: BrowserSocket, initial: Row[] = []): Row[] {
+  const byId = new Map(initial.map((row) => [row.id, { ...row }]));
   for (const frame of socket.frames) {
     if (frame.type === 'messages.batch')
       for (const { id, content } of frame.payload.messages as Row[]) byId.set(id, { id, content });
@@ -127,7 +154,10 @@ describe('browser sockets and chunk merging', () => {
     expect(await contents(f)).toEqual(['one two three four']);
     // Liveness: the project socket is open and still receives session lifecycle frames.
     await f.stub.updateSessionTopic(f.session, 'Renamed');
-    await settle(() => project.frames.some((frame) => frame.type === 'session.updated'));
+    await settle(
+      () => project.frames.some((frame) => frame.type === 'session.updated'),
+      'session.updated'
+    );
     expect(project.frames.map((frame) => frame.type)).toContain('session.updated');
     expect(transcriptFrames(project)).toEqual([]);
   });
@@ -137,7 +167,10 @@ describe('browser sockets and chunk merging', () => {
     const project = await openSocket(f, await signedIn(f), { capable: true });
     await deliver(f, chunks(f, ['one ', 'two']));
     await f.stub.updateSessionTopic(f.session, 'Renamed');
-    await settle(() => project.frames.some((frame) => frame.type === 'session.updated'));
+    await settle(
+      () => project.frames.some((frame) => frame.type === 'session.updated'),
+      'session.updated'
+    );
     expect(project.frames.map((frame) => frame.type)).toContain('session.updated');
     expect(transcriptFrames(project)).toEqual([]);
   });
@@ -146,28 +179,18 @@ describe('browser sockets and chunk merging', () => {
     const f = await startup();
     const cookie = await signedIn(f);
     const other = await f.stub.createSession(f.workspace, 'Other session');
+    // The other session is mid-reply when this session's legacy socket connects: the admission
+    // must seal only the session it watches.
+    await persistToOther(f, other, ['five '], 101);
     const legacy = await openSocket(f, cookie, { sessionId: f.session, capable: false });
+    await persistToOther(f, other, ['six'], 102);
 
     await deliver(f, chunks(f, ['one ', 'two ']));
     await deliver(f, chunks(f, ['three ', 'four'], 3, 'b'));
-    const source = {
-      workspaceId: f.workspace,
-      callbackGeneration: null,
-      outboxIncarnation: f.incarnation,
-    };
-    const otherChunks = ['five ', 'six'].map((content, index) => ({
-      messageId: `${f.prefix}-other-${index}`,
-      role: 'assistant',
-      content,
-      toolMetadata: null,
-      timestamp: f.now,
-      sequence: 101 + index,
-    }));
-    await f.stub.persistMessageBatch(other, otherChunks, source);
 
     expect(await contents(f)).toEqual(['one ', 'two ', 'three ', 'four']);
     expect((await storedRows(f, other)).map((row) => row.content)).toEqual(['five six']);
-    await settle(() => transcriptFrames(legacy).length >= 2);
+    await settle(() => transcriptFrames(legacy).length >= 2, 'legacy transcript frames');
     expect(legacy.frames.map((frame) => frame.type)).not.toContain('message.append');
     expect(legacyTranscript([], legacy, []).map((row) => row.content)).toEqual([
       'one ',
@@ -179,14 +202,15 @@ describe('browser sockets and chunk merging', () => {
 
   it('a capable chat socket still receives appends and rebuilds the stored rows', async () => {
     const f = await startup();
-    const chat = await openSocket(f, await signedIn(f), { sessionId: f.session, capable: true });
-
     await deliver(f, chunks(f, ['one ', 'two ']));
+    const loaded = await storedRows(f);
+    // Admitted mid-reply: a capable socket must not seal the open row.
+    const chat = await openSocket(f, await signedIn(f), { sessionId: f.session, capable: true });
     await deliver(f, chunks(f, ['three ', 'four'], 3, 'b'));
-    await settle(() => chat.frames.some((frame) => frame.type === 'message.append'));
+    await settle(() => chat.frames.some((frame) => frame.type === 'message.append'), 'append');
 
-    expect(chat.frames.map((frame) => frame.type)).toContain('message.append');
-    expect(capableTranscript(chat)).toEqual(await storedRows(f));
+    expect(await contents(f)).toEqual(['one two three four']);
+    expect(capableTranscript(chat, loaded)).toEqual(await storedRows(f));
     expect(chat.closeCode()).toBeNull();
   });
 
@@ -198,8 +222,10 @@ describe('browser sockets and chunk merging', () => {
     const loaded = await storedRows(f);
     expect(loaded.map((row) => row.content)).toEqual(['one two ']);
 
-    // An armed idle cleanup makes every batch await `recalculateAlarm` after its transaction
-    // and before its broadcasts. Hold the next batch at exactly that point.
+    // An armed idle cleanup makes every batch await `recalculateAlarm` (a storage alarm write)
+    // after its transaction and before its broadcasts; resolving an attention marker is the other
+    // await there. The hold widens that window on purpose: the send-time check must be correct
+    // whenever any await separates a batch's commit from its broadcast.
     await f.stub.scheduleIdleCleanup(f.session, f.workspace, null);
     // The test and the object signal through plain flags, each waiting on its own timers: a
     // promise resolved across the boundary would resume in the other side's I/O context.
@@ -218,27 +244,48 @@ describe('browser sockets and chunk merging', () => {
       };
     });
 
+    // A current tab on the same chat, connected before the batch, must still get the append.
+    const capable = await openSocket(f, cookie, { sessionId: f.session, capable: true });
     const inFlight = deliver(f, chunks(f, ['three ', 'four'], 3, 'b'));
-    await settle(() => hold.reached);
-    expect(hold.reached).toBe(true);
-    // Committed already: the second batch was appended to the open row.
-    expect((await storedRows(f)).map((row) => row.content)).toEqual(['one two three four']);
-    const legacy = await openSocket(f, cookie, { sessionId: f.session, capable: false });
-    hold.released = true;
+    let legacy!: BrowserSocket;
+    try {
+      await settle(() => hold.reached, 'the batch to reach its hold');
+      // Committed already: the second batch was appended to the open row.
+      expect((await storedRows(f)).map((row) => row.content)).toEqual(['one two three four']);
+      legacy = await openSocket(f, cookie, { sessionId: f.session, capable: false });
+    } finally {
+      // Never leave the object spinning if an assertion above fails.
+      hold.released = true;
+    }
     await inFlight;
-    await settle(() => legacy.closeCode() !== null);
+    await settle(
+      () =>
+        legacy.closeCode() !== null &&
+        capable.frames.some((frame) => frame.type === 'message.append'),
+      'the resync close and the capable append'
+    );
 
     expect(legacy.frames.map((frame) => frame.type)).not.toContain('message.append');
+    // A wire contract with deployed clients: any code but 1000 makes them reconnect and re-read.
+    expect(CHAT_MESSAGE_RESYNC_CLOSE_CODE).toBe(4409);
     expect(legacy.closeCode()).toBe(CHAT_MESSAGE_RESYNC_CLOSE_CODE);
     const reread = await storedRows(f);
     expect(legacyTranscript(loaded, legacy, reread)).toEqual(reread);
     expect(reread.map((row) => row.content)).toEqual(['one two three four']);
+    expect(capableTranscript(capable, loaded)).toEqual(reread);
+    expect(capable.closeCode()).toBeNull();
 
     // The reconnected socket keeps merging off for this session.
     const reconnected = await openSocket(f, cookie, { sessionId: f.session, capable: false });
     await deliver(f, chunks(f, ['five ', 'six'], 5, 'c'));
     expect(await contents(f)).toEqual(['one two three four', 'five ', 'six']);
     expect(reconnected.closeCode()).toBeNull();
+
+    // Control: once the last legacy chat socket leaves, merging resumes for the session.
+    reconnected.ws.close(1000);
+    await settle(() => reconnected.closeCode() !== null, 'the client close');
+    await deliver(f, chunks(f, ['seven ', 'eight'], 7, 'd'));
+    expect(await contents(f)).toEqual(['one two three four', 'five ', 'six', 'seven eight']);
   });
 
   it('with merging off, every socket keeps individual rows exactly as before', async () => {
@@ -255,7 +302,8 @@ describe('browser sockets and chunk merging', () => {
     await deliver(f, chunks(f, ['one ', 'two ']));
     await deliver(f, chunks(f, ['three ', 'four'], 3, 'b'));
     await settle(
-      () => transcriptFrames(legacy).length >= 2 && transcriptFrames(capable).length >= 2
+      () => transcriptFrames(legacy).length >= 2 && transcriptFrames(capable).length >= 2,
+      'both sockets to receive both batches'
     );
 
     const stored = await storedRows(f);

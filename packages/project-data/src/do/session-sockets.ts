@@ -43,8 +43,11 @@ function sessionTag(sessionId: string): string {
 
 /** Accept a browser socket upgrade forwarded by the API route. */
 export function admitBrowserSocket(ctx: DurableObjectState, sql: SqlStorage, url: URL): Response {
-  const sessionId = url.searchParams.get('sessionId');
+  const requested = url.searchParams.get('sessionId');
   const tags: string[] = [];
+  // Session IDs are stored lowercase; an uppercase spelling must still match the
+  // broadcast tag and the merge gate, or the socket would be invisible to both.
+  const sessionId = requested ? requested.toLowerCase() : null;
   if (sessionId) {
     if (!SESSION_ID_PATTERN.test(sessionId))
       return new Response('Invalid sessionId format', { status: 400 });
@@ -61,11 +64,19 @@ export function admitBrowserSocket(ctx: DurableObjectState, sql: SqlStorage, url
   return new Response(null, { status: 101, webSocket: pair[0] });
 }
 
-/** Whether a socket subscribed to this session cannot apply `message.append`. */
+/**
+ * Whether an open socket subscribed to this session cannot apply `message.append`. A socket the
+ * server already closed (for example after a resync) stays listed while its close handshake is
+ * pending; it receives nothing more, so it must not keep merging off.
+ */
 export function hasLegacySessionSocket(ctx: DurableObjectState, sessionId: string): boolean {
   return ctx
     .getWebSockets(sessionTag(sessionId))
-    .some((ws) => !ctx.getTags(ws).includes(CHAT_MESSAGE_APPEND_CAPABILITY));
+    .some(
+      (ws) =>
+        ws.readyState === WebSocket.OPEN &&
+        !tagsOf(ctx, ws)?.includes(CHAT_MESSAGE_APPEND_CAPABILITY)
+    );
 }
 
 function send(ws: WebSocket, message: string): void {
@@ -76,20 +87,38 @@ function send(ws: WebSocket, message: string): void {
   }
 }
 
+/** Close a socket that may already be closing (server-initiated resync, or the peer's close). */
+export function closeQuietly(ws: WebSocket, code?: number, reason?: string): void {
+  try {
+    ws.close(code, reason);
+  } catch {
+    /* already closed */
+  }
+}
+
+function tagsOf(ctx: DurableObjectState, ws: WebSocket): string[] | null {
+  try {
+    return ctx.getTags(ws);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The socket cannot apply this append, and its client has no frame that updates a row it
  * already holds. Every chat client reconnects on a non-1000 close and re-reads the newest
  * messages, which now include the committed append, and its re-admission seals the session.
  */
 function closeForResync(ws: WebSocket, sessionId: string): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
   log.info('websocket.legacy_append_resync', { sessionId, action: 'closed_for_resync' });
-  try {
-    ws.close(CHAT_MESSAGE_RESYNC_CLOSE_CODE, 'message append resync');
-  } catch {
-    /* already closing */
-  }
+  closeQuietly(ws, CHAT_MESSAGE_RESYNC_CLOSE_CODE, 'message append resync');
 }
 
+/**
+ * Never throws: it runs after a batch has committed, and an exception here would skip the
+ * remaining frames for every other socket.
+ */
 export function broadcastToBrowserSockets(
   ctx: DurableObjectState,
   type: string,
@@ -102,13 +131,16 @@ export function broadcastToBrowserSockets(
     return;
   }
   for (const ws of ctx.getWebSockets(sessionTag(sessionId))) {
-    if (type === MESSAGE_APPEND_FRAME && !ctx.getTags(ws).includes(CHAT_MESSAGE_APPEND_CAPABILITY))
+    const tags = tagsOf(ctx, ws);
+    if (!tags) continue;
+    if (type === MESSAGE_APPEND_FRAME && !tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY))
       closeForResync(ws, sessionId);
     else send(ws, message);
   }
   if (TRANSCRIPT_FRAME_TYPES.has(type)) return;
   for (const ws of ctx.getWebSockets()) {
-    if (ctx.getTags(ws).some((tag) => tag.startsWith(SESSION_TAG_PREFIX))) continue;
+    const tags = tagsOf(ctx, ws);
+    if (!tags || tags.some((tag) => tag.startsWith(SESSION_TAG_PREFIX))) continue;
     send(ws, message);
   }
 }

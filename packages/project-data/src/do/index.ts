@@ -124,6 +124,7 @@ import { guardedSessionSleep, type SessionSleepRuntimeGuard } from './session-sl
 import {
   admitBrowserSocket,
   broadcastToBrowserSockets,
+  closeQuietly,
   hasLegacySessionSocket,
 } from './session-sockets';
 import * as sessionState from './session-state';
@@ -3585,10 +3586,10 @@ export class ProjectData extends DurableObject<Env> {
     _reason: string,
     _wasClean: boolean
   ): Promise<void> {
-    ws.close();
+    closeQuietly(ws);
   }
   async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
-    ws.close();
+    closeQuietly(ws);
   }
 
   // --- Knowledge Graph ---

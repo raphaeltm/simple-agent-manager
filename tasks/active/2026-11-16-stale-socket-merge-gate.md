@@ -37,7 +37,11 @@ forwards the raw upgrade to the DO (`ProjectData.fetch`). Repo-wide search for `
 | same hook at `7bea824b9^`                                                                             | `?sessionId=…`, no capability                  | `message.new`, `messages.batch` (append-merge: skips existing IDs), lifecycle. Reconnects on any close code other than 1000 and then re-reads the newest window with `mergeReplace`, which replaces rows by ID. |
 | chat hook before `47ff45302` (2026-03-12)                                                             | unscoped, filtered `message.new` client-side   | Out of support: an eight-month-old bundle; the server already rejects its `message.send` path. Documented, not accommodated.                                                                                    |
 
-No other client (`packages/acp-client`, CLI, vm-agent, harness) uses this route.
+No other client (`packages/acp-client`, CLI, vm-agent, harness) uses this route. Project-hook
+versions were checked at `624ff291a`, `ca8ff81da`, `fe787b54d`, `45e3a2786` and `7bea824b9^`; chat
+hooks at `7bea824b9^`, a May 2026 version and the first version. Every chat hook since 2026-03-17
+(`98ceb3904`, `mergeReplace` replaces rows by ID) reconnects on a close other than 1000 and re-reads
+the newest window, so the resync close works for all of them.
 
 ### Frames the DO sends (`ProjectData.broadcastEvent`)
 
@@ -81,7 +85,7 @@ No other client (`packages/acp-client`, CLI, vm-agent, harness) uses this route.
    rejected: the old client's replace keeps rows at or past the window's newest timestamp, so a
    delta row could duplicate text after a reconnect.
 
-Residual, out of scope (recorded in backlog): a legacy client that read the transcript over REST
+Residual, out of scope (`tasks/backlog/2026-11-16-legacy-chat-pre-admission-append-gap.md`): a legacy client that read the transcript over REST
 just before its first socket admission, while an append landed in between, keeps the stale row
 until its next reconnect or reload. The brief scopes the guarantee to text arriving after the
 socket appears; the old client's first-open catch-up reads only rows newer than its newest loaded
@@ -89,21 +93,37 @@ row.
 
 ## Implementation checklist
 
-- [ ] Extract socket admission/broadcast into `packages/project-data/src/do/session-sockets.ts`
-- [ ] Unscoped sockets: no transcript frames; no seal on admission; no effect on merge gate
-- [ ] Session-scoped legacy socket: gates only its session; sealed on admission (unchanged)
-- [ ] `message.append` capability check at send time; legacy session socket closed with resync code
-- [ ] Shared protocol constant for the resync close code in `packages/shared/src/chat-message-append.ts`
-- [ ] Workers tests (real workerd, real socket route, real callback route):
-  - [ ] legacy project socket + merging on: session merges (row count), project socket gets no transcript frame, still gets lifecycle frame
-  - [ ] legacy session socket: its session does not merge, another session still merges
-  - [ ] race: batch held at awaited midpoint, legacy session socket admitted, released: no append frame, closed with resync code, old-client model ends with complete text
-  - [ ] capable session socket still receives appends and reconstructs the stored text
-  - [ ] merging off: unchanged individual rows and frames
-  - [ ] billed-write snapshot test stays green
-- [ ] Discrimination: remove each guard once, record the test that goes red
-- [ ] Docs: `api.md` sessions/ws section, `admin-settings.md` legacy note, `chat.ts` route comment
-- [ ] Backlog task for the pre-admission residual
+- [x] Extract socket admission/broadcast into `packages/project-data/src/do/session-sockets.ts`
+- [x] Unscoped sockets: no transcript frames; no seal on admission; no effect on merge gate
+- [x] Session-scoped legacy socket: gates only its session (open sockets only); sealed on admission
+- [x] `message.append` capability check at send time; legacy session socket closed with resync code
+- [x] Shared protocol constant for the resync close code in `packages/shared/src/chat-message-append.ts`
+- [x] Broadcast never throws after commit (per-socket tag read and close isolated); `webSocketClose` tolerates a double close; `sessionId` tag lowercased
+- [x] Workers tests (real workerd, real `sessions/ws` route with session cookie, real reporter callback route):
+  - [x] legacy project socket admitted mid-reply + merging on: session merges (row count), no transcript frame, lifecycle frame still arrives
+  - [x] legacy session socket: its session does not merge; another session mid-reply when it connects still merges (seal scoped)
+  - [x] race: batch held at awaited midpoint, legacy session socket admitted, released: no append, closed 4409, old-client model ends with complete text; a capable socket on the same chat still gets the append
+  - [x] reconnected legacy socket keeps merging off; once it leaves, merging resumes (control)
+  - [x] capable session socket admitted mid-reply does not seal and rebuilds the stored rows from appends
+  - [x] merging off: unchanged individual rows and frames
+  - [x] billed-write snapshot test stays green
+- [x] Unit tests for failure isolation (`packages/project-data/tests/unit/session-sockets.test.ts`)
+- [x] Discrimination recorded (below)
+- [x] Docs: `api.md` sessions/ws section, `admin-settings.md` legacy note, `chat.ts` route comment, `useProjectWebSocket` JSDoc; dead `ProjectWebSocketEvent` type removed
+- [x] Backlog task for the pre-admission residual: `tasks/backlog/2026-11-16-legacy-chat-pre-admission-append-gap.md`
+- [ ] Staging2 verification (Phase 6)
+
+### Discrimination record (each guard removed once, restored byte-identical)
+
+| Guard removed                                  | Tests that went red                           |
+| ---------------------------------------------- | --------------------------------------------- |
+| no transcript frames to project sockets        | legacy project socket; capable project socket |
+| merge gate counts only session sockets         | legacy project socket                         |
+| no seal on project-socket admission            | legacy project socket                         |
+| session gate for legacy chat sockets           | own-session-only; mid-batch race              |
+| send-time capability check on `message.append` | mid-batch race                                |
+| close for resync (append dropped silently)     | mid-batch race                                |
+| gate counts only OPEN sockets                  | mid-batch race (merging-resumes control)      |
 
 ## Acceptance criteria
 
