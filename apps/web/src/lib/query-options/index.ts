@@ -163,6 +163,7 @@ export {
   notificationsListQueryOptions,
   timelineProgressNotificationsQueryOptions,
 } from './notifications';
+export { insightsQueryKeys, projectFlowQueryOptions } from './insights';
 export { projectOverviewQueryKeys, projectOverviewQueryOptions } from './project-overview';
 export {
   instantRuntimeEnabledQueryOptions,
