@@ -110,6 +110,7 @@ exist at deploy time stay answerable and archivable until they resolve or expire
 ## Notes
 
 - Reviews: security-auditor, cloudflare-specialist, test-engineer, task-completion-validator all ADDRESSED (see PR #2780).
+- 07:08Z: paused for the account's 5-hour window (77%, resets 09:10Z); resume wake 09:12Z. Remaining: rebase on F1 (#2775) if merged and adapt its overview query (`.tmp/adapt-f1.py` locally, otherwise: count open question asks in RUNNING_SQL has_attention/row filter/WAITING_ON_VIEWER_SQL), staging2 live checks, merge, deploy.
 - Main rejected the direct task-file push (repository rules), so this file lives on the branch only.
 
 ## Rule 44 inventory
