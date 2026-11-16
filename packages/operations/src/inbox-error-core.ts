@@ -23,7 +23,6 @@ import {
 
 import { OperationError } from './errors';
 import { createAsk } from './inbox-ask-create-core';
-import { updateSchedule } from './schedule-writes';
 import type { OperationContext, OperationDeps } from './types';
 
 /** What failed. The dedupe key is `error:<source>:<subjectId>`. */
@@ -278,11 +277,7 @@ export async function answerErrorItem(
       return { ref: item.ref, outcome: 'wake_requested', agentNotified: false };
     }
     case 'resume': {
-      await updateSchedule(ctx, {
-        projectId: item.projectId,
-        scheduleId: target.subjectId,
-        paused: false,
-      });
+      await ctx.ports.inbox.resumeTrigger(me, item.projectId, target.subjectId);
       await resolveSystemError(ctx, {
         projectId: item.projectId,
         source: target.source,

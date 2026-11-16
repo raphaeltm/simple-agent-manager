@@ -490,6 +490,12 @@ export interface OperationInboxPort {
    * `ensureSessionRecovery`). Throws an `OperationError` when it is refused.
    */
   wakeChat(userId: string, projectId: string, sessionId: string): Promise<void>;
+  /**
+   * A system error item's Resume: a paused automation back to active, the same status change
+   * the trigger PATCH route makes (`triggerStatusUpdates`, resetting the failure window). Needs
+   * `task:write`; throws an `OperationError` when it is refused or the trigger is not paused.
+   */
+  resumeTrigger(userId: string, projectId: string, triggerId: string): Promise<void>;
 }
 
 export interface OperationPorts {

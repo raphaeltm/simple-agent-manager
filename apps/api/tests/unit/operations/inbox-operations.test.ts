@@ -156,6 +156,10 @@ beforeEach(() => {
     sqlite,
     new URL('../../../src/db/migrations/0247_asks_questions.sql', import.meta.url)
   );
+  applySqliteMigration(
+    sqlite,
+    new URL('../../../src/db/migrations/0248_asks_system_errors.sql', import.meta.url)
+  );
   for (const [id, role] of [
     ['owner', 'user'],
     ['colleague', 'user'],
