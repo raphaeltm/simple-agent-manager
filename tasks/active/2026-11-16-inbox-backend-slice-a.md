@@ -60,32 +60,42 @@ and the "since" side of the context read. No UI, no agent-facing MCP tools.
 
 ## Implementation checklist
 
-- [ ] Migration `0242_asks.sql` (additive) + drizzle `asks` in `packages/worker-core/src/schema.ts`
-- [ ] Shared types `packages/shared/src/types/inbox.ts` (kinds, filters, refs, item, responses)
-- [ ] `getAttentionSummary` carries `source`, `category`, `interactionId`, `interactionKind`
-- [ ] Inbox settings definitions + resolver + admin registry entries
-- [ ] Operations: list (cross-project + project), count, get, answer, archive, internal create
-- [ ] `inboxGet` (Connector `sam_inbox_get`) reads pending items from the shared list
-- [ ] Inbox port + worker implementation (asks CAS writes, attention archive, secret/approval/permission delegation)
-- [ ] ProjectData: archive claim/complete for attention markers (reason `archived`)
-- [ ] Prompt source kind `inbox_ask` added to every source-kind list and guard
-- [ ] Asks notice sweep (expiry + notified_at retry) in the cron, isolated
-- [ ] Context read: "since" side in `chat-attention.ts`, bounded like "before"
-- [ ] REST routes `/api/inbox`, `/api/inbox/count`, `/api/projects/:projectId/inbox/...`
-- [ ] Tests: real-SQL tenancy attack + owner control pairs (discriminating), CAS concurrency
+- [x] Migration `0242_asks.sql` (additive) + drizzle `asks` in `packages/worker-core/src/schema.ts`
+- [x] Shared types `packages/shared/src/types/inbox.ts` (kinds, filters, refs, item, responses)
+- [x] `getAttentionSummary` carries `source`, `category`, `interactionId`, `interactionKind`
+- [x] Inbox settings definitions + resolver + admin registry entries
+- [x] Operations: list (cross-project + project), count, get, answer, archive, internal create
+- [x] `inboxGet` (Connector `sam_inbox_get`) reads pending items from the shared list
+- [x] Inbox port + worker implementation (asks CAS writes, attention archive, secret/approval/permission delegation)
+- [x] ProjectData: archive claim/complete for attention markers (reason `archived`)
+- [x] Prompt source kind `inbox_ask` added to every source-kind list and guard
+- [x] Asks notice sweep (expiry + notified_at retry) in the cron, isolated
+- [x] Context read: "since" side in `chat-attention.ts`, bounded like "before"
+- [x] REST routes `/api/inbox`, `/api/inbox/count`, `/api/projects/:projectId/inbox/...`
+- [x] Tests: real-SQL tenancy attack + owner control pairs (discriminating), CAS concurrency
       (two answers, answer vs archive), fault isolation, capability tests (question, secret, ask)
-- [ ] Docs: API reference / public docs for the inbox routes; idea note + channel publication
+- [x] Docs: API reference / public docs for the inbox routes; idea note + channel publication
+
+## Notes
+
+- Migration numbered 0245 (0242/0243 claimed by open PRs #2721, #2753, #2772, #2691).
+- Archive of a question uses the answer path's DO claim with an `archive` mode (NUL-prefixed
+  staged value), so an answer and an archive exclude each other through one compare-and-set.
+- Answers to `asks` also notify the agent (answered/done), through the same `notified_at` + sweep.
+- Writes require the exact app origin + JSON like the interaction/secret routes.
+- Discrimination runs recorded in PR #2776.
+- Known limit: one open question per chat until slice G (attention_json holds one marker).
 
 ## Acceptance criteria
 
-- [ ] An agent's `request_human_input` shows in the creator's cross-project list and count, not
+- [x] An agent's `request_human_input` shows in the creator's cross-project list and count, not
       in another member's list; archiving through the inbox resolves the marker with reason
       `archived` and the agent receives the "will not act" prompt
-- [ ] A secret request archived through the inbox is declined and the agent notified; fulfil works
-- [ ] An `asks` row created through the internal operation lists, answers, archives with a notice
+- [x] A secret request archived through the inbox is declined and the agent notified; fulfil works
+- [x] An `asks` row created through the internal operation lists, answers, archives with a notice
       that retries via the sweep when the first delivery fails
-- [ ] Foreign-project and missing items return the same not-found; transcript context only for
+- [x] Foreign-project and missing items return the same not-found; transcript context only for
       readers with access to the source chat
-- [ ] Two concurrent answers: one wins; answer vs archive: one wins
-- [ ] One malformed row does not hide the others
-- [ ] List and count stay within rule 60 budgets with no per-chat DO call
+- [x] Two concurrent answers: one wins; answer vs archive: one wins
+- [x] One malformed row does not hide the others
+- [x] List and count stay within rule 60 budgets with no per-chat DO call
