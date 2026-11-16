@@ -28,6 +28,21 @@ import { workflowSource } from './workflow-test-helpers';
 const REPO_ROOT = join(__dirname, '..', '..');
 const SCOPE = '@simple-agent-manager/';
 
+// CI checks out tracked inputs. Local build outputs and screenshot scratch files must
+// never change the dependency scan or require broader CI filters.
+const tracked = spawnSync('git', ['ls-files', '-z'], { cwd: REPO_ROOT, encoding: 'utf8' });
+if (tracked.status !== 0) throw new Error(`Cannot list tracked CI inputs: ${tracked.stderr}`);
+const TRACKED_FILES = new Set(tracked.stdout.split('\0').filter(Boolean));
+const TRACKED_DIRS = new Set<string>();
+for (const file of TRACKED_FILES) {
+  for (let dir = dirname(file); dir !== '.'; dir = dirname(dir)) TRACKED_DIRS.add(dir);
+}
+
+function isTrackedInput(path: string): boolean {
+  const repoPath = relative(REPO_ROOT, path);
+  return TRACKED_FILES.has(repoPath) || TRACKED_DIRS.has(repoPath);
+}
+
 /** Root files every package's tests read (lockfile, workspace, TypeScript and Vitest bases). */
 const ROOT_INPUTS = [
   'package.json',
@@ -222,6 +237,34 @@ function suitesFor(paths: string[], eventName: Scenario['eventName'] = 'pull_req
 }
 
 describe('glob matcher (sanity, so coverage checks cannot pass vacuously)', () => {
+  it.each(['scripts/selfhost/celld-config.ts', 'deploy/selfhost/key-agent/server.ts'])(
+    '%s selects API unit and hosted-git checks without the Workers suite',
+    (path) => {
+      const results = simulate({ eventName: 'pull_request', filters: filtersFor([path]) });
+      expect(results.get('test-api')).toBe('success');
+      expect(results.get('hosted-git')).toBe('success');
+      expect(results.get('durable-object-worker-shards')).toBe('skipped');
+    }
+  );
+
+  it('lineage-only web contracts do not select hosted-git conformance', () => {
+    const results = simulate({
+      eventName: 'pull_request',
+      filters: filtersFor(['apps/web/src/pages/project-chat/lineageUtils.ts']),
+    });
+    expect(results.get('test-api')).toBe('success');
+    expect(results.get('hosted-git')).toBe('skipped');
+  });
+
+  it('scans tracked input files and directories, excluding generated and scratch paths', () => {
+    expect(isTrackedInput(join(REPO_ROOT, 'apps/api/src/index.ts'))).toBe(true);
+    expect(isTrackedInput(join(REPO_ROOT, 'apps/api/src'))).toBe(true);
+    for (const path of ['node_modules', '.codex/tmp/playwright-screenshots', '.tmp',
+      'apps/www/public/scripts/blog-mermaid.js', 'apps/www/public/scripts/docs-mermaid.js']) {
+      expect(isTrackedInput(join(REPO_ROOT, path)), path).toBe(false);
+    }
+  });
+
   it.each([
     ['apps/api/**', 'apps/api/src/index.ts', true],
     ['apps/api/**', 'apps/api-x/src/index.ts', false],
@@ -309,9 +352,9 @@ function resolveExisting(candidate: string, imported = false): string | undefine
   const indexes = imported ? ['/index.ts', '/index.tsx'] : [];
   for (const suffix of ['', '.ts', '.tsx', '.mjs', '.js', '.json', ...indexes]) {
     const path = `${candidate}${suffix}`;
-    if (existsSync(path) && (suffix !== '' || statSync(path).isFile())) return path;
+    if (isTrackedInput(path) && existsSync(path) && (suffix !== '' || statSync(path).isFile())) return path;
   }
-  return existsSync(candidate) ? candidate : undefined;
+  return isTrackedInput(candidate) && existsSync(candidate) ? candidate : undefined;
 }
 
 const CODE_FILE = /\.(?:[cm]?[jt]sx?|astro)$/u;
@@ -377,6 +420,7 @@ function crossReads(
     for (const entry of readdirSync(current)) {
       if (['node_modules', 'dist', '.astro', 'coverage', 'test-results'].includes(entry)) continue;
       const full = join(current, entry);
+      if (!isTrackedInput(full)) continue;
       if (statSync(full).isDirectory()) walk(full);
       else if (CODE_FILE.test(entry)) queue.push(full);
     }
@@ -626,10 +670,10 @@ describe('runner budget (jobs a ready PR starts)', () => {
     jobCount(simulate({ eventName: 'pull_request', filters: filtersFor(paths) }));
 
   it.each([
-    ['API only', ['apps/api/src/index.ts'], 19],
+    ['API only', ['apps/api/src/index.ts'], 20],
     ['web only', ['apps/web/src/App.tsx'], 11],
-    ['shared package', ['packages/shared/src/index.ts'], 22],
-    ['lockfile', ['pnpm-lock.yaml'], 22],
+    ['shared package', ['packages/shared/src/index.ts'], 23],
+    ['lockfile', ['pnpm-lock.yaml'], 23],
     ['public site or docs', ['apps/www/src/content/docs/docs/index.mdx'], 7],
   ])('a ready %s PR starts the recorded number of jobs', (_, paths, expected) => {
     expect(count(paths)).toBe(expected);
@@ -640,9 +684,10 @@ describe('runner budget (jobs a ready PR starts)', () => {
   });
 
   // Realistic multi-area PRs, with their limits. The four-area shape of baseline run
-  // 43734352275 is the one case above 26: 23 before, 27 now. The seventh Workers shard
+  // 43734352275 is the one case above 26: 23 before, 28 with hosted git. The seventh Workers shard
   // is what brings an API PR to about 10 min, since the Workers shards run alongside the
-  // 8.4 min Test api shards.
+  // 8.4 min Test api shards. Self-host integration adds one hosted-git conformance
+  // job to API-affected changes; web-only and public-site-only budgets stay unchanged.
   it.each([
     [
       'API, web, VM agent and docs',
@@ -652,26 +697,26 @@ describe('runner budget (jobs a ready PR starts)', () => {
         'packages/vm-agent/main.go',
         'apps/www/src/content/docs/docs/index.mdx',
       ],
-      27,
+      28,
     ],
     [
       'shared package and VM agent',
       ['packages/shared/src/index.ts', 'packages/vm-agent/main.go'],
-      25,
+      26,
     ],
     [
       'lockfile, VM agent and Go modules',
       ['pnpm-lock.yaml', 'packages/vm-agent/main.go', 'packages/vm-agent/go.mod'],
-      26,
+      27,
     ],
   ])('a ready %s PR starts at most the recorded number of jobs', (_, paths, limit) => {
     expect(count(paths)).toBeLessThanOrEqual(limit);
   });
 
-  it('a PR that matches every filter starts at most 31 jobs (27 before: four more Workers shards)', () => {
+  it('a PR that matches every filter starts at most 32 jobs (four more Workers shards and hosted git)', () => {
     expect(
       jobCount(simulate({ eventName: 'pull_request', filters: allFilters() }))
-    ).toBeLessThanOrEqual(31);
+    ).toBeLessThanOrEqual(32);
   });
 
   it('a draft PR starts 6 jobs', () => {

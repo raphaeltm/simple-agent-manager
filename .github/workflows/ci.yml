@@ -54,6 +54,7 @@ jobs:
     outputs:
       api: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api }}
       api-unit: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.api-unit }}
+      hosted-git: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.hosted-git }}
       web: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.web }}
       public-site: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.public-site }}
       packages: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.packages }}
@@ -112,6 +113,8 @@ jobs:
             # ci-suite-selection.test.ts scans the tests and their imports for these.
             api-unit:
               - *api
+              - 'scripts/selfhost/**'
+              - 'deploy/selfhost/**'
               # Go sources, Makefile and `go test` runs in cross-boundary contract tests.
               - 'packages/vm-agent/**'
               # Omitted-worker-var defaults scan the tail worker's sources.
@@ -136,6 +139,11 @@ jobs:
               - 'tests/fixtures/acp-activity-report-v1.json'
               - 'tests/fixtures/deploy-release/**'
               - 'tests/fixtures/durable-execution-protocol-v1.json'
+            # The conformance suite also builds the self-host entry/configuration.
+            hosted-git:
+              - *api
+              - 'scripts/selfhost/**'
+              - 'deploy/selfhost/**'
             web:
               - *workspace-root
               - 'apps/web/**'
@@ -1088,6 +1096,7 @@ jobs:
       - code-quality
       - go-vulnerability-diff
       - durable-object-worker-shards
+      - hosted-git
       - pulumi-infra
       - vm-agent-test
       - cli-test
@@ -1127,12 +1136,12 @@ jobs:
 
   # SAM-hosted git exists only in the self-host build: the real git CLI against the HostedGitRepo
   # Durable Object in Miniflare (apps/api/vitest.hosted-git.config.ts). Gated on the whole API
-  # filter because the route's auth path reaches shared modules (project auth, workspace callback
-  # identity, node callback auth), not only the hosted-git files.
+  # dependency closure because the route's auth path reaches shared modules (project auth,
+  # workspace callback identity, node callback auth), plus the self-host entry/configuration.
   hosted-git:
     name: Hosted git conformance (self-host)
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && !github.event.pull_request.draft && needs.changes.outputs.hosted-git == 'true'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
