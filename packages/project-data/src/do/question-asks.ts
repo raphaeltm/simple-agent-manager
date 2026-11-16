@@ -33,6 +33,7 @@ export async function closeQuestionAsksForHumanMessage(
       `UPDATE asks
           SET status = 'answered', answer_json = ?, resolved_at = ?, updated_at = ?, notified_at = ?
         WHERE project_id = ? AND source_session_id = ? AND kind = 'question' AND status = 'open'
+          AND created_at <= ?
         RETURNING id`
     )
       .bind(
@@ -41,7 +42,9 @@ export async function closeQuestionAsksForHumanMessage(
         now,
         now,
         input.projectId,
-        input.sessionId
+        input.sessionId,
+        // A question filed after the message is not answered by it.
+        now
       )
       .all<{ id: string }>();
     const ids = (result.results ?? []).map((row) => row.id).filter(Boolean);

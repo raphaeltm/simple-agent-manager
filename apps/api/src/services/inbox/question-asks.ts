@@ -156,6 +156,13 @@ export async function answerQuestionAsk(
   }
 ): Promise<QuestionAnswerResult> {
   const { ask, answer, userId } = input;
+  if (ask.status === 'answered' && ask.answer === answer && ask.notifiedAt === null) {
+    // The same answer again while it has not reached the agent: try the delivery again (the same
+    // delivery id, so a delivery that did land is not repeated). The person can always unstick it.
+    return (await deliverAnswer(env, ask))
+      ? { resolved: true, alreadyResolved: false, answer }
+      : { resolved: false, alreadyResolved: false, inFlight: true, answer };
+  }
   if (ask.status !== 'open') return settledOutcome(ask, answer);
   const now = Date.now();
   if (ask.expiresAt !== null && ask.expiresAt <= now) {
@@ -193,9 +200,7 @@ export async function answerQuestionAsk(
     return settledOutcome(current, answer);
   }
 
-  const deps = { env, ports: createOperationPorts(env) };
-  const row = await loadAskNoticeRow(deps, ask.projectId, ask.id);
-  const queued = row ? await notifyClosedAsk(deps, row, 'answered') : false;
+  const queued = await deliverAnswer(env, ask);
   // A teammate's answer is recorded on the shared-answer audit event, as for a marker.
   await recordSharedSessionAnswer(env, input.authorization.writer, {
     markerId: ask.id,
@@ -204,6 +209,13 @@ export async function answerQuestionAsk(
   return queued
     ? { resolved: true, alreadyResolved: false, answer }
     : { resolved: false, alreadyResolved: false, inFlight: true, answer };
+}
+
+/** Queue the answer to the agent and record `notified_at`; false when it was not queued. */
+async function deliverAnswer(env: Env, ask: QuestionAsk): Promise<boolean> {
+  const deps = { env, ports: createOperationPorts(env) };
+  const row = await loadAskNoticeRow(deps, ask.projectId, ask.id);
+  return row ? notifyClosedAsk(deps, row, 'answered') : false;
 }
 
 /** `request.resolvedAt` / `resolvedAnswer` as the chat card read them from a marker. */

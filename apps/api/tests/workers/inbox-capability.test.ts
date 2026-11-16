@@ -15,6 +15,7 @@ import { handleAppError } from '../../src/middleware/app-error-handler';
 import { requireApproved, requireAuth } from '../../src/middleware/auth';
 import { webOperationContext } from '../../src/operation-ports';
 import { inboxRoutes, projectInboxRoutes } from '../../src/routes/inbox';
+import { runInboxAskSweep } from '../../src/services/inbox/sweep';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import {
   seedAgentSession,
@@ -209,8 +210,9 @@ describe('inbox capability through the real entry points', () => {
       .bind(s.chatSessionId)
       .first<{ attention_json: string | null }>();
     expect(summary?.attention_json ?? null).toBeNull();
-    // The chat's own reads still show it as the chat's question (ProjectData session read).
-    expect(await s.project.getSession(s.chatSessionId)).toMatchObject({
+    // The chat list's ProjectData read still shows it as the chat's question.
+    const listed = await s.project.listSessions(null, 20, 0, null, null);
+    expect(listed.sessions.find((session) => session.id === s.chatSessionId)).toMatchObject({
       attention: { markerId: askId, kind: 'needs_input', source: 'request_human_input' },
     });
 
@@ -523,5 +525,209 @@ describe('inbox capability through the real entry points', () => {
     expect(String(delivered[0]?.content)).toContain('will not act on it');
     const archivedList = await get<ListBody>('/api/inbox?filter=archived', s.ownerCookie);
     expect(archivedList.body.items.map((item) => item.ref)).toContain(created.ref);
+  });
+
+  // Inbox slice G: what a question marker did inside ProjectData, through the real Durable Object.
+  describe('asks-era questions inside ProjectData', () => {
+    // The expiry path stops the task run on its VM; stub that edge and keep it off the network.
+    beforeEach(() => {
+      vi.stubGlobal('fetch', fetchMock);
+      fetchMock.mockImplementation(async () => Response.json({ ok: true }));
+    });
+
+    async function ask(s: Seeded, context = 'Ship the billing fix now?') {
+      const result = await callTool(s.token, 'request_human_input', { context });
+      return (result.humanInputRequest as { id: string }).id;
+    }
+    async function askRow(id: string) {
+      return testEnv.DATABASE.prepare(
+        'SELECT status, answer_json, notified_at, resolved_at FROM asks WHERE id = ?'
+      )
+        .bind(id)
+        .first<{
+          status: string;
+          answer_json: string | null;
+          notified_at: number | null;
+          resolved_at: number | null;
+        }>();
+    }
+    async function taskStatus(taskId: string) {
+      return testEnv.DATABASE.prepare('SELECT status, error_message FROM tasks WHERE id = ?')
+        .bind(taskId)
+        .first<{ status: string; error_message: string | null }>();
+    }
+
+    it('another member cannot read-to-answer, answer or archive the owner’s question (attack + owner control)', async () => {
+      const s = await seed();
+      const id = await ask(s);
+      const card = (cookie: string, path = '') =>
+        SELF.fetch(
+          `https://api.${testEnv.BASE_DOMAIN}/api/projects/${s.projectId}/sessions/${s.chatSessionId}/attention/${id}${path}`,
+          path
+            ? {
+                method: 'POST',
+                headers: { Cookie: cookie, 'Content-Type': 'application/json', Origin: ORIGIN },
+                body: JSON.stringify({ answer: 'Yes' }),
+              }
+            : { headers: { Cookie: cookie } }
+        );
+      // A member who is not the chat's owner (and has no grant) reads it without answer controls.
+      const read = await card(s.colleagueCookie);
+      if (read.status === 200) {
+        expect((await read.json<{ request: { canAnswer: boolean } }>()).request.canAnswer).toBe(
+          false
+        );
+      } else {
+        expect(read.status).toBe(404);
+      }
+      expect((await card(s.colleagueCookie, '/resolve')).status).toBe(403);
+      const ref = encodeURIComponent(`ask:${id}`);
+      expect(
+        (
+          await post(`/api/projects/${s.projectId}/inbox/items/${ref}/answer`, s.colleagueCookie, {
+            answer: 'Yes',
+          })
+        ).status
+      ).toBe(404);
+      expect(
+        (await post(`/api/projects/${s.projectId}/inbox/items/${ref}/archive`, s.colleagueCookie))
+          .status
+      ).toBe(404);
+      expect((await askRow(id))?.status).toBe('open');
+      const snapshot = await s.project.getDurableExecutionSnapshot(s.chatSessionId);
+      expect(
+        snapshot.deliveries.filter((delivery: { id: string }) => delivery.id === `inbox-ask:${id}`)
+      ).toEqual([]);
+      // Owner control.
+      expect((await card(s.ownerCookie, '/resolve')).status).toBe(200);
+      expect((await askRow(id))?.status).toBe('answered');
+    });
+
+    it('the ProjectData reads behind team status show the question', async () => {
+      const s = await seed();
+      const id = await ask(s);
+      const [session] = await s.project.getSessionsByTaskIds([s.taskId]);
+      expect(session).toMatchObject({ attention: { markerId: id, kind: 'needs_input' } });
+    });
+
+    it('a person’s chat message answers the chat’s open questions, and only those', async () => {
+      const s = await seed();
+      const first = await ask(s);
+      const second = await ask(s, 'And the docs too?');
+      // A question in another chat of this project (foreign projects: real-SQL unit test).
+      await testEnv.DATABASE.prepare(
+        `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
+            source_session_id, status, created_at, updated_at)
+         VALUES ('other-chat-q', ?, 'user', ?, 'question', 1, 'y', ?, 'open', 1, 1)`
+      )
+        .bind(s.projectId, s.ownerId, s.colleagueSessionId)
+        .run();
+      await s.project.persistMessageBatch(s.chatSessionId, [
+        {
+          messageId: `typed-${crypto.randomUUID()}`,
+          role: 'user',
+          content: 'Yes, ship it, and the docs.',
+          toolMetadata: null,
+          timestamp: new Date(Date.now() + 1_000).toISOString(),
+        },
+      ]);
+      for (const id of [first, second]) {
+        const row = await askRow(id);
+        expect(row?.status).toBe('answered');
+        expect(row?.notified_at).not.toBeNull();
+      }
+      expect((await askRow('other-chat-q'))?.status).toBe('open');
+      // Liveness: the chat itself is no longer waiting on a person.
+      const listed = await s.project.listSessions(null, 20, 0, null, null);
+      expect(
+        listed.sessions.find((session) => session.id === s.chatSessionId)?.attention ?? null
+      ).toBeNull();
+    });
+
+    it('an agent’s own message does not answer its question (control)', async () => {
+      const s = await seed();
+      const id = await ask(s);
+      await s.project.persistMessageBatch(s.chatSessionId, [
+        {
+          messageId: `agent-${crypto.randomUUID()}`,
+          role: 'assistant',
+          content: 'Waiting for your answer.',
+          toolMetadata: null,
+          timestamp: new Date(Date.now() + 1_000).toISOString(),
+        },
+      ]);
+      expect((await askRow(id))?.status).toBe('open');
+    });
+
+    it('filing a question answers SAM’s open check-in, as a question marker did', async () => {
+      const s = await seed();
+      await s.project.createAttentionMarker({
+        sessionId: s.chatSessionId,
+        taskId: s.taskId,
+        workspaceId: s.workspaceId,
+        kind: 'reconciliation_checkin',
+        source: 'reconciliation_loop',
+        reason: 'Are you still working?',
+        metadata: null,
+        expiresAt: Date.now() + 3_600_000,
+      });
+      expect(
+        (await s.project.listActiveAttentionMarkers(s.chatSessionId)).map((marker) => marker.kind)
+      ).toEqual(['reconciliation_checkin']);
+      await ask(s);
+      expect(await s.project.listActiveAttentionMarkers(s.chatSessionId)).toEqual([]);
+    });
+
+    it('an expired question stops its task, as a question marker’s expiry did', async () => {
+      const s = await seed();
+      const id = await ask(s);
+      // The task runs in the chat's workspace, as a dispatched task does.
+      await testEnv.DATABASE.prepare('UPDATE tasks SET workspace_id = ? WHERE id = ?')
+        .bind(s.workspaceId, s.taskId)
+        .run();
+      const past = Date.now() - 1_000;
+      // Past its deadline and its hard limit, so no undelivered grace applies.
+      await testEnv.DATABASE.prepare(
+        'UPDATE asks SET expires_at = ?, max_expires_at = ? WHERE id = ?'
+      )
+        .bind(past, past, id)
+        .run();
+      await runInboxAskSweep(testEnv);
+      const row = await askRow(id);
+      expect(row?.status).toBe('expired');
+      expect(row?.notified_at).not.toBeNull();
+      expect(await taskStatus(s.taskId)).toMatchObject({
+        status: 'failed',
+        error_message: 'Human input request expired after timeout',
+      });
+    });
+
+    it('a question the person already answered in the chat does not stop the task at expiry', async () => {
+      const s = await seed();
+      const id = await ask(s);
+      await testEnv.DATABASE.prepare('UPDATE tasks SET workspace_id = ? WHERE id = ?')
+        .bind(s.workspaceId, s.taskId)
+        .run();
+      await s.project.persistMessageBatch(s.chatSessionId, [
+        {
+          messageId: `typed-${crypto.randomUUID()}`,
+          role: 'user',
+          content: 'Yes.',
+          toolMetadata: null,
+          timestamp: new Date(Date.now() + 1_000).toISOString(),
+        },
+      ]);
+      // As if closing the row had failed: the expiry backstop must see the message.
+      const past = Date.now() - 1_000;
+      await testEnv.DATABASE.prepare(
+        `UPDATE asks SET status = 'open', notified_at = NULL, expires_at = ?, max_expires_at = ?
+          WHERE id = ?`
+      )
+        .bind(past, past, id)
+        .run();
+      await runInboxAskSweep(testEnv);
+      expect((await askRow(id))?.status).toBe('expired');
+      expect((await taskStatus(s.taskId))?.status).toBe('in_progress');
+    });
   });
 });

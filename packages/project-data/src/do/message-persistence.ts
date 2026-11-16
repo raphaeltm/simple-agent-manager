@@ -131,6 +131,7 @@ export async function runPersistedMessageSideEffects(
     },
     sessionId
   );
+  await closeQuestionsForHumanMessage(hooks, sessionId, [{ id: result.id, role }]);
 }
 
 export async function persistMessageBatchWithSideEffects(
@@ -200,6 +201,7 @@ export async function persistMessageBatchWithSideEffects(
   );
   for (const append of result.appends)
     hooks.broadcastEvent('message.append', { ...append }, sessionId);
+  await closeQuestionsForHumanMessage(hooks, sessionId, result.persistedMessages);
   return {
     persisted: result.persisted,
     duplicates: result.duplicates,
@@ -229,7 +231,6 @@ async function resolveAttentionForRoles(
       'human_message'
     );
     reason = 'human_message';
-    await hooks.closeQuestionAsks?.(sessionId, firstUserMsg.id);
   } else if (firstAssistantMsg) {
     resolved = attention.resolveAttentionMarkersByKind(
       sql,
@@ -246,6 +247,20 @@ async function resolveAttentionForRoles(
     await hooks.recalculateAlarm();
     hooks.broadcastEvent('attention.resolved', { sessionId, count: resolved, reason }, sessionId);
   }
+}
+
+/**
+ * A person's message answers the chat's open questions in D1 `asks` (inbox slice G), as it
+ * resolves the chat's markers above. Run after the live broadcast, so a D1 round trip never
+ * delays it; never throws (`question-asks.ts`).
+ */
+async function closeQuestionsForHumanMessage(
+  hooks: MessagePersistenceHooks,
+  sessionId: string,
+  persistedMessages: Array<{ id: string; role: string; origin?: string | null }>
+): Promise<void> {
+  const firstUserMsg = persistedMessages.find((m) => m.role === 'user' && m.origin !== 'system');
+  if (firstUserMsg) await hooks.closeQuestionAsks?.(sessionId, firstUserMsg.id);
 }
 
 function parseToolMetadata(toolMetadata: string | null, sessionId: string): unknown {

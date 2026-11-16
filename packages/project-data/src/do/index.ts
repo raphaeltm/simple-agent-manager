@@ -115,6 +115,7 @@ import {
 } from './provider-limit-attention';
 import * as questionAsks from './question-asks';
 import * as reconciliation from './reconciliation';
+import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
@@ -1005,12 +1006,14 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /** A person's chat message answers the chat's open questions in D1 `asks` (inbox slice G). */
-  private closeQuestionAsks(sessionId: string, messageId: string | null): Promise<number> {
-    return questionAsks.closeQuestionAsksForHumanMessage(
+  private async closeQuestionAsks(sessionId: string, messageId: string | null): Promise<number> {
+    const closed = await questionAsks.closeQuestionAsksForHumanMessage(
       this.env,
       { projectId: this.getProjectId(), sessionId, messageId },
       (type, payload, targetSessionId) => this.broadcastEvent(type, payload, targetSessionId)
     );
+    if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
+    return closed;
   }
 
   /** The chats' open questions from D1 `asks`, merged into their attention (inbox slice G). */
@@ -1030,7 +1033,9 @@ export class ProjectData extends DurableObject<Env> {
     if (questions.size === 0) return sessions;
     return sessions.map((session) => {
       const question = typeof session.id === 'string' ? questions.get(session.id) : undefined;
-      return question ? { ...session, attention: preferAttention(session.attention, question) } : session;
+      return question
+        ? { ...session, attention: preferAttention(session.attention, question) }
+        : session;
     });
   }
 
@@ -1119,11 +1124,14 @@ export class ProjectData extends DurableObject<Env> {
     return sessions.map((s) => this.addBaseDomain(s));
   }
 
+  /**
+   * One session. Its `attention` is the ProjectData marker summary only: this read sits on many
+   * control loops, and nothing renders a single session's attention; the list reads above merge
+   * open questions from D1 `asks` (inbox slice G).
+   */
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
     const result = sessionReads.getSession(this.sql, sessionId);
-    if (!result) return null;
-    const [session] = await this.withQuestionAttention([result]);
-    return this.addBaseDomain(session ?? result);
+    return result ? this.addBaseDomain(result) : null;
   }
 
   async getMessages(
@@ -2896,6 +2904,7 @@ export class ProjectData extends DurableObject<Env> {
         { projectId: this.getProjectId(), scheduleSummarySync: () => this.scheduleSummarySync() }
       );
     }
+    if (releaseQuestionHold(this.sql, input.sessionId)) await this.recalculateAlarm();
     this.broadcastEvent(
       'attention.resolved',
       {
@@ -2931,7 +2940,6 @@ export class ProjectData extends DurableObject<Env> {
     );
     return result;
   }
-
 
   prepareAttentionAnswer(sessionId: string, markerId: string, answer: string) {
     return attention.prepareAttentionAnswer(this.sql, sessionId, markerId, answer);

@@ -134,10 +134,11 @@ async function openQuestionMarkers(
             notification_id, assignee_user_id
        FROM asks
       WHERE project_id = ? AND source_session_id = ? AND kind = 'question' AND status = 'open'
+        AND (expires_at IS NULL OR expires_at > ?)
       ORDER BY created_at DESC, id DESC
       LIMIT ?`
   )
-    .bind(projectId, sessionId, MAX_OPEN_QUESTIONS_PER_READ)
+    .bind(projectId, sessionId, Date.now(), MAX_OPEN_QUESTIONS_PER_READ)
     .all<Record<string, unknown>>();
   const markers: Marker[] = [];
   for (const row of result.results ?? []) {

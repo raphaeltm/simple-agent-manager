@@ -159,15 +159,17 @@ async function resolveCandidateProjectId(
   // marker does in the local candidate query: the agent is waiting on a person, not stalled.
   const taskRow = await env.DATABASE.prepare(
     `SELECT task_mode, status, project_id, workspace_id, chat_session_id, admission_state,
-            EXISTS (
-              SELECT 1 FROM asks a
-               WHERE a.project_id = tasks.project_id AND a.source_session_id = ?2
+            (
+              -- The task's own chat (checked against this session just below); now in epoch ms.
+              SELECT MAX(COALESCE(a.expires_at, 0)) FROM asks a
+               WHERE a.project_id = tasks.project_id AND a.source_session_id = tasks.chat_session_id
                  AND a.kind = 'question' AND a.status = 'open'
-                 AND (a.expires_at IS NULL OR a.expires_at > ?3)
-            ) AS open_question
-     FROM tasks WHERE id = ?1 LIMIT 1`
+                 AND (a.expires_at IS NULL
+                   OR a.expires_at > CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER))
+            ) AS open_question_until
+     FROM tasks WHERE id = ? LIMIT 1`
   )
-    .bind(taskId, sessionId, now)
+    .bind(taskId)
     .first<{
       task_mode: string | null;
       admission_state?: string | null;
@@ -175,7 +177,7 @@ async function resolveCandidateProjectId(
       project_id: string | null;
       workspace_id: string | null;
       chat_session_id: string | null;
-      open_question?: number | null;
+      open_question_until?: number | null;
     }>();
   if (!taskRow) {
     recordReconciliationCandidateInconclusive(sql, env, {
@@ -217,10 +219,16 @@ async function resolveCandidateProjectId(
     });
     return null;
   }
-  if (taskRow.open_question) {
-    // Looked at again one lease later; answering or expiring the question ends the hold, and
-    // the deferral spends no probe attempt.
-    deferReconciliationCandidateUntil(sql, sessionId, now + reconciliationCandidateLeaseMs(env));
+  if (taskRow.open_question_until !== null && taskRow.open_question_until !== undefined) {
+    // Held until the question's own deadline, so an open question costs no alarms (the alarm
+    // reads this gate time, `computeReconciliationAlarmTime`). Closing the question releases the
+    // hold at once (`releaseQuestionHold`); the deferral spends no probe attempt.
+    deferReconciliationCandidateUntil(
+      sql,
+      sessionId,
+      Math.max(taskRow.open_question_until, now + reconciliationCandidateLeaseMs(env)),
+      { questionHold: true }
+    );
     return null;
   }
   return taskRow.project_id;

@@ -284,7 +284,8 @@ async function readIndex(
            WHERE status_rank <= ?
            ${recency}`
         )
-        .bind(...params, ...LIVE_SESSION_STATUSES, query.limit)
+        // The first bind is the open-question expiry clock (`OPEN_QUESTION_EXISTS`).
+        .bind(Date.now(), ...params, ...LIVE_SESSION_STATUSES, query.limit)
         .all<Record<string, unknown>>();
     } catch (err) {
       log.warn('session_index.live_read_failed', {
@@ -337,13 +338,14 @@ async function readIndex(
 }
 
 /**
- * A chat holds an open question in D1 `asks` (inbox slice G). Correlated on the row being ranked;
- * `idx_asks_session_status` answers it.
+ * A chat holds an open, unexpired question in D1 `asks` (inbox slice G). Correlated on the row
+ * being ranked; `idx_asks_open_question` answers it.
  */
 const OPEN_QUESTION_EXISTS = `EXISTS (
   SELECT 1 FROM asks a
-   WHERE a.source_session_id = session_summaries.id AND a.project_id = session_summaries.project_id
-     AND a.kind = 'question' AND a.status = 'open')`;
+   WHERE a.project_id = session_summaries.project_id AND a.source_session_id = session_summaries.id
+     AND a.kind = 'question' AND a.status = 'open'
+     AND (a.expires_at IS NULL OR a.expires_at > ?))`;
 
 /** Each chat's attention with its open question merged in, as the ProjectData read does. */
 function withQuestionAttention(
@@ -353,7 +355,9 @@ function withQuestionAttention(
   if (questions.size === 0) return sessions;
   return sessions.map((session) => {
     const question = typeof session.id === 'string' ? questions.get(session.id) : undefined;
-    return question ? { ...session, attention: preferAttention(session.attention, question) } : session;
+    return question
+      ? { ...session, attention: preferAttention(session.attention, question) }
+      : session;
   });
 }
 

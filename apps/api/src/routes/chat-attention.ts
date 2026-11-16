@@ -52,6 +52,27 @@ function parseAttentionCategory(metadata: string | null): HumanInputCategory | n
 }
 
 /**
+ * Whether the viewer may answer the agent in this chat: the owner, or an active grantee whose
+ * owner can still write, holding `task:write` themselves. One rule for a question held as a
+ * marker and one held in `asks`.
+ */
+async function isChatWriter(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  projectId: string,
+  role: string,
+  access: { role?: string | null; ownerUserId?: string | null; grant?: unknown }
+): Promise<boolean> {
+  return (
+    Boolean(access.ownerUserId) &&
+    projectRoleHasCapability(role, 'task:write') &&
+    (access.role === 'owner' ||
+      (access.role === 'grantee' &&
+        Boolean(access.grant) &&
+        (await hasProjectCapability(db, projectId, access.ownerUserId ?? '', 'task:write'))))
+  );
+}
+
+/**
  * One attention marker with what this viewer may do with it. Shared by the attention read below
  * and the inbox (`services/inbox/port.ts`), so both answer "can this person answer?" the same way.
  */
@@ -71,13 +92,7 @@ export async function loadAttentionForViewer(
     markerId,
     userId
   );
-  const writer =
-    Boolean(access.ownerUserId) &&
-    projectRoleHasCapability(membership.role, 'task:write') &&
-    (access.role === 'owner' ||
-      (access.role === 'grantee' &&
-        Boolean(access.grant) &&
-        (await hasProjectCapability(db, projectId, access.ownerUserId ?? '', 'task:write'))));
+  const writer = await isChatWriter(db, projectId, membership.role, access);
   return {
     canRead:
       Boolean(session) && access.found && projectRoleHasCapability(membership.role, 'task:read'),
@@ -108,13 +123,7 @@ async function questionAskAttentionResponse(
   );
   if (!session || !access.found || !projectRoleHasCapability(role, 'task:read'))
     throw errors.notFound('Chat session');
-  const writer =
-    Boolean(access.ownerUserId) &&
-    projectRoleHasCapability(role, 'task:write') &&
-    (access.role === 'owner' ||
-      (access.role === 'grantee' &&
-        Boolean(access.grant) &&
-        (await hasProjectCapability(db, ask.projectId, access.ownerUserId ?? '', 'task:write'))));
+  const writer = await isChatWriter(db, ask.projectId, role, access);
   const now = Date.now();
   const state = questionAskRequestState(ask, now);
   const context =
