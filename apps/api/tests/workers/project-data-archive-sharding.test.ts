@@ -522,6 +522,15 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
         );
         expect(sourceRowsAfterMigrate).toBe(0);
 
+        // Copy-back must repair a known watermark below the restored rows,
+        // including when the session anchor predates this derived cache.
+        await runInDurableObject(source, (_instance, state) => {
+          state.storage.sql.exec(
+            'UPDATE chat_sessions SET last_message_sequence = 0 WHERE id = ?',
+            sessionId
+          );
+        });
+
         const copyBack = await copyBackProjectDataArchiveMigration(testEnv, {
           migrationId: location!.migration_id!,
           projectId,
@@ -536,6 +545,13 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
           return row.count;
         });
         expect(restored).toBe(OVER_BIND_LIMIT_ROWS);
+        await runInDurableObject(source, (_instance, state) => {
+          expect(
+            state.storage.sql
+              .exec('SELECT last_message_sequence FROM chat_sessions WHERE id = ?', sessionId)
+              .toArray()[0]?.last_message_sequence
+          ).toBe(OVER_BIND_LIMIT_ROWS);
+        });
       }
     );
   }, 120_000);

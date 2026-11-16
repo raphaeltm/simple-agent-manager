@@ -77,7 +77,8 @@ let memberRows: ProjectMemberRow[] = [];
 let environmentRows: EnvironmentRow[] = [];
 let nodeRows: NodeRow[] = [];
 
-vi.mock('drizzle-orm', () => ({
+vi.mock('drizzle-orm', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('drizzle-orm')>()),
   and: (...conds: Condition[]) => ({ op: 'and', conds }),
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
 }));
