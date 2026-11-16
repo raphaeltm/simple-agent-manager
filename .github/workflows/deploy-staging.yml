@@ -11,9 +11,9 @@ on:
         description: 'SAM task holding the live verification slot (optional)'
         type: string
       lease_action:
-        description: 'Deploy and hold, reserve without deploying, or release from the holder branch'
+        description: 'deploy (queue, then deploy and hold), reserve (queue only), acquire (queue, then hold without deploying), release (give up hold or place)'
         type: choice
-        options: [deploy, acquire, release]
+        options: [deploy, reserve, acquire, release]
         default: deploy
       lease_hold_minutes:
         description: 'Live verification hold in minutes (default/cap from environment variables)'
@@ -78,10 +78,12 @@ on:
         required: false
         type: string
 
-# Only one staging deployment at a time; queue (don't cancel) concurrent requests
-concurrency:
-  group: deploy-${{ inputs.environment || 'staging' }}
-  cancel-in-progress: false
+# No workflow-level concurrency group: GitHub keeps one pending run per group and cancels the
+# previous pending run, which silently lost waiting agents their place. The `queue` job records
+# places outside any group; only runs that hold the lease, have their turn, or have something to
+# release enter the serialized `lease` job (group staging-lease-<installation>; deliberately not
+# the deploy-<installation> name older workflow copies use, so their runs cannot displace an
+# entitled pending run), and mutating jobs share staging-apply-<installation>. See scripts/deploy/staging-lease-queue.mjs.
 
 env:
   PLAYWRIGHT_VERSION: 1.65.0
@@ -92,10 +94,13 @@ permissions:
   id-token: none
 
 jobs:
-  lease:
+  # Records this branch's place in the queue. Deliberately outside every concurrency group: a
+  # reservation is an append-only record, so no later dispatch can cancel it. Refuses here, with
+  # the queue in the run summary, when it is not this branch's turn.
+  queue:
     runs-on: ubuntu-24.04
     # Every installation this workflow may target runs with the staging credentials, so the
-    # lease job never enters another Environment (the installation is validated in its first
+    # lease jobs never enter another Environment (the installation is validated in the first
     # step against scripts/deploy/staging-installations.mjs).
     environment: staging
     timeout-minutes: 2
@@ -104,6 +109,8 @@ jobs:
       deployments: write
       id-token: none
     outputs:
+      proceed: ${{ steps.queue.outputs.proceed }}
+      checked_at: ${{ steps.queue.outputs.checked_at }}
       credential_environment: ${{ steps.target.outputs.credential_environment }}
       installation: ${{ steps.target.outputs.installation }}
       base_domain: ${{ steps.target.outputs.base_domain }}
@@ -118,7 +125,8 @@ jobs:
           INSTALLATION: ${{ inputs.environment || 'staging' }}
           PRIMARY_BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
         run: node scripts/deploy/staging-installations.mjs workflow-target
-      - name: Read and acquire, renew or release verification lease
+      - name: Reserve a place or confirm this branch's turn
+        id: queue
         env:
           GH_TOKEN: ${{ github.token }}
           LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
@@ -128,13 +136,57 @@ jobs:
           LEASE_HOLD_MINUTES: ${{ inputs.lease_hold_minutes }}
           LEASE_DEFAULT_HOLD_MINUTES: ${{ vars.STAGING_LEASE_DEFAULT_HOLD_MINUTES || '30' }}
           LEASE_MAX_HOLD_MINUTES: ${{ vars.STAGING_LEASE_MAX_HOLD_MINUTES || '120' }}
-          # Reserve-only checks do not need a deploy-time allowance.
+          LEASE_GRACE_MINUTES: ${{ vars.STAGING_LEASE_GRACE_MINUTES || '10' }}
+          LEASE_RESERVATION_MINUTES: ${{ vars.STAGING_LEASE_RESERVATION_MINUTES || '480' }}
+          # Acquire-only holds do not need a deploy-time allowance.
           LEASE_EXPECTED_DEPLOY_MINUTES: ${{ inputs.lease_action == 'acquire' && '0' || vars.STAGING_LEASE_EXPECTED_DEPLOY_MINUTES || '30' }}
-        run: node scripts/deploy/staging-lease.mjs
+        run: node scripts/deploy/staging-lease.mjs queue
+
+  # Serialized per installation. Only runs that hold the lease, have their turn, or have something
+  # to release get here, so a pending run in this group can only be displaced by another run of a
+  # branch that is itself the holder or in the queue.
+  lease:
+    needs: queue
+    if: ${{ needs.queue.outputs.proceed == 'true' }}
+    runs-on: ubuntu-24.04
+    environment: staging
+    timeout-minutes: 2
+    concurrency:
+      group: staging-lease-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      deployments: write
+      id-token: none
+    outputs:
+      credential_environment: ${{ needs.queue.outputs.credential_environment }}
+      installation: ${{ needs.queue.outputs.installation }}
+      base_domain: ${{ needs.queue.outputs.base_domain }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Acquire, renew or release the verification lease
+        env:
+          LEASE_TURN_CHECKED_AT: ${{ needs.queue.outputs.checked_at }}
+          GH_TOKEN: ${{ github.token }}
+          LEASE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          LEASE_ACTION: ${{ inputs.lease_action || 'deploy' }}
+          LEASE_PRIMARY_ONLY_AUDIT: ${{ inputs.activation_only || inputs.agent_email_dns_audit || inputs.github_trigger_audit }}
+          SAM_TASK_ID: ${{ inputs.sam_task_id }}
+          LEASE_HOLD_MINUTES: ${{ inputs.lease_hold_minutes }}
+          LEASE_DEFAULT_HOLD_MINUTES: ${{ vars.STAGING_LEASE_DEFAULT_HOLD_MINUTES || '30' }}
+          LEASE_MAX_HOLD_MINUTES: ${{ vars.STAGING_LEASE_MAX_HOLD_MINUTES || '120' }}
+          LEASE_GRACE_MINUTES: ${{ vars.STAGING_LEASE_GRACE_MINUTES || '10' }}
+          LEASE_RESERVATION_MINUTES: ${{ vars.STAGING_LEASE_RESERVATION_MINUTES || '480' }}
+          # Acquire-only holds do not need a deploy-time allowance.
+          LEASE_EXPECTED_DEPLOY_MINUTES: ${{ inputs.lease_action == 'acquire' && '0' || vars.STAGING_LEASE_EXPECTED_DEPLOY_MINUTES || '30' }}
+        run: node scripts/deploy/staging-lease.mjs lease
 
   deploy:
     needs: lease
     if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
+    concurrency:
+      group: staging-apply-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
     uses: ./.github/workflows/deploy-reusable.yml
     with:
       environment: ${{ needs.lease.outputs.credential_environment }}
@@ -219,6 +271,9 @@ jobs:
     needs: lease
     # Primary installation only (also refused in the lease preflight).
     if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.activation_only && needs.lease.outputs.installation == '' }}
+    concurrency:
+      group: staging-apply-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment: ${{ needs.lease.outputs.credential_environment }}
     steps:
@@ -251,6 +306,9 @@ jobs:
     needs: [lease, deploy]
     # Primary installation only (also refused in the lease preflight).
     if: ${{ (inputs.lease_action == 'deploy' || inputs.lease_action == '') && inputs.agent_email_dns_audit && !inputs.dry_run && needs.lease.outputs.installation == '' }}
+    concurrency:
+      group: staging-apply-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment: ${{ needs.lease.outputs.credential_environment }}
     timeout-minutes: 5
