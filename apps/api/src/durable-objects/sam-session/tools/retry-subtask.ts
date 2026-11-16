@@ -22,6 +22,7 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from '../../../services/capacity-placement-snapshot';
+import { resolveSystemErrorFor } from '../../../services/inbox/system-errors';
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
@@ -405,6 +406,15 @@ export async function retrySubtask(
 
   const appDomain = `app.${env.BASE_DOMAIN}`;
   const taskUrl = `https://${appDomain}/projects/${original.projectId}/ideas/${newTaskId}`;
+
+  // The retry worked: the original task's inbox error item closes (slice E). Never throws.
+  await resolveSystemErrorFor(env, {
+    projectId: original.projectId,
+    source: 'task',
+    subjectId: taskId,
+    resolution: 'retried',
+    resolvedByUserId: ctx.userId,
+  });
 
   log.info('sam.retry_subtask.created', {
     originalTaskId: taskId,

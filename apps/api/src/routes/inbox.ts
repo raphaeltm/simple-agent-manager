@@ -9,6 +9,7 @@
  *   GET  /api/projects/:projectId/inbox/count
  *   GET  /api/projects/:projectId/inbox/items/:ref?context=true  — one item (+ transcript context)
  *   POST /api/projects/:projectId/inbox/items/:ref/answer         — answer through the item's store
+ *     (a system error item takes `{action}`: retry, wake or resume, `inbox-error-core.ts`)
  *   POST /api/projects/:projectId/inbox/items/:ref/archive        — close; the agent is told
  *
  * Writes come only from the app's own pages (exact origin, JSON body), like the interaction and
@@ -25,7 +26,12 @@ import {
   listInbox,
   toOperationHttpError,
 } from '@simple-agent-manager/operations';
-import { INBOX_FILTERS, type InboxFilter } from '@simple-agent-manager/shared';
+import {
+  INBOX_ERROR_ACTIONS,
+  INBOX_FILTERS,
+  type InboxErrorAction,
+  type InboxFilter,
+} from '@simple-agent-manager/shared';
 import { type Context, Hono } from 'hono';
 
 import type { Env } from '../env';
@@ -137,6 +143,14 @@ async function readAnswerBody(c: AppContext): Promise<Omit<InboxAnswerInput, 'pr
     if (body.decision !== 'approve' && body.decision !== 'deny')
       throw errors.badRequest('decision must be approve or deny');
     out.decision = body.decision;
+  }
+  if (body.action !== undefined) {
+    if (
+      typeof body.action !== 'string' ||
+      !(INBOX_ERROR_ACTIONS as readonly string[]).includes(body.action)
+    )
+      throw errors.badRequest(`action must be one of ${INBOX_ERROR_ACTIONS.join(', ')}`);
+    out.action = body.action as InboxErrorAction;
   }
   if (body.formContent !== undefined) {
     if (
