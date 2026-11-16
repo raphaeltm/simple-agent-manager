@@ -100,10 +100,17 @@ function ItemPane({ walk, item, now }: { walk: Walk; item: InboxItem; now: numbe
       {walk.receipt && <InboxReceiptLine receipt={walk.receipt} />}
       <div className="relative min-h-0 flex-1 overflow-y-auto" data-testid="inbox-item-scroll">
         <div className="mx-auto flex w-full max-w-[680px] min-w-0 flex-col gap-3 px-4 py-4">
-          <InboxItemBody item={item} context={context} now={now} stackPosition={position} />
-          {item.answerSpec.type === 'interaction' && (
-            <InboxPermissionSummary detail={permission.detail} />
-          )}
+          <InboxItemBody
+            item={item}
+            context={context}
+            now={now}
+            stackPosition={position}
+            detail={
+              item.answerSpec.type === 'interaction' ? (
+                <InboxPermissionSummary detail={permission.detail} />
+              ) : undefined
+            }
+          />
         </div>
       </div>
       <div

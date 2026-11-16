@@ -47,7 +47,7 @@ export function PermissionOptions({
             type="button"
             size={pinned ? 'md' : 'sm'}
             variant={variant}
-            className="h-auto min-h-11 min-w-0 max-w-full !whitespace-normal break-words text-left"
+            className={`h-auto min-h-11 min-w-0 max-w-full !whitespace-normal break-words ${pinned ? 'text-center' : 'text-left'}`}
             disabled={disabled}
             onClick={() => onChoose(option)}
             data-option-id={option.id}

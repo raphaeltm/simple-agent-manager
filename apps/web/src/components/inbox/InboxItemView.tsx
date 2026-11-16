@@ -1,6 +1,6 @@
 import type { InboxItem, InboxItemContext } from '@simple-agent-manager/shared';
 import { Check, ChevronDown, CircleAlert, Undo2 } from 'lucide-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router';
 
 import {
@@ -197,11 +197,14 @@ export function InboxItemBody({
   context,
   now,
   stackPosition,
+  detail,
 }: {
   item: InboxItem;
   context: InboxItemContext | null;
   now: number;
   stackPosition: { index: number; total: number; topic: string | null } | null;
+  /** What the ask is about, right under the reason (a permission's command). */
+  detail?: ReactNode;
 }) {
   const left = timeLeft(item, now);
   const state = left !== null ? `Expires in ${left}` : agentStateLong(item);
@@ -250,6 +253,7 @@ export function InboxItemBody({
           {item.answerSpec.type === 'approval' ? item.answerSpec.targetType : 'target'}.
         </p>
       )}
+      {detail}
       <InboxLinkChips item={item} />
       {context && <InboxContextDisclosure context={context} />}
     </div>
