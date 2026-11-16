@@ -22,6 +22,7 @@ import {
   type Seeded,
   testEnv,
 } from './helpers/inbox-harness';
+import { seedSignedInUser } from './helpers/seed-d1';
 
 /** The summary index is written on a debounce; flush it the way the timer would. */
 async function syncSummaries(project: DurableObjectStub<ProjectData>) {
