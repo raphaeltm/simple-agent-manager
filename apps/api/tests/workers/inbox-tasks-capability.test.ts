@@ -10,8 +10,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { moveDepartedMemberTasksToTeam } from '../../src/services/inbox/departed-member-tasks';
-import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
 import { storeMcpToken } from '../../src/services/mcp-token';
+import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
 import { inboxRows, materializeWakes, sqlRows } from './helpers/agent-message-channels';
 import {
   callTool,
@@ -486,6 +486,176 @@ describe('human tasks through the real entry points', () => {
     expect(other.body.inboxItems).toEqual([
       { ref: team.inboxItem.ref, id: team.inboxItem.id, title: 'Pick the launch date' },
     ]);
+  });
+
+  it('reassign: to a member (notified, claim released), back to the team; a non-member is refused and nothing changes', async () => {
+    const s = await seed();
+    const third = await addMember(s, 'maintainer', 'priya');
+    const filed = await assign(s, { title: 'Book the launch venue', assignee: { team: true } });
+    const ref = filed.inboxItem.ref;
+    await post(itemPath(s, ref, '/claim'), s.colleagueCookie, {});
+    await deliverWakes(s, s.chatSessionId);
+
+    const stranger = `inbox-out-${crypto.randomUUID().slice(0, 8)}`;
+    await seedUser(stranger);
+    const refused = await post(itemPath(s, ref, '/reassign'), s.colleagueCookie, {
+      assigneeUserId: stranger,
+    });
+    expect(refused.status).toBe(400);
+    const unchanged = await get<TaskView>(itemPath(s, ref), s.colleagueCookie);
+    expect(unchanged.body.task).toMatchObject({
+      assignee: { kind: 'team' },
+      claimedBy: { userId: s.colleagueId },
+    });
+
+    const toPriya = await post(itemPath(s, ref, '/reassign'), s.colleagueCookie, {
+      assigneeUserId: third.userId,
+    });
+    expect(toPriya.body).toMatchObject({ status: 'open', agentNotified: true });
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(1);
+    const priyaView = await get<TaskView>(itemPath(s, ref), third.cookie);
+    expect(priyaView.body.task).toMatchObject({
+      assignee: { kind: 'user', userId: third.userId },
+      claimedBy: null,
+      canWrite: true,
+    });
+    // The previous claimer no longer sees it (a person's task is the assignee's and the filer's).
+    expect((await get<unknown>(itemPath(s, ref), s.colleagueCookie)).status).toBe(404);
+
+    await deliverWakes(s, s.chatSessionId);
+    const toTeam = await post(itemPath(s, ref, '/reassign'), third.cookie, { team: true });
+    expect(toTeam.body).toMatchObject({ agentNotified: true });
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(1);
+  });
+
+  it('archive through the inbox route closes a task and wakes; untick is recorded; wakeOnSteps makes ticks wake', async () => {
+    const s = await seed();
+    const filed = await assign(s, {
+      title: 'Check the invoice totals',
+      steps: ['Open the report', 'Compare totals'],
+      assignee: { userId: s.colleagueId },
+      wakeOnSteps: true,
+    });
+    const ref = filed.inboxItem.ref;
+    await deliverWakes(s, s.chatSessionId);
+    await post(itemPath(s, ref, '/steps/0'), s.colleagueCookie, { done: true });
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(1);
+    await deliverWakes(s, s.chatSessionId);
+    const untick = await post(itemPath(s, ref, '/steps/0'), s.colleagueCookie, { done: false });
+    expect(untick.status).toBe(200);
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(1);
+    // Ticking a step already in that state changes nothing.
+    const again = await post(itemPath(s, ref, '/steps/0'), s.colleagueCookie, { done: false });
+    expect(again.body).toMatchObject({ agentNotified: false });
+    expect(
+      (await post(itemPath(s, ref, '/steps/7'), s.colleagueCookie, { done: true })).status
+    ).toBe(400);
+
+    await deliverWakes(s, s.chatSessionId);
+    const archived = await post(itemPath(s, ref, '/archive'), s.colleagueCookie, {});
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
+    const wakes = await wakesFor(s, s.chatSessionId);
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]!.content).toContain('archived');
+    const view = await get<TaskView>(itemPath(s, ref), s.colleagueCookie);
+    expect(view.body.task?.activity.map((entry) => entry.kind)).toEqual([
+      'created',
+      'step_checked',
+      'step_unchecked',
+      'archived',
+    ]);
+    // Reopen from archived wakes again.
+    await deliverWakes(s, s.chatSessionId);
+    expect((await post(itemPath(s, ref, '/reopen'), s.colleagueCookie, {})).body).toMatchObject({
+      status: 'open',
+    });
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(1);
+  });
+
+  it('attach: only a chat of the same person; an attached chat is woken by lifecycle changes, not by comments', async () => {
+    const s = await seed();
+    const docs = await secondChat(s);
+    const filed = await assign(s, {
+      title: 'Approve the pricing copy',
+      assignee: { userId: s.colleagueId },
+    });
+    const ref = filed.inboxItem.ref;
+    // A second chat of the same person may watch a task assigned to a teammate.
+    expect(await callTool(docs.token, 'inbox_write', { method: 'attach', ref })).toMatchObject({
+      watching: true,
+    });
+    // A chat of another person may not, even on a team task it can read.
+    const team = await assign(s, { title: 'Pick a launch tweet', assignee: { team: true } });
+    const other = await seed();
+    await testEnv.DATABASE.prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'maintainer', 'active')`
+    )
+      .bind(s.projectId, other.ownerId)
+      .run();
+    const foreignChat = await testEnvFetchTool(other.token, 'inbox_write', {
+      method: 'attach',
+      ref: team.inboxItem.ref,
+    });
+    expect(foreignChat.error).toBeDefined();
+
+    await deliverWakes(s, s.chatSessionId);
+    await deliverWakes(s, docs.sessionId);
+    const commented = await post(itemPath(s, ref, '/comments'), s.colleagueCookie, {
+      body: 'Is the EU price right?',
+    });
+    expect(commented.body).toMatchObject({ agentNotified: true });
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(1);
+    expect(await wakesFor(s, docs.sessionId)).toHaveLength(0);
+    await deliverWakes(s, s.chatSessionId);
+    await post(itemPath(s, ref, '/done'), s.colleagueCookie, {});
+    expect(await wakesFor(s, docs.sessionId)).toHaveLength(1);
+  });
+
+  it('a task open for days still wakes: each change renews the watch past its lifetime and wake budget', async () => {
+    const s = await seed();
+    const filed = await assign(s, { title: 'Sign the DPA', assignee: { userId: s.colleagueId } });
+    const ref = filed.inboxItem.ref;
+    await deliverWakes(s, s.chatSessionId);
+    // Two days later, with the generic wake lifetime long over and the budget spent.
+    await sqlRows(
+      s.project,
+      `UPDATE project_event_subscriptions
+          SET delivery_lifetime_expires_at = ?, prompt_delivery_count = 1000
+        WHERE target_session_id = ?`,
+      Date.now() - 1,
+      s.chatSessionId
+    );
+    await post(itemPath(s, ref, '/comments'), s.colleagueCookie, { body: 'Which entity signs?' });
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(1);
+    // Done: the watch winds down (expires after the grace) instead of holding a place forever.
+    await deliverWakes(s, s.chatSessionId);
+    await post(itemPath(s, ref, '/done'), s.colleagueCookie, {});
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(1);
+    const watches = await sqlRows<{ expires_at: number | null }>(
+      s.project,
+      `SELECT expires_at FROM project_event_subscriptions WHERE target_session_id = ?`,
+      s.chatSessionId
+    );
+    expect(watches).toHaveLength(1);
+    expect(watches[0]!.expires_at).toBeGreaterThan(Date.now());
+  });
+
+  it('a direct event subscription to sam.inbox is refused; inbox_write is the only way to watch', async () => {
+    const s = await seed();
+    const refused = await testEnvFetchTool(s.token, 'create_project_event_subscription', {
+      idempotencyKey: 'sneak',
+      filter: { version: 1, source: 'sam.inbox' },
+      requestedDelivery: 'record_only',
+    });
+    expect(refused.error?.message ?? JSON.stringify(refused)).toContain('inbox_write');
+    // Control: a subscription to another source still works.
+    const allowed = await callTool(s.token, 'create_project_event_subscription', {
+      idempotencyKey: 'lifecycle',
+      filter: { version: 1, source: 'sam.lifecycle' },
+      requestedDelivery: 'record_only',
+    });
+    expect(allowed).toBeTruthy();
   });
 });
 

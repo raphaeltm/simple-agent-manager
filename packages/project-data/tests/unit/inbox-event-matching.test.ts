@@ -90,6 +90,8 @@ describe('sam.inbox event matching', () => {
     });
     subscribe(sql, 'same-subject', { subjectType: INBOX_EVENT_SUBJECT_TYPE, subjectId: 'ask-1' });
 
+    // A source-only inbox subscription (no item) never receives a task's events.
+    subscribe(sql, 'source-only', { source: INBOX_EVENT_SOURCE });
     const inbox = admit(sql, INBOX_EVENT_SOURCE, INBOX_EVENT_SUBJECT_TYPE, 'ask-1', 'inbox-1');
     expect(inbox.matches.map((match) => match.subscriptionId)).toEqual([watch.id]);
 
@@ -115,6 +117,11 @@ describe('sam.inbox event matching', () => {
       subjectId: 'ask-2',
     });
     subscribe(sql, 'd', { subjectId: 'ask-1' });
+    subscribe(sql, 'e', {
+      source: 'sam.lifecycle',
+      subjectType: INBOX_EVENT_SUBJECT_TYPE,
+      subjectId: 'ask-1',
+    });
     expect(countInboxItemWatchers(sql, PROJECT_ID, 'ask-1')).toBe(2);
     expect(countInboxItemWatchers(sql, PROJECT_ID, 'ask-2')).toBe(1);
     expect(countInboxItemWatchers(sql, 'other-project', 'ask-1')).toBe(0);
