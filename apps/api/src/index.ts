@@ -114,6 +114,7 @@ import { googleAuthRoutes } from './routes/google-auth';
 import { ideaUpdateRoutes } from './routes/idea-updates';
 import { ideaRoutes } from './routes/ideas';
 import { inboxRoutes, projectInboxRoutes } from './routes/inbox';
+import { projectInboxTaskRoutes } from './routes/inbox-tasks';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
@@ -424,6 +425,8 @@ app.route('/api/projects/:projectId/ideas', ideaRoutes);
 app.route('/api/projects/:projectId/overview', projectOverviewRoutes);
 app.route('/api/projects/:projectId/insights', projectInsightsRoutes);
 app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
+// Human tasks (inbox slice H1): steps, comments, claim, reassign, done, reopen.
+app.route('/api/projects/:projectId/inbox', projectInboxTaskRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);

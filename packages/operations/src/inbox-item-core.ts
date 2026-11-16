@@ -15,6 +15,8 @@ import { authorizeProjectOperation } from './authorization';
 import { OperationError } from './errors';
 import { SECRET_VISIBLE } from './inbox-list-core';
 import { inboxItemFromRow, InboxRowSchema } from './inbox-rows';
+import { getTaskDetailForPerson } from './inbox-task-core';
+import { TASK_FILER_SQL } from './inbox-task-rows';
 import type { OperationContext } from './types';
 
 export const INBOX_NOT_FOUND = 'Inbox item not found';
@@ -62,7 +64,8 @@ async function readStoreRow(
           JOIN project_members pm ON pm.project_id = a.project_id AND pm.user_id = ? AND pm.status = 'active'
           WHERE a.id = ? AND a.project_id = ?
             AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?)
-              OR (a.assignee_kind = 'team' AND (a.claimed_by_user_id IS NULL OR a.claimed_by_user_id = ?)))
+              OR a.assignee_kind = 'team'
+              OR (a.kind = 'task' AND ${TASK_FILER_SQL} = ?))
         ) x ${ENRICH}`
       )
       .bind(...writers.params, me, me, me, ref.id, projectId, me, me)
@@ -231,7 +234,13 @@ export async function getInboxItem(
   ctx: OperationContext,
   input: { projectId: string; ref: string; context?: boolean }
 ): Promise<InboxItemResponse> {
-  const { item } = await resolveInboxItem(ctx, input);
+  const { item, ref } = await resolveInboxItem(ctx, input);
+  // A human task's steps, assignee, claim, activity and discussion (slice H1). The transcript
+  // (`context`) still needs read access to the chat; the task view never does.
+  const task =
+    item.kind === 'task' && ref.store === 'ask'
+      ? await getTaskDetailForPerson(ctx, { projectId: item.projectId, askId: ref.id })
+      : null;
   const context =
     input.context && item.sessionId
       ? await ctx.ports.inbox.context({
@@ -241,5 +250,5 @@ export async function getInboxItem(
           userId: ctx.actor.userId,
         })
       : null;
-  return { item, context };
+  return { item, context, task };
 }
