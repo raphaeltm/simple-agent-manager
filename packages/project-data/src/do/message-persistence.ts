@@ -33,7 +33,11 @@ export type MessagePersistenceHooks = {
    * A person's chat message answers the chat's open questions in D1 `asks` (inbox slice G), as it
    * resolves its attention markers. Never throws (`question-asks.ts`).
    */
-  closeQuestionAsks?: (sessionId: string, messageId: string) => Promise<unknown>;
+  closeQuestionAsks?: (
+    sessionId: string,
+    messageId: string,
+    messageCreatedAt: number
+  ) => Promise<unknown>;
 };
 
 export type MessageBatchPersistenceResult = {
@@ -131,7 +135,9 @@ export async function runPersistedMessageSideEffects(
     },
     sessionId
   );
-  await closeQuestionsForHumanMessage(hooks, sessionId, [{ id: result.id, role }]);
+  await closeQuestionsForHumanMessage(hooks, sessionId, [
+    { id: result.id, role, createdAt: result.now },
+  ]);
 }
 
 export async function persistMessageBatchWithSideEffects(
@@ -257,10 +263,17 @@ async function resolveAttentionForRoles(
 async function closeQuestionsForHumanMessage(
   hooks: MessagePersistenceHooks,
   sessionId: string,
-  persistedMessages: Array<{ id: string; role: string; origin?: string | null }>
+  persistedMessages: Array<{
+    id: string;
+    role: string;
+    origin?: string | null;
+    createdAt: number;
+  }>
 ): Promise<void> {
   const firstUserMsg = persistedMessages.find((m) => m.role === 'user' && m.origin !== 'system');
-  if (firstUserMsg) await hooks.closeQuestionAsks?.(sessionId, firstUserMsg.id);
+  if (firstUserMsg) {
+    await hooks.closeQuestionAsks?.(sessionId, firstUserMsg.id, firstUserMsg.createdAt);
+  }
 }
 
 function parseToolMetadata(toolMetadata: string | null, sessionId: string): unknown {

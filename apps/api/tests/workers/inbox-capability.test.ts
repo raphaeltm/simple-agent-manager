@@ -176,6 +176,10 @@ type ListBody = { items: { ref: string; kind: string; canAct: boolean; projectId
 describe('inbox capability through the real entry points', () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    // The VM edge is stubbed for every test (task-run stops, live prompts); tests that assert on
+    // it set their own responses.
+    vi.stubGlobal('fetch', fetchMock);
+    fetchMock.mockImplementation(async () => Response.json({ ok: true }));
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -601,6 +605,34 @@ describe('inbox capability through the real entry points', () => {
       // Owner control.
       expect((await card(s.ownerCookie, '/resolve')).status).toBe(200);
       expect((await askRow(id))?.status).toBe('answered');
+    });
+
+    it('a retried answer notice does not reach the agent twice', async () => {
+      const s = await seed();
+      const id = await ask(s);
+      const response = await post(
+        `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(`ask:${id}`)}/answer`,
+        s.ownerCookie,
+        { answer: 'Yes' }
+      );
+      expect(response.status).toBe(200);
+      // As if recording the notice had failed after it was queued: the sweep retries it.
+      const resolvedAt = (await askRow(id))?.resolved_at ?? Date.now();
+      await testEnv.DATABASE.prepare('UPDATE asks SET notified_at = NULL WHERE id = ?')
+        .bind(id)
+        .run();
+      await runInboxAskSweep(testEnv, resolvedAt + 2 * 60_000);
+      expect((await askRow(id))?.notified_at).not.toBeNull();
+      const snapshot = await s.project.getDurableExecutionSnapshot(s.chatSessionId);
+      expect(
+        snapshot.deliveries.filter((delivery: { id: string }) => delivery.id === `inbox-ask:${id}`)
+      ).toHaveLength(1);
+      const { messages } = await s.project.getMessages(s.chatSessionId, 50);
+      expect(
+        messages.filter((message: { content: string }) =>
+          message.content.startsWith('The person answered your question')
+        )
+      ).toHaveLength(1);
     });
 
     it('the ProjectData reads behind team status show the question', async () => {

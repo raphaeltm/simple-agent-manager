@@ -1001,15 +1001,20 @@ export class ProjectData extends DurableObject<Env> {
       },
       nudgeDeliveries: (chatSessionId) =>
         promptDelivery.nudgePromptDeliveriesForTarget(this.sql, chatSessionId),
-      closeQuestionAsks: (sessionId, messageId) => this.closeQuestionAsks(sessionId, messageId),
+      closeQuestionAsks: (sessionId, messageId, messageCreatedAt) =>
+        this.closeQuestionAsks(sessionId, messageId, messageCreatedAt),
     };
   }
 
   /** A person's chat message answers the chat's open questions in D1 `asks` (inbox slice G). */
-  private async closeQuestionAsks(sessionId: string, messageId: string | null): Promise<number> {
+  private async closeQuestionAsks(
+    sessionId: string,
+    messageId: string | null,
+    messageCreatedAt: number
+  ): Promise<number> {
     const closed = await questionAsks.closeQuestionAsksForHumanMessage(
       this.env,
-      { projectId: this.getProjectId(), sessionId, messageId },
+      { projectId: this.getProjectId(), sessionId, messageId, messageCreatedAt },
       (type, payload, targetSessionId) => this.broadcastEvent(type, payload, targetSessionId)
     );
     if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
@@ -1063,7 +1068,8 @@ export class ProjectData extends DurableObject<Env> {
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
       broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
-      closeQuestionAsks: (sessionId, messageId) => this.closeQuestionAsks(sessionId, messageId),
+      closeQuestionAsks: (sessionId, messageId, messageCreatedAt) =>
+        this.closeQuestionAsks(sessionId, messageId, messageCreatedAt),
     };
   }
 
