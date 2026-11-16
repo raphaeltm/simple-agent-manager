@@ -51,11 +51,8 @@ export function AdminAnalytics() {
     if (prevLoadingRef.current && !loading) {
       setLastRefreshed(new Date());
     }
-    if (!prevLoadingRef.current && !loading && !isRefreshing) {
-      // Also update after a manual refresh completes
-    }
     prevLoadingRef.current = loading;
-  }, [loading, isRefreshing]);
+  }, [loading]);
 
   // Update lastRefreshed when a refresh cycle completes
   const prevRefreshingRef = useRef(isRefreshing);

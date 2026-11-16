@@ -19,3 +19,4 @@ that one was fixed in `apps/web/src/pages/admin-analytics/chartTokens.ts`.
 - [ ] FailureCard uses a defined token (`--sam-color-fg-muted` or `--sam-color-fg-primary`)
 - [ ] Checked in both `sam` and `sam-light` themes for 4.5:1 contrast
 - [ ] `grep -rn "fg-secondary)" apps/web/src packages/ui/src` finds no `var()` use of the undefined token
+- [ ] Also check whether the Tailwind utility `text-fg-secondary` resolves to a defined colour (used in `AIUsageChart.tsx`, `AdminCosts.tsx`, `PeriodSelector.tsx`); if not, map it or replace it

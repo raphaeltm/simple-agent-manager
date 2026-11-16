@@ -156,6 +156,9 @@ adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
 
 registerAdminWebsiteTrafficRoutes(adminAnalyticsRoutes);
 
+/**
+ * GET /api/admin/analytics/forward-status — Forwarding configuration and cursor state
+ */
 adminAnalyticsRoutes.get('/forward-status', async (c) => {
   const status = await getForwardStatus(c.env);
   return c.json(status);

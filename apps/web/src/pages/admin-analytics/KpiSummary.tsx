@@ -7,6 +7,13 @@ interface Props {
   events: AnalyticsEventsResponse | null;
 }
 
+/** Static class names so Tailwind generates them; KpiSummary renders at most three cards. */
+const DESKTOP_COLUMNS: Record<number, string> = {
+  1: 'lg:grid-cols-1',
+  2: 'lg:grid-cols-2',
+  3: 'lg:grid-cols-3',
+};
+
 interface KpiCard {
   label: string;
   value: string;
@@ -55,15 +62,20 @@ export const KpiSummary: FC<Props> = ({ dau, events }) => {
 
   if (!cards.length) return null;
 
+  // One desktop column per card, so a partial load (DAU only, events only) leaves no hole.
+  const desktopColumns = DESKTOP_COLUMNS[cards.length] ?? 'lg:grid-cols-3';
+  // On phones (two columns), an odd last card fills its row instead of leaving a hole.
+  const oddLastIndex = cards.length % 2 === 1 ? cards.length - 1 : -1;
+
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+    <div className={`grid grid-cols-2 gap-3 ${desktopColumns}`}>
       {cards.map((card, index) => (
         <div
           key={card.label}
-          className={`rounded-lg border border-border-default bg-surface-secondary p-4${
-            // An odd last card fills the two-column phone row instead of leaving a hole.
-            cards.length % 2 === 1 && index === cards.length - 1 ? ' col-span-2 lg:col-span-1' : ''
-          }`}
+          className={[
+            'rounded-lg border border-border-default bg-surface-secondary p-4',
+            index === oddLastIndex ? 'col-span-2 lg:col-span-1' : '',
+          ].join(' ')}
         >
           <div className="text-xs font-medium text-fg-muted uppercase tracking-wide">
             {card.label}
