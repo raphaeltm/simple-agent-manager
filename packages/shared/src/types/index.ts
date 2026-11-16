@@ -1242,6 +1242,7 @@ export type {
   InstallationCloudflareCost,
   InstallationCloudflareCostStatus,
   InstallationCloudflareProductLine,
+  InstallationCloudflareRefreshResponse,
   InstallationComputeCurrencySpend,
   InstallationComputeProviderSpend,
   InstallationComputeSpend,

@@ -61,7 +61,20 @@ describe('GET /api/admin/health-cost', () => {
         '2026-11-01T00:00:00.000Z', '2026-11-16T11:00:00.000Z');
       INSERT INTO workspaces (id, node_id, project_id, user_id, name, status, created_at, updated_at)
       VALUES ('w1', 'n1', 'p', 'admin', 'w1', 'running', '2026-11-10T00:00:00.000Z', '2026-11-10T00:00:00.000Z');
+      INSERT INTO installation_cost_sync (source, status, last_attempt_at, last_success_at, rows_written)
+      VALUES ('cloudflare', 'ok', 1794800000000, 1794800000000, 2);
     `);
+    // Two stored days of Cloudflare cost in the current month, so the card has data to read.
+    const today = new Date();
+    const day = (offset: number) =>
+      new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - offset))
+        .toISOString()
+        .slice(0, 10);
+    const insertCost = sqlite.prepare(
+      `INSERT INTO installation_cost_daily VALUES ('cloudflare', ?, 'r2StorageGb', 174, 'GB', 0.08, 1)`
+    );
+    insertCost.run(day(1));
+    insertCost.run(day(2));
     const db = createSqliteD1(sqlite);
     const prepare = db.prepare.bind(db);
     db.prepare = (query: string) => {
@@ -80,9 +93,12 @@ describe('GET /api/admin/health-cost', () => {
       window: { range: string };
       compute: { currencies: { byProvider: { provider: string }[] }[] };
       latency: { states: unknown[] };
+      cloudflare: { status: string; monthToDateUsd: number; productLines: { key: string }[] };
       unavailable: string[];
     };
     expect(body.window.range).toBe('30d');
+    expect(body.cloudflare.status).toBe('ok');
+    expect(body.cloudflare.productLines[0]?.key).toBe('r2StorageGb');
     expect(body.compute.currencies[0]?.byProvider[0]?.provider).toBe('hetzner');
     expect(body.latency.states).toHaveLength(11); // the real lifecycle port ran
     expect(body.unavailable).toEqual([]);
@@ -107,6 +123,42 @@ describe('GET /api/admin/health-cost', () => {
     // Only the superadmin check ran: no installation data was read.
     expect(statements).toHaveLength(1);
     expect(statements[0]).toContain("role = 'superadmin'");
+  });
+
+  it('runs the Cloudflare cost snapshot for a superadmin and reports its status', async () => {
+    // No CF_API_TOKEN in this env: the run records not_configured without calling Cloudflare.
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const res = await app().request(
+        '/api/admin/health-cost/cloudflare/refresh',
+        { method: 'POST' },
+        env
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ status: 'not_configured', rowsWritten: 0 });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      const sync = sqlite
+        .prepare(`SELECT status FROM installation_cost_sync WHERE source = 'cloudflare'`)
+        .get() as { status: string };
+      expect(sync.status).toBe('not_configured');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('refuses the Cloudflare refresh to a non-superadmin without running it', async () => {
+    const res = await app().request(
+      '/api/admin/health-cost/cloudflare/refresh',
+      { method: 'POST', headers: { 'x-test-role': 'user' } },
+      env
+    );
+    expect(res.status).toBe(403);
+    expect(statements).toEqual([]);
+    const sync = sqlite
+      .prepare(`SELECT status FROM installation_cost_sync WHERE source = 'cloudflare'`)
+      .get() as { status: string };
+    expect(sync.status).toBe('ok');
   });
 
   it('rejects an unknown range before reading anything', async () => {

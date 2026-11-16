@@ -29,6 +29,7 @@ import {
   cloudflareDaysInMonth,
   createCloudflarePricing,
   dailyCloudflareMetricCosts,
+  type InstallationCloudflareRefreshResponse,
   isCloudflareCostMetricKey,
   parseCloudflareCostResponse,
 } from '@simple-agent-manager/shared';
@@ -44,15 +45,7 @@ const DAY_MS = 86_400_000;
 const ERROR_MESSAGE_MAX_LENGTH = 500;
 const UPSERT_COLUMNS = 7;
 
-export type CloudflareCostSyncStatus = 'ok' | 'not_configured' | 'permission_denied' | 'error';
-
-export interface CloudflareCostSnapshotResult {
-  status: CloudflareCostSyncStatus;
-  firstDay: string | null;
-  lastDay: string | null;
-  rowsWritten: number;
-  error: string | null;
-}
+export type CloudflareCostSnapshotResult = InstallationCloudflareRefreshResponse;
 
 interface DailyCostRow {
   day: string;

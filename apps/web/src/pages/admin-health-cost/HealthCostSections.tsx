@@ -4,6 +4,7 @@
  * Layout follows the prototype (Library /product/analytics/analytics-prototypes.html?s=admin).
  */
 import type {
+  InstallationCloudflareCost,
   InstallationComputeCurrencySpend,
   InstallationComputeSpend,
   InstallationMachineDensity,
@@ -14,6 +15,7 @@ import { Pane } from '@simple-agent-manager/ui';
 import type { ReactNode } from 'react';
 
 import { adminChartSeries } from '../admin-analytics/chartTokens';
+import { cloudflareTileText } from './CloudflarePane';
 import { formatMoney, formatPercent, providerLabel, weekLabel } from './format';
 import { PaneHead, Unavailable } from './pane-parts';
 
@@ -79,11 +81,13 @@ export function StatTiles({
   compute,
   reuse,
   density,
+  cloudflare,
 }: {
   rangeText: string;
   compute: InstallationComputeSpend | null;
   reuse: InstallationMachineReuse | null;
   density: InstallationMachineDensity | null;
+  cloudflare: InstallationCloudflareCost | null;
 }) {
   // Currencies are never added together: SAM keeps no exchange rates.
   const currencies = compute?.currencies ?? [];
@@ -101,7 +105,7 @@ export function StatTiles({
     compute?.truncated ? 'lower bound: machine cap reached' : null,
   ].filter(Boolean);
   return (
-    <div className="grid grid-cols-1 gap-[var(--sam-space-gutter)] sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-[var(--sam-space-gutter)] sm:grid-cols-2 lg:grid-cols-4">
       <StatTile
         testId="stat-compute"
         label={`Compute · ${rangeText}`}
@@ -132,6 +136,13 @@ export function StatTiles({
               : 'No agents ran on a machine in this range'
             : 'Could not be read'
         }
+      />
+      {/* USD from Cloudflare's own analytics: never added to compute, which is per currency. */}
+      <StatTile
+        testId="stat-cloudflare"
+        label="Cloudflare · estimated"
+        value={cloudflareTileText(cloudflare).value}
+        note={cloudflareTileText(cloudflare).note}
       />
     </div>
   );

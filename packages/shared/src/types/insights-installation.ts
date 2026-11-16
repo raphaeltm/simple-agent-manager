@@ -192,6 +192,16 @@ export interface InstallationHealthResponse {
 export type InstallationCloudflareCostStatus =
   'never_run' | 'not_configured' | 'permission_denied' | 'error' | 'ok';
 
+/** `POST /api/admin/health-cost/cloudflare/refresh`: the snapshot run's own outcome. */
+export interface InstallationCloudflareRefreshResponse {
+  status: Exclude<InstallationCloudflareCostStatus, 'never_run'>;
+  /** The window stored by a successful run. */
+  firstDay: string | null;
+  lastDay: string | null;
+  rowsWritten: number;
+  error: string | null;
+}
+
 export interface InstallationCloudflareProductLine {
   /** Billed metric key, e.g. `doDurationGbSeconds`. */
   key: string;

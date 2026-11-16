@@ -12,12 +12,17 @@ vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'admin-1', email: 'a@example.com', name: 'Admin' } }),
 }));
 
-const mocks = vi.hoisted(() => ({ getInstallationHealth: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  getInstallationHealth: vi.fn(),
+  refreshCloudflareCost: vi.fn(),
+}));
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   getInstallationHealth: mocks.getInstallationHealth,
+  refreshCloudflareCost: mocks.refreshCloudflareCost,
 }));
 
+import { ToastProvider } from '../../../src/hooks/useToast';
 import { AdminHealthCost } from '../../../src/pages/AdminHealthCost';
 import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
@@ -122,7 +127,51 @@ function health(overrides: Partial<InstallationHealthResponse> = {}): Installati
         },
       ],
     },
+    cloudflare: cloudflare(),
     unavailable: [],
+    ...overrides,
+  };
+}
+
+function cloudflare(
+  overrides: Partial<NonNullable<InstallationHealthResponse['cloudflare']>> = {}
+): NonNullable<InstallationHealthResponse['cloudflare']> {
+  return {
+    status: 'ok',
+    lastAttemptAt: '2026-11-16T03:00:05.000Z',
+    lastSuccessAt: '2026-11-16T03:00:05.000Z',
+    error: null,
+    month: '2026-11',
+    throughDay: '2026-11-15',
+    monthComplete: false,
+    missingDays: 0,
+    monthToDateUsd: 18.41,
+    projectedUsd: 36.9,
+    productLines: [
+      {
+        key: 'doRowsWritten',
+        product: 'Durable Objects',
+        label: 'Durable Objects SQLite rows written',
+        unit: 'rows',
+        monthToDateUsage: 25_710_000,
+        monthToDateUsd: 4.2,
+        projectedUsd: 9.39,
+      },
+      {
+        key: 'workersAiNeurons',
+        product: 'Workers AI',
+        label: 'Workers AI neurons',
+        unit: 'neurons',
+        monthToDateUsage: 272_240,
+        monthToDateUsd: 1.6,
+        projectedUsd: 3.4,
+      },
+    ],
+    otherProductLines: { count: 17, monthToDateUsd: 12.61, projectedUsd: 24.11 },
+    daily: [
+      { day: '2026-11-14', costUsd: null },
+      { day: '2026-11-15', costUsd: 1.25 },
+    ],
     ...overrides,
   };
 }
@@ -130,7 +179,9 @@ function health(overrides: Partial<InstallationHealthResponse> = {}): Installati
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={['/admin/health-cost']}>
-      <AdminHealthCost />
+      <ToastProvider>
+        <AdminHealthCost />
+      </ToastProvider>
     </MemoryRouter>,
     { wrapper: QueryTestWrapper }
   );
@@ -308,5 +359,113 @@ describe('AdminHealthCost', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Superadmin access required');
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('$412')).toBeInTheDocument();
+  });
+
+  it('shows the Cloudflare month to date, projection and top lines as an estimate, apart from compute', async () => {
+    mocks.getInstallationHealth.mockResolvedValue(health());
+    renderPage();
+
+    const tile = await screen.findByTestId('stat-cloudflare');
+    expect(tile).toHaveTextContent(
+      'Cloudflare · estimated$18.41November so far · projected $36.90'
+    );
+    // Compute stays per currency; the Cloudflare dollars are never folded into it.
+    expect(within(screen.getByTestId('stat-compute')).getByText('$412')).toBeInTheDocument();
+    const pane = screen.getByTestId('cloudflare-pane');
+    expect(pane).toHaveTextContent('estimate from usage · whole account');
+    expect(pane).toHaveTextContent('November through Nov 15 · projected $36.90 for November');
+    expect(pane).toHaveTextContent('not an invoice');
+    const lines = screen.getAllByTestId('cloudflare-line');
+    expect(lines[0]).toHaveTextContent('Durable Objects SQLite rows written$4.20 → $9.39');
+    expect(screen.getByTestId('cloudflare-other')).toHaveTextContent(
+      'Everything else (17 lines): $12.61 → $24.11'
+    );
+    expect(screen.getByLabelText('Nov 14: no data')).toBeInTheDocument();
+    expect(screen.getByLabelText('Nov 15: $1.25')).toBeInTheDocument();
+    expect(screen.queryByTestId('cloudflare-status')).not.toBeInTheDocument();
+  });
+
+  it('explains what to set when the Cloudflare credential is missing, without an error', async () => {
+    mocks.getInstallationHealth.mockResolvedValue(
+      health({
+        cloudflare: cloudflare({
+          status: 'not_configured',
+          lastSuccessAt: null,
+          month: null,
+          throughDay: null,
+          monthToDateUsd: 0,
+          projectedUsd: 0,
+          productLines: [],
+          otherProductLines: { count: 0, monthToDateUsd: 0, projectedUsd: 0 },
+          daily: [],
+        }),
+      })
+    );
+    renderPage();
+
+    const status = await screen.findByTestId('cloudflare-status');
+    expect(status).toHaveTextContent('CF_API_TOKEN and CF_ACCOUNT_ID');
+    expect(status).toHaveTextContent('Account → Account Analytics → Read');
+    expect(screen.getByTestId('stat-cloudflare')).toHaveTextContent('Not set up');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // The rest of the page still renders.
+    expect(screen.getByText('$412')).toBeInTheDocument();
+  });
+
+  it('says the token lacks analytics permission and keeps earlier days on screen', async () => {
+    mocks.getInstallationHealth.mockResolvedValue(
+      health({ cloudflare: cloudflare({ status: 'permission_denied', missingDays: 3 }) })
+    );
+    renderPage();
+
+    expect(await screen.findByTestId('cloudflare-status')).toHaveTextContent(
+      'cannot read account analytics'
+    );
+    expect(screen.getByTestId('cloudflare-missing')).toHaveTextContent(
+      '3 days of November have no data and count as $0.'
+    );
+    expect(screen.getAllByTestId('cloudflare-line')).toHaveLength(2);
+  });
+
+  it('runs the snapshot on Refresh now and reloads the numbers without blanking the page', async () => {
+    mocks.getInstallationHealth.mockResolvedValueOnce(
+      health({ cloudflare: cloudflare({ status: 'never_run', month: null, daily: [] }) })
+    );
+    mocks.getInstallationHealth.mockResolvedValue(health());
+    let finish: (value: unknown) => void = () => undefined;
+    mocks.refreshCloudflareCost.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    renderPage();
+
+    expect(await screen.findByTestId('cloudflare-status')).toHaveTextContent('No snapshot yet');
+    fireEvent.click(screen.getByTestId('cloudflare-refresh'));
+    await waitFor(() => expect(mocks.refreshCloudflareCost).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('cloudflare-refresh')).toBeDisabled();
+    // While the snapshot runs, the page keeps what it showed.
+    expect(screen.getByText('$412')).toBeInTheDocument();
+
+    finish({
+      status: 'ok',
+      firstDay: '2026-10-17',
+      lastDay: '2026-11-15',
+      rowsWritten: 570,
+      error: null,
+    });
+    expect(await screen.findByText('Cloudflare cost updated')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('stat-cloudflare')).toHaveTextContent('$18.41'));
+    expect(mocks.getInstallationHealth).toHaveBeenCalledTimes(2);
+  });
+
+  it('names the Cloudflare section when it could not be read', async () => {
+    mocks.getInstallationHealth.mockResolvedValue(
+      health({ cloudflare: null, unavailable: ['cloudflare'] })
+    );
+    renderPage();
+
+    expect(await screen.findByText(/Not available right now: Cloudflare cost/)).toBeInTheDocument();
+    expect(screen.getByText('Cloudflare cost could not be read just now.')).toBeInTheDocument();
   });
 });

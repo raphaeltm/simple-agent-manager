@@ -41,6 +41,67 @@ const LONG_REASON =
   'measured memory headroom would be exceeded after outstanding reservations on a host whose observed hardware differs from its planned offering ' +
   'https://example.com/a/really/long/unbroken/path/that/keeps/going/and/going/without/any/spaces/at/all';
 
+const LONG_ERROR =
+  'Cloudflare GraphQL error: cannot request data older than 4w4d, but your query requests data from 6w4d22h36m8s ago; ' +
+  'https://developers.cloudflare.com/analytics/graphql-api/limits/and/a/very/long/unbroken/path/that/never/wraps/by/itself';
+
+type CloudflareCard = NonNullable<InstallationHealthResponse['cloudflare']>;
+
+function makeCloudflare(kind: 'normal' | 'stress' | 'empty'): CloudflareCard {
+  if (kind === 'empty')
+    return {
+      status: 'never_run',
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      error: null,
+      month: null,
+      throughDay: null,
+      monthComplete: false,
+      missingDays: 0,
+      monthToDateUsd: 0,
+      projectedUsd: 0,
+      productLines: [],
+      otherProductLines: { count: 0, monthToDateUsd: 0, projectedUsd: 0 },
+      daily: [],
+    };
+  const scale = kind === 'stress' ? 1000 : 1;
+  const lines = [
+    ['doRowsWritten', 'Durable Objects', 'Durable Objects SQLite rows written', 4.2, 9.39],
+    ['workersAiNeurons', 'Workers AI', 'Workers AI neurons', 1.6, 3.4],
+    ['r2StorageGb', 'R2', 'R2 storage', 1.3, 2.47],
+    ['containerMemoryGibSeconds', 'Containers', 'Containers memory', 0.4, 1.41],
+    ['doStorageReadUnits', 'Durable Objects', 'Durable Objects KV read units', 0.3, 1.08],
+  ] as const;
+  return {
+    status: kind === 'stress' ? 'error' : 'ok',
+    lastAttemptAt: '2026-11-16T03:00:05.000Z',
+    lastSuccessAt: '2026-11-15T03:00:04.000Z',
+    error: kind === 'stress' ? LONG_ERROR : null,
+    month: '2026-11',
+    throughDay: '2026-11-15',
+    monthComplete: false,
+    missingDays: kind === 'stress' ? 4 : 0,
+    monthToDateUsd: 8.41 * scale,
+    projectedUsd: 20.76 * scale,
+    productLines: lines.map(([key, product, label, mtd, projected]) => ({
+      key,
+      product,
+      label,
+      unit: 'units',
+      monthToDateUsage: 1,
+      monthToDateUsd: mtd * scale,
+      projectedUsd: projected * scale,
+    })),
+    otherProductLines: { count: 14, monthToDateUsd: 0.61 * scale, projectedUsd: 3.01 * scale },
+    daily: Array.from({ length: kind === 'stress' ? 62 : 30 }, (_, i) => ({
+      day: new Date(Date.UTC(2026, 10, 15 - (kind === 'stress' ? 61 : 29) + i))
+        .toISOString()
+        .slice(0, 10),
+      costUsd: kind === 'stress' && i % 9 === 3 ? null : (0.3 + ((i * 7) % 11) / 10) * scale,
+    })),
+  };
+}
+
 function makeHealth(kind: 'normal' | 'stress' | 'empty'): InstallationHealthResponse {
   const weekCount = kind === 'stress' ? 26 : 6;
   const weekStart = (i: number) => new Date(Date.UTC(2026, 9, 5 + i * 7)).toISOString();
@@ -208,6 +269,7 @@ function makeHealth(kind: 'normal' | 'stress' | 'empty'): InstallationHealthResp
         };
       }),
     },
+    cloudflare: makeCloudflare(kind),
     unavailable: [],
   };
 }
@@ -224,6 +286,14 @@ async function setupMocks(page: Page, scenario: Scenario) {
   await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await page.route('**/api/**', async (route: Route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/admin/health-cost/cloudflare/refresh')
+      return respond(route, 200, {
+        status: 'ok',
+        firstDay: '2026-10-17',
+        lastDay: '2026-11-15',
+        rowsWritten: 570,
+        error: null,
+      });
     if (path === '/api/admin/health-cost') {
       if (scenario.status && scenario.status >= 400)
         return respond(route, scenario.status, {
@@ -259,7 +329,7 @@ async function audit(
   await expect(page.getByRole('heading', { name: /Health & cost/ })).toBeVisible();
   await screenshot(page, `admin-health-cost-${name}-${theme}`);
   // The page scrolls inside the app shell, so a viewport shot misses the lower panes: capture each.
-  for (const pane of ['latency-pane', 'spend-pane', 'reasons-pane']) {
+  for (const pane of ['latency-pane', 'spend-pane', 'reasons-pane', 'cloudflare-pane']) {
     const locator = page.getByTestId(pane);
     if ((await locator.count()) === 0) continue;
     await locator.scrollIntoViewIfNeeded();
@@ -325,6 +395,47 @@ for (const viewport of [
         health: { ...makeHealth('normal'), latency: null, unavailable: ['latency'] },
       });
       await expect(page.getByText('Lifecycle latency could not be read just now.')).toBeVisible();
+    });
+
+    test('Cloudflare not configured explains what to set', async ({ page }) => {
+      await audit(page, `cloudflare-unconfigured-${viewport.label}`, {
+        health: {
+          ...makeHealth('normal'),
+          cloudflare: { ...makeCloudflare('empty'), status: 'not_configured' },
+        },
+      });
+      await expect(page.getByTestId('cloudflare-status')).toContainText('CF_API_TOKEN');
+      await expect(page.getByTestId('stat-cloudflare')).toContainText('Not set up');
+    });
+
+    test('Cloudflare token without analytics permission', async ({ page }) => {
+      await audit(page, `cloudflare-permission-${viewport.label}`, {
+        health: {
+          ...makeHealth('normal'),
+          cloudflare: {
+            ...makeCloudflare('normal'),
+            status: 'permission_denied',
+            error: 'Cloudflare GraphQL error: Authentication error',
+          },
+        },
+      });
+      await expect(page.getByTestId('cloudflare-status')).toContainText(
+        'cannot read account analytics'
+      );
+      await expect(page.getByTestId('cloudflare-line')).toHaveCount(5);
+    });
+
+    test('Cloudflare Refresh now is reachable and runs', async ({ page }) => {
+      await audit(page, `cloudflare-refresh-${viewport.label}`, { health: makeHealth('empty') });
+      const refresh = page.getByTestId('cloudflare-refresh');
+      await refresh.scrollIntoViewIfNeeded();
+      const box = await refresh.boundingBox();
+      expect(box).not.toBeNull();
+      if (viewport.isMobile) expect(box!.height).toBeGreaterThanOrEqual(44);
+      const request = page.waitForRequest('**/api/admin/health-cost/cloudflare/refresh');
+      await refresh.click();
+      expect((await request).method()).toBe('POST');
+      await expect(page.getByText('Cloudflare cost updated')).toBeVisible();
     });
 
     test('error state', async ({ page }) => {
