@@ -85,6 +85,15 @@ export {
   listAgentAsks,
   titleSimilarity,
 } from './inbox-agent-reads';
+export {
+  type AgentAssignInput,
+  type AgentAssignResult,
+  agentTaskDetail,
+  assignAgentTask,
+  attachAgentTask,
+  commentAgentTask,
+  getAgentItem,
+} from './inbox-agent-tasks';
 export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
 export { getInboxItem, resolveInboxItem } from './inbox-item-core';
 export { countInbox, listInbox } from './inbox-list-core';
@@ -106,6 +115,27 @@ export {
 export { inboxTitle } from './inbox-rows';
 export { defaultInboxLimits, getInboxLimits, type InboxLimits } from './inbox-settings';
 export { INBOX_SETTINGS, type InboxSettingName } from './inbox-settings-definition';
+export {
+  archiveTask,
+  claimTask,
+  commentOnTask,
+  completeTask,
+  getTaskDetailForPerson,
+  reassignTask,
+  reopenTask,
+  setTaskStep,
+  TASK_NOT_FOUND,
+} from './inbox-task-core';
+export type {
+  InboxTaskCommentNotice,
+  InboxTaskCommentWakeDecision,
+  InboxTaskCommentWakeInput,
+  InboxTaskEventActor,
+  InboxTaskEventInput,
+  InboxTaskWatchInput,
+  OperationInboxTaskPort,
+} from './inbox-task-ports';
+export { canWriteTask, TASK_READABLE_SQL } from './inbox-task-rows';
 export {
   answerInboxItem,
   archiveInboxItem,

@@ -13,6 +13,7 @@ import {
   agentMessageChannelForSubscription,
   agentMessageWakeContent,
 } from './agent-message-notice';
+import { inboxWakeContent, isInboxWatchSubscription } from './inbox-event-wake';
 import { projectDataPorts } from './ports';
 import type { ProjectEventWakeSourceTaskGuard } from './project-events-materialization';
 import type { AcceptPromptDeliveryInput } from './prompt-delivery';
@@ -58,7 +59,14 @@ export function buildWakePromptInput(
       ? 'Project event update added to your current turn (runtime_steer) — it does not stop ' +
         'your work; fold it in if it is relevant. '
       : '';
-  const content = agentMessageChannel
+  // A task watch names who acted (and whether it is teammate input); still no event content.
+  const inboxContent =
+    !agentMessageChannel && isInboxWatchSubscription(options.subscription)
+      ? inboxWakeContent({ batchId: options.batchId, events: options.events ?? [] })
+      : null;
+  const content = inboxContent
+    ? urgentPrefix + inboxContent
+    : agentMessageChannel
     ? agentMessageWakeContent({
         batchId: options.batchId,
         channel: agentMessageChannel,

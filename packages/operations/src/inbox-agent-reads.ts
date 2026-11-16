@@ -174,10 +174,13 @@ export async function getAgentAsk(
   input: { ref: string }
 ): Promise<InboxAgentItem> {
   const askId = agentAskId(input.ref);
+  // Also an item this chat filed: a task the agent assigned to a teammate is addressed to them,
+  // but the agent that assigned it reads its progress (slice H1).
   const row = await ctx.env.DATABASE.prepare(
-    `SELECT ${AGENT_ITEM_COLUMNS} FROM asks WHERE id = ? AND project_id = ? AND ${ADDRESSED_TO_CALLER}`
+    `SELECT ${AGENT_ITEM_COLUMNS} FROM asks
+      WHERE id = ? AND project_id = ? AND (${ADDRESSED_TO_CALLER} OR source_session_id = ?)`
   )
-    .bind(askId, source.projectId, source.userId)
+    .bind(askId, source.projectId, source.userId, source.sessionId)
     .first<Record<string, unknown>>();
   if (!row) throw new OperationError('not_found', AGENT_ITEM_NOT_FOUND);
   try {
