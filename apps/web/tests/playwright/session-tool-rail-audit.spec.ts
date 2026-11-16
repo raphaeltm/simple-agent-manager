@@ -1266,7 +1266,7 @@ test.describe('Session resource timeline touch interaction', () => {
     await touch('touchEnd', []);
     const clear = dialog.getByRole('button', { name: 'Clear the selected instant' });
     await expect(clear).toBeVisible();
-    await clear.click();
+    await clear.tap();
     await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible();
 
     await touch('touchStart', [

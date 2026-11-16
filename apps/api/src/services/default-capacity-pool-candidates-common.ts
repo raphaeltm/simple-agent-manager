@@ -2,6 +2,7 @@ import type { CapacityPoolStatus } from '@simple-agent-manager/shared';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
+import type { PoolPublicationGuard } from './default-capacity-pool-types';
 
 export type Db = ReturnType<typeof drizzle>;
 
@@ -29,6 +30,9 @@ export const MISSING_CANDIDATE_SOURCE_GENERATION_GUARD_BIND_COUNT = 4;
 /** Candidate ROWS written per D1 batch. A pass writes successive batches until its budget ends. */
 export const DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE = 200;
 
+export const CAPACITY_POOL_CANDIDATE_PUBLICATION_CURSOR_PREFIX =
+  'capacityPools.candidatePublication.v1:';
+
 /**
  * Wall-clock budget for publishing one changed catalog in a single pass
  * (`operations.capacityPoolPublishBudgetMs`). A pool is unplaceable until its catalog is
@@ -50,8 +54,12 @@ export interface CapacityCandidatePublicationCursorStore {
 }
 
 export interface EnsureCandidatesForSourceOptions {
+  /** Pool state owned by the enclosing refresh; never adopt a concurrent editor's revision. */
+  poolPublicationGuard?: PoolPublicationGuard;
   sourceGeneration?: number;
   sourceAuthorityGeneration?: number;
+  /** Whether returned metadata is trusted for placement, independent of exhaustive enumeration. */
+  catalogValidated?: boolean;
   catalogComplete?: boolean;
   /** Max candidate rows written per D1 batch. Defaults to the module constant. */
   publishBatchSize?: number;
@@ -67,6 +75,8 @@ export interface EnsureCandidatesForSourceOptions {
 }
 
 export interface EnsureCandidatesForSourceResult {
+  /** Own atomic promotion's resulting pool state; absent when its CAS did not commit. */
+  poolPublicationGuard?: PoolPublicationGuard;
   /** Total candidate rows this catalog resolves to (offerings x materialized roles). */
   totalCandidates: number;
   /** Rows written by this invocation. */
@@ -99,4 +109,6 @@ export interface PublicationCursor {
   published: number;
   /** This exact semantic catalog has completed at least one fenced publication. */
   complete?: boolean;
+  /** Incomplete writes touched private staging only; inherited legacy unsafety stays false. */
+  atomic?: boolean;
 }

@@ -89,6 +89,8 @@ function createEnv(options: { bindLimit?: number } = {}) {
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
+    schema.capacityPoolCandidateStaging,
+    schema.capacityPoolRefreshes,
   ]);
   return {
     sqlite,

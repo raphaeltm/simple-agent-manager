@@ -103,8 +103,10 @@ chatRoutes.post('/', async (c) => {
 
 /**
  * GET /api/projects/:projectId/sessions/ws
- * WebSocket upgrade — streams real-time events (new messages, session changes, activity)
- * from the project's Durable Object to the connected client.
+ * WebSocket upgrade, forwarded to the project's Durable Object. With `?sessionId=` the socket
+ * receives that session's transcript and lifecycle events; without it, lifecycle, attention,
+ * comment and access events for every session but no transcript frames
+ * (`project-data/src/do/session-sockets.ts`).
  *
  * NOTE: This route MUST be defined before /:sessionId to avoid 'ws' being
  * captured as a sessionId parameter.
