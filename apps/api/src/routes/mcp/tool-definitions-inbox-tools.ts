@@ -117,7 +117,7 @@ export const INBOX_TOOLS = [
             '`{ "userId": "<id>" }` for one active project member, or `{ "team": true }` for anyone in the project (one member takes it).',
           properties: {
             userId: { type: 'string' },
-            team: { type: 'boolean', enum: [true] },
+            team: { type: 'boolean', description: 'true for the team.' },
           },
           additionalProperties: false,
         },
