@@ -51,8 +51,10 @@ placeholder the spec allows; tracked by those slices in the spec, rule 42).
 - Migration (additive): `pull_request_heads (project_id, repository, pr_number, head_sha,
   first_seen_at, from_open)` PK `(project_id, repository, pr_number, head_sha)`; column
   `pull_request_checks.first_failed_at`.
-- `from_open = 1` when SAM recorded the head while the PR had no earlier head in SAM: SAM saw the
-  PR from its first commit. PRs that existed before this table say "not recorded".
+- `from_open = 1` only for the head GitHub's `pull_request.opened` event carried (changed after
+  review from "no earlier head in SAM", which could mislabel a later commit). PRs whose opened
+  event SAM never received say "not recorded". Late check results for the opening commit are kept
+  after a push.
 - Old-head deletes keep checks of a PR's first recorded head.
 - `projectFlow(ctx, {projectId, range})` in `packages/operations/src/insights-flow*.ts`; REST
   `GET /api/projects/:projectId/insights/flow?range=7d|30d|90d`.
@@ -61,28 +63,38 @@ placeholder the spec allows; tracked by those slices in the spec, rule 42).
 
 ## Implementation checklist
 
-- [ ] Migration + drizzle schema for `pull_request_heads` and `first_failed_at`
-- [ ] `upsertPullRequestSnapshot` records heads; previous-head delete preserves first-head checks
-- [ ] `ingestChecksWebhook` records `first_failed_at` (out-of-order safe) and prune preserves first-head checks
-- [ ] Shared types `ProjectFlowResponse` etc. in `packages/shared`
-- [ ] `insights-flow` op: tiles (idea→merged median, CI first try, waiting on a person, rework 7d), runs per bucket by outcome, stop reasons, flaky checks, ideas waiting longest, merged count, top blocker; deltas vs previous period
-- [ ] Stop-reason vocabulary derived at read time; rework definition in code comments
-- [ ] Admin settings `insights.flow*` for caps
-- [ ] REST route + mount
-- [ ] Real-SQL tests: foreign-project attack + owner control, first-try, flaky, rework, stop reasons, not-recorded
-- [ ] Web: route `/projects/:id/insights` (React.lazy), nav item, tabs, range control, Flow tab (TanStack Query, SWR)
-- [ ] Web: "This week" pane in Overview rail
-- [ ] Web unit tests; Playwright audit 375/1280 with realistic + empty data
-- [ ] Public docs: project guide section for Insights
-- [ ] After merge: wire first-try into `runReceipt` if slice R merged (follow-up PR)
+- [x] Migration + drizzle schema for `pull_request_heads` and `first_failed_at`
+- [x] `upsertPullRequestSnapshot` records heads; previous-head delete preserves first-head checks
+- [x] `ingestChecksWebhook` records `first_failed_at` (out-of-order safe) and prune preserves first-head checks
+- [x] Shared types `ProjectFlowResponse` etc. in `packages/shared`
+- [x] `insights-flow` op: tiles (idea→merged median, CI first try, waiting on a person, rework 7d), runs per bucket by outcome, stop reasons, flaky checks, ideas waiting longest, merged count, top blocker; deltas vs previous period
+- [x] Stop-reason vocabulary derived at read time; rework definition in code comments
+- [x] Admin settings `insights.flow*` for caps
+- [x] REST route + mount
+- [x] Real-SQL tests: foreign-project attack + owner control, first-try, flaky, rework, stop reasons, not-recorded
+- [x] Web: route `/projects/:id/insights` (React.lazy), nav item, tabs, range control, Flow tab (TanStack Query, SWR)
+- [x] Web: "This week" pane in Overview rail
+- [x] Web unit tests; Playwright audit 375/1280 with realistic + empty data
+- [x] Public docs: project guide section for Insights
+- [ ] After merge: wire first-try into `runReceipt` if slice R merged (follow-up PR, by design after this merges)
 
 ## Acceptance criteria
 
-- [ ] Insights nav item on desktop and phone opens `/projects/:id/insights`, Flow tab shows real data
-- [ ] Other tabs show a short coming-soon state
-- [ ] Range control switches 7/30/90 days without blanking the page
-- [ ] Overview rail shows This week (merged, idea→merged, CI first try, top blocker) linking to Insights
-- [ ] A foreign project's rows never appear (tested on a real SQL engine)
-- [ ] First try reads "not recorded" when no PR in range was recorded from its first head
-- [ ] projectFlow ≤ 12 round trips
+- [x] Insights nav item on desktop and phone opens `/projects/:id/insights`, Flow tab shows real data
+- [x] Other tabs show a short coming-soon state
+- [x] Range control switches 7/30/90 days without blanking the page
+- [x] Overview rail shows This week (merged, idea→merged, CI first try, top blocker) linking to Insights
+- [x] A foreign project's rows never appear (tested on a real SQL engine)
+- [x] First try reads "not recorded" when no PR in range was recorded from its first head
+- [x] projectFlow ≤ 12 round trips
 - [ ] Verified on staging with real tasks and PRs
+
+## Review outcome (Phase 5)
+
+task-completion-validator, cloudflare-specialist, security-auditor, ui-ux-specialist,
+performance-reviewer, doc-sync-validator: no CRITICAL. HIGH (no round-trip test) fixed with a
+measured test (8 trips with 120 linked tasks). MEDIUMs fixed: exact from_open, late opening-commit
+checks, json_each idea reads (no 96-id chunking), vertical slice ingest → projectFlow,
+cross-project placeholder data, amber misuse, API reference entry. Accepted with reasons: This week
+runs the full read (5-minute shared cache, within budget); pull_request_heads has one small row per
+push with no retention, like pull_requests itself; tabs drop ?range= (other tabs are placeholders).

@@ -380,13 +380,7 @@ export {
   listProjectIdeas,
   setProjectIdeaStatus,
 } from './ideas';
-export {
-  answerInboxItem,
-  archiveInboxItem,
-  getInboxCount,
-  getInboxItem,
-  listInbox,
-} from './inbox';
+export { answerInboxItem, archiveInboxItem, getInboxCount, getInboxItem, listInbox } from './inbox';
 export { getProjectFlow } from './insights';
 export {
   addObservation,
