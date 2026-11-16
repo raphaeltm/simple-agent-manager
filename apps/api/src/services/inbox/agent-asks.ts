@@ -92,7 +92,8 @@ export async function withdrawAgentQuestion(
       askId: input.askId,
     });
   } catch (error) {
-    // The row is closed; the chat list reads it as closed on its next read.
+    // The row is closed and the chat list reads it as closed; SAM's check-in hold stays until the
+    // question's original deadline, when the candidate is evaluated again and finds no question.
     log.warn('inbox.agent_ask.withdraw_live_update_failed', {
       askId: input.askId,
       projectId: input.projectId,
@@ -102,6 +103,10 @@ export async function withdrawAgentQuestion(
 }
 
 const NOT_IN_PROJECT = 'not found in this project';
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /** `ws-<workspaceId>` or `ws-<workspaceId>--<port>` directly under the base domain. */
 function previewWorkspaceId(url: URL, baseDomain: string): string | null {
@@ -148,24 +153,54 @@ async function checkOne(env: Env, projectId: string, link: InboxLink): Promise<s
         ? null
         : NOT_IN_PROJECT;
     case 'pr': {
+      // Pinned to the project's own repository host and a numbered pull or merge request path,
+      // so a chip labelled "PR" cannot point anywhere else.
+      const url = new URL(link.id);
+      if (url.username || url.password || url.port)
+        return 'a pull request URL has no credentials or port';
       const project = await db
-        .prepare('SELECT repository FROM projects WHERE id = ?')
+        .prepare(
+          `SELECT p.repository, p.repo_provider, g.host AS gitlab_host, g.path_with_namespace
+             FROM projects p LEFT JOIN project_gitlab_repositories g ON g.project_id = p.id
+            WHERE p.id = ?`
+        )
         .bind(projectId)
-        .first<{ repository: string | null }>();
-      const repository = project?.repository?.trim().toLowerCase();
-      const path = new URL(link.id).pathname.toLowerCase();
-      return repository && path.startsWith(`/${repository}/`)
+        .first<{
+          repository: string | null;
+          repo_provider: string | null;
+          gitlab_host: string | null;
+          path_with_namespace: string | null;
+        }>();
+      const host = url.hostname.toLowerCase();
+      const path = url.pathname.toLowerCase().replace(/\/+$/, '');
+      if (project?.repo_provider === 'gitlab') {
+        const repo = (project.path_with_namespace ?? project.repository ?? '').trim().toLowerCase();
+        const gitlabHost = (project.gitlab_host ?? '').trim().toLowerCase();
+        return repo &&
+          gitlabHost &&
+          host === gitlabHost &&
+          new RegExp(`^/${escapeRegExp(repo)}/-/merge_requests/\\d+$`).test(path)
+          ? null
+          : "not a merge request of this project's repository";
+      }
+      const repo = project?.repository?.trim().toLowerCase();
+      return project?.repo_provider !== 'artifacts' &&
+        repo &&
+        host === 'github.com' &&
+        new RegExp(`^/${escapeRegExp(repo)}/pull/\\d+$`).test(path)
         ? null
         : "not a pull request of this project's repository";
     }
     case 'preview': {
       const workspaceId = previewWorkspaceId(new URL(link.id), env.BASE_DOMAIN ?? '');
       if (!workspaceId) return "not a preview URL of this project's workspaces";
-      // Host names are lower case; workspace ids are not.
+      // Host names are lower case; workspace ids are upper-case ULIDs. Both forms keep the
+      // primary-key lookup.
       return (await exists(
-        'SELECT 1 FROM workspaces WHERE project_id = ? AND id = ? COLLATE NOCASE',
+        'SELECT 1 FROM workspaces WHERE project_id = ? AND id IN (?, ?)',
         projectId,
-        workspaceId
+        workspaceId,
+        workspaceId.toUpperCase()
       ))
         ? null
         : NOT_IN_PROJECT;

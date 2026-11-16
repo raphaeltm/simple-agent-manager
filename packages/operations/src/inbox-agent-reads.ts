@@ -3,9 +3,10 @@
  * items of its chat or project (`inbox_read list`, the check before filing), one item with its
  * outcome (`inbox_read get`), and the similar open items returned when it files.
  *
- * These read `asks` by where an item came from, not by who may act on it, so they are separate
- * from the viewer-scoped inbox list (`inbox-list-core.ts`): an agent checks what this chat or
- * project already asked, whoever it is addressed to. Every read binds `project_id` (rule 11).
+ * These read `asks` by where an item came from (this chat, or this project), limited to items
+ * addressed to the person the agent works for, so they are separate from the viewer-scoped inbox
+ * list (`inbox-list-core.ts`), which merges other stores and computes who may act. Every read
+ * binds `project_id` (rule 11).
  */
 import {
   ASK_STATUSES,
@@ -33,6 +34,13 @@ export interface AgentInboxSource {
 }
 
 export const AGENT_ITEM_NOT_FOUND = 'Inbox item not found';
+
+/**
+ * Only items addressed to the person the agent works for (or to a team), as in that person's
+ * inbox (`inbox-list-core.ts`): another member's items, and their answers, stay theirs. Binds
+ * the caller's user id.
+ */
+const ADDRESSED_TO_CALLER = `(assignee_kind = 'team' OR assignee_user_id = ?)`;
 
 const AGENT_ITEM_COLUMNS = `id, kind, blocking, status, title, body_md, links_json, group_key,
   source_session_id, created_at, expires_at, resolved_at, answer_json`;
@@ -130,11 +138,13 @@ export async function listAgentAsks(
   );
   const chatOnly = (input.scope ?? 'chat') === 'chat';
   const result = await ctx.env.DATABASE.prepare(
-    `SELECT ${AGENT_ITEM_COLUMNS} FROM asks
-      WHERE project_id = ? AND status = 'open'${chatOnly ? ' AND source_session_id = ?' : ''}
+    // A chat's open items are capped per chat; read them from the chat's index rather than walking
+    // the project's open set.
+    `SELECT ${AGENT_ITEM_COLUMNS} FROM asks${chatOnly ? ' INDEXED BY idx_asks_session_status' : ''}
+      WHERE project_id = ? AND status = 'open' AND ${ADDRESSED_TO_CALLER}${chatOnly ? ' AND source_session_id = ?' : ''}
       ORDER BY created_at DESC, id DESC LIMIT ?`
   )
-    .bind(...(chatOnly ? [source.projectId, source.sessionId] : [source.projectId]), limit + 1)
+    .bind(source.projectId, source.userId, ...(chatOnly ? [source.sessionId] : []), limit + 1)
     .all<Record<string, unknown>>();
   const rows = result.results ?? [];
   const items: InboxAgentItem[] = [];
@@ -165,9 +175,9 @@ export async function getAgentAsk(
 ): Promise<InboxAgentItem> {
   const askId = agentAskId(input.ref);
   const row = await ctx.env.DATABASE.prepare(
-    `SELECT ${AGENT_ITEM_COLUMNS} FROM asks WHERE id = ? AND project_id = ?`
+    `SELECT ${AGENT_ITEM_COLUMNS} FROM asks WHERE id = ? AND project_id = ? AND ${ADDRESSED_TO_CALLER}`
   )
-    .bind(askId, source.projectId)
+    .bind(askId, source.projectId, source.userId)
     .first<Record<string, unknown>>();
   if (!row) throw new OperationError('not_found', AGENT_ITEM_NOT_FOUND);
   try {
@@ -236,6 +246,8 @@ export async function findSimilarAsks(
   input: {
     projectId: string;
     sessionId: string;
+    /** The person the agent works for: only their items are compared. */
+    userId: string;
     title: string;
     groupKey?: string;
     excludeId: string;
@@ -245,11 +257,18 @@ export async function findSimilarAsks(
   let rows: Record<string, unknown>[];
   try {
     const result = await ctx.env.DATABASE.prepare(
-      `SELECT id, kind, title, group_key, source_session_id FROM asks
-        WHERE project_id = ? AND status = 'open' AND id != ?
-        ORDER BY created_at DESC, id DESC LIMIT ?`
+      // The newest `similarScanMax` open items of the project are read first (an index walk that
+      // stops at the limit), then narrowed to the caller's: the bound is on rows read.
+      `SELECT id, kind, title, group_key, source_session_id FROM (
+         SELECT id, kind, title, group_key, source_session_id, assignee_kind, assignee_user_id,
+                created_at
+           FROM asks
+          WHERE project_id = ? AND status = 'open' AND id != ?
+          ORDER BY created_at DESC, id DESC LIMIT ?
+       ) WHERE ${ADDRESSED_TO_CALLER}
+       ORDER BY created_at DESC, id DESC`
     )
-      .bind(input.projectId, input.excludeId, limits.similarScanMax)
+      .bind(input.projectId, input.excludeId, limits.similarScanMax, input.userId)
       .all<Record<string, unknown>>();
     rows = result.results ?? [];
   } catch (error) {

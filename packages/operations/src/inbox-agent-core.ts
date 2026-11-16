@@ -45,7 +45,9 @@ export const AgentLinkInputSchema = v.object({
 export type AgentLinkInput = v.InferInput<typeof AgentLinkInputSchema>;
 
 const LinksSchema = v.optional(v.array(AgentLinkInputSchema), []);
-const KeySchema = v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(200)));
+const GroupKeySchema = v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(200)));
+// Stored as `agent:<chatId>:<key>` within the 200-character `dedupe_key`.
+const IdempotencyKeySchema = v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(120)));
 
 export const AgentAskInputSchema = v.object({
   title: v.optional(v.string()),
@@ -55,8 +57,8 @@ export const AgentAskInputSchema = v.object({
   blocking: v.optional(v.boolean(), true),
   category: v.optional(v.picklist(HUMAN_INPUT_CATEGORIES)),
   links: LinksSchema,
-  groupKey: KeySchema,
-  idempotencyKey: KeySchema,
+  groupKey: GroupKeySchema,
+  idempotencyKey: IdempotencyKeySchema,
 });
 export type AgentAskInput = v.InferInput<typeof AgentAskInputSchema>;
 
@@ -64,8 +66,8 @@ export const AgentReviewInputSchema = v.object({
   title: v.string(),
   why: v.optional(v.string()),
   links: LinksSchema,
-  groupKey: KeySchema,
-  idempotencyKey: KeySchema,
+  groupKey: GroupKeySchema,
+  idempotencyKey: IdempotencyKeySchema,
 });
 export type AgentReviewInput = v.InferInput<typeof AgentReviewInputSchema>;
 
@@ -227,6 +229,7 @@ async function file(
   const similar = await findSimilarAsks(ctx, limits, {
     projectId: source.projectId,
     sessionId: source.sessionId,
+    userId: source.userId,
     title: item.title,
     groupKey: item.groupKey,
     excludeId: created.id,
