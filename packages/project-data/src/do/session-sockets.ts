@@ -81,6 +81,8 @@ export function countLegacySockets(
   for (const ws of ctx.getWebSockets()) {
     if (ws.readyState !== WebSocket.OPEN) continue;
     const tags = tagsOf(ctx, ws);
+    // A socket whose tags cannot be read cannot be attributed to a session (it is almost
+    // certainly gone), so it is not counted for either scope.
     if (!tags || tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY)) continue;
     const tag = tags.find((t) => t.startsWith(SESSION_TAG_PREFIX));
     if (!tag) project++;

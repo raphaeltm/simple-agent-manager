@@ -146,6 +146,8 @@ describe('content-free message ingestion counters through real workerd', () => {
               legacyProjectSocketsMax: 1,
             }
       );
+      if (!sessionScoped)
+        expect(reports(log).at(-1)!.messageIngest.refused.legacy_client).toBeUndefined();
       expect((await stub.getMessages(session, 50)).messages).toHaveLength(sessionScoped ? 3 : 1);
       response.webSocket!.close();
     }
