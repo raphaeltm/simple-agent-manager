@@ -928,6 +928,23 @@ Get project details. `recentSessions` and `recentActivity` are empty unless you 
 `?include=recent` (`apps/api/src/routes/projects/project-detail.ts`); that read is bounded by the
 admin setting `performance.projectRecentTimeoutMs`.
 
+### `GET /api/projects/:projectId/overview`
+
+The Project Overview's one read (`projectOverviewGet`, `packages/operations/src/project-overview.ts`).
+Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequests }, unavailable, generatedAt }`:
+
+- `running.items`: awake chats whose task is queued, delegated or in progress and that are starting,
+  mid-turn, or paused on an open question, newest activity first. Each has `sessionId`, `taskId`,
+  `topic`, `state` (`starting`, `working` or `waiting`), `waitingOnViewer`, `startedAt`,
+  `lastActivityAt` and `profile` (`{ id, name }` or null). `running.total` counts every running chat.
+- `recent.ideas`: the most recently updated ideas, open or closed, in the Ideas list's item shape.
+- `recent.mergedPullRequests`: `{ number, url, title, repository, mergedAt }`, newest merge first.
+- `unavailable`: sections whose read failed this time (`running`, `ideas`, `pullRequests`); they
+  come back empty rather than failing the whole response.
+
+Optional query `runningLimit` and `recentLimit` (defaults 5 and 3, at most 20). Requires project
+membership.
+
 ### `POST /api/projects/:id/tasks`
 
 Create a task record.

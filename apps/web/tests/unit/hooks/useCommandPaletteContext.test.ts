@@ -1,5 +1,5 @@
 import { renderHook } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCommandPaletteContext } from '../../../src/hooks/useCommandPaletteContext';
 import type { SessionSummaryItem } from '../../../src/lib/api';
@@ -30,7 +30,7 @@ vi.mock('../../../src/components/NavSidebar', () => ({
 // ── Test Data ──
 
 function makeSession(
-  overrides: Partial<SessionSummaryItem & { createdAt: number }> = {},
+  overrides: Partial<SessionSummaryItem & { createdAt: number }> = {}
 ): SessionSummaryItem & { createdAt: number } {
   return {
     id: 'sess-1',
@@ -65,7 +65,7 @@ function renderContextHook(options?: {
     useCommandPaletteContext({
       chatSessions: options?.chatSessions ?? [],
       projects: options?.projects ?? defaultProjects,
-    }),
+    })
   );
   return { ...result };
 }
@@ -169,6 +169,7 @@ describe('useCommandPaletteContext', () => {
     const { result } = renderContextHook();
 
     const labels = result.current.contextActions.map((a) => a.label);
+    expect(labels).toContain('My Project: Go to Overview');
     expect(labels).toContain('My Project: Go to Library');
     expect(labels).toContain('My Project: Go to Deployments');
     expect(labels).toContain('My Project: Go to Agent Context');
@@ -179,6 +180,7 @@ describe('useCommandPaletteContext', () => {
   });
 
   it.each([
+    ['ctx-project-overview', '/projects/p1/overview'],
     ['ctx-project-library', '/projects/p1/library'],
     ['ctx-project-deployments', '/projects/p1/deployments'],
     ['ctx-project-agent-context', '/projects/p1/agent-context'],
@@ -324,11 +326,11 @@ describe('useCommandPaletteContext', () => {
 
     const { result } = renderContextHook({ chatSessions: sessions });
     // Default cap is 20. On a project+session URL we have:
-    //   10 project nav (Chat/Ideas/Activity/Settings/Library/Agent Context/
-    //   Inbox/Automation/Profiles/Skills) + 3 create + 2 session = 15 (all fit)
+    //   11 project nav (Overview/Chat/Inbox/Ideas/Deployments/Settings/Library/Agent Context/
+    //   Automation/Profiles/Skills) + 3 create + 2 session = 16 (all fit)
     // (outputPrUrl is only on detail endpoint, not list; "Open PR" action removed)
     expect(result.current.contextActions.length).toBeLessThanOrEqual(20);
-    expect(result.current.contextActions.length).toBe(15);
+    expect(result.current.contextActions.length).toBe(16);
   });
 
   // ── window.open assertions ──
@@ -390,9 +392,7 @@ describe('useCommandPaletteContext', () => {
   it('does not show session actions when session belongs to wrong project', () => {
     mockPathname = '/projects/p1/chat/sess-1';
 
-    const sessions = [
-      makeSession({ id: 'sess-1', projectId: 'p2', workspaceId: 'ws-abc' }),
-    ];
+    const sessions = [makeSession({ id: 'sess-1', projectId: 'p2', workspaceId: 'ws-abc' })];
 
     const { result } = renderContextHook({ chatSessions: sessions });
     const labels = result.current.contextActions.map((a) => a.label);

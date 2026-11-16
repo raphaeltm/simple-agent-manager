@@ -28,3 +28,7 @@ than recovered.
 - [ ] If rollout: a session whose container is replaced during agent startup recovers instead of
       failing, or the deploy waits for container rollout before declaring success
 - [ ] Regression test or documented staging procedure covering a session started during rollout
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2722 makes deploys wait for container rollout completion (`.github/workflows/deploy-reusable.yml`, "Wait for container rollout completion"), one of the options AC2 allows. Still open: confirm the SIGTERM source, and a test or staging procedure for a session started during a rollout.

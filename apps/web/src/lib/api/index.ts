@@ -469,6 +469,7 @@ export {
 } from './notifications';
 export type { ListPoliciesResponse, ProjectPolicy } from './policies';
 export { deletePolicy, getPolicy, listPolicies, updatePolicy } from './policies';
+export { getProjectOverview } from './project-overview';
 export type {
   AccountMapResponse,
   DevcontainerConfigEntry,

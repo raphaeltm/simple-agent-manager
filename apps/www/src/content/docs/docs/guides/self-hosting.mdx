@@ -554,30 +554,90 @@ Optional GitHub Environment variables `CONTAINER_ROLLOUT_TIMEOUT_MS` (default
 accept positive integer milliseconds. These are deployment runner settings, not
 Worker runtime settings. Timeout errors include the rollout ID and last status.
 
+### Container image reuse
+
+Before the API Worker is deployed, the **Resolve container images** step
+(`scripts/deploy/container-image-reuse.ts`) gives each Instant container image a
+content key. The key covers the Dockerfile, every file it copies, and a
+fingerprint of every input installed from the network: the apt package indexes
+of each suite the image installs from, every URL the build fetches, the resolved
+dependency tree of each `npm install -g` package, and the resolved PyPI
+dependencies of each `uv tool install` (`container-image-inputs.ts`,
+`container-image-fingerprints.ts`). The registry tag `inputs-<key>` in your
+account's container registry records an image built from those inputs.
+
+- **Inputs unchanged:** the deploy uses that image's digest. Nothing is built or
+  pushed, and when it is the running image Wrangler reports no change and starts
+  no rollout, so the rollout gate returns at once.
+- **Inputs changed** (including an upstream security update or dependency
+  release): the image is built and pushed under the new key, and the rollout
+  gate waits for the rollout as usual.
+- **Latest rollout failed or cancelled** (or its state cannot be read): the image
+  is rebuilt to a fresh digest even when its inputs are unchanged, so the deploy
+  starts a new rollout instead of re-pointing at the one that failed.
+- **Any doubt** (a Dockerfile command, fetched URL or npm install script outside
+  the reviewed lists in `container-image-reviewed-inputs.ts`, a failed
+  fingerprint, a registry error): the Dockerfile is left in place and Wrangler
+  builds the image as it would without this step. A failed image build fails the
+  deployment.
+
+Anyone who can push to a repository in your account's container registry can
+replace the image a tag points at, so registry write access is deploy access. That
+was already true of the deploy token, which can publish Workers too; keep
+production in a Cloudflare account, or behind a token, that staging cannot use.
+
+The step's job summary lists each image's outcome and reason. A clean install
+has no recorded images, so its first deploy builds them. To always build with
+Wrangler, set the GitHub Environment variable `CONTAINER_IMAGE_REUSE_ENABLED` to
+exactly `false`. Optional `CONTAINER_IMAGE_FINGERPRINT_TIMEOUT_MS` (default
+`180000`) bounds each fingerprint request and all of an image's lookups together, and `CONTAINER_REGISTRY_CREDENTIAL_MINUTES`
+(default `30`) sets the lifetime of each short-lived registry credential.
+
 ## First Login & Admin Access
 
-On ordinary deployments without an installer owner binding, the first genuine human to sign in becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.
-
-Installer deployments set the API Worker secret `BOOTSTRAP_OWNER_EMAIL` before enabling login. Until that owner is established, other identities are refused; only a matching verified email (from an OAuth provider, or proven by an emailed sign-in code) can establish initial administration. The owner is elected with an atomic database update, including concurrent callbacks from different providers. `SETUP_TOKEN` authorizes first-run setup; it does not itself grant a SAM user session. Finish `/setup`, then sign in with the approved owner email.
+On ordinary deployments without an installer owner binding, the first genuine human to sign in becomes the **superadmin**: the account that can approve other users, manage platform credentials, and reach the admin dashboard. The promotion happens once, when that person's first session is created (`establishFirstSuperadmin`, `apps/api/src/services/first-superadmin.ts`), and only while they are the **only** real account on the instance.
 
 Email sign-in codes (`services/email-sign-in.ts`) create an account only for the installer owner email, before that owner exists. Otherwise only addresses that already belong to an account receive a code. Deployments without an owner email never create accounts by email, because the first person to ask for a code would become the administrator. The response is the same for every address, and the code is sent after the response, so its timing reveals nothing either. The password-reset, verification and email-change code routes are closed. Codes expire after 5 minutes and allow 3 attempts. Each address gets at most 5 codes an hour, each IP address at most 20 requests, and each address at most 10 code guesses an hour from all IP addresses combined (the `agentEmail.signInCodesPerEmailPerHour`, `agentEmail.signInCodesPerIpPerHour` and `agentEmail.signInCodeAttemptsPerEmailPerHour` settings). GitHub is not required before the instance exists. Preserve the owner binding across routine updates.
 
-Fresh deployments are seeded with an internal system user (`system_anonymous_trials`, `status='system'`, created by a database migration). Its id dates from SAM's retired anonymous-trial product; it now records SAM itself as the author of platform settings saved during unattended setup, and it owns the placeholder GitHub installation row that Artifacts- and GitLab-backed projects point at. Never delete either row. This system user is **not** a real user, cannot sign in, and never counts toward "is this the first human" checks. Without the installer owner binding, two mechanisms handle first-user promotion regardless of the system user:
+Fresh deployments are seeded with an internal system user (`system_anonymous_trials`, `status='system'`, created by a database migration). Its id dates from SAM's retired anonymous-trial product; it now records SAM itself as the author of platform settings saved during unattended setup, and it owns the placeholder GitHub installation row that Artifacts- and GitLab-backed projects point at. Never delete either row. This system user is **not** a real user, cannot sign in, and never counts toward "is this the first human" checks.
 
-- **Deploy-time backfill** (migration): when a deployment has exactly one non-system human and no superadmin yet, that human is promoted to `superadmin`/`active` when migrations run. This also covers accounts created via token-login or device-flow.
-- **Login-time self-heal** (all sign-in paths): on every session creation — GitHub OAuth, token-login, and device-flow — if the signing-in user is the only non-system human and no superadmin exists, they are promoted in a single atomic, idempotent write. A failure here never blocks login.
+Without the installer owner binding, the first-superadmin election works like this:
 
-Both mechanisms apply the same promotion conditions and are strictly no-ops in any other state — they never promote a second user, never touch an existing superadmin, and never auto-promote a `suspended` or `system` account. They differ only in how they exclude the system user: the login-time hook excludes it by both `status='system'` and id, while the deploy-time migration excludes it by `status='system'` alone. On managed/multi-user deployments nothing changes.
+- **One atomic write.** The promotion is a single guarded database update, so two sign-ups can never both become superadmin. It promotes the signing-in user only if they are not `suspended`, no other real account exists, and the election has not already happened. It then records the winner in the `platform_settings` row `setup.firstSuperadminEstablished`.
+- **A later sign-up never wins.** If any other real account already exists, whether active, pending or suspended, nobody is promoted. If two people sign up at the same moment on a fresh instance and both accounts exist before either election runs, neither becomes superadmin. Use the recovery steps below.
+- **The election happens once.** After the marker row exists, no sign-in is ever auto-promoted, even if every superadmin is later deleted. Instances that already had a superadmin got the marker from the `first_superadmin_election` database migration. That migration only writes the marker and never changes a user.
+- **Login always succeeds.** If the database fails during the election, the sign-in still completes without promotion and the error is logged as `auth.first_superadmin_election.failed`. The next sign-in tries again.
+- **Login-time self-heal** (`session.create.after`, `apps/api/src/auth.ts`) applies the same conditions and is a second attempt in the same sign-in. It is a no-op once the marker exists.
+
+#### More than one superadmin
+
+The admin API never grants the superadmin role, so an instance has at most one unless it was hit by the concurrent first-sign-up race that existed before this election, or someone edited the database by hand. SAM does not demote anyone automatically. On an instance without `BOOTSTRAP_OWNER_EMAIL`, each sign-in logs the warning `first-superadmin.multiple_superadmins` with the count, visible in the API Worker's logs (Cloudflare dashboard → Workers → your API worker → Logs, or `wrangler tail`). To review the accounts, run this against your D1 database:
+
+```sql
+SELECT id, email, status, created_at FROM users
+WHERE role = 'superadmin' AND status != 'system' ORDER BY created_at;
+```
+
+Demote any account you do not recognise with `UPDATE users SET role = 'user' WHERE id = '<id>';`. The admin UI can't do this, because it refuses to modify superadmin accounts.
+
+#### Recovering when no account can administer the instance
+
+This applies when the only superadmin was deleted, or when no superadmin was ever elected (for example, after the simultaneous-sign-up case above). Pick one:
+
+1. **Bind an owner email (recommended).** Add the API Worker secret `BOOTSTRAP_OWNER_EMAIL` with the email address of the person who should administer the instance: `wrangler secret put BOOTSTRAP_OWNER_EMAIL --name <your-api-worker-name>` (the worker is named `<resource-prefix>-api-<stack>`), or in the Cloudflare dashboard under the API worker's **Settings → Variables and Secrets**. Deploys leave a secret they don't set in place (`scripts/deploy/configure-secrets.sh` skips an empty value). That person then signs in with that address as a **verified** email. While no superadmin exists, the owner path (`bootstrapSessionAllowed`, `apps/api/src/services/bootstrap-owner.ts`) promotes them. It does not depend on the first-superadmin marker. Until the owner has signed in, every other sign-in is refused. After that, normal sign-in resumes and the secret can stay or be removed. This option does not work on an installer-bound instance whose owner was already established (the `setup.bootstrapOwnerEstablished` row exists): the owner path runs only until that row is written, so use option 2 there.
+2. **Edit D1 directly.** Promote a specific account: `UPDATE users SET role = 'superadmin', status = 'active' WHERE id = '<id>';` (`wrangler d1 execute <database> --remote --command "..."`). Role checks read the database on every request, so a page refresh is enough.
+
+Deleting the `setup.firstSuperadminEstablished` row does not choose an account. It only lets the election run again, and the election still promotes nobody unless exactly one real account exists.
 
 Notes:
 
 - **Promotion is independent of `REQUIRE_APPROVAL`.** Installer-bound deployments still require the configured verified owner identity.
-- **Installer first-login race:** the owner-bound election promotes at most one matching verified user, including simultaneous provider callbacks.
+- **First-login races:** both the owner-bound election and the ordinary election promote at most one user, including simultaneous provider callbacks.
 - **Session freshness:** SAM disables BetterAuth’s session-cookie cache when reading authorization state, so role and suspension checks use current database data. Refresh the page after a promotion; if access is still missing, recheck the promotion conditions rather than waiting for a cookie-cache timeout.
 
 ### Signup approval
 
-When signup approval is on (`REQUIRE_APPROVAL`, or the runtime switch in **Admin → Users**), new accounts are created **pending** (except the very first, which becomes superadmin) and stay pending until a superadmin approves them there. Accounts created while approval was off stay active. A pending account can sign in, see that it is waiting for approval, sign out, and link its own GitHub App installation. SAM's features answer `403 APPROVAL_REQUIRED` until the account is approved, including the SAM and project agent chats, API token management, every project route, and browser-session workspace access. This also applies to pending accounts that already own resources when approval is turned on. Admins and superadmins are never held for approval, and suspended accounts are refused on authenticated account surfaces. Publicly published workspace ports and valid port-access links use their own anonymous or capability access model.
+When signup approval is on (`REQUIRE_APPROVAL`, or the runtime switch in **Admin → Users**), new accounts are created **pending** (the very first is promoted to an active superadmin when its first session starts) and stay pending until a superadmin approves them there. Accounts created while approval was off stay active. A pending account can sign in, see that it is waiting for approval, sign out, and link its own GitHub App installation. SAM's features answer `403 APPROVAL_REQUIRED` until the account is approved, including the SAM and project agent chats, API token management, every project route, and browser-session workspace access. This also applies to pending accounts that already own resources when approval is turned on. Admins and superadmins are never held for approval, and suspended accounts are refused on authenticated account surfaces. Publicly published workspace ports and valid port-access links use their own anonymous or capability access model.
 
 ### Storage and archive circuit breakers
 

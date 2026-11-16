@@ -140,6 +140,7 @@ import {
 } from './routes/project-deployment';
 import { projectEventChannelRoutes } from './routes/project-event-channels';
 import { projectEventSubscriptionRoutes } from './routes/project-event-subscriptions';
+import { projectOverviewRoutes } from './routes/project-overview';
 import { projectsRoutes } from './routes/projects';
 import { acpInteractionCallbackRoute } from './routes/projects/acp-interaction-callback';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
@@ -416,6 +417,7 @@ app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before pr
 app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/ideas', ideaRoutes);
+app.route('/api/projects/:projectId/overview', projectOverviewRoutes);
 app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);

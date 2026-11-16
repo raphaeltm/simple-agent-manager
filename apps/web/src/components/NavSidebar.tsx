@@ -9,6 +9,7 @@ import {
   FolderOpen,
   Home,
   Inbox,
+  LayoutDashboard,
   Lightbulb,
   Map,
   MessageSquare,
@@ -64,6 +65,9 @@ export function getGlobalNavItems(samEnabled: boolean): NavItem[] {
 
 /** Project sub-nav items — paths are relative to /projects/:id/ */
 export const PROJECT_NAV_ITEMS: NavItem[] = [
+  // First: what is going on in the project. Not the landing page yet (Inbox slice F2 makes it
+  // the index route); until then the project still opens in Chat.
+  { label: 'Overview', path: 'overview', icon: <LayoutDashboard size={18} /> },
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
   // The inbox replaced the project Notifications page (its FYI list is the Updates chip).
   { label: 'Inbox', path: 'inbox', icon: <Inbox size={18} />, inboxCount: true },

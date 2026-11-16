@@ -30,3 +30,7 @@ whole is unbounded. Review findings (cloudflare-specialist, round 2):
 - [ ] The DNS create in the durable publish tail gets a fresh per-request timeout instead of the
       elapsed attempt signal, with a test using realistic create latency (more than 5 s).
 - [ ] An overlapping-alarm test: an alarm fires while an uncancelled create is in flight.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2749 (2026-11-15) made the attempt deadline a 60 s admin setting (`node-lifecycle-provisioning-attempt.ts`). Still open, as #2749's body states: a ceiling for a started create, an `inFlight` max-age, and the overlap test.
