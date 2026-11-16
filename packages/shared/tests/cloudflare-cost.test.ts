@@ -13,7 +13,6 @@ import {
   cloudflareCostHttpError,
   cloudflareCostQueryBody,
   CloudflareCostQueryError,
-  type CloudflareCostRows,
   cloudflareDaysInMonth,
   createCloudflarePricing,
   dailyCloudflareMetricCosts,
@@ -23,18 +22,6 @@ import {
   validateDurationIdentity,
 } from '../src/cloudflare-cost';
 
-const EMPTY: CloudflareCostRows = {
-  durableObjectPeriodic: [],
-  durableObjectInvocations: [],
-  workersInvocations: [],
-  kvOperations: [],
-  kvStorage: [],
-  workersAi: [],
-  r2Storage: [],
-  d1Analytics: [],
-  d1Storage: [],
-  containers: [],
-};
 const pricing = createCloudflarePricing();
 
 describe('pricing', () => {
