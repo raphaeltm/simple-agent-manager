@@ -11,7 +11,6 @@
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
-  CHAT_MESSAGE_APPEND_CAPABILITY,
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
   type IdeaUpdateNote,
@@ -73,11 +72,7 @@ import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messageContext from './message-context';
 import * as messagePersistence from './message-persistence';
-import {
-  DEFAULT_MESSAGE_MERGE_CONFIG,
-  type MessageIngestSource,
-  sealMessageStream,
-} from './message-stream-ingest';
+import { DEFAULT_MESSAGE_MERGE_CONFIG, type MessageIngestSource } from './message-stream-ingest';
 import * as messages from './messages';
 import { runMigrations } from './migrations';
 import * as missionState from './missions';
@@ -126,6 +121,11 @@ import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionReads from './session-reads';
 import { guardedSessionSleep, type SessionSleepRuntimeGuard } from './session-sleep-runtime-guard';
+import {
+  admitBrowserSocket,
+  broadcastToBrowserSockets,
+  hasLegacySessionSocket,
+} from './session-sockets';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
@@ -907,14 +907,9 @@ export class ProjectData extends DurableObject<Env> {
         ? ((await projectDataPorts().operations.messageMergeConfig?.(this.env)) ??
           DEFAULT_MESSAGE_MERGE_CONFIG)
         : DEFAULT_MESSAGE_MERGE_CONFIG;
-      const legacyClient = this.ctx.getWebSockets().some((ws) => {
-        const tags = this.ctx.getTags(ws);
-        const sessionTag = tags.find((tag) => tag.startsWith('session:'));
-        return (
-          (!sessionTag || sessionTag === `session:${sessionId}`) &&
-          !tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY)
-        );
-      });
+      // Only a socket watching this session can miss an append; project sockets never get
+      // transcript frames (session-sockets.ts).
+      const legacyClient = hasLegacySessionSocket(this.ctx, sessionId);
       return messagePersistence.persistMessageBatchWithSideEffects(
         this.sql,
         this.env,
@@ -3549,19 +3544,7 @@ export class ProjectData extends DurableObject<Env> {
       const upgradeHeader = request.headers.get('Upgrade');
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
         return new Response('Expected WebSocket upgrade', { status: 426 });
-      const pair = new WebSocketPair();
-      const sessionId = url.searchParams.get('sessionId');
-      const tags: string[] = [];
-      if (sessionId) {
-        if (!/^[0-9a-f-]{36}$/i.test(sessionId))
-          return new Response('Invalid sessionId format', { status: 400 });
-        tags.push(`session:${sessionId}`);
-      }
-      if (url.searchParams.get('messageAppend') === CHAT_MESSAGE_APPEND_CAPABILITY)
-        tags.push(CHAT_MESSAGE_APPEND_CAPABILITY);
-      else sealMessageStream(this.sql, sessionId ?? undefined);
-      this.ctx.acceptWebSocket(pair[1], tags);
-      return new Response(null, { status: 101, webSocket: pair[0] });
+      return admitBrowserSocket(this.ctx, this.sql, url);
     }
     return new Response('Not found', { status: 404 });
   }
@@ -4032,37 +4015,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private broadcastEvent(type: string, payload: Record<string, unknown>, sessionId?: string): void {
-    const message = JSON.stringify({ type, payload });
-    if (sessionId) {
-      const sessionSockets = this.ctx.getWebSockets(`session:${sessionId}`);
-      const allSockets = this.ctx.getWebSockets();
-      const sent = new Set<WebSocket>();
-      for (const ws of sessionSockets) {
-        try {
-          ws.send(message);
-          sent.add(ws);
-        } catch {
-          /* closed */
-        }
-      }
-      for (const ws of allSockets) {
-        if (sent.has(ws)) continue;
-        if (this.ctx.getTags(ws).some((t) => t.startsWith('session:'))) continue;
-        try {
-          ws.send(message);
-        } catch {
-          /* closed */
-        }
-      }
-    } else {
-      for (const ws of this.ctx.getWebSockets()) {
-        try {
-          ws.send(message);
-        } catch {
-          /* closed */
-        }
-      }
-    }
+    broadcastToBrowserSockets(this.ctx, type, payload, sessionId);
   }
 
   private broadcastCommentThread(
