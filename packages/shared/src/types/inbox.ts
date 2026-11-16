@@ -215,3 +215,66 @@ export function formatInboxRef(ref: ParsedInboxRef): string {
     ? `attention:${ref.sessionId}:${ref.markerId}`
     : `${ref.store}:${ref.id}`;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Agent inbox tools (slice D): `inbox_write` (ask, review, update, cancel) and `inbox_read`
+// (list, get), thin MCP adapters over `packages/operations/src/inbox-agent-*.ts`.
+// ---------------------------------------------------------------------------------------------
+
+/** The MCP tool an agent files and edits items with; the chat card is matched on this name. */
+export const INBOX_WRITE_TOOL = 'inbox_write';
+
+/**
+ * What an agent may link an item to. Each is checked as this project's when filed and stored as
+ * a reference only; the reader resolves it with their own access. `pr` and `preview` are URLs,
+ * kept in the link's `id` (`linkTarget` in `apps/web/src/components/inbox/inbox-model.ts`).
+ */
+export const INBOX_AGENT_LINK_KINDS = [
+  'idea',
+  'file',
+  'policy',
+  'knowledge',
+  'pr',
+  'preview',
+  'chat',
+] as const;
+export type InboxAgentLinkKind = (typeof INBOX_AGENT_LINK_KINDS)[number];
+export const INBOX_AGENT_URL_LINK_KINDS: readonly InboxAgentLinkKind[] = ['pr', 'preview'];
+
+/** Free text, or Yes / No. Options are passed as `options` instead. */
+export const INBOX_ASK_ANSWER_SHAPES = ['text', 'confirm'] as const;
+export type InboxAskAnswerShape = (typeof INBOX_ASK_ANSWER_SHAPES)[number];
+export const INBOX_CONFIRM_OPTIONS = ['Yes', 'No'] as const;
+
+/** One open item that looks like the one being filed: same group, or a close title. */
+export interface InboxSimilarItem {
+  ref: string;
+  kind: string;
+  title: string;
+  /** Filed from the calling chat. */
+  fromThisChat: boolean;
+  /** Why it matched. */
+  match: 'group' | 'title';
+}
+
+/** An `asks` row as the filing agent reads it (`inbox_read`). Agent-written text is untrusted. */
+export interface InboxAgentItem {
+  ref: string;
+  kind: string;
+  blocking: boolean;
+  status: AskStatus;
+  title: string;
+  why: string | null;
+  links: InboxLink[];
+  groupKey: string | null;
+  sessionId: string | null;
+  fromThisChat: boolean;
+  createdAt: string;
+  expiresAt: string | null;
+  resolvedAt: string | null;
+  /** The person's typed answer or reply, when there is one. */
+  answer: string | null;
+  /** Why the filing agent cancelled it. */
+  cancelReason: string | null;
+  untrustedContent: true;
+}

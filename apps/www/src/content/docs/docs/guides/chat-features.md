@@ -188,11 +188,12 @@ own. **Decline** tells the agent you're skipping the question. A question waits 
 Questions appear only in sessions labelled **Chat** in the session list — see
 [Chat or Task](#chat-or-task).
 
-An agent can also ask with its `request_human_input` tool, which works in a **Task** too and, unlike
-the cards above, sends you a notification. That question appears as a card in the conversation as
-well, marked **Needs your answer** until someone answers it, then **Answered** with the choice
-that was made. Answer it on the card or in your [Inbox](/docs/guides/inbox/): it is the same
-answer wherever you give it.
+An agent can also file an item in your [Inbox](/docs/guides/inbox/#what-agents-file) with its
+`inbox_write` tool (or ask with `request_human_input`, which files a blocking question). This works
+in a **Task** too and, unlike the cards above, sends you a notification. The item appears as a card
+in the conversation as well: a question marked **Needs your answer**, or a review marked **Waiting
+for your review**, until someone answers it. Answer it on the card or in your Inbox: it is the same
+record wherever you answer it.
 
 ### Links to open
 

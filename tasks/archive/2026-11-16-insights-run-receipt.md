@@ -57,7 +57,10 @@ markers, and a "What slowed it down" list.
 - Settings go in the admin settings registry (`INBOX_SETTINGS` pattern), not Worker vars
   (rule 07 runtime tunables).
 - Slice T (phase timings) runs in parallel; R ships with workspace timestamps unless T merges
-  first.
+  first. T merged first (#2787). R kept its own comparison: T's provision rows carry no project,
+  so they cannot give a usual machine wait; T has no history before its deploy; and its rows are
+  sub-phases, which do not sum to a setup median. Posted on `feature.insights`. Follow-up: switch
+  the setup comparison to T's per-phase stats once 30 days of rows exist.
 
 ## I/O budget (rule 60: receipt ≤ 8)
 
@@ -89,7 +92,7 @@ Max 7.
 - [x] Web unit tests (rail action gating, drawer render states)
 - [x] Playwright visual audit 375 + 1280 with normal/long/empty/error/many data
 - [x] Docs: user-facing page in `apps/www/src/content/docs/docs/` for the Receipt
-- [ ] Staging verification on a real task-backed chat
+- [x] Staging verification on a real task-backed chat (PR #2786 comment 6916002524)
 
 ## Review-driven changes (Phase 5)
 
@@ -108,16 +111,16 @@ Max 7.
 
 ## Acceptance criteria
 
-- [ ] `GET .../tasks/:taskId/receipt` returns phases, outcome, account, resources, tool calls,
+- [x] `GET .../tasks/:taskId/receipt` returns phases, outcome, account, resources, tool calls,
       slowed-down, tokens `not_reported` for a real task
-- [ ] Foreign-project task and missing task return the same 404
-- [ ] A malformed row (status event / asks / resource summary / agent session JSON) degrades
+- [x] Foreign-project task and missing task return the same 404
+- [x] A malformed row (status event / asks / resource summary / agent session JSON) degrades
       that field, not the receipt
-- [ ] ≤ 8 round trips, asserted in a test
-- [ ] Receipt tab appears only for task-backed chats; opens as a side panel on desktop and a
+- [x] ≤ 8 round trips, asserted in a test
+- [x] Receipt tab appears only for task-backed chats; opens as a side panel on desktop and a
       full sheet on phone; stale-while-revalidate
-- [ ] Playwright audit at 375 and 1280 passes overflow checks
-- [ ] Staging: receipt opens on a real task-backed chat and shows real values with zero errors
+- [x] Playwright audit at 375 and 1280 passes overflow checks
+- [x] Staging: receipt opens on a real task-backed chat and shows real values with zero errors
 
 ## References
 

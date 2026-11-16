@@ -73,7 +73,7 @@ const RUNNING_SQL = `
   WITH open_questions AS (
     SELECT DISTINCT source_session_id AS session_id
       FROM asks
-     WHERE project_id = ? AND kind = 'question' AND status = 'open'
+     WHERE project_id = ? AND kind = 'question' AND status = 'open' AND blocking = 1
        AND source_session_id IS NOT NULL
        AND (expires_at IS NULL OR expires_at > ?)
   )

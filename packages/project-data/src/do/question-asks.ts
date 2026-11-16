@@ -15,7 +15,8 @@ const log = createModuleLogger('project_data.question_asks');
 type Broadcast = (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
 
 /**
- * Close the chat's open questions because the person wrote to the agent in the chat. The message
+ * Close the chat's open blocking questions because the person wrote to the agent in the chat (a
+ * non-blocking ask stays in the inbox until answered there; inbox slice D). The message
  * itself reached the agent, so no notice is queued (`notified_at` is set). Bound to the project
  * and the chat (rule 11). A failure is logged, never thrown: the message is already persisted,
  * and the question still expires on its schedule, where `ProjectData.expireQuestionAsk` sees
@@ -39,7 +40,7 @@ export async function closeQuestionAsksForHumanMessage(
       `UPDATE asks
           SET status = 'answered', answer_json = ?, resolved_at = ?, updated_at = ?, notified_at = ?
         WHERE project_id = ? AND source_session_id = ? AND kind = 'question' AND status = 'open'
-          AND created_at <= ?
+          AND blocking = 1 AND created_at <= ?
         RETURNING id`
     )
       .bind(

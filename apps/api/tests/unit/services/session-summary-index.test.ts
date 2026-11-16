@@ -541,20 +541,27 @@ describe('listSessionsFromIndex', () => {
     function addQuestion(
       id: string,
       sessionId: string,
-      opts: { projectId?: string; status?: string; createdAt?: number; expiresAt?: number } = {}
+      opts: {
+        projectId?: string;
+        status?: string;
+        createdAt?: number;
+        expiresAt?: number;
+        blocking?: 0 | 1;
+      } = {}
     ): void {
       sqlite
         .prepare(
           `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
               body_md, answer_spec_json, category, source_session_id, status, expires_at,
               created_at, updated_at)
-           VALUES (?, ?, 'user', ?, 'question', 1, 'Pick one', 'Pick one of these, please.',
+           VALUES (?, ?, 'user', ?, 'question', ?, 'Pick one', 'Pick one of these, please.',
               '{"type":"options","options":["a","b"],"allowText":false}', 'decision', ?, ?, ?, ?, ?)`
         )
         .run(
           id,
           opts.projectId ?? PROJECT,
           OWNER,
+          opts.blocking ?? 1,
           sessionId,
           opts.status ?? 'open',
           opts.expiresAt ?? now + 60_000,
@@ -571,6 +578,8 @@ describe('listSessionsFromIndex', () => {
       // Attack fixtures: the same chat id in another project, and a closed question.
       addQuestion('ask-foreign', 'chat-plain', { projectId: OTHER_PROJECT });
       addQuestion('ask-closed', 'chat-plain', { status: 'answered' });
+      // A non-blocking ask (inbox slice D) does not pause the chat.
+      addQuestion('ask-nonblocking', 'chat-plain', { blocking: 0 });
       const out = await listSessionsFromIndex(env, {
         projectId: PROJECT,
         status: null,

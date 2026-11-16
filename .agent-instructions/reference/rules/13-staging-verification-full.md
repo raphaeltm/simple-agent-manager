@@ -38,9 +38,10 @@ account's workers.dev subdomain and the Hetzner account.
 | `staging`    | `https://app.sammy.party`  | `https://api.sammy.party`  | `sam` / `staging`   |
 | `staging2`   | `https://app.sammy2.party` | `https://api.sammy2.party` | `sam2` / `staging2` |
 
-**Choosing one.** Read the lease of both (`task=staging-lease`, environments `staging` and
-`staging2`) and take whichever is free. Each installation has its own lease, its own deploy
-concurrency group and its own data, so two agents can verify at the same time. Deploy with
+**Choosing one.** Read the queue of both (`node scripts/deploy/staging-lease.mjs status staging`
+and `... status staging2`) and reserve the one that is free or has the shorter queue. Each
+installation has its own lease and queue, its own concurrency groups and its own data, so two
+agents can verify at the same time. Deploy with
 `gh workflow run deploy-staging.yml --ref <branch> -f environment=staging2 -f sam_task_id=<id>`
 (omit `environment` for `staging`). Storage activation and the agent-email DNS audit are
 primary-only, and so is the signed GitHub-trigger audit (staging2 has no GitHub App). The
@@ -76,6 +77,18 @@ name (`sam2-staging2`): `GET /accounts/$CF_ACCOUNT_ID/d1/database?name=sam2-stag
 the `staging2` Pulumi stack and the `sammy2.party` zone's workspace and node records. Delete test workspaces and
 nodes first; teardown does not delete VMs. The next deploy rebuilds staging2 from nothing.
 
+**Branches that add a Durable Object migration.** Durable Object migrations only move forward.
+Once a branch deploys a tag that `origin/main` lacks (a new `[[migrations]]` entry in
+`apps/api/wrangler.toml`), every main-based branch fails the migration preflight on that
+installation until the branch merges. So `deploy-staging.yml` refuses such deploys on primary
+`staging` before reserving a place (`scripts/deploy/staging-migration-guard.mjs`, which fails closed
+when it cannot compare the two files; it runs from your branch's workflow copy, so branches must
+include it, and the deploy-time migration preflight stays the backstop). Use `staging2`. Clean-up duty: if your branch has not merged
+when you are done on `staging2`, tear it down (Actions → Teardown → `staging2` → `DELETE`, after
+deleting test workspaces and nodes) and redeploy `main` to it (`gh workflow run deploy-staging.yml
+--ref main -f environment=staging2 -f sam_task_id=<id>`) before you release. staging2 rebuilds
+from nothing, so main-based branches can use it again. Nothing does this automatically.
+
 Adding a third: one entry in `scripts/deploy/staging-installations.mjs` plus a zone in the
 staging Cloudflare account that the staging deploy token can edit.
 
@@ -95,73 +108,99 @@ GitHub may label some checks as informational, advisory, or not strictly require
 
 Staging deployment is **manual** — it does NOT run automatically on PRs. You must trigger it yourself:
 
-1. **Read the environment lease** (the workflow enforces the same check atomically):
+1. **Read the queue of both installations** (one `gh api` call each):
 
    ```bash
-   gh api --method GET repos/raphaeltm/simple-agent-manager/deployments \
-     -f environment=staging -f task=staging-lease -f per_page=1 \
-     --jq '.[0] | {id, payload}'
+   node scripts/deploy/staging-lease.mjs status staging2   # and: status staging
+   # Raw records, newest first (a `snapshot` plus newer `reservation` events):
+   gh api 'repos/raphaeltm/simple-agent-manager/deployments?environment=staging2&task=staging-lease&per_page=100' \
+     --jq '[.[] | {id, payload}]'
    ```
 
-   Use your selected environment name in every command. The latest `staging-lease`
-   deployment payload is authoritative; ordinary deployment statuses and a quiet
-   Actions queue do not release the slot. A held foreign branch with a future
-   `expiresAt` owns live verification even after its deploy finishes. Schedule a
-   one-time SAM wake at that exact UTC expiry (`schedules_write`, method `create`,
-   `message_session` action for your session), persist the accepted schedule ID,
-   and continue independent work or end the turn. On wake re-read once and retry
-   if free; if renewed, schedule a new wake. Do not poll, wait five minutes, or
-   negotiate the slot in chat.
+   `status` prints the holder, whether the slot is free, and the ordered queue
+   (branch, SAM task ID, reserved-at, turn window). There are two staging
+   installations, `staging` (`sammy.party`) and `staging2` (`sammy2.party`); pick the
+   one that is free or has the shorter queue and use that name in every command
+   below. They share the `staging` credentials but nothing else. staging2 sign-in is
+   workload identity only; see "Two Staging Installations" in the full reference.
 
-   No record means free (first-use bootstrap). A malformed latest record or API
-   error fails closed: ownership cannot be established safely. Inspect/fix the
-   record through the normal reviewed workflow; never delete history to bypass
-   another branch's lease.
-
-2. **Acquire by deploying your branch**, with your SAM task ID:
+2. **Reserve first, then deploy only on your turn.** Reserving takes seconds and
+   deploys nothing:
 
    ```bash
    gh workflow run deploy-staging.yml --ref <your-branch> \
-     -f environment=staging -f sam_task_id=<your-task-id> -f lease_hold_minutes=30
+     -f environment=staging2 -f lease_action=reserve -f sam_task_id=<your-task-id>
    ```
 
-   The serialized lease job reads, acquires and reads back the lease before any
-   deploy/audit job. A foreign active lease fails immediately with holder branch,
-   task and expiry. Same-branch redeploys renew it. Expiry is acquisition time plus
-   expected deployment time plus live-check hold. GitHub Environment variables
-   `STAGING_LEASE_EXPECTED_DEPLOY_MINUTES` (default 30),
-   `STAGING_LEASE_DEFAULT_HOLD_MINUTES` (default 30), and
-   `STAGING_LEASE_MAX_HOLD_MINUTES` (default 120) configure durations; positive
-   integer holds above the cap are rejected. Expected deploy time may be zero.
-   Choose a hold covering your checks; renew before expiry if needed. Failed or
-   cancelled runs retain the lease until release/expiry, so failures cannot expose
-   checks to an overwrite.
+   The run summary shows your position and estimated turn. When the slot is free
+   (holder released, or its lease expired), only the head of the queue may take it,
+   for `STAGING_LEASE_GRACE_MINUTES` (default 10); if it does not, the next entry
+   gets its own grace period and the missed one is dropped. If the holder released
+   early, the head's turn still lasts until the holder's announced expiry plus grace.
+   Schedule a one-time SAM wake (`schedules_write`, method `create`,
+   `message_session` for your session) at your turn start, persist the schedule ID,
+   and end the turn or do independent work. Do not poll, and **never dispatch a
+   deploy while another branch holds the lease or it is another branch's turn**: the
+   run is refused (your place is kept). A reservation expires after
+   `STAGING_LEASE_RESERVATION_MINUTES` (default 480) unless renewed by reserving
+   again, which keeps your place. While the holder is a branch whose workflow predates
+   the queue (its lease record is version 1), no reservation is written, because its
+   workflow cannot read queue records and would be locked out of its own lease:
+   schedule a wake at its expiry and reserve then.
 
-   To reserve or renew without deploying, use `-f lease_action=acquire`. This
-   holds for just the requested live-check duration (no deploy allowance), and
-   also permits bounded lease lifecycle verification without full redeploys.
-   Audit-only runs acquire/renew through the same gate. Storage activation and
-   the agent-email DNS audit currently support only the primary `staging` slot;
-   unsupported combinations are rejected before lease acquisition. Lease writes must go
-   through this workflow; direct `gh api` writes bypass serialization.
+   On your turn, deploy (or `-f lease_action=acquire` to hold without deploying):
 
-3. **Watch the run and verify live**, then **release early** from the holder branch:
+   ```bash
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging2 -f sam_task_id=<your-task-id> -f lease_hold_minutes=30
+   ```
+
+   A deploy dispatch also reserves if you are not queued yet, and goes straight
+   through when the slot is free and nobody is waiting. The `queue` job records
+   places outside any concurrency group, so no later dispatch can cancel your place;
+   only a branch that holds the lease or whose turn it is reaches the serialized
+   `lease` job. Same-branch redeploys renew the lease. Expiry is acquisition time
+   plus expected deployment time (`STAGING_LEASE_EXPECTED_DEPLOY_MINUTES`, default
+   30; zero for `acquire`) plus the live-check hold
+   (`STAGING_LEASE_DEFAULT_HOLD_MINUTES`, default 30, capped by
+   `STAGING_LEASE_MAX_HOLD_MINUTES`, default 120). Failed or cancelled runs keep the
+   lease until release or expiry.
+
+3. **Watch the run.** Keep the lease through every live check (section 2 below, and the
+   infrastructure checks where they apply); then **release** and hand over:
 
    ```bash
    gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=3 \
      --json databaseId,status,conclusion,headSha
    gh run watch <run-id>
-   # After live checks and test-resource cleanup:
-   gh workflow run deploy-staging.yml --ref <your-branch> \
-     -f environment=staging -f lease_action=release -f sam_task_id=<your-task-id>
    ```
 
-   Confirm the release job passed and the newest payload has `state: released`.
-   Release shares the same environment concurrency group and refuses a foreign
-   holder. Expiry permits another branch to acquire automatically. Do not mistake
-   successful deployment completion for a release. Only the lease job receives
-   `deployments: write`; agents can inspect records with their existing `gh api`
-   read access. Leases are keyed by environment name for future staging slots.
+   After every live check and test-resource cleanup:
+
+   ```bash
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging2 -f lease_action=release -f sam_task_id=<your-task-id>
+   ```
+
+   Confirm the release run passed and `status` shows no holder. Release also
+   removes you from the queue if you were waiting. A branch that releases and wants
+   the slot again queues behind everyone already waiting. **If you release early,
+   message the next task in the queue** (`send_durable_message` to its SAM task ID
+   from `status`) so it can take its turn before its scheduled wake. Successful
+   deployment completion is not a release. Release only after your own deploy run
+   has finished: the next holder's deploy waits for an in-flight one in the
+   `staging-apply-<installation>` group, but your live checks are no longer
+   protected once you release.
+
+   Records are GitHub deployments with task `staging-lease`, keyed by installation.
+   A malformed snapshot or an unknown record version fails closed (no one can
+   change the lease until it is fixed through a reviewed change; never delete
+   history to get around another branch); a malformed reservation is skipped and
+   reported in the run. Branches whose workflow copy predates the queue are refused
+   by every queue record ("Malformed lease record"): they cannot reserve, deploy,
+   acquire or release until they update from `origin/main`. Only the `queue` and
+   `lease` jobs receive `deployments: write`; lease writes must go through the
+   workflow.
 
 For container-backed Instant verification, `wrangler deploy` success means the
 rollout started, not that every instance serves the new image. The shared staging
