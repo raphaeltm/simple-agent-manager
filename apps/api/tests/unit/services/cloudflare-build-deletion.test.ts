@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-
 import {
   admitCloudflareBuild,
   assertNoReservedCloudflareBuilds,
@@ -14,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
-import { createSqliteD1 } from '../../helpers/sqlite-d1';
+import { applySqliteMigration, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 let sqlite: Database.Database;
 let db: ReturnType<typeof drizzle<typeof schema>>;
@@ -43,9 +41,7 @@ beforeEach(() => {
     '0242_cloudflare_build_executor.sql',
     '0244_cloudflare_build_reservation_deletion_guard.sql',
   ]) {
-    sqlite.exec(
-      readFileSync(new URL(`../../../src/db/migrations/${file}`, import.meta.url), 'utf8')
-    );
+    applySqliteMigration(sqlite, new URL(`../../../src/db/migrations/${file}`, import.meta.url));
   }
   sqlite
     .prepare(
