@@ -80,8 +80,60 @@ function overview(items: ProjectOverviewResponse['running']['items']): ProjectOv
       waitingOnViewerTotal: items.filter((item) => item.waitingOnViewer).length,
     },
     recent: { ideas: [], mergedPullRequests: [] },
+    brief: null,
     unavailable: [],
     generatedAt: '2026-11-16T00:00:00.000Z',
+  };
+}
+
+/** A brief naming an inbox item, a chat, an automation and a pull request (inbox slice I). */
+function briefOf(overrides: Partial<NonNullable<ProjectOverviewResponse['brief']>> = {}) {
+  return {
+    sentences: [
+      {
+        parts: [
+          { ref: { kind: 'ask' as const, id: 'ask-deploy', label: 'Pick a deploy target' } },
+          { text: ' is holding up ' },
+          {
+            ref: {
+              kind: 'chat' as const,
+              id: 'sess-existing',
+              label: 'Fix rounding in tax totals',
+            },
+          },
+          { text: '.' },
+        ],
+      },
+      {
+        parts: [
+          {
+            ref: {
+              kind: 'automation' as const,
+              id: 'trg-nightly',
+              label: 'Nightly <script>alert(1)</script> build',
+            },
+          },
+          { text: ' keeps failing.' },
+        ],
+      },
+      {
+        parts: [
+          {
+            ref: {
+              kind: 'pullRequest' as const,
+              id: '2771',
+              label: 'Round tax totals',
+              url: 'https://github.com/acme/billing/pull/2771',
+            },
+          },
+          { text: ' landed.' },
+        ],
+      },
+    ],
+    generatedAt: new Date(Date.now() - 25 * 60_000).toISOString(),
+    stale: false,
+    refreshing: false,
+    ...overrides,
   };
 }
 
@@ -834,6 +886,98 @@ describe('Project Overview', () => {
       profileItems = [];
       renderOverview();
       expect(await screen.findByText('Create a profile to start')).toBeInTheDocument();
+    });
+  });
+
+  describe('the generated brief (inbox slice I)', () => {
+    it('shows three sentences on desktop, above Needs you, each item a link SAM builds from its id', async () => {
+      overviewBody = { ...overview([EXISTING]), brief: briefOf() };
+      renderOverview();
+      const brief = await screen.findByRole('region', { name: 'Project brief' });
+      expect(within(brief).getByRole('link', { name: 'Pick a deploy target' })).toHaveAttribute(
+        'href',
+        `/projects/${PROJECT_ID}/inbox?item=ask%3Aask-deploy&from=overview`
+      );
+      expect(
+        within(brief).getByRole('link', { name: 'Fix rounding in tax totals' })
+      ).toHaveAttribute('href', `/projects/${PROJECT_ID}/chat/sess-existing`);
+      const automation = within(brief).getByRole('link', { name: /Nightly/ });
+      expect(automation).toHaveAttribute(
+        'href',
+        `/projects/${PROJECT_ID}/automation/trigger/trg-nightly`
+      );
+      // Agent-written text is rendered as text, never markup.
+      expect(automation.textContent).toBe('Nightly <script>alert(1)</script> build');
+      expect(brief.querySelector('script')).toBeNull();
+      const pr = within(brief).getByRole('link', { name: 'Round tax totals' });
+      expect(pr).toHaveAttribute('href', 'https://github.com/acme/billing/pull/2771');
+      expect(pr).toHaveAttribute('rel', 'noopener noreferrer');
+      expect(within(brief).queryByTestId('overview-brief-toggle')).toBeNull();
+      expect(within(brief).queryByTestId('overview-brief-age')).toBeNull();
+      // Desktop DOM order: the brief comes before Needs you.
+      const main = screen.getByTestId('overview-main');
+      const regions = within(main)
+        .getAllByRole('region')
+        .map((r) => r.getAttribute('aria-label'));
+      expect(regions.indexOf('Project brief')).toBeLessThan(regions.indexOf('Needs you'));
+    });
+
+    it('folds to one sentence on a phone and expands in place to two', async () => {
+      viewport.isMobile = true;
+      overviewBody = { ...overview([EXISTING]), brief: briefOf() };
+      renderOverview();
+      const brief = await screen.findByRole('region', { name: 'Project brief' });
+      expect(within(brief).getByRole('link', { name: 'Pick a deploy target' })).toBeInTheDocument();
+      expect(within(brief).queryByRole('link', { name: /Nightly/ })).toBeNull();
+      const toggle = within(brief).getByTestId('overview-brief-toggle');
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      expect(within(brief).getByRole('link', { name: /Nightly/ })).toBeInTheDocument();
+      expect(within(brief).queryByRole('link', { name: 'Round tax totals' })).toBeNull();
+    });
+
+    it('keeps a stale brief visible, dimmed with its age, and refetches to catch up', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        overviewBody = { ...overview([EXISTING]), brief: briefOf({ stale: true }) };
+        renderOverview();
+        const text = await screen.findByTestId('overview-brief-text');
+        expect(text).toHaveAttribute('data-stale', 'true');
+        expect(screen.getByTestId('overview-brief-age')).toHaveTextContent('Written 25 min ago');
+        const reads = () =>
+          recorded.filter((r) => r.path === `/api/projects/${PROJECT_ID}/overview`).length;
+        const before = reads();
+        overviewBody = { ...overview([EXISTING]), brief: briefOf() };
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(9_000);
+        });
+        await waitFor(() => expect(reads()).toBe(before + 1));
+        await waitFor(() =>
+          expect(screen.getByTestId('overview-brief-text')).toHaveAttribute('data-stale', 'false')
+        );
+        // Current again: no further catch-up reads.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(30_000);
+        });
+        expect(reads()).toBe(before + 1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('renders nothing when there is no brief or its read failed, and the page is just the tiles', async () => {
+      overviewBody = { ...overview([EXISTING]), brief: null };
+      renderOverview();
+      expect(await screen.findByRole('region', { name: 'Running now' })).toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Project brief' })).toBeNull();
+    });
+
+    it('ignores a stored brief when the read reports the brief section unavailable', async () => {
+      overviewBody = { ...overview([EXISTING]), brief: briefOf(), unavailable: ['brief'] };
+      renderOverview();
+      expect(await screen.findByRole('region', { name: 'Running now' })).toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'Project brief' })).toBeNull();
     });
   });
 });

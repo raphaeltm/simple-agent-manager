@@ -271,6 +271,7 @@ function overviewBody(scene: 'normal' | 'busy' | 'quiet'): ProjectOverviewRespon
       projectId: PROJECT_ID,
       running: { items: [], total: 0, waitingOnViewerTotal: 0 },
       recent: { ideas: [], mergedPullRequests: [] },
+      brief: null,
       unavailable: [],
       generatedAt: new Date().toISOString(),
     };
@@ -326,6 +327,7 @@ function overviewBody(scene: 'normal' | 'busy' | 'quiet'): ProjectOverviewRespon
         },
       ],
     },
+    brief: null,
     unavailable: [],
     generatedAt: new Date().toISOString(),
   };
@@ -370,6 +372,10 @@ interface SceneOptions {
   /** Which automations exist: the normal set, two failing ones, or none. */
   automations: 'normal' | 'failing' | 'none';
   submit?: 'ok' | 'fail' | 'reauth';
+  /** The generated brief the read returns (inbox slice I). Default: none. */
+  brief?: ProjectOverviewResponse['brief'];
+  /** The read reports the brief section as failed. */
+  briefUnavailable?: boolean;
 }
 
 async function setupScene(page: Page, options: SceneOptions) {
@@ -455,6 +461,8 @@ async function setupScene(page: Page, options: SceneOptions) {
       if (sub === '') return respond(200, MOCK_PROJECT);
       if (sub === '/overview') {
         const body = overviewBody(options.scene);
+        body.brief = options.brief ?? null;
+        if (options.briefUnavailable) body.unavailable = ['brief'];
         if (submitted && options.submit === 'ok') {
           // The chat index has caught up with the new task.
           body.running.items = [
@@ -983,5 +991,190 @@ test.describe('Project Overview as the landing page, with Needs you (slice F2)',
     await page.getByRole('button', { name: 'Back to Overview' }).first().click();
     await expect(page).toHaveURL(new RegExp(`${BASE}$`));
     await expect(page.getByTestId('overview-needs-you-list')).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The generated brief (inbox slice I)
+// ---------------------------------------------------------------------------
+
+type Brief = NonNullable<ProjectOverviewResponse['brief']>;
+type BriefRef = Extract<Brief['sentences'][number]['parts'][number], { ref: unknown }>['ref'];
+
+const ref = (kind: BriefRef['kind'], id: string, label: string, url?: string) => ({
+  ref: url ? { kind, id, label, url } : { kind, id, label },
+});
+const text = (value: string) => ({ text: value });
+
+function briefFixture(overrides: Partial<Brief> = {}, long = false): Brief {
+  return {
+    sentences: [
+      {
+        parts: [
+          ref('ask', 'ask-deploy', long ? LONG_TITLE : 'Pick a deploy target for the billing fix'),
+          text(' is holding up '),
+          ref('chat', 'sess-1', long ? LONG_TOKEN : 'Ship billing'),
+          text(', which is paused on it.'),
+        ],
+      },
+      {
+        parts: [
+          ref('automation', 'trg-deps', long ? `Weekly ${LONG_TOKEN}` : 'Weekly dependency bump'),
+          text(' keeps failing, and '),
+          ref('account', 'cc_credentials:team', "the project's anthropic account"),
+          text(' is almost out of usage.'),
+        ],
+      },
+      {
+        parts: [
+          ref(
+            'pullRequest',
+            '2771',
+            long ? LONG_TITLE : 'Round tax totals per line',
+            'https://github.com/acme/billing/pull/2771'
+          ),
+          text(' landed and '),
+          ref('idea', 'idea-1', 'Pause subscriptions'),
+          text(' is new.'),
+        ],
+      },
+    ],
+    generatedAt: new Date(Date.now() - 25 * MIN).toISOString(),
+    stale: false,
+    refreshing: false,
+    ...overrides,
+  };
+}
+
+/** Phone: the first screen still shows three Needs you rows above the pinned task box. */
+async function expectThreeRowsOnFirstPhoneScreen(page: Page) {
+  const rows = await needsYouRows(page);
+  await expect(rows).toHaveCount(3);
+  const box = await page.locator('[data-testid="project-overview"] > div').last().boundingBox();
+  for (let i = 0; i < 3; i += 1) {
+    const row = await rows.nth(i).boundingBox();
+    expect(row!.y + row!.height).toBeLessThanOrEqual(box!.y);
+  }
+}
+
+test.describe('Project Overview brief (inbox slice I)', () => {
+  test('fresh brief: one line under Needs you on a phone, above Needs you on desktop', async ({
+    page,
+  }, testInfo) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: STRESS_INBOX,
+      brief: briefFixture(),
+    });
+    await page.goto(BASE);
+    const brief = page.getByRole('region', { name: 'Project brief' });
+    await expect(brief).toBeVisible();
+    const needs = await page.getByRole('region', { name: 'Needs you' }).boundingBox();
+    const briefBox = await brief.boundingBox();
+    if (isPhone(testInfo)) {
+      expect(briefBox!.y).toBeGreaterThanOrEqual(needs!.y + needs!.height);
+      // One line: the paragraph is one line tall, and only the first sentence is rendered.
+      await expect(brief.getByRole('link', { name: /Weekly dependency bump/ })).toHaveCount(0);
+      const textBox = await page.getByTestId('overview-brief-text').boundingBox();
+      expect(textBox!.height).toBeLessThanOrEqual(30);
+      await expectThreeRowsOnFirstPhoneScreen(page);
+    } else {
+      expect(briefBox!.y + briefBox!.height).toBeLessThanOrEqual(needs!.y);
+      expect(Math.abs(briefBox!.x - needs!.x)).toBeLessThanOrEqual(1);
+      await expect(brief.getByRole('link', { name: 'Pause subscriptions' })).toBeVisible();
+    }
+    await expect(brief.getByRole('link', { name: /Pick a deploy target/ })).toHaveAttribute(
+      'href',
+      `/projects/${PROJECT_ID}/inbox?item=ask%3Aask-deploy&from=overview`
+    );
+    await expect(brief.getByTestId('overview-brief-age')).toHaveCount(0);
+    await capture(page, 'overview-brief-fresh');
+  });
+
+  test('phone: the brief expands in place to two sentences', async ({ page }, testInfo) => {
+    test.skip(!isPhone(testInfo), 'the brief folds only on a phone');
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture(),
+    });
+    await page.goto(BASE);
+    const brief = page.getByRole('region', { name: 'Project brief' });
+    const toggle = brief.getByRole('button', { name: 'Show more of the brief' });
+    await toggle.click();
+    await expect(brief.getByRole('button', { name: 'Show less of the brief' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    await expect(brief.getByRole('link', { name: /Weekly dependency bump/ })).toBeVisible();
+    await expect(brief.getByRole('link', { name: /Round tax totals/ })).toHaveCount(0);
+    // Expanding happens in place: Needs you above did not move.
+    await capture(page, 'overview-brief-phone-expanded');
+  });
+
+  test('stale and refreshing: the old text stays, dimmed with its age', async ({ page }) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture({ stale: true, refreshing: true }),
+    });
+    await page.goto(BASE);
+    await expect(page.getByTestId('overview-brief-text')).toHaveAttribute('data-stale', 'true');
+    await expect(page.getByTestId('overview-brief-age')).toHaveText(
+      /Updating · written 25 min ago/
+    );
+    await capture(page, 'overview-brief-stale-refreshing');
+  });
+
+  test('long brief: long names and unbroken tokens wrap inside the pane', async ({
+    page,
+  }, testInfo) => {
+    await setupScene(page, {
+      scene: 'busy',
+      budget: 'stressed',
+      automations: 'failing',
+      inbox: STRESS_INBOX,
+      brief: briefFixture({ stale: true }, true),
+    });
+    await page.goto(BASE);
+    const brief = page.getByRole('region', { name: 'Project brief' });
+    await expect(brief).toBeVisible();
+    if (isPhone(testInfo)) {
+      await expectThreeRowsOnFirstPhoneScreen(page);
+      await brief.getByRole('button', { name: 'Show more of the brief' }).click();
+    }
+    const paneBox = await brief.boundingBox();
+    expect(paneBox!.x + paneBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await capture(page, 'overview-brief-long');
+  });
+
+  test('quiet project: no brief, nothing else changes', async ({ page }) => {
+    await setupScene(page, { scene: 'quiet', budget: 'normal', automations: 'none', brief: null });
+    await page.goto(BASE);
+    await expect(page.getByRole('region', { name: 'Running now' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Project brief' })).toHaveCount(0);
+    await capture(page, 'overview-brief-hidden-quiet');
+  });
+
+  test('brief unavailable: the page is just its tiles', async ({ page }) => {
+    await setupScene(page, {
+      scene: 'normal',
+      budget: 'normal',
+      automations: 'normal',
+      inbox: NORMAL_INBOX,
+      brief: briefFixture(),
+      briefUnavailable: true,
+    });
+    await page.goto(BASE);
+    await expect(page.getByRole('region', { name: 'Running now' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Needs you' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Project brief' })).toHaveCount(0);
+    await capture(page, 'overview-brief-unavailable');
   });
 });

@@ -9,7 +9,7 @@
  * Layout (`OverviewLayout`): one DOM tree that CSS arranges, so crossing the phone/desktop
  * breakpoint never remounts the task box or a section (`apps/web/.claude/rules/48`, rule 5).
  * - Phone: one scrolling column in `PHONE_ORDER`, the task box pinned under it.
- * - Desktop: a wide `main` column (the brief slot, then Needs you) with the task box pinned under
+ * - Desktop: a wide `main` column (the generated brief, then Needs you) with the task box pinned under
  *   it, and a `rail` (Running now, This week, Budgets, Automations, Recently).
  */
 import { MessageSquare } from 'lucide-react';
@@ -25,6 +25,7 @@ import { AutomationsSection } from './AutomationsSection';
 import { BudgetsSection } from './BudgetsSection';
 import { NeedsYouSection, useNeedsYou } from './NeedsYouSection';
 import { OverviewTaskBox } from './OverviewTaskBox';
+import { ProjectBriefSection } from './ProjectBriefSection';
 import { RecentlySection, RunningNowSection } from './sections';
 import { ThisWeekSection } from './ThisWeekSection';
 import { useProjectOverview } from './useProjectOverview';
@@ -35,11 +36,13 @@ import { useProjectOverview } from './useProjectOverview';
  */
 const PHONE_ORDER = {
   needsYou: 'order-1 md:order-none',
-  running: 'order-2 md:order-none',
-  thisWeek: 'order-3 md:order-none',
-  budgets: 'order-4 md:order-none',
-  automations: 'order-5 md:order-none',
-  recently: 'order-6 md:order-none',
+  // The brief folds to one line under Needs you on a phone (spec 4.2); desktop shows it first.
+  brief: 'order-2 md:order-none',
+  running: 'order-3 md:order-none',
+  thisWeek: 'order-4 md:order-none',
+  budgets: 'order-5 md:order-none',
+  automations: 'order-6 md:order-none',
+  recently: 'order-7 md:order-none',
 } as const;
 
 /**
@@ -125,8 +128,13 @@ export function ProjectOverview() {
     <OverviewLayout
       main={
         <>
-          {/* BRIEF SLOT (inbox slice I, spec 4.3): the generated brief renders here, above Needs
-              you. Nothing renders here until then: no placeholder. */}
+          {/* The generated brief (inbox slice I, spec 4.3): above Needs you on desktop, folded to
+              one line under it on a phone. Renders nothing when there is no brief. */}
+          <ProjectBriefSection
+            projectId={projectId}
+            brief={overview.isError || unavailable.has('brief') ? null : overview.data?.brief}
+            className={PHONE_ORDER.brief}
+          />
           <NeedsYouSection
             projectId={projectId}
             needsYou={needsYou}
