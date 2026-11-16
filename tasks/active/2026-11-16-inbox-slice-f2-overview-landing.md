@@ -50,23 +50,23 @@ the same way as the inbox ("paused on this").
 
 ## Implementation checklist
 
-- [ ] Index route → `overview`; `isFullBleedRoute` covers the bare index; `isProjectChatRoute` no longer does;
+- [x] Index route → `overview`; `isFullBleedRoute` covers the bare index; `isProjectChatRoute` no longer does;
       route prefetch reads the Overview (and its Needs you list) for the index and `/overview`
-- [ ] Links: SidebarProjectList, TaskRedirect fallback, ActiveTaskCard fallback → project; ObservabilityLogEntry → chat path
-- [ ] `NeedsYouSection`: slice C hooks + `InboxRow`; 3 rows phone / 5 desktop; count + "All N" link; one quiet line
+- [x] Links: SidebarProjectList, TaskRedirect fallback, ActiveTaskCard fallback → project; ObservabilityLogEntry → chat path
+- [x] `NeedsYouSection`: slice C hooks + `InboxRow`; 3 rows phone / 5 desktop; count + "All N" link; one quiet line
       when empty / loading / unavailable; rows open `/projects/:id/inbox?item=<ref>&from=overview`
-- [ ] Layout: main = [brief slot comment, Needs you]; rail = [Running now, Budgets, Automations, Recently];
+- [x] Layout: main = [brief slot comment, Needs you]; rail = [Running now, Budgets, Automations, Recently];
       PHONE_ORDER needsYou 1, running 2, (3 free for This week), budgets 4, automations 5, recently 6
-- [ ] Phone app bar Chat control on the Overview (setScreenAction); desktop Chat nav item already present
-- [ ] Inbox item view: Back returns to the Overview when opened from it (phone and desktop), no reload
-- [ ] Running now: "Paused on this" (amber) when the viewer has a paused Needs-you item from that chat;
+- [x] Phone app bar Chat control on the Overview (setScreenAction); desktop Chat nav item already present
+- [x] Inbox item view: Back returns to the Overview when opened from it (phone and desktop), no reload
+- [x] Running now: "Paused on this" (amber) when the viewer has a paused Needs-you item from that chat;
       server waiting predicate also counts open blocking asks and pending secret requests for the chat
-- [ ] Couldn't start wiring: only if slice E is in production; otherwise post what remains on feature.inbox
-- [ ] Tests: landing behavioural test (opening a project shows the Overview, no bounce to chat; returning from an
+- [x] Couldn't start wiring: slice E (#2781) is not in production (unmerged draft, 2026-11-16 11:45Z), so NOT built; the exact follow-up is posted on feature.inbox (event 4a9cd154-374c-43da-9fab-39904a9bcf73) for the coordinator to dispatch. Today's receipt-line failure is unchanged.
+- [x] Tests: landing behavioural test (opening a project shows the Overview, no bounce to chat; returning from an
       inbox item keeps the Overview); Needs you unit tests; Running now wording; shell-routes; prefetch; operations SQL
-- [ ] Playwright audit 375/1280: 40 items, long titles, stack, expiring permission, failed start item,
+- [x] Playwright audit 375/1280: 40 items, long titles, stack, expiring permission, failed start item,
       nothing-needs-you, brand-new empty project; first-screen check at 375x667
-- [ ] Docs: `guides/project-overview.md`, other docs naming where a project opens; rule 26 note
+- [x] Docs: `guides/project-overview.md`, other docs naming where a project opens; rule 26 note
 
 ## Acceptance criteria
 
@@ -83,3 +83,12 @@ the same way as the inbox ("paused on this").
 
 Rules 06 (interaction effects), 48 (stale-while-revalidate), 17 (visual audit), 62, 26; spec idea above; prototype
 Library `/design/project-overview-inbox-2026-11-15/`.
+
+## Notes
+
+- Recent chats (phone app bar and desktop sidebar) now uses a History icon, as in the accepted
+  prototype, so it is not a second speech bubble beside the new phone Chat control.
+- Quarantined Playwright specs that opened the bare project URL expecting chat now open `/chat`
+  (focus-mode, nested-session-sidebar, wake-failed-session-sidebar). nested-session-sidebar and
+  focus-mode are quarantined (not selected by CI) and fail locally on the first-run wizard overlay
+  regardless of this change.
