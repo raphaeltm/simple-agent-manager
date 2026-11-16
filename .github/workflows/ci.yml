@@ -65,6 +65,7 @@ jobs:
       deploy-scripts: ${{ steps.filter.outputs.deploy-scripts }}
       ci-workflow: ${{ steps.filter.outputs.ci-workflow }}
       repo-quality: ${{ steps.filter.outputs.repo-quality }}
+      agent-instructions: ${{ steps.filter.outputs.agent-instructions }}
       web-ui: ${{ steps.filter.outputs.web-ui }}
       browser-install: ${{ steps.filter.outputs.browser-install }}
       go-modules: ${{ steps.filter.outputs.go-modules }}
@@ -253,6 +254,19 @@ jobs:
               - 'vitest*.ts'
               - 'eslint.config.*'
               - 'prettier.config.*'
+            # Files that decide what an agent harness loads. See
+            # scripts/quality/check-agent-context-budget.ts.
+            agent-instructions:
+              - '.claude/rules/**'
+              - '.claude/settings.json'
+              - '.claude/hooks/**'
+              - 'CLAUDE.md'
+              - 'AGENTS.md'
+              - '**/AGENTS.md'
+              - 'AGENTS.override.md'
+              - '**/AGENTS.override.md'
+              - 'scripts/quality/agent-*'
+              - 'scripts/quality/check-agent-context-budget.ts'
             web-ui:
               - 'apps/web/**'
               - 'packages/ui/**'
@@ -824,7 +838,7 @@ jobs:
   code-quality:
     name: Code Quality Checks
     needs: [changes]
-    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.repo-quality == 'true' || needs.changes.outputs.ci-workflow == 'true')
+    if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && (needs.changes.outputs.repo-quality == 'true' || needs.changes.outputs.ci-workflow == 'true' || needs.changes.outputs.agent-instructions == 'true')
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -856,6 +870,12 @@ jobs:
 
       - name: File size limit enforcement
         run: pnpm quality:file-sizes
+
+      # Every path-scoped rule can load, rules follow the code they name, the generated
+      # rule indexes are current, hook entries are well-formed, and instruction size
+      # stays under the ceilings in scripts/quality/agent-context-budget.json.
+      - name: Agent instruction delivery and budget check
+        run: pnpm quality:agent-context-budget --check
 
       - name: Stale artifact check
         run: pnpm quality:stale-artifacts

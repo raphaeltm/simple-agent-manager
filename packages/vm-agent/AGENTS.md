@@ -1,6 +1,6 @@
 # VM Agent Technical Patterns
 
-Full scoped rules: `packages/vm-agent/.claude/rules/`
+Rules that apply here are listed under "Rules for this directory" at the end of this file.
 
 ## VM Agent Lifecycle Pattern
 
@@ -45,3 +45,28 @@ Full model: "Workspace Isolation Model" in `apps/www/src/content/docs/docs/archi
 2. Update variable types in `src/variables.ts`, validation in `src/validate.ts` and wiring in `src/generate.ts` when needed
 3. Ingress-mode blocks (Origin CA direct mode, Cloudflare Tunnel mode) live in `src/template-ingress.ts` and render only for their mode; keep user-data under the 32 KB Hetzner limit
 4. Test cloud-init generation through the workspace provisioning flow
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/06-vm-agent-patterns.md`: VM Agent Technical Patterns
+- `.claude/rules/27-vm-agent-staging-refresh.md`: VM Agent Binary Refresh for Staging Tests
+- `.claude/rules/34-vm-agent-callback-auth-agent-side.md`: VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE)
+- `.claude/rules/34-vm-agent-callback-auth.md`: VM Agent Callback Routes Must Use Callback JWT Auth (ABSOLUTE RULE)
+- `.claude/rules/43-long-running-mcp-tools.md`: Long-Running MCP Tools Must Be Async
+- `.claude/rules/46-vm-agent-diagnostic-getter-sync.md`: VM Agent Diagnostic Getters Must Synchronize Loop-Mutated Fields
+- `.claude/rules/49-capture-prerequisites-before-async-completion.md`: Capture Handler Prerequisites Before a Long Async Operation
+- `.claude/rules/51-vm-agent-no-host-mime-dependency.md`: VM Agent Behavior Must Not Depend on Host-Provided MIME/OS Databases
+- `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`: Scheduled Handlers: Isolate Every Step, and Never Use a Liveness Timestamp as an Idleness Signal
+- `.claude/rules/54-vm-agent-rollout-compatibility.md`: VM Agent Rollout Compatibility
+- `.claude/rules/61-guards-must-cover-every-runtime.md`: A Guard Added for One Runtime Must Be Enforced for Every Runtime
+- `.claude/rules/67-shared-predicates-that-trigger-actions.md`: Never Widen a Shared Predicate That Drives an Action
+- `.claude/rules/71-request-context-must-not-outlive-its-request.md`: A Goroutine That Outlives Its Request Must Not Capture That Request's Context
+- `.claude/rules/75-external-api-check-then-act.md`: A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure
+- `.claude/rules/78-snapshot-capture-must-scale-with-the-session.md`: Snapshot Capture Cost Must Scale With the Session, Not the Repository
+
+<!-- END GENERATED RULE INDEX -->

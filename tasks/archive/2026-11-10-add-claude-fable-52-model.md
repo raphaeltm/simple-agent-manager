@@ -30,7 +30,7 @@ newer is required.` The model is also missing from SAM's catalogs.
   (`packages/shared/src/acp-form.ts`, `packages/vm-agent/internal/acp/acp_form_validation.go`)
   accept a field without `_meta`, no UI code reads the marker, and the adapter still reads
   `question_<n>_custom` answers. The pinned fixture must be regenerated from the pinned builder.
-- Pin locations (rule `packages/vm-agent/.claude/rules/06-vm-agent-patterns.md`): install
+- Pin locations (rule `.claude/rules/06-vm-agent-patterns.md`): install
   manifest, `gateway.go`, `Dockerfile.vm-agent-container`, `Dockerfile.sandbox`, e2e mocks,
   pinned-adapter verification scripts, version/steering tests.
 

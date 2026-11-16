@@ -65,3 +65,16 @@ package through the worker adapters.
 - Depends on `shared`, `worker-core`, `drizzle-orm` and `valibot` (catalog) and `postal-mime`.
 - No function accepts the worker `Env`. Add a field to `AgentEmailEnv` only if the package reads it.
 - A new dependency on worker code is a new port, not an import.
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/47-control-loop-io-budget.md`: Control Loops Need Explicit I/O Budgets
+- `.claude/rules/51-runtime-boundary-validation.md`: Runtime boundary validation
+- `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`: Scheduled Handlers: Isolate Every Step, and Never Use a Liveness Timestamp as an Idleness Signal
+
+<!-- END GENERATED RULE INDEX -->

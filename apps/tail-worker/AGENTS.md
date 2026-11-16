@@ -33,3 +33,14 @@ pnpm --filter @simple-agent-manager/tail-worker dev        # Local dev (limited 
 - Tail workers do NOT work in local dev with Miniflare/Vitest — the `tail_consumers` binding breaks the test harness, so it is excluded from top-level wrangler config
 - Deploying this worker before the API Worker causes the service binding to fail — deploy API Worker first
 - The `Env.API_WORKER` binding is optional (`?`) because it may not exist in all environments
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+No path-scoped rules apply to this directory.
+
+<!-- END GENERATED RULE INDEX -->

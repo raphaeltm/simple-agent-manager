@@ -66,3 +66,16 @@ The worker resolves this package from `dist/`: build it before typechecking or t
   step when files move.
 - Tests that need a database, a Durable Object or worker modules stay in `apps/api/tests` and
   import this package through its entry point.
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/51-runtime-boundary-validation.md`: Runtime boundary validation
+- `.claude/rules/51-server-side-node-class-gates.md`: Server-Side Node-Class / Identity Gates — Never Trust a Client-Supplied Identifier or Agent Abstention
+- `.claude/rules/69-aggregate-capacity-at-final-reservation.md`: Enforce Aggregate Capacity at the Final Atomic Reservation
+
+<!-- END GENERATED RULE INDEX -->

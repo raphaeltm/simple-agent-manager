@@ -41,7 +41,7 @@ Affected files, all with the same two lines:
 - [ ] The desktop rail form is unchanged: there the panel genuinely floats over the conversation
       and the glass treatment is the intent.
 - [ ] Playwright screenshots at 375x667 for each of the five panels, before and after, reviewed
-      and posted (`apps/web/.claude/rules/17-ui-visual-testing.md`). Headless Chromium does not
+      and posted (`.claude/rules/17-ui-visual-testing.md`). Headless Chromium does not
       apply `backdrop-filter`, so also check one panel in a real browser on staging before
       concluding the blur was the fix.
 - [ ] Light mode checked too: `--sam-glass-bg-modal` is 60% there, so the bleed-through is at

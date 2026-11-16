@@ -50,4 +50,4 @@ When work gates availability, ask what the user is blocked on while the bound de
 
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`: realistic triggers
 - `.claude/rules/74-proxy-signals-must-match-the-condition.md`: a cap is a proxy for the condition it protects
-- `apps/api/.claude/rules/47-control-loop-io-budget.md`: bound cost, and this rule: prove the bound still finishes
+- `.claude/rules/47-control-loop-io-budget.md`: bound cost, and this rule: prove the bound still finishes

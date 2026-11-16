@@ -10,7 +10,7 @@
  *
  * Every text node clamps and breaks: a 200-character idea title and a 90-character branch-like
  * filename both have to survive a 375px viewport without widening the row
- * (`apps/web/.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`).
+ * (`.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`).
  */
 import type { LucideIcon } from 'lucide-react';
 import { ChevronRight } from 'lucide-react';

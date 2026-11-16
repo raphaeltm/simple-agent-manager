@@ -69,3 +69,17 @@ pnpm --filter @simple-agent-manager/app-deployment lint
 - A `vi.mock` of an old worker path does not reach imports made inside this package. Inject a fake
   port, or mock the package specifier (`@simple-agent-manager/worker-core`,
   `@simple-agent-manager/worker-core/schema`) with `importOriginal`.
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/47-control-loop-io-budget.md`: Control Loops Need Explicit I/O Budgets
+- `.claude/rules/51-runtime-boundary-validation.md`: Runtime boundary validation
+- `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`: Scheduled Handlers: Isolate Every Step, and Never Use a Liveness Timestamp as an Idleness Signal
+- `.claude/rules/75-external-api-check-then-act.md`: A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure
+
+<!-- END GENERATED RULE INDEX -->

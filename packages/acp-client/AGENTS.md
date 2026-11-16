@@ -44,3 +44,18 @@ pnpm --filter @simple-agent-manager/acp-client lint        # ESLint
 - Components use `messageId` field for lazy loading — this is populated by compact mode in the API
 - UI changes here trigger mandatory Playwright visual audit (rule 17)
 - This is a peer-dependency package — consumers must provide React 19+
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/04-ui-standards.md`: UI Standards
+- `.claude/rules/17-ui-visual-testing.md`: Mandatory Playwright Visual Testing for UI Changes
+- `.claude/rules/48-stale-while-revalidate-ui.md`: Stale-While-Revalidate UI (No Hiding, No Refetch Loops)
+- `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`: Horizontal Overflow Inside `overflow-x-hidden` Is Invisible to Document-Level Checks
+- `.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`: An Object Literal in a Render Body Can Remount an Entire Subtree
+
+<!-- END GENERATED RULE INDEX -->

@@ -4,7 +4,7 @@
  *
  * Drives the REAL project chat page with mocked API data (`setupGlassChatMocks`) and reaches
  * every behaviour the way a user does: the toggle is clicked, never called. Layout claims are
- * asserted as measured coordinates, not screenshots (`apps/web/.claude/rules/17-ui-visual-testing.md`).
+ * asserted as measured coordinates, not screenshots (`.claude/rules/17-ui-visual-testing.md`).
  *
  * Screenshots land in `.codex/tmp/playwright-screenshots/` as `chat-immersive-*`.
  */

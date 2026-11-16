@@ -38,3 +38,14 @@ pnpm --filter @simple-agent-manager/cloud-init typecheck  # Type check only
 - Built with `tsup` (not plain `tsc`) — outputs ESM with `.d.ts` declarations.
 - **User-data is near the 32 KB Hetzner limit.** Do not repeat secrets inline (scripts read `/etc/sam/callback-token`), and render mode-specific blocks only for their mode.
 - Changes here require infrastructure verification on staging (provision a real VM) per rule 02.
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/06-vm-agent-patterns.md`: VM Agent Technical Patterns
+
+<!-- END GENERATED RULE INDEX -->

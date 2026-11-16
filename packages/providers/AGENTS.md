@@ -59,3 +59,17 @@ pnpm --filter @simple-agent-manager/providers lint        # ESLint
 - Provider API tokens come from user credentials (encrypted in D1), NOT from environment variables
 - Tests mock HTTP responses — real API calls are only made on staging with user-supplied tokens
 - Hetzner labels are used as metadata storage (workspace ID, node ID) — label format matters
+
+<!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
+
+## Rules for this directory
+
+Read the rules whose scope covers the files you will change before editing. Claude Code
+loads them by itself on file access; other harnesses must open them.
+
+- `.claude/rules/56-destructive-provider-ownership-proof.md`: Destructive Provider Ownership Proof
+- `.claude/rules/69-aggregate-capacity-at-final-reservation.md`: Enforce Aggregate Capacity at the Final Atomic Reservation
+- `.claude/rules/71-request-context-must-not-outlive-its-request.md`: A Goroutine That Outlives Its Request Must Not Capture That Request's Context
+- `.claude/rules/72-error-categories-must-match-the-recovery-action.md`: An Error Category Must Name the Recovery Action, Not the Provider's Vocabulary
+
+<!-- END GENERATED RULE INDEX -->

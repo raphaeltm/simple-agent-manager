@@ -123,7 +123,7 @@ Test mapping:
 ## References
 
 - `.claude/rules/62`, `.claude/rules/74`, `.claude/rules/73`, `.claude/rules/81`
-- `apps/api/.claude/rules/69-aggregate-capacity-at-final-reservation.md`, `61-per-cycle-budget-counters.md`, `47-control-loop-io-budget.md`
+- `.claude/rules/69-aggregate-capacity-at-final-reservation.md`, `61-per-cycle-budget-counters.md`, `47-control-loop-io-budget.md`
 
 ## Implementation notes
 
