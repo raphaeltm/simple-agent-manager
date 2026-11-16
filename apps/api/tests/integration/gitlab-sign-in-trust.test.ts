@@ -231,21 +231,30 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     }
   );
 
-  it('uses outbound.maxRedirects default through the real resolver for profile hops', async () => {
-    const env = await runtimeGitLabEnv(PUBLIC_HOST);
-    const gitlab = createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email));
-    let profileCalls = 0;
-    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = new Request(input, init);
-      if (new URL(request.url).pathname === '/oauth/token') return gitlab.fetch(input, init);
-      profileCalls++;
-      return new Response(null, { status: 307, headers: { location: `${PUBLIC_HOST}/loop` } });
-    });
-    const callback = await signInWithGitLab(env, PUBLIC_HOST);
-    expect(callback.headers.get('location')).toContain('error=');
-    expect(profileCalls).toBe(4); // original + default three allowed hops
-    expect(gitlabAccounts()).toEqual([]);
-  });
+  it.each([null, 0])(
+    'uses outbound.maxRedirects=%s through the real resolver for profile hops',
+    async (limit) => {
+      const env = await runtimeGitLabEnv(PUBLIC_HOST);
+      if (limit !== null)
+        sqlite
+          .prepare(
+            'INSERT INTO platform_settings(key,value,updated_at,updated_by) VALUES (?,?,?,NULL)'
+          )
+          .run('outbound.maxRedirects', String(limit), new Date().toISOString());
+      const gitlab = createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email));
+      let profileCalls = 0;
+      vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).pathname === '/oauth/token') return gitlab.fetch(input, init);
+        profileCalls++;
+        return new Response(null, { status: 307, headers: { location: `${PUBLIC_HOST}/loop` } });
+      });
+      const callback = await signInWithGitLab(env, PUBLIC_HOST);
+      expect(callback.headers.get('location')).toContain('error=');
+      expect(profileCalls).toBe(1 + (limit ?? 3)); // original + configured/default hops
+      expect(gitlabAccounts()).toEqual([]);
+    }
+  );
 
   it('profile redirects drop Authorization before the cross-origin hop', async () => {
     const env = await runtimeGitLabEnv(PUBLIC_HOST);

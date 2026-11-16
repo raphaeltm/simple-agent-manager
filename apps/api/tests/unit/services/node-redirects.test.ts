@@ -24,22 +24,25 @@ describe('node redirect boundary', () => {
         requests.push(new Request('https://unvetted.example/steal', init));
         return Response.json({ followed: true });
       }
-      return Response.json(
-        { healthy: true },
-        { status, headers: { location: 'https://unvetted.example/steal?token=management-secret' } }
-      );
+      return Response.json(status === 307 ? { token: 'management-secret' } : { healthy: true }, {
+        status,
+        headers: { location: 'https://unvetted.example/steal?token=management-secret' },
+      });
     });
     if (status === 200) {
       await expect(
         nodeAgentRequest('node', env, '/workspaces', { userId: 'user' })
       ).resolves.toEqual({ healthy: true });
     } else {
-      await expect(
-        nodeAgentRequest('node', env, '/workspaces', { userId: 'user', redirect: 'follow' })
-      ).rejects.toThrow('307');
+      const request = nodeAgentRequest('node', env, '/workspaces', {
+        userId: 'user',
+        redirect: 'follow',
+      });
+      await expect(request).rejects.toThrow('307');
+      await expect(request).rejects.not.toThrow('management-secret');
     }
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.redirect).toBe('manual');
+    if (status === 307) expect(requests[0]?.redirect).toBe('manual');
     expect(requests[0]?.headers.get('authorization')).toBe('Bearer management-secret');
   });
 

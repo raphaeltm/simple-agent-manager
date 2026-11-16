@@ -11,12 +11,12 @@ Integration setup remains the static /api/auth/callback/gitlab callback and exis
 Rule 54: release resolver keys this Go change to a new immutable binary; Worker manual redirect protection must also protect old agents while busy nodes drain. No protocol fields change.
 
 ## Checklist
-- [ ] Force manual node control/liveness/workspace fetches; fail node 3xx without following or disclosing Location.
-- [ ] Guard GitLab host, profile, API, code exchange and refresh using existing guardedFetch; bounded admin redirect limit and existing timeout.
-- [ ] Preserve untrusted GitLab identity rules; use exported BetterAuth types and exercise real library callback/refresh.
-- [ ] Prevent vm-agent mux 307 Location token leak; regression and normal controls.
-- [ ] Reduce outbound-fetch baseline where applicable; annotate fixed node destinations.
-- [ ] Verify Cloudflare outbound redirect default using official docs/runtime evidence.
+- [x] Force manual node control/liveness/workspace fetches; fail node 3xx without following or disclosing Location.
+- [x] Guard GitLab host, profile, API, code exchange and refresh using existing guardedFetch; bounded admin redirect limit and existing timeout.
+- [x] Preserve untrusted GitLab identity rules; use exported BetterAuth types and exercise real library callback/refresh.
+- [x] Prevent vm-agent mux 307 Location token leak; regression and normal controls.
+- [x] Reduce outbound-fetch baseline where applicable; annotate fixed node destinations.
+- [x] Verify Cloudflare outbound redirect default using official docs/runtime evidence.
 - [ ] Run regression controls, full quality, required local reviews.
 - [ ] Staging lease both installs, deploy, full VM lifecycle and cleanup; GitLab sign-in or integration evidence if unconfigured.
 - [ ] CI/CodeRabbit gates; merge; production deploy; channel and idea updates.
@@ -26,3 +26,10 @@ Node 307 is failure and never followed; node 200 works. Private GitLab refused, 
 
 ## References
 Idea 01M72M9AEB933ZY8269D376DKC; L5a #2751; rules 54, 62, 74, 77.
+
+## Validation evidence
+Full lint/typecheck/build pass. Repo-hosting: 143/143 tests. Focused API/guard: 181 earlier, final added default+override and unfamiliar-header controls pass 166 tests across those two files; 36 node/proxy/auth controls pass. Full Go suite and go vet pass. Actual probeLiveRuntimeSession found under durable-objects and fixed. Security/Cloudflare reviewers confirmed; Go reviewer passed. Completion reviewer no code gaps, operational gates remain. Existing relay HTTP+WebSocket tests now use buildHTTPServers, covering guard insertion.
+
+Cloudflare default verified against https://developers.cloudflare.com/workers/runtime-apis/request/: new outbound Request defaults follow, incoming client Request manual. BetterAuth1.7.14 token exchange/refresh source uses fetchRefusingRedirects; regression enters actual callback and production getBetterAuthAccessTokenForProvider. No duplicate OAuth transport added.
+
+Staging reserved primary, position5 at 20:43Z, turn estimate22:03:58Z; wake registered. No staging deploy before own turn. PR #2819.
