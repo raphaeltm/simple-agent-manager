@@ -350,6 +350,44 @@ async function captureScene(
   await assertNoHorizontalOverflow(page);
 }
 
+/** Visual scenes captured at each viewport; shots are named `admin-analytics-<slug>-<viewport>`. */
+const SCENES: Array<{
+  title: string;
+  slug: string;
+  scenario: MockScenario;
+  opts: Parameters<typeof captureScene>[3];
+}> = [
+  { title: 'normal data', slug: 'normal', scenario: NORMAL, opts: { settle: 800, noCrash: true } },
+  { title: 'empty state', slug: 'empty', scenario: EMPTY, opts: { settle: 'empty-state' } },
+  { title: 'many items', slug: 'many-items', scenario: MANY_ITEMS, opts: { settle: 800 } },
+  { title: 'long event names', slug: 'long-text', scenario: LONG_TEXT, opts: { settle: 700 } },
+  { title: 'every API fails', slug: 'error', scenario: API_ERROR, opts: { settle: 'empty-state' } },
+  {
+    title: 'light theme, normal data',
+    slug: 'light-normal',
+    scenario: NORMAL,
+    opts: { theme: 'light', settle: 800 },
+  },
+  {
+    title: 'light theme, many items',
+    slug: 'light-many-items',
+    scenario: MANY_ITEMS,
+    opts: { theme: 'light', settle: 800 },
+  },
+  {
+    title: 'light theme, empty state',
+    slug: 'light-empty',
+    scenario: EMPTY,
+    opts: { theme: 'light', settle: 'empty-state' },
+  },
+  {
+    title: 'light theme, every API fails',
+    slug: 'light-error',
+    scenario: API_ERROR,
+    opts: { theme: 'light', settle: 'empty-state' },
+  },
+];
+
 /** Kept sections render, retired ones are gone, and the page never asks for them. */
 async function expectOnlyKeptSections(page: Page) {
   const { retiredRequests } = await setupMocks(page, NORMAL);
@@ -398,54 +436,11 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
     await expectOnlyKeptSections(page);
   });
 
-  test('normal data — all charts render', async ({ page }) => {
-    await captureScene(page, NORMAL, 'admin-analytics-normal-mobile', {
-      settle: 800,
-      noCrash: true,
+  for (const scene of SCENES) {
+    test(`scene: ${scene.title}`, async ({ page }) => {
+      await captureScene(page, scene.scenario, `admin-analytics-${scene.slug}-mobile`, scene.opts);
     });
-  });
-
-  test('empty state — all sections show empty messages', async ({ page }) => {
-    await captureScene(page, EMPTY, 'admin-analytics-empty-mobile', { settle: 600 });
-
-    // All empty state texts should be visible
-    const emptyMessages = page.locator('text=/No .* data available yet/');
-    const count = await emptyMessages.count();
-    expect(count).toBeGreaterThan(0);
-  });
-
-  test('many items — 30+ events, 90 day DAU, many AI models', async ({ page }) => {
-    await captureScene(page, MANY_ITEMS, 'admin-analytics-many-items-mobile', { settle: 800 });
-  });
-
-  test('long event names — no overflow from untruncated text', async ({ page }) => {
-    await captureScene(page, LONG_TEXT, 'admin-analytics-long-text-mobile', { settle: 700 });
-  });
-
-  test('error state — page still renders with empty states', async ({ page }) => {
-    await captureScene(page, API_ERROR, 'admin-analytics-error-mobile', { settle: 'empty-state' });
-  });
-
-  test('light theme — normal charts and tables', async ({ page }) => {
-    await captureScene(page, NORMAL, 'admin-analytics-light-normal-mobile', {
-      theme: 'light',
-      settle: 800,
-    });
-  });
-
-  test('light theme — many rows and large numbers', async ({ page }) => {
-    await captureScene(page, MANY_ITEMS, 'admin-analytics-light-many-items-mobile', {
-      theme: 'light',
-      settle: 800,
-    });
-  });
-
-  test('light theme — empty and error states', async ({ page }) => {
-    await captureScene(page, API_ERROR, 'admin-analytics-light-error-mobile', {
-      theme: 'light',
-      settle: 'empty-state',
-    });
-  });
+  }
 
   test('period selector toggle — all four buttons accessible and toggleable', async ({ page }) => {
     await setupMocks(page, NORMAL);
@@ -568,47 +563,9 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
     await expectOnlyKeptSections(page);
   });
 
-  test('normal data — full layout', async ({ page }) => {
-    await captureScene(page, NORMAL, 'admin-analytics-normal-desktop', {
-      settle: 800,
-      noCrash: true,
+  for (const scene of SCENES) {
+    test(`scene: ${scene.title}`, async ({ page }) => {
+      await captureScene(page, scene.scenario, `admin-analytics-${scene.slug}-desktop`, scene.opts);
     });
-  });
-
-  test('empty state', async ({ page }) => {
-    await captureScene(page, EMPTY, 'admin-analytics-empty-desktop', { settle: 600 });
-  });
-
-  test('many items — desktop', async ({ page }) => {
-    await captureScene(page, MANY_ITEMS, 'admin-analytics-many-items-desktop', { settle: 800 });
-  });
-
-  test('long event names — bar charts do not overflow page', async ({ page }) => {
-    await captureScene(page, LONG_TEXT, 'admin-analytics-long-text-desktop', { settle: 700 });
-  });
-
-  test('error state', async ({ page }) => {
-    await captureScene(page, API_ERROR, 'admin-analytics-error-desktop', { settle: 'empty-state' });
-  });
-
-  test('light theme — normal data', async ({ page }) => {
-    await captureScene(page, NORMAL, 'admin-analytics-light-normal-desktop', {
-      theme: 'light',
-      settle: 800,
-    });
-  });
-
-  test('light theme — empty state', async ({ page }) => {
-    await captureScene(page, EMPTY, 'admin-analytics-light-empty-desktop', {
-      theme: 'light',
-      settle: 600,
-    });
-  });
-
-  test('light theme — many rows', async ({ page }) => {
-    await captureScene(page, MANY_ITEMS, 'admin-analytics-light-many-items-desktop', {
-      theme: 'light',
-      settle: 800,
-    });
-  });
+  }
 });
