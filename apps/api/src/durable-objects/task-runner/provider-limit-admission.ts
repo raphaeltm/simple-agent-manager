@@ -164,8 +164,11 @@ export async function holdTaskForProviderLimit(
   } else if (!window) {
     if (previous && (previous.phase !== 'released' || ownerResumed)) {
       await rc.assertRecoveryAuthority(state);
+      // The queued watchdog measures runnable orchestration time. A deliberate
+      // provider wait is outside that interval; release starts a fresh clock.
+      // Its terminal CAS also checks this timestamp, fencing an earlier scan.
       const released = await rc.env.DATABASE.prepare(
-        `UPDATE tasks SET provider_limit_wait_json = ?, admission_state = NULL, admission_reason = NULL, admission_next_retry_at = NULL
+        `UPDATE tasks SET provider_limit_wait_json = ?, admission_state = NULL, admission_reason = NULL, admission_next_retry_at = NULL, updated_at = ?
          WHERE id = ? AND provider_limit_wait_json IS ?`
       )
         .bind(
@@ -181,6 +184,7 @@ export async function holdTaskForProviderLimit(
                     }
                   : {}),
               }),
+          new Date(now).toISOString(),
           state.taskId,
           row?.provider_limit_wait_json ?? null
         )
