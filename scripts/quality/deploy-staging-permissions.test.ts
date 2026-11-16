@@ -421,6 +421,9 @@ describe('Durable Object migration guard', () => {
     expect(guard).toBeLessThan(queue);
     expect(steps[guard].if).toContain("(inputs.environment || 'staging') == 'staging'");
     expect(steps[guard].if).toContain("inputs.lease_action == 'deploy'");
+    // Same deploy conditions as the deploy job, so the guard cannot drift from what deploys.
+    const deployCondition = String(workflow.jobs.deploy.if).replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+    expect(steps[guard].if).toContain(deployCondition);
     expect(steps[guard].env).toEqual({
       LEASE_ENVIRONMENT: "${{ inputs.environment || 'staging' }}",
       LEASE_ACTION: "${{ inputs.lease_action || 'deploy' }}",

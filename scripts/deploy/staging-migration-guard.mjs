@@ -63,6 +63,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log('Durable Object migration guard: no new migration tags for primary staging.');
   } catch (error) {
     console.error(`Staging deploy refused: ${error.message}`);
+    if (process.env.GITHUB_ACTIONS === 'true') console.log(`::error::${error.message}`);
     process.exitCode = 1;
   }
 }

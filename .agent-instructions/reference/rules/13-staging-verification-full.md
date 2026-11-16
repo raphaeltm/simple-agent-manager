@@ -82,7 +82,8 @@ Once a branch deploys a tag that `origin/main` lacks (a new `[[migrations]]` ent
 `apps/api/wrangler.toml`), every main-based branch fails the migration preflight on that
 installation until the branch merges. So `deploy-staging.yml` refuses such deploys on primary
 `staging` before reserving a place (`scripts/deploy/staging-migration-guard.mjs`, which fails closed
-when it cannot compare the two files). Use `staging2`. Clean-up duty: if your branch has not merged
+when it cannot compare the two files; it runs from your branch's workflow copy, so branches must
+include it, and the deploy-time migration preflight stays the backstop). Use `staging2`. Clean-up duty: if your branch has not merged
 when you are done on `staging2`, tear it down (Actions → Teardown → `staging2` → `DELETE`, after
 deleting test workspaces and nodes) and redeploy `main` to it (`gh workflow run deploy-staging.yml
 --ref main -f environment=staging2 -f sam_task_id=<id>`) before you release. staging2 rebuilds
