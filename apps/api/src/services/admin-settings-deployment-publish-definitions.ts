@@ -53,6 +53,7 @@ export const DEPLOYMENT_PUBLISH_SETTINGS = [
     'Absolute builder deadline after first admission, also capped by the overall publish-job deadline.',
     { min: 10000, max: 1200000 }
   ),
+  // Keep VM builds on node until staging proof in SAM idea 01M7H8GCR5FFDEXA70DNMEF8BW is complete.
   choiceDefinition(
     'deployments.buildExecutor',
     'node',

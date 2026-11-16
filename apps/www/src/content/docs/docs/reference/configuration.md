@@ -2053,7 +2053,7 @@ Collection has no file-count cutoff. For a 100,000-file context near 1.5 GiB, ta
 
 ## Cloudflare application build executor
 
-Edit runtime controls in **Admin → Settings**. Instant sessions always use Cloudflare; `deployments.buildExecutor` selects the VM-session executor. These controls are independent of the default-off context shadow probe.
+Edit runtime controls in **Admin → Settings**. Instant sessions always use Cloudflare; `deployments.buildExecutor` selects the VM-session executor. These controls are independent of the default-off context shadow probe. Keep the VM setting at `node` until staging validates Cloudflare publishing from a VM with unchanged source build/save counters and a served release; that validation remains pending.
 
 | Runtime setting                           | Default   | Meaning                                                                                             |
 | ----------------------------------------- | --------- | --------------------------------------------------------------------------------------------------- |
