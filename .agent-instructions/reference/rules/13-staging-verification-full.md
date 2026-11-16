@@ -151,13 +151,18 @@ Staging deployment is **manual** — it does NOT run automatically on PRs. You m
    `STAGING_LEASE_MAX_HOLD_MINUTES`, default 120). Failed or cancelled runs keep the
    lease until release or expiry.
 
-3. **Watch the run and verify live**, then **release** and hand over:
+3. **Watch the run.** Keep the lease through every live check (section 2 below, and the
+   infrastructure checks where they apply); then **release** and hand over:
 
    ```bash
    gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=3 \
      --json databaseId,status,conclusion,headSha
    gh run watch <run-id>
-   # After live checks and test-resource cleanup:
+   ```
+
+   After every live check and test-resource cleanup:
+
+   ```bash
    gh workflow run deploy-staging.yml --ref <your-branch> \
      -f environment=staging2 -f lease_action=release -f sam_task_id=<your-task-id>
    ```

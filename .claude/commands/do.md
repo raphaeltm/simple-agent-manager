@@ -265,26 +265,13 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    `STAGING_LEASE_MAX_HOLD_MINUTES`, default 120). Failed or cancelled runs keep the
    lease until release or expiry.
 
-3. **Watch the run and verify live**, then **release** and hand over:
+3. **Watch the run.** Keep the lease through every live check below; release comes last (step 9).
 
    ```bash
    gh run list --workflow=deploy-staging.yml --branch=<your-branch> --limit=3 \
      --json databaseId,status,conclusion,headSha
    gh run watch <run-id>
-   # After live checks and test-resource cleanup:
-   gh workflow run deploy-staging.yml --ref <your-branch> \
-     -f environment=staging2 -f lease_action=release -f sam_task_id=<your-task-id>
    ```
-
-   Confirm the release run passed and `status` shows no holder. Release also
-   removes you from the queue if you were waiting. A branch that releases and wants
-   the slot again queues behind everyone already waiting. **If you release early,
-   message the next task in the queue** (`send_durable_message` to its SAM task ID
-   from `status`) so it can take its turn before its scheduled wake. Successful
-   deployment completion is not a release. Release only after your own deploy run
-   has finished: the next holder's deploy waits for an in-flight one in the
-   `staging-apply-<installation>` group, but your live checks are no longer
-   protected once you release.
 
    Records are GitHub deployments with task `staging-lease`, keyed by installation.
    A malformed snapshot or an unknown record version fails closed (no one can
@@ -319,6 +306,24 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 7. **Report findings** to the user with evidence (screenshots or Playwright observations).
 
 8. **If issues are found**, fix them in the branch, push, re-deploy, and re-verify. Do NOT merge with known staging failures.
+
+9. **Release the lease only after every live check** (steps 4–8, plus Phase 6b
+   where it applies) and test-resource cleanup:
+
+   ```bash
+   gh workflow run deploy-staging.yml --ref <your-branch> \
+     -f environment=staging2 -f lease_action=release -f sam_task_id=<your-task-id>
+   ```
+
+   Confirm the release run passed and `status` shows no holder. Release also
+   removes you from the queue if you were waiting. A branch that releases and wants
+   the slot again queues behind everyone already waiting. **If you release early,
+   message the next task in the queue** (`send_durable_message` to its SAM task ID
+   from `status`) so it can take its turn before its scheduled wake. Successful
+   deployment completion is not a release. Release only after your own deploy run
+   has finished: the next holder's deploy waits for an in-flight one in the
+   `staging-apply-<installation>` group, but your live checks are no longer
+   protected once you release.
 
 ### 6b. Infrastructure Verification (MANDATORY for Infrastructure Changes)
 

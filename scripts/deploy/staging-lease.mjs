@@ -175,6 +175,7 @@ export async function runQueue({
         kind: 'reservation',
         environment,
         ...entry,
+        graceMinutes: timing.graceMinutes,
         notice: OLD_WORKFLOW_NOTICE,
       },
     });
@@ -277,7 +278,10 @@ export async function leaseStatus({ api, environment, now = Date.now(), graceMin
       return null;
     }
   };
-  const newest = records.map(payloadOf).find((payload) => payload?.kind === 'snapshot');
+  // The newest record that says which grace period the workflow used (snapshots and reservations).
+  const newest = records
+    .map(payloadOf)
+    .find((payload) => Number.isSafeInteger(payload?.graceMinutes) && payload.graceMinutes > 0);
   const grace = graceMinutes ?? newest?.graceMinutes ?? 10;
   const turns = resolveTurns(state, now, grace);
   return {

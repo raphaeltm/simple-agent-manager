@@ -50,7 +50,8 @@ function validEntry(entry) {
     text(entry.taskId) &&
     validUtc(entry.reservedAt) &&
     validUtc(entry.expiresAt) &&
-    (entry.lastReservedAt === undefined || validUtc(entry.lastReservedAt))
+    (entry.lastReservedAt === undefined || validUtc(entry.lastReservedAt)) &&
+    (entry.promisedEnd === undefined || validUtc(entry.promisedEnd))
   );
 }
 
@@ -150,7 +151,8 @@ function baseState(parsed) {
 }
 
 // A reservation by a branch already queued keeps its place and extends its expiry. It also records
-// when it was made, so a branch that missed its turn and reserves again rejoins at the back.
+// when it was made, so a branch that missed its turn and reserves again rejoins at the back. A
+// reservation made after the old one expired is a new one: back of the queue.
 export function applyReservation(state, entry) {
   // Only a live hold makes the reservation redundant; a holder whose lease ran out queues again.
   const holder = state.holder;
@@ -160,15 +162,17 @@ export function applyReservation(state, entry) {
   )
     return;
   const existing = state.queue.find((queued) => queued.branch === entry.branch);
-  if (!existing) {
-    state.queue.push({ ...entry });
+  if (existing && Date.parse(existing.expiresAt) <= Date.parse(entry.reservedAt))
+    state.queue.splice(state.queue.indexOf(existing), 1);
+  else if (existing) {
+    if (Date.parse(entry.expiresAt) > Date.parse(existing.expiresAt))
+      existing.expiresAt = entry.expiresAt;
+    if (Date.parse(entry.reservedAt) > Date.parse(existing.lastReservedAt ?? existing.reservedAt))
+      existing.lastReservedAt = entry.reservedAt;
+    if (entry.taskId) existing.taskId = entry.taskId;
     return;
   }
-  if (Date.parse(entry.expiresAt) > Date.parse(existing.expiresAt))
-    existing.expiresAt = entry.expiresAt;
-  if (Date.parse(entry.reservedAt) > Date.parse(existing.lastReservedAt ?? existing.reservedAt))
-    existing.lastReservedAt = entry.reservedAt;
-  if (entry.taskId) existing.taskId = entry.taskId;
+  state.queue.push({ ...entry });
 }
 
 // records: newest first, as GitHub lists deployments. `complete` is true when they are the whole
@@ -256,16 +260,25 @@ export function resolveTurns(state, now, graceMinutes) {
       entries.push({ ...entry, status: 'stale', start, end: start });
       continue;
     }
-    const end = (first ? Math.max(start, promisedAt) : start) + grace;
+    // A window never ends before the end already reported for it (promisedEnd), so a waiter
+    // that left the queue ahead of this one cannot make it miss a turn it scheduled a wake for.
+    const end = Math.max(
+      (first ? Math.max(start, promisedAt) : start) + grace,
+      entry.promisedEnd ? Date.parse(entry.promisedEnd) : 0
+    );
     let status = 'waiting';
     if (!holder && end <= now) status = 'missed';
     else if (!holder && start <= now) status = 'turn';
-    entries.push({ ...entry, status, start, end });
-    previousEnd = end;
     const again = entry.lastReservedAt ? Date.parse(entry.lastReservedAt) : null;
-    if (status === 'missed' && again !== null && again >= end) {
-      // Missed its turn, then reserved again: back of the queue.
-      pending.push({
+    const requeued = status === 'missed' && again !== null && again >= end;
+    entries.push({ ...entry, status, start, end, requeued });
+    previousEnd = end;
+    if (requeued) {
+      // Missed its turn, then reserved again: behind everyone who reserved before that, ahead
+      // of anyone who reserved after.
+      let at = index + 1;
+      while (at < pending.length && Date.parse(pending[at].reservedAt) <= again) at += 1;
+      pending.splice(at, 0, {
         branch: entry.branch,
         taskId: entry.taskId,
         reservedAt: entry.lastReservedAt,
@@ -277,18 +290,36 @@ export function resolveTurns(state, now, graceMinutes) {
   return { holder, lastHolder, freeSince, promisedAt, entries, live, grace };
 }
 
-function queueEntry({ branch, taskId, reservedAt, expiresAt, lastReservedAt }) {
-  return lastReservedAt
-    ? { branch, taskId, reservedAt, expiresAt, lastReservedAt }
-    : { branch, taskId, reservedAt, expiresAt };
+function queueEntry({ branch, taskId, reservedAt, expiresAt, lastReservedAt, promisedEnd }) {
+  return {
+    branch,
+    taskId,
+    reservedAt,
+    expiresAt,
+    ...(lastReservedAt ? { lastReservedAt } : {}),
+    ...(promisedEnd ? { promisedEnd } : {}),
+  };
 }
 
-// The state to store after a decision taken while the slot is free. Dropped (missed or stale)
-// entries are removed, and freeSince/promisedAt are moved so the remaining windows are unchanged.
-// If the branch whose turn it was leaves, the next one may start at once and still keeps the window
-// it was promised.
+// How far back the lease job honours a turn the queue job saw (see hadTurn), in grace periods.
+const ADMISSION_SLACK_GRACES = 3;
+
+// The state to store after a decision taken while the slot is free. Stale entries, and entries that
+// missed their turn longer ago than the admission slack, are removed. freeSince/promisedAt move to
+// the first remaining entry and every entry records the end it was promised, so no remaining window
+// ends earlier than before. If the branch whose turn it was leaves, the next may start at once.
+// Recently missed entries are kept so a delayed lease job can still prove the turn it was let
+// through on (hadTurn).
 function freeSnapshot(turns, keep, now) {
-  const remaining = turns.live.filter(keep);
+  const slack = ADMISSION_SLACK_GRACES * turns.grace;
+  const remaining = turns.entries
+    .filter(
+      (entry) =>
+        entry.status === 'turn' ||
+        entry.status === 'waiting' ||
+        (entry.status === 'missed' && !entry.requeued && entry.end > now - slack)
+    )
+    .filter(keep);
   if (remaining.length === 0)
     return {
       holder: null,
@@ -301,7 +332,7 @@ function freeSnapshot(turns, keep, now) {
     holder: null,
     freeSince: iso(Math.min(first.start, now)),
     promisedAt: iso(first.end - turns.grace),
-    queue: remaining.map(queueEntry),
+    queue: remaining.map((entry) => queueEntry({ ...entry, promisedEnd: iso(entry.end) })),
   };
 }
 
@@ -309,7 +340,11 @@ function freeSnapshot(turns, keep, now) {
 // or for the concurrency group must not cost it the turn. Bounded to a few grace periods back.
 function hadTurn(state, branch, checkedAt, now, graceMinutes) {
   const checked = checkedAt ? Date.parse(checkedAt) : NaN;
-  if (!Number.isFinite(checked) || checked > now || checked < now - 3 * graceMinutes * MINUTE)
+  if (
+    !Number.isFinite(checked) ||
+    checked > now ||
+    checked < now - ADMISSION_SLACK_GRACES * graceMinutes * MINUTE
+  )
     return false;
   return hasTurn(resolveTurns(state, checked, graceMinutes), branch);
 }

@@ -511,3 +511,100 @@ test('a lease job delayed past the turn keeps the turn the queue job saw, within
   assert.equal(granted.holder.branch, 'b');
   assert.deepEqual(await order(db, T0 + 44 * MIN), ['c', 'd', 'e', 'f']);
 });
+
+test('a reservation made after the old one expired goes to the back, not to its old place', async () => {
+  const db = store();
+  const short = { ...timing, reservationMinutes: 45 };
+  await dispatch(db, 'a', 'deploy', T0); // expires T0+60
+  await dispatch(db, 'b', 'reserve', T0 + MIN, { timing: short }); // expires T0+46
+  await dispatch(db, 'c', 'reserve', T0 + 2 * MIN);
+  await dispatch(db, 'b', 'reserve', T0 + 50 * MIN);
+  assert.deepEqual(await order(db, T0 + 51 * MIN), ['c', 'b']);
+  assert.equal((await dispatch(db, 'b', 'acquire', T0 + 61 * MIN)).refused, true);
+  assert.equal((await dispatch(db, 'c', 'acquire', T0 + 61 * MIN)).lease.holder.branch, 'c');
+});
+
+test('a missed head that reserves again is placed by when it reserved, ahead of later reservations', async () => {
+  const db = store();
+  await dispatch(db, 'a', 'acquire', T0); // expires T0+30
+  await dispatch(db, 'b', 'reserve', T0 + MIN);
+  await dispatch(db, 'c', 'reserve', T0 + 2 * MIN);
+  // B misses [30,40). B reserves again at 45, D first reserves at 46, both before any snapshot.
+  await dispatch(db, 'b', 'reserve', T0 + 45 * MIN);
+  await dispatch(db, 'd', 'reserve', T0 + 46 * MIN);
+  assert.deepEqual(await order(db, T0 + 47 * MIN), ['c', 'b', 'd']);
+});
+
+test('when a waiter ahead leaves, later waiters keep the end of the turn they were told', async () => {
+  const db = store();
+  await dispatch(db, 'a', 'acquire', T0); // expires T0+30
+  for (const branch of ['b', 'c', 'd', 'e']) await dispatch(db, branch, 'reserve', T0 + MIN);
+  const before = await status(db, T0 + 31 * MIN);
+  const promised = Object.fromEntries(before.queue.map((entry) => [entry.branch, entry.turnEnds]));
+  assert.equal(promised.d, new Date(T0 + 60 * MIN).toISOString());
+  await dispatch(db, 'c', 'release', T0 + 31 * MIN);
+  const after = await status(db, T0 + 32 * MIN);
+  for (const entry of after.queue)
+    assert.ok(entry.turnEnds >= promised[entry.branch], `${entry.branch} window shrank`);
+  // D wakes at the start it was told (T0+50; B missed [30,40)) and still has its turn.
+  assert.equal(after.queue.find((entry) => entry.branch === 'd').turnEnds, promised.d);
+  assert.equal((await dispatch(db, 'd', 'acquire', T0 + 50 * MIN)).lease.holder.branch, 'd');
+});
+
+test('a delayed lease job keeps its admission even if another snapshot was written meanwhile', async () => {
+  const db = store();
+  await dispatch(db, 'a', 'acquire', T0); // expires T0+30
+  for (const branch of ['b', 'c', 'd']) await dispatch(db, branch, 'reserve', T0 + MIN);
+  // B's queue job saw its turn at T0+39; its lease job starts at T0+43. In between, at T0+41,
+  // D leaves the queue, which writes a snapshot while B has already missed [30,40).
+  await dispatch(db, 'd', 'release', T0 + 41 * MIN);
+  const granted = await runLease({
+    api: db.api,
+    environment: 'staging2',
+    branch: 'b',
+    sha,
+    action: 'acquire',
+    timing,
+    now: T0 + 43 * MIN,
+    turnCheckedAt: new Date(T0 + 39 * MIN).toISOString(),
+  });
+  assert.equal(granted.holder.branch, 'b');
+  assert.deepEqual(await order(db, T0 + 44 * MIN), ['c']);
+});
+
+test('status uses the grace period the workflow recorded, even before the first snapshot', async () => {
+  const db = store();
+  const short = { ...timing, graceMinutes: 3 };
+  await runQueue({
+    api: db.api,
+    environment: 'staging2',
+    branch: 'x',
+    sha,
+    action: 'reserve',
+    timing: short,
+    now: T0,
+  });
+  await runQueue({
+    api: db.api,
+    environment: 'staging2',
+    branch: 'y',
+    sha,
+    action: 'reserve',
+    timing: short,
+    now: T0 + MIN,
+  });
+  const view = await status(db, T0 + 2 * MIN);
+  assert.equal(view.graceMinutes, 3);
+  assert.equal(view.queue[1].turnStarts, new Date(T0 + 3 * MIN).toISOString());
+});
+
+test('a missed head that reserved again is stored once when a snapshot is written soon after', async () => {
+  const db = store();
+  await dispatch(db, 'a', 'acquire', T0); // expires T0+30
+  await dispatch(db, 'b', 'reserve', T0 + MIN);
+  await dispatch(db, 'c', 'reserve', T0 + 2 * MIN);
+  await dispatch(db, 'b', 'reserve', T0 + 41 * MIN); // missed [30,40), within the admission slack
+  await dispatch(db, 'c', 'release', T0 + 42 * MIN); // writes a snapshot
+  assert.deepEqual(await order(db, T0 + 43 * MIN), ['b']);
+  assert.equal((await dispatch(db, 'b', 'acquire', T0 + 43 * MIN)).lease.holder.branch, 'b');
+});
