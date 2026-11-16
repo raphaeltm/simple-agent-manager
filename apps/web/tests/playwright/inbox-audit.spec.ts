@@ -5,7 +5,7 @@
  */
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, screenshot } from './audit-helpers';
+import { assertNoClippedOverflow, assertNoOverflow, screenshot } from './audit-helpers';
 import { type InboxMockState, KIND_ITEMS, MANY_ITEMS, setupInboxMocks } from './inbox-fixtures';
 
 function state(items = MANY_ITEMS, extra: Partial<InboxMockState> = {}): InboxMockState {
@@ -51,6 +51,7 @@ test.describe('Inbox — Mobile', () => {
     ).toBeVisible();
     await expect(page.getByText('3 from')).toBeVisible();
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-list-many');
   });
 
@@ -64,6 +65,7 @@ test.describe('Inbox — Mobile', () => {
     await expect(page.getByText('PR #93 opened: tax totals')).toBeVisible();
     await expect(page.getByText('Input needed (an inbox item, not an update)')).toHaveCount(0);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-updates');
   });
 
@@ -71,6 +73,7 @@ test.describe('Inbox — Mobile', () => {
     await openInbox(page, state([]));
     await expect(page.getByText('Nothing needs you')).toBeVisible();
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-empty');
   });
 
@@ -87,6 +90,7 @@ test.describe('Inbox — Mobile', () => {
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
       await expectControlsPinned(page);
       await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
       await screenshot(page, `inbox-item-${kind.name}`);
     });
   }
@@ -112,6 +116,7 @@ test.describe('Inbox — Mobile', () => {
     await page.getByRole('button', { name: /Archive/ }).click();
     await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-archive-undo');
   });
 
@@ -121,6 +126,7 @@ test.describe('Inbox — Mobile', () => {
       page.getByRole('button', { name: /Allow running the invoices migration/ })
     ).toBeVisible();
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-project');
   });
 });
@@ -139,6 +145,7 @@ test.describe('Inbox — Desktop', () => {
     expect(list!.x + list!.width).toBeLessThanOrEqual(item!.x);
     await expectControlsPinned(page);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-desktop-list');
   });
 
@@ -149,6 +156,7 @@ test.describe('Inbox — Desktop', () => {
       await expect(page.getByTestId('inbox-item-body')).toBeVisible();
       await expectControlsPinned(page);
       await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
       await screenshot(page, `inbox-desktop-item-${kind.name}`);
     });
   }
@@ -165,6 +173,7 @@ test.describe('Inbox — Desktop', () => {
     await openInbox(page, state([]));
     await expect(page.getByText('Nothing needs you')).toBeVisible();
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'inbox-desktop-empty');
   });
 

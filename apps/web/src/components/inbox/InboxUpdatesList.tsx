@@ -1,13 +1,14 @@
 import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, X } from 'lucide-react';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
-import { dismissNotification, markNotificationRead } from '../../lib/api';
-import { notificationQueryKeys, notificationsListQueryOptions } from '../../lib/query-options';
+import { dismissNotification, listNotifications, markNotificationRead } from '../../lib/api';
+import { parseNotificationListItems } from '../../lib/notification-validation';
+import { notificationQueryKeys } from '../../lib/query-options';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
 import {
   isUpdateNotification,
@@ -26,19 +27,31 @@ function projectLabel(notification: NotificationResponse): string | null {
 /** Unread FYI notifications, for the Updates chip count. */
 export function useInboxUpdates(projectId: string | null) {
   const scope = useQueryScope();
-  const params = useMemo(
-    () => (projectId ? { limit: UPDATES_PAGE_SIZE, projectId } : { limit: UPDATES_PAGE_SIZE }),
-    [projectId]
-  );
-  const query = useQuery({
-    ...notificationsListQueryOptions(scope, params),
+  const query = useInfiniteQuery({
+    // Under `notificationQueryKeys.all`, so the notification socket's refresh reaches it.
+    queryKey: [...notificationQueryKeys.all(scope), 'updates', projectId ?? 'all'] as const,
+    queryFn: async ({ pageParam }) => {
+      const response = await listNotifications({
+        limit: UPDATES_PAGE_SIZE,
+        ...(projectId ? { projectId } : {}),
+        ...(pageParam ? { cursor: pageParam } : {}),
+      });
+      return {
+        notifications: parseNotificationListItems(response.notifications, 'inboxUpdates'),
+        nextCursor: response.nextCursor ?? null,
+      };
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
     enabled: Boolean(scope),
   });
   const updates = useMemo(
     () =>
-      (query.data?.notifications ?? []).filter(
-        (notification) => isUpdateNotification(notification.type) && !notification.dismissedAt
-      ),
+      (query.data?.pages ?? [])
+        .flatMap((page) => page.notifications)
+        .filter(
+          (notification) => isUpdateNotification(notification.type) && !notification.dismissedAt
+        ),
     [query.data]
   );
   return {
@@ -46,6 +59,9 @@ export function useInboxUpdates(projectId: string | null) {
     unread: updates.filter((notification) => !notification.readAt).length,
     loaded: query.data !== undefined,
     error: query.error,
+    hasMore: query.hasNextPage,
+    loadMore: () => void query.fetchNextPage(),
+    loadingMore: query.isFetchingNextPage,
   };
 }
 
@@ -65,7 +81,7 @@ export function InboxUpdatesList({
   const navigate = useNavigate();
   const scope = useQueryScope();
   const queryClient = useQueryClient();
-  const { updates, loaded, error } = useInboxUpdates(projectId);
+  const { updates, loaded, error, hasMore, loadMore, loadingMore } = useInboxUpdates(projectId);
   const refresh = () =>
     void queryClient.invalidateQueries({ queryKey: notificationQueryKeys.all(scope) });
 
@@ -94,65 +110,79 @@ export function InboxUpdatesList({
     );
   }
   return (
-    <ul className="m-0 flex flex-col gap-0.5 p-2" aria-label="Updates">
-      {updates.map((notification) => {
-        const config = notificationTypeConfig(notification.type);
-        const Icon = config.icon;
-        const project = showProject ? projectLabel(notification) : null;
-        const open = () => {
-          if (!notification.readAt) void markNotificationRead(notification.id).then(refresh);
-          // In-app paths only: `//host` would be protocol-relative.
-          if (notification.actionUrl && /^\/(?![/\\])/.test(notification.actionUrl))
-            navigate(notification.actionUrl);
-        };
-        return (
-          <li key={notification.id} className="flex list-none items-start gap-1 rounded-xl">
-            <button
-              type="button"
-              onClick={open}
-              className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 rounded-xl border-0 bg-transparent px-3 py-2.5 text-left hover:bg-[var(--sam-glass-v2-raised)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-            >
-              <span
-                aria-hidden="true"
-                className={`sam-well grid h-8 w-8 shrink-0 place-items-center rounded-full ${config.color}`}
+    <>
+      <ul className="m-0 flex flex-col gap-0.5 p-2" aria-label="Updates">
+        {updates.map((notification) => {
+          const config = notificationTypeConfig(notification.type);
+          const Icon = config.icon;
+          const project = showProject ? projectLabel(notification) : null;
+          const open = () => {
+            if (!notification.readAt) void markNotificationRead(notification.id).then(refresh);
+            // In-app paths only: `//host` would be protocol-relative.
+            if (notification.actionUrl && /^\/(?![/\\])/.test(notification.actionUrl))
+              navigate(notification.actionUrl);
+          };
+          return (
+            <li key={notification.id} className="flex list-none items-start gap-1 rounded-xl">
+              <button
+                type="button"
+                onClick={open}
+                className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 rounded-xl border-0 bg-transparent px-3 py-2.5 text-left hover:bg-[var(--sam-glass-v2-raised)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               >
-                <Icon size={15} />
-              </span>
-              <span className="min-w-0 flex-1">
                 <span
-                  className={`block text-sm break-words [overflow-wrap:anywhere] ${notification.readAt ? 'text-fg-secondary' : 'font-medium text-fg-primary'}`}
+                  aria-hidden="true"
+                  className={`sam-well grid h-8 w-8 shrink-0 place-items-center rounded-full ${config.color}`}
                 >
-                  {notification.title}
+                  <Icon size={15} />
                 </span>
-                {notification.body && (
-                  <span className="mt-0.5 line-clamp-2 block text-xs break-words text-fg-muted [overflow-wrap:anywhere]">
-                    {notification.body}
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={`block text-sm break-words [overflow-wrap:anywhere] ${notification.readAt ? 'text-fg-secondary' : 'font-medium text-fg-primary'}`}
+                  >
+                    {notification.title}
                   </span>
-                )}
-                <span className="mt-0.5 flex min-w-0 flex-wrap gap-x-1 text-xs text-fg-muted">
-                  <span>{config.label}</span>
-                  {project && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className="min-w-0 max-w-full truncate">{project}</span>
-                    </>
+                  {notification.body && (
+                    <span className="mt-0.5 line-clamp-2 block text-xs break-words text-fg-muted [overflow-wrap:anywhere]">
+                      {notification.body}
+                    </span>
                   )}
-                  <span aria-hidden="true">·</span>
-                  <span>{formatAge(notification.createdAt, now)}</span>
+                  <span className="mt-0.5 flex min-w-0 flex-wrap gap-x-1 text-xs text-fg-muted">
+                    <span>{config.label}</span>
+                    {project && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="min-w-0 max-w-full truncate">{project}</span>
+                      </>
+                    )}
+                    <span aria-hidden="true">·</span>
+                    <span>{formatAge(notification.createdAt, now)}</span>
+                  </span>
                 </span>
-              </span>
-            </button>
-            <button
-              type="button"
-              aria-label={`Dismiss ${notification.title}`}
-              onClick={() => void dismissNotification(notification.id).then(refresh)}
-              className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-full border-0 bg-transparent text-fg-muted hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-            >
-              <X size={15} aria-hidden="true" />
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+              </button>
+              <button
+                type="button"
+                aria-label={`Dismiss ${notification.title}`}
+                onClick={() => void dismissNotification(notification.id).then(refresh)}
+                className="grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-full border-0 bg-transparent text-fg-muted hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+              >
+                <X size={15} aria-hidden="true" />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {hasMore && (
+        <div className="flex justify-center pb-3">
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="min-h-11 cursor-pointer border-0 bg-transparent px-3 text-sm text-accent disabled:opacity-60"
+          >
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      )}
+    </>
   );
 }

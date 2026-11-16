@@ -88,10 +88,6 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
   listNodes: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('../../src/components/NotificationCenter', () => ({
-  NotificationCenter: () => <button type="button" aria-label="Notifications" />,
-}));
-
 vi.mock('../../src/components/RecentChatsDropdown', () => ({
   RecentChatsDropdown: () => <button type="button" aria-label="Recent chats" />,
 }));

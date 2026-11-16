@@ -82,8 +82,8 @@ interface PendingArchive {
 /**
  * Archive with an Undo window. `schedule` hides nothing itself: the caller hides the item and
  * shows the receipt. The request is sent when the window ends, when another archive is
- * scheduled, when the page unmounts (navigation) or when the tab is hidden or closed
- * (`pagehide`), with `keepalive` so a closing tab still delivers it.
+ * scheduled, when the page unmounts (navigation), or when the tab is hidden (`visibilitychange`) or
+ * closed (`pagehide`), with `keepalive` so a closing tab still delivers it.
  */
 export function usePendingArchive({
   onSent,
@@ -143,9 +143,15 @@ export function usePendingArchive({
   useEffect(() => {
     mountedRef.current = true;
     const onPageHide = () => flush(true);
+    // A phone may kill a backgrounded tab without a pagehide, so a hidden tab sends it too.
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush(true);
+    };
     window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
       mountedRef.current = false;
       flush(true);
     };

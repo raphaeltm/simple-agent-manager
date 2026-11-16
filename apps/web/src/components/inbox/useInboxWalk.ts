@@ -40,9 +40,14 @@ export function useInboxWalk({
 
   const list = useInboxList(projectId, view === 'updates' ? 'needs_you' : view, view !== 'updates');
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+  // `hidden` holds what this session answered or archived until the server list catches up. The
+  // Archived view lists exactly those archives, so it must not filter them out.
   const order = useMemo(
-    () => walkOrder(list.items.filter((item) => !hidden.has(item.ref))),
-    [list.items, hidden]
+    () =>
+      walkOrder(
+        view === 'archived' ? list.items : list.items.filter((item) => !hidden.has(item.ref))
+      ),
+    [list.items, hidden, view]
   );
   const orderRef = useRef(order);
   orderRef.current = order;

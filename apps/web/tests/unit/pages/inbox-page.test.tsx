@@ -72,6 +72,7 @@ function json(status: number, body: unknown) {
 
 function installFetch(server: Server) {
   const closed = new Set<string>();
+  const archived = new Set<string>();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -88,8 +89,17 @@ function installFetch(server: Server) {
           needsYou: open.length,
           blocking: open.filter((i) => i.blocking).length,
         });
-      if (method === 'GET' && /\/inbox$/.test(path))
+      if (method === 'GET' && /\/inbox$/.test(path)) {
+        if (url.searchParams.get('filter') === 'archived')
+          return json(200, {
+            items: server.items
+              .filter((candidate) => archived.has(candidate.ref))
+              .map((candidate) => ({ ...candidate, status: 'archived' })),
+            nextCursor: null,
+            skipped: 0,
+          });
         return json(200, { items: open, nextCursor: null, skipped: 0 });
+      }
       const itemMatch = path.match(/\/inbox\/items\/(.+?)(\/answer|\/archive)?$/);
       if (itemMatch) {
         const ref = itemMatch[1]!;
@@ -97,6 +107,7 @@ function installFetch(server: Server) {
         if (!found) return json(404, { error: 'NOT_FOUND', message: 'Inbox item not found' });
         if (itemMatch[2]) {
           closed.add(ref);
+          if (itemMatch[2] === '/archive') archived.add(ref);
           return json(200, {
             ref,
             outcome: itemMatch[2] === '/archive' ? 'archived' : 'answered',
@@ -163,7 +174,11 @@ function LocationProbe() {
 
 function renderInbox(entry = '/inbox') {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: false } },
+    // Same focus default as the app's client (`lib/query-client.ts`): inbox queries must opt in.
+    defaultOptions: {
+      queries: { retry: false, gcTime: Infinity, refetchOnWindowFocus: false },
+      mutations: { retry: false },
+    },
   });
   const view = render(
     <QueryClientProvider client={client}>
@@ -519,5 +534,104 @@ describe('InboxPage — archive', () => {
     });
     expect(await screen.findByTestId('inbox-receipt')).toHaveTextContent('Agent wake not allowed');
     expect(screen.getByRole('button', { name: /Title ask:a/ })).toBeInTheDocument();
+  });
+});
+
+describe('InboxPage — navigation, filters and freshness', () => {
+  it('steps with previous / next and goes back to the list on a phone', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' }), item({ ref: 'ask:c' })];
+    installFetch(server);
+    renderInbox(openUrl('ask:b'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:b',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Next item' }));
+    await within(itemPane()).findByRole('heading', { name: 'Title ask:c' });
+    expect(screen.getByRole('button', { name: 'Next item' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous item' }));
+    await within(itemPane()).findByRole('heading', { name: 'Title ask:b' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to inbox' }));
+    await waitFor(() => expect(location).toBe('/inbox'));
+    expect(answerCalls(server)).toHaveLength(0);
+  });
+
+  it('a chip filters the list on the server', async () => {
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox();
+    await screen.findByRole('button', { name: /Title ask:a/ });
+    fireEvent.click(screen.getByRole('tab', { name: /^Blocking/ }));
+    await waitFor(() => expect(location).toBe('/inbox?filter=blocking'));
+    await waitFor(() =>
+      expect(server.calls.some((c) => c.path === '/api/inbox' && c.method === 'GET')).toBe(true)
+    );
+    expect(screen.getByRole('tab', { name: /^Blocking/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('an item archived this session is listed under Archived (⋯ menu)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    renderInbox();
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Archive/ }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(INBOX_ARCHIVE_UNDO_MS + 100);
+    });
+    await waitFor(() => expect(archiveCalls(server)).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: 'More filters' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Archived/ }));
+    expect(await screen.findByRole('button', { name: /Title ask:a/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Archived/ })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('refreshes on window focus, without polling', async () => {
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox();
+    await screen.findByRole('button', { name: /Title ask:a/ });
+    const countCalls = () => server.calls.filter((c) => c.path === '/api/inbox/count').length;
+    const before = countCalls();
+    act(() => {
+      // TanStack's focus manager listens for `visibilitychange` on window.
+      window.dispatchEvent(new Event('visibilitychange'));
+    });
+    await waitFor(() => expect(countCalls()).toBeGreaterThan(before));
+    const { inboxCountQueryOptions, inboxListQueryOptions, inboxItemQueryOptions } =
+      await import('../../../src/lib/query-options');
+    expect(inboxCountQueryOptions('u', null).refetchInterval).toBeUndefined();
+    expect(inboxListQueryOptions('u', null, 'needs_you').refetchInterval).toBeUndefined();
+    expect(inboxItemQueryOptions('u', 'p', 'r').refetchInterval).toBeUndefined();
+  });
+
+  it('a refetch keeps the list rows mounted', async () => {
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    const { client } = renderInbox();
+    const row = await screen.findByRole('button', { name: /Title ask:b/ });
+    await act(async () => {
+      await client.invalidateQueries();
+    });
+    expect(screen.getByRole('button', { name: /Title ask:b/ })).toBe(row);
+  });
+
+  it('closes an item whose fresh read says it is no longer open', async () => {
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    server.override = (method, path) =>
+      method === 'GET' && path.endsWith('/items/ask:a')
+        ? {
+            status: 200,
+            body: { item: item({ ref: 'ask:a', status: 'answered' }), context: null },
+          }
+        : undefined;
+    installFetch(server);
+    renderInbox(openUrl('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:b',
+    });
+    expect(screen.getByTestId('inbox-receipt')).toHaveTextContent('Already handled somewhere else');
   });
 });

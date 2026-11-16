@@ -45,6 +45,7 @@ const NOTIFICATIONS = [
 ];
 
 const calls: { method: string; path: string; search: string }[] = [];
+let listBody: unknown = null;
 let location = '';
 function Probe() {
   const current = useLocation();
@@ -54,6 +55,7 @@ function Probe() {
 
 beforeEach(() => {
   calls.length = 0;
+  listBody = null;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -65,7 +67,7 @@ beforeEach(() => {
       });
       const body =
         url.pathname === '/api/notifications'
-          ? { notifications: NOTIFICATIONS, unreadCount: 7, nextCursor: null }
+          ? (listBody ?? { notifications: NOTIFICATIONS, unreadCount: 7, nextCursor: null })
           : {};
       return new Response(JSON.stringify(body), {
         status: 200,
@@ -135,5 +137,37 @@ describe('Inbox Updates', () => {
     renderList('p1');
     await screen.findByText('A mention');
     expect(calls.find((c) => c.path === '/api/notifications')?.search).toContain('projectId=p1');
+  });
+});
+
+describe('Inbox Updates — malformed rows', () => {
+  it('drops a malformed row and keeps the valid ones', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    listBody = {
+      notifications: [notification({ type: 'mention' }), { id: 42, type: null }],
+      unreadCount: 2,
+      nextCursor: null,
+    };
+    renderList(null);
+    expect(await screen.findByText('A mention')).toBeInTheDocument();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('shows the empty state when the response has no notifications array', async () => {
+    listBody = { error: 'upstream unavailable' };
+    renderList(null);
+    expect(await screen.findByText('No updates')).toBeInTheDocument();
+  });
+
+  it('loads the next page on demand', async () => {
+    listBody = {
+      notifications: [notification({ type: 'mention' })],
+      unreadCount: 1,
+      nextCursor: 'c2',
+    };
+    renderList(null);
+    fireEvent.click(await screen.findByRole('button', { name: 'Load more' }));
+    await waitFor(() => expect(calls.some((c) => c.search.includes('cursor=c2'))).toBe(true));
   });
 });
