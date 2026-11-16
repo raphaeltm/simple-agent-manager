@@ -96,3 +96,26 @@ export function inboxWakeContent(input: {
     ' Reply in the task with inbox_write method comment when they asked something; then carry on.'
   );
 }
+
+/**
+ * Active subscriptions watching one inbox item (the chat that assigned a task plus chats that
+ * attached to it), for the `inbox.watchersPerItemMax` cap. One indexed read of the match keys.
+ */
+export function countInboxItemWatchers(sql: SqlStorage, projectId: string, itemId: string): number {
+  const row = sql
+    .exec(
+      `SELECT COUNT(DISTINCT s.id) AS count
+         FROM project_event_subscription_match_keys k
+         JOIN project_event_subscriptions s ON s.id = k.subscription_id AND s.project_id = k.project_id
+        WHERE k.project_id = ? AND k.field_name = 'subjectId' AND k.field_value = ?
+          AND s.lifecycle_state = 'active'
+          AND EXISTS (SELECT 1 FROM project_event_subscription_match_keys src
+                       WHERE src.subscription_id = s.id AND src.field_name = 'source'
+                         AND src.field_value = ?)`,
+      projectId,
+      itemId,
+      INBOX_EVENT_SOURCE
+    )
+    .toArray()[0];
+  return typeof row?.count === 'number' ? row.count : 0;
+}

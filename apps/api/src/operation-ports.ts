@@ -59,6 +59,7 @@ import {
 import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
 import { createInboxPort } from './services/inbox/port';
+import { createInboxTaskPort } from './services/inbox/task-port';
 import { resolveProfileAccountBindings } from './services/profile-account-bindings';
 import * as projectData from './services/project-data';
 import { describeRootSearchCoverage } from './services/project-data-search-coverage';
@@ -152,6 +153,7 @@ export function createOperationPorts(env: Env): OperationPorts {
       connectorReadLimits: () => getConnectorReadLimits(env),
     },
     inbox: createInboxPort(env),
+    inboxTasks: createInboxTaskPort(env),
     access: {
       requireProjectAccess: (projectId, userId) => requireProjectAccess(db(), projectId, userId),
       requireProjectCapability: (projectId, userId, capability) =>

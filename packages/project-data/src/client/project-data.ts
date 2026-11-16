@@ -2316,6 +2316,20 @@ export async function listInboxItemCommentThreads(
   );
 }
 
+export async function countInboxItemWatchers(
+  env: Env,
+  projectId: string,
+  itemId: string
+): Promise<number> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'countInboxItemWatchers',
+    (stub) => stub.countInboxItemWatchers(projectId, itemId),
+    'idempotent_read'
+  );
+}
+
 export async function createInboxItemComment(
   env: Env,
   projectId: string,

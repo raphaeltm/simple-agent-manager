@@ -66,6 +66,7 @@ import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
+import { countInboxItemWatchers } from './inbox-event-wake';
 import * as inboxItemComments from './inbox-item-comments';
 import * as libraryFileComments from './library-file-comments';
 import * as links from './links';
@@ -2612,6 +2613,10 @@ export class ProjectData extends DurableObject<Env> {
     input: inboxItemComments.ListInboxItemCommentThreadsInput
   ): ReturnType<typeof inboxItemComments.listInboxItemCommentThreads> {
     return inboxItemComments.listInboxItemCommentThreads(this.sql, this.env, input);
+  }
+
+  countInboxItemWatchers(projectId: string, itemId: string): number {
+    return countInboxItemWatchers(this.sql, projectId, itemId);
   }
 
   createInboxItemComment(
