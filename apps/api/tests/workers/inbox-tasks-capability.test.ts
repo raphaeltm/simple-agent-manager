@@ -7,12 +7,18 @@
  *
  * Every guard runs on a real SQL engine (D1 and the Durable Object's SQLite).
  */
+import { runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { moveDepartedMemberTasksToTeam } from '../../src/services/inbox/departed-member-tasks';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
-import { inboxRows, materializeWakes, sqlRows } from './helpers/agent-message-channels';
+import {
+  inboxRows,
+  materializeWakes,
+  sqlRows,
+  withProjectDataEnv,
+} from './helpers/agent-message-channels';
 import {
   callTool,
   fetchMock,
@@ -660,6 +666,73 @@ describe('human tasks through the real entry points', () => {
       requestedDelivery: 'record_only',
     });
     expect(allowed).toBeTruthy();
+  });
+
+  it('two members take a team task at once: exactly one wins and one claim is recorded', async () => {
+    const s = await seed();
+    const third = await addMember(s, 'maintainer', 'sam');
+    const filed = await assign(s, { title: 'Renew the domain', assignee: { team: true } });
+    const ref = filed.inboxItem.ref;
+    const results = await Promise.all([
+      post(itemPath(s, ref, '/claim'), s.colleagueCookie, {}),
+      post(itemPath(s, ref, '/claim'), third.cookie, {}),
+    ]);
+    expect(results.filter((result) => result.status === 200)).toHaveLength(1);
+    expect(results.filter((result) => result.status !== 200)).toHaveLength(1);
+    const view = await get<TaskView>(itemPath(s, ref), s.ownerCookie);
+    expect(view.body.task?.activity.filter((entry) => entry.kind === 'claimed')).toHaveLength(1);
+    expect(view.body.task?.claimedBy).not.toBeNull();
+  });
+
+  it("the filing chat's work finished: the task stays open and its changes are recorded, not delivered", async () => {
+    const s = await seed();
+    const filed = await assign(s, {
+      title: 'Confirm the invoice address',
+      assignee: { userId: s.colleagueId },
+    });
+    const ref = filed.inboxItem.ref;
+    await deliverWakes(s, s.chatSessionId);
+    // The real alarm path (it checks the source task before materializing a wake).
+    const alarmWakes = async () => {
+      await withProjectDataEnv(s.project, { PROJECT_EVENT_WAKE_ENABLED: 'true' }, () =>
+        runInDurableObject(s.project, (instance) =>
+          (
+            instance as unknown as { runProjectEventWakeMaterializationAlarm(): Promise<void> }
+          ).runProjectEventWakeMaterializationAlarm()
+        )
+      );
+      return (await inboxRows(s.project)).filter(
+        (row) =>
+          row.target_session_id === s.chatSessionId && row.source_kind === 'project_event_wake'
+      );
+    };
+    // Control: while the chat's task is running, the alarm delivers a comment's wake.
+    await post(itemPath(s, ref, '/comments'), s.colleagueCookie, { body: 'Head office?' });
+    expect(await alarmWakes()).toHaveLength(1);
+    await deliverWakes(s, s.chatSessionId);
+
+    await testEnv.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+      .bind(s.taskId)
+      .run();
+    const commented = await post(itemPath(s, ref, '/comments'), s.colleagueCookie, {
+      body: 'Which office?',
+    });
+    expect(commented.status).toBe(200);
+    const view = await get<TaskView>(itemPath(s, ref), s.colleagueCookie);
+    expect(view.body.item.status).toBe('open');
+    expect(view.body.task?.discussion.map((thread) => thread.body)).toEqual([
+      'Head office?',
+      'Which office?',
+    ]);
+    // The event is recorded ...
+    const events = await sqlRows<{ id: string }>(
+      s.project,
+      `SELECT id FROM project_events WHERE source = 'sam.inbox' AND subject_id = ?`,
+      filed.inboxItem.id
+    );
+    expect(events.length).toBe(2);
+    // ... but the alarm does not wake a chat whose task finished.
+    expect(await alarmWakes()).toHaveLength(0);
   });
 });
 
