@@ -39,3 +39,5 @@ Adjacent main-layout gap: token/device/workload sign-ins invoke internalAdapter 
 - [x] Thread inbound headers through three existing routes into session-factory; persist validated helper IP for normal/capped sessions; test real workload persistence with spoof XFF and missing/malformed controls plus token/device caller payloads.
 
 Final pre-PR validation (2026-11-16): root lint 22/22 tasks; typecheck 36/36; build 18/18; final immutable-head root test 39/39 package tasks passed. First broad run overlapped final test/factory edits and observed old cached module against new assertions in two route tests; final unchanged-head rerun passed. All local reviewers PASS/ADDRESSED through 3deaf9155: security, Cloudflare, completion, tests, docs, constitution. Task stays active pending staging/release evidence.
+
+Sonar review: gate passed but reported S3776 complexity43 and duplicate branches in extracted heartbeat reconciliation. Split selection, backfill and DNS reconciliation into focused internal functions; preserve callback routing, IP ownership and DNS operations. Targeted heartbeat46/46 tests pass; final re-review and full validation rerun required after this delta.

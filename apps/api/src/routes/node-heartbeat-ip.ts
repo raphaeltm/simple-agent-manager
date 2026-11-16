@@ -34,19 +34,18 @@ function isValidIPv4Address(value: string | null | undefined): value is string {
   });
 }
 
-export async function applyHeartbeatIp(params: {
+type HeartbeatIpParams = {
   c: Context<{ Bindings: Env }>;
   node: Node;
   nodeId: string;
   updatePayload: Record<string, unknown>;
-}): Promise<void> {
-  const { c, node, nodeId, updatePayload } = params;
-  // Self-heal stale "Awaiting IP allocation" error on nodes that already have an IP.
-  // This handles nodes where the IP was backfilled before this fix was deployed.
-  if (node.ipAddress && node.errorMessage?.includes('Awaiting IP allocation')) {
-    updatePayload.errorMessage = sql`NULL`;
-  }
+};
 
+function selectHeartbeatIp(
+  node: Node,
+  nodeId: string,
+  connectingIp: string | undefined
+): string | undefined {
   // Tunnel-transport nodes are reached via a proxied CNAME → cloudflared, NOT a public-IP A record,
   // and their CF-Connecting-IP is the tunnel/NAT egress. Suppress ALL IP/A-record backfill for them
   // server-side (keyed on tunnelId presence, NOT nodeClass — a future public-IP BYO mode still wants
@@ -64,79 +63,87 @@ export async function applyHeartbeatIp(params: {
   if (node.tunnelId && !deploymentTunnelIpBackfill) {
     log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
   }
-  const connectingIp = clientIpFromHeaders((name) => c.req.header(name)) ?? undefined;
-  let heartbeatIp: string | undefined;
-  if (!node.tunnelId) {
-    heartbeatIp = connectingIp;
-  } else if (deploymentTunnelIpBackfill && isValidIPv4Address(connectingIp)) {
-    heartbeatIp = connectingIp;
+  if (!node.tunnelId || (deploymentTunnelIpBackfill && isValidIPv4Address(connectingIp))) {
+    return connectingIp;
   }
+  return undefined;
+}
 
-  // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
-  // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
-  let effectiveNodeIp = node.tunnelId ? null : node.ipAddress;
+function backfillNodeIp(
+  node: Node,
+  nodeId: string,
+  heartbeatIp: string | undefined,
+  updatePayload: Record<string, unknown>
+): void {
+  if (node.ipAddress || !heartbeatIp) return;
+  log.info('heartbeat.ip_backfilled', {
+    nodeId,
+    backfilledIp: heartbeatIp,
+    action: 'ip_backfilled',
+  });
+  updatePayload.ipAddress = heartbeatIp;
+  // Explicit SQL NULL is required: an undefined property is dropped by Drizzle/D1.
+  updatePayload.errorMessage = sql`NULL`;
+  if (node.status === 'creating' || node.status === 'error') updatePayload.status = 'running';
+}
 
-  if (!node.ipAddress) {
-    if (heartbeatIp) {
-      log.info('heartbeat.ip_backfilled', {
-        nodeId,
-        backfilledIp: heartbeatIp,
-        action: 'ip_backfilled',
-      });
-      updatePayload.ipAddress = heartbeatIp;
-      effectiveNodeIp = node.tunnelId ? null : heartbeatIp;
-
-      // Always clear the "Awaiting IP allocation" error when IP is backfilled.
-      // Use explicit SQL null to ensure Drizzle/D1 generates SET errorMessage = NULL
-      // (assigning null to a Record<string, unknown> property may be silently dropped).
+async function reconcileHeartbeatDns(
+  params: HeartbeatIpParams,
+  heartbeatIp: string | undefined,
+  effectiveNodeIp: string
+): Promise<void> {
+  const { c, node, nodeId, updatePayload } = params;
+  const heartbeatIpv4 = isValidIPv4Address(heartbeatIp) ? heartbeatIp : null;
+  const dnsIp = heartbeatIpv4 || effectiveNodeIp;
+  try {
+    if (node.backendDnsRecordId) {
+      if (heartbeatIpv4 && heartbeatIpv4 !== node.ipAddress) {
+        await updateDNSRecord(node.backendDnsRecordId, heartbeatIpv4, c.env);
+        log.info('heartbeat.backend_dns_updated', {
+          nodeId,
+          ipAddress: heartbeatIpv4,
+          previousIpAddress: node.ipAddress,
+        });
+      }
+      return;
+    }
+    const dnsRecordId = await createNodeBackendDNSRecord(nodeId, dnsIp, c.env);
+    updatePayload.backendDnsRecordId = dnsRecordId;
+    if (isBackendDnsError(node.errorMessage)) {
       updatePayload.errorMessage = sql`NULL`;
-
-      // Transition to running if the node was awaiting IP allocation
-      if (node.status === 'creating' || node.status === 'error') {
+      if (node.status === 'error') {
         updatePayload.status = 'running';
       }
     }
+    log.info('heartbeat.backend_dns_backfilled', {
+      nodeId,
+      ipAddress: dnsIp,
+      source: heartbeatIpv4 ? 'heartbeat' : 'stored',
+    });
+  } catch (dnsErr) {
+    const message = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
+    updatePayload.errorMessage = truncateNodeLifecycleError(
+      `${NODE_BACKEND_DNS_ERROR_PREFIX} ${message}`
+    );
+    log.error('heartbeat.backend_dns_backfill_failed', {
+      nodeId,
+      ipAddress: dnsIp,
+      hasExistingDnsRecord: !!node.backendDnsRecordId,
+      error: String(dnsErr),
+    });
   }
+}
 
-  if (effectiveNodeIp) {
-    const heartbeatIpv4 = isValidIPv4Address(heartbeatIp) ? heartbeatIp : null;
-    const dnsIp = heartbeatIpv4 || effectiveNodeIp;
-    try {
-      if (node.backendDnsRecordId) {
-        if (heartbeatIpv4 && heartbeatIpv4 !== node.ipAddress) {
-          await updateDNSRecord(node.backendDnsRecordId, heartbeatIpv4, c.env);
-          log.info('heartbeat.backend_dns_updated', {
-            nodeId,
-            ipAddress: heartbeatIpv4,
-            previousIpAddress: node.ipAddress,
-          });
-        }
-      } else {
-        const dnsRecordId = await createNodeBackendDNSRecord(nodeId, dnsIp, c.env);
-        updatePayload.backendDnsRecordId = dnsRecordId;
-        if (isBackendDnsError(node.errorMessage)) {
-          updatePayload.errorMessage = sql`NULL`;
-          if (node.status === 'error') {
-            updatePayload.status = 'running';
-          }
-        }
-        log.info('heartbeat.backend_dns_backfilled', {
-          nodeId,
-          ipAddress: dnsIp,
-          source: heartbeatIpv4 ? 'heartbeat' : 'stored',
-        });
-      }
-    } catch (dnsErr) {
-      const message = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
-      updatePayload.errorMessage = truncateNodeLifecycleError(
-        `${NODE_BACKEND_DNS_ERROR_PREFIX} ${message}`
-      );
-      log.error('heartbeat.backend_dns_backfill_failed', {
-        nodeId,
-        ipAddress: dnsIp,
-        hasExistingDnsRecord: !!node.backendDnsRecordId,
-        error: String(dnsErr),
-      });
-    }
+export async function applyHeartbeatIp(params: HeartbeatIpParams): Promise<void> {
+  const { c, node, nodeId, updatePayload } = params;
+  // Also heal an old awaiting-IP error when the address was backfilled on a prior heartbeat.
+  if (node.ipAddress && node.errorMessage?.includes('Awaiting IP allocation')) {
+    updatePayload.errorMessage = sql`NULL`;
   }
+  const connectingIp = clientIpFromHeaders((name) => c.req.header(name)) ?? undefined;
+  const heartbeatIp = selectHeartbeatIp(node, nodeId, connectingIp);
+  backfillNodeIp(node, nodeId, heartbeatIp, updatePayload);
+  // A tunnel's app-route IP may be recorded, but its CNAME must never get a backend A record.
+  const effectiveNodeIp = node.tunnelId ? null : node.ipAddress || heartbeatIp;
+  if (effectiveNodeIp) await reconcileHeartbeatDns(params, heartbeatIp, effectiveNodeIp);
 }
