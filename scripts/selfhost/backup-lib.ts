@@ -342,8 +342,11 @@ export function runBackup(
   try {
     pullBucket(ctx, liveDir);
   } catch (err) {
+    // Box round R17: the 404 on a node lease read like a defect. It is the expected case.
     ctx.log(
-      `live pre-copy incomplete, the delta copy with celld stopped will finish it: ${firstLine(err)}`
+      'live pre-copy incomplete (expected: celld rewrites its node lease, waker and capacity ' +
+        'objects every few seconds, so a copy of the running bucket misses some, often with a ' +
+        `404); the delta copy with celld stopped copies them: ${firstLine(err)}`
     );
   }
   const precopyMs = ctx.now() - precopyStart;

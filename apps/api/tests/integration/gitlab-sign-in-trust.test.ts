@@ -22,6 +22,7 @@ import {
   __resetPlatformConfigCacheForTest,
   completeSetupWithConfig,
 } from '../../src/services/platform-config';
+import { startFakeSmtpServer } from '../helpers/fake-smtp-server';
 import {
   buildAuthApp,
   type CookieJar,
@@ -206,6 +207,20 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
       image: string;
     };
 
+  // Box round R17 (D4): better-auth prepended its default read_user to SAM's list.
+  it('asks GitLab for each scope exactly once', async () => {
+    const env = await runtimeGitLabEnv('https://gitlab.com');
+    const authorizeUrl = await startSocialSignIn(app, env, jar, {
+      apiOrigin: API_ORIGIN,
+      appOrigin: APP_ORIGIN,
+      provider: 'gitlab',
+      callbackURL: CALLBACK_URL,
+    });
+    expect(authorizeUrl.searchParams.get('scope')).toBe(
+      'read_user api read_repository write_repository'
+    );
+  });
+
   it('refuses a runtime self-managed host that claims the owner’s verified email (2026-11-12)', async () => {
     const env = await runtimeGitLabEnv(SELF_MANAGED_HOST);
     const gitlab = createFakeGitLab(SELF_MANAGED_HOST, profileClaiming(OWNER.email));
@@ -344,6 +359,35 @@ describe('GitLab sign-in trust by identity host (vertical slice)', () => {
     expect(callback.headers.get('location')).toBe(CALLBACK_URL);
     expect(await currentUserId(env)).toBe(OWNER.id);
     expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+  });
+
+  // Box round R17 (D1): on a self-hosted box (SMTP, no AGENT_EMAIL) the owner alert for a newly
+  // linked sign-in was dropped with security_alert.no_sender. Entered through better-auth's own
+  // account.create.after hook, during a real GitLab callback.
+  it('emails the owners over SMTP when a GitLab sign-in is linked to the superadmin', async () => {
+    const smtp = await startFakeSmtpServer({ mode: 'plain' });
+    try {
+      const env = await runtimeGitLabEnv(PUBLIC_HOST, {
+        SMTP_HOST: '127.0.0.1',
+        SMTP_PORT: String(smtp.port),
+        SMTP_TLS: 'none',
+        SMTP_FROM: 'alerts@example.com',
+      } as Partial<Env>);
+      vi.stubGlobal('fetch', createFakeGitLab(PUBLIC_HOST, profileClaiming(OWNER.email)).fetch);
+      const linkedSubject =
+        'Subject: SAM security alert: a GitLab sign-in was linked to a superadmin account';
+      const linkAlerts = () => smtp.messages.filter((m) => m.data.includes(linkedSubject));
+      expect(linkAlerts()).toHaveLength(0);
+
+      const callback = await signInWithGitLab(env, PUBLIC_HOST);
+
+      expect(callback.headers.get('location')).toBe(CALLBACK_URL);
+      expect(gitlabAccounts()).toEqual([{ account_id: '424242', user_id: OWNER.id }]);
+      await vi.waitFor(() => expect(linkAlerts()).toHaveLength(1));
+      expect(linkAlerts()[0]).toMatchObject({ from: 'alerts@example.com', to: [OWNER.email] });
+    } finally {
+      await smtp.close();
+    }
   });
 
   it('links a self-managed host the deployer pinned in the Worker environment', async () => {

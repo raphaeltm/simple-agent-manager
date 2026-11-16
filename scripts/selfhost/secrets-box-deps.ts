@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 import { REPO_ROOT } from './backup-cli';
 import { type BoxContext, composeArgs } from './backup-lib';
-import { intEnv } from './deploy-steps';
+import { adoptAndCheck } from './celld-adopt';
 import { detectKeyCandidates } from './key-platforms';
 import { keyAgentPort } from './key-service';
 import { knownSecrets, scanDeployVersions } from './plaintext-scan';
@@ -78,57 +78,4 @@ export function boxMigrateDeps(ctx: BoxContext): MigrateDeps {
       return current.secretNames;
     },
   };
-}
-
-/**
- * How long the check after a secrets deploy keeps trying. celld can stall for seconds while it
- * adopts a version (6.5 s on sam-box in box round R11), and one refused fetch then failed a
- * rotation that `rotate --resume` finished at once. A version that is really broken still fails,
- * after this window. Override with SELFHOST_ADOPT_CHECK_WINDOW_MS.
- */
-export const DEFAULT_ADOPT_CHECK_WINDOW_MS = 30_000;
-const DEFAULT_ADOPT_POLL_INTERVAL_MS = 2000;
-const DEFAULT_RELOAD_REQUEST_TIMEOUT_MS = 60_000;
-const DEFAULT_HEALTH_REQUEST_TIMEOUT_MS = 30_000;
-
-/**
- * celld adopts the newest deployment now; then the API must answer its health check. Both are
- * retried until the window ends (the reload only re-reads deploy/current.json, so repeating it is
- * safe), as `pnpm selfhost:deploy`'s own health wait does (waitForHealth in deploy-steps.ts).
- */
-export async function adoptAndCheck(
-  box: Readonly<Record<string, string>>
-): Promise<{ healthy: boolean; detail: string }> {
-  const deadline =
-    Date.now() + intEnv('SELFHOST_ADOPT_CHECK_WINDOW_MS', DEFAULT_ADOPT_CHECK_WINDOW_MS);
-  const pollMs = intEnv('SELFHOST_HEALTH_POLL_INTERVAL_MS', DEFAULT_ADOPT_POLL_INTERVAL_MS);
-  for (;;) {
-    const result = await adoptAndCheckOnce(box);
-    if (result.healthy || Date.now() + pollMs >= deadline) return result;
-    await sleep(pollMs);
-  }
-}
-
-async function adoptAndCheckOnce(
-  box: Readonly<Record<string, string>>
-): Promise<{ healthy: boolean; detail: string }> {
-  const internal = box.CELLD_INTERNAL_PORT || '7001';
-  const reload = await fetch(`http://127.0.0.1:${internal}/reload`, {
-    method: 'POST',
-    signal: AbortSignal.timeout(DEFAULT_RELOAD_REQUEST_TIMEOUT_MS),
-  }).catch((error: unknown) => error);
-  if (!(reload instanceof Response) || !reload.ok) {
-    const detail = reload instanceof Response ? `HTTP ${reload.status}` : String(reload);
-    return { healthy: false, detail: `celld did not adopt the deployment (${detail})` };
-  }
-  await reload.arrayBuffer().catch(() => undefined);
-  const health = await fetch(`http://127.0.0.1:${box.CELLD_PORT || '8080'}/health`, {
-    headers: { host: `api.${box.SAM_DOMAIN ?? ''}`, 'x-forwarded-proto': 'https' },
-    signal: AbortSignal.timeout(DEFAULT_HEALTH_REQUEST_TIMEOUT_MS),
-  }).catch((error: unknown) => error);
-  if (!(health instanceof Response)) return { healthy: false, detail: String(health) };
-  if (health.ok) return { healthy: true, detail: 'HTTP 200' };
-  const body = (await health.text()).slice(0, 300);
-  const code = /"code"\s*:\s*"([A-Z_]+)"/.exec(body)?.[1];
-  return { healthy: false, detail: `HTTP ${health.status}${code ? ` ${code}` : ''}` };
 }

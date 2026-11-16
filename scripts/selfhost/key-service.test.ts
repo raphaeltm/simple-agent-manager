@@ -223,6 +223,97 @@ describe('resolveSealedSecrets', () => {
   });
 });
 
+// Box round R16: deleting a line from secrets.env left the value in the newest sealed bundle
+// (bundles merge secrets.env over it), and only moving bundle files by hand removed it.
+describe('removing a sealed value (pnpm selfhost:deploy --unset NAME)', () => {
+  const newest = async () => {
+    const bundle = listBundles(join(state, 'key-agent/bundles'))[0];
+    if (!bundle) throw new Error('no bundle');
+    return openBundle(bundle, createFileProvider({ SAM_KEY_FILE: join(state, 'key-agent/kek') }));
+  };
+  // Bundles are ordered by createdAt (ms); two seals in one millisecond would tie, which no real
+  // deploy can do. Space them as the other bundle tests do.
+  const tick = () => new Promise((done) => setTimeout(done, 5));
+  const seal = async (operatorSecrets: Record<string, string>, unset?: string[]) => {
+    await tick();
+    return resolveSealedSecrets({
+      settings: settings(),
+      platformKeysFile: null,
+      operatorSecrets,
+      unset,
+    });
+  };
+
+  it('reproduces R16: a deleted secrets.env line survives in the sealed secrets', async () => {
+    await seal({ PROVIDER_ORPHAN_MIN_AGE_MS: '900000' });
+    const after = await seal({});
+    expect(after.secrets.PROVIDER_ORPHAN_MIN_AGE_MS).toBe('900000');
+    expect((await newest()).PROVIDER_ORPHAN_MIN_AGE_MS).toBe('900000');
+  });
+
+  it('removes it into a new bundle, and keeps every other secret', async () => {
+    await seal({ ...OPERATOR, PROVIDER_ORPHAN_MIN_AGE_MS: '900000' });
+    const before = await newest();
+    const rest: Record<string, string> = { ...OPERATOR };
+    const lines: string[] = [];
+    await tick();
+    const r = await resolveSealedSecrets({
+      settings: settings(),
+      platformKeysFile: null,
+      operatorSecrets: rest,
+      unset: ['PROVIDER_ORPHAN_MIN_AGE_MS'],
+      log: (line) => lines.push(line),
+    });
+    expect(r.sealed).toBe(true);
+    const opened = await newest();
+    expect(listBundles(join(state, 'key-agent/bundles'))[0]?.bundleId).toBe(r.bundleId);
+    expect(opened).not.toHaveProperty('PROVIDER_ORPHAN_MIN_AGE_MS');
+    const expected = { ...before };
+    delete expected.PROVIDER_ORPHAN_MIN_AGE_MS;
+    expect(opened).toEqual(expected);
+    expect(lines.join('\n')).toContain(
+      'removing PROVIDER_ORPHAN_MIN_AGE_MS from the sealed secrets'
+    );
+    // The next plain deploy keeps it removed.
+    expect((await seal(rest)).secrets).not.toHaveProperty('PROVIDER_ORPHAN_MIN_AGE_MS');
+  });
+
+  it('refuses while the line is still in secrets.env, and changes nothing', async () => {
+    const first = await seal({ PROVIDER_ORPHAN_MIN_AGE_MS: '900000' });
+    await expect(
+      seal({ PROVIDER_ORPHAN_MIN_AGE_MS: '900000' }, ['PROVIDER_ORPHAN_MIN_AGE_MS'])
+    ).rejects.toThrow(/still in secrets\.env.*Delete its line first/);
+    expect(listBundles(join(state, 'key-agent/bundles')).map((b) => b.bundleId)).toEqual([
+      first.bundleId,
+    ]);
+  });
+
+  it.each([...PLATFORM_KEY_NAMES, 'SAM_KEY_AGENT_SIGNING_KEY'])(
+    'refuses to remove %s, a key SAM generates',
+    async (name) => {
+      const first = await seal({});
+      expect(first.secrets[name]).toBeTruthy();
+      await expect(seal({}, [name])).rejects.toThrow(/SAM generates this key/);
+      expect((await newest())[name]).toBe(first.secrets[name]);
+    }
+  );
+
+  it('says when there is nothing to remove, and seals nothing new', async () => {
+    const first = await seal({});
+    const lines: string[] = [];
+    const r = await resolveSealedSecrets({
+      settings: settings(),
+      platformKeysFile: null,
+      operatorSecrets: {},
+      unset: ['NEVER_SET'],
+      log: (line) => lines.push(line),
+    });
+    expect(r.bundleId).toBe(first.bundleId);
+    expect(r.sealed).toBe(false);
+    expect(lines).toContain('NEVER_SET is not in the sealed secrets; nothing to remove');
+  });
+});
+
 describe('agent signing key', () => {
   it('is generated once into the bundle; the Worker gets only its public half', async () => {
     const r = await resolveSealedSecrets({

@@ -11,7 +11,9 @@
  *   only when no other VM uses it.
  * - Firewall rules (`sam-allow-agent`, `sam-allow-app-routes`, gcp-firewall.ts): one fixed name per
  *   project shared by every SAM install there, with no install identity on them. Teardown cannot
- *   prove one is this install's, so it never deletes them; it prints the command.
+ *   prove one is this install's, so it never deletes them; it prints the command, and says which
+ *   other VMs the rule applies to (its network and target tags, read from the rule itself), so a VM
+ *   that merely carries SAM labels without the rule's tag is not reported as using it.
  * - Workload identity, node service account, KMS key: removed by the bootstrap's own teardown
  *   (deploy/selfhost/gcp-teardown.sh), which re-proves each recorded resource first.
  */
@@ -53,6 +55,18 @@ interface GcpInstance {
   zone: string;
   labels: Record<string, string>;
   disks: Array<{ source: string; autoDelete: boolean }>;
+  /** Network tags (`tags.items`): what a firewall rule's `targetTags` select. */
+  tags: string[];
+  /** Names (last path segment) of the networks its interfaces are on. */
+  networks: string[];
+}
+
+/** What a firewall rule applies to (gcloud `firewall-rules describe --format=json`). */
+interface GcpFirewallTargets {
+  network: string | null;
+  targetTags: string[];
+  /** Rules selecting by service account are not modelled: report them as unknown. */
+  targetServiceAccounts: boolean;
 }
 
 export function gcpItems(ctx: TeardownContext): Item[] {
@@ -129,7 +143,27 @@ function parseInstance(value: unknown): GcpInstance {
         .map((d) => ({ source: d.source as string, autoDelete: d.autoDelete === true }))
     : [];
   if (!GCE_NAME.test(v.name)) throw new Error(`unexpected instance name ${JSON.stringify(v.name)}`);
-  return { id: v.id, name: v.name, zone: v.zone.split('/').pop() ?? v.zone, labels, disks };
+  const tagItems = (v.tags as { items?: unknown } | undefined)?.items;
+  const tags = Array.isArray(tagItems) ? tagItems.filter((t) => typeof t === 'string') : [];
+  const networks = Array.isArray(v.networkInterfaces)
+    ? v.networkInterfaces
+        .map((n) => (n as Record<string, unknown>)?.network)
+        .filter((n): n is string => typeof n === 'string')
+        .map(lastSegment)
+    : [];
+  return {
+    id: v.id,
+    name: v.name,
+    zone: v.zone.split('/').pop() ?? v.zone,
+    labels,
+    disks,
+    tags,
+    networks,
+  };
+}
+
+function lastSegment(value: string): string {
+  return value.split('/').pop() ?? value;
 }
 
 /** Why an instance is not this install's, or null when every ownership label matches. */
@@ -284,9 +318,10 @@ function firewallItems(
   project: string,
   listed: GcpInstance[] | Error
 ): Item[] {
-  const others =
-    listed instanceof Error ? [] : listed.filter((i) => ownershipRefusal(i, ctx.installationId));
   const items: Item[] = [];
+  // Every VM in the project, labelled or not, read only when a rule exists: a rule is in use
+  // when it applies to a VM teardown does not remove, whoever made that VM.
+  let everyInstance: GcpInstance[] | Error | undefined;
   for (const rule of [SAM_AGENT_FIREWALL_RULE_NAME, SAM_APP_ROUTE_FIREWALL_RULE_NAME]) {
     const found = gcloud(ctx, [
       'compute',
@@ -294,7 +329,7 @@ function firewallItems(
       'describe',
       rule,
       `--project=${project}`,
-      '--format=value(name)',
+      '--format=json',
     ]);
     if (found.status !== 0) {
       if (gcloudNotFound(found.stderr)) continue;
@@ -313,16 +348,19 @@ function firewallItems(
       });
       continue;
     }
-    const inUse =
-      others.length > 0
-        ? `; ${others.length} other SAM VM(s) in this project still use it, so keep it`
-        : '';
+    everyInstance ??= listAllInstances(ctx, project);
+    const usage = firewallUsage(
+      parseFirewallTargets(found.stdout),
+      everyInstance,
+      listed,
+      ctx.installationId
+    );
     items.push({
       id: `gcp:${project}:firewall:${rule}`,
       place: 'in your cloud, made by SAM at runtime',
       what: `firewall rule ${rule} (${project})`,
       provenance: 'discovered, not recorded',
-      how: `gcloud compute firewall-rules delete ${rule} --project=${project}, only if no other SAM install uses ${project}${inUse}`,
+      how: `gcloud compute firewall-rules delete ${rule} --project=${project}, only if no other SAM install uses ${project}; ${usage}`,
       step: STEPS.compute,
       plan: {
         'keep-data': { act: 'keep', why: 'the next node needs it' },
@@ -334,4 +372,95 @@ function firewallItems(
     });
   }
   return items;
+}
+
+function listAllInstances(ctx: TeardownContext, project: string): GcpInstance[] | Error {
+  const result = gcloud(ctx, [
+    'compute',
+    'instances',
+    'list',
+    `--project=${project}`,
+    '--format=json',
+  ]);
+  if (result.status !== 0) return new Error(gcloudReason(result.stderr));
+  try {
+    const parsed = JSON.parse(result.stdout) as unknown;
+    if (!Array.isArray(parsed)) throw new Error('not a list');
+    return parsed.map(parseInstance);
+  } catch (error) {
+    return new Error(
+      `unreadable instance list: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+export function parseFirewallTargets(json: string): GcpFirewallTargets | null {
+  try {
+    const raw: unknown = JSON.parse(json);
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const v = raw as Record<string, unknown>;
+    const targetTags = Array.isArray(v.targetTags)
+      ? v.targetTags.filter((t): t is string => typeof t === 'string')
+      : [];
+    return {
+      network: typeof v.network === 'string' ? lastSegment(v.network) : null,
+      targetTags,
+      targetServiceAccounts:
+        Array.isArray(v.targetServiceAccounts) && v.targetServiceAccounts.length > 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which VMs the rule applies to, as advice for the operator. A VM uses a rule when it is on the
+ * rule's network and, if the rule has target tags, carries one of them (GCP firewall semantics).
+ * This install's own node VMs are left out: teardown removes them. Read-only; never decides a
+ * deletion.
+ */
+export function firewallUsage(
+  rule: GcpFirewallTargets | null,
+  everyInstance: GcpInstance[] | Error,
+  labelled: GcpInstance[] | Error,
+  installationId: string | null
+): string {
+  if (!rule || rule.targetServiceAccounts) {
+    return 'teardown could not read which VMs it applies to; check them before deleting it';
+  }
+  if (everyInstance instanceof Error) {
+    return `teardown could not list the project's VMs to see which use it (${everyInstance.message})`;
+  }
+  const own = new Set(
+    (labelled instanceof Error ? [] : labelled)
+      .filter((i) => ownershipRefusal(i, installationId) === null)
+      .map((i) => i.id)
+  );
+  const applies = (i: GcpInstance) =>
+    (rule.network === null || i.networks.includes(rule.network)) &&
+    (rule.targetTags.length === 0 || i.tags.some((t) => rule.targetTags.includes(t)));
+  const others = everyInstance.filter((i) => !own.has(i.id));
+  const users = others.filter(applies);
+  const target =
+    rule.targetTags.length > 0
+      ? `tag ${rule.targetTags.join(', ')}`
+      : `every VM on network ${rule.network ?? '?'}`;
+  if (users.length > 0) {
+    return `${users.length} other VM(s) in this project use it (${target}: ${names(users)}), so keep it`;
+  }
+  const lookalikes = others.filter(
+    (i) => i.labels[SAM_MANAGED_LABEL_KEY] === SAM_MANAGED_LABEL_VALUE
+  );
+  const aside =
+    lookalikes.length > 0
+      ? `; ${lookalikes.length} other SAM-labelled VM(s) do not carry it (${names(lookalikes)})`
+      : '';
+  return `no existing VM in this project uses it (${target}; a VM made later may)${aside}`;
+}
+
+function names(instances: GcpInstance[]): string {
+  const shown = instances.slice(0, 5).map((i) => i.name);
+  return instances.length > 5
+    ? `${shown.join(', ')} and ${instances.length - 5} more`
+    : shown.join(', ');
 }

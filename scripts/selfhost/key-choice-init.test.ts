@@ -163,6 +163,41 @@ describe('pnpm selfhost:deploy --init (sealed secrets by default)', () => {
     expect(secrets.GITHUB_CLIENT_SECRET).toBe(OPERATOR_SECRET);
   });
 
+  // Security review of --unset: applying it seals a bundle without the value (and the seal prunes
+  // old bundles), so under --dry-run it must only check the name.
+  it('deploy --dry-run --unset only checks the name and keeps the sealed value', async () => {
+    const envFile = writeBox(dir);
+    mkdirSync(state, { mode: 0o700 });
+    writeFileSync(join(state, 'secrets.env'), `F5_UNSET_PROBE=${OPERATOR_SECRET}\n`, {
+      mode: 0o600,
+    });
+    expect((await runDeploy(envFile, ['--init'])).status).toBe(0);
+    expect((await sealedSecrets()).F5_UNSET_PROBE).toBe(OPERATOR_SECRET);
+
+    // Still in secrets.env: refused.
+    const refused = await runDeploy(envFile, [
+      '--dry-run',
+      '--skip-vm-agent',
+      '--unset',
+      'F5_UNSET_PROBE',
+    ]);
+    expect(refused.status).not.toBe(0);
+    expect(refused.out).toContain('still in secrets.env');
+
+    writeFileSync(join(state, 'secrets.env'), '', { mode: 0o600 });
+    const before = bundles();
+    const dry = await runDeploy(envFile, [
+      '--dry-run',
+      '--skip-vm-agent',
+      '--unset',
+      'F5_UNSET_PROBE',
+    ]);
+    expect(dry.status, dry.out).toBe(0);
+    expect(dry.out).toContain('dry run: would remove F5_UNSET_PROBE');
+    expect(bundles()).toEqual(before);
+    expect((await sealedSecrets()).F5_UNSET_PROBE).toBe(OPERATOR_SECRET);
+  });
+
   it('a box whose bundles exist but whose choice record is gone keeps their provider', async () => {
     const envFile = writeBox(dir);
     expect((await runDeploy(envFile, ['--init'])).status).toBe(0);

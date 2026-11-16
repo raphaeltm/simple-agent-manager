@@ -39,6 +39,21 @@ export interface FakeKeyServiceOptions {
   existingKeys?: readonly string[];
   /** The project id the fake GCE metadata server reports. */
   gcpProject?: string;
+  /** The VM name and zone the fake GCE metadata server reports (unset: it answers 404). */
+  gceInstance?: { name: string; zone: string };
+}
+
+/** The fake GCE metadata answer for this VM's name or zone, or null for any other path. */
+function gceInstanceAnswer(
+  path: string,
+  instance: FakeKeyServiceOptions['gceInstance']
+): string | null {
+  if (!instance) return null;
+  if (path === '/computeMetadata/v1/instance/name') return instance.name;
+  if (path === '/computeMetadata/v1/instance/zone') {
+    return `projects/123456789012/zones/${instance.zone}`;
+  }
+  return null;
 }
 
 async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -89,6 +104,12 @@ export async function startFakeKeyServices(
         if (request.headers['metadata-flavor'] !== 'Google') return send(403, {});
         response.writeHead(200, { 'content-type': 'text/plain', 'metadata-flavor': 'Google' });
         return response.end(options.gcpProject ?? 'sam-test-project');
+      }
+      const instanceAnswer = gceInstanceAnswer(url.pathname, options.gceInstance);
+      if (instanceAnswer !== null) {
+        if (request.headers['metadata-flavor'] !== 'Google') return send(403, {});
+        response.writeHead(200, { 'content-type': 'text/plain', 'metadata-flavor': 'Google' });
+        return response.end(instanceAnswer);
       }
       if (url.pathname === '/metadata/instance/compute') {
         if (request.headers.metadata !== 'true') return send(400, {});

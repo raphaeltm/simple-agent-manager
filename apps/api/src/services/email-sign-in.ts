@@ -35,12 +35,9 @@ import {
 } from '../middleware/rate-limit';
 import { agentEmailDomain } from './agent-email/address';
 import { listSendingSubdomains } from './agent-email/cloudflare-email-api';
-import {
-  type EmailTransportEnv,
-  emailTransportKind,
-  systemEmailTransportFor,
-} from './agent-email/provider';
+import { type EmailTransportEnv, emailTransportKind } from './agent-email/provider';
 import { getAgentEmailLimits } from './agent-email/settings';
+import { resolveSystemEmailTransport } from './agent-email/system-email';
 import { bootstrapOwnerEmail, bootstrapOwnerEstablished } from './bootstrap-owner';
 
 const log = createModuleLogger('email-sign-in');
@@ -257,10 +254,7 @@ export async function deliverSignInCode(env: Env, email: string, code: string): 
       log.info('email_sign_in.code_not_sent', { reason: 'no_account' });
       return;
     }
-    // The timeout setting is read only where it applies, so a Cloudflare send costs no read.
-    const smtpTimeoutMs =
-      emailTransportKind(env) === 'smtp' ? (await getAgentEmailLimits(env)).smtpTimeoutMs : 0;
-    const transport = systemEmailTransportFor(env, { smtpTimeoutMs });
+    const transport = await resolveSystemEmailTransport(env);
     if (!transport) return;
     // The note goes to the mailbox, not into the API response, so the response still reveals
     // nothing about which addresses have accounts.

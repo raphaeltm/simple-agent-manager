@@ -60,6 +60,8 @@ export interface KeyCandidate {
    * Unset when the key is only the conventional name the one-time setup would create.
    */
   configuredBy?: string;
+  /** This box's VM name and zone, when the platform named them; fills printed commands only. */
+  boxInstance?: { name: string; zone: string };
 }
 
 /** Why a platform yielded no usable cloud key, for the fallback reason line. */
@@ -222,6 +224,13 @@ export interface SealingFloor {
 }
 
 /**
+ * The command a refused automatic choice is retried with (box round R15, G4: "run the same command
+ * again" after a bootstrap command read as "run the bootstrap again"). `switch --to auto` passes
+ * its own.
+ */
+const DEFAULT_RERUN = '`pnpm selfhost:deploy --init`';
+
+/**
  * THE rule for every automatic choice of a key provider (chooseKeyProvider, reached by
  * `deploy --init`, `secrets migrate` through it, and `secrets switch --to auto`): never seal with
  * a provider weaker (sealingStrength) than any floor, where a floor is
@@ -237,7 +246,8 @@ export interface SealingFloor {
  */
 export function sealingFloorRefusal(
   chosen: string,
-  floors: readonly SealingFloor[]
+  floors: readonly SealingFloor[],
+  rerun: string = DEFAULT_RERUN
 ): string | null {
   const above = floors.filter((f) => sealingStrength(f.provider) > sealingStrength(chosen));
   if (above.length === 0) return null;
@@ -248,7 +258,8 @@ export function sealingFloorRefusal(
     'A key file on the box is weaker than a key held off it (it sits next to the secrets it opens),',
     'and SAM does not fall back to a weaker key by itself.',
     ...fixes,
-    'Then run the same command again. To seal with a key file on purpose, say so: set',
+    `Then run ${rerun} again on this box, in the SAM checkout.`,
+    'To seal with a key file on purpose, say so: set',
     'SAM_KEY_PROVIDER=file in .env for `pnpm selfhost:deploy --init`, or run',
     '`pnpm selfhost:secrets switch --to file` on a sealed box.',
   ].join(' ');
@@ -272,8 +283,10 @@ function gcpNewKeyVersionCommand(box: Box, candidate: KeyCandidate): string {
       : '';
   return (
     `\`pnpm selfhost:gcp-bootstrap -- --project ${project} --api-url ` +
-    `https://api.${box.SAM_DOMAIN ?? '<SAM_DOMAIN>'} --kms-only${named} --box-instance <box VM> ` +
-    '--box-zone <zone> --new-key-version` (or --restore-key-version within 30 days of the ' +
+    `https://api.${box.SAM_DOMAIN ?? '<SAM_DOMAIN>'} --kms-only${named} ` +
+    `--box-instance ${candidate.boxInstance?.name ?? '<box VM>'} ` +
+    `--box-zone ${candidate.boxInstance?.zone ?? '<zone>'} --new-key-version\`` +
+    ' (or --restore-key-version within 30 days of the ' +
     'teardown; README, Cloud key, one-time setup)'
   );
 }
@@ -396,6 +409,8 @@ export interface ChooseInput {
   now?: () => Date;
   /** Floors beyond the candidates' own: the box's current provider for `switch --to auto`. */
   floors?: readonly SealingFloor[];
+  /** The command a refusal tells the operator to run again (default `pnpm selfhost:deploy --init`). */
+  rerun?: string;
 }
 
 const FILE_CANDIDATE: KeyCandidate = {
@@ -457,7 +472,7 @@ export async function chooseKeyProvider(input: ChooseInput): Promise<KeyChoice> 
     if (floor) floors.push(floor);
     failures.push(`${candidate.label} is not usable (${failure.text})`);
   }
-  const refusal = sealingFloorRefusal('file', floors);
+  const refusal = sealingFloorRefusal('file', floors, input.rerun);
   if (refusal) throw new Error(`${found.platform ?? 'this host'}: ${refusal}`);
   const why =
     failures.length > 0

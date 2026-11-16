@@ -47,6 +47,7 @@ export function candidatesFor(facts: PlatformFacts, box: Box): PlatformCandidate
       settings: { SAM_GCP_KMS_KEY: key },
       label: `Cloud KMS key ${key}`,
       ...(configured ? { configuredBy: 'SAM_GCP_KMS_KEY' } : {}),
+      ...(facts.instance ? { boxInstance: facts.instance } : {}),
     };
     return { platform, candidates: [candidate] };
   }

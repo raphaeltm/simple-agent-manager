@@ -28,7 +28,12 @@ const LINK_LOCAL = '169.254.169.254';
 const MAX_ANSWER_BYTES = 64 * 1024;
 
 export type PlatformFacts =
-  | { platform: 'gcp'; projectId: string }
+  | {
+      platform: 'gcp';
+      projectId: string;
+      /** This VM's name and zone, when the metadata service names them (for printed commands). */
+      instance?: { name: string; zone: string };
+    }
   | { platform: 'aws'; region: string; accountId: string }
   | { platform: 'azure'; location: string; subscriptionId: string };
 
@@ -117,7 +122,38 @@ async function probeGce(box: Box, timeoutMs: number): Promise<PlatformFacts> {
   }
   const projectId = text.trim();
   if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(projectId)) throw new Error('no project id');
-  return { platform: 'gcp', projectId };
+  const instance = await gceInstance(box, timeoutMs);
+  return { platform: 'gcp', projectId, ...(instance ? { instance } : {}) };
+}
+
+/** Compute Engine resource names (RFC 1035), as instance names and zones are. */
+const GCE_NAME = /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/;
+
+/**
+ * The VM's own name and zone, only to fill printed commands in for the operator (never used to
+ * decide anything). Best effort: any miss leaves the placeholders in the command.
+ */
+async function gceInstance(
+  box: Box,
+  timeoutMs: number
+): Promise<{ name: string; zone: string } | null> {
+  const read = async (path: string): Promise<string | null> => {
+    try {
+      const { response, text } = await call(
+        `http://${host(box, 'SAM_GCE_METADATA_HOST')}/computeMetadata/v1/instance/${path}`,
+        { headers: { 'Metadata-Flavor': 'Google' } },
+        timeoutMs
+      );
+      if (!response.ok || response.headers.get('metadata-flavor') !== 'Google') return null;
+      return text.trim();
+    } catch {
+      return null;
+    }
+  };
+  const [name, zonePath] = await Promise.all([read('name'), read('zone')]);
+  // The zone answer is `projects/<number>/zones/<zone>`.
+  const zone = zonePath?.split('/').pop() ?? null;
+  return name && zone && GCE_NAME.test(name) && GCE_NAME.test(zone) ? { name, zone } : null;
 }
 
 async function probeAws(box: Box, timeoutMs: number): Promise<PlatformFacts> {

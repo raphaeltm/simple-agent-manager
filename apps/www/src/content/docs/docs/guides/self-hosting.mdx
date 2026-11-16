@@ -136,7 +136,7 @@ When the deployment can send email (see the optional email permissions above), S
 - first-run setup completes;
 - a GitHub, Google or GitLab sign-in is linked to an admin or superadmin account.
 
-The emails come from `security@agents.yourdomain.com` and link to the admin page to review. Before the first superadmin exists, the owner email the installer recorded (`BOOTSTRAP_OWNER_EMAIL`) gets them instead. Sending is best-effort: a failed email is logged (`security_alert.send_failed`) and never blocks the change. Without email, nothing is sent.
+The emails come from `security@agents.yourdomain.com` (on a self-hosted box that sends through SMTP, from your `SMTP_FROM` address, the same transport as sign-in codes) and link to the admin page to review. Before the first superadmin exists, the owner email the installer recorded (`BOOTSTRAP_OWNER_EMAIL`) gets them instead. Sending is best-effort: a failed email is logged (`security_alert.send_failed`) and never blocks the change. Without email, nothing is sent.
 
 ### Set up GitLab sign-in
 

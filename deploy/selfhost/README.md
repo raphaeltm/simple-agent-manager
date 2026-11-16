@@ -195,6 +195,13 @@ uses (`agents/releases/<release>/vm-agent-linux-<arch>`, immutable), then pins t
 `--skip-vm-agent` skips this for a control-plane-only box. The release is resolved from git
 history, so the checkout must be a full clone (not `--depth 1`).
 
+After `celld deploy` the deploy asks celld to switch to the new version at once (`POST /reload` on
+its internal listener; on its own celld reads the deploy pointer only every 30 s,
+`CELLD_DEPLOY_POLL_S`), then checks `/health`, and with `AGENT_SIGN_IN_TRUST` set also checks that
+the agent sign-in route answers. So "deployed" means the new version serves. A version that does
+not build stops the deploy with celld's error, and the previous version keeps serving
+(`scripts/selfhost/celld-adopt.ts`).
+
 Worker secrets that are yours to supply (GitHub App, OAuth clients) go in
 `deploy/selfhost/.state/secrets.env` (`NAME=value`, mode 600). The deploy seals them, with the
 platform keys it generates once, into a bundle only the box's key agent can open (Sealed secrets,
@@ -234,6 +241,21 @@ Worker's 3 s wait for the agent), it serves the copy it already opened while the
 key service that refuses (`denied`) drops that copy. Measured on Google Cloud: opening a bundle
 through Cloud KMS takes about 190-235 ms the first time (metadata token included), about 115-135 ms
 on a later reopen.
+
+**Removing a sealed value.** Each deploy lays `secrets.env` over the newest bundle, so deleting a
+line from `secrets.env` does not remove a value that was sealed before: the next bundle keeps it.
+Delete the line, then deploy once with `--unset`:
+
+```bash
+pnpm selfhost:deploy --unset PROVIDER_ORPHAN_MIN_AGE_MS     # repeat --unset for more names
+```
+
+It seals a new bundle without that name and deploys it; later deploys keep it removed. It refuses
+a name still in `secrets.env` (that line would win again) and SAM's own generated keys
+(`ENCRYPTION_KEY` and the other platform keys: rotate those instead). The two older bundles kept for
+rollback, and any backup, still hold the value until later seals replace them or you delete them
+(`scripts/selfhost/key-service.ts`, `assertUnsettable`). On a `legacy-plaintext` box every deploy
+rebuilds the secrets from `secrets.env`, so deleting the line is enough.
 
 **Which key provider.** `pnpm selfhost:deploy --init` chooses once, records the choice and why
 in `.state/key-agent/choice.json`, and every deploy prints it (`key provider: file (...)`);
@@ -603,7 +625,10 @@ off the box, or the cloud key), the install's platform keys and every backup are
 SAM emails a six-digit sign-in code. On a box there is no Cloudflare Email Sending, so the Worker
 sends through SMTP (`packages/agent-email/src/smtp-client.ts`). Codes go only to
 addresses that already have an account, and to `BOOTSTRAP_OWNER_EMAIL` until that owner exists,
-exactly as on Cloudflare. Choose one of:
+exactly as on Cloudflare. The owner security alerts (an integration saved or cleared, setup
+completed, a sign-in linked to an admin) go out through the same SMTP transport, from `SMTP_FROM`
+(`resolveSystemEmailTransport` in `apps/api/src/services/agent-email/system-email.ts`). Choose one
+of:
 
 **A real SMTP relay** (any provider with SMTP submission). In `.env`:
 
@@ -710,6 +735,10 @@ public internet, so a public issuer needs no fence entry. Agents request the aud
 `https://api.SAM_DOMAIN/api/auth/workload-identity-login`. The box needs an administrator account
 first. Choose targets that are not administrators and not linked to real GitHub organizations.
 
+The deploy checks the route on the new version before it prints "deployed"; if the value does not
+parse, the Worker logs `agent_sign_in.config_invalid`, the route answers 404 and the deploy stops
+saying so.
+
 ## Machines for workspaces
 
 Nodes come from a compute pool. A box with a platform cloud credential (**Admin → Credentials →
@@ -782,8 +811,9 @@ pnpm selfhost:restore --from <backup dir>    # into an EMPTY bucket and .state/ 
 A backup is the fleet bucket (celld's only durable state), `.state/` (without the rebuildable
 vm-agent build cache `.state/go-cache`) and `.env`: a live copy,
 then celld stopped for the delta copy only, then restarted; the downtime is printed and kept in
-`backup-manifest.json`. The live copy may fail on objects celld rewrites while it runs; that is
-logged and the delta copy finishes it. The backup is exactly the bucket as celld left it when it
+`backup-manifest.json`. The live copy may fail on objects celld rewrites while it runs (its node
+lease, often as a 404); that is expected, logged as "live pre-copy incomplete (expected: ...)", and
+the delta copy finishes it. The backup is exactly the bucket as celld left it when it
 stopped, deletions included. The delta copy writes into a different directory than the live copy
 did, so state an aborted `gcloud` pass left behind cannot break it; if the delta copy still
 fails, the whole bucket is copied again into a fresh directory before celld restarts (longer

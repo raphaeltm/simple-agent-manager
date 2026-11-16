@@ -4,6 +4,7 @@
  *
  *   pnpm selfhost:deploy [--env-file deploy/selfhost/.env] [--state-dir <env dir>/.state]
  *                        [--secrets <state-dir>/secrets.env] [--web-dist DIR] [--dry-run] [--init]
+ *                        [--unset NAME ...]
  *                        [--skip-vm-agent] [--key-provider NAME]
  *
  * `--init` chooses the key provider that seals the Worker secrets when none is recorded
@@ -46,6 +47,7 @@ import {
   resolveTunnelSettings,
   tunnelWorkerVars,
 } from './box-settings.js';
+import { verifyNewVersionServes } from './celld-adopt.js';
 import { ensureCelldBinary, resolveEsbuild } from './celld-binary.js';
 import {
   assertOperatorSecretsAllowed,
@@ -61,7 +63,6 @@ import {
   intEnv,
   redact,
   syncGatewayEnv,
-  waitForHealth,
 } from './deploy-steps.js';
 import {
   assertCelldTaggedImages,
@@ -85,6 +86,7 @@ import {
   celldDeployConfig,
   keyAgentUrl,
   resolveDeployKeys,
+  unsetForThisRun,
 } from './key-service.js';
 import {
   ensureMailCollectorPassword,
@@ -193,6 +195,8 @@ async function main(): Promise<void> {
       init: { type: 'boolean', default: false },
       'skip-vm-agent': { type: 'boolean', default: false },
       'key-provider': { type: 'string' },
+      // Remove a sealed value whose secrets.env line was deleted (key-service.ts assertUnsettable).
+      unset: { type: 'string', multiple: true },
     },
   });
   const envFile = resolve(values['env-file'] ?? join(REPO_ROOT, 'deploy/selfhost/.env'));
@@ -223,7 +227,13 @@ async function main(): Promise<void> {
 
   // Sealed secrets (key-service.ts): the platform keys and secrets.env go into a bundle only the
   // key agent can open, and no secret is passed to celld. Off: every secret is a Worker var.
-  const { keyService, keys, sealed } = await resolveDeployKeys({ box, stateDir, secretsPath, log });
+  const { keyService, keys, sealed } = await resolveDeployKeys({
+    box,
+    stateDir,
+    secretsPath,
+    log,
+    unset: unsetForThisRun(values.unset, values['dry-run'], secretsPath, log),
+  });
   // What this install is, for `pnpm selfhost:teardown` (install-record.ts). No secrets.
   if (!values['dry-run']) recordInstall(stateDir, envFile, box, keys.SAM_INSTALLATION_ID);
   // docker compose passes this file to frps and Caddy (env_file); rewritten only on change.
@@ -409,7 +419,17 @@ async function main(): Promise<void> {
     }
   }
 
-  await waitForHealth(box.CELLD_PORT || DEFAULT_CELLD_PORT, baseDomain);
+  // celld reads deploy/current.json only every CELLD_DEPLOY_POLL_S (30 s); without this the
+  // health check below passed on the previous version (box round R15, G3). celld-adopt.ts.
+  await verifyNewVersionServes(
+    box,
+    {
+      celldPort: box.CELLD_PORT || DEFAULT_CELLD_PORT,
+      baseDomain,
+      agentSignInConfigured: Boolean(secrets.AGENT_SIGN_IN_TRUST?.trim()),
+    },
+    log
+  );
   log(`deployed: https://app.${baseDomain} (API https://api.${baseDomain})`);
   if (collectorPassword) {
     log(

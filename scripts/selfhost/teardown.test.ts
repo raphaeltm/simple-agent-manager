@@ -34,6 +34,12 @@ const PROJECT = 'sam-test-proj';
 const BOX_SA = `sam-box@${PROJECT}.iam.gserviceaccount.com`;
 const OTHER_INSTALL = 'ffffffffffffffffffffffffffffffff';
 const ZONE_URL = `https://www.googleapis.com/compute/v1/projects/${PROJECT}/zones/europe-west1-b`;
+const NETWORK_URL = `https://www.googleapis.com/compute/v1/projects/${PROJECT}/global/networks/default`;
+/** The rules as ensureGcpFirewallRules creates them (packages/providers/src/gcp-firewall.ts). */
+const FIREWALLS = {
+  'sam-allow-agent': { network: NETWORK_URL, targetTags: ['sam-agent'] },
+  'sam-allow-app-routes': { network: NETWORK_URL, targetTags: ['sam-deployment-app-routes'] },
+};
 const VOLUMES = [
   'sam-selfhost_celld-data',
   'sam-selfhost_caddy-data',
@@ -101,6 +107,9 @@ function vm(name: string, installation: string, extra: Partial<Record<string, st
       ...extra,
     },
     disks: [{ source: `${ZONE_URL}/disks/${name}`, autoDelete: true }],
+    // As SAM's GCP provider creates a node (packages/providers/src/gcp.ts): tag sam-agent, default network.
+    tags: { items: ['sam-agent'] },
+    networkInterfaces: [{ network: NETWORK_URL }],
   };
 }
 
@@ -154,7 +163,7 @@ async function install(): Promise<void> {
       'sam-data-b': { users: ['b'] },
       'sam-node-other': { users: ['o'] },
     };
-    db.firewalls = { 'sam-allow-agent': {}, 'sam-allow-app-routes': {} };
+    db.firewalls = structuredClone(FIREWALLS);
     db.objects = {
       'gs://fleet/celld/deploy/current.json': 10,
       'gs://fleet/celld/deploy/workspaces-api/v1/manifest.json': 20,
@@ -290,6 +299,51 @@ describe('pnpm selfhost:teardown', () => {
         .slice(callsBefore)
         .filter((c) => MUTATING_GCLOUD.test(` ${c}`))
     ).toEqual([]);
+  });
+
+  // Box round R15 (G5): another agent's fixture VMs carried SAM labels but no network tags, and the
+  // advice said "2 other SAM VM(s) in this project still use it, so keep it". A rule applies to a
+  // VM by network and target tag, so only those VMs use it. Teardown never deletes these rules.
+  it('reports only the VMs a firewall rule applies to as using it, and changes nothing', async () => {
+    await install();
+    setGcp((db) => {
+      const fixture = (name: string) => {
+        const untagged: Partial<ReturnType<typeof vm>> = vm(name, OTHER_INSTALL);
+        delete untagged.tags;
+        return untagged as ReturnType<typeof vm>;
+      };
+      db.instances = db.instances
+        .filter((i) => i.name !== 'sam-node-other')
+        .concat([fixture('sam-orphan-owned'), fixture('sam-orphan-foreign')]);
+    });
+    const before = snapshot();
+    let result = await teardown([]);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain(
+      'no existing VM in this project uses it (tag sam-agent; a VM made later may); 2 other SAM-labelled VM(s) do not carry it (sam-orphan-owned, sam-orphan-foreign)'
+    );
+    expect(result.out).not.toMatch(/still use it|so keep it/);
+    expect(snapshot()).toBe(before);
+
+    // Control: a VM that carries the tag uses the rule, labelled by SAM or not; own nodes do not count.
+    setGcp((db) => {
+      db.instances.push(vm('sam-node-other', OTHER_INSTALL), {
+        ...vm('hand-made', OTHER_INSTALL),
+        labels: {},
+      });
+    });
+    result = await teardown([]);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain(
+      '2 other VM(s) in this project use it (tag sam-agent: sam-node-other, hand-made), so keep it'
+    );
+    expect(result.out).toContain(
+      'no existing VM in this project uses it (tag sam-deployment-app-routes; a VM made later may); 3 other SAM-labelled VM(s) do not carry it'
+    );
+    expect(Object.keys(gcp().firewalls).sort()).toEqual([
+      'sam-allow-agent',
+      'sam-allow-app-routes',
+    ]);
   });
 
   it('dry run of either mode changes nothing and prints the plan', async () => {
