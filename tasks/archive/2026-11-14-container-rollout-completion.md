@@ -26,7 +26,7 @@ Cloudflare activates the Worker and starts a gradual container rollout before wr
 - [ ] Lint/typecheck/tests/build, specialist reviews and completion validator.
 - [ ] Explicit staging slot; exact-head deploy success includes rollout completion, one bounded Claude Instant node reports expected version, cleanup and late audit.
 - [x] Draft PR, CI, best-effort CodeRabbit wait, exact-SHA coordinator approval before merge.
-- [x] After approved merge monitor production rollout-wait completion.
+- [ ] After approved merge monitor production rollout-wait completion.
 
 ## Validation progress — 2026-11-14
 
@@ -73,4 +73,4 @@ Sonar on a01a061 reported six new issues despite its passing quality gate: S3776
 
 Archived by the weekly queue reconciliation: the work shipped in #2722 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
 Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.
-Left unticked (2): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.
+Left unticked (3): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

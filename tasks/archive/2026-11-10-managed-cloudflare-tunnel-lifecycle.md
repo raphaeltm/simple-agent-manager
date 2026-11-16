@@ -171,3 +171,4 @@ regression run.
 ## Reconciliation (2026-11-16)
 
 Archived by the weekly queue reconciliation: the work shipped in #2615 (merged 2026-11-10; this child slice landed through the parent's PR). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+The "Remaining (parent-owned)" live staging E2E above belonged to the parent task; its evidence is in `tasks/archive/2026-11-10-tunnel-transport-hardening.md` and #2646, not in this file.

@@ -16,7 +16,7 @@ Scope: app deployment context collection/transport only. Existing node builds an
 - [x] Coordinator staging slot; one small claude-code VM and Instant collect proof at bf4285; cleanup verified immediately and five minutes later, slot released.
 - [x] CI and CodeRabbit request/wait at bf4285; coordinator approved that exact SHA.
 - [x] Ready-state CodeRabbit follow-up fixes: final CI/incremental wait and new exact-SHA coordinator approval.
-- [x] Merge and monitor main CI / Deploy Production to success; basic production smoke only.
+- [ ] Merge and monitor main CI / Deploy Production to success; basic production smoke only.
 
 Mandatory release hold: early DRAFT PR + needs-human-review. Do not mark ready or merge until coordinator task 01M6SHDRB60F28XPA14C7J9XKZ approves PR number at exact full SHA. Every commit voids approval. Never commit main. After approval/merge monitor production and verify deployed tip contains merge.
 
@@ -73,3 +73,4 @@ The new commits void bf4285 approval. Keep the PR ready under coordinator instru
 
 Archived by the weekly queue reconciliation: the work shipped in #2605 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
 Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.
+Left unticked (1): a box that also claims a production smoke, health or rollout observation the merge does not prove; check the PR body for that evidence.

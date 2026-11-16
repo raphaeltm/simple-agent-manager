@@ -31,15 +31,25 @@ backlog entries outlive the work that resolved them, and stale open PRs sit with
 
 ## Acceptance criteria
 
-- [ ] Every file left in `tasks/active/` has a live owner or open PR.
-- [ ] Every removed backlog file has PR or code evidence in the PR description; uncertain files stay.
-- [ ] No non-task file changes in the diff.
+- [x] Every file left in `tasks/active/` has a live owner or open PR.
+- [x] Every removed backlog file has PR or code evidence in the PR description; uncertain files stay.
+- [x] No non-task file changes in the diff.
 
 ## Results
 
 - `tasks/active/`: 31 → 3 (+ this file). 28 archived with a dated note; 3 kept with live owners.
-- `tasks/backlog/`: 300 → 291. 9 moved to `tasks/archive/` with a dated verdict note (4 SHIPPED,
-  4 DUPLICATE folded into a survivor, 1 SUPERSEDED). 20 PARTIAL files got a dated progress note;
-  2 survivors received the folded criteria. 268 KEEP unchanged.
+- `tasks/backlog/`: 300 → 292. 8 moved to `tasks/archive/` with a dated verdict note (3 SHIPPED,
+  4 DUPLICATE folded into a survivor, 1 SUPERSEDED). 21 PARTIAL files got a dated progress note;
+  2 survivors received the folded criteria. 269 KEEP unchanged.
 - Nothing was deleted: obsolete and duplicate files moved to the archive with a pointer, so the history
   stays searchable.
+
+## Review
+
+- task-completion-validator: PASS, no CRITICAL/HIGH. MEDIUM (Vultr onboarding archived as SHIPPED with two
+  verification criteria unmet) fixed by returning it to the backlog as PARTIAL, narrowed to the onboarding
+  Playwright and staging checks. LOWs fixed: three boxes that also claimed a smoke/health/rollout
+  observation were unticked again, and the tunnel-lifecycle note now points to where the parent's staging
+  E2E evidence lives.
+- CodeRabbit: requested 06:21 UTC; replied "Review limit reached" (free OSS quota) and "Review rate
+  limited". No review; wait ended per rule 25.
