@@ -33,7 +33,7 @@ additionalContextLimit = 16000
 statusMessage = "Preparing SAM rule delivery"
 
 [[hooks.PreToolUse]]
-matcher = "^(Bash|apply_patch|Edit|Write)$"
+matcher = "^(Bash|apply_patch)$"
 
 [[hooks.PreToolUse.hooks]]
 type = "command"

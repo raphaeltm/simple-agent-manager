@@ -21,7 +21,8 @@
 // must never break a session. Node built-ins only, so it runs without node_modules.
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -199,9 +200,15 @@ export function changedFiles(root) {
   return [...paths].sort();
 }
 
+/** Larger test files are skipped: the shallow-test heuristic needs no more. */
+const MAX_TEST_FILE_BYTES = 1024 * 1024;
+
 function readRepoFile(root) {
   return (path) => {
     try {
+      // Regular files only: a symlink to /dev/zero or a huge file must not hang the turn.
+      const info = lstatSync(join(root, path));
+      if (!info.isFile() || info.size > MAX_TEST_FILE_BYTES) return null;
       return readFileSync(join(root, path), 'utf8');
     } catch {
       return null;
@@ -210,7 +217,10 @@ function readRepoFile(root) {
 }
 
 function stateFile(root, sessionId) {
-  const key = String(sessionId || 'unknown').replaceAll(/[^A-Za-z0-9._-]/g, '_');
+  const raw = String(sessionId || 'unknown');
+  const safe = raw.replaceAll(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
+  const key =
+    safe === raw ? safe : `${safe}-${createHash('sha256').update(raw).digest('hex').slice(0, 12)}`;
   return join(root, '.tmp/stop-gate', `${key}.json`);
 }
 
@@ -223,15 +233,16 @@ function readState(file) {
   }
 }
 
+/** Returns false when the state could not be saved. */
 function writeState(file, state) {
   try {
     mkdirSync(dirname(file), { recursive: true });
     const temporary = `${file}.${process.pid}.tmp`;
     writeFileSync(temporary, JSON.stringify(state));
     renameSync(temporary, file);
+    return true;
   } catch {
-    // State is best effort; without it the gate may repeat feedback, never loop forever
-    // in one turn, because stop_hook_active plus the limit below still applies per run.
+    return false;
   }
 }
 
@@ -263,7 +274,14 @@ export function run(input, root = SCRIPT_ROOT) {
   const findings = evaluate(changedFiles(root), readRepoFile(root));
   const file = stateFile(root, input.session_id);
   const { output, state } = decide(findings, readState(file));
-  writeState(file, state);
+  // The reminder limits live in the state file. If it cannot be saved (read-only .tmp, full
+  // disk), a block would repeat on every stop, so the gate lets the turn end instead.
+  if (!writeState(file, state) && output.decision === 'block') {
+    return {
+      systemMessage:
+        'Test-quality gate: could not save its state under .tmp/stop-gate, so it is not blocking.',
+    };
+  }
   return output;
 }
 

@@ -70,6 +70,25 @@ const SHELL_WRITERS = new Set([
 
 const IGNORED_SEGMENTS = new Set(['.git', 'node_modules', '.tmp', 'dist']);
 
+/** Input bounds: a hook runs before every shell call, so a huge command must stay cheap. */
+const MAX_COMMAND_CHARS = 64_000;
+const MAX_WORDS = 4_000;
+const MAX_CD_STEPS = 50;
+const MAX_PATH_CHARS = 1_024;
+const MAX_TARGETS = 200;
+const DISPLAY_PATH_CHARS = 200;
+
+/** Only files in the rules directory may be read into model context. */
+const RULE_PATH = /^\.claude\/rules\/[A-Za-z0-9._-]+\.md$/;
+
+/** A path as shown to the model or written to the log: bounded and quoted. */
+export function displayPath(path) {
+  const text = String(path);
+  return JSON.stringify(
+    text.length > DISPLAY_PATH_CHARS ? `${text.slice(0, DISPLAY_PATH_CHARS)}…` : text
+  );
+}
+
 export function maxBytes(env = process.env) {
   const raw = Number.parseInt(env.SAM_CODEX_RULE_CONTEXT_MAX_BYTES ?? '', 10);
   if (!Number.isFinite(raw)) return DEFAULT_MAX_BYTES;
@@ -79,11 +98,16 @@ export function maxBytes(env = process.env) {
 export function loadLookup(file = LOOKUP_FILE) {
   const data = JSON.parse(readFileSync(file, 'utf8'));
   if (!data || !Array.isArray(data.rules)) throw new Error('rule-scopes.json has no rules array');
-  return data.rules.map((rule) => ({
-    path: String(rule.path),
-    title: String(rule.title),
-    patterns: rule.patterns.map((p) => ({ literal: p.literal, regex: new RegExp(p.regex) })),
-  }));
+  return data.rules
+    .filter((rule) => RULE_PATH.test(String(rule.path)) && Array.isArray(rule.patterns))
+    .map((rule) => ({
+      path: String(rule.path),
+      title: String(rule.title).slice(0, DISPLAY_PATH_CHARS),
+      patterns: rule.patterns.map((p) => ({
+        literal: Number(p.literal) || 0,
+        regex: new RegExp(p.regex),
+      })),
+    }));
 }
 
 /** How narrowly a matched pattern names the path: its literal characters. */
@@ -116,6 +140,7 @@ export function rulesFor(lookup, paths) {
 
 /** Repository-relative path for a token, or null when it is outside the repository. */
 export function toRepoPath(token, cwd, root = ROOT) {
+  if (String(token).length > MAX_PATH_CHARS) return null;
   const absolute = isAbsolute(token) ? token : resolve(cwd, token);
   const rel = relative(root, absolute);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return null;
@@ -130,8 +155,26 @@ export function patchPaths(patch) {
   for (const line of String(patch).split('\n')) {
     const match = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/.exec(line.trim());
     if (match) paths.push(match[1].trim());
+    if (paths.length >= MAX_TARGETS) break;
   }
   return paths;
+}
+
+/** Drop heredoc bodies: they are file content or script text, not path arguments. */
+export function withoutHeredocBodies(text) {
+  const lines = text.split('\n');
+  const kept = [];
+  let delimiter = null;
+  for (const line of lines) {
+    if (delimiter !== null) {
+      if (line.trim() === delimiter) delimiter = null;
+      continue;
+    }
+    kept.push(line);
+    const match = /<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/.exec(line);
+    if (match) delimiter = match[1];
+  }
+  return kept.join('\n');
 }
 
 function shellWords(command) {
@@ -149,15 +192,24 @@ function shellWords(command) {
  * counts as a write when it redirects output, edits in place, or runs a writing command.
  */
 export function shellPaths(command, cwd, root = ROOT, exists = defaultExists) {
-  const text = String(command);
-  const words = shellWords(text);
+  const text = withoutHeredocBodies(String(command).slice(0, MAX_COMMAND_CHARS));
+  const words = shellWords(text).slice(0, MAX_WORDS);
+  const known = new Map();
+  const kindOf = (path) => {
+    if (!known.has(path)) known.set(path, exists(path));
+    return known.get(path);
+  };
   let base = cwd;
+  let cdSteps = 0;
   const found = [];
   for (let index = 0; index < words.length; index++) {
     const word = words[index];
     if (word === 'cd' && words[index + 1]) {
       const next = words[index + 1];
-      if (!/[$`*]/.test(next)) base = resolve(base, next);
+      if (!/[$`*]/.test(next) && cdSteps < MAX_CD_STEPS && next.length <= MAX_PATH_CHARS) {
+        base = resolve(base, next);
+        cdSteps++;
+      }
       index++;
       continue;
     }
@@ -167,18 +219,20 @@ export function shellPaths(command, cwd, root = ROOT, exists = defaultExists) {
     const absolute = isAbsolute(candidate) ? candidate : resolve(base, candidate);
     const repoPath = toRepoPath(absolute, base, root);
     if (!repoPath) continue;
-    const kind = exists(absolute);
+    const kind = kindOf(absolute);
     if (kind) found.push({ path: repoPath, isDirectory: kind === 'dir', exists: true });
-    else if (exists(dirname(absolute)) === 'dir') {
+    else if (kindOf(dirname(absolute)) === 'dir') {
       found.push({ path: repoPath, isDirectory: false, exists: false });
     }
   }
   const writes =
-    />>?\s*[^\s&|]/.test(text.replaceAll(/[0-9]?>&[0-9]/g, '').replaceAll(/>\s*\/dev\/null/g, '')) ||
+    />>?\s*[^\s&|]/.test(
+      text.replaceAll(/[0-9]?>&[0-9]/g, '').replaceAll(/>\s*\/dev\/null/g, '')
+    ) ||
     /\b(?:sed|perl)\s+(?:-[a-zA-Z]*\s+)*-[a-zA-Z]*i/.test(text) ||
     /\bgit\s+(?:mv|rm|apply|checkout|restore)\b/.test(text) ||
     words.some((word) => SHELL_WRITERS.has(word));
-  return { paths: dedupe(found), writes };
+  return { paths: dedupe(found).slice(0, MAX_TARGETS), writes };
 }
 
 function dedupe(paths) {
@@ -210,6 +264,7 @@ export function renderDelivery(rules, targets, budget, root = ROOT) {
   const header = [
     `SAM rule delivery (.codex/hooks/rule-context.mjs). These repository rules govern ${targets
       .slice(0, 5)
+      .map(displayPath)
       .join(', ')}${targets.length > 5 ? `, +${targets.length - 5} more` : ''}.`,
     'Claude Code loads them by itself when these files are accessed; treat them as project instructions for this work.',
   ].join('\n');
@@ -241,19 +296,25 @@ export function renderDelivery(rules, targets, budget, root = ROOT) {
       .join('\n');
     const more = deferred.length > 40 ? `\n- +${deferred.length - 40} more` : '';
     parts.push(
-      `\n\nAlso governing these paths, not delivered yet because of the per-call size cap. They arrive with your next tool calls on these paths, or run \`node .codex/hooks/rule-context.mjs --show ${targets[0] ?? '<path>'}\`:\n${lines}${more}`
+      `\n\nAlso governing these paths, not delivered yet because of the per-call size cap. They arrive with your next tool calls on these paths, or run \`node .codex/hooks/rule-context.mjs --show ${targets[0] ? displayPath(targets[0]) : '<path>'}\`:\n${lines}${more}`
     );
   }
   return { text: parts.join(''), delivered, deferred };
 }
 
-function sessionKey(sessionId) {
-  return String(sessionId || 'unknown').replaceAll(/[^A-Za-z0-9._-]/g, '_');
+/** A file-name-safe key; long or unusual ids are shortened and made unique with a hash. */
+export function sessionKey(sessionId) {
+  const raw = String(sessionId || 'unknown');
+  const safe = raw.replaceAll(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
+  if (safe === raw) return safe;
+  return `${safe}-${createHash('sha256').update(raw).digest('hex').slice(0, 12)}`;
 }
 
 function readState(sessionId) {
   try {
-    const state = JSON.parse(readFileSync(join(STATE_DIR, `${sessionKey(sessionId)}.json`), 'utf8'));
+    const state = JSON.parse(
+      readFileSync(join(STATE_DIR, `${sessionKey(sessionId)}.json`), 'utf8')
+    );
     return {
       epoch: Number(state.epoch) || 0,
       delivered: Array.isArray(state.delivered) ? state.delivered : [],
@@ -277,7 +338,9 @@ function log(sessionId, entries) {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
     const at = new Date().toISOString();
-    const lines = entries.map((entry) => JSON.stringify({ at, harness: 'codex', session_id: sessionId, ...entry }));
+    const lines = entries.map((entry) =>
+      JSON.stringify({ at, harness: 'codex', session_id: sessionId, ...entry })
+    );
     appendFileSync(join(LOG_DIR, `codex-${sessionKey(sessionId)}.jsonl`), `${lines.join('\n')}\n`);
   } catch {
     // Logging must never fail the hook.
@@ -328,7 +391,10 @@ function preToolUse(event, lookup, budget) {
   const targetPaths = targets.map((target) => target.path);
   const rendered = renderDelivery(pending, targetPaths, budget);
   if (rendered.delivered.length === 0 && rendered.deferred.length === 0) return {};
-  const writeKey = createHash('sha256').update(targetPaths.slice().sort().join('\n')).digest('hex').slice(0, 16);
+  const writeKey = createHash('sha256')
+    .update(targetPaths.slice().sort().join('\n'))
+    .digest('hex')
+    .slice(0, 16);
   // Deny only to deliver: a write is refused once, and only when rule text came with it.
   const deny = writes && rendered.delivered.length > 0 && !state.deniedWrites.includes(writeKey);
   writeState(event.session_id, {
@@ -343,8 +409,8 @@ function preToolUse(event, lookup, budget) {
       tool,
       load_reason: 'path_match',
       file: entry.rule.path,
-      trigger: targetPaths[0],
-      triggers: targetPaths.slice(0, 10),
+      trigger: targetPaths[0].slice(0, DISPLAY_PATH_CHARS),
+      triggers: targetPaths.slice(0, 10).map((path) => path.slice(0, DISPLAY_PATH_CHARS)),
       bytes: entry.bytes,
       decision: deny ? 'deny_once' : 'allow',
       epoch: state.epoch,
@@ -356,7 +422,7 @@ function preToolUse(event, lookup, budget) {
   };
   if (deny) {
     output.hookSpecificOutput.permissionDecision = 'deny';
-    output.hookSpecificOutput.permissionDecisionReason = `Not run yet: ${rendered.delivered.length} repository rule(s) governing ${targetPaths[0]} were not in your context. They are attached as context. Check this change against them, then run it again (the retry is allowed). If you cannot see the rule text, run: node .codex/hooks/rule-context.mjs --show ${targetPaths[0]}`;
+    output.hookSpecificOutput.permissionDecisionReason = `Not run yet: ${rendered.delivered.length} repository rule(s) governing ${displayPath(targetPaths[0])} were not in your context. They are attached as context. Check this change against them, then run it again (the retry is allowed). If you cannot see the rule text, run: node .codex/hooks/rule-context.mjs --show ${displayPath(targetPaths[0])}`;
   }
   return output;
 }
@@ -372,7 +438,15 @@ function show(paths) {
     process.stdout.write('No path-scoped rules govern these paths.\n');
     return;
   }
-  process.stdout.write(`${renderDelivery(rules, targets.map((t) => t.path), maxBytes()).text}\n`);
+  process.stdout.write(
+    `${
+      renderDelivery(
+        rules,
+        targets.map((t) => t.path),
+        maxBytes()
+      ).text
+    }\n`
+  );
 }
 
 function main() {
@@ -392,7 +466,11 @@ function main() {
   } catch (error) {
     output = {};
     log(event.session_id, [
-      { event: String(event.hook_event_name ?? 'unknown'), load_reason: 'error', error: String(error?.message ?? error).slice(0, 300) },
+      {
+        event: String(event.hook_event_name ?? 'unknown'),
+        load_reason: 'error',
+        error: String(error?.message ?? error).slice(0, 300),
+      },
     ]);
   }
   process.stdout.write(`${JSON.stringify(output)}\n`);
