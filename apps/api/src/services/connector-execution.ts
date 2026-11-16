@@ -247,6 +247,10 @@ const AUDIT_INPUT_FIELDS = new Set([
   'formContent',
   'markerId',
   'answer',
+  // Inbox writes (sam_inbox_answer, sam_inbox_archive).
+  'ref',
+  'decision',
+  'note',
   'scheduleId',
   'runAt',
   'cron',

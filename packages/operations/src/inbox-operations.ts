@@ -17,6 +17,7 @@ import {
   createAsk,
   CreateAskInputSchema,
   prepareInboxAnswer,
+  prepareInboxArchive,
 } from './inbox-write-core';
 import { defineOperation } from './types';
 
@@ -110,8 +111,14 @@ export const samInboxArchive = defineOperation({
   kind: 'destructive',
   input: v.object({ projectId: id, ref, requestKey }),
   run(ctx, input) {
-    return ctx.ports.connector.executeWrite(ctx, 'sam_inbox_archive', input, () =>
-      archiveInboxItem(ctx, { projectId: input.projectId, ref: input.ref })
+    const target = { projectId: input.projectId, ref: input.ref };
+    return ctx.ports.connector.executeWrite(
+      ctx,
+      'sam_inbox_archive',
+      input,
+      () => archiveInboxItem(ctx, target),
+      // Refusals (not actable, approvals outside the app) before a receipt is reserved.
+      () => prepareInboxArchive(ctx, target)
     );
   },
 });

@@ -309,9 +309,34 @@ export async function prepareInboxAnswer(
   ctx: OperationContext,
   input: InboxAnswerInput
 ): Promise<AcpInteractionBrowserAnswer | undefined> {
+  await checkAnswerLengths(ctx, input);
   const { item, ref } = await requireActable(ctx, input);
+  if (ref.store === 'approval') requireWebApprovalDecision(ctx);
   if (ref.store !== 'attention' || item.answerSpec.type !== 'interaction') return undefined;
   return prepareInteraction(ctx, item, ref.sessionId, input);
+}
+
+/** The Connector preflight for an archive: refusals happen before a receipt is reserved. */
+export async function prepareInboxArchive(
+  ctx: OperationContext,
+  input: { projectId: string; ref: string }
+): Promise<void> {
+  const { ref } = await requireActable(ctx, input);
+  if (ref.store === 'approval') requireWebApprovalDecision(ctx);
+}
+
+async function checkAnswerLengths(
+  ctx: OperationContext,
+  input: Pick<InboxAnswerInput, 'answer' | 'note'>
+): Promise<void> {
+  const { answerMaxChars } = await getInboxLimits(ctx);
+  for (const [field, value] of [
+    ['answer', input.answer],
+    ['note', input.note],
+  ] as const) {
+    if (value && value.length > answerMaxChars)
+      throw new OperationError('invalid_input', `${field} exceeds ${answerMaxChars} characters`);
+  }
 }
 
 async function prepareInteraction(
@@ -340,14 +365,7 @@ export async function answerInboxItem(
   /** An interaction answer prepared by `prepareInboxAnswer` (the Connector preflight). */
   preparedInteraction?: AcpInteractionBrowserAnswer
 ): Promise<InboxActionResponse> {
-  const { answerMaxChars } = await getInboxLimits(ctx);
-  for (const [field, value] of [
-    ['answer', input.answer],
-    ['note', input.note],
-  ] as const) {
-    if (value && value.length > answerMaxChars)
-      throw new OperationError('invalid_input', `${field} exceeds ${answerMaxChars} characters`);
-  }
+  await checkAnswerLengths(ctx, input);
   const { item, ref } = await requireActable(ctx, input);
   const me = ctx.actor.userId;
   switch (ref.store) {
