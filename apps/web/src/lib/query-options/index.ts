@@ -129,6 +129,12 @@ export {
   ideaUpdatesQueryOptions,
 } from './ideas';
 export {
+  inboxCountQueryOptions,
+  inboxItemQueryOptions,
+  inboxListQueryOptions,
+  inboxQueryKeys,
+} from './inbox';
+export {
   nodeListQueryOptions,
   nodeQueryKeys,
   nodeResourceUsageQueryOptions,
@@ -155,7 +161,6 @@ export {
   notificationQueryKeys,
   type NotificationsListQueryData,
   notificationsListQueryOptions,
-  notificationUnreadCountQueryOptions,
   timelineProgressNotificationsQueryOptions,
 } from './notifications';
 export { projectOverviewQueryKeys, projectOverviewQueryOptions } from './project-overview';
