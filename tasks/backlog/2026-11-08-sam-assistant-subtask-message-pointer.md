@@ -29,3 +29,7 @@ Found while shipping SAM notice rows (PR #2575). The first version of that PR fi
       (`renderedPrompt` in `services/github-trigger-queue.ts`, for example PR titles and bodies) must
       also become a pointer, and record the decision. He put trigger templates out of scope for the
       first Human Voice PR.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL, and more urgent than last week. #2627 (D2) made `send_message_to_subtask` accept running tasks (`apps/api/src/durable-objects/sam-session/tools/send-message-to-subtask.ts`, `LIVE_TASK_STATUSES`), but pointer delivery, the notice row and fail-closed have not shipped. This file said the two must ship together: plain assistant text can now reach running tasks (Constitution XV).
