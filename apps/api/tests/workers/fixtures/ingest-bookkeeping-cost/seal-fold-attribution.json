@@ -1,0 +1,1022 @@
+[
+  {
+    "shape": "original-mixed50",
+    "enabled": false,
+    "before": 6615,
+    "after": 6449,
+    "savingPercent": 2.5094482237339344,
+    "statementDeltas": [
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 42,
+        "after": 0,
+        "delta": -42
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "before": 168,
+        "after": 0,
+        "delta": -168
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count WHERE id = ?",
+        "before": 0,
+        "after": 41,
+        "delta": 41
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      }
+    ]
+  },
+  {
+    "shape": "original-mixed50",
+    "enabled": true,
+    "before": 1596,
+    "after": 1725,
+    "savingPercent": -8.08270676691729,
+    "statementDeltas": [
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 44,
+        "delta": 44
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 42,
+        "after": 0,
+        "delta": -42
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 42,
+        "delta": 42
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "before": 168,
+        "after": 0,
+        "delta": -168
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 168,
+        "delta": 168
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?",
+        "before": 0,
+        "after": 84,
+        "delta": 84
+      }
+    ]
+  },
+  {
+    "shape": "steady",
+    "enabled": false,
+    "before": 1205,
+    "after": 634,
+    "savingPercent": 47.38589211618257,
+    "statementDeltas": [
+      {
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "before": 10,
+        "after": 80,
+        "delta": 70
+      },
+      {
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 7,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 1,
+        "after": 15,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 21,
+        "delta": 21
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 7,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 28,
+        "delta": 28
+      },
+      {
+        "statement": "traffic:alarm:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 14,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 14,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:storage.setAlarm",
+        "before": 1,
+        "after": 15,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 8,
+        "delta": 8
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 120,
+        "after": 0,
+        "delta": -120
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "before": 480,
+        "after": 0,
+        "delta": -480
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count WHERE id = ?",
+        "before": 0,
+        "after": 112,
+        "delta": 112
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?",
+        "before": 0,
+        "after": 16,
+        "delta": 16
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "before": 240,
+        "after": 0,
+        "delta": -240
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 3,
+        "delta": 3
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 4,
+        "delta": 4
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      }
+    ]
+  },
+  {
+    "shape": "steady",
+    "enabled": true,
+    "before": 965,
+    "after": 394,
+    "savingPercent": 59.17098445595854,
+    "statementDeltas": [
+      {
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "before": 10,
+        "after": 80,
+        "delta": 70
+      },
+      {
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 7,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 1,
+        "after": 15,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 21,
+        "delta": 21
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 7,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 28,
+        "delta": 28
+      },
+      {
+        "statement": "traffic:alarm:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 14,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 14,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:storage.setAlarm",
+        "before": 1,
+        "after": 15,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 8,
+        "delta": 8
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 120,
+        "after": 0,
+        "delta": -120
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "before": 480,
+        "after": 0,
+        "delta": -480
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count WHERE id = ?",
+        "before": 0,
+        "after": 112,
+        "delta": 112
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?",
+        "before": 0,
+        "after": 16,
+        "delta": 16
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "before": 240,
+        "after": 0,
+        "delta": -240
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 3,
+        "delta": 3
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 4,
+        "delta": 4
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      }
+    ]
+  },
+  {
+    "shape": "mixed",
+    "enabled": false,
+    "before": 2309,
+    "after": 1738,
+    "savingPercent": 24.72932005197055,
+    "statementDeltas": [
+      {
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "before": 10,
+        "after": 80,
+        "delta": 70
+      },
+      {
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 7,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 1,
+        "after": 15,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 21,
+        "delta": 21
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 7,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 28,
+        "delta": 28
+      },
+      {
+        "statement": "traffic:alarm:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 14,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 14,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:storage.setAlarm",
+        "before": 1,
+        "after": 15,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 8,
+        "delta": 8
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 120,
+        "after": 0,
+        "delta": -120
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "before": 480,
+        "after": 0,
+        "delta": -480
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count WHERE id = ?",
+        "before": 0,
+        "after": 112,
+        "delta": 112
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?",
+        "before": 0,
+        "after": 16,
+        "delta": 16
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "before": 240,
+        "after": 0,
+        "delta": -240
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 3,
+        "delta": 3
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 4,
+        "delta": 4
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      }
+    ]
+  },
+  {
+    "shape": "mixed",
+    "enabled": true,
+    "before": 1253,
+    "after": 996,
+    "savingPercent": 20.510774142059063,
+    "statementDeltas": [
+      {
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "before": 1,
+        "after": 26,
+        "delta": 25
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "before": 1,
+        "after": 26,
+        "delta": 25
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "before": 10,
+        "after": 260,
+        "delta": 250
+      },
+      {
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "before": 1,
+        "after": 26,
+        "delta": 25
+      },
+      {
+        "statement": "traffic:alarm:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 25,
+        "delta": 25
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 1,
+        "after": 26,
+        "delta": 25
+      },
+      {
+        "statement": "traffic:alarm:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 50,
+        "delta": 50
+      },
+      {
+        "statement": "traffic:alarm:storage.setAlarm",
+        "before": 1,
+        "after": 27,
+        "delta": 26
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 32,
+        "delta": 32
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 75,
+        "delta": 75
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 120,
+        "after": 0,
+        "delta": -120
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 25,
+        "delta": 25
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "before": 480,
+        "after": 0,
+        "delta": -480
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 100,
+        "delta": 100
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count WHERE id = ?",
+        "before": 0,
+        "after": 95,
+        "delta": 95
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?",
+        "before": 0,
+        "after": 50,
+        "delta": 50
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "before": 240,
+        "after": 0,
+        "delta": -240
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 50,
+        "delta": 50
+      },
+      {
+        "statement": "traffic:persistMessageBatch:storage.setAlarm",
+        "before": 0,
+        "after": 31,
+        "delta": 31
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:storage.setAlarm",
+        "before": 1,
+        "after": 0,
+        "delta": -1
+      }
+    ]
+  },
+  {
+    "shape": "thinking-tool",
+    "enabled": false,
+    "before": 2309,
+    "after": 1738,
+    "savingPercent": 24.72932005197055,
+    "statementDeltas": [
+      {
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "before": 10,
+        "after": 80,
+        "delta": 70
+      },
+      {
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "before": 1,
+        "after": 8,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 7,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 1,
+        "after": 15,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 21,
+        "delta": 21
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 7,
+        "delta": 7
+      },
+      {
+        "statement": "traffic:alarm:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 28,
+        "delta": 28
+      },
+      {
+        "statement": "traffic:alarm:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 14,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 14,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:alarm:storage.setAlarm",
+        "before": 1,
+        "after": 15,
+        "delta": 14
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 8,
+        "delta": 8
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 120,
+        "after": 0,
+        "delta": -120
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "before": 480,
+        "after": 0,
+        "delta": -480
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count WHERE id = ?",
+        "before": 0,
+        "after": 112,
+        "delta": 112
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?",
+        "before": 0,
+        "after": 16,
+        "delta": 16
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "before": 240,
+        "after": 0,
+        "delta": -240
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 3,
+        "delta": 3
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 4,
+        "delta": 4
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      }
+    ]
+  },
+  {
+    "shape": "thinking-tool",
+    "enabled": true,
+    "before": 1901,
+    "after": 2073,
+    "savingPercent": -9.047869542346131,
+    "statementDeltas": [
+      {
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "before": 1,
+        "after": 49,
+        "delta": 48
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "before": 1,
+        "after": 49,
+        "delta": 48
+      },
+      {
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "before": 10,
+        "after": 490,
+        "delta": 480
+      },
+      {
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "before": 1,
+        "after": 49,
+        "delta": 48
+      },
+      {
+        "statement": "traffic:alarm:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 48,
+        "delta": 48
+      },
+      {
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 1,
+        "after": 48,
+        "delta": 47
+      },
+      {
+        "statement": "traffic:alarm:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 96,
+        "delta": 96
+      },
+      {
+        "statement": "traffic:alarm:storage.setAlarm",
+        "before": 1,
+        "after": 48,
+        "delta": 47
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 56,
+        "delta": 56
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 144,
+        "delta": 144
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 120,
+        "after": 0,
+        "delta": -120
+      },
+      {
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 48,
+        "delta": 48
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "before": 480,
+        "after": 0,
+        "delta": -480
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 192,
+        "delta": 192
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count WHERE id = ?",
+        "before": 0,
+        "after": 71,
+        "delta": 71
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET pending_message_count = pending_message_count + ?, message_ingested_at = ?, message_activity_at = ?, message_idle_after = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count, message_bookkeeping_due_at = ? WHERE id = ?",
+        "before": 0,
+        "after": 98,
+        "delta": 98
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "before": 240,
+        "after": 0,
+        "delta": -240
+      },
+      {
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 96,
+        "delta": 96
+      },
+      {
+        "statement": "traffic:persistMessageBatch:storage.setAlarm",
+        "before": 0,
+        "after": 55,
+        "delta": 55
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO message_bookkeeping_summary_queue (session_id, first_queued_at, attempts, next_attempt_at, terminal_at, version) VALUES (?, ?, 0, ?, NULL, 1) ON CONFLICT(session_id) DO UPDATE SET version = version + 1",
+        "before": 0,
+        "after": 3,
+        "delta": 3
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET session_id = CASE WHEN COALESCE(workspace_activity.last_message_at, 0) <= excluded.last_message_at THEN excluded.session_id ELSE workspace_activity.session_id END, last_message_at = MAX(COALESCE(workspace_activity.last_message_at, 0), excluded.last_message_at), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE chat_sessions SET message_count = message_count + pending_message_count, last_message_sequence_count = CASE WHEN last_message_sequence_count = message_count THEN message_count + pending_message_count ELSE NULL END, updated_at = MAX(updated_at, message_ingested_at), pending_message_count = 0, message_bookkeeping_due_at = NULL WHERE id = ? AND pending_message_count > 0",
+        "before": 0,
+        "after": 4,
+        "delta": 4
+      },
+      {
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity_at = MAX(activity_at, ?), work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND (session_id = ? OR session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ?))",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:DELETE FROM message_bookkeeping_summary_queue WHERE session_id = ? AND version = ? AND attempts = ? AND first_queued_at = ? AND terminal_at IS NULL RETURNING session_id",
+        "before": 0,
+        "after": 1,
+        "delta": 1
+      },
+      {
+        "statement": "traffic:runSummarySyncLocked:UPDATE message_bookkeeping_summary_queue SET attempts = ?, next_attempt_at = ? WHERE session_id = ? AND version = ? AND terminal_at IS NULL",
+        "before": 0,
+        "after": 2,
+        "delta": 2
+      }
+    ]
+  }
+]

@@ -5,7 +5,7 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-import { DEFAULT_MESSAGE_BOOKKEEPING, flushMessageBookkeeping } from './message-bookkeeping';
+import { DEFAULT_MESSAGE_BOOKKEEPING } from './message-bookkeeping';
 import { DEFAULT_BOOKKEEPING_SUMMARY_RETRY } from './message-bookkeeping-summary-queue';
 
 export const DEFAULT_MESSAGE_MERGE_CONFIG = {
@@ -79,7 +79,6 @@ export function readMessageIngestState(value: unknown): MessageIngestState | nul
 
 /** Seal only a new canonical row; historical transcript rows are never changed. */
 export function sealMessageStream(sql: SqlStorage, sessionId: string): void {
-  flushMessageBookkeeping(sql, sessionId);
   sql.exec(
     `UPDATE chat_sessions SET stream_ingest_state = json_set(stream_ingest_state, '$.open', NULL)
      WHERE json_extract(stream_ingest_state, '$.open') IS NOT NULL AND id = ?`,
@@ -94,7 +93,6 @@ export function sealMessageStream(sql: SqlStorage, sessionId: string): void {
  */
 export class MessageStreamBatch {
   readonly state: MessageIngestState;
-  sealed = false;
   private readonly initialThrough: number;
   private readonly priorRecent: Set<string>;
   private readonly seen = new Set<string>();
@@ -192,7 +190,6 @@ export class MessageStreamBatch {
           (open.createdAt === materializedThrough.createdAt &&
             open.sequence <= materializedThrough.sequence)))
     ) {
-      this.sealed = previous?.open != null;
       this.state.open = null;
     }
   }
@@ -221,7 +218,6 @@ export class MessageStreamBatch {
   /** Role/metadata/origin/gaps/cap/turn boundaries end a run, even on duplicate user echoes. */
   boundary(role: string, toolMetadata: string | null): void {
     if (role !== 'assistant' || toolMetadata !== null) {
-      this.sealed ||= this.state.open != null;
       this.state.open = null;
     }
   }
@@ -268,7 +264,6 @@ export class MessageStreamBatch {
       open.messageCount = this.messageCount;
       return open.id;
     }
-    this.sealed ||= this.state.open != null;
     this.inserts.set(message.id, { ...message });
     this.metadata.set(message.id, storedToolMetadata);
     const bytes = new TextEncoder().encode(

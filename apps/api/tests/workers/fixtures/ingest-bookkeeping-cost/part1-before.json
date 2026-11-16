@@ -1,0 +1,2672 @@
+[
+  {
+    "batches": 42,
+    "d1Writes": null,
+    "enabled": false,
+    "messages": 2100,
+    "nativeWrites": 0,
+    "shape": "original-mixed50",
+    "sqlReads": null,
+    "sqlWrites": 6615,
+    "statements": [
+      {
+        "calls": 2100,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "writes": 6405
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "writes": 42
+      },
+      {
+        "calls": 2100,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 105,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2100,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "writes": 168
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "writes": 0
+      }
+    ],
+    "totalDoWrites": 6615
+  },
+  {
+    "batches": 42,
+    "d1Writes": null,
+    "enabled": true,
+    "messages": 2100,
+    "nativeWrites": 0,
+    "shape": "original-mixed50",
+    "sqlReads": null,
+    "sqlWrites": 1596,
+    "statements": [
+      {
+        "calls": 420,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "writes": 1365
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "writes": 42
+      },
+      {
+        "calls": 2100,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 105,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, created_at, sequence FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, sequence DESC, id DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, task_id, created_by_user_id, status, message_count FROM chat_sessions WHERE id = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2100,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 21,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_messages SET content = content || ? WHERE id = ? AND session_id = ? RETURNING id",
+        "writes": 21
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "writes": 168
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 42,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "writes": 0
+      }
+    ],
+    "totalDoWrites": 1596
+  },
+  {
+    "batches": 120,
+    "d1Writes": 13,
+    "dueAlarms": 1,
+    "enabled": false,
+    "nativeWrites": 2,
+    "roles": {
+      "assistant": 120
+    },
+    "seconds": 240,
+    "shape": "steady",
+    "sqlReads": null,
+    "sqlWrites": 1203,
+    "statements": [
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "writes": 10
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT key, value, updated_at AS updatedAt, updated_by AS updatedBy FROM platform_settings",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT synced_at, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at FROM session_index_coverage WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT user_id FROM projects WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 29,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "writes": 360
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "writes": 120
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "writes": 480
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND kind = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "writes": 240
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:DELETE FROM prompt_delivery_target_backoff WHERE target_session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT activity FROM session_state WHERE session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT chat_session_id FROM acp_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 3,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET next_attempt_at = ? WHERE target_session_id = ? AND delivery_state IN ('queued', 'retry_wait') AND (next_attempt_at IS NULL OR next_attempt_at > ?)",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET wake_ready_attempt_id = attempt_id WHERE target_session_id = ? AND delivery_state = 'delivering' AND prompt_delivery_phase = 'preparing' AND wake_ready_attempt_id IS NOT attempt_id",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity = 'idle', activity_at = ?, work_at = ?, activity_source = ?, activity_reason = ?, prompt_started_at = NULL, prompt_epoch = NULL, status_error = CASE WHEN ? = 1 AND activity = 'error' THEN status_error ELSE NULL END, activity_probe_attempts = 0, activity_probe_at = NULL WHERE session_id = ? AND activity IN (?, ?) AND COALESCE(prompt_started_at, activity_at) <= ?",
+        "writes": 2
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, kind, created_at, expires_at, reason, metadata FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL ORDER BY CASE WHEN kind = 'needs_input' THEN 0 ELSE 1 END, created_at DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE updated_at >= ? UNION SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE id IN (SELECT session_id FROM session_attention_markers WHERE created_at >= ? OR resolved_at >= ?) ORDER BY updated_at DESC LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT MAX(created_at) as latest FROM activity_events",
+        "writes": 0
+      }
+    ],
+    "totalDoWrites": 1205,
+    "variant": "part1"
+  },
+  {
+    "batches": 120,
+    "d1Writes": 13,
+    "dueAlarms": 1,
+    "enabled": true,
+    "nativeWrites": 2,
+    "roles": {
+      "assistant": 120
+    },
+    "seconds": 240,
+    "shape": "steady",
+    "sqlReads": null,
+    "sqlWrites": 963,
+    "statements": [
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "writes": 10
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT key, value, updated_at AS updatedAt, updated_by AS updatedBy FROM platform_settings",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT synced_at, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at FROM session_index_coverage WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT user_id FROM projects WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 29,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "writes": 120
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, created_at, sequence FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, sequence DESC, id DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, task_id, created_by_user_id, status, message_count FROM chat_sessions WHERE id = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_messages SET content = content || ? WHERE id = ? AND session_id = ? RETURNING id",
+        "writes": 120
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "writes": 480
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND kind = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "writes": 240
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:DELETE FROM prompt_delivery_target_backoff WHERE target_session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT activity FROM session_state WHERE session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT chat_session_id FROM acp_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 3,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET next_attempt_at = ? WHERE target_session_id = ? AND delivery_state IN ('queued', 'retry_wait') AND (next_attempt_at IS NULL OR next_attempt_at > ?)",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET wake_ready_attempt_id = attempt_id WHERE target_session_id = ? AND delivery_state = 'delivering' AND prompt_delivery_phase = 'preparing' AND wake_ready_attempt_id IS NOT attempt_id",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity = 'idle', activity_at = ?, work_at = ?, activity_source = ?, activity_reason = ?, prompt_started_at = NULL, prompt_epoch = NULL, status_error = CASE WHEN ? = 1 AND activity = 'error' THEN status_error ELSE NULL END, activity_probe_attempts = 0, activity_probe_at = NULL WHERE session_id = ? AND activity IN (?, ?) AND COALESCE(prompt_started_at, activity_at) <= ?",
+        "writes": 2
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, kind, created_at, expires_at, reason, metadata FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL ORDER BY CASE WHEN kind = 'needs_input' THEN 0 ELSE 1 END, created_at DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE updated_at >= ? UNION SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE id IN (SELECT session_id FROM session_attention_markers WHERE created_at >= ? OR resolved_at >= ?) ORDER BY updated_at DESC LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT MAX(created_at) as latest FROM activity_events",
+        "writes": 0
+      }
+    ],
+    "totalDoWrites": 965,
+    "variant": "part1"
+  },
+  {
+    "batches": 120,
+    "d1Writes": 13,
+    "dueAlarms": 1,
+    "enabled": false,
+    "nativeWrites": 2,
+    "roles": {
+      "assistant": 408,
+      "tool": 48,
+      "user": 24
+    },
+    "seconds": 240,
+    "shape": "mixed",
+    "sqlReads": null,
+    "sqlWrites": 2307,
+    "statements": [
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "writes": 10
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT key, value, updated_at AS updatedAt, updated_by AS updatedBy FROM platform_settings",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT synced_at, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at FROM session_index_coverage WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT user_id FROM projects WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 29,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "writes": 1464
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "writes": 120
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 24,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "writes": 480
+      },
+      {
+        "calls": 96,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND kind = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 24,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "writes": 240
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:DELETE FROM prompt_delivery_target_backoff WHERE target_session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT activity FROM session_state WHERE session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT chat_session_id FROM acp_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 3,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET next_attempt_at = ? WHERE target_session_id = ? AND delivery_state IN ('queued', 'retry_wait') AND (next_attempt_at IS NULL OR next_attempt_at > ?)",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET wake_ready_attempt_id = attempt_id WHERE target_session_id = ? AND delivery_state = 'delivering' AND prompt_delivery_phase = 'preparing' AND wake_ready_attempt_id IS NOT attempt_id",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity = 'idle', activity_at = ?, work_at = ?, activity_source = ?, activity_reason = ?, prompt_started_at = NULL, prompt_epoch = NULL, status_error = CASE WHEN ? = 1 AND activity = 'error' THEN status_error ELSE NULL END, activity_probe_attempts = 0, activity_probe_at = NULL WHERE session_id = ? AND activity IN (?, ?) AND COALESCE(prompt_started_at, activity_at) <= ?",
+        "writes": 2
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, kind, created_at, expires_at, reason, metadata FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL ORDER BY CASE WHEN kind = 'needs_input' THEN 0 ELSE 1 END, created_at DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE updated_at >= ? UNION SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE id IN (SELECT session_id FROM session_attention_markers WHERE created_at >= ? OR resolved_at >= ?) ORDER BY updated_at DESC LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT MAX(created_at) as latest FROM activity_events",
+        "writes": 0
+      }
+    ],
+    "totalDoWrites": 2309,
+    "variant": "part1"
+  },
+  {
+    "batches": 120,
+    "d1Writes": 13,
+    "dueAlarms": 1,
+    "enabled": true,
+    "nativeWrites": 2,
+    "roles": {
+      "assistant": 408,
+      "tool": 48,
+      "user": 24
+    },
+    "seconds": 240,
+    "shape": "mixed",
+    "sqlReads": null,
+    "sqlWrites": 1251,
+    "statements": [
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "writes": 10
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT key, value, updated_at AS updatedAt, updated_by AS updatedBy FROM platform_settings",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT synced_at, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at FROM session_index_coverage WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT user_id FROM projects WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 29,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 96,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "writes": 312
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "writes": 120
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 24,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, created_at, sequence FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, sequence DESC, id DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, task_id, created_by_user_id, status, message_count FROM chat_sessions WHERE id = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 96,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_messages SET content = content || ? WHERE id = ? AND session_id = ? RETURNING id",
+        "writes": 96
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "writes": 480
+      },
+      {
+        "calls": 96,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND kind = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 24,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "writes": 240
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:DELETE FROM prompt_delivery_target_backoff WHERE target_session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT activity FROM session_state WHERE session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT chat_session_id FROM acp_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 3,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET next_attempt_at = ? WHERE target_session_id = ? AND delivery_state IN ('queued', 'retry_wait') AND (next_attempt_at IS NULL OR next_attempt_at > ?)",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET wake_ready_attempt_id = attempt_id WHERE target_session_id = ? AND delivery_state = 'delivering' AND prompt_delivery_phase = 'preparing' AND wake_ready_attempt_id IS NOT attempt_id",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity = 'idle', activity_at = ?, work_at = ?, activity_source = ?, activity_reason = ?, prompt_started_at = NULL, prompt_epoch = NULL, status_error = CASE WHEN ? = 1 AND activity = 'error' THEN status_error ELSE NULL END, activity_probe_attempts = 0, activity_probe_at = NULL WHERE session_id = ? AND activity IN (?, ?) AND COALESCE(prompt_started_at, activity_at) <= ?",
+        "writes": 2
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, kind, created_at, expires_at, reason, metadata FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL ORDER BY CASE WHEN kind = 'needs_input' THEN 0 ELSE 1 END, created_at DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE updated_at >= ? UNION SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE id IN (SELECT session_id FROM session_attention_markers WHERE created_at >= ? OR resolved_at >= ?) ORDER BY updated_at DESC LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT MAX(created_at) as latest FROM activity_events",
+        "writes": 0
+      }
+    ],
+    "totalDoWrites": 1253,
+    "variant": "part1"
+  },
+  {
+    "batches": 120,
+    "d1Writes": 13,
+    "dueAlarms": 1,
+    "enabled": false,
+    "nativeWrites": 2,
+    "roles": {
+      "assistant": 192,
+      "thinking": 168,
+      "tool": 96,
+      "user": 24
+    },
+    "seconds": 240,
+    "shape": "thinking-tool",
+    "sqlReads": null,
+    "sqlWrites": 2307,
+    "statements": [
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "writes": 10
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT key, value, updated_at AS updatedAt, updated_by AS updatedBy FROM platform_settings",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT synced_at, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at FROM session_index_coverage WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT user_id FROM projects WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 29,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "writes": 1464
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "writes": 120
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 24,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "writes": 480
+      },
+      {
+        "calls": 72,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND kind = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 24,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "writes": 240
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:DELETE FROM prompt_delivery_target_backoff WHERE target_session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT activity FROM session_state WHERE session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT chat_session_id FROM acp_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 3,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET next_attempt_at = ? WHERE target_session_id = ? AND delivery_state IN ('queued', 'retry_wait') AND (next_attempt_at IS NULL OR next_attempt_at > ?)",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET wake_ready_attempt_id = attempt_id WHERE target_session_id = ? AND delivery_state = 'delivering' AND prompt_delivery_phase = 'preparing' AND wake_ready_attempt_id IS NOT attempt_id",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity = 'idle', activity_at = ?, work_at = ?, activity_source = ?, activity_reason = ?, prompt_started_at = NULL, prompt_epoch = NULL, status_error = CASE WHEN ? = 1 AND activity = 'error' THEN status_error ELSE NULL END, activity_probe_attempts = 0, activity_probe_at = NULL WHERE session_id = ? AND activity IN (?, ?) AND COALESCE(prompt_started_at, activity_at) <= ?",
+        "writes": 2
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, kind, created_at, expires_at, reason, metadata FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL ORDER BY CASE WHEN kind = 'needs_input' THEN 0 ELSE 1 END, created_at DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE updated_at >= ? UNION SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE id IN (SELECT session_id FROM session_attention_markers WHERE created_at >= ? OR resolved_at >= ?) ORDER BY updated_at DESC LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT MAX(created_at) as latest FROM activity_events",
+        "writes": 0
+      }
+    ],
+    "totalDoWrites": 2309,
+    "variant": "part1"
+  },
+  {
+    "batches": 120,
+    "d1Writes": 13,
+    "dueAlarms": 1,
+    "enabled": true,
+    "nativeWrites": 2,
+    "roles": {
+      "assistant": 192,
+      "thinking": 168,
+      "tool": 96,
+      "user": 24
+    },
+    "seconds": 240,
+    "shape": "thinking-tool",
+    "sqlReads": null,
+    "sqlWrites": 1899,
+    "statements": [
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO project_data_session_index_cursors ( project_id, cursor_updated_at, cursor_id, full_sync_started_at, last_progress_at, observed_session_count, complete, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET cursor_updated_at = excluded.cursor_updated_at, cursor_id = excluded.cursor_id, full_sync_started_at = excluded.full_sync_started_at, last_progress_at = excluded.last_progress_at, observed_session_count = excluded.observed_session_count, complete = excluded.complete, updated_at = excluded.updated_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_index_coverage ( project_id, synced_at, session_count, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at, backfill_completed_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET synced_at = excluded.synced_at, session_count = excluded.session_count, complete = excluded.complete, backfill_cursor_updated_at = excluded.backfill_cursor_updated_at, backfill_cursor_id = excluded.backfill_cursor_id, backfill_started_at = excluded.backfill_started_at, backfill_completed_at = excluded.backfill_completed_at",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:INSERT INTO session_summaries (id, project_id, user_id, status, topic, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at, created_by_user_id, created_at, attention_json, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET status = excluded.status, topic = excluded.topic, task_id = excluded.task_id, workspace_id = excluded.workspace_id, message_count = excluded.message_count, last_message_at = excluded.last_message_at, agent_completed_at = excluded.agent_completed_at, ended_at = excluded.ended_at, updated_at = excluded.updated_at, created_by_user_id = excluded.created_by_user_id, created_at = excluded.created_at, attention_json = excluded.attention_json, synced_at = excluded.synced_at",
+        "writes": 10
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT key, value, updated_at AS updatedAt, updated_by AS updatedBy FROM platform_settings",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT synced_at, complete, backfill_cursor_updated_at, backfill_cursor_id, backfill_started_at FROM session_index_coverage WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:SELECT user_id FROM projects WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "D1:coordinator:UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 29,
+        "reads": null,
+        "statement": "traffic:alarm:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:alarm:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 2,
+        "reads": null,
+        "statement": "traffic:alarm:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 336,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "writes": 1032
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET last_message_at = ?, session_id = COALESCE(?, session_id), idle_check_retry_count = 0, next_idle_check_at = NULL",
+        "writes": 120
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 24,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id FROM chat_messages WHERE session_id = ? AND role = ? AND content = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, created_at, sequence FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, sequence DESC, id DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, message_count, topic, status, last_message_sequence, last_message_sequence_count, stream_ingest_state, materialized_at, materialized_through_created_at, materialized_through_sequence, (SELECT prompt_epoch FROM session_state WHERE session_id = chat_sessions.id) AS prompt_epoch FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT id, workspace_id, task_id, created_by_user_id, status, message_count FROM chat_sessions WHERE id = ? LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT state FROM project_data_archive_source_intents WHERE session_id = ? AND state != 'rehome_exported' LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 480,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:SELECT workspace_id FROM chat_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 24,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_messages SET content = content || ? WHERE id = ? AND session_id = ? RETURNING id",
+        "writes": 24
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ?, stream_ingest_state = ?, last_message_sequence = ?, last_message_sequence_count = message_count + ? WHERE id = ?",
+        "writes": 480
+      },
+      {
+        "calls": 72,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND kind = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 24,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_attention_markers SET resolved_at = ?, resolved_by_message_id = ?, resolved_by_actor_type = ?, resolved_reason = ? WHERE session_id = ? AND resolved_at IS NULL RETURNING id",
+        "writes": 0
+      },
+      {
+        "calls": 120,
+        "reads": null,
+        "statement": "traffic:persistMessageBatch:UPDATE session_state SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?) WHERE activity IN ('prompting', 'recovering') AND session_id IN (SELECT id FROM acp_sessions WHERE chat_session_id = ? UNION SELECT ?)",
+        "writes": 240
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:DELETE FROM prompt_delivery_target_backoff WHERE target_session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT * FROM project_standing_watches WHERE project_id = ? AND state = 'active' ORDER BY next_eligible_at, id LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT 1 FROM session_inbox WHERE delivery_state IN ('queued', 'delivered') LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT activity FROM session_state WHERE session_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT chat_session_id FROM acp_sessions WHERE id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT cs.id AS session_id, COALESCE(ics.task_id, cs.task_id) AS task_id, COALESCE( CASE WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at WHEN wa.last_terminal_activity_at IS NULL THEN wa.last_message_at WHEN wa.last_terminal_activity_at > wa.last_message_at THEN wa.last_terminal_activity_at ELSE wa.last_message_at END, wa.created_at, cs.updated_at, cs.created_at, ics.created_at ) AS last_activity, ss.activity AS session_activity, ss.activity_at AS session_activity_at, ss.prompt_started_at AS prompt_started_at, gate.value AS reconciliation_gate FROM chat_sessions cs LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id LEFT JOIN workspace_activity wa ON wa.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) JOIN acp_sessions acp ON acp.workspace_id = COALESCE(ics.workspace_id, cs.workspace_id) AND acp.chat_session_id = cs.id AND acp.status IN ('assigned', 'running') LEFT JOIN session_state ss ON ss.session_id = acp.id LEFT JOIN do_meta gate ON gate.key = ? || cs.id WHERE cs.status = 'active' AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL AND COALESCE(ics.workspace_id, cs.workspace_id) IS NOT NULL AND NOT EXISTS ( SELECT 1 FROM do_meta episode WHERE episode.key = ? || cs.id AND json_valid(episode.value) AND json_extract(episode.value, '$.paused') = 1 ) AND NOT EXISTS ( SELECT 1 FROM session_attention_markers sam WHERE sam.session_id = cs.id AND sam.resolved_at IS NULL AND sam.kind IN ('needs_input', 'reconciliation_checkin') )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(CASE WHEN wake_attempts > 0 THEN next_reconcile_at ELSE MIN(next_reconcile_at, wake_deadline) END) AS due_at FROM task_wait_subscriptions WHERE state = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(COALESCE(expires_at, 0)) AS due FROM chat_session_access_grants WHERE revoked_at IS NULL AND expiry_handled_at IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(deadline) as earliest FROM ( SELECT expires_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND expires_at IS NOT NULL UNION ALL SELECT next_escalation_at AS deadline FROM session_attention_markers WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(due_at) AS due_at FROM ( SELECT MIN(MAX(COALESCE(next_attempt_at, created_at), CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at FROM prompt_delivery_target_backoff target WHERE target.target_session_id = inbox.target_session_id AND (CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END <= 2 OR target.message_priority >= CASE inbox.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END)), 0) END)) AS due_at FROM session_inbox inbox INDEXED BY idx_inbox_pending_due WHERE delivery_state IN ('queued', 'retry_wait') AND inbox.id = (SELECT active.id FROM session_inbox active INDEXED BY idx_inbox_active_target_head WHERE active.target_session_id = inbox.target_session_id AND active.delivery_intent = inbox.delivery_intent AND active.delivery_state IN ('queued', 'retry_wait', 'delivering') ORDER BY (active.delivery_state = 'delivering') DESC, CASE active.message_class WHEN 'shutdown_with_final_prompt' THEN 5 WHEN 'preempt_and_replan' THEN 4 WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END DESC, active.created_at, active.rowid LIMIT 1) UNION ALL SELECT MIN(attempt_started_at) + ? AS due_at FROM session_inbox WHERE delivery_state = 'delivering' AND attempt_started_at IS NOT NULL UNION ALL SELECT MIN(expires_at) AS due_at FROM session_inbox INDEXED BY idx_inbox_active_expiry WHERE delivery_state IN ('queued', 'retry_wait', 'delivering') AND expires_at IS NOT NULL )",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(last_heartbeat_at) as earliest FROM acp_sessions WHERE status IN ('assigned', 'running') AND last_heartbeat_at IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due FROM session_state ss JOIN acp_sessions acp ON acp.id = ss.session_id WHERE ss.activity IN (?, ?, ?) AND COALESCE(ss.activity_probe_attempts, 0) < ? AND acp.workspace_id IS NOT NULL AND acp.node_id IS NOT NULL",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT MIN(received_at) AS oldest_at FROM project_events WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 3,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at FROM project_schedules WHERE project_id = ? AND state = ? AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at, id LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT next_attempt_at, next_retention_at, materialization_failures FROM project_event_wake_scheduler_state WHERE project_id = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL",
+        "writes": 0
+      },
+      {
+        "calls": 6,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:SELECT value FROM do_meta WHERE key = ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:storage.setAlarm",
+        "writes": 1
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET next_attempt_at = ? WHERE target_session_id = ? AND delivery_state IN ('queued', 'retry_wait') AND (next_attempt_at IS NULL OR next_attempt_at > ?)",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_inbox SET wake_ready_attempt_id = attempt_id WHERE target_session_id = ? AND delivery_state = 'delivering' AND prompt_delivery_phase = 'preparing' AND wake_ready_attempt_id IS NOT attempt_id",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:UPDATE session_state SET activity = 'idle', activity_at = ?, work_at = ?, activity_source = ?, activity_reason = ?, prompt_started_at = NULL, prompt_epoch = NULL, status_error = CASE WHEN ? = 1 AND activity = 'error' THEN status_error ELSE NULL END, activity_probe_attempts = 0, activity_probe_at = NULL WHERE session_id = ? AND activity IN (?, ?) AND COALESCE(prompt_started_at, activity_at) <= ?",
+        "writes": 2
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:recordSessionTurnEnd:WITH tracked AS ( SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at, max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0), COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at FROM workspace_activity wa INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id WHERE cs.status = 'active' ), checks AS ( SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at, COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at FROM tracked ) SELECT MIN(next_check_at) AS earliest FROM checks",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, kind, created_at, expires_at, reason, metadata FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL ORDER BY CASE WHEN kind = 'needs_input' THEN 0 ELSE 1 END, created_at DESC LIMIT 1",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE updated_at >= ? UNION SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, NULLIF(MAX( COALESCE(archive_last_message_at, 0), COALESCE(json_extract(stream_ingest_state, '$.lastCreatedAt'), 0), (SELECT COALESCE(MAX(created_at), 0) FROM chat_messages WHERE session_id = chat_sessions.id) ), 0) as last_message_at FROM chat_sessions WHERE id IN (SELECT session_id FROM session_attention_markers WHERE created_at >= ? OR resolved_at >= ?) ORDER BY updated_at DESC LIMIT ?",
+        "writes": 0
+      },
+      {
+        "calls": 1,
+        "reads": null,
+        "statement": "traffic:runSummarySyncLocked:SELECT MAX(created_at) as latest FROM activity_events",
+        "writes": 0
+      }
+    ],
+    "totalDoWrites": 1901,
+    "variant": "part1"
+  }
+]

@@ -155,7 +155,7 @@ export async function persistMessageBatchWithSideEffects(
   for (const message of result.persistedMessages) {
     observeReconciliationMessage(sql, env, sessionId, message, hooks.broadcastEvent);
   }
-  if (result.bookkeepingScheduled || result.bookkeepingFlushed) await hooks.recalculateAlarm();
+  if (result.bookkeepingScheduled) await hooks.recalculateAlarm();
 
   // Extract latest plan message from the batch to update session state
   const lastPlanMsg = [...batchMessages].reverse().find((m) => m.role === 'plan' && m.content);

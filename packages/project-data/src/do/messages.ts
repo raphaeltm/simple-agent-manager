@@ -173,7 +173,6 @@ export function persistMessageBatch(
   remainingCapacity: number;
   broadcastMessages: Array<import('./message-stream-ingest').StoredBatchMessage>;
   bookkeepingScheduled: boolean;
-  bookkeepingFlushed: boolean;
   appends: Array<import('@simple-agent-manager/shared').ChatMessageAppend>;
 } {
   assertTranscriptWriteAllowed(sql, sessionId, 'persistMessageBatch');
@@ -390,7 +389,6 @@ export function persistMessageBatch(
   const hadTopic = !!session.topic;
   const staged = stream?.flush(sql);
   let bookkeepingScheduled = false;
-  let bookkeepingFlushed = false;
 
   if (persisted > 0) {
     const firstPending = session.message_bookkeeping_due_at == null;
@@ -435,7 +433,6 @@ export function persistMessageBatch(
         sessionId
       );
     }
-    if (stream?.sealed) bookkeepingFlushed = flushMessageBookkeeping(sql, sessionId);
 
     if (!session.topic) {
       const firstUserMsg = messages.find(
@@ -484,7 +481,6 @@ export function persistMessageBatch(
     maxMessages,
     remainingCapacity,
     bookkeepingScheduled,
-    bookkeepingFlushed,
     broadcastMessages: staged?.broadcastMessages ?? persistedMessages,
     appends: staged?.appends ?? [],
   };
