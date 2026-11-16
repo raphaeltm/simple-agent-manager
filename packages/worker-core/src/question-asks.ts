@@ -8,6 +8,7 @@
  * their consumers see no difference. One home for the record; this module only reads it.
  */
 import { createModuleLogger } from './logger';
+import { maybeJsonRecord } from './runtime-validation';
 
 const log = createModuleLogger('question_asks');
 
@@ -49,10 +50,8 @@ export const DEFAULT_OPEN_QUESTION_READ_LIMIT = 500;
 export function questionOptions(answerSpecJson: unknown): string[] {
   if (typeof answerSpecJson !== 'string' || !answerSpecJson) return [];
   try {
-    const spec = JSON.parse(answerSpecJson) as unknown;
-    if (!spec || typeof spec !== 'object') return [];
-    const record = spec as Record<string, unknown>;
-    if (record.type !== 'options' || !Array.isArray(record.options)) return [];
+    const record = maybeJsonRecord(JSON.parse(answerSpecJson) as unknown);
+    if (!record || record.type !== 'options' || !Array.isArray(record.options)) return [];
     return record.options.filter((option): option is string => typeof option === 'string');
   } catch {
     return [];
