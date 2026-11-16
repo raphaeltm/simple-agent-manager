@@ -25,8 +25,12 @@ import type { InsightsReceiptLimits } from './insights-receipt-settings';
 import { parseProjectPullRequestUrl } from './pull-request-core';
 import type { OperationContext } from './types';
 
-/** Bounds on the JSON sub-selects of the task read; each keeps the statement's size fixed. */
-const ASK_LIMIT = 50;
+/**
+ * Fixed shape bounds on the JSON sub-selects of the task read. They bound how many rows of a
+ * one-to-few relation one statement returns (a workspace's agent restarts, a task's owned pull
+ * requests), not a tunable budget; the ask cap, which is one, comes from
+ * `insights.receiptWaitingMaxQuestions`.
+ */
 const AGENT_SESSION_LIMIT = 10;
 const PR_ASSOCIATION_LIMIT = 5;
 
@@ -290,10 +294,12 @@ export function readResources(
 export async function readTask(
   ctx: OperationContext,
   projectId: string,
-  taskId: string
+  taskId: string,
+  /** Most asks read; one more is fetched so a cut-off list can say so. */
+  askLimit: number
 ): Promise<TaskRow | null> {
   const raw = await ctx.env.DATABASE.prepare(TASK_SQL)
-    .bind(ctx.actor.userId, ctx.actor.userId, ASK_LIMIT, taskId, projectId)
+    .bind(ctx.actor.userId, ctx.actor.userId, askLimit + 1, taskId, projectId)
     .first<Record<string, unknown>>();
   if (!raw) return null;
   const parsed = v.safeParse(TaskRowSchema, raw);

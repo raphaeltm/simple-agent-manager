@@ -380,7 +380,6 @@ export {
   listProjectIdeas,
   setProjectIdeaStatus,
 } from './ideas';
-export { getRunReceipt } from './insights-receipt';
 export {
   answerInboxItem,
   archiveInboxItem,
@@ -388,6 +387,7 @@ export {
   getInboxItem,
   listInbox,
 } from './inbox';
+export { getRunReceipt } from './insights-receipt';
 export {
   addObservation,
   createKnowledgeEntity,

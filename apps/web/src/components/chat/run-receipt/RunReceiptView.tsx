@@ -168,7 +168,7 @@ export function RunReceiptView({
       <h3 className={sectionHeading}>Where the time went</h3>
       <PhaseBar phases={receipt.phases} live={receipt.live} />
 
-      <div className="mt-4 grid grid-cols-2 gap-2.5">
+      <div className="mt-4 grid grid-cols-1 gap-2.5 min-[360px]:grid-cols-2">
         <StatTile
           label="Tokens"
           value="Not reported"

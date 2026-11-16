@@ -136,6 +136,9 @@ describe('runReceipt', () => {
   }
 
   beforeEach(() => {
+    // Fixed clock: the comparison window is "the last N days", and the fixtures sit around T0.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0 + 60 * MIN);
     vi.clearAllMocks();
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
@@ -280,7 +283,10 @@ describe('runReceipt', () => {
     };
     env = { DATABASE: counted, BASE_DOMAIN: 'example.test' } as unknown as Env;
   });
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    sqlite.close();
+    vi.useRealTimers();
+  });
 
   it('measures phases, outcome, account, resources and tool calls for the owner', async () => {
     const receipt = await runReceipt(ctx(), { projectId: 'p', taskId: 'task-own' });
@@ -441,7 +447,9 @@ describe('runReceipt', () => {
     expect(receipt.resources.requestedMemoryMb).toBeNull();
     expect(receipt.outcome.pullRequest).toBeNull();
     expect(receipt.toolCalls).toBeNull();
-    expect(receipt.unavailable).toEqual(['toolCalls']);
+    // The questions came from the same failed read, so waiting is a disclosed floor, not a zero.
+    expect(receipt.unavailable).toEqual(['toolCalls', 'waiting']);
+    expect(receipt.phases.find((phase) => phase.key === 'waiting')?.limited).toBe(true);
     // Liveness: the parts that did read are still there.
     expect(receipt.phases.find((phase) => phase.key === 'setup')?.durationMs).toBe(3 * MIN);
     expect(receipt.resources.peakMemoryBytes).toBe(3_100_000_000);
@@ -492,6 +500,22 @@ describe('runReceipt', () => {
     });
     // Control: other phases are not marked.
     expect(receipt.phases.find((phase) => phase.key === 'setup')?.limited).toBeUndefined();
+  });
+
+  it('marks waiting as a floor when the run had more asks than one receipt reads', async () => {
+    mocks.facts.mockResolvedValue(facts({ waitingIntervals: [] }));
+    const insertAsk = sqlite.prepare(
+      `INSERT INTO asks (id, project_id, kind, assignee_kind, assignee_user_id, title,
+         source_session_id, created_at, updated_at, resolved_at, status)
+       VALUES (?, 'p', 'question', 'user', 'owner', ?, 'chat-task-own', ?, ?, ?, 'answered')`
+    );
+    // The default cap is 200 questions; 201 asks inside the run.
+    for (let i = 0; i < 201; i += 1) {
+      const at = T0 + 5 * MIN + i * 1000;
+      insertAsk.run(`ask-many-${i}`, `Question ${i}`, at, at, at + 500);
+    }
+    const receipt = await runReceipt(ctx(), { projectId: 'p', taskId: 'task-own' });
+    expect(receipt.phases.find((phase) => phase.key === 'waiting')?.limited).toBe(true);
   });
 
   it('stays within the receipt I/O budget of 8 round trips', async () => {

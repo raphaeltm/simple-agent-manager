@@ -74,10 +74,9 @@ export async function runReceipt(
   await authorizeProjectOperation(ctx, projectId);
   if (!taskId) throw new OperationError('not_found', 'Task not found');
 
-  const [limits, row] = await Promise.all([
-    getInsightsReceiptLimits(ctx),
-    readTask(ctx, projectId, taskId),
-  ]);
+  // Settings are cached per isolate, so reading them first costs no extra round trip in practice.
+  const limits = await getInsightsReceiptLimits(ctx);
+  const row = await readTask(ctx, projectId, taskId, limits.receiptWaitingMaxQuestions);
   if (!row) throw new OperationError('not_found', 'Task not found');
 
   const now = Date.now();
@@ -127,7 +126,14 @@ export async function runReceipt(
     unavailable
   );
 
-  const asks = parseJsonList(row.asks, AskSchema, { taskId, column: 'asks' });
+  const readAsks = parseJsonList(row.asks, AskSchema, { taskId, column: 'asks' });
+  const askLimit = limits.receiptWaitingMaxQuestions;
+  const asks = readAsks.slice(0, askLimit);
+  // The ProjectData read carries the agent's questions too: when it failed, waiting is a floor
+  // (asks only) and is named as unavailable, never reported as an exact figure.
+  const factsFailed = unavailable.includes('toolCalls');
+  if (factsFailed) unavailable.push('waiting');
+  const waitingIsFloor = Boolean(facts?.waitingLimited) || readAsks.length > askLimit || factsFailed;
   const waiting = [
     ...(facts?.waitingIntervals ?? []),
     ...asks.map((ask) => ({
@@ -162,9 +168,10 @@ export async function runReceipt(
     createdAt: new Date(createdAt).toISOString(),
     endedAt: new Date(phases.endMs).toISOString(),
     totalMs: phases.totalMs,
-    // The question cap is disclosed on the phase it bounds (rule 65): past it, waiting is a floor.
+    // A cut-off or unreadable list of questions is disclosed on the phase it bounds (rule 65):
+    // waiting is then a floor.
     phases: phases.phases.map((phase) =>
-      phase.key === 'waiting' && facts?.waitingLimited ? { ...phase, limited: true } : phase
+      phase.key === 'waiting' && waitingIsFloor ? { ...phase, limited: true } : phase
     ),
     outcome: {
       pullRequest: pullRequest?.outcome.pullRequest ?? null,

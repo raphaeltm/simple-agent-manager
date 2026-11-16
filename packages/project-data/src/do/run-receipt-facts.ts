@@ -21,6 +21,11 @@ import type {
   RunReceiptWaitingInterval,
 } from '@simple-agent-manager/shared';
 
+/**
+ * ACP sessions returned for the account lookup. Sessions created after the run's window are
+ * excluded first, so the newest remaining ones belong to this run, not a later one in the same
+ * chat; a run restarts its agent a handful of times at most.
+ */
 const ACP_SESSION_LIMIT = 10;
 
 /**
@@ -143,9 +148,10 @@ export function getRunReceiptFacts(sql: SqlStorage, input: RunReceiptFactsInput)
 
   const acpSessionIds = sql
     .exec(
-      `SELECT id FROM acp_sessions WHERE chat_session_id = ?
+      `SELECT id FROM acp_sessions WHERE chat_session_id = ? AND created_at <= ?
         ORDER BY created_at DESC, id DESC LIMIT ?`,
       input.sessionId,
+      toMs,
       ACP_SESSION_LIMIT
     )
     .toArray()

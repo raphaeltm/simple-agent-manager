@@ -141,7 +141,7 @@ describe('computePhases', () => {
     ).toEqual({ machine: MIN, setup: 8 * MIN, agent: null, waiting: null, ci: null });
   });
 
-  it('counts an open question up to the end of the run', () => {
+  it('counts an open question on a live run up to now', () => {
     expect(
       durations(
         timeline({
@@ -153,7 +153,22 @@ describe('computePhases', () => {
           waiting: [{ startMs: T0 + 25 * MIN, endMs: null }],
         })
       ).waiting
-    ).toBe(5 * MIN);
+    ).toBe(35 * MIN);
+  });
+});
+
+describe('computePhases — idle live run', () => {
+  it('ends an idle live run at its last message, not now', () => {
+    const result = computePhases(
+      timeline({
+        live: true,
+        completedAt: null,
+        hasChecks: false,
+        finalCheckAt: null,
+        waiting: [{ startMs: T0 + 10 * MIN, endMs: T0 + 15 * MIN }],
+      })
+    );
+    expect(result.endMs).toBe(T0 + 30 * MIN);
   });
 });
 

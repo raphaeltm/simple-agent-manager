@@ -84,7 +84,7 @@ export interface RunReceiptPhase {
 }
 
 /** A part of the receipt that could not be read; the rest is still returned. */
-export type RunReceiptSection = 'outcome' | 'toolCalls' | 'comparison' | 'account';
+export type RunReceiptSection = 'outcome' | 'toolCalls' | 'waiting' | 'comparison' | 'account';
 
 export interface RunReceiptPullRequest {
   number: number;

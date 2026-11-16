@@ -94,9 +94,15 @@ export interface ReceiptPhases {
 }
 
 export function computePhases(t: ReceiptTimeline): ReceiptPhases {
+  // A live run is measured up to now while it is still being placed, or while a question is open
+  // (the wait is still going on); otherwise up to its last message, so an idle chat waiting for a
+  // follow-up does not grow its "agent working" time.
+  const openQuestion = t.waiting.some((wait) => wait.endMs === null);
   const base =
     t.completedAt ??
-    (t.live && t.agentStartAt === null ? t.now : (t.lastActivityAt ?? t.agentStartAt ?? t.now));
+    (t.live && (t.agentStartAt === null || openQuestion)
+      ? t.now
+      : (t.lastActivityAt ?? t.agentStartAt ?? t.now));
   const ciStart = t.lastAgentMessageAt ?? t.agentStartAt;
   const ci =
     t.hasChecks && t.agentStartAt !== null && t.finalCheckAt !== null && ciStart !== null

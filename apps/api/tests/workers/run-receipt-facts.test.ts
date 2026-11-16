@@ -71,13 +71,17 @@ async function seed(projectId: string) {
     );
     sql.exec(
       `INSERT INTO acp_sessions (id, chat_session_id, status, created_at, updated_at)
-       VALUES ('acp-old', ?, 'completed', ?, ?), ('acp-new', ?, 'running', ?, ?)`,
+       VALUES ('acp-old', ?, 'completed', ?, ?), ('acp-new', ?, 'running', ?, ?),
+              ('acp-later-run', ?, 'running', ?, ?)`,
       sessionId,
       T0,
       T0,
       sessionId,
       T0 + MIN,
-      T0 + MIN
+      T0 + MIN,
+      sessionId,
+      T0 + 20 * MIN,
+      T0 + 20 * MIN
     );
   });
   return { stub, sessionId };
@@ -123,6 +127,7 @@ describe('getRunReceiptFacts', () => {
     ]);
     expect(facts.lastAgentMessageAt).toBe(T0 + 7 * MIN);
     expect(facts.lastMessageAt).toBe(T0 + 9 * MIN);
+    // A later run's ACP session in the same chat is not this run's.
     expect(facts.acpSessionIds).toEqual(['acp-new', 'acp-old']);
   });
 

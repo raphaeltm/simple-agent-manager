@@ -64,6 +64,7 @@ export function formatDuration(ms: number | null, live = false): string {
 const SECTION_LABEL: Record<RunReceiptSection, string> = {
   outcome: 'the pull request',
   toolCalls: 'tool calls',
+  waiting: 'all the questions the agent asked',
   comparison: 'the comparison with recent runs',
   account: 'the account',
 };
