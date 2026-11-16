@@ -49,6 +49,7 @@ import {
   readIdeaRows,
   readIdeaTotals,
   readProjectRepository,
+  readRecentIdeaRows,
   readSessionTasks,
   type SessionTaskRow,
   viaConnector,
@@ -325,7 +326,16 @@ export async function listIdeasWithDerivedStatus(
 
   const { evidence, snapshots } = await collectEvidence(ctx, input.projectId, rows, 'none');
 
-  const items = rows.map((row) => {
+  return { items: listItems(ctx, rows, evidence, snapshots), truncated, totals };
+}
+
+function listItems(
+  ctx: OperationContext,
+  rows: readonly IdeaRow[],
+  evidence: Map<string, IdeaEvidence>,
+  snapshots: CollectedEvidence['snapshots']
+): IdeaListItem[] {
+  return rows.map((row) => {
     const entry = evidence.get(row.id) ?? emptyEvidence();
     return {
       ideaId: row.id,
@@ -340,7 +350,40 @@ export async function listIdeasWithDerivedStatus(
       viaConnector: viaConnector(row),
     } satisfies IdeaListItem;
   });
-  return { items, truncated, totals };
+}
+
+/**
+ * The `limit` most recently updated ideas, open or closed, as Ideas list items: the Project
+ * Overview's "Recently". Same rows and derived state as the list, without its per-status caps
+ * and totals, so evidence is collected for exactly the rows shown.
+ */
+export async function listRecentIdeasWithDerivedStatus(
+  ctx: OperationContext,
+  input: { projectId: string; limit: number }
+): Promise<IdeaListItem[]> {
+  const limits = getPlatformOperationLimits(ctx.env);
+  const limit = clampOperationNumber(input.limit, 1, limits.ideaListMax, 'limit');
+  const rows = await readRecentIdeaRows(ctx, input.projectId, limit);
+  const { evidence, snapshots } = await collectEvidence(ctx, input.projectId, rows, 'none');
+  return listItems(ctx, rows, evidence, snapshots);
+}
+
+/**
+ * Ideas list items for rows the caller already read, with every pull request recorded for each
+ * idea: the same evidence and derived state as the Ideas list, in its fixed number of round
+ * trips. Insights reads it for "idea to merged", rework and "ideas waiting longest".
+ */
+export async function ideaItemsWithPullRequests(
+  ctx: OperationContext,
+  projectId: string,
+  rows: readonly IdeaRow[]
+): Promise<Array<{ item: IdeaListItem; pullRequests: IdeaPullRequest[] }>> {
+  const { evidence, snapshots } = await collectEvidence(ctx, projectId, rows, 'none');
+  const items = listItems(ctx, rows, evidence, snapshots);
+  return items.map((item) => ({
+    item,
+    pullRequests: evidence.get(item.ideaId)?.pullRequests ?? [],
+  }));
 }
 
 export interface GetIdeaInput {

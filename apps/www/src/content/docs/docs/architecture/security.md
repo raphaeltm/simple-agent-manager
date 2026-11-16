@@ -149,7 +149,17 @@ Neither path serves Instant (cf-container) workspaces. Their container receives 
 
 Deleting, stopping or sleeping a workspace ends its callback authority at once. SAM has no per-token revocation list. Instead, each use re-reads the workspace and its node in D1, and only an active workspace (`creating`, `running` or `recovery`) on a node that is not ending (`stopping`, `stopped`, `destroying`, `deleting`, `destroyed` or `deleted`; `nodeStatusTerminatesCallbacks`) is accepted (`assertWorkspaceAcceptsCallback` in `apps/api/src/routes/workspaces/_helpers.ts`). Endpoints that return secrets or rotate credentials re-read the full workspace incarnation again just before they respond (`assertWorkspaceCallbackIdentityCurrent`). The same check gates the SAM AI proxy (`verifyAIProxyAuth` in `apps/api/src/services/ai-proxy-auth.ts`), so a stopped workspace's token cannot keep spending model credentials. A workspace never moves to another node: placement only sets `node_id` while it is empty, and deleting the node clears it. A renewed token keeps its first issue time in a `gen_iat` claim, so the Instant stale-callback guard compares generations correctly (`apps/api/src/routes/_stale-callback-guard.ts`).
 
-The workspace's SAM MCP token follows the same rule (`validateActiveWorkspaceMcpToken` in `apps/api/src/services/mcp-token-lifecycle.ts`). MCP tool calls, webhook-claim redemption and the GCP deployment identity endpoint accept it only while its workspace is active on a live node and still belongs to the token's user and project. A deleted, missing or reassigned workspace also deletes the token.
+The workspace's SAM MCP token follows the same rule, and also follows the authority of the user it acts for (`validateActiveWorkspaceMcpToken` in `apps/api/src/services/mcp-token-lifecycle.ts`). MCP tool calls, webhook-claim redemption and the GCP deployment identity endpoint accept it only while, in a single D1 read:
+
+- its workspace is active on a live node, runs the token's credential generation, and still belongs to the token's user and project;
+- that user's account still exists and is not suspended;
+- that user has an `active` membership in the project, the same condition the REST API checks (`requireActiveProjectMembership` in `apps/api/src/middleware/project-auth.ts`). Project owners hold an active `owner` membership.
+
+Some failures delete the token, because no later state can make it valid again: a deleted, missing or reassigned workspace, a retired generation, a deleted user account, a membership marked `removed` (offboarding), or no membership row at all. Other failures only refuse the call and keep the token, because the state can be reversed: a suspended account, a `pending` account while signup approval is required, a membership that is `invited` or `suspended`, or a workspace that is stopped, sleeping or on an ending node. Every deleting check runs before every refusing one, so a reversible state cannot hide a permanent one. If a suspended member is also removed, the token is deleted, and reinstating them later does not revive it. An agent whose user is unsuspended or approved can use its token again straight away, with no restart. A `pending` account is gated the same way REST gates it (`isBlockedBySignupApproval` in `apps/api/src/services/signup-approval.ts`). It is refused while signup approval is required, unless its platform role is admin or superadmin, and accepted otherwise. The current `signup.requireApproval` setting is read in the same D1 query and never cached, so turning approval on stops a pending owner's already-running agent on its next call.
+
+The token check does not look at the member's role. Tools that need a particular capability check the current role themselves. Destructive orchestration tools require `task:write` (`apps/api/src/routes/mcp/orchestration-authority.ts`). The GCP deployment identity endpoint requires `deployment:deploy` before it reads its cached identity token or signs a new one (`apps/api/src/routes/project-deployment.ts`).
+
+Removing a member does not stop the workspaces they started. Those workspaces lose MCP access as described above, but they keep running until they are stopped. Their callback tokens are checked against the workspace, not the member.
 
 While a workspace is ending, a few cleanup calls are still accepted:
 
@@ -489,6 +499,21 @@ Escaping a devcontainer reaches only the user's own VM, whether the escape comes
 - **App deployments.** Deployment nodes run internet-facing apps unattended and can host several environments belonging to the same user. Their Compose subset denies host-authority fields such as `privileged`, `network_mode` and `use_api_socket` (`DENIED_SERVICE_FIELDS` in `packages/shared/src/compose-parser/constants.ts`).
 
 Ways to run nested containers without `privileged`, such as a user-namespaced container runtime, are welcome improvements, provided Docker, Compose and Testcontainers keep working inside workspaces.
+
+## Application Build Executor
+
+Cloudflare application builds run arbitrary Dockerfile `RUN` code as root inside Docker-in-Docker with host build networking. Builds have unrestricted internet access, like VM workspaces; package repositories and presigned R2 transfers are reached directly without an outbound proxy, host allowlist or HTTPS interception CA. This is the deployment-build egress decision approved on November 15, 2026. Network access is not a security boundary for build code.
+
+Each publish job gets its own microVM, identified by `publishJobId`, with no reuse across jobs or projects. SAM delivers no platform cloud credentials, signing keys, workspace callback token, or runtime deployment secret values to that guest. The Go supervisor holds the job callback token in memory; it is not placed in process arguments, environment variables or files. Arbitrary root code shares the guest with that supervisor, so assume it can obtain and use the authority of that one job. It can also use the job's short-lived presigned object URLs. It has no authority over other jobs, projects, credential endpoints or Worker bindings.
+
+The enforcing paths are:
+
+- `apps/api/src/durable-objects/compose-builder-container.ts` enables direct internet access, passes only nonsecret timing budgets through the environment, checks the builder version, and sends a single launch payload through the SDK's private container transport. It never calls the guest control port after launch acceptance, because root build code could bind that port later. Its persisted deadline alarm destroys the microVM before recording the timeout in D1 and retries failed destruction.
+- `packages/vm-agent/cmd/sam-builder/main.go` closes the bootstrap HTTP listener before starting the build. `packages/vm-agent/internal/builder/` keeps the callback token in supervisor memory, verifies context size and SHA-256 before extraction, and rejects HTTP redirects for authenticated control-plane and presigned transfers.
+- `apps/api/src/services/jwt.ts` verifies the publish-job token's signature, issuer, audience, expiration and claims. `apps/api/src/services/publish-job-token.ts` binds it to the current nonterminal job row, project, environment, profile, executor and attempt on every authorized callback. Completion, cancellation or an attempt change revokes callback authority immediately. Generic workspace/node callback sinks reject this scope.
+- The existing publish callback routes fence artifact keys, event updates and release submission to that job and attempt. Presigned URLs carry only the specific context download or image upload authority until their expiry; a terminal job cannot obtain new URLs, but an already-issued URL remains usable until it expires.
+
+The build microVM is the isolation boundary. Root execution and open egress are intentional capabilities; the restrictions protect control-plane and cross-project authority while allowing ordinary Docker builds. Deployment target nodes retain their separate restricted Compose policy described above.
 
 ## Security Best Practices
 

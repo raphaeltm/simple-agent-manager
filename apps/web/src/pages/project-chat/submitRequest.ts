@@ -6,7 +6,7 @@ import type {
 
 import type { TaskAttachmentRef } from '../../lib/api';
 import type { submitTask } from '../../lib/api';
-import type { PendingDerived } from './useProjectChatState';
+import type { PendingDerived } from './types';
 
 type SubmitTaskPayload = Parameters<typeof submitTask>[1];
 

@@ -22,7 +22,7 @@ export interface HumanInputCardProps {
 
 /**
  * How often an open card re-reads a question that can still change (answered from the
- * notification bell or another tab, delivered, or expired). TanStack pauses this while the tab
+ * Inbox or another tab, delivered, or expired). TanStack pauses this while the tab
  * is hidden. Override via VITE_HUMAN_INPUT_CARD_REFRESH_MS.
  */
 const DEFAULT_HUMAN_INPUT_CARD_REFRESH_MS = 15_000;
@@ -43,7 +43,7 @@ const CARD_CLASS = 'glass-surface my-1 rounded-md border border-border-default';
 type Request = AttentionRequestContext['request'];
 type Tone = 'open' | 'done' | 'muted';
 
-/** Same wording as the bell's title (`notifyNeedsInput`): "Approval needed", "Input needed". */
+/** Same wording as the notification's title (`notifyNeedsInput`): "Approval needed", "Input needed". */
 function titleFor(request: Request): string {
   const category = request.category;
   const label = category
@@ -111,9 +111,9 @@ function QuestionText({ reason }: { reason: string | null }) {
 
 /**
  * Renders a `request_human_input` tool call as the question it created, so the user can answer
- * it in the conversation instead of only from the notification bell. Everything shown comes
+ * it in the conversation as well as from the Inbox. Everything shown comes
  * from the server's attention marker; the transcript supplies only its ID. Answers go through
- * the same endpoint as the bell and reach the agent as a new prompt.
+ * the same record as the Inbox and reach the agent as a new prompt.
  */
 export const HumanInputCard: FC<HumanInputCardProps> = ({ item, projectId }) => {
   const ref = useMemo(() => extractHumanInputRequest(item), [item]);
@@ -152,7 +152,7 @@ export const HumanInputCard: FC<HumanInputCardProps> = ({ item, projectId }) => 
       <div className={`${CARD_CLASS} flex items-center gap-2.5 px-3 py-2.5`} role="note">
         <HelpCircle size={18} className="shrink-0 text-fg-muted" aria-hidden="true" />
         <div className="min-w-0 text-sm text-fg-muted">
-          The agent asked for your input. Answer it from the notification bell.
+          The agent asked for your input. Answer it from your Inbox.
         </div>
       </div>
     );

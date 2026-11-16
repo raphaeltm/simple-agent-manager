@@ -363,7 +363,18 @@ async function runStrictCleanup(
 
     return 'destroyed';
   } catch (error) {
-    await handleCleanupFailure(env, node, nowIso, options, error);
+    try {
+      await handleCleanupFailure(env, node, nowIso, options, error);
+    } catch (failureError) {
+      // Failure diagnosis and persistence can fail too. Keep this candidate's
+      // failure from suppressing teardown of the remaining nodes in the phase.
+      log.error('node_cleanup.failure_handler_failed', {
+        nodeId: node.id,
+        userId: node.user_id,
+        error: errorMessage(failureError),
+        originalError: errorMessage(error),
+      });
+    }
     await recordSweepDecision(env, node, options, 'destroy_failed', errorMessage(error));
     return 'failed';
   } finally {

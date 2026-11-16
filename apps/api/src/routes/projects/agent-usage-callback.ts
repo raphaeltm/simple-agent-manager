@@ -28,7 +28,7 @@ const agentUsageCallbackRoute = new Hono<{ Bindings: Env }>();
 /**
  * Field paths that failed validation, with array indices collapsed so the list
  * stays bounded by the schema's shape. Never the values or Valibot messages:
- * both can echo the request body (apps/api/.claude/rules/51).
+ * both can echo the request body (.claude/rules/51).
  */
 function invalidFieldPaths(error: unknown): string[] {
   if (!(error instanceof RuntimeValidationError) || !error.issues) return [];

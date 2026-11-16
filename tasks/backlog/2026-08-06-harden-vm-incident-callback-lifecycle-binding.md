@@ -17,7 +17,7 @@
 >     `node_mismatch` (`apps/api/src/services/vm-error-correlation.ts`, commit fd1d1aa08; tests in
 >     `vm-error-correlation.test.ts`).
 >   - The shared callback policy is documented in
->     `apps/api/.claude/rules/34-vm-agent-callback-auth.md:38`.
+>     `.claude/rules/34-vm-agent-callback-auth.md:38`.
 > - **Still open:**
 >   - The body `workspaceId` is still stored as-is when it belongs to another node; only task and
 >     session are nulled. `apps/api/tests/integration/observability-ingestion.test.ts:1003-1011`

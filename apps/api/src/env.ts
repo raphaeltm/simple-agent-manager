@@ -8,6 +8,7 @@ import type { ProjectDataEnv } from '@simple-agent-manager/project-data';
 import type { ArtifactsBinding, RepoHostingEnv } from '@simple-agent-manager/repo-hosting';
 import type { WorkspaceAdmissionEnv } from '@simple-agent-manager/scheduler-core';
 
+import type { ComposeBuilderContainer } from './durable-objects/compose-builder-container';
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
 import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
@@ -25,6 +26,8 @@ export interface Env
     OperationsEnv,
     RepoHostingEnv,
     AiProxyEnv {
+  COMPOSE_BUILDER: DurableObjectNamespace<ComposeBuilderContainer>;
+  DEPLOY_BUILDER_CLASS_MAX_INSTANCES?: string;
   CLI_RECEIPT_REQUEST_MAX_BYTES?: string; // default 262144
   CLI_RECEIPT_RESPONSE_MAX_BYTES?: string; // default 65536
   // D1 Database.
@@ -989,7 +992,6 @@ export interface Env
   ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS?: string; // Max task-status CAS attempts after a hard stop (default: 2)
   ORCHESTRATOR_MESSAGE_MAX_LENGTH?: string; // Max length for injected messages to child agents (default: 32768)
   // Attention markers
-  HUMAN_INPUT_TIMEOUT_MS?: string; // Attention marker expiry for needs_input (default: 7200000 = 2 hours)
   HUMAN_INPUT_ESCALATION_FRACTIONS?: string; // Comma-separated fractions of initial window (default: 0.25,0.75)
   HUMAN_INPUT_UNDELIVERED_GRACE_MS?: string; // Extension without confirmed delivery (default: 7200000)
   HUMAN_INPUT_MAX_WAIT_MS?: string; // Hard marker residence limit (default: 86400000)

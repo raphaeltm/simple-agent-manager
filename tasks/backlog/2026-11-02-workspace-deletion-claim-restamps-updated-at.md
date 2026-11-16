@@ -7,7 +7,7 @@ sets `updated_at = now` on every deletion attempt, including retries of a row th
 `stopping`. `LAST_WORKSPACE_ACTIVITY_SQL` (`apps/api/src/scheduled/node-cleanup/shared.ts`), read by the
 empty-node warm-handoff backstop (`scheduled/node-cleanup/empty-node-warm-handoff.ts`), treats that
 column as workspace activity, so each retry pushes the backstop out again. This is the
-liveness-as-idleness class from `apps/api/.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
+liveness-as-idleness class from `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
 (a retry writer moving a clock another step schedules on).
 
 ## Context

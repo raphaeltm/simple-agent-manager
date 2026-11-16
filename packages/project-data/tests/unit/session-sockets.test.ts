@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   broadcastToBrowserSockets,
   closeQuietly,
-  hasLegacySessionSocket,
+  countLegacySockets,
 } from '../../src/do/session-sockets';
 
 const SESSION = '11111111-2222-3333-4444-555555555555';
@@ -99,11 +99,20 @@ describe('broadcastToBrowserSockets failure isolation', () => {
   });
 });
 
-describe('hasLegacySessionSocket', () => {
-  it('counts only open sockets without the capability', () => {
+describe('countLegacySockets', () => {
+  it('counts open sockets without the capability, by scope', () => {
     const closing = socket(session);
     closing.readyState = WebSocket.CLOSING;
-    expect(hasLegacySessionSocket(context([closing, socket(capable)]), SESSION)).toBe(false);
-    expect(hasLegacySessionSocket(context([closing, socket(session)]), SESSION)).toBe(true);
+    const other = socket(['session:99999999-2222-3333-4444-555555555555']);
+    expect(countLegacySockets(context([closing, other, socket(capable)]), SESSION)).toEqual({
+      session: 0,
+      project: 0,
+    });
+    expect(
+      countLegacySockets(
+        context([closing, socket(session), socket([]), socket([CHAT_MESSAGE_APPEND_CAPABILITY])]),
+        SESSION
+      )
+    ).toEqual({ session: 1, project: 1 });
   });
 });

@@ -342,6 +342,7 @@ describe('MCP knowledge and policy route tools', () => {
       // which is exactly what every policy created before this feature was.
       'always',
       null,
+      'pinned'
     );
   });
 
@@ -459,6 +460,31 @@ describe('MCP knowledge and policy route tools', () => {
     );
   });
 
+  describe('policy inject mode', () => {
+    it('add_policy forwards on_demand and rejects an unknown mode', async () => {
+      const ok = await mcpPost(app, 'add_policy', {
+        category: 'preference', title: 'T', content: 'C', injectMode: 'on_demand',
+      });
+      expect((await ok.json()).error).toBeUndefined();
+      expect(vi.mocked(projectDataService.createPolicy).mock.calls[0]?.at(-1)).toBe('on_demand');
+
+      await expectInvalidParams(await mcpPost(app, 'add_policy', {
+        category: 'preference', title: 'T', content: 'C', injectMode: 'maybe',
+      }), 'injectMode must be one of: pinned, on_demand');
+      expect(projectDataService.createPolicy).toHaveBeenCalledTimes(1);
+    });
+
+    it('update_policy sends injectMode only when it was supplied', async () => {
+      vi.mocked(projectDataService.updatePolicy).mockResolvedValue(true);
+      await mcpPost(app, 'update_policy', { policyId: 'pol-1', injectMode: 'on_demand' });
+      await mcpPost(app, 'update_policy', { policyId: 'pol-1', title: 'Renamed' });
+      expect(vi.mocked(projectDataService.updatePolicy).mock.calls.map((c) => c[3])).toEqual([
+        { injectMode: 'on_demand' },
+        { title: 'Renamed' },
+      ]);
+    });
+  });
+
   describe('policy lifecycle (expiry + scope)', () => {
     it('rejects a task-scoped policy with no expiry before touching ProjectData', async () => {
       // The failure this feature exists to prevent: capturing a one-shot workflow
@@ -530,6 +556,7 @@ describe('MCP knowledge and policy route tools', () => {
         expect.any(Number),
         'task',
         expiresAt,
+        'pinned'
       );
     });
 

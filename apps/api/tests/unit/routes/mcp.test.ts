@@ -47,6 +47,13 @@ const instantSessionMocks = vi.hoisted(() => ({
   launchInstantSession: vi.fn(),
 }));
 
+// request_human_input files its question as a D1 `asks` row (inbox slice G); the real create
+// path is covered on SQLite in `tests/unit/services/inbox/question-asks.test.ts`.
+const questionAskMocks = vi.hoisted(() => ({
+  fileQuestionAsk: vi.fn(),
+  linkQuestionNotification: vi.fn(),
+}));
+vi.mock('../../../src/services/inbox/question-asks', () => questionAskMocks);
 const agentActivityMocks = vi.hoisted(() => ({
   listAgentActivityTasks: vi.fn(),
 }));
@@ -4667,6 +4674,12 @@ describe('MCP Routes', () => {
     beforeEach(() => {
       vi.clearAllMocks();
       mockKV.get.mockResolvedValue({ ...validTokenData, chatSessionId: 'session-1' });
+      questionAskMocks.fileQuestionAsk.mockResolvedValue({
+        id: 'ask-1',
+        createdAt: 1,
+        expiresAt: 2,
+      });
+      questionAskMocks.linkQuestionNotification.mockResolvedValue(undefined);
     });
 
     it('should send notification and return success', async () => {
@@ -4691,18 +4704,35 @@ describe('MCP Routes', () => {
       const body = await res.json();
       const payload = JSON.parse(body.result.content[0].text);
       expect(payload.message).toContain('Human input request recorded');
-      // The chat card reads the question from this marker; it must point at the stored one.
-      expect(payload.humanInputRequest).toEqual({ id: 'marker-1', sessionId: 'session-1' });
+      // The chat card reads the question by this id; it must be the stored ask's.
+      expect(payload.humanInputRequest).toEqual({ id: 'ask-1', sessionId: 'session-1' });
       expect(payload.notificationScheduled).toBe(true);
+      expect(questionAskMocks.fileQuestionAsk).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          sessionId: 'session-1',
+          userId: 'user-789',
+          context: 'Should I use approach A or B for the database migration?',
+          category: 'decision',
+          options: ['Approach A', 'Approach B'],
+        })
+      );
+      expect(mockDoStub.createAttentionMarker).not.toHaveBeenCalled();
       expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
         'user-789',
         expect.objectContaining({
           type: 'needs_input',
           metadata: expect.objectContaining({
-            attentionMarkerId: 'marker-1',
+            attentionMarkerId: 'ask-1',
             options: ['Approach A', 'Approach B'],
           }),
         })
+      );
+      expect(questionAskMocks.linkQuestionNotification).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(String),
+        'ask-1',
+        expect.any(String)
       );
     });
 
@@ -4826,8 +4856,9 @@ describe('MCP Routes', () => {
       expect(payload.message).toContain('notification delivery was not scheduled');
       expect(payload.notificationScheduled).toBe(false);
       // The question is still recorded, so the chat card can still be answered.
-      expect(payload.humanInputRequest).toEqual({ id: 'marker-1', sessionId: 'session-1' });
-      expect(mockDoStub.createAttentionMarker).toHaveBeenCalledOnce();
+      expect(payload.humanInputRequest).toEqual({ id: 'ask-1', sessionId: 'session-1' });
+      expect(questionAskMocks.fileQuestionAsk).toHaveBeenCalledOnce();
+      expect(questionAskMocks.linkQuestionNotification).not.toHaveBeenCalled();
     });
 
     it('returns an error instead of claiming safety when no chat session exists', async () => {
@@ -4851,7 +4882,26 @@ describe('MCP Routes', () => {
       const body = await res.json();
       expect(body.error.message).toContain('chat session is missing');
       expect(mockNotificationStub.createNotification).not.toHaveBeenCalled();
-      expect(mockDoStub.createAttentionMarker).not.toHaveBeenCalled();
+      expect(questionAskMocks.fileQuestionAsk).not.toHaveBeenCalled();
+    });
+
+    it('tells the agent which inbox limit it hit (per-chat cap) instead of an internal error', async () => {
+      mockD1._stmt.first.mockResolvedValueOnce({ user_id: 'user-789', title: 'Fix the bug' });
+      const { OperationError } = await import('@simple-agent-manager/operations');
+      questionAskMocks.fileQuestionAsk.mockRejectedValueOnce(
+        new OperationError('rate_limited', 'This chat already has 20 open inbox items')
+      );
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'One more question?' },
+        })
+      );
+      const body = await res.json();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toBe('This chat already has 20 open inbox items');
+      expect(mockNotificationStub.createNotification).not.toHaveBeenCalled();
     });
 
     it('should reject context that is only whitespace', async () => {

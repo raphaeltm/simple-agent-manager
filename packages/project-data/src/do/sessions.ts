@@ -203,8 +203,8 @@ export function createSession(
   const id = reservedSessionId ?? generateId();
   const now = Date.now();
   sql.exec(
-    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
+    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, last_message_sequence, last_message_sequence_count, started_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'active', 0, 0, 0, ?, ?, ?)`,
     id,
     workspaceId,
     taskId,
@@ -255,8 +255,8 @@ export function createReservedTaskSession(
 
   const now = Date.now();
   sql.exec(
-    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
+    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, last_message_sequence, last_message_sequence_count, started_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'active', 0, 0, 0, ?, ?, ?)`,
     input.sessionId,
     input.workspaceId,
     input.taskId,

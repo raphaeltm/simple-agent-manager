@@ -8,7 +8,7 @@
  * pill, and the pill appears the moment state arrives.
  *
  * Never colour-only: each state carries a distinct icon and its own word, so the distinction
- * survives a monochrome display and a screen reader (`apps/web/.claude/rules/04-ui-standards.md`).
+ * survives a monochrome display and a screen reader (`.claude/rules/04-ui-standards.md`).
  */
 import type { PullRequestState } from '@simple-agent-manager/shared';
 import type { LucideIcon } from 'lucide-react';

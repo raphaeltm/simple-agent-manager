@@ -322,17 +322,20 @@ export function IdeaRow({
   item,
   projectId,
   leading,
+  compact = false,
 }: {
   item: IdeaListItem;
   projectId: string;
   leading?: ReactNode;
+  /** A summary list (the Project Overview): a small icon and no counts line. */
+  compact?: boolean;
 }) {
   const line = ideaRowLine(item);
   const counts = ideaCountsLine(item.counts);
   return (
     <RowLink
       to={projectIdeaPath(projectId, item.ideaId)}
-      leading={leading ?? <IdeaStateIcon state={item.derived.state} />}
+      leading={leading ?? <IdeaStateIcon state={item.derived.state} size={compact ? 'sm' : 'md'} />}
       title={item.title}
       // No flex wrapper here: `RowLink` clamps the subtitle with `line-clamp`, which is a
       // `-webkit-box`, and a flex child inside one is not clamped at all — an idea whose
@@ -348,18 +351,22 @@ export function IdeaRow({
         </>
       }
       meta={
-        <span className="flex min-w-0 flex-wrap items-center gap-2">
+        compact ? (
           <span className="sr-only">{IDEA_STATE_LABELS[item.derived.state]}.</span>
-          {/*
+        ) : (
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="sr-only">{IDEA_STATE_LABELS[item.derived.state]}.</span>
+            {/*
             Wraps rather than truncates. Four counts at their widest — "137 updates · 50+
             chats · 50+ files · 50+ PRs" — do not fit a 375px row or a 340px side column, and
             truncating cut a count in half ("50+ …"), which is worse than a second line. The
             content is short words and numbers, so there is nothing here that can refuse to
             wrap the way a long unbroken title can.
           */}
-          {counts && <span className="min-w-0">{counts}</span>}
-          {item.viaConnector && <ConnectorChip clientName={item.viaConnector} />}
-        </span>
+            {counts && <span className="min-w-0">{counts}</span>}
+            {item.viaConnector && <ConnectorChip clientName={item.viaConnector} />}
+          </span>
+        )
       }
       testId="idea-row"
     />

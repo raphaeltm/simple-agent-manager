@@ -52,6 +52,27 @@ export const AUTOMATION_POLL_MS = resolveIntervalMs(
 );
 
 /**
+ * Project Overview backstop refresh. Running now is pushed (the project socket's session events
+ * invalidate the read), so this only reconciles what no event announces: a merged pull request,
+ * an idea updated elsewhere, a missed socket frame.
+ */
+export const DEFAULT_PROJECT_OVERVIEW_POLL_MS = 60_000;
+export const PROJECT_OVERVIEW_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_PROJECT_OVERVIEW_POLL_MS,
+  DEFAULT_PROJECT_OVERVIEW_POLL_MS
+);
+
+/**
+ * Refresh of an open Run receipt while its run is still live. A finished run's receipt does not
+ * change, so it is not polled; TanStack pauses polling on a hidden tab.
+ */
+export const DEFAULT_RUN_RECEIPT_POLL_MS = 60_000;
+export const RUN_RECEIPT_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_RUN_RECEIPT_POLL_MS,
+  DEFAULT_RUN_RECEIPT_POLL_MS
+);
+
+/**
  * Refresh for an open workflow run while it is active, so a step finishing or starting shows
  * without a reload. Finished runs do not change and are not polled.
  */

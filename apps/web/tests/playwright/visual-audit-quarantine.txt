@@ -57,7 +57,6 @@ mcp-servers-audit.spec.ts
 message-comments-audit.spec.ts
 nav-toggle-audit.spec.ts
 nested-session-sidebar-audit.spec.ts
-notification-tabs-audit.spec.ts
 onboarding-inline-audit.spec.ts
 onboarding-project-selector-audit.spec.ts
 onboarding-wizard-theme-audit.spec.ts

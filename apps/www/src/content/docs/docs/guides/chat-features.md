@@ -191,9 +191,8 @@ Questions appear only in sessions labelled **Chat** in the session list — see
 An agent can also ask with its `request_human_input` tool, which works in a **Task** too and, unlike
 the cards above, sends you a notification. That question appears as a card in the conversation as
 well, marked **Needs your answer** until someone answers it, then **Answered** with the choice
-that was made. Answer it on the card, from the notification bell, or in the question reader: it is
-the same answer wherever you give it. See
-[Read and answer an agent's question](/docs/guides/notifications/#read-and-answer-an-agents-question).
+that was made. Answer it on the card or in your [Inbox](/docs/guides/inbox/): it is the same
+answer wherever you give it.
 
 ### Links to open
 
@@ -342,6 +341,7 @@ the conversation you are in rather than opening something beside it.)
 | **Resources**   | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                                                                                                                                            |
 | **Automation**  | What this chat waits for, and what is set to message it — [Scheduled actions](/docs/guides/scheduled-actions/)                                                     | Always                                                                                                                                                                            |
 | **Comments**    | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                                                                                                                                            |
+| **Receipt**     | Where the run's time went, what it produced and what slowed it down — [Run Receipt](#run-receipt)                                                                  | When the session has a task                                                                                                                                                       |
 | **Share**       | Who else can drive this chat and until when, with controls to add, renew or revoke — [Share a chat](/docs/guides/collaboration/#share-a-chat)                      | Always; only the owner and people it is shared with can change it                                                                                                                 |
 | **Retry**       | Start a new chat with the original task prompt — [Retrying a Session](#retrying-a-session)                                                                         | When the session has a task, unless the chat has expired                                                                                                                          |
 | **Fork**        | Start a new chat that can read this one — [Conversation Forking](#conversation-forking)                                                                            | When the session has a task                                                                                                                                                       |
@@ -410,6 +410,33 @@ Two of these also surface without opening the panel:
 Most links are recorded as the work happens, so there is nothing to maintain by hand. An agent
 can also connect something deliberately when the work happened elsewhere — see
 [How work gets linked](/docs/guides/ideas/#how-work-gets-linked).
+
+## Run Receipt
+
+**Receipt** in the tool rail opens one task's run receipt: a side panel on desktop, a full sheet on a
+phone. It is built from records SAM already keeps (`runReceipt`,
+`packages/operations/src/insights-receipt.ts`), and it says when it has nothing to measure from
+rather than guessing.
+
+- **Outcome**: the pull request the run opened, whether it merged, and the state of its checks on
+  the latest commit.
+- **Where the time went**: a bar split into waiting for a machine, setup, agent working, waiting on
+  a person (the agent's open questions and the inbox items it filed), and CI (from the agent's last
+  message until the pull request's last check finished). While the run is live, the phases it has
+  not reached read **not yet**.
+- **Tiles**: tokens (shown as **Not reported** for now; SAM never estimates them), the account the
+  agent ran on (its name only for the person who ran it; everyone else sees which kind of account),
+  peak memory against what the run requested, and tool calls by kind. A count with `+` is a floor:
+  the run had more tool calls than one receipt reads.
+- **CPU**: the run's CPU per minute, with a marker on each minute in which the agent started tool
+  calls, from the same history as **Resources**.
+- **What slowed it down**: up to three items, largest first. A machine wait or setup is listed only
+  when it was clearly slower than recent runs of the same skill (or profile) in the project. Time
+  spent waiting for an answer, failing checks, and memory near the limit are listed too.
+
+Whether CI passed on the first push is not shown: SAM keeps check results for a pull request's
+latest commit only. Admins can tune the receipt's limits under **Chat** in
+[Admin settings](/docs/guides/admin-settings/#run-receipt).
 
 ## File Browsing
 

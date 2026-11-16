@@ -91,7 +91,9 @@ function planOf(query: string): string[] {
   ).map((row) => row.detail);
 }
 
-describe('pool edit on a large pool', () => {
+// Seeds a production-sized pool (thousands of rows) on purpose: about 3 s locally, which
+// overran vitest's 5 s default on loaded CI shards. The assertions are query plans, not speed.
+describe('pool edit on a large pool', { timeout: 30_000 }, () => {
   it('updates the edited rows and their mirrors, looking every row up by id', async () => {
     const { db, statements } = setup();
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {

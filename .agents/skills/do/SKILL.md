@@ -5,7 +5,7 @@ description: 'End-to-end autonomous task executor. Takes a task description and 
 
 # End-to-End Task Executor
 
-Read the full workflow from `.claude/commands/do.md` and execute it. Use `.claude/rules/00-rule-routing.md` to select only the rules needed for the changed paths before reading scoped `.claude/rules/` files.
+Read the full workflow from `.claude/commands/do.md` and execute it. Use `.claude/rules/00-rule-routing.md` and the nearest `AGENTS.md` to find the rules for the changed paths, and read them before editing.
 
 ## Quick Summary
 

@@ -29,7 +29,7 @@ SAM app deployment is **agent-first** and **never goes through CI**. This is the
 - A user creates a **deployment environment** (for example \`staging\` or \`production\`) and enables agent deployment for it.
 - If the user asks for a new non-production environment, you may create it with \`deployments_write\` method \`create_environment\`; SAM restricts it to your creator profile by default and the project owner can later change or disable the policy.
 - You, the agent, author a **Docker Compose stack** in the workspace and call one tool — \`deployments_write\` method \`publish\` — targeting that environment.
-- SAM builds the Compose stack **server-side on the SAM VM**, pushes the built service images to the project-scoped registry **using SAM-owned credentials**, and records the release.
+- SAM builds the Compose stack on the selected executor (Cloudflare for Instant; the source node by default for VM sessions), uploads the service images, and records the release.
 - SAM's deployment nodes then pull the recorded release and run it.
 
 What this means for you:
@@ -133,9 +133,9 @@ Call \`deployments_write { method: 'publish', environment, reference?, workingDi
 - \`reference\` — optional release tag/identifier (defaults to "latest").
 - \`workingDir\` — optional absolute path under \`/workspaces\` if the Compose file is not at the workspace root.
 
-SAM returns a \`publishJobId\` quickly after the VM accepts the job. The actual Docker Compose build, image export, artifact upload, and release recording continue in the background. You do not run any docker or registry commands.
+SAM returns a \`publishJobId\` quickly after the source accepts the job. The actual Docker Compose build, image export, artifact upload, and release recording continue in the background. You do not run any docker or registry commands.
 
-Publishing requires a VM session; Instant sessions cannot publish yet. Jobs fail with retryable \`stalled\` when a heartbeat-capable executor stops heartbeating (older agents are deadline-only) or \`deadline_exceeded\` after the overall deadline. To cancel, use \`deployments_write { method: 'cancel_publish', publishJobId }\` (also callable as \`cancel_publish\`).
+Both Instant and VM sessions can publish. Instant always builds in a dedicated Cloudflare Container. VM sessions default to building on their node; an administrator can select the Cloudflare executor. For Cloudflare builds, the source collects and uploads a verified portable context first. Wait until \`publish_status\` reports \`context_ready\` or subsequent builder progress before sleeping the source; the remote build can then continue independently. Deployment targets remain VMs. Jobs fail with retryable \`stalled\` when a heartbeat-capable executor stops heartbeating (older agents are deadline-only) or \`deadline_exceeded\` after the overall deadline. To cancel, use \`deployments_write { method: 'cancel_publish', publishJobId }\` (also callable as \`cancel_publish\`).
 
 After \`deployments_write\` method \`publish\` returns, call \`deployments_read { method: 'publish_status', publishJobId }\` every 10-20 seconds until the status is terminal:
 

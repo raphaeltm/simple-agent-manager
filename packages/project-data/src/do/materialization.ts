@@ -74,7 +74,7 @@ export const DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT = 500;
  * already happened on this object: on 2026-09-05 `tableAggregateSha256` reset the
  * SAM root ProjectData twice with an unbounded `SELECT ... WHERE session_id = ?`
  * plus `toArray()` on a 100,000-message session. This read has the same shape over
- * the same table, so it pages (`apps/api/.claude/rules/69`, "Memory Is A Ceiling
+ * the same table, so it pages (`.claude/rules/69`, "Memory Is A Ceiling
  * Too"). No harness enforces the isolate limit, so the guard is proven by a
  * page-shape assertion rather than by reproducing the reset.
  */
@@ -94,7 +94,7 @@ export const DEFAULT_MATERIALIZATION_MAX_ROWS_PER_PASS = 5000;
  * woken repeatedly while still streaming would pay O(k^2) across k extensions with
  * nothing to stop it — sleep is gated on the session being idle, but a stale
  * activity mirror has kept a session in `prompting` for four hours in production
- * before (`apps/api/.claude/rules/57`). Past this size a continuation starts a new
+ * before (`.claude/rules/57`). Past this size a continuation starts a new
  * grouped row instead: one word boundary in the index, rather than unbounded
  * rewrite cost.
  */

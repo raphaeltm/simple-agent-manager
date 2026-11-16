@@ -20,6 +20,8 @@ import type {
   ProjectSchedule,
   ProjectScheduleList,
   ProjectScheduleMutationResult,
+  RunReceiptFacts,
+  RunReceiptFactsInput,
   SchedulePromptAuthor,
 } from '@simple-agent-manager/shared';
 
@@ -157,6 +159,8 @@ export interface OperationProjectDataPort {
   resolveTranscriptOwner(projectId: string, sessionId: string): Promise<ProjectDataArchiveLocation>;
   getMailboxMessage(projectId: string, messageId: string): Promise<AgentMailboxMessage | null>;
   listActiveAttentionMarkers(projectId: string, sessionId: string): Promise<AttentionMarker[]>;
+  /** One chat's run-receipt facts for a window (`project-data/do/run-receipt-facts.ts`). */
+  getRunReceiptFacts(projectId: string, input: RunReceiptFactsInput): Promise<RunReceiptFacts>;
   searchKnowledgeObservations(
     projectId: string,
     query: string,

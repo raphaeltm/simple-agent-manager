@@ -5,7 +5,7 @@
  * The defect this guards: on the SAM root object a project-wide search full-scanned
  * `chat_messages` (7.4 M rows) in the keyword fallback and scored every FTS match, burning the
  * 30 s CPU allowance and queuing every other request behind it (2026-09-18..24). No harness here
- * enforces the CPU limit (`apps/api/.claude/rules/69`), so the discriminating assertions measure
+ * enforces the CPU limit (`.claude/rules/69`), so the discriminating assertions measure
  * the SHAPE that prevents it — SQLite rows read by one search — and the coverage disclosure a
  * consumer relies on to know the result is partial.
  */

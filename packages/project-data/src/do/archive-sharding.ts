@@ -50,6 +50,7 @@ import { insertArchiveSearchDocumentBatch } from './archive-search-writes';
 import * as compactArchive from './compact-archive';
 import { resolveMaterializationPassConfig } from './materialization';
 import * as messages from './messages';
+import { advanceImportedMessageSequence } from './messages-persist-helpers';
 import type {
   ArchivedToolPayloadListResult,
   MessageToolContentResult,
@@ -1817,6 +1818,8 @@ export async function commitArchiveTargetChunk(
     committedHash = input.sha256;
   } else {
     for (const row of input.rows) insertArchiveRow(sql, input.tableName, row);
+    if (input.tableName === 'chat_messages')
+      advanceImportedMessageSequence(sql, input.sessionId, input.rows);
     committedHash = await canonicalRowsSha256(
       spec.columns,
       readCommittedRowsForChunk(sql, input.tableName, input.rowIds)
@@ -3875,6 +3878,8 @@ export async function restoreSourceArchiveChunk(
     );
     if (after > before) inserted++;
   }
+  if (input.tableName === 'chat_messages')
+    advanceImportedMessageSequence(sql, input.sessionId, input.rows);
   const committedRows = readCommittedRowsForChunk(sql, input.tableName, input.rowIds);
   const committedHash = await canonicalRowsSha256(spec.columns, committedRows);
   if (committedHash !== input.sha256) {

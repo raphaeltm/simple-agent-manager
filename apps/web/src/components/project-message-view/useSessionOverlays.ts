@@ -1,15 +1,15 @@
 /**
  * Which of the chat's on-demand surfaces is open.
  *
- * Six booleans and twelve handlers for the panels the session tool rail opens — Timeline,
- * Comments, Resources, Automation, Related and Share. They lived inline in
+ * Seven booleans and fourteen handlers for the panels the session tool rail opens — Timeline,
+ * Comments, Resources, Automation, Related, Share and Receipt. They lived inline in
  * `SessionMessageView`, which this extraction keeps under the 500-line ceiling
  * (`.claude/rules/18-file-size-limits.md`).
  *
  * Every handler is `useCallback`-stable, which is load-bearing rather than tidy: they feed
  * `useSessionTools`' memoised action array, and an inline arrow would hand the rail a new prop
  * identity on every poll tick and remount the whole strip mid-interaction
- * (`apps/web/.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`). The returned
+ * (`.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`). The returned
  * object is memoised for the same reason, so passing it down as one prop is safe.
  */
 import { useCallback, useMemo, useState } from 'react';
@@ -33,15 +33,18 @@ export interface SessionOverlays {
   showShare: boolean;
   openShare: () => void;
   closeShare: () => void;
+  showReceipt: boolean;
+  openReceipt: () => void;
+  closeReceipt: () => void;
 }
 
 /**
  * The drawers and dialogs the rail opens are exclusive: opening one closes the others, because
  * each is a SAM Glass overlay over the chat, and two stacked overlays would blur one another
- * into an unreadable smear (`apps/web/.claude/rules/80-sam-glass.md`). Comments stay independent: on desktop they are a
+ * into an unreadable smear (`.claude/rules/80-sam-glass.md`). Comments stay independent: on desktop they are a
  * rail docked inside the conversation, not an overlay, and must survive opening Timeline.
  */
-type ExclusivePanel = 'timeline' | 'resources' | 'automation' | 'related' | 'share';
+type ExclusivePanel = 'timeline' | 'resources' | 'automation' | 'related' | 'share' | 'receipt';
 
 export function useSessionOverlays(): SessionOverlays {
   const [panel, setPanel] = useState<ExclusivePanel | null>(null);
@@ -56,6 +59,7 @@ export function useSessionOverlays(): SessionOverlays {
   const showAutomation = panel === 'automation';
   const showRelated = panel === 'related';
   const showShare = panel === 'share';
+  const showReceipt = panel === 'receipt';
 
   const openTimeline = useCallback(() => setPanel('timeline'), []);
   const closeTimeline = useCallback(() => closeIf('timeline'), [closeIf]);
@@ -69,6 +73,8 @@ export function useSessionOverlays(): SessionOverlays {
   const closeRelated = useCallback(() => closeIf('related'), [closeIf]);
   const openShare = useCallback(() => setPanel('share'), []);
   const closeShare = useCallback(() => closeIf('share'), [closeIf]);
+  const openReceipt = useCallback(() => setPanel('receipt'), []);
+  const closeReceipt = useCallback(() => closeIf('receipt'), [closeIf]);
 
   return useMemo(
     () => ({
@@ -90,6 +96,9 @@ export function useSessionOverlays(): SessionOverlays {
       showShare,
       openShare,
       closeShare,
+      showReceipt,
+      openReceipt,
+      closeReceipt,
     }),
     [
       showTimeline,
@@ -110,6 +119,9 @@ export function useSessionOverlays(): SessionOverlays {
       showShare,
       openShare,
       closeShare,
+      showReceipt,
+      openReceipt,
+      closeReceipt,
     ]
   );
 }
