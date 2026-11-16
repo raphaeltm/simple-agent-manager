@@ -47,6 +47,16 @@ shows as **operations · cron Sweeps Enabled**), and shows:
   />
 </picture>
 
+If an older stored override no longer meets the current bounds or type, its card shows
+**Default in effect, stored value invalid**, with the stored text for nonsecret settings.
+Security controls that fail closed instead show **Safe fallback in effect**: Connector
+access and writes are disabled, registration is allowlisted, redirect hosts are empty,
+and the private SAM assistant is disabled. Existing emergency brakes remain effective.
+The other settings remain available. Use **Reset override** to remove the invalid row,
+or save a valid replacement. Secret values are never displayed. The admin list isolates
+validation failures in `apps/api/src/services/admin-settings-resolution.ts:readAdminSettings`;
+runtime safety fallbacks remain in `resolveAdminSetting`.
+
 ## Change a setting
 
 1. Find the setting and change its value.
