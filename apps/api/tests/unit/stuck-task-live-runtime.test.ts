@@ -339,6 +339,7 @@ beforeEach(() => {
   d1 = new Database(':memory:');
   createSchemaTables(d1, [
     schema.agentSessions,
+    schema.asks,
     schema.tasks,
     schema.taskStatusEvents,
     schema.workspaces,
@@ -595,6 +596,44 @@ describe('live-runtime record: what kept the task, and why', () => {
         expect(cleanupTaskRunMock).not.toHaveBeenCalled();
       }
     );
+    // Inbox slice G: a question is a D1 `asks` row; the guard reads it there (real SQLite).
+    function seedQuestionAsk(
+      overrides: { status?: string; expiresAt?: number; taskId?: string; projectId?: string } = {}
+    ) {
+      d1.prepare(
+        `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
+            source_session_id, source_task_id, status, expires_at, created_at, updated_at)
+         VALUES ('ask-q', ?, 'user', 'user-1', 'question', 1, 'Which way?', ?, ?, ?, ?, ?, ?)`
+      ).run(
+        overrides.projectId ?? PROJECT_ID,
+        CHAT_SESSION_ID,
+        overrides.taskId ?? TASK_ID,
+        overrides.status ?? 'open',
+        overrides.expiresAt ?? T0 + MINUTE,
+        T0 - MINUTE,
+        T0 - MINUTE
+      );
+    }
+    it('preserves a task whose open question is an asks row, without consulting the model', async () => {
+      quietPrompt();
+      seedQuestionAsk();
+      const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
+      await recoverStuckTasks(env({ AI: { run: aiRun } }));
+      expect(taskRow().status).toBe('in_progress');
+      expect(aiRun).not.toHaveBeenCalled();
+      expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    });
+    it.each([
+      ['answered', { status: 'answered' }],
+      ['expired by time', { expiresAt: T0 - 1 }],
+      ['in another project', { projectId: 'other-project' }],
+    ])('consults the model when the asks question is %s (control)', async (_label, overrides) => {
+      quietPrompt();
+      seedQuestionAsk(overrides);
+      const aiRun = vi.fn().mockResolvedValue(stalledVerdict());
+      await recoverStuckTasks(env({ AI: { run: aiRun } }));
+      expect(aiRun).toHaveBeenCalledOnce();
+    });
     it('preserves needs-input even when a newer non-input marker exists', async () => {
       quietPrompt();
       createAttentionMarker(doSql, {

@@ -63,6 +63,7 @@ export {
   validateIdeaStatusTransition,
 } from './idea-transitions';
 export { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from './idea-update-core';
+export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
 export { getInboxItem, resolveInboxItem } from './inbox-item-core';
 export { countInbox, listInbox } from './inbox-list-core';
 export {
@@ -74,14 +75,20 @@ export {
   samInboxItemGet,
   samInboxList,
 } from './inbox-operations';
+export {
+  nextQuestionReminderAt,
+  questionReminderFractions,
+  questionSchedule,
+  questionUndeliveredExtension,
+} from './inbox-question-schedule';
+export { inboxTitle } from './inbox-rows';
 export { defaultInboxLimits, getInboxLimits, type InboxLimits } from './inbox-settings';
 export { INBOX_SETTINGS, type InboxSettingName } from './inbox-settings-definition';
 export {
   answerInboxItem,
   archiveInboxItem,
-  createAsk,
-  type CreateAskInput,
   type InboxAnswerInput,
+  loadAskNoticeRow,
   notifyClosedAsk,
 } from './inbox-write-core';
 export { getPlatformOperationLimits } from './limits';

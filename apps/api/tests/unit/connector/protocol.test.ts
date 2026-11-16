@@ -62,6 +62,7 @@ beforeEach(async () => {
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [
     schema.users,
+    schema.asks,
     schema.projects,
     schema.projectMembers,
     schema.tasks,

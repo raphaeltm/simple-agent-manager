@@ -10,7 +10,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   completeAttentionAnswer,
   computeAttentionAlarmTime,
-  computeHumanInputExpiry,
   createAttentionMarker,
   getAttentionMarker,
   getAttentionSummary,
@@ -662,34 +661,4 @@ describe('Attention Markers Module', () => {
     });
   });
 
-  describe('computeHumanInputExpiry', () => {
-    it('uses default 2-hour timeout when env is undefined', () => {
-      const before = Date.now();
-      const expiry = computeHumanInputExpiry(undefined);
-      const after = Date.now();
-      const twoHours = 2 * 60 * 60 * 1000;
-
-      expect(expiry).toBeGreaterThanOrEqual(before + twoHours);
-      expect(expiry).toBeLessThanOrEqual(after + twoHours);
-    });
-
-    it('uses custom timeout from env var', () => {
-      const before = Date.now();
-      const expiry = computeHumanInputExpiry('60000'); // 1 minute
-      const after = Date.now();
-
-      expect(expiry).toBeGreaterThanOrEqual(before + 60000);
-      expect(expiry).toBeLessThanOrEqual(after + 60000);
-    });
-
-    it('falls back to default on non-numeric env var', () => {
-      const before = Date.now();
-      const expiry = computeHumanInputExpiry('not-a-number');
-      const after = Date.now();
-      const twoHours = 2 * 60 * 60 * 1000;
-
-      expect(expiry).toBeGreaterThanOrEqual(before + twoHours);
-      expect(expiry).toBeLessThanOrEqual(after + twoHours);
-    });
-  });
 });
