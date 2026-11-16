@@ -2,6 +2,7 @@ import type { DeploymentPublishJobSettingName } from '@simple-agent-manager/app-
 
 import type { Env } from '../env';
 import { type GcpCatalogSettingName } from './admin-settings-gcp-catalog-definitions';
+import { type InstructionBudgetSettingName } from './admin-settings-instructions-definitions';
 import type { NodeTunnelSettingName } from './admin-settings-node-tunnel-definitions';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
@@ -39,6 +40,7 @@ export type AdminSettingName =
   | FleetOpsSettingName
   | NodeTunnelSettingName
   | GcpCatalogSettingName
+  | InstructionBudgetSettingName
   | OperationsTelemetrySettingName
   | 'operations.projectDataRowUsageIntervalMs'
   | 'chat.profileUsageWindowDays'

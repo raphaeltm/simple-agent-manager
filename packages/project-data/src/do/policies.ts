@@ -5,8 +5,13 @@
  * stated by humans or inferred by agents. They are stored in the ProjectData DO
  * SQLite and injected into agent instructions via get_instructions.
  */
-import type { PolicyCategory, PolicyScope, PolicySource } from '@simple-agent-manager/shared';
-import { DEFAULT_POLICY_MAX_PER_PROJECT } from '@simple-agent-manager/shared';
+import type {
+  PolicyCategory,
+  PolicyInjectMode,
+  PolicyScope,
+  PolicySource,
+} from '@simple-agent-manager/shared';
+import { DEFAULT_POLICY_INJECT_MODE, DEFAULT_POLICY_MAX_PER_PROJECT } from '@simple-agent-manager/shared';
 
 import { parseCountCnt, parsePolicyRow } from './row-schemas';
 import type { Env } from './types';
@@ -66,6 +71,7 @@ export function createPolicy(
   confidence: number,
   scope: PolicyScope = 'always',
   expiresAt: number | null = null,
+  injectMode: PolicyInjectMode = DEFAULT_POLICY_INJECT_MODE,
 ): { id: string; now: number } {
   const now = Date.now();
 
@@ -98,9 +104,9 @@ export function createPolicy(
 
   const id = generateId();
   sql.exec(
-    `INSERT INTO project_policies (id, category, title, content, source, source_session_id, confidence, active, scope, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-    id, category, title, content, source, sourceSessionId, confidence, scope, expiresAt, now, now,
+    `INSERT INTO project_policies (id, category, title, content, source, source_session_id, confidence, active, scope, expires_at, inject_mode, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+    id, category, title, content, source, sourceSessionId, confidence, scope, expiresAt, injectMode, now, now,
   );
   return { id, now };
 }
@@ -164,6 +170,7 @@ export function updatePolicy(
     confidence?: number;
     scope?: PolicyScope;
     expiresAt?: number | null;
+    injectMode?: PolicyInjectMode;
   },
 ): boolean {
   const existing = getPolicy(sql, policyId);
@@ -191,8 +198,11 @@ export function updatePolicy(
   // `??` idiom used above: `null` is a MEANINGFUL value here (it clears an expiry
   // and makes the policy permanent), and `updates.expiresAt ?? existing.expiresAt`
   // would silently treat "clear this expiry" as "leave it alone".
+  //
+  // `injectMode` uses `??`: absence means "leave it alone" (rule 73). An update that
+  // omits it, such as an edit to the title, must never re-pin or unpin a policy.
   sql.exec(
-    'UPDATE project_policies SET title = ?, content = ?, category = ?, active = ?, confidence = ?, scope = ?, expires_at = ?, updated_at = ? WHERE id = ?',
+    'UPDATE project_policies SET title = ?, content = ?, category = ?, active = ?, confidence = ?, scope = ?, expires_at = ?, inject_mode = ?, updated_at = ? WHERE id = ?',
     updates.title ?? existing.title,
     updates.content ?? existing.content,
     updates.category ?? existing.category,
@@ -200,6 +210,7 @@ export function updatePolicy(
     updates.confidence ?? existing.confidence,
     updates.scope ?? existing.scope,
     updates.expiresAt !== undefined ? updates.expiresAt : existing.expiresAt,
+    updates.injectMode ?? existing.injectMode,
     now,
     policyId,
   );
