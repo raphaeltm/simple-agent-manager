@@ -73,6 +73,8 @@ Agents file items with their `inbox_write` tool, and read what is already open w
 Every session is told that people read their inbox, not chats: an agent that ends its turn with a
 question only in its message has asked nobody, so it files an item instead
 (`apps/api/src/routes/mcp/instruction-inbox-guidance.ts`). Nothing is filed on an agent's behalf.
+The tools need a session started from a task or a project chat, as `request_human_input` always did;
+a chat opened directly on a workspace has no inbox to file into.
 
 - **Ask** (`ask`): one question with one way to answer it: options, free text, or Yes / No. A
   blocking ask means the agent is stopped until you answer: the chat shows **paused on this**, you
