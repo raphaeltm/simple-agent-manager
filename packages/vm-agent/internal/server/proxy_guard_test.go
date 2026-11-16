@@ -15,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/workspace/vm-agent/internal/auth"
+	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -75,6 +76,21 @@ func newRelayHarness(t *testing.T) *relayHarness {
 	}
 	h.serveAgentMux(listener)
 	return h
+}
+
+// installExchange installs a fresh helper exchange bearer for the harness
+// workspace, as provisioning does when it writes the workspace's helper.
+func (h *relayHarness) installExchange() string {
+	h.t.Helper()
+	token, err := bootstrap.NewGitCredentialExchangeToken()
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := bootstrap.InstallGitCredentialExchange(relayTestWorkspaceID, token); err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(func() { _ = bootstrap.RemoveCredentialHelperFromHost(relayTestWorkspaceID) })
+	return token
 }
 
 // serveAgentMux serves this harness's vm-agent routes on a listener.
@@ -180,6 +196,7 @@ func TestPortProxyRefusesVMAgentOwnListenerOnPublicPortRoute(t *testing.T) {
 // without the Worker's forwarding headers.
 func TestPortProxyRelayToAgentRoutesGetsNoLoopbackCredentialTrust(t *testing.T) {
 	h := newRelayHarness(t)
+	exchangeToken := h.installExchange()
 	second, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -187,24 +204,36 @@ func TestPortProxyRelayToAgentRoutesGetsNoLoopbackCredentialTrust(t *testing.T) 
 	h.serveAgentMux(second)
 	secondPort := second.Addr().(*net.TCPAddr).Port
 
-	for _, connection := range []string{"", "keep-alive, " + proxiedRequestHeader + ", X-Forwarded-Host"} {
-		// A client may name headers in Connection to have the proxy strip them
-		// as hop-by-hop after its Director runs; the marker must survive that.
-		req := h.apiPortRequest(secondPort, "/git-credential", "host=github.com", false)
-		if connection != "" {
-			req.Header.Set("Connection", connection)
-		}
-		status, body := doRelayRequest(t, req)
+	for _, bearer := range []string{"", exchangeToken} {
+		for _, connection := range []string{"", "keep-alive, " + proxiedRequestHeader + ", X-Forwarded-Host"} {
+			// A client may name headers in Connection to have the proxy strip them
+			// as hop-by-hop after its Director runs; the marker must survive that.
+			req := h.apiPortRequest(secondPort, "/git-credential", "host=github.com&workspaceId="+relayTestWorkspaceID, false)
+			if connection != "" {
+				req.Header.Set("Connection", connection)
+			}
+			if bearer != "" {
+				// The helper bearer is node-local: relayed, it is refused too.
+				req.Header.Set("Authorization", "Bearer "+bearer)
+			}
+			status, body := doRelayRequest(t, req)
 
-		if status != http.StatusUnauthorized {
-			t.Fatalf("Connection %q: status = %d, want 401 (body %q)", connection, status, body)
+			if status != http.StatusUnauthorized {
+				t.Fatalf("bearer %v, Connection %q: status = %d, want 401 (body %q)", bearer != "", connection, status, body)
+			}
+			assertNoCredential(t, h, body)
 		}
-		assertNoCredential(t, h, body)
 	}
 
-	// Liveness: the same second listener answers a direct loopback helper call,
-	// so the 401 above is the relay check and not a broken listener.
-	direct, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/git-credential?host=github.com&workspaceId=%s", secondPort, relayTestWorkspaceID))
+	// Liveness: the same second listener answers a direct loopback helper call
+	// carrying the workspace's helper bearer, so the 401s above are the relay
+	// check and not a broken listener.
+	directReq, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/git-credential?host=github.com&workspaceId=%s", secondPort, relayTestWorkspaceID), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directReq.Header.Set("Authorization", "Bearer "+exchangeToken)
+	direct, err := http.DefaultClient.Do(directReq)
 	if err != nil {
 		t.Fatalf("direct request: %v", err)
 	}
@@ -298,14 +327,25 @@ func TestGitCredentialRefusesBearerlessRelayedRequest(t *testing.T) {
 	}
 }
 
-// Controls: the in-workspace helper's direct loopback call still works, and a
-// relayed request that carries a valid callback bearer is still authorized.
-func TestGitCredentialLoopbackHelperAndBearerRelayStillAuthorized(t *testing.T) {
+// Controls: the in-workspace helper's dedicated bearer still works, and a
+// relayed request carrying a valid callback bearer remains authorized.
+func TestGitCredentialHelperAndBearerRelayStillAuthorized(t *testing.T) {
+	exchangeToken, err := bootstrap.NewGitCredentialExchangeToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.InstallGitCredentialExchange(relayTestWorkspaceID, exchangeToken); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bootstrap.RemoveCredentialHelperFromHost(relayTestWorkspaceID) })
+
 	cases := []struct {
 		name    string
 		headers map[string]string
 	}{
-		{name: "direct loopback helper, no bearer"},
+		{name: "direct helper exchange bearer", headers: map[string]string{
+			"Authorization": "Bearer " + exchangeToken,
+		}},
 		{name: "relayed with callback bearer", headers: map[string]string{
 			"Authorization":      "Bearer callback-token",
 			"X-Forwarded-Host":   "ws-x.workspaces.example.com",
@@ -315,7 +355,7 @@ func TestGitCredentialLoopbackHelperAndBearerRelayStillAuthorized(t *testing.T) 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newRelayHarness(t)
-			req := httptest.NewRequest(http.MethodGet, "/git-credential?host=github.com", nil)
+			req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId="+relayTestWorkspaceID+"&host=github.com", nil)
 			req.RemoteAddr = "127.0.0.1:41000"
 			for k, v := range tc.headers {
 				req.Header.Set(k, v)
