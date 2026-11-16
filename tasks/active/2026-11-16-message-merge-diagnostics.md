@@ -72,3 +72,91 @@ After the handoff, Sonar reported Quality Gate PASS with0.0% duplication, but al
 ### Final Sonar refactor followup — 2026-11-16 01:19UTC
 
 The first helper extraction reduced stage complexity to17 but did not clear S3776, and its boolean diagnostic parameter triggered S2301. Extracted existing append accumulation into stageContentAppend(id,content,offset), and opening diagnostics now derive their predicate from the message before latestPosition mutates. Specialist review PASS: insert/update choice, content, offsets, revisions and reason precedence preserved. ESLint/project-data build PASS; final four-suite real-workerd rerun48/48PASS. Fresh exacthead CI/Sonar must still pass before merge.
+
+
+## FINAL TRANSFER — 2026-11-16 01:49UTC (supersedes earlier ownership and waits)
+
+Coordinator decision event e720a35f-6d5b-4978-958b-bd33fb91404e transfers remaining PR2773 staging, merge, production deploy and first counter read to Claude task 01M7GY0BKP1WESE5Y82PZNN42S (PR2774), which holds staging2. This Codex task MUST NOT take a lease, deploy or merge, and starts no new work. It remains reachable for questions. Counter source candidate 2a86d7f55a9f5d587d73b5ad2297f82ebbaa2852 has ALL CI PASS/SKIP, including aggregate Test/Workers and Sonar zero issues. The final transfer commit changes only the task document; deploy the tested exact source head if requested by coordinator, then reconcile CI on the current documentation head before merge. PR2774 must verify independently; do not silently treat its modified socket behavior as counter-only proof.
+
+Production observation remains 1.750881667 actual covered hours, 4054 calls /112301 writes INCLUDING3190 alarms, 27.7013 writes/call versus24.6499 OFF. No demonstrated saving. Coordinator event517a43ef requested cancellation of top-up; 01:50 schedule0f3302f3 CANCELLEDv2. No >=2h completion claimed. No production changes. Next useful observation is after counters AND gate fix are deployed.
+
+Exact staging counter read, without raw log disclosure:
+
+1. Helper Library01M7H0F82Y6T0XASP58Z1T46ZZ, filename message-ingest-staging-counts.mjs,4530bytes. Restore with download_library_file(fileId=01M7H0F82Y6T0XASP58Z1T46ZZ,targetPath=".tmp") — targetPath is a relative DIRECTORY. The helper is syntax-checked only; live execution belongs to the lease holder. It queries sam2-api-staging2 in the staging Cloudflare account, fixed numeric fields only. It never prints message content, source/session/message IDs or arbitrary metadata.
+2. Record isolated test project ID and phase start/end UTC timestamps in the holder's local state. Use separate OFF/ON/legacy phases, one owned session per phase or non-overlapping complete log windows. A project usage window includes every session in that project; it is not a per-session counter. Let the initial window settle before measuring.
+3. Under exec_with_secrets use EXACT staging secretNames ["CF_TOKEN","CF_ACCOUNT_ID"], cwd "/workspaces/simple-agent-manager", timeoutMs180000 and literal argv:
+
+       ["node","/workspaces/simple-agent-manager/.tmp/message-ingest-staging-counts.mjs","<OWNED_PROJECT_ID>","<PHASE_FROM_ISO>","<PHASE_TO_ISO>"]
+
+   Replace angle placeholders with actual IDs/timestamps, not shell expansions. Poll exec_with_secrets_status until terminal. The helper writes .tmp/message-ingest-staging-counts.json and prints only numeric counter JSON. Upload a distinct phase-named copy. No production secrets for staging. Do not use wrangler tail or publish raw telemetry.
+4. Flush interval is runtime admin setting operations.projectDataRowUsageIntervalMs, default15min, min60000. In leased staging only, save original value and temporarily select60000 through the admin settings API/UI if bounded live testing needs it. GET https://api.sammy2.party/api/admin/settings returns {revision,settings,history}; PATCH same URL with authenticated admin browser credentials and JSON {expectedRevision:<fresh revision>,changes:[{name:"operations.projectDataRowUsageIntervalMs",value:60000}]}. The same PATCH shape changes chat.messageMergingEnabled between false/true. Fetch a fresh revision each mutation; restore original values afterward through API/UI. NO Cloudflare Worker settings PATCH.
+5. RowUsage emits at an operation boundary after interval elapsed, not on a timer. Existing DOs refresh interval after a flush, so do not assume setting change instantly affects a previously active object. Prefer a fresh test project after setting changes and trigger an ordinary session-list read after each interval to cause flush. Exclude a boundary-straddling window. Missing logs or missing messageIngest is a coverage gap, never zero merges. The helper excludes straddlers and reports union coveredMs. AlarmWrites is a subset of rowsWritten, never add it twice.
+
+Expected emitted event and numeric schema:
+
+    event: "project_data.row_usage"
+    projectId: owned test project ID (existing top-level attribution)
+    windowStart, windowEnd: epoch milliseconds
+    labels: {rank0:{label:"persistMessageBatch",calls,rowsRead,rowsWritten,alarmWrites}, ...}
+    droppedLabelCount, totalLabelCount: integers
+    messageIngest: {
+      batches: integer,
+      received: {user,assistant,thinking,tool,plan,system,other},
+      accepted: {user,assistant,thinking,tool,plan,system,other},
+      inserted: {user,assistant,thinking,tool,plan,system,other},
+      eligible: integer,
+      coalesced: integer,
+      appendStatements: integer,
+      duplicates: integer,
+      mergeReadyBatches: integer,
+      refused: {setting_disabled?,legacy_client?,missing_incarnation?,invalid_sequence?,retired_source?,receipt_cap?},
+      breaks: {no_open?,source?,turn?,intervening_writer?,materialized?,role?,metadata?,origin?,sequence_gap?,timestamp?,out_of_order?,size_cap?},
+      legacyProjectSocketsMax: integer,
+      legacySessionSocketsMax: integer
+    }
+
+Every role key exists; sparse refused/break keys absent means0. Unknown roles count as other. Received includes retries; accepted excludes duplicates; inserted is physical canonical inserts. Eligible counts accepted assistant/null-metadata chunks even OFF. Coalesced is logical chunk merges, including within a batch; appendStatements counts actual UPDATE statements only, so these differ. Refused is one primary reason per batch (setting_disabled takes precedence over legacy_client). Socket counts are MAXIMA sampled per batch, not window sums. Counters publish only after synchronous persistence commits; rollback contributes none; postcommit broadcast failure retains counts. Instance eviction loses unflushed diagnostics. Existing label cap can drop persist label even while messageIngest exists; require persistLabelPresent=true for writes/call comparisons.
+
+Live expected checks on exact counter source candidate:
+
+- OFF: accepted assistant eligibility still visible; refused.setting_disabled >0; coalesced=0 and appendStatements=0.
+- ON with merge-capable reporter/incarnation, sequential assistant chunks and no legacy relevant socket: mergeReadyBatches>0, coalesced>0; cross-batch continuation normally yields appendStatements>0. inserted.assistant below accepted.assistant establishes fewer physical assistant rows. Other run boundaries/metadata may legitimately prevent a particular chunk from merging; inspect reason counts instead of assuming.
+- Thinking/tool-heavy real Claude turn: received/accepted/inserted role mix makes density visible. Thinking/tool rows remain unmerged in this PR. Typed cards and transcript content must remain intact; watch incremental app reply, reload and compare content hash. Never paste text into evidence.
+- ON with actual unscoped legacy socket: legacyProjectSocketsMax>=1, refused.legacy_client>0, coalesced=0 for affected batches on COUNTER-ONLY source. After closing socket, subsequent clean phases should merge eligible assistant runs. Mixed normal traffic in the same window makes simple zero assertions invalid; isolate phases.
+- A legacy session socket only affects that session; unrelated session socket not counted as relevant. PR2774 changes unscoped semantics, so its expected result differs: unscoped must not block merging or receive transcript frames. Do not mix these two expected behaviors.
+
+Exact legacy/capable browser WebSocket reproduction (authenticated staging2 Playwright page/context, cookie .sammy2.party):
+
+    await page.evaluate(async ({projectId,sessionId,scoped,capable}) => {
+      const u = new URL("wss://api.sammy2.party/api/projects/" + projectId + "/sessions/ws");
+      if (scoped) u.searchParams.set("sessionId",sessionId);
+      if (capable) u.searchParams.set("messageAppend","message-append-v1");
+      const ws = new WebSocket(u.href);
+      window.__mergeProbe = ws;
+      window.__mergeProbeTypes = {};
+      ws.onmessage = event => {
+        try {
+          const type = JSON.parse(event.data).type;
+          if (typeof type === "string") window.__mergeProbeTypes[type] = (window.__mergeProbeTypes[type] || 0) + 1;
+        } catch {}
+      };
+      await new Promise((resolve,reject) => {
+        ws.onopen=resolve;
+        ws.onerror=() => reject(new Error("Probe websocket failed"));
+      });
+      return {readyState:ws.readyState};
+    }, {projectId:"<OWNED_PROJECT_ID>",sessionId:"<OWNED_SESSION_ID>",scoped:false,capable:false});
+
+Use scoped:false,capable:false for the old project client; scoped:true,capable:false for an old session client; scoped:true,capable:true for a compatible session reader. Query parameter absence is what makes it legacy: do NOT send messageAppend on the legacy probe. Normal browser cookies authenticate the upgrade; never put tokens in the URL. Keep the socket open DURING real agent ingestion. Record only readyState and event-type counts, never frames/content. Close and delete probe state in finally:
+
+    await page.evaluate(() => {
+      window.__mergeProbe?.close(1000);
+      delete window.__mergeProbe;
+      delete window.__mergeProbeTypes;
+    });
+
+The real workerd regression file apps/api/tests/workers/project-data-message-ingest-metrics.test.ts drives the same actual socket admission via stub.fetch Upgrade. It is a reference for expected counter outcomes, not a substitute for leased staging proof.
+
+Cleanup and release remain holder-owned: restore staging settings, close probes/browser auth, delete EVERY owned workspace/node/project, verify provider absence, then release lease through deploy-staging and confirm released payload. No old PR2760 auth/helper authority may be reused. This Codex task has no resources/auth/settings/lease to clean.
+
+Library01M7GXXV4YN93Z9J13S3TARGFA is replaced with the complete original handoff plus this addendum. PR body and task document carry the same transfer instructions. The counter helper is separately durable in Library01M7H0F82Y6T0XASP58Z1T46ZZ. Coordinator/Claude task owns all remaining release actions; previous Codex queue timer will be cancelled so it cannot accidentally resume deployment.
