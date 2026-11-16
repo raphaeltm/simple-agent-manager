@@ -397,6 +397,20 @@ describe('runReceipt', () => {
       resolved_at: T0 + 22 * MIN,
       status: 'answered',
     });
+    // An earlier run's ask in the same chat lies outside this run's window and never counts.
+    insert('asks', {
+      id: 'ask-earlier-run',
+      project_id: 'p',
+      kind: 'question',
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      title: 'A question from an earlier run',
+      source_session_id: 'chat-task-own',
+      created_at: T0 - 120 * MIN,
+      updated_at: T0 - 120 * MIN,
+      resolved_at: T0 - 60 * MIN,
+      status: 'answered',
+    });
     const waitingOf = (r: Awaited<ReturnType<typeof runReceipt>>) =>
       r.phases.find((phase) => phase.key === 'waiting')?.durationMs;
 
@@ -407,6 +421,7 @@ describe('runReceipt', () => {
       question: null,
     });
     expect(JSON.stringify(teammate)).not.toContain('private customer');
+    expect(JSON.stringify(teammate)).not.toContain('earlier run');
 
     // Owner control: the assignee sees the question.
     const owner = await runReceipt(ctx(), { projectId: 'p', taskId: 'task-own' });

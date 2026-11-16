@@ -119,4 +119,19 @@ describe('run receipt query plans', { timeout: 30_000 }, () => {
     expect(taskPlan).not.toMatch(/idx_asks_project_status/);
     expect(taskPlan).not.toMatch(/SCAN (asks|task_status_events|workspace_resource_summaries)/);
   });
+
+  it('finds comparable runs of the same profile by index when the run has no skill', async () => {
+    const { ctx, statements } = setup();
+    sqlite!.exec(
+      `UPDATE tasks SET skill_id = NULL,
+         agent_profile_hint = CASE WHEN rowid % 400 = 0 THEN 'profile-rare' ELSE 'profile-common' END`
+    );
+    sqlite!.exec(`UPDATE tasks SET agent_profile_hint = 'profile-rare' WHERE id = 't-0'`);
+    await runReceipt(ctx, { projectId: 'p', taskId: 't-0' });
+    const comparison = statements.find((query) => query.includes('t.agent_profile_hint = ?'));
+    expect(comparison, 'the profile comparison statement ran').toBeDefined();
+    const comparisonPlan = plan(comparison!).join('\n');
+    expect(comparisonPlan).toMatch(/idx_tasks_project_profile_created/);
+    expect(comparisonPlan).not.toMatch(/SCAN t\b|SCAN tasks/);
+  });
 });

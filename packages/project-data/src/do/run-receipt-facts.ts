@@ -26,27 +26,30 @@ const ACP_SESSION_LIMIT = 10;
 /**
  * One pass over the window's messages in time order, capped by messages READ, not by tool rows
  * matched, so a long chat with few tool calls costs at most the cap (served by
- * idx_chat_messages_session_seq). The CTE is materialized once and feeds both the per-kind
- * counts and the count of messages read. \`json_valid\` guards every \`json_extract\`: one malformed
- * row would otherwise raise "malformed JSON" and fail the whole read (\`.claude/rules/50\`).
+ * idx_chat_messages_session_seq). The CTE is materialized once, holding only each message's
+ * kind and call id (never its metadata, so memory does not grow with payload size), and feeds
+ * both the per-kind counts and the count of messages read. `json_valid` guards every `json_extract`: one malformed
+ * row would otherwise raise "malformed JSON" and fail the whole read (`.claude/rules/50`).
  * MAX(kind) makes a call whose rows disagree on kind count once, deterministically. Bind: session,
  * from, to, cap + 1 (the extra row only tells us the cap was reached), cap (rows counted).
  */
 const TOOL_KIND_SQL = `
   WITH w AS MATERIALIZED (
-    SELECT id, role, tool_metadata, created_at, sequence FROM chat_messages
+    SELECT created_at, sequence,
+      CASE WHEN role = 'tool' THEN COALESCE(
+        CASE WHEN json_valid(tool_metadata) THEN json_extract(tool_metadata, '$.kind') END,
+        'other') END AS kind,
+      CASE WHEN role = 'tool' THEN COALESCE(
+        CASE WHEN json_valid(tool_metadata) THEN json_extract(tool_metadata, '$.toolCallId') END,
+        id) END AS call_id
+      FROM chat_messages
      WHERE session_id = ? AND created_at >= ? AND created_at <= ?
      ORDER BY created_at, sequence
      LIMIT ?
   ),
-  counted AS (SELECT * FROM w ORDER BY created_at, sequence LIMIT ?)
+  counted AS (SELECT kind, call_id FROM w ORDER BY created_at, sequence LIMIT ?)
   SELECT kind, COUNT(*) AS calls, NULL AS examined FROM (
-    SELECT MAX(kind) AS kind FROM (
-      SELECT
-        COALESCE(CASE WHEN json_valid(tool_metadata) THEN json_extract(tool_metadata, '$.kind') END, 'other') AS kind,
-        COALESCE(CASE WHEN json_valid(tool_metadata) THEN json_extract(tool_metadata, '$.toolCallId') END, id) AS call_id
-      FROM counted WHERE role = 'tool'
-    ) GROUP BY call_id
+    SELECT MAX(kind) AS kind FROM counted WHERE call_id IS NOT NULL GROUP BY call_id
   ) GROUP BY kind
   UNION ALL
   SELECT NULL, NULL, COUNT(*) FROM w`;

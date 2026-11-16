@@ -31,9 +31,9 @@ const AGENT_SESSION_LIMIT = 10;
 const PR_ASSOCIATION_LIMIT = 5;
 
 /**
- * First time a task entered a status, as a Julian day number. \`task_status_events.created_at\` is
- * written both as ISO and as \`CURRENT_TIMESTAMP\` text, which do not compare as strings;
- * \`julianday()\` reads both. Served by \`idx_task_status_events_task_created_at\`.
+ * First time a task entered a status, as a Julian day number. `task_status_events.created_at` is
+ * written both as ISO and as `CURRENT_TIMESTAMP` text, which do not compare as strings;
+ * `julianday()` reads both. Served by `idx_task_status_events_task_created_at`.
  */
 function FIRST_EVENT_JD_SQL(status: 'delegated' | 'in_progress', taskColumn: string): string {
   return `(SELECT MIN(julianday(e.created_at)) FROM task_status_events e
@@ -60,7 +60,7 @@ const TASK_SQL = `
          (SELECT json_group_array(json_object('start', a.created_at, 'end', a.resolved_at,
                  'title', a.title)) FROM (
             -- Every ask's time counts toward waiting; its title is shown only to the people the
-            -- inbox shows it to (\`inbox-item-core.ts\`): the assignee, or anyone for an unclaimed
+            -- inbox shows it to (inbox-item-core.ts): the assignee, or anyone for an unclaimed
             -- team ask, or its claimant.
             SELECT created_at, resolved_at,
                    CASE WHEN (assignee_kind = 'user' AND assignee_user_id = ?)
@@ -68,11 +68,16 @@ const TASK_SQL = `
                               AND (claimed_by_user_id IS NULL OR claimed_by_user_id = ?))
                         THEN title END AS title
               FROM asks
-             -- \`+project_id\` keeps the scope check as a filter so the planner uses
+             -- "+project_id" keeps the scope check as a filter so the planner uses
              -- idx_asks_session_status (one chat's asks), never the project's whole ask list.
              WHERE +project_id = t.project_id
                AND source_session_id = COALESCE(t.chat_session_id, w.chat_session_id)
                AND (source_task_id IS NULL OR source_task_id = t.id)
+               -- Only this run's asks, so a chat reused across runs keeps each run's own inside
+               -- the cap. strftime('%s') reads both ISO and CURRENT_TIMESTAMP task times.
+               AND created_at >= CAST(strftime('%s', t.created_at) AS INTEGER) * 1000
+               AND (t.completed_at IS NULL
+                    OR created_at <= CAST(strftime('%s', t.completed_at) AS INTEGER) * 1000)
              -- Newest first: a chat reused across runs keeps this run's asks inside the cap.
              ORDER BY created_at DESC LIMIT ?) a) AS asks,
          (SELECT json_group_array(json_object('id', s.id, 'userId', s.user_id,
@@ -232,7 +237,7 @@ export function parseJsonList<T>(
   return items;
 }
 
-/** A Julian day number from SQLite's \`julianday()\` as epoch milliseconds. */
+/** A Julian day number from SQLite's `julianday()` as epoch milliseconds. */
 export function julianDayMs(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return Math.round((value - 2_440_587.5) * 86_400_000);
@@ -381,7 +386,7 @@ export async function readUsual(
 ): Promise<UsualDurations | null> {
   const comparedBy = row.skill_id ? 'skill' : row.agent_profile_hint ? 'profile' : null;
   if (!comparedBy) return null;
-  // The date alone ("YYYY-MM-DD"): \`tasks.created_at\` holds both ISO and CURRENT_TIMESTAMP
+  // The date alone ("YYYY-MM-DD"): `tasks.created_at` holds both ISO and CURRENT_TIMESTAMP
   // text, which differ at the 11th character, and a date prefix sorts correctly against both.
   // The window therefore starts at the beginning of its first day.
   const since = new Date(now - limits.receiptComparisonWindowDays * 86_400_000)
