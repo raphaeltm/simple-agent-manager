@@ -24,7 +24,7 @@ Rules: 39 (debug first), 62 (real trigger), 67 (shared predicate unchanged), 74 
 - [x] Real startup tests: null version -> wait -> matching heartbeat but no /ready -> wait -> /ready -> workspace_creation.
 - [x] Controls: reported mismatch refused, never-ready timeout terminal, missing/deleted node still refused.
 - [x] Remove new wait guard temporarily and prove divergence test red; restore and pass.
-- [ ] Sync relevant public docs; lint, typecheck, tests, build.
+- [x] Sync relevant public docs; lint, typecheck, tests, build.
 - [x] Local specialist and task completion reviews; resolve findings.
 - [ ] Both staging lease status checks, queue/reserve/deploy, real node and immediately pinned task, confirm running after readiness, delete workspace/node, release.
 - [ ] Ready PR, full CI, best-effort CodeRabbit, merge authorized, production deploy and smoke; complete idea with PR/commit and report feature.selfhost-landing.
@@ -46,14 +46,22 @@ Rules: 39 (debug first), 62 (real trigger), 67 (shared predicate unchanged), 74 
 - [x] Split oversized source module preserving behavior before changing status condition.
 - [x] Accept creating/running on real submission producer; retain foreign/deleted/stopped controls.
 - [x] Update moved static source consumers and allocation inventory; rerun affected tests.
-  All354 affected tests verified; route27/27, Worker11/11, restored proof green. Final constitution, doc-sync, expanded Cloudflare and completion implementation reviews PASS.
+      All354 affected tests verified; route27/27, Worker11/11, restored proof green. Final constitution, doc-sync, expanded Cloudflare and completion implementation reviews PASS.
 
 Post-mutation restored Worker suite11/11 passed. Full root test attempt2: web419/420 files passed, single inbox test timed out waiting for count; isolated6/6 passed. Also Vitest teardown import error in retired-trial; latest full test attempt running without concurrent build. API suite was canceled by sibling web failure, so it needs the final full run.
 
 ## Final local review and quality delta
 
-All specialist reviews pass: test-engineer, Cloudflare (deadline finding addressed), constitution/doc-sync, completion validator. Sonar actual issues (despite green quality gate) found a nested ternary and complexity35 in the newly extracted VM function. Replaced ternary with equivalent if/elseif and extracted unchanged quota/session/idea-link effects into focused helpers, preserving effect order and failure handling. Cloudflare verified normalized executable blocks unchanged; 203 affected tests across5 files pass, including route27; lint on adjusted source-contract tests passes. Helper148lines / parent408lines, no suppression.
+All specialist reviews pass: test-engineer, Cloudflare (deadline finding addressed), constitution/doc-sync, completion validator. Sonar actual issues (despite green quality gate) found a nested ternary and complexity35 in the newly extracted VM function. Replaced ternary with equivalent if/elseif and extracted unchanged quota/session/idea-link effects into focused helpers, preserving effect order and failure handling. Cloudflare verified normalized executable blocks unchanged; 203 affected tests across5 files pass, including route27; lint on adjusted source-contract tests passes. Helper149lines / parent408lines, no suppression.
 
 Serial full root test:38/39 tasks pass, web420/420 files pass, API1053 passed/1failed/3skipped files (15945 passed/1failed/4skipped cases). Sole API failure was stale placement-authority fixture missing the new ready field/timer, now seeded ready and timer null; targeted fixture suite passes. Full root suite rerun ongoing on final code. Format ratchet passed with baseline2101/2180 unformatted files; changed files formatted. Final lint/typecheck/build underway after Sonar cleanup.
 
 Staging queue18:00: primary productionhotfix holder until18:29:01, L5b first, D3second projected18:39:01. Secondary helduntil18:46+queue. Accepted rescheduled wake version4 due18:39:02Z (prior timeout reconciled and retried successfully). No deploy or VM/workspace created; real-node pin script prepared and browser/auth recovery verified read-only.
+
+Final post-Sonar lint22/typecheck36/build18 tasks passed; focused Worker startup suite11/11 passed in72s. Allocation inventory and format ratchet pass. Full serial root suite approaching completion; archive after green.
+
+## Final local gate result
+
+Final full root serial run `pnpm exec turbo run test --concurrency=1` passed39/39 tasks. API1054 passed/3 skipped files;15947 passed/4 skipped cases (15951 collected). Web420/420 files passed in the serial root run. Lint22, typecheck36, build18 tasks passed. Focused Worker11/11, route27/27, affected203, existing selection43 and authority43 pass. No unresolved local reviewer or implementation findings.
+
+Archived at completed implementation/local-validation phase per /do. Release gates remain pending and merge-blocking: ready CI, CodeRabbit request/wait, leased staging real-node immediate pin + cleanup, merge, production deploy/smoke, idea completion and channel report. Archive does not claim these pending operations passed.
