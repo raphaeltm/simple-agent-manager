@@ -382,6 +382,13 @@ export {
 } from './ideas';
 export { getRunReceipt } from './insights-receipt';
 export {
+  answerInboxItem,
+  archiveInboxItem,
+  getInboxCount,
+  getInboxItem,
+  listInbox,
+} from './inbox';
+export {
   addObservation,
   createKnowledgeEntity,
   deleteKnowledgeEntity,
@@ -452,12 +459,10 @@ export {
 export {
   dismissNotification,
   getNotificationPreferences,
-  getNotificationUnreadCount,
   getNotificationWsUrl,
   getVapidPublicKey,
   listNotifications,
   listWebPushSubscriptions,
-  markAllNotificationsRead,
   markNotificationRead,
   subscribeWebPush,
   unsubscribeWebPush,

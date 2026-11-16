@@ -5,8 +5,8 @@ import type { ReactNode } from 'react';
 import type { FocusMode } from '../../lib/focus-mode';
 import { isMacPlatform } from '../../lib/keyboard-shortcuts';
 import { FocusModeToggle } from '../FocusModeToggle';
+import { InboxButton } from '../inbox/InboxButton';
 import { NavSidebar } from '../NavSidebar';
-import { NotificationCenter } from '../NotificationCenter';
 import { RecentChatsDropdown } from '../RecentChatsDropdown';
 import { ThemeSwitcher } from '../ThemeSwitcher';
 
@@ -17,7 +17,7 @@ interface SidebarUser {
 }
 
 /**
- * The desktop navigation pane: logo with Recent chats and Notifications, the search well,
+ * The desktop navigation pane: logo with Recent chats and the Inbox, the search well,
  * the nav items, the layout control, theme and the signed-in person.
  *
  * In Focus Mode it narrows to an icon rail: labels move into tooltips and the cross-project
@@ -60,7 +60,7 @@ export function DesktopSidebar({
         {!iconOnly && (
           <div className="flex items-center">
             <RecentChatsDropdown />
-            <NotificationCenter />
+            <InboxButton />
           </div>
         )}
       </div>

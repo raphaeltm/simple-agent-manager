@@ -135,10 +135,8 @@ const ProjectCommentReader = lazyNamed(
 const ProjectFiles = lazyNamed(() => import('./pages/ProjectFiles'), 'ProjectFiles');
 const ProjectInvite = lazyNamed(() => import('./pages/ProjectInvite'), 'ProjectInvite');
 const ProjectLibrary = lazyNamed(() => import('./pages/ProjectLibrary'), 'ProjectLibrary');
-const ProjectNotifications = lazyNamed(
-  () => import('./pages/ProjectNotifications'),
-  'ProjectNotifications'
-);
+const Inbox = lazyNamed(() => import('./pages/inbox'), 'Inbox');
+const ProjectInbox = lazyNamed(() => import('./pages/inbox'), 'ProjectInbox');
 const ProjectProfiles = lazyNamed(() => import('./pages/ProjectProfiles'), 'ProjectProfiles');
 const Projects = lazyNamed(() => import('./pages/Projects'), 'Projects');
 const ProjectSettings = lazyNamed(loadProjectSettings, 'ProjectSettings');
@@ -305,6 +303,7 @@ export default function App() {
                     <Route element={<ProtectedLayout />}>
                       <Route path="/dashboard" element={<Dashboard />} />
                       <Route path="/sam" element={page(<Sam />)} />
+                      <Route path="/inbox" element={page(<Inbox />)} />
                       <Route path="/chats" element={page(<Chats />)} />
                       <Route path="/projects" element={page(<Projects />)} />
                       <Route path="/projects/new" element={page(<ProjectCreate />)} />
@@ -371,7 +370,12 @@ export default function App() {
                           <Route path="deploy" element={page(<ProjectSettingsDeploy />)} />
                         </Route>
                         <Route path="activity" element={page(<ProjectActivity />)} />
-                        <Route path="notifications" element={page(<ProjectNotifications />)} />
+                        <Route path="inbox" element={page(<ProjectInbox />)} />
+                        {/* The project Notifications page became the inbox's Updates chip. */}
+                        <Route
+                          path="notifications"
+                          element={<Navigate to="../inbox?filter=updates" replace />}
+                        />
                         <Route path="automation" element={page(<AutomationOverview />)} />
                         <Route path="automation/new" element={page(<AutomationEditor />)} />
                         <Route path="automation/history" element={page(<AutomationHistory />)} />

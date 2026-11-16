@@ -56,6 +56,7 @@ export default defineConfig({
             { slug: 'docs/guides/instant-sessions' },
             { slug: 'docs/guides/session-troubleshooting' },
             { slug: 'docs/guides/reporting-issues' },
+            { slug: 'docs/guides/inbox' },
             { slug: 'docs/guides/notifications' },
             { slug: 'docs/guides/scheduled-actions' },
             { slug: 'docs/guides/triggers' },

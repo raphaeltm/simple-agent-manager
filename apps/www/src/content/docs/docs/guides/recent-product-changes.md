@@ -9,6 +9,12 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
+- **One Inbox for everything agents need from you.** Questions, permission requests, secrets,
+  approvals and reviews from every project are in one list, with **Inbox** in the navigation and an
+  inbox icon where the notification bell was. Answer from the item, with the answer buttons pinned at
+  the bottom; the next item opens with a one-line receipt. **Archive** closes an item and tells the
+  agent, with a few seconds to **Undo**. Other notifications are under **Updates**.
+  → [Inbox](/docs/guides/inbox/)
 - **Claude Fable 5.2.** Anthropic's newest frontier model (1M-token context) is selectable for
   Claude Code in an agent profile and through the SAM AI proxy. Sessions that start after the
   update run a Claude Code version that supports it. → [Agent profiles](/docs/guides/agents/#agent-profiles)
@@ -149,7 +155,7 @@ Also for admins:
   → [Connecting a subscription with guided sign-in](/docs/guides/agents/#connecting-a-subscription-with-guided-sign-in)
 - **Read an agent's whole question from a notification.** **Read question & context** opens the full
   question with the messages before it, and you can answer it right there.
-  → [Read and answer an agent's question](/docs/guides/notifications/#read-and-answer-an-agents-question)
+  → [Inbox](/docs/guides/inbox/) (the question reader was replaced by the Inbox on 2026-11-16)
 - **A waking chat says why it is waiting**, for example that the cloud provider is out of capacity or
   your account is at its server limit, and when SAM tries next.
   → [Recovery is in progress](/docs/guides/session-troubleshooting/#recovery-is-in-progress)

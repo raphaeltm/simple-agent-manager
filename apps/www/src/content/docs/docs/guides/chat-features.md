@@ -191,9 +191,8 @@ Questions appear only in sessions labelled **Chat** in the session list — see
 An agent can also ask with its `request_human_input` tool, which works in a **Task** too and, unlike
 the cards above, sends you a notification. That question appears as a card in the conversation as
 well, marked **Needs your answer** until someone answers it, then **Answered** with the choice
-that was made. Answer it on the card, from the notification bell, or in the question reader: it is
-the same answer wherever you give it. See
-[Read and answer an agent's question](/docs/guides/notifications/#read-and-answer-an-agents-question).
+that was made. Answer it on the card or in your [Inbox](/docs/guides/inbox/): it is the same
+answer wherever you give it.
 
 ### Links to open
 

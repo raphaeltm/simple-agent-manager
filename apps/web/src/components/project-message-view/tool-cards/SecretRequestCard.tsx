@@ -4,38 +4,22 @@ import type {
   RuntimeSecretRequestStatus,
 } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { KeyRound } from 'lucide-react';
 import { type FC, useMemo, useState } from 'react';
 
 import { useDeadlinePassed } from '../../../hooks/useDeadlinePassed';
-import { useQueryScope } from '../../../hooks/useQueryScope';
-import { getSecretRequest } from '../../../lib/api';
 import { projectQueryKeys } from '../../../lib/query-options/projects';
 import { formatDateTime } from '../../../lib/time-utils';
 import { extractSecretRequestId } from './secret-request-card-data';
 import { SecretRequestForm } from './SecretRequestForm';
+import { useSecretRequest } from './useSecretRequest';
 
 export interface SecretRequestCardProps {
   item: ToolCallItem;
   /** Project of the conversation; the request is read and answered within it. */
   projectId?: string;
 }
-
-/**
- * How often an open card re-reads a request that can still change (answered on another device,
- * or expired). TanStack pauses this while the tab is hidden. Override via
- * VITE_SECRET_REQUEST_CARD_REFRESH_MS.
- */
-const DEFAULT_SECRET_REQUEST_CARD_REFRESH_MS = 15_000;
-const configuredRefreshMs = Number.parseInt(
-  import.meta.env.VITE_SECRET_REQUEST_CARD_REFRESH_MS ?? '',
-  10
-);
-const SECRET_REQUEST_CARD_REFRESH_MS =
-  Number.isFinite(configuredRefreshMs) && configuredRefreshMs > 0
-    ? configuredRefreshMs
-    : DEFAULT_SECRET_REQUEST_CARD_REFRESH_MS;
 
 const CARD_CLASS = 'glass-surface my-1 rounded-md border border-border-default';
 
@@ -109,18 +93,9 @@ function outcomeText(request: RuntimeSecretRequest, valueExpired: boolean): stri
  */
 export const SecretRequestCard: FC<SecretRequestCardProps> = ({ item, projectId }) => {
   const requestId = useMemo(() => extractSecretRequestId(item), [item]);
-  const scope = useQueryScope();
   const queryClient = useQueryClient();
-  const queryKey = projectQueryKeys.secretRequest(scope, projectId ?? '', requestId ?? '');
-  const query = useQuery({
-    queryKey,
-    queryFn: ({ signal }) => getSecretRequest(projectId as string, requestId as string, signal),
-    enabled: Boolean(scope && projectId && requestId),
-    retry: false,
-    refetchInterval: (q) =>
-      q.state.data?.request.status !== 'pending' || (q.state.error && !q.state.data)
-        ? false
-        : SECRET_REQUEST_CARD_REFRESH_MS,
+  const { query, queryKey, scope } = useSecretRequest(projectId, requestId, {
+    refreshWhilePending: true,
   });
   // Which outcome was saved without the agent being confirmed told, so the warning names it.
   const [unconfirmedOutcome, setUnconfirmedOutcome] = useState<'fulfilled' | 'declined' | null>(
