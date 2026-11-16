@@ -5,7 +5,8 @@
  *   - a rule's `paths` pattern is unsupported or matches no file (the rule could never load),
  *   - a rule names source files that do not load it (the rule was left behind by a move),
  *   - two rule files are identical copies,
- *   - a Claude Code hook entry is malformed (Claude Code would silently skip it),
+ *   - a Claude Code or Codex hook entry is malformed (both harnesses skip such entries
+ *     silently), or a hook runs a script that does not exist,
  *   - a generated rule index, or the Codex hook's rule lookup, is out of date,
  *   - a size ceiling in agent-context-budget.json is exceeded.
  *
@@ -21,8 +22,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import TOML from '@iarna/toml';
+
 import { CODEX_RULE_SCOPES_FILE, renderCodexRuleScopes } from './agent-codex-rule-scopes';
-import { checkClaudeHookConfig } from './agent-hook-config';
+import {
+  checkClaudeHookConfig,
+  checkCodexHookConfig,
+  hookCommandScripts,
+} from './agent-hook-config';
 import {
   checkCodexChainSizes,
   checkCodexEntryFiles,
@@ -55,6 +62,8 @@ const ROOT = resolve(import.meta.dirname, '../..');
 const BUDGET_FILE = 'scripts/quality/agent-context-budget.json';
 const ROOT_INDEX_FILE = '.claude/rules/00-rule-routing.md';
 const CLAUDE_SETTINGS_FILE = '.claude/settings.json';
+const CODEX_CONFIG_FILE = '.codex/config.toml';
+const CODEX_HOOKS_FILE = '.codex/hooks.json';
 // Absolute path: the check must not resolve git through a writable PATH entry.
 const GIT_BIN = '/usr/bin/git';
 
@@ -278,13 +287,74 @@ function agentsFileSizes(files: string[]): { file: string; bytes: number }[] {
     .map((file) => ({ file, bytes: bytesOf(file) }));
 }
 
+function hooksOf(config: unknown): unknown {
+  return config && typeof config === 'object' ? (config as { hooks?: unknown }).hooks : undefined;
+}
+
+/** Every `command` string under a hooks object, for the missing-script check. */
+function hookCommands(hooks: unknown): string[] {
+  if (!hooks || typeof hooks !== 'object') return [];
+  const commands: string[] = [];
+  for (const groups of Object.values(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      const handlers = (group as { hooks?: unknown } | null)?.hooks;
+      if (!Array.isArray(handlers)) continue;
+      for (const handler of handlers) {
+        const command = (handler as { command?: unknown } | null)?.command;
+        if (typeof command === 'string') commands.push(command);
+      }
+    }
+  }
+  return commands;
+}
+
+function missingScriptFindings(file: string, hooks: unknown): Finding[] {
+  return hookCommands(hooks)
+    .flatMap(hookCommandScripts)
+    .filter((script) => !existsSync(resolve(ROOT, script)))
+    .map((script) => ({
+      check: 'hook-config',
+      file,
+      message: `a hook runs ${script}, which does not exist; the hook would fail on every run`,
+    }));
+}
+
 function hookFindings(): Finding[] {
-  if (!existsSync(resolve(ROOT, CLAUDE_SETTINGS_FILE))) return [];
-  return checkClaudeHookConfig(JSON.parse(read(CLAUDE_SETTINGS_FILE))).map((problem) => ({
+  const findings: Finding[] = [];
+  const toFinding = (file: string) => (problem: { event: string; message: string }) => ({
     check: 'hook-config',
-    file: CLAUDE_SETTINGS_FILE,
+    file,
     message: `${problem.event}: ${problem.message}`,
-  }));
+  });
+  if (existsSync(resolve(ROOT, CLAUDE_SETTINGS_FILE))) {
+    const settings = JSON.parse(read(CLAUDE_SETTINGS_FILE)) as unknown;
+    findings.push(...checkClaudeHookConfig(settings).map(toFinding(CLAUDE_SETTINGS_FILE)));
+    findings.push(...missingScriptFindings(CLAUDE_SETTINGS_FILE, hooksOf(settings)));
+  }
+  if (existsSync(resolve(ROOT, CODEX_CONFIG_FILE))) {
+    let config: unknown;
+    try {
+      config = TOML.parse(read(CODEX_CONFIG_FILE));
+    } catch (error) {
+      return [
+        ...findings,
+        {
+          check: 'hook-config',
+          file: CODEX_CONFIG_FILE,
+          message: `is not valid TOML, so Codex rejects it: ${(error as Error).message}`,
+        },
+      ];
+    }
+    findings.push(...checkCodexHookConfig(config).map(toFinding(CODEX_CONFIG_FILE)));
+    findings.push(...missingScriptFindings(CODEX_CONFIG_FILE, hooksOf(config)));
+  }
+  if (existsSync(resolve(ROOT, CODEX_HOOKS_FILE))) {
+    const config = JSON.parse(read(CODEX_HOOKS_FILE)) as unknown;
+    findings.push(...checkCodexHookConfig(config).map(toFinding(CODEX_HOOKS_FILE)));
+    findings.push(...missingScriptFindings(CODEX_HOOKS_FILE, hooksOf(config)));
+  }
+  return findings;
 }
 
 function runObserved(model: InstructionModel, logPath: string, args: string[]): never {

@@ -42,5 +42,15 @@ timeout = 10
 additionalContextLimit = 16000
 statusMessage = "Checking SAM rules for these files"
 
+# Test-quality Stop gate (rule 35), shared with Claude Code. Delivery per finding class is
+# set and measured in .claude/hooks/verify-test-quality.mjs; it never blocks without limit.
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'node "$(git rev-parse --show-toplevel)/.claude/hooks/verify-test-quality.mjs"'
+timeout = 30
+statusMessage = "Checking tests for changed boundary code"
+
 [projects."/workspaces/simple-agent-manager"]
 trust_level = "trusted"

@@ -215,6 +215,10 @@ describe('agent instruction check selection', () => {
     '.claude/rules/99-example-rule.md',
     '.claude/settings.json',
     '.claude/hooks/log-instructions-loaded.sh',
+    '.claude/hooks/verify-test-quality.mjs',
+    '.codex/config.toml',
+    '.codex/hooks/rule-context.mjs',
+    '.codex/hooks/rule-scopes.json',
     'scripts/quality/agent-instructions.ts',
     'scripts/quality/agent-context-budget.json',
     'scripts/quality/check-agent-context-budget.ts',
@@ -235,5 +239,6 @@ describe('agent instruction check selection', () => {
     expect(jobsRunning('pnpm quality:agent-context-budget --check', results)).toEqual([
       'code-quality',
     ]);
+    expect(jobsRunning('pnpm quality:agent-tooling:test', results)).toEqual(['code-quality']);
   });
 });

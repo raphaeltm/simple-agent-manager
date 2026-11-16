@@ -1,0 +1,256 @@
+/**
+ * Drives the real Stop hook (.claude/hooks/verify-test-quality.mjs) against fixture git
+ * repositories. Each defect Sol's probes found in the old shell script has a case and a
+ * control (idea 01M7H8SDG77AE0FH39QXW3NPYX).
+ */
+import { execFileSync, spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+const ROOT = resolve(import.meta.dirname, '../..');
+const SCRIPT = '.claude/hooks/verify-test-quality.mjs';
+
+const repos: string[] = [];
+
+function git(repo: string, ...args: string[]): string {
+  return execFileSync('git', args, {
+    cwd: repo,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Fixture',
+      GIT_AUTHOR_EMAIL: 'fixture@example.com',
+      GIT_COMMITTER_NAME: 'Fixture',
+      GIT_COMMITTER_EMAIL: 'fixture@example.com',
+    },
+  });
+}
+
+function write(repo: string, path: string, text = 'export const value = 1;\n'): void {
+  mkdirSync(dirname(join(repo, path)), { recursive: true });
+  writeFileSync(join(repo, path), text);
+}
+
+/** A repository with the hook installed on `main`, checked out on a feature branch. */
+function fixtureRepo(): string {
+  const repo = mkdtempSync(join(tmpdir(), 'stop-gate-'));
+  repos.push(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  mkdirSync(join(repo, '.claude/hooks'), { recursive: true });
+  copyFileSync(join(ROOT, SCRIPT), join(repo, SCRIPT));
+  writeFileSync(join(repo, '.gitignore'), '.tmp/\n');
+  write(repo, 'apps/api/src/services/existing.ts');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'base');
+  git(repo, 'checkout', '-qb', 'feature');
+  return repo;
+}
+
+function commit(repo: string, message = 'change'): void {
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', message);
+}
+
+interface HookRun {
+  status: number | null;
+  output: Record<string, unknown>;
+  raw: string;
+}
+
+function runHook(repo: string, input: unknown = { session_id: 's1' }): HookRun {
+  const result = spawnSync('node', [join(repo, SCRIPT)], {
+    cwd: repo,
+    input: typeof input === 'string' ? input : JSON.stringify(input),
+    encoding: 'utf8',
+  });
+  return { status: result.status, output: JSON.parse(result.stdout), raw: result.stdout };
+}
+
+const blocks = (run: HookRun) => run.output.decision === 'block';
+const reason = (run: HookRun) => String(run.output.reason ?? '');
+
+afterEach(() => {
+  repos.length = 0;
+});
+
+describe('Stop gate: what counts as a change', () => {
+  it('ignores a non-code file under a boundary directory (old script blocked on it)', () => {
+    const repo = fixtureRepo();
+    write(repo, 'apps/api/src/services/no-test-needed.md', '# notes\n');
+    commit(repo);
+    const run = runHook(repo);
+    expect(run.status).toBe(0);
+    expect(run.output).toEqual({});
+  });
+
+  it('control: a boundary source file with no test change is reported', () => {
+    const repo = fixtureRepo();
+    write(repo, 'apps/api/src/services/new-service.ts');
+    commit(repo);
+    const run = runHook(repo);
+    expect(blocks(run)).toBe(true);
+    expect(reason(run)).toContain('apps/api/src/services/new-service.ts');
+  });
+
+  it('sees committed branch changes (old script read only `git diff HEAD`)', () => {
+    const repo = fixtureRepo();
+    write(repo, 'apps/api/src/routes/committed.ts');
+    commit(repo);
+    expect(git(repo, 'status', '--porcelain')).toBe('');
+    expect(reason(runHook(repo))).toContain('apps/api/src/routes/committed.ts');
+  });
+
+  it('sees untracked files', () => {
+    const repo = fixtureRepo();
+    write(repo, 'apps/api/src/routes/untracked.ts');
+    expect(reason(runHook(repo))).toContain('apps/api/src/routes/untracked.ts');
+  });
+
+  it('sees staged and unstaged edits', () => {
+    const repo = fixtureRepo();
+    write(repo, 'apps/api/src/services/existing.ts', 'export const value = 2;\n');
+    expect(reason(runHook(repo))).toContain('apps/api/src/services/existing.ts');
+    git(repo, 'add', '-A');
+    expect(reason(runHook(repo, { session_id: 's2' }))).toContain(
+      'apps/api/src/services/existing.ts'
+    );
+  });
+
+  it('control: committed source with a committed test in its area passes', () => {
+    const repo = fixtureRepo();
+    write(repo, 'apps/api/src/routes/committed.ts');
+    write(repo, 'apps/api/tests/unit/routes/committed.test.ts', "it('works', () => {});\n");
+    commit(repo);
+    expect(runHook(repo).output).toEqual({});
+  });
+
+  it('covers ProjectData Durable Object code in packages/project-data/src/do (old pattern missed it)', () => {
+    const repo = fixtureRepo();
+    write(repo, 'packages/project-data/src/do/session-sockets.ts');
+    commit(repo);
+    expect(reason(runHook(repo))).toContain('packages/project-data/src/do/session-sockets.ts');
+  });
+
+  it('control: a worker package change is covered by its own tests or by apps/api tests', () => {
+    const repo = fixtureRepo();
+    write(repo, 'packages/project-data/src/do/session-sockets.ts');
+    write(repo, 'packages/project-data/tests/unit/session-sockets.test.ts', "it('x', () => {});\n");
+    commit(repo);
+    expect(runHook(repo).output).toEqual({});
+
+    const second = fixtureRepo();
+    write(second, 'packages/operations/src/ideas.ts');
+    write(second, 'apps/api/tests/workers/ideas.test.ts', "it('x', () => {});\n");
+    commit(second);
+    expect(runHook(second).output).toEqual({});
+  });
+
+  it('does not treat a test in another package as covering the change', () => {
+    const repo = fixtureRepo();
+    write(repo, 'apps/api/src/services/thing.ts');
+    write(repo, 'apps/web/tests/unit/thing.test.ts', "it('x', () => {});\n");
+    commit(repo);
+    expect(reason(runHook(repo))).toContain('apps/api/src/services/thing.ts');
+  });
+});
+
+describe('Stop gate: delivery and loop safety', () => {
+  it('delivers feedback even when stop_hook_active is true (old script approved unconditionally)', () => {
+    const repo = fixtureRepo();
+    write(repo, 'apps/api/src/services/new-service.ts');
+    commit(repo);
+    const run = runHook(repo, { session_id: 'loop', stop_hook_active: true });
+    expect(blocks(run)).toBe(true);
+  });
+
+  it('feedback is delivered once per set of findings, then the turn may end', () => {
+    const repo = fixtureRepo();
+    write(repo, 'apps/api/src/services/new-service.ts');
+    commit(repo);
+    expect(blocks(runHook(repo, { session_id: 'once' }))).toBe(true);
+    const second = runHook(repo, { session_id: 'once', stop_hook_active: true });
+    expect(blocks(second)).toBe(false);
+    expect(String(second.output.systemMessage)).toContain('untested-boundary-change');
+    // A new finding in the same session is delivered again.
+    write(repo, 'apps/api/src/services/another.ts');
+    expect(blocks(runHook(repo, { session_id: 'once', stop_hook_active: true }))).toBe(true);
+  });
+
+  it('a blocking class repeats while unresolved, but never more than the limit', () => {
+    const repo = fixtureRepo();
+    const shallow = [
+      'vi.fn().mockResolvedValue({});',
+      'vi.fn().mockResolvedValue({});',
+      'vi.fn().mockReturnValue({});',
+      'vi.fn().mockReturnValue({});',
+    ].join('\n');
+    write(repo, 'apps/api/tests/unit/shallow.test.ts', `${shallow}\n`);
+    commit(repo);
+    const results = [1, 2, 3, 4, 5].map(() =>
+      blocks(runHook(repo, { session_id: 'cap', stop_hook_active: true }))
+    );
+    expect(results).toEqual([true, true, true, false, false]);
+  });
+
+  it('control: a test with realistic state is not reported as shallow', () => {
+    const repo = fixtureRepo();
+    const realistic = [
+      'vi.fn().mockResolvedValue({});',
+      'vi.fn().mockResolvedValue({});',
+      'vi.fn().mockResolvedValue({});',
+      "vi.fn().mockResolvedValue({ id: 'ws-1', status: 'running' });",
+    ].join('\n');
+    write(repo, 'apps/api/tests/unit/realistic.test.ts', `${realistic}\n`);
+    commit(repo);
+    expect(runHook(repo).output).toEqual({});
+  });
+});
+
+describe('Stop gate: output contract and failure safety', () => {
+  it('prints only documented fields: {} to allow, decision "block" with a reason to continue', () => {
+    const clean = fixtureRepo();
+    const allow = runHook(clean);
+    expect(allow.output).toEqual({});
+    expect(allow.raw).not.toContain('approve');
+
+    const dirty = fixtureRepo();
+    write(dirty, 'apps/api/src/routes/x.ts');
+    const block = runHook(dirty);
+    expect(Object.keys(block.output).sort()).toEqual(['decision', 'reason']);
+    expect(block.output.decision).toBe('block');
+  });
+
+  it('exits 0 with valid JSON for thousands of changed files (old script could exit 141)', () => {
+    const repo = fixtureRepo();
+    for (let index = 0; index < 3000; index++)
+      write(repo, `apps/api/src/services/gen/f${index}.ts`);
+    const run = runHook(repo);
+    expect(run.status).toBe(0);
+    expect(blocks(run)).toBe(true);
+    expect(reason(run)).toContain('+2985 more');
+  });
+
+  it('exits 0 with {} on malformed input or outside a git repository', () => {
+    const repo = fixtureRepo();
+    const malformed = runHook(repo, 'not json');
+    expect(malformed.status).toBe(0);
+    expect(malformed.output).toEqual({});
+
+    const notRepo = mkdtempSync(join(tmpdir(), 'stop-gate-norepo-'));
+    mkdirSync(join(notRepo, '.claude/hooks'), { recursive: true });
+    copyFileSync(join(ROOT, SCRIPT), join(notRepo, SCRIPT));
+    const outside = runHook(notRepo);
+    expect(outside.status).toBe(0);
+    expect(outside.output).toEqual({});
+  });
+
+  it('uses only Node built-ins, so it runs without node_modules', () => {
+    const source = readFileSync(join(ROOT, SCRIPT), 'utf8');
+    const imports = [...source.matchAll(/from '([^']+)'/g)].map((match) => match[1]);
+    expect(imports.length).toBeGreaterThan(0);
+    expect(imports.every((specifier) => specifier.startsWith('node:'))).toBe(true);
+  });
+});

@@ -260,6 +260,7 @@ jobs:
               - '.claude/rules/**'
               - '.claude/settings.json'
               - '.claude/hooks/**'
+              - '.codex/**'
               - 'CLAUDE.md'
               - 'AGENTS.md'
               - '**/AGENTS.md'
@@ -876,6 +877,11 @@ jobs:
       # stays under the ceilings in scripts/quality/agent-context-budget.json.
       - name: Agent instruction delivery and budget check
         run: pnpm quality:agent-context-budget --check
+
+      # The Codex rule-delivery hook, the Stop gate shared by Claude Code and Codex, and the
+      # instruction model, each driven through the real script against fixture repositories.
+      - name: Agent instruction and hook tests
+        run: pnpm quality:agent-tooling:test
 
       - name: Stale artifact check
         run: pnpm quality:stale-artifacts
