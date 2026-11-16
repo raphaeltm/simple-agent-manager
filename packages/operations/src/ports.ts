@@ -36,7 +36,6 @@ import type { ConnectorAnswerChoice } from './connector-answer-input';
 import type { ConnectorReadSettingName } from './connector-read-settings-definition';
 import type { InboxSettingName } from './inbox-settings-definition';
 import type { OperationInboxTaskPort } from './inbox-task-ports';
-import type { InsightsFlowSettingName } from './insights-flow-settings';
 import type { InsightsInstallationSettingName } from './insights-installation-settings-definition';
 import type { InsightsPageSettingName } from './insights-page-settings';
 import type { InsightsReceiptSettingName } from './insights-receipt-settings-definition';
