@@ -351,8 +351,42 @@ describe('agent inbox tools through the real entry points', () => {
     expect(late.status).toBe(409);
   });
 
-  it('get_instructions tells every task-backed session to use the inbox', async () => {
+  it('get_instructions tells every task-backed session to use the inbox, in task and conversation mode', async () => {
     const s = await seed();
+    const conversationToken = `${s.token}-conversation`;
+    await testEnv.DATABASE.prepare(`UPDATE tasks SET task_mode = 'conversation' WHERE id = ?`)
+      .bind(s.taskId)
+      .run();
+    await storeMcpToken(testEnv.KV, conversationToken, {
+      taskId: s.taskId,
+      taskMode: 'conversation',
+      projectId: s.projectId,
+      userId: s.ownerId,
+      workspaceId: s.workspaceId,
+      chatSessionId: s.chatSessionId,
+      agentSessionId: s.agentSessionId,
+      createdAt: new Date().toISOString(),
+    });
+    for (const token of [s.token, conversationToken]) {
+      const res = await SELF.fetch(`https://api.${testEnv.BASE_DOMAIN}/mcp`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'gi',
+          method: 'tools/call',
+          params: { name: 'get_instructions', arguments: {} },
+        }),
+      });
+      const payload = await res.json<{ result: { content: { text: string }[] } }>();
+      const lines = JSON.parse(payload.result.content[0]!.text).instructions as string[];
+      expect(
+        lines.filter((line) =>
+          line.startsWith('People do not watch chats; they read their inbox.')
+        ),
+        token
+      ).toHaveLength(1);
+    }
     const response = await SELF.fetch(`https://api.${testEnv.BASE_DOMAIN}/mcp`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${s.token}`, 'Content-Type': 'application/json' },
