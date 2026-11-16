@@ -4,15 +4,12 @@
  * (`MANAGED_NODE_RAN_IN_WINDOW_SQL`) and reach workspaces through `idx_workspaces_node_id`.
  *
  * Reuse — condition: "this placement went onto a machine that already existed". Record: the
- * workspace order on its machine, plus the node decision log's warm-pool claims
- * (`node_lifecycle` / `claimed` / `warm_node_reused`). A placement is from the warm pool when a
- * claim on its machine falls after the previous workspace there and at or before this one; it is
- * on an existing machine when an earlier workspace exists or such a claim does. Claims are
- * attributed per placement, not counted on their own: the log keeps claims whose workspace row was
- * later deleted (`workspace-cleanup.ts` and node delete remove rows), so a bare count can exceed
- * the placements it is part of. Packing onto a busy machine records no claim, so warm-pool
- * placements are a subset of reuse. `placement_explanation_json.diagnostics.selectedNodeId` is
+ * workspace order on its machine. A workspace is a new-machine placement when no earlier
+ * workspace exists on that machine. `placement_explanation_json.diagnostics.selectedNodeId` is
  * not used: provisioning rewrites it to the new machine, so it reads the same for both cases.
+ * A placement a warm-pool claim preceded (`insights-installation-warm-claims.ts`) is reuse too,
+ * and is reported as the part of reuse that came from the warm pool; packing onto a busy machine
+ * records no claim, so that part is never the whole rate.
  *
  * New-machine reasons — the first workspace on each new machine carries the capacity gate's
  * verdict on every existing machine it considered (`diagnostics.hosts[].reasons`), each reason
@@ -38,6 +35,7 @@ import {
   MANAGED_NODE_RAN_IN_WINDOW_SQL,
   storedTimeMs,
 } from './insights-installation-compute';
+import { readWarmClaims, warmPlacementIds } from './insights-installation-warm-claims';
 import type { OperationContext } from './types';
 
 const HOUR_MS = 3_600_000;
@@ -58,7 +56,6 @@ interface PlacementRow {
   node_id: string;
   created_at: string;
   reused: number;
-  warm: number;
   /** `diagnostics.hosts` of a new-machine placement; null for reuse or when absent/invalid. */
   hosts_json: string | null;
 }
@@ -129,54 +126,69 @@ export async function readPlacementSections(
   // placements, so reused placements never carry it through the sort. `json_valid` keeps one
   // malformed value from failing the statement.
   //
-  // A warm claim on the machine since its previous workspace also marks the placement as reuse,
-  // so a machine whose earlier workspace row was removed is still recognised when the claim says
-  // so. Lower bound otherwise: a removed first workspace on a machine packed without a claim
-  // shows its next placement as new. Not observed in production (2026-11-16: all 281 first
-  // placements in 30 days were created within an hour of their machine). Claim times are compared
-  // through `julianday` because the two tables' text timestamps are not guaranteed one format;
-  // `idx_node_lifecycle_decisions_node_created` serves the per-machine lookup.
+  // A warm-pool claim also marks a placement as reuse, so a machine whose earlier workspace row
+  // was removed is still recognised when a claim says so. Lower bound otherwise: a removed first
+  // workspace on a machine packed without a claim shows its next placement as new. Not observed
+  // in production (2026-11-16: all 281 first placements in 30 days were created within an hour
+  // of their machine).
   const placementsQuery = ctx.env.DATABASE.prepare(
-    `SELECT x.id, x.node_id, x.created_at, (x.prev_at IS NOT NULL OR x.warm) AS reused, x.warm,
+    `SELECT x.id, x.node_id, x.created_at, x.reused,
             CASE WHEN json_valid(pw.placement_explanation_json)
                  THEN json_extract(pw.placement_explanation_json, '$.diagnostics.hosts') END
               AS hosts_json
        FROM (
-         SELECT y.*,
+         SELECT w.id, w.node_id, w.created_at,
                 EXISTS (
-                  SELECT 1 FROM node_lifecycle_decisions d
-                   WHERE d.node_id = y.node_id
-                     AND d.source = 'node_lifecycle' AND d.decision = 'claimed'
-                     AND d.reason = 'warm_node_reused'
-                     AND julianday(d.created_at) <= julianday(y.created_at)
-                     AND (y.prev_at IS NULL OR julianday(d.created_at) > julianday(y.prev_at))
-                ) AS warm
-           FROM (
-             SELECT w.id, w.node_id, w.created_at,
-                    (SELECT MAX(p.created_at) FROM workspaces p
-                      WHERE p.node_id = w.node_id
-                        AND (p.created_at < w.created_at OR (p.created_at = w.created_at AND p.id < w.id))
-                    ) AS prev_at
-               FROM nodes n
-               JOIN workspaces w ON w.node_id = n.id
-              WHERE ${MANAGED_NODE_RAN_IN_WINDOW_SQL}
-                AND n.node_role = 'workspace'
-                AND w.created_at >= ? AND w.created_at < ?
-              ORDER BY w.created_at DESC, w.id DESC
-              LIMIT ?
-           ) y
+                  SELECT 1 FROM workspaces p
+                   WHERE p.node_id = w.node_id
+                     AND (p.created_at < w.created_at OR (p.created_at = w.created_at AND p.id < w.id))
+                ) AS reused
+           FROM nodes n
+           JOIN workspaces w ON w.node_id = n.id
+          WHERE ${MANAGED_NODE_RAN_IN_WINDOW_SQL}
+            AND n.node_role = 'workspace'
+            AND w.created_at >= ? AND w.created_at < ?
+          ORDER BY w.created_at DESC, w.id DESC
+          LIMIT ?
        ) x
-       LEFT JOIN workspaces pw ON pw.id = x.id AND x.prev_at IS NULL AND NOT x.warm
-      ORDER BY x.created_at DESC, x.id DESC`
+       LEFT JOIN workspaces pw ON pw.id = x.id AND x.reused = 0`
   ).bind(
     ...isoBinds(bounds),
     new Date(bounds.readStartMs).toISOString(),
     new Date(bounds.nowMs).toISOString(),
     maxPlacements + 1
   );
-  const placementResult = await placementsQuery.all<PlacementRow>();
+  const [placementResult, warmClaims] = await Promise.all([
+    placementsQuery.all<PlacementRow>(),
+    readWarmClaims(ctx, bounds, maxPlacements),
+  ]);
   const rows = placementResult.results ?? [];
-  const truncated = rows.length > maxPlacements;
+  const placementsTruncated = rows.length > maxPlacements;
+  const read: { row: PlacementRow; atMs: number }[] = [];
+  for (const row of rows.slice(0, maxPlacements)) {
+    const atMs = storedTimeMs(row.created_at);
+    if (atMs === null) {
+      log.warn('insights_installation.placement_row_skipped', {
+        workspaceId: row.id,
+        reason: 'unreadable_timestamp',
+        action: 'skipped',
+      });
+      continue;
+    }
+    read.push({ row, atMs });
+  }
+  // Claims are credited only where every placement after them was read: from the window start,
+  // or, when the placement read hit its cap, from the oldest placement kept (an unread placement
+  // in between may be the one a claim served).
+  const oldestPlacementMs = read.reduce((oldest, p) => Math.min(oldest, p.atMs), Infinity);
+  const warm = warmClaims
+    ? warmPlacementIds(
+        read.map(({ row, atMs }) => ({ id: row.id, nodeId: row.node_id, atMs })),
+        warmClaims.events,
+        placementsTruncated ? oldestPlacementMs : -Infinity
+      )
+    : new Set<string>();
+  const truncated = placementsTruncated || Boolean(warmClaims?.truncated);
 
   let placements = 0;
   let onExisting = 0;
@@ -188,17 +200,9 @@ export async function readPlacementSections(
   >();
   let newMachines = 0;
 
-  for (const row of rows.slice(0, maxPlacements)) {
-    const at = storedTimeMs(row.created_at);
-    if (at === null) {
-      log.warn('insights_installation.placement_row_skipped', {
-        workspaceId: row.id,
-        reason: 'unreadable_timestamp',
-        action: 'skipped',
-      });
-      continue;
-    }
-    const reused = Number(row.reused) === 1;
+  for (const { row, atMs: at } of read) {
+    const isWarm = warm.has(row.id);
+    const reused = Number(row.reused) === 1 || isWarm;
     const week =
       weekly[bounds.weekStarts.findIndex((start) => at >= start && at < start + WEEK_MS)];
     if (week) {
@@ -209,7 +213,7 @@ export async function readPlacementSections(
     placements += 1;
     if (reused) {
       onExisting += 1;
-      if (Number(row.warm) === 1) fromWarmPool += 1;
+      if (isWarm) fromWarmPool += 1;
       continue;
     }
     newMachines += 1;
@@ -237,7 +241,7 @@ export async function readPlacementSections(
       placements,
       onExistingMachine: onExisting,
       onNewMachine: placements - onExisting,
-      fromWarmPool,
+      fromWarmPool: warmClaims === undefined ? null : fromWarmPool,
       reuseRate: placements > 0 ? onExisting / placements : null,
       weeks: bounds.weekStarts.map((weekStart, index) => {
         const week = weekly[index] ?? { placements: 0, reused: 0 };

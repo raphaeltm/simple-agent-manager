@@ -107,7 +107,7 @@ export function StatTiles({
         extra={reuse && <Sparkline values={reuse.weeks.map((week) => week.reuseRate)} />}
         note={
           reuse
-            ? `${reuse.onExistingMachine} of ${reuse.placements} placements on an existing machine · ${reuse.fromWarmPool} from the warm pool`
+            ? `${reuse.onExistingMachine} of ${reuse.placements} placements on an existing machine${reuse.fromWarmPool === null ? '' : ` · ${reuse.fromWarmPool} from the warm pool`}`
             : 'Could not be read'
         }
       />

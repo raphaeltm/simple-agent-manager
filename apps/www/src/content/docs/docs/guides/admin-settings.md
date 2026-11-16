@@ -552,8 +552,10 @@ shared `installationHealth` operation (`packages/operations/src/insights-install
 - **Warm machine reuse.** The share of workspace placements that went onto a machine that already
   existed: an earlier workspace exists on that machine, or the node decision log recorded a
   warm-pool claim on it since its previous workspace. The note under it gives how many of those
-  placements came from the warm pool. A claim whose workspace was later deleted is not counted, so
-  the warm-pool number is always part of the reuse number. If a machine's first workspace row is
+  placements came from the warm pool. A claim given back unused, or whose workspace was later
+  deleted, is not counted, so the warm-pool number is always part of the reuse number. The node
+  decision log keeps `operations.nodeDecisionLogRetentionDays` (14 by default), so placements older
+  than that are never credited to the warm pool. If a machine's first workspace row is
   later removed and its next placement packed onto it without a warm-pool claim, that placement
   reads as new, so the rate is a lower bound.
 - **Agents per busy machine.** Agents running at once on a machine, averaged over the time it had

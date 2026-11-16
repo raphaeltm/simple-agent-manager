@@ -69,10 +69,11 @@ export interface InstallationMachineReuse {
   onExistingMachine: number;
   onNewMachine: number;
   /**
-   * Placements on an existing machine that came from the warm pool: a warm-pool claim in the node
-   * decision log on that machine since its previous workspace. Always a part of `onExistingMachine`.
+   * Placements on an existing machine that came from the warm pool: an unreleased warm-pool claim
+   * in the node decision log on that machine since its previous workspace. Always a part of
+   * `onExistingMachine`; null when the decision log could not be read.
    */
-  fromWarmPool: number;
+  fromWarmPool: number | null;
   /** onExistingMachine / placements, 0-1; null with no placements. */
   reuseRate: number | null;
   weeks: { weekStart: string; placements: number; reuseRate: number | null }[];

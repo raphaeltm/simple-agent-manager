@@ -404,6 +404,102 @@ describe('installationHealth', () => {
       expect(result.reuse?.fromWarmPool).toBe(1);
     });
 
+    it('credits only an unreleased warm claim, once, ignoring other decisions', async () => {
+      node('g', { created_at: iso('2026-11-13T00:00:00Z') });
+      const decision = (id: string, at: string, fields: Record<string, string>) =>
+        insert('node_lifecycle_decisions', {
+          id,
+          node_id: 'g',
+          source: 'node_lifecycle',
+          decision: 'claimed',
+          reason: 'warm_node_reused',
+          created_at: iso(at),
+          ...fields,
+        });
+      workspace('g-1', 'g', '2026-11-13T00:01:00Z');
+      // Before g-2: two claims for one placement, credited once.
+      decision('g-claim-1', '2026-11-13T01:00:00Z', {});
+      decision('g-claim-2', '2026-11-13T01:30:00Z', {});
+      workspace('g-2', 'g', '2026-11-13T02:00:00Z');
+      // Before g-3: only decoys, and a claim given back unused.
+      decision('g-decoy-kind', '2026-11-13T03:00:00Z', { decision: 'marked_warm', reason: '' });
+      decision('g-claim-3', '2026-11-13T03:10:00Z', {});
+      decision('g-released', '2026-11-13T03:20:00Z', {
+        decision: 'claim_released',
+        reason: 'claim_unused',
+      });
+      // Claim-shaped rows from another source or for another reason are not warm-pool claims.
+      decision('g-decoy-source', '2026-11-13T03:40:00Z', { source: 'cleanup_sweep' });
+      decision('g-decoy-reason', '2026-11-13T03:45:00Z', { reason: 'something_else' });
+      workspace('g-3', 'g', '2026-11-13T04:00:00Z');
+
+      const result = await installationHealth(ctx(), { range: '7d' }, NOW);
+
+      // Fixture: 6 placements, 2 on existing machines, 1 warm (a-2). g adds 3 placements, 2 reuse.
+      expect(result.reuse).toMatchObject({
+        placements: 9,
+        onExistingMachine: 4,
+        fromWarmPool: 2,
+      });
+    });
+
+    it('says the reuse rate but not the warm-pool part when the decision log cannot be read', async () => {
+      sqlite.exec('DROP TABLE node_lifecycle_decisions');
+
+      const result = await installationHealth(ctx(), { range: '7d' }, NOW);
+
+      expect(result.reuse).toMatchObject({
+        placements: 6,
+        onExistingMachine: 2,
+        fromWarmPool: null,
+      });
+      expect(result.unavailable).toEqual([]);
+    });
+
+    it('does not credit a claim an unread placement may have served when the cap is reached', async () => {
+      // Cap 3 keeps c-first, d-first and e-first. e-early (unread) sits between this claim and
+      // e-first, so the claim is e-early's, not e-first's.
+      workspace('e-early', 'e', '2026-11-12T12:00:00Z');
+      insert('node_lifecycle_decisions', {
+        id: 'claim-e',
+        node_id: 'e',
+        source: 'node_lifecycle',
+        decision: 'claimed',
+        reason: 'warm_node_reused',
+        created_at: iso('2026-11-12T06:00:00Z'),
+      });
+
+      const result = await installationHealth(
+        ctx('admin', { 'insights.healthMaxPlacements': 3 }),
+        { range: '7d' },
+        NOW
+      );
+
+      expect(result.reuse).toMatchObject({ placements: 3, fromWarmPool: 0, truncated: true });
+    });
+
+    it('says the warm-pool part is a lower bound when the decision read reaches its cap', async () => {
+      for (let i = 0; i < 8; i++) {
+        insert('node_lifecycle_decisions', {
+          id: `late-release-${i}`,
+          node_id: 'other-node',
+          source: 'node_lifecycle',
+          decision: 'claim_released',
+          reason: 'claim_unused',
+          created_at: iso(`2026-11-16T0${i}:00:00Z`),
+        });
+      }
+
+      const result = await installationHealth(
+        ctx('admin', { 'insights.healthMaxPlacements': 7 }),
+        { range: '7d' },
+        NOW
+      );
+
+      // 7 placements fit; 9 decisions in the window (a claim and 8 releases) do not.
+      expect(result.reuse).toMatchObject({ placements: 6, truncated: true });
+    });
+
     it('marks placements truncated when the cap is reached', async () => {
       const result = await installationHealth(
         ctx('admin', { 'insights.healthMaxPlacements': 3 }),

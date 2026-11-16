@@ -185,6 +185,17 @@ describe('AdminHealthCost', () => {
     );
   });
 
+  it('leaves out the warm-pool part when that count could not be read', async () => {
+    mocks.getInstallationHealth.mockResolvedValue(
+      health({ reuse: { ...health().reuse!, fromWarmPool: null } })
+    );
+    renderPage();
+
+    const reuse = await screen.findByTestId('stat-reuse');
+    expect(reuse).toHaveTextContent('61 of 100 placements on an existing machine');
+    expect(reuse).not.toHaveTextContent('warm pool');
+  });
+
   it('links the open watchdog incident for an over-budget state', async () => {
     mocks.getInstallationHealth.mockResolvedValue(health());
     renderPage();
