@@ -63,14 +63,14 @@ First night of use (idea notes, 2026-11-16):
 
 ## Checklist — Part 1 (PR 1)
 
-- [ ] Pure queue state + decision module with tests (empty queue, two waiters in order, head misses
+- [x] Pure queue state + decision module with tests (empty queue, two waiters in order, head misses
       grace, holder re-queues behind waiters, reservation expiry, concurrent reservations, legacy
       record, malformed records, early release keeps head's turn)
-- [ ] `staging-lease.mjs`: `queue` and `lease` phases, `status` command
-- [ ] Workflow: `reserve` action, `queue` job outside group, `lease` job group, apply group; grace
+- [x] `staging-lease.mjs`: `queue` and `lease` phases, `status` command
+- [x] Workflow: `reserve` action, `queue` job outside group, `lease` job group, apply group; grace
       and reservation TTL vars
-- [ ] Permissions/gating test updated
-- [ ] Docs: `.claude/commands/do.md`, `.agents/skills/do/SKILL.md`, `.claude/rules/13-staging-verification.md`,
+- [x] Permissions/gating test updated
+- [x] Docs: `.claude/commands/do.md`, `.agents/skills/do/SKILL.md`, `.claude/rules/13-staging-verification.md`,
       `.agent-instructions/reference/rules/13-staging-verification-full.md`
 - [ ] Live proof on staging2 with two branches (reserve/acquire/release, no full deploys)
 - [ ] Note on idea, channel `feature.ship-faster`
