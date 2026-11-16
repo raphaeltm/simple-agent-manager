@@ -31,3 +31,7 @@ The 5 "has-cloud-provider" detection gates (incl. onboarding completion checks) 
 ## References
 - Parent PR / task: `tasks/archive/2026-07-23-vultr-cloud-provider.md`
 - Rule 42 (no untracked degrading placeholders — this is the tracked follow-up), Rule 26 (project-chat-first — onboarding is secondary).
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The code premise is gone: #2610 deleted the hardcoded Hetzner/Scaleway `StepForm.tsx`, and onboarding now renders the shared seven-provider `CloudProviderConnectFlow` (`apps/web/src/components/onboarding/choose-path/StepExecution.tsx:276`; Vultr/DigitalOcean arms in `CloudProviderConnectFlow.tsx`). Still open, narrowed to verification: an onboarding-specific Playwright audit of the cloud step with each token provider selected (375 + 1280), and a staging onboarding run with bogus Vultr and DigitalOcean keys showing a clean sanitized error. The Settings audit (`settings-vultr-credential-audit.spec.ts`) covers the shared component only.

@@ -25,12 +25,14 @@ import {
   isWakeWaitReason,
   type SessionStateSnapshot,
 } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { replacementDeletionRowVerdict } from '../../services/replacement-deletion-fence';
+import { signalSessionWakeReadyBestEffort } from '../../services/session-wake-ready';
 
 type Db = DrizzleD1Database<typeof schema>;
 
@@ -78,7 +80,7 @@ const EMPTY_STATE: SessionStateSnapshot = {
 export async function attachWakeState(
   db: Db,
   state: SessionStateSnapshot | null,
-  args: { projectId: string; sessionId: string; sessionStatus: unknown }
+  args: { projectId: string; sessionId: string; sessionStatus: unknown; env?: Env }
 ): Promise<SessionStateSnapshot | null> {
   if (args.sessionStatus !== 'sleeping') return state;
 
@@ -87,6 +89,11 @@ export async function attachWakeState(
       .select({
         recoveryStatus: schema.sessionSnapshots.recoveryStatus,
         recoveryAttemptId: schema.sessionSnapshots.recoveryAttemptId,
+        recoveryTaskId: schema.sessionSnapshots.recoveryTaskId,
+        recoveryWorkspaceId: schema.sessionSnapshots.recoveryWorkspaceId,
+        runtime: schema.sessionSnapshots.runtime,
+        agentSessionId: schema.agentSessions.id,
+        taskStatus: schema.tasks.status,
         executionStep: schema.tasks.executionStep,
         admissionReason: schema.tasks.admissionReason,
         admissionNextRetryAt: schema.tasks.admissionNextRetryAt,
@@ -99,7 +106,16 @@ export async function attachWakeState(
       .leftJoin(schema.tasks, eq(schema.tasks.id, schema.sessionSnapshots.recoveryTaskId))
       .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.sessionSnapshots.workspaceId))
       .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+      .leftJoin(
+        schema.agentSessions,
+        and(
+          eq(schema.agentSessions.workspaceId, schema.sessionSnapshots.recoveryWorkspaceId),
+          eq(schema.agentSessions.userId, schema.sessionSnapshots.userId),
+          eq(schema.agentSessions.status, 'running')
+        )
+      )
       .where(eq(schema.sessionSnapshots.chatSessionId, args.sessionId))
+      .orderBy(desc(schema.agentSessions.createdAt))
       .limit(1);
 
     if (!row) return state;
@@ -119,11 +135,36 @@ export async function attachWakeState(
         runtimeDeletionConfirmedAt: row.sleptWorkspaceDeletionConfirmedAt,
         runtimeTerminationConfirmedAt: row.sleptNodeTerminationConfirmedAt,
       }) === 'blocked';
-    const recoveryStatus = isRecoveryStatus(row.recoveryStatus) ? row.recoveryStatus : null;
+    let recoveryStatus = isRecoveryStatus(row.recoveryStatus) ? row.recoveryStatus : null;
     if (!recoveryStatus) {
       return cleanupPending
         ? { ...(state ?? EMPTY_STATE), waitReason: 'previous_workspace_cleanup', waitRetryAt: null }
         : state;
+    }
+
+    if (recoveryStatus === 'restored' && ['queued', 'delegated'].includes(row.taskStatus ?? '')) {
+      // Snapshot restore precedes the authoritative task handoff commit.
+      recoveryStatus = 'waking';
+    } else if (recoveryStatus === 'restored' && args.env && row.runtime === 'vm') {
+      // A crash after D1 commit can lose the runner's best-effort signal. Pull hydration
+      // replays the same exact fence, independently of runner memory or notifications.
+      const signaled =
+        row.recoveryTaskId &&
+        row.recoveryAttemptId &&
+        row.recoveryWorkspaceId &&
+        row.agentSessionId &&
+        (await signalSessionWakeReadyBestEffort(args.env, {
+          projectId: args.projectId,
+          chatSessionId: args.sessionId,
+          workspaceId: row.recoveryWorkspaceId,
+          agentSessionId: row.agentSessionId,
+          fence: {
+            runtime: 'vm',
+            taskId: row.recoveryTaskId,
+            recoveryAttemptId: row.recoveryAttemptId,
+          },
+        }));
+      if (!signaled) recoveryStatus = 'waking';
     }
 
     // Only a wake that is actually in flight has a meaningful phase. A 'restored'

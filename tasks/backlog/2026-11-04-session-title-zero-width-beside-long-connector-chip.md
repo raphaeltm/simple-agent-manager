@@ -22,3 +22,7 @@ visual-audit quarantine list, so CI does not run it.
 - [ ] The nested-session-sidebar "Connector provenance" case passes at 375 and 1280 widths.
 - [ ] Remove `nested-session-sidebar-audit.spec.ts` from the quarantine list if its other cases
       pass, or record which ones still fail and why.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2717 moved the connector chip onto the meta line under the title (`apps/web/src/pages/project-chat/SessionItem.tsx`), so a long name no longer squeezes the title. Still open: the spec is still listed in `apps/web/tests/playwright/visual-audit-quarantine.txt`, so CI does not run it.

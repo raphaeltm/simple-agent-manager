@@ -1,5 +1,15 @@
 # A pool mid-republication should keep placing on its last published catalog
 
+## Implementation tracking (2026-11-12)
+
+The committed-catalog readiness and durable continuation work is implemented in draft
+[PR #2693](https://github.com/raphaeltm/simple-agent-manager/pull/2693), tracked by
+[the active recovery task](../active/2026-11-12-resilient-catalog-wake-recovery.md).
+It includes private atomic replacement, retained published capacity, bounded resumable work and
+automatic accepted-wake recovery. Real staging and the coordinator's exact-SHA release gate remain
+open; this backlog item is not archived or claimed shipped. The separate editor/digest optimization
+below remains tracked here.
+
 ## Problem
 
 `defaultPoolEffectiveState()` (`apps/api/src/services/default-capacity-pool-summaries.ts`) returns
@@ -76,3 +86,7 @@ Cloud catalog is rewritten after each save.
       needs the authority recompute moved to the edit path (or proven unnecessary).
 - [ ] Test: a pool edit followed by an identical refresh writes no candidate rows and keeps the
       pool ready (through the real edit and ensure paths).
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2693 shipped the readiness gate (`apps/api/src/services/default-capacity-pool-summaries.ts` keys readiness on `catalogPublished`, staged promotion), shared pass/source budgets and resumable continuation. Still open: `candidateSetDigest` still hashes `status` (`default-capacity-pool-candidates-publication.ts`), so a pool edit republishes the whole catalog; and the credential-mutation latency item.

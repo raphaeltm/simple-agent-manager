@@ -113,6 +113,7 @@ import { gitlabRoutes } from './routes/gitlab';
 import { googleAuthRoutes } from './routes/google-auth';
 import { ideaUpdateRoutes } from './routes/idea-updates';
 import { ideaRoutes } from './routes/ideas';
+import { inboxRoutes, projectInboxRoutes } from './routes/inbox';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
@@ -418,6 +419,7 @@ app.route('/api/projects', workspaceEvictionCallbackRoute); // Must be before pr
 app.route('/api/projects', workspaceResourceHistoryCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/ideas', ideaRoutes);
+app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);
@@ -484,6 +486,7 @@ app.route('/api/account-map', accountMapRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/sam', samRoutes);
 app.route('/api/notifications', notificationRoutes);
+app.route('/api/inbox', inboxRoutes);
 app.route('/api', trialRoutes);
 app.route('/api/gcp', gcpRoutes);
 app.route('/ai/v1', aiProxyRoutes);

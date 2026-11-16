@@ -35,6 +35,8 @@ export interface PlacementAuthoritySqlInput {
   projectCapability?: ProjectCapability;
   capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
   requireProjectMembership?: boolean;
+  /** Existing runtimes revalidate current authority; new allocation plans remain revision-fenced. */
+  authorityMode?: 'allocation-plan' | 'existing-node';
 }
 
 export const PROVIDER_ALLOCATION_ACTIVE_STATUS_SQL = "'creating', 'running'";
@@ -111,6 +113,15 @@ export function buildPlacementAuthoritySqlPredicate(
 
   const concrete = normalizeConcreteSnapshot(snapshot);
   if (!concrete) return impossiblePredicate();
+  const existingNode = input.authorityMode === 'existing-node';
+  if (existingNode) {
+    // Existing VM revisions are provenance; current authority is checked below.
+    // Never use this mode to create a VM.
+    clauses.push(
+      `AND ${nodeAlias}.status = 'running'`,
+      `AND ${nodeAlias}.provider_instance_id IS NOT NULL`
+    );
+  }
   if (concrete.workloadRole !== input.workloadRole) return impossiblePredicate();
   if (
     concrete.capacityPoolScope === 'project' &&
@@ -126,12 +137,8 @@ export function buildPlacementAuthoritySqlPredicate(
   const sourceScope = poolScopeSql('s', concrete.capacityPoolScope, nodeAlias, nodeUserIdSql);
   if (!poolScope || !sourceScope) return impossiblePredicate();
 
-  // The claimed pool must still BE the effective pool for this run: the current
-  // default of its own scope, with nothing authoritative outranking it. Without
-  // this, a plan resolved against a user/installation pool stays admissible after
-  // a project default pool is configured (even a configured-empty one), which is
-  // exactly the cross-pool fallback v1 forbids. Mirrors
-  // `resolveEffectiveDefaultCapacityPoolSummary` through one shared ordering.
+  // The claimed pool must remain the effective default, with no higher-precedence
+  // default (including configured-empty pools). Shares the resolver's ordering.
   const higherPrecedenceExclusion = buildHigherPrecedenceDefaultCapacityPoolExclusionSql(
     concrete.capacityPoolScope,
     { userId: input.userId, projectId: input.projectId ?? null },
@@ -141,7 +148,7 @@ export function buildPlacementAuthoritySqlPredicate(
   clauses.push(
     `AND ${nodeAlias}.capacity_pool_id = ?`,
     `AND ${nodeAlias}.capacity_pool_scope = ?`,
-    `AND ${nodeAlias}.capacity_pool_revision = ?`,
+    ...(existingNode ? [] : [`AND ${nodeAlias}.capacity_pool_revision = ?`]),
     `AND ${nodeAlias}.capacity_source_id = ?`,
     `AND ${nodeAlias}.capacity_source_generation = ?`,
     `AND ${nodeAlias}.capacity_source_external_ref IS ?`,
@@ -158,7 +165,7 @@ export function buildPlacementAuthoritySqlPredicate(
   binds.push(
     concrete.capacityPoolId,
     concrete.capacityPoolScope,
-    concrete.capacityPoolRevision,
+    ...(existingNode ? [] : [concrete.capacityPoolRevision]),
     concrete.capacitySourceId,
     concrete.capacitySourceGeneration,
     concrete.capacitySourceExternalRef,
@@ -178,9 +185,8 @@ export function buildPlacementAuthoritySqlPredicate(
     binds.push(...higherPrecedenceExclusion.binds);
   }
 
-  // Every identity below is already pinned to a bound value through the node
-  // columns asserted above, so the joins compare against those columns instead of
-  // re-binding the same snapshot values.
+  // Identity is already pinned through node columns above; joins reuse those
+  // columns instead of binding the snapshot values again.
   clauses.push(
     `AND EXISTS (
       SELECT 1
@@ -193,7 +199,7 @@ export function buildPlacementAuthoritySqlPredicate(
        AND c.capacity_source_id = s.id
       WHERE p.id = ${nodeAlias}.capacity_pool_id
         AND p.scope = ${nodeAlias}.capacity_pool_scope
-        AND p.revision = ${nodeAlias}.capacity_pool_revision
+        ${existingNode ? '' : `AND p.revision = ${nodeAlias}.capacity_pool_revision`}
         AND p.status = 'active'
         AND p.configuration_state = 'configured-ready'
         AND p.is_default = 1

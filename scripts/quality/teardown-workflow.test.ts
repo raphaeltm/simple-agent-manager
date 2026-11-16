@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 const workflow = readFileSync(
@@ -37,7 +38,7 @@ describe('teardown workflow', () => {
     }
 
     const workspaceDns = workflow.match(
-      /- name: Delete Workspace DNS Records[\s\S]*?(?=\n      - name:|\n      #|$)/
+      /- name: Delete Workspace DNS Records[\s\S]*?(?=\n {6}- name:|\n {6}#|$)/
     )?.[0];
     expect(workspaceDns).toBeDefined();
     expect(workspaceDns).toContain('if [ "$INPUT_DRY_RUN" = "true" ]; then');
@@ -45,7 +46,7 @@ describe('teardown workflow', () => {
     expect(workspaceDns).toContain('echo "status=dry_run" >> "$GITHUB_OUTPUT"');
 
     const marketingDns = workflow.match(
-      /- name: Delete Marketing DNS Records[\s\S]*?(?=\n      - name:|\n      #|$)/
+      /- name: Delete Marketing DNS Records[\s\S]*?(?=\n {6}- name:|\n {6}#|$)/
     )?.[0];
     expect(marketingDns).toBeDefined();
     expect(marketingDns).toContain('if [ "$INPUT_DRY_RUN" = "true" ]; then');
@@ -55,14 +56,14 @@ describe('teardown workflow', () => {
     expect(marketingDns).toContain('APEX_STATUS="dry_run_exists"');
 
     const unprotect = workflow.match(
-      /- name: Unprotect Pulumi Resources[\s\S]*?(?=\n      - name:|\n      #|$)/
+      /- name: Unprotect Pulumi Resources[\s\S]*?(?=\n {6}- name:|\n {6}#|$)/
     )?.[0];
     expect(unprotect).toContain(
       "if: ${{ steps.pulumi_stack.outputs.status == 'ok' && inputs.dry_run != true }}"
     );
 
     const pulumiDestroy = workflow.match(
-      /- name: Pulumi Destroy[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Pulumi Destroy[\s\S]*?(?=\n {6}# ================================================================)/
     )?.[0];
     expect(pulumiDestroy).toContain("if: ${{ steps.pulumi_stack.outputs.status == 'ok' }}");
     expect(pulumiDestroy).toContain('if [ "$INPUT_DRY_RUN" = "true" ]; then');
@@ -70,14 +71,14 @@ describe('teardown workflow', () => {
     expect(pulumiDestroy).toContain('pulumi destroy --yes');
 
     const fallback = workflow.match(
-      /- name: Delete Web Pages Project \(fallback\)[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Delete Web Pages Project \(fallback\)[\s\S]*?(?=\n {6}# ================================================================)/
     )?.[0];
     expect(fallback).toContain(
       "if: ${{ steps.pulumi_destroy.outputs.status != 'deleted' && steps.pulumi_destroy.outputs.status != 'dry_run' && inputs.dry_run != true }}"
     );
 
     const removeStack = workflow.match(
-      /- name: Remove Pulumi Stack[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Remove Pulumi Stack[\s\S]*?(?=\n {6}# ================================================================)/
     )?.[0];
     expect(removeStack).toContain(
       "if: ${{ !inputs.keep_data && !inputs.dry_run && steps.pulumi_stack.outputs.status == 'ok' && steps.pulumi_destroy.outputs.status == 'deleted' }}"
@@ -86,7 +87,7 @@ describe('teardown workflow', () => {
 
   it('only removes Pulumi stack state after Pulumi destroy succeeds', () => {
     const stepMatch = workflow.match(
-      /- name: Remove Pulumi Stack[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Remove Pulumi Stack[\s\S]*?(?=\n {6}# ================================================================)/
     );
 
     expect(stepMatch?.[0]).toBeDefined();
@@ -96,7 +97,7 @@ describe('teardown workflow', () => {
 
   it('defaults AI Gateway teardown to the resolved deployment prefix, not sam', () => {
     const stepMatch = workflow.match(
-      /- name: Resolve Resource Names[\s\S]*?(?=\n      - name: Install dependencies)/
+      /- name: Resolve Resource Names[\s\S]*?(?=\n {6}- name: Install dependencies)/
     );
 
     expect(stepMatch?.[0]).toBeDefined();
@@ -108,10 +109,10 @@ describe('teardown workflow', () => {
 
   it('preserves installation identity with data and removes it on full teardown', () => {
     const unprotect = workflow.match(
-      /- name: Unprotect Pulumi Resources[\s\S]*?(?=\n      - name: Pulumi Destroy)/
+      /- name: Unprotect Pulumi Resources[\s\S]*?(?=\n {6}- name: Pulumi Destroy)/
     )?.[0];
     const destroy = workflow.match(
-      /- name: Pulumi Destroy[\s\S]*?(?=\n      # ================================================================)/
+      /- name: Pulumi Destroy[\s\S]*?(?=\n {6}# ================================================================)/
     )?.[0];
 
     expect(unprotect).toContain('if [ "$INPUT_KEEP_DATA" = "true" ]');
@@ -120,5 +121,77 @@ describe('teardown workflow', () => {
     expect(destroy).toContain('if [ "$INPUT_KEEP_DATA" = "true" ]');
     expect(destroy).toContain("grep -qE 'RandomId|PrivateKey'");
     expect(destroy).toContain('pulumi destroy --yes');
+  });
+
+  it('tears down a secondary installation with its credential environment and its own zone only', () => {
+    expect(workflow).toMatch(/options:\n\s+- staging\n\s+- staging2\n\s+- production/);
+    expect(workflow).toContain(
+      'node scripts/deploy/staging-installations.mjs credential-environment'
+    );
+    expect(workflow).toContain('environment: ${{ needs.resolve.outputs.credential_environment }}');
+    expect(workflow).toContain('run: node scripts/deploy/resolve-installation-zone.mjs');
+
+    // Every zone-scoped step uses the looked-up zone for a secondary installation and can never
+    // fall back to the primary's CF_ZONE_ID when the lookup produced nothing.
+    const zoneLines = workflow.match(/CF_ZONE_ID: .*/g) ?? [];
+    expect(zoneLines.length).toBeGreaterThanOrEqual(3);
+    for (const line of zoneLines) {
+      expect(line).toBe(
+        "CF_ZONE_ID: ${{ steps.names.outputs.secondary == 'true' && (steps.zone.outputs.zone_id || 'unresolved-zone') || secrets.CF_ZONE_ID }}"
+      );
+    }
+
+    expect(workflow).toContain(
+      "if: ${{ steps.names.outputs.secondary == 'true' && inputs.include_marketing }}"
+    );
+    for (const stepName of ['Unprotect Pulumi Resources', 'Pulumi Destroy']) {
+      const step = workflow.match(
+        new RegExp(String.raw`- name: ${stepName}\n[\s\S]*?(?=\n      - name:|\n      # =)`)
+      )?.[0];
+      expect(step, stepName).toContain('if [ "$(pulumi stack --show-name)" != "$STACK" ]; then');
+      expect(step, stepName).toContain('STACK: ${{ steps.names.outputs.stack }}');
+    }
+  });
+
+  it('empties the assets bucket before the Pulumi destroy and force-deletes Workers', () => {
+    const empty = workflow.indexOf('- name: Empty Assets Bucket');
+    const destroy = workflow.indexOf('- name: Pulumi Destroy');
+    expect(empty).toBeGreaterThan(0);
+    expect(empty).toBeLessThan(destroy);
+    expect(workflow).toContain(
+      "if: ${{ steps.pulumi_stack.outputs.status == 'ok' && inputs.dry_run != true && !inputs.keep_data }}"
+    );
+    expect(workflow).toContain('BUCKET_NAME: ${{ steps.names.outputs.assets_bucket }}');
+    // The tail Worker always (it is only a tail consumer); the API Worker only on a full
+    // teardown, because force also deletes its Durable Object data.
+    expect(workflow.match(/workers\/scripts\/\$WORKER_NAME\?force=true/g)).toHaveLength(1);
+    expect(workflow).toContain(
+      'if [ "$INPUT_KEEP_DATA" != "true" ]; then FORCE_QUERY="?force=true"; fi'
+    );
+    expect(workflow).toContain('workers/scripts/$WORKER_NAME$FORCE_QUERY');
+    expect(workflow).toContain(
+      'STACK_BUCKET="$(pulumi stack output r2Name --stack "$STACK" 2>/dev/null || true)"'
+    );
+  });
+
+  it('matches workspace and node DNS records by literal domain suffix', () => {
+    expect(workflow).toContain(
+      `jq -r --arg d ".\${BASE_DOMAIN}" '.result[] | select((.name | endswith($d)) and ((.name | startswith("ws-")) or (.name | endswith(".vm" + $d)))) | .id + " " + .name'`
+    );
+    expect(workflow).not.toContain('test(\\"^ws-.*');
+  });
+
+  it('names no resource literally: every target comes from the resolved installation', () => {
+    expect(workflow).not.toMatch(/\bsam-[a-z]/);
+    expect(workflow).not.toMatch(/[a-z0-9]-staging\b/);
+    expect(workflow).not.toMatch(/sammy2?\.party/);
+  });
+
+  it('deletes the installation container applications on a full teardown only', () => {
+    expect(workflow).toContain('run: node scripts/deploy/delete-container-applications.mjs');
+    expect(workflow).toMatch(
+      /- name: Delete Container Applications\n\s+id: delete_container_apps\n\s+if: \$\{\{ !inputs.keep_data \}\}/
+    );
+    expect(workflow).toContain('API_WORKER: ${{ steps.names.outputs.api_worker }}');
   });
 });

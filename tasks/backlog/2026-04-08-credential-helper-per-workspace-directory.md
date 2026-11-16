@@ -31,3 +31,7 @@ Create the directory with `os.MkdirAll(dir, 0o700)` before writing the file. The
 
 - Security audit finding from PR fixing git-credential-sam permissions
 - `packages/vm-agent/internal/bootstrap/bootstrap.go` — `credentialHelperHostPath()`
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. The helper no longer holds the callback token, so the worst-case leak is gone. Every acceptance criterion is still open: no per-workspace 0700 directory, no bind-mount change, no cleanup. Evidence: #2759; `packages/vm-agent/internal/bootstrap/bootstrap.go:2283-2322` (per-workspace random bearer), `:2419-2420` (path still flat `/tmp/git-credential-sam-<id>`).

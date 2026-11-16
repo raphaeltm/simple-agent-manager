@@ -1213,8 +1213,48 @@ describe('deploy reusable workflow', () => {
       expect(block).toContain('BUILD_DATE="$VM_AGENT_BUILD_DATE"');
       expect(block).not.toContain('$DEPLOY_SHA');
     }
-    expect(build).toContain('make -C packages/vm-agent build-all');
+    // Linux only: publish-vm-agent-artifacts.sh uploads linux amd64/arm64.
+    expect(build).toContain('make -C packages/vm-agent build-linux-amd64 build-linux-arm64');
+    expect(build).not.toContain('build-all');
     expect(build).toContain('VERSION="$VM_AGENT_RELEASE"');
+  });
+
+  it('resolves container images after their inputs exist and before any API Worker deploy', () => {
+    const resolve = stepBlock('Resolve container images');
+    const index = (name: string) => workflow.indexOf(`- name: ${name}`);
+    expect(resolve).toContain('pnpm tsx scripts/deploy/container-image-reuse.ts');
+    expect(resolve).toContain('CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}');
+    expect(resolve).toContain('API_WORKER_NAME: ${{ steps.deploy_resources.outputs.api_worker }}');
+    expect(resolve).toContain('DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}');
+    expect(resolve).toContain("vars.CONTAINER_IMAGE_REUSE_ENABLED != 'false'");
+    // The vm-agent image copies the prepared artifact, the generated env section
+    // must exist, and the build uses the mirror-configured Docker daemon.
+    for (const before of [
+      'Sync Wrangler Config (API + Tail Worker)',
+      'Prepare Versioned VM Agent Container Artifact',
+      'Configure Docker Hub cache',
+      'Install uv for container image fingerprints',
+    ])
+      expect(index(before), before).toBeLessThan(index('Resolve container images'));
+    // Every Wrangler deploy of the API reads the overridden config; the tail
+    // re-sync keeps it through SAM_CONTAINER_IMAGE_OVERRIDES in GITHUB_ENV.
+    for (const after of [
+      'Bootstrap API Worker',
+      'Re-sync Wrangler Config (add tail_consumers)',
+      'Re-deploy API Worker (with tail_consumers)',
+      'Deploy API Worker',
+    ])
+      expect(index(after), after).toBeGreaterThan(index('Resolve container images'));
+    // The #2722 rollout gate is unchanged around it.
+    expect(index('Snapshot container rollout identities')).toBeLessThan(
+      index('Resolve container images')
+    );
+    expect(index('Wait for container rollout completion')).toBeGreaterThan(
+      index('Deploy API Worker')
+    );
+    expect(stepBlock('Wait for container rollout completion')).toContain(
+      'if: ${{ inputs.dry_run != true }}'
+    );
   });
 
   it('reuses identical same-SHA artifacts and refuses immutable-key overwrites', () => {

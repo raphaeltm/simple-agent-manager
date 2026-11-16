@@ -904,11 +904,12 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       UPDATE projects SET default_location='nbg1',default_branch='main',repository='owner/repo',installation_id='install-1' WHERE id='project-1';
       UPDATE nodes SET cloud_provider='hetzner',vm_size='small',vm_location='nbg1' WHERE id='node-1'`);
     // The user picked machines: the wake places on the pool, and nothing joins it on its own.
+    // Prepare the validated bundled catalog; this callback/wake fixture's synthetic
+    // credential is not encrypted for a live cloud-provider lookup.
     await ensurePoolsWithStarterMachines(drizzle(env.DATABASE, { schema }) as never, {
       userId: 'user-1',
       projectId: 'project-1',
       includeInstallation: true,
-      env: env,
     });
     for (let prompt = 1; prompt <= 4; prompt++) {
       if (prompt > 1) {

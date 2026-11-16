@@ -9,7 +9,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/bootstrap"
 )
+
+const testStandaloneGitCredentialExchangeToken = "test-standalone-git-credential-exchange-token"
 
 // runStandaloneCredScript writes the helper script to a temp file and runs it
 // with the given argv[1] and stdin, returning trimmed stdout.
@@ -20,7 +24,7 @@ func runStandaloneCredScript(t *testing.T, arg, stdin, ghToken string) string {
 
 func runStandaloneCredScriptWithEnv(t *testing.T, arg, stdin string, env map[string]string) string {
 	t.Helper()
-	script, err := renderStandaloneGitCredentialHelperScript(5 * time.Second)
+	script, err := renderStandaloneGitCredentialHelperScript(5*time.Second, testStandaloneGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatalf("render script: %v", err)
 	}
@@ -46,12 +50,15 @@ func runStandaloneCredScriptWithEnv(t *testing.T, arg, stdin string, env map[str
 func TestRenderStandaloneGitCredentialHelperScriptUsesConfiguredTimeout(t *testing.T) {
 	t.Parallel()
 
-	script, err := renderStandaloneGitCredentialHelperScript(1750 * time.Millisecond)
+	script, err := renderStandaloneGitCredentialHelperScript(1750*time.Millisecond, testStandaloneGitCredentialExchangeToken)
 	if err != nil {
 		t.Fatalf("render script: %v", err)
 	}
 	if !strings.Contains(script, "--max-time 1.75") {
 		t.Fatalf("configured timeout missing from helper script: %q", script)
+	}
+	if !strings.Contains(script, "Authorization: Bearer ${exchange_token}") || !strings.Contains(script, testStandaloneGitCredentialExchangeToken) {
+		t.Fatalf("dedicated exchange authorization missing from helper script: %q", script)
 	}
 }
 
@@ -91,7 +98,7 @@ func TestStandaloneGitCredentialFillExchangesInsteadOfServingSessionGHToken(t *t
 		t.Fatalf("control plane token mints = %d, want 1", got)
 	}
 	query := exchange.lastRequestQuery()
-	if query.Get("workspaceId") != "ws-instant" || query.Get("host") != "github.com" || query.Get("path") != "octo/repo.git" {
+	if query.Get("workspaceId") != exchange.workspaceID || query.Get("host") != "github.com" || query.Get("path") != "octo/repo.git" {
 		t.Fatalf("exchange query = %v, want the workspace, host, and repository path", query)
 	}
 }
@@ -104,7 +111,7 @@ func TestWriteStandaloneGitCredentialHelperRestoresOwnerOnlyExecutableMode(t *te
 		t.Fatalf("seed helper: %v", err)
 	}
 
-	if err := writeStandaloneGitCredentialHelper(path, 5*time.Second); err != nil {
+	if err := writeStandaloneGitCredentialHelper(path, 5*time.Second, testStandaloneGitCredentialExchangeToken); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
 
@@ -146,6 +153,9 @@ func TestStandaloneGitCredentialHelperDelegatesGitLabToLocalExchange(t *testing.
 		gotWorkspaceID = r.URL.Query().Get("workspaceId")
 		gotHost = r.URL.Query().Get("host")
 		gotPath = r.URL.Query().Get("path")
+		if got := r.Header.Get("Authorization"); got != "Bearer "+testStandaloneGitCredentialExchangeToken {
+			t.Fatalf("Authorization = %q, want dedicated exchange bearer", got)
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("username=oauth2\npassword=gl_token\n"))
 	}))
@@ -229,4 +239,62 @@ func TestStandaloneCloneSpecStripsEmbeddedCredentials(t *testing.T) {
 	if spec.Token != "art_token" {
 		t.Fatalf("token = %q, want art_token", spec.Token)
 	}
+}
+
+// An Instant container's agent can restart in place (self_restart.go). The
+// restarted agent must keep the helper's bearer, and an empty workspace ID must
+// install nothing rather than a helper that can never authenticate.
+func TestInstallStandaloneGitCredentialExchange(t *testing.T) {
+	t.Run("restart reuses the bearer", func(t *testing.T) {
+		workspaceID := "ws-standalone-restart"
+		lockStandaloneExchange(t, workspaceID)
+		t.Cleanup(func() { _ = bootstrap.RemoveCredentialHelperFromHost(workspaceID) })
+		path := filepath.Join(t.TempDir(), "git-credential-sam")
+
+		if err := installStandaloneGitCredentialExchange(path, workspaceID, 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		first, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		firstInfo, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := installStandaloneGitCredentialExchange(path, workspaceID, 5*time.Second); err != nil {
+			t.Fatal(err)
+		}
+		secondInfo, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !os.SameFile(firstInfo, secondInfo) || secondInfo.Mode().Perm() != 0o700 {
+			t.Fatal("an unchanged helper must be left in place (a git command may be running it), owner-only")
+		}
+		second, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		token := bootstrap.ExchangeTokenFromHelperScript(string(first))
+		if token == "" || token != bootstrap.ExchangeTokenFromHelperScript(string(second)) {
+			t.Fatal("agent restart rotated the standalone helper bearer")
+		}
+		if !bootstrap.ValidateGitCredentialExchange(workspaceID, token) {
+			t.Fatal("the helper's bearer must validate after restart")
+		}
+		if bootstrap.ValidateGitCredentialExchange(workspaceID+"-other", token) {
+			t.Fatal("the bearer must not validate for another workspace")
+		}
+	})
+
+	t.Run("empty workspace id installs nothing", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "git-credential-sam")
+		if err := installStandaloneGitCredentialExchange(path, "  ", 5*time.Second); err == nil {
+			t.Fatal("expected an error for an empty workspace id")
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("no helper may be written without a workspace id: %v", err)
+		}
+	})
 }

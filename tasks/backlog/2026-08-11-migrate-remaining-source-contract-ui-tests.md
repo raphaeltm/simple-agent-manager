@@ -121,3 +121,7 @@ underlying migration approach/helpers were established there.
 - `apps/api/tests/unit/project-default-provider.test.ts` (lines 1-19 docstring, 295-312 settings UI block)
 - `tasks/backlog/2026-04-01-replace-source-contract-tests.md` — same bug class, different files, filed earlier
 - `tasks/archive/2026-08-10-ai-slop-debt-burndown.md` — the burn-down PR whose prettier rewrap first broke the API-PATCH-route sibling blocks in these same two files
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2731 deleted `apps/api/tests/unit/project-default-provider.test.ts` along with the project default-provider feature. Still open: the `readFileSync`/`toContain` UI assertions in `apps/api/tests/unit/project-agent-defaults.test.ts`.

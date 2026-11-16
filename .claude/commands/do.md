@@ -218,6 +218,12 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
      --jq '.[0] | {id, payload}'
    ```
 
+   There are two staging installations, `staging` (`sammy.party`) and `staging2`
+   (`sammy2.party`). Read both leases and take whichever is free; use that name in
+   every command below. They share the `staging` credentials but nothing else, so
+   your checks cannot disturb an agent on the other one. staging2 sign-in is
+   workload identity only; see "Two Staging Installations" in the full reference.
+
    Use your selected environment name in every command. The latest `staging-lease`
    deployment payload is authoritative; ordinary deployment statuses and a quiet
    Actions queue do not release the slot. A held foreign branch with a future
@@ -274,9 +280,9 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
    holder. Expiry permits another branch to acquire automatically. Do not mistake
    successful deployment completion for a release. Only the lease job receives
    `deployments: write`; agents can inspect records with their existing `gh api`
-   read access. Leases are keyed by environment name for future staging slots.
+   read access. Leases are keyed by installation name (`staging`, `staging2`).
 
-4. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
+4. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging) or `app.sammy2.party` (staging2).
 
 5. **Authenticate** using the smoke test token via token-login API:
 
@@ -287,6 +293,10 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 
    Do this inside Playwright so the browser context receives the session cookie, then navigate that browser to `https://app.sammy.party`. Do not exchange the staging smoke/API token against `SAM_API_URL`; these tokens correctly fail against production.
    If the env var is not set, ask the human for credentials.
+
+   On `staging2` (`sammy2.party`), sign in with your workload identity instead (audience
+   `https://api.sammy2.party/api/auth/workload-identity-login`, target `staging2-agent-user` or
+   `staging2-agent-admin`); see "Two Staging Installations" in the full reference.
 
 6. **Verify the changed behavior works end-to-end:**
    - **UI changes**: interact as a real user — click buttons, submit forms, navigate pages
@@ -398,7 +408,7 @@ After merging to main, you MUST monitor the production deployment to completion.
      - Whether this is something the agent can fix (code issue) or requires human intervention (missing secrets, infrastructure config)
    - If it's a code issue you introduced: fix it, push to main, and monitor the next deploy
    - If it requires human intervention (missing secrets, permissions, external config): **tell the user explicitly what action they need to take** and do NOT silently move on
-   - **Exception: a fail-closed "does not match the current trusted main tip" at "Re-verify current main after deployment queue"** means a newer commit reached `main` first; your change ships with the tip. Main CI runs overlap, so this deploy run can also have displaced the tip's pending deploy. Check that a Deploy Production run for the current tip succeeded or is queued or running (`gh run list --workflow=deploy.yml --limit=5 --json headSha,status,conclusion,displayTitle` and `git ls-remote origin main`). If none exists and CI on the tip succeeded, start one with `gh workflow run deploy.yml --ref main` (it defaults to the tip and re-checks CI on that exact SHA) and monitor it. Report what you did.
+   - **A successful Deploy Production run that deployed nothing** means a newer commit reached `main` first, or the tip was already deployed: the automatic gate always deploys the current main tip, and only once the tip's own CI succeeded. Your change ships with the tip's deploy; monitor that run instead (`gh run list --workflow=deploy.yml --limit=5`).
 
 5. **Check for pre-existing deploy failures**: Before monitoring your own deploy, check if recent deploys have been failing:
    ```bash

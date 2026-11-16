@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -478,8 +479,9 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 	testCfg := &config.Config{
 		Port:          9999,
 		CallbackToken: "test-cred-token-abc",
+		WorkspaceID:   "ws-cred-full-flow",
 	}
-	script, err := renderGitCredentialHelperScript(testCfg)
+	script, err := renderGitCredentialHelperScript(testCfg, "test-git-credential-exchange-token")
 	if err != nil {
 		t.Fatalf("renderGitCredentialHelperScript: %v", err)
 	}
@@ -514,10 +516,8 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 		t.Fatalf("script not executable: %v\n%s", err, string(out))
 	}
 
-	// Verify: hardened script uses the local /git-credential exchange and does
-	// NOT embed the durable callback token (the helper asks the VM agent to
-	// perform the control-plane token exchange via its in-memory workspace
-	// callback instead of carrying a reusable bearer in the on-disk script).
+	// Verify: hardened script uses the local /git-credential exchange with its
+	// dedicated bearer and does NOT embed the broader callback token.
 	out, err = exec.CommandContext(ctx, "docker", "exec", containerID, "cat", installPath).CombinedOutput()
 	if err != nil {
 		t.Fatalf("cat script: %v\n%s", err, string(out))
@@ -528,6 +528,9 @@ func TestIntegration_GitCredentialHelperFullFlow(t *testing.T) {
 	}
 	if !strings.Contains(scriptContent, "/git-credential") {
 		t.Fatal("script missing /git-credential local exchange endpoint")
+	}
+	if !strings.Contains(scriptContent, "Authorization: Bearer ${exchange_token}") {
+		t.Fatal("script missing dedicated credential exchange authorization")
 	}
 	if !strings.Contains(scriptContent, "9999") {
 		t.Fatal("script missing port")
@@ -555,6 +558,7 @@ func TestIntegration_EnsureGitCredentialHelper(t *testing.T) {
 	defer cancel()
 
 	cfg := &config.Config{
+		WorkspaceID:         "ws-ensure-cred-" + fmt.Sprint(time.Now().UnixNano()),
 		Repository:          "https://github.com/test/repo",
 		CallbackToken:       "ensure-cred-token",
 		Port:                8080,
@@ -562,6 +566,7 @@ func TestIntegration_EnsureGitCredentialHelper(t *testing.T) {
 		ContainerLabelKey:   labelKey,
 		ContainerLabelValue: labelValue,
 	}
+	t.Cleanup(func() { _ = RemoveCredentialHelperFromHost(cfg.WorkspaceID) })
 
 	if err := ensureGitCredentialHelper(ctx, cfg); err != nil {
 		t.Fatalf("ensureGitCredentialHelper: %v", err)
@@ -576,6 +581,184 @@ func TestIntegration_EnsureGitCredentialHelper(t *testing.T) {
 	if !strings.Contains(string(out), "git-credential-sam") {
 		t.Fatalf("expected credential helper to contain 'git-credential-sam', got: %s", string(out))
 	}
+}
+
+// exchangeEndpoint stands in for the VM agent's /git-credential route: it
+// accepts a request only when the presented bearer validates against the
+// workspace's installed digest, exactly the check handleGitCredential makes.
+func startExchangeEndpoint(t *testing.T, workspaceID string) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if r.URL.Query().Get("workspaceId") != workspaceID || !ValidateGitCredentialExchange(workspaceID, bearer) {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = fmt.Fprint(w, "protocol=https\nhost=github.com\nusername=x-access-token\npassword=exchanged-test-credential\n")
+	})}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close() })
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+// runInContainerHelper asks the helper installed in the container for GitHub
+// credentials, the way git does.
+func runInContainerHelper(t *testing.T, ctx context.Context, containerID string) string {
+	t.Helper()
+	out, err := exec.CommandContext(ctx, "docker", "exec", containerID, "sh", "-c",
+		`printf 'protocol=https\nhost=github.com\n\n' | `+credentialHelperContainerPath+` get`).CombinedOutput()
+	if err != nil {
+		t.Fatalf("run in-container helper: %v\n%s", err, string(out))
+	}
+	return string(out)
+}
+
+// exchangeFixture is one workspace whose helper exchanges against a
+// bearer-validating endpoint, with the container label the agent searches for.
+type exchangeFixture struct {
+	cfg      *config.Config
+	hostPath string
+}
+
+func newExchangeFixture(t *testing.T, name string) *exchangeFixture {
+	t.Helper()
+	workspaceID := "ws-" + name + "-" + fmt.Sprint(time.Now().UnixNano())
+	t.Cleanup(func() { _ = RemoveCredentialHelperFromHost(workspaceID) })
+	return &exchangeFixture{
+		hostPath: credentialHelperHostPath(workspaceID),
+		cfg: &config.Config{
+			WorkspaceID:         workspaceID,
+			Repository:          "https://github.com/test/repo",
+			CallbackToken:       name + "-callback-token",
+			Port:                startExchangeEndpoint(t, workspaceID),
+			ContainerMode:       true,
+			ContainerLabelKey:   "devcontainer.local_folder",
+			ContainerLabelValue: "/workspace-" + workspaceID,
+		},
+	}
+}
+
+// startContainer runs the fixture's devcontainer as a non-root user that can
+// reach the endpoint, optionally with the host helper bind-mounted the way
+// writeMountOverrideConfig / the fallback config mount it.
+func (f *exchangeFixture) startContainer(t *testing.T, bindMountHelper bool) string {
+	t.Helper()
+	args := []string{"--add-host", "host.docker.internal:host-gateway"}
+	if bindMountHelper {
+		args = append(args, "--mount", credentialHelperMountEntry(f.hostPath))
+	}
+	args = append(args, nodeImage.dockerRunArgs...)
+	return mustStartContainer(t, nodeImage.image, f.cfg.ContainerLabelKey, f.cfg.ContainerLabelValue, args...)
+}
+
+// bearerlessHelperScript is a helper as an agent build before the exchange
+// bearer wrote it: it names the workspace but sends no Authorization header.
+func (f *exchangeFixture) bearerlessHelperScript() string {
+	return fmt.Sprintf("#!/bin/sh\ncat >/dev/null\ncurl -fsS \"http://host.docker.internal:%d/git-credential?workspaceId=%s\" || true\n",
+		f.cfg.Port, f.cfg.WorkspaceID)
+}
+
+func assertHelperAuthenticates(t *testing.T, ctx context.Context, containerID, when string) {
+	t.Helper()
+	if out := runInContainerHelper(t, ctx, containerID); !strings.Contains(out, "password=exchanged-test-credential") {
+		t.Fatalf("%s: the container's helper does not authenticate: %q", when, out)
+	}
+}
+
+func assertHelperRefused(t *testing.T, ctx context.Context, containerID, when string) {
+	t.Helper()
+	if out := runInContainerHelper(t, ctx, containerID); strings.Contains(out, "password=") {
+		t.Fatalf("%s: a bearerless helper must not authenticate: %q", when, out)
+	}
+}
+
+// Reprovisioning a workspace whose devcontainer is still running (rebuild,
+// restart, recovery, snapshot restore) must not break the helper the container
+// already holds. The helper is a single-file bind mount, so the container keeps
+// the inode it was started with no matter what the host path points to later.
+func TestIntegration_ReprovisionKeepsBindMountedHelperAuthenticated(t *testing.T) {
+	requireDockerAvailable(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	f := newExchangeFixture(t, "reprovision")
+
+	// First provisioning: the helper is written before devcontainer up and
+	// bind-mounted.
+	if _, _, minted, err := writeCredentialHelperToHost(f.cfg); err != nil || !minted {
+		t.Fatalf("first provisioning: minted=%v err=%v", minted, err)
+	}
+	containerID := f.startContainer(t, true)
+	if err := ensureGitCredentialHelper(ctx, f.cfg); err != nil {
+		t.Fatalf("first ensureGitCredentialHelper: %v", err)
+	}
+	assertHelperAuthenticates(t, ctx, containerID, "liveness after first provisioning")
+
+	// Reprovision against the running container. A changed helper (newer
+	// template, different timeout) forces the host file to be replaced, so the
+	// container now sees a different inode than the host path.
+	f.cfg.GitCredentialTimeout = 9 * time.Second
+	if _, _, minted, err := writeCredentialHelperToHost(f.cfg); err != nil || minted {
+		t.Fatalf("reprovision host helper: minted=%v err=%v", minted, err)
+	}
+	if err := ensureGitCredentialHelper(ctx, f.cfg); err != nil {
+		t.Fatalf("reprovision ensureGitCredentialHelper: %v", err)
+	}
+	assertHelperAuthenticates(t, ctx, containerID, "after reprovision")
+}
+
+// A running container whose bind-mounted helper predates the exchange bearer
+// (or holds a bearer whose digest is gone and cannot be recovered) pins that
+// helper's inode. Reprovisioning must reach it: a minted bearer is written into
+// the existing host inode, because docker cp cannot write through the read-only
+// bind mount.
+func TestIntegration_ReprovisionRepairsBindMountedBearerlessHelper(t *testing.T) {
+	requireDockerAvailable(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	f := newExchangeFixture(t, "bind-bearerless")
+
+	if err := os.WriteFile(f.hostPath, []byte(f.bearerlessHelperScript()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	containerID := f.startContainer(t, true)
+	assertHelperRefused(t, ctx, containerID, "test setup")
+
+	if _, _, minted, err := writeCredentialHelperToHost(f.cfg); err != nil || !minted {
+		t.Fatalf("reprovision host helper: minted=%v err=%v", minted, err)
+	}
+	if err := ensureGitCredentialHelper(ctx, f.cfg); err != nil {
+		t.Fatalf("ensureGitCredentialHelper: %v", err)
+	}
+	assertHelperAuthenticates(t, ctx, containerID, "after repairing the bind-mounted helper")
+}
+
+// A container whose helper was copied in by an agent build that predates the
+// exchange bearer (for example a container restored on a newer node) carries a
+// bearerless helper. It must be reinstalled, not skipped because a file exists.
+func TestIntegration_EnsureGitCredentialHelperReplacesBearerlessHelper(t *testing.T) {
+	requireDockerAvailable(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	f := newExchangeFixture(t, "bearerless")
+	containerID := f.startContainer(t, false)
+
+	oldHelper := filepath.Join(t.TempDir(), "git-credential-sam")
+	if err := os.WriteFile(oldHelper, []byte(f.bearerlessHelperScript()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.CommandContext(ctx, "docker", "cp", oldHelper, containerID+":"+credentialHelperContainerPath).CombinedOutput(); err != nil {
+		t.Fatalf("docker cp old helper: %v\n%s", err, string(out))
+	}
+	assertHelperRefused(t, ctx, containerID, "test setup")
+
+	if err := ensureGitCredentialHelper(ctx, f.cfg); err != nil {
+		t.Fatalf("ensureGitCredentialHelper: %v", err)
+	}
+	assertHelperAuthenticates(t, ctx, containerID, "after reinstalling the bearerless helper")
 }
 
 // ---------------------------------------------------------------------------
@@ -731,6 +914,7 @@ func TestIntegration_DevcontainerWithRemoteUser(t *testing.T) {
 	// Verify git credential helper works in a container with remoteUser set.
 	// This exercises the -u root pattern needed for non-root containers.
 	testCfg := &config.Config{
+		WorkspaceID:         "ws-remote-user-cred-" + fmt.Sprint(time.Now().UnixNano()),
 		Repository:          "https://github.com/test/repo",
 		CallbackToken:       "remote-user-cred-token",
 		Port:                8080,
@@ -738,6 +922,7 @@ func TestIntegration_DevcontainerWithRemoteUser(t *testing.T) {
 		ContainerLabelKey:   cfg.ContainerLabelKey,
 		ContainerLabelValue: cfg.ContainerLabelValue,
 	}
+	t.Cleanup(func() { _ = RemoveCredentialHelperFromHost(testCfg.WorkspaceID) })
 	if err := ensureGitCredentialHelper(ctx, testCfg); err != nil {
 		t.Fatalf("ensureGitCredentialHelper with remoteUser: %v", err)
 	}
@@ -879,6 +1064,7 @@ RUN echo "dockerfile-build-marker" > /tmp/dockerfile-marker
 
 	// Verify credential helper works in Dockerfile-built container
 	credCfg := &config.Config{
+		WorkspaceID:         "ws-dockerfile-cred-" + fmt.Sprint(time.Now().UnixNano()),
 		Repository:          "https://github.com/test/repo",
 		CallbackToken:       "dockerfile-cred-token",
 		Port:                8080,
@@ -886,6 +1072,7 @@ RUN echo "dockerfile-build-marker" > /tmp/dockerfile-marker
 		ContainerLabelKey:   cfg.ContainerLabelKey,
 		ContainerLabelValue: cfg.ContainerLabelValue,
 	}
+	t.Cleanup(func() { _ = RemoveCredentialHelperFromHost(credCfg.WorkspaceID) })
 	if err := ensureGitCredentialHelper(ctx, credCfg); err != nil {
 		t.Fatalf("ensureGitCredentialHelper in Dockerfile container: %v", err)
 	}

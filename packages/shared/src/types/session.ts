@@ -148,18 +148,6 @@ export interface PersistMessageBatchResponse {
 }
 
 // =============================================================================
-// ProjectData WebSocket Broadcast Events
-// =============================================================================
-
-export type ProjectWebSocketEventType =
-  'message.new' | 'session.created' | 'session.stopped' | 'activity.new';
-
-export interface ProjectWebSocketEvent {
-  type: ProjectWebSocketEventType;
-  payload: Record<string, unknown>;
-}
-
-// =============================================================================
 // Agent Sessions
 // =============================================================================
 
