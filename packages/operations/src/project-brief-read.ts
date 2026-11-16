@@ -69,7 +69,7 @@ const BRIEF_SQL = `
 const RowSchema = v.object({
   brief_json: v.nullable(v.string()),
   generated_at: v.nullable(v.number()),
-  stale: v.number(),
+  stale: v.nullable(v.number()),
   pending_since: v.nullable(v.number()),
   last_error_at: v.nullable(v.number()),
   open_asks: v.nullable(v.string()),

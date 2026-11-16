@@ -264,13 +264,11 @@ export async function readBriefFacts(
       })
     ),
     accounts: [...byAccount.values()].slice(0, limit),
-    mergedPullRequests: parseRows(PullRequestRow, pulls, 'pullRequests', projectId).map(
-      (row) => ({
-        number: row.number,
-        url: row.url,
-        title: briefText(row.title, `Pull request`),
-      })
-    ),
+    mergedPullRequests: parseRows(PullRequestRow, pulls, 'pullRequests', projectId).map((row) => ({
+      number: row.number,
+      url: row.url,
+      title: briefText(row.title, `Pull request`),
+    })),
     newIdeas: parseRows(IdeaRow, ideas, 'ideas', projectId).map((row) => ({
       id: row.id,
       title: briefText(row.title, 'An idea'),

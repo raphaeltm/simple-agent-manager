@@ -43,7 +43,8 @@ const NUMBER_WORDS =
   /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|hundreds|thousand|thousands|million|millions|dozen|dozens|couple|half|once|twice|thrice|single|double|triple|first|second|third|fourth|fifth)\b/i;
 /** Any decimal digit, in any script. */
 const DIGITS = /\p{Nd}/u;
-const LINK_OR_MARKUP = /(:\/\/|www\.|mailto:|\bhttps?\b|[<>[\]{}`*#|\\]|\.(com|org|net|io|dev|app|ai)\b)/i;
+const LINK_OR_MARKUP =
+  /(:\/\/|www\.|mailto:|\bhttps?\b|[<>[\]{}`*#|\\]|\.(com|org|net|io|dev|app|ai)\b)/i;
 /** Control and invisible format characters (zero-width, bidi overrides). */
 const CONTROL = /[\p{Cc}\p{Cf}]/u;
 

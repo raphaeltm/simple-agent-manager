@@ -82,14 +82,14 @@ const CLAIM_GENERATION_SQL = `
          updated_at = ?1
    WHERE project_id = ?3
      AND (pending_since IS NULL OR pending_since <= ?4)
-     AND (generation_day IS NULL OR generation_day <> ?2 OR generation_count < ?5)
+     AND (CASE WHEN generation_day = ?2 THEN generation_count ELSE 0 END) < ?5
      AND (generated_at IS NULL OR generated_at <= ?6)
      AND (last_error_at IS NULL OR last_error_at <= ?6)`;
 
 const StateRow = v.object({
   fingerprint: v.nullable(v.string()),
   generated_at: v.nullable(v.number()),
-  stale: v.number(),
+  stale: v.nullable(v.number()),
   last_error_at: v.nullable(v.number()),
 });
 

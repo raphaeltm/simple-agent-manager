@@ -41,7 +41,7 @@ export const PROJECT_BRIEF_INTEGER_SETTINGS = [
   },
 ] as const;
 
-export type ProjectBriefIntegerSettingName = (typeof PROJECT_BRIEF_INTEGER_SETTINGS)[number]['name'];
+export type ProjectBriefIntegerSettingName =
+  (typeof PROJECT_BRIEF_INTEGER_SETTINGS)[number]['name'];
 export type ProjectBriefSettingName =
-  | typeof PROJECT_BRIEF_ENABLED_SETTING.name
-  | ProjectBriefIntegerSettingName;
+  typeof PROJECT_BRIEF_ENABLED_SETTING.name | ProjectBriefIntegerSettingName;
