@@ -1,3 +1,27 @@
+# FINAL STATE: diagnostic exhausted; cleanup and release complete
+
+Updated 2026-11-16 01:45 UTC. PR2765 remains OPEN and UNMERGED. The final authorized run is complete: **merging OFF PASS; merging ON NOT_MET**. Do not start another live attempt, merge, provision resources or change production. Coordinator01M7CVZNSP0EHV9BJ72HCFQJSC must decide the next step. Part2 remains explicitly paused pending PR2773 production traffic counters.
+
+Full exact-head deployment43783338111 and no-login preflight passed. Final authjob `sx-7a21aea6601d19322a1f8a8b805da1945e578af3a821208063361bafa176407f` is TERMINAL (exit1, verification-not-met), one login/one Instant/no VM, within35minutes. No active auth jobs or owned live resources remain.
+
+ON:9session physical rows/321logical messages,34appends,0append-before-base; stored/reloaded transcript hashes match, completion marker/order/comment anchor pass. All four desktop/mobile live/reload assistant semantic checks pass (first difference-1), but all four full captures report `inventory-mismatch` at `ordered-inventory`, captured4/expected4 (desktop step1, mobile step3). Desktop fallback sees4rows and top-of-history true; mobile fallback3rows/top false. This does not establish whether the discrepancy is application UI or the verification helper. No waiver or pass inferred.
+
+OFF:298session physical rows/610logical messages,288new assistant rows,0appends; all four full inventories and assistant semantic/hash/marker/order/anchor checks PASS. These captures include the prior ON reply. Whole-session pageerrors0 in both modes; failed-request counts4ON/6OFF. Bounded worker telemetry32events/0ingesterrors;0forwarded browser mutations.
+
+The job restored BOTH original merge/max-row overrides FIRST, stopped its session, deleted its own workspace/node/project, signed out, verified get-session null and closed Chromium. Independent first proof `sx-47064a84b7ea70ff3c19f4e58dcb7942f23b673de99739a48803b9a8bb7bd692` and late proof `sx-e10af77175abc44bd74b61ac05458353e9e39fdd9d5998ff38be6b1d5777c489` both PASS. Exact container inactive/no current location/start; retained node row deleted with terminationconfirmed01:34:17.064Z; owned workspace/task/project/summaries and both overrides absent. An initial read-only proof invocation failed only because its required output-path argument was omitted; the corrected independent proofs above are the evidence.
+
+Release workflow **43787472177 SUCCESS**, our lease deployment **7813370335 RELEASED01:39:07.703Z**. Later latest staging2 holder is foreign task01M7GY0BKP1WESE5Y82PZNN42S, lease7813412061; do not touch its resources or assume the installation is free. Next security2755 task01M7FPX2RR5JSJ1CYG6QPXY9VG received our direct cleanup/release receipt; coordinator and selfhost coordinator also notified. Oversight guard3d3e792c cancelledv2; deployment watch cancelled. No more live retries authorized.
+
+Safe final metadata/proofs: project library **01M7H0BNQT1E8KHTJ9J430YQVA**, `/engineering/cost/ingest/ingest-final-staging-result.json`. Follow-up SAM idea **01M7H0DXXAZ2DPAKBYF8K1K82S** records the unresolved inventory verification discrepancy. Latest kit **01M7GY0PBVYYWCZJJ672HN1ZRX** now prominently marks the grant exhausted and corrects the mandatory cleanup-proof output argument; code is unchanged. It contains no credentials/content/logs.
+
+Part2 checkpoint and measurements remain on `sam/chat-ingest-bookkeeping-hxawts`, with numeric before/old/after files and fixture proportions committed under `apps/api/tests/workers/fixtures/ingest-bookkeeping-cost/`. No Part2 PR/deploy/further implementation authorized. No task-completion claim.
+
+---
+
+## Historical continuation procedure and earlier attempts
+
+Everything below describes the already-exhausted run. It is retained for recovery evidence, not authority to repeat it. Current final state above takes precedence.
+
 # PR2765 release handoff
 
 Updated 2026-11-16 01:02 UTC. This file is a continuation record, not completion evidence.
@@ -41,7 +65,7 @@ PASS requires both modes; correct stored/reloaded full-field transcript hashes; 
 
 If stopped mid-run, touch `.tmp/ingest-staging2-stop` and let the SAME job execute finally; do not kill it first. Its29-minute watchdog closes the page and forces cleanup even if the agent disappears. BOTH original merge/max-row overrides restore FIRST. Then resolve owned temporary comments, normal session stop, delete only owned workspace/node/project/artifacts, sign out and verify get-session null, close browser. Preserve safe cleanup receipts.
 
-After auth job terminal, independently run `.tmp/ingest-staging2-cleanup-proof.mjs` through exec_with_secrets, then again after a short delay. Both must PASS exact container inactive/no location/start, node absent OR deleted+runtime termination confirmed, own workspace/task/project/summaries absent, both overrides absent. Never delete foreign or retained resources. Release only afterward:
+After auth job terminal, independently run `node .tmp/ingest-staging2-cleanup-proof.mjs /workspaces/simple-agent-manager/.tmp/ingest-staging2-proof-first.json` through exec_with_secrets, then again after a short delay with a distinct scoped absolute output path ending in `ingest-staging2-proof-late.json`. The output-path argument is mandatory. Both must PASS exact container inactive/no location/start, node absent OR deleted+runtime termination confirmed, own workspace/task/project/summaries absent, both overrides absent. Never delete foreign or retained resources. Release only afterward:
 `gh workflow run deploy-staging.yml --ref sam/cut-fixed-per-batch-hxawts -f environment=staging2 -f sam_task_id=01M7GB4125DFTECRYYCAHXAWTS -f lease_action=release`.
 Confirm workflow SUCCESS and latest environment-keyed lease RELEASED. Send results/cleanup/release to coordinator and DIRECTLY next security task01M7FPX2RR5JSJ1CYG6QPXY9VG. Counter task01M7E19YHSJ73896Q84ASSGFDN follows security. Publish safe receipt on feature.selfhost-spike if available.
 
