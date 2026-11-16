@@ -93,7 +93,8 @@ export function questionAttentionFromRow(row: Record<string, unknown>): {
 }
 
 /**
- * The newest open question per chat, as attention summaries. Bound to the project in the
+ * The newest open blocking question per chat, as attention summaries (what a chat paused on a
+ * person shows). Bound to the project in the
  * predicate (rule 11). Never throws: a failed read returns an empty map and logs, because every
  * caller is enriching a read that is still worth serving without the question badge.
  */
@@ -110,6 +111,8 @@ export async function readOpenQuestionAttention(
   const conditions = [
     "kind = 'question'",
     "status = 'open'",
+    // Only a blocking question pauses a chat; a non-blocking ask (inbox slice D) lets it work on.
+    'blocking = 1',
     'source_session_id IS NOT NULL',
     '(expires_at IS NULL OR expires_at > ?)',
   ];
@@ -191,7 +194,10 @@ export function preferAttention(marker: unknown, question: QuestionAttentionSumm
   return question;
 }
 
-/** Whether the chat has an open, unexpired question from this task (the stalled-task guard). */
+/**
+ * Whether the chat has an open, unexpired blocking question from this task (the stalled-task
+ * guard): only a blocking question means the agent is waiting on a person.
+ */
 export async function hasOpenQuestionAsk(
   db: D1Database,
   input: { projectId: string; sessionId: string; taskId: string; now: number }
@@ -200,7 +206,7 @@ export async function hasOpenQuestionAsk(
     .prepare(
       `SELECT 1 AS open FROM asks
         WHERE project_id = ? AND source_session_id = ? AND kind = 'question' AND status = 'open'
-          AND (source_task_id IS NULL OR source_task_id = ?)
+          AND blocking = 1 AND (source_task_id IS NULL OR source_task_id = ?)
           AND (expires_at IS NULL OR expires_at > ?)
         LIMIT 1`
     )

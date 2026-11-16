@@ -17,6 +17,7 @@
  * rows → chatMessagesToConversationItems → matchToolCard → groupToolCallItems.
  */
 import type { ConversationItem, ToolCallItem } from '@simple-agent-manager/acp-client';
+import { INBOX_WRITE_TOOL } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import { chatMessagesToConversationItems } from '../../../src/components/project-message-view';
@@ -27,6 +28,8 @@ import { DOCUMENT_CARD_TOOLS } from '../../../src/components/project-message-vie
 import { DocumentCard } from '../../../src/components/project-message-view/tool-cards/DocumentCard';
 import { HUMAN_INPUT_CARD_TOOL } from '../../../src/components/project-message-view/tool-cards/human-input-card-data';
 import { HumanInputCard } from '../../../src/components/project-message-view/tool-cards/HumanInputCard';
+import { isInboxItemCardTool } from '../../../src/components/project-message-view/tool-cards/inbox-item-card-data';
+import { InboxItemCard } from '../../../src/components/project-message-view/tool-cards/InboxItemCard';
 import { matchToolCard } from '../../../src/components/project-message-view/tool-cards/registry';
 import { SECRET_REQUEST_CARD_TOOL } from '../../../src/components/project-message-view/tool-cards/secret-request-card-data';
 import { SecretRequestCard } from '../../../src/components/project-message-view/tool-cards/SecretRequestCard';
@@ -337,6 +340,21 @@ const TYPED_CARD_FIXTURES: Record<string, { result: string; card: unknown }> = {
     card: HumanInputCard,
   },
   request_secret: { result: SECRET_RESULT, card: SecretRequestCard },
+  inbox_write: {
+    result: JSON.stringify({
+      message: 'Filed in the person’s inbox.',
+      inboxItem: {
+        ref: 'ask:01ASK',
+        id: '01ASK',
+        sessionId: 'sess-codex',
+        kind: 'review',
+        blocking: false,
+      },
+      created: true,
+      similar: [],
+    }),
+    card: InboxItemCard,
+  },
 };
 
 /** Claude Code's rows: toolName on both, the compact card payload as rawOutput on the result. */
@@ -371,6 +389,7 @@ describe('every typed card renders for every harness', () => {
       APPROVAL_CARD_TOOL,
       HUMAN_INPUT_CARD_TOOL,
       SECRET_REQUEST_CARD_TOOL,
+      INBOX_WRITE_TOOL,
     ];
     expect(fromCardModules.sort()).toEqual([...TYPED_CARD_TOOLS].sort());
   });
@@ -397,4 +416,42 @@ describe('every typed card renders for every harness', () => {
       expect(standaloneToolCallIds(items)).toEqual([`call_${tool}`]);
     });
   }
+});
+
+describe('inbox_write renders the inbox item card only for a filed ask or review', () => {
+  const UPDATE_RESULT = JSON.stringify({ ref: 'ask:01ASK', status: 'open' });
+  const CANCEL_RESULT = JSON.stringify({ ref: 'ask:01ASK', status: 'cancelled' });
+
+  for (const [label, result] of [
+    ['update', UPDATE_RESULT],
+    ['cancel', CANCEL_RESULT],
+  ] as const) {
+    it(`keeps an inbox_write ${label} on the generic card (Codex and Claude Code)`, () => {
+      for (const rows of [
+        codexSparseCall(`call_${label}`, 'inbox_write', result),
+        claudeCall(`call_${label}_cc`, 'inbox_write', result),
+      ]) {
+        const [call] = toolCalls(chatMessagesToConversationItems(rows));
+        expect(isInboxItemCardTool(call!)).toBe(true);
+        expect(matchToolCard(call!)).toBeNull();
+      }
+    });
+  }
+
+  it('keeps a failed inbox_write ask on the generic card so its error stays visible', () => {
+    const [call] = toolCalls(
+      chatMessagesToConversationItems(
+        codexSparseCall('call_fail', 'inbox_write', 'title is required', 'failed')
+      )
+    );
+    expect(matchToolCard(call!)).toBeNull();
+  });
+
+  it('refuses a ref that is not an ask', () => {
+    const result = JSON.stringify({ inboxItem: { ref: 'secret:01X', sessionId: 'sess-codex' } });
+    const [call] = toolCalls(
+      chatMessagesToConversationItems(codexSparseCall('call_bad', 'inbox_write', result))
+    );
+    expect(matchToolCard(call!)).toBeNull();
+  });
 });

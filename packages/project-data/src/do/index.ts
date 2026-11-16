@@ -8,6 +8,7 @@
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
  */
+import type { RunReceiptFactsInput } from '@simple-agent-manager/shared';
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
@@ -118,6 +119,7 @@ import * as reconciliation from './reconciliation';
 import { releaseQuestionHold } from './reconciliation-candidate-state';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { instrumentRowUsage, RowUsage } from './row-usage';
+import { getRunReceiptFacts } from './run-receipt-facts';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import { withoutSamNotice } from './sam-notice-metadata';
 import * as sessionAccess from './session-access';
@@ -2877,6 +2879,20 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
+   * The agent cancelled its blocking question in D1 `asks` (`inbox_write` method `cancel`, inbox
+   * slice D): the chat stops showing it as paused, as when a question is answered. Nothing is
+   * stored here; the row is already closed.
+   */
+  async recordQuestionWithdrawn(input: { sessionId: string; askId: string }): Promise<void> {
+    if (releaseQuestionHold(this.sql, input.sessionId)) await this.recalculateAlarm();
+    this.broadcastEvent(
+      'attention.resolved',
+      { sessionId: input.sessionId, markerId: input.askId, reason: 'cancelled' },
+      input.sessionId
+    );
+  }
+
+  /**
    * The outcome of an expired question held in D1 `asks` (the inbox sweep expired the row): the
    * same task outcome a question marker's expiry has. A chat message from the person after the
    * question answered it, so then the task is left alone.
@@ -3055,6 +3071,11 @@ export class ProjectData extends DurableObject<Env> {
 
   listActiveAttentionMarkers(sessionId: string) {
     return attention.listActiveAttentionMarkers(this.sql, sessionId);
+  }
+
+  /** One chat's run-receipt facts: tool calls, questions, last agent message (`run-receipt-facts.ts`). */
+  getRunReceiptFacts(input: RunReceiptFactsInput) {
+    return getRunReceiptFacts(this.sql, input);
   }
 
   async createAcpSession(opts: {
@@ -4086,7 +4107,8 @@ export class ProjectData extends DurableObject<Env> {
     sourceSessionId: string | null,
     confidence: number,
     scope: import('@simple-agent-manager/shared').PolicyScope = 'always',
-    expiresAt: number | null = null
+    expiresAt: number | null = null,
+    injectMode: import('@simple-agent-manager/shared').PolicyInjectMode = 'pinned'
   ) {
     const result = policies.createPolicy(
       this.sql,
@@ -4098,7 +4120,8 @@ export class ProjectData extends DurableObject<Env> {
       sourceSessionId,
       confidence,
       scope,
-      expiresAt
+      expiresAt,
+      injectMode
     );
     this.broadcastEvent('policy.created', { id: result.id, category, title });
     return result;
@@ -4122,6 +4145,7 @@ export class ProjectData extends DurableObject<Env> {
       confidence?: number;
       scope?: import('@simple-agent-manager/shared').PolicyScope;
       expiresAt?: number | null;
+      injectMode?: import('@simple-agent-manager/shared').PolicyInjectMode;
     }
   ) {
     const result = policies.updatePolicy(this.sql, policyId, updates);

@@ -258,6 +258,7 @@ const LINK_ICONS: Record<string, LucideIcon> = {
   pull_request: GitPullRequest,
   policy: Scale,
   knowledge: Scale,
+  preview: Globe,
   url: Globe,
 };
 
@@ -289,6 +290,7 @@ export function linkTarget(
       return { href: projectAgentContextPath(projectId), external: false };
     case 'pr':
     case 'pull_request':
+    case 'preview':
     case 'url':
       return externalTarget(link.id);
     default:

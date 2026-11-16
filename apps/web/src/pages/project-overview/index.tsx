@@ -21,14 +21,16 @@ import { AutomationsSection } from './AutomationsSection';
 import { BudgetsSection } from './BudgetsSection';
 import { OverviewTaskBox } from './OverviewTaskBox';
 import { RecentlySection, RunningNowSection } from './sections';
+import { ThisWeekSection } from './ThisWeekSection';
 import { useProjectOverview } from './useProjectOverview';
 
 /** Phone order of the sections, as Tailwind `order-*` classes (desktop ignores them). */
 const PHONE_ORDER = {
   running: 'order-1 md:order-none',
-  budgets: 'order-2 md:order-none',
-  automations: 'order-3 md:order-none',
-  recently: 'order-4 md:order-none',
+  thisWeek: 'order-2 md:order-none',
+  budgets: 'order-3 md:order-none',
+  automations: 'order-4 md:order-none',
+  recently: 'order-5 md:order-none',
 } as const;
 
 const GUTTER = 'gap-[var(--sam-space-gutter)]';
@@ -109,6 +111,8 @@ export function ProjectOverview() {
       }
       rail={
         <>
+          {/* Insights slice F: the week's flow, linking into Insights. Top of the rail. */}
+          <ThisWeekSection projectId={projectId} className={PHONE_ORDER.thisWeek} />
           <BudgetsSection
             projectId={projectId}
             profiles={composer.agentProfiles}
