@@ -173,13 +173,23 @@ export async function answerQuestionAsk(
       WHERE id = ? AND project_id = ? AND source_session_id = ? AND kind = 'question'
         AND status = 'open' AND (expires_at IS NULL OR expires_at > ?)`
   )
-    .bind(JSON.stringify({ text: answer }), userId, now, now, ask.id, ask.projectId, ask.sessionId, now)
+    .bind(
+      JSON.stringify({ text: answer }),
+      userId,
+      now,
+      now,
+      ask.id,
+      ask.projectId,
+      ask.sessionId,
+      now
+    )
     .run();
   if ((claimed.meta?.changes ?? 0) !== 1) {
     // Someone else settled it first: report what they did.
     const current = await loadQuestionAsk(env, ask.projectId, ask.sessionId, ask.id);
     if (!current) throw markRejectedBeforeEffects(errors.notFound('Attention request'));
-    if (current.status === 'open') throw markRejectedBeforeEffects(errors.conflict('This question expired'));
+    if (current.status === 'open')
+      throw markRejectedBeforeEffects(errors.conflict('This question expired'));
     return settledOutcome(current, answer);
   }
 
@@ -247,25 +257,29 @@ export async function fileQuestionAsk(
   const limits = await getInboxLimits(ctx);
   const now = Date.now();
   const schedule = questionSchedule(limits, now);
-  const created = await createAsk(ctx, {
-    projectId: input.projectId,
-    assigneeKind: 'user',
-    assigneeUserId: input.userId,
-    kind: 'question',
-    blocking: true,
-    title: inboxTitle(input.context, limits.titleMaxChars),
-    body: input.context,
-    answerSpec: input.options?.length
-      ? { type: 'options', options: input.options, allowText: false }
-      : { type: 'text' },
-    sourceSessionId: input.sessionId,
-    sourceTaskId: input.taskId,
-    sourceWorkspaceId: input.workspaceId ?? undefined,
-    category: input.category ?? undefined,
-    expiresAt: schedule.expiresAt,
-    nextEscalationAt: schedule.nextEscalationAt ?? undefined,
-    maxExpiresAt: schedule.maxExpiresAt,
-  });
+  const created = await createAsk(
+    ctx,
+    {
+      projectId: input.projectId,
+      assigneeKind: 'user',
+      assigneeUserId: input.userId,
+      kind: 'question',
+      blocking: true,
+      title: inboxTitle(input.context, limits.titleMaxChars),
+      body: input.context,
+      answerSpec: input.options?.length
+        ? { type: 'options', options: input.options, allowText: false }
+        : { type: 'text' },
+      sourceSessionId: input.sessionId,
+      sourceTaskId: input.taskId,
+      sourceWorkspaceId: input.workspaceId ?? undefined,
+      category: input.category ?? undefined,
+      expiresAt: schedule.expiresAt,
+      nextEscalationAt: schedule.nextEscalationAt ?? undefined,
+      maxExpiresAt: schedule.maxExpiresAt,
+    },
+    now
+  );
   try {
     await projectDataService.recordQuestionAsked(env, input.projectId, {
       sessionId: input.sessionId,

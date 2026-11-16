@@ -83,30 +83,65 @@ exist at deploy time stay answerable and archivable until they resolve or expire
 
 ## Implementation checklist
 
-- [ ] Rule 44 inventory written below and in the PR
-- [ ] Migration 0247 + drizzle columns
-- [ ] Admin settings `inbox.questionTimeoutMinutes`, `inbox.questionFirstReminderPercent`,
+- [x] Rule 44 inventory written below and in the PR
+- [x] Migration 0247 + drizzle columns
+- [x] Admin settings `inbox.questionTimeoutMinutes`, `inbox.questionFirstReminderPercent`,
       `inbox.questionSecondReminderPercent`, `inbox.questionUndeliveredGraceMinutes`,
       `inbox.questionMaxWaitMinutes`
-- [ ] `createAsk` accepts question fields; `request_human_input` writes an ask, links notification
-- [ ] Shared question answer operation (CAS + outcomes + durable delivery + notified_at)
-- [ ] Inbox answer of a question goes through it; inbox archive of a question unchanged (asks)
-- [ ] Attention GET/resolve adapters (ask first, marker fallback)
-- [ ] Typed human message closes open question asks (both DO paths)
-- [ ] Sweep: question reminders, undelivered-grace extension, expiry with task outcome
-- [ ] Chat list overlay (index + DO fallback) and live-read ranking
-- [ ] Connector pending attention merges question asks
-- [ ] Stalled-task classifier reads asks
-- [ ] Remove code that only served new needs_input question markers
+- [x] `createAsk` accepts question fields; `request_human_input` writes an ask, links notification
+- [x] Shared question answer operation (CAS + outcomes + durable delivery + notified_at)
+- [x] Inbox answer of a question goes through it; inbox archive of a question unchanged (asks)
+- [x] Attention GET/resolve adapters (ask first, marker fallback)
+- [x] Typed human message closes open question asks (both DO paths)
+- [x] Sweep: question reminders, undelivered-grace extension, expiry with task outcome
+- [x] Chat list overlay (index + DO fallback) and live-read ranking
+- [x] Connector pending attention merges question asks
+- [x] Stalled-task classifier reads asks
+- [x] Remove code that only served new needs_input question markers
 - [ ] Tests: capability (ask → sleep → answer via inbox → woken once; archive), concurrent answers,
       marker-era vs asks-era overlap, tenancy attack/owner pairs on real SQL (discriminating),
       expiry/reminder schedule, chat list overlay, Connector projection
-- [ ] Docs: API reference / admin settings / any doc describing request_human_input storage
-- [ ] Idea for removing marker-era question code after overlap
+- [x] Docs: API reference / admin settings / any doc describing request_human_input storage
+- [x] Idea for removing marker-era question code after overlap: `01M7HC7CN5WY6GEP9G0PP4DG7B`
 
 ## Rule 44 inventory
 
-(filled in from the code inventory)
+Every writer and reader of question markers (kind `needs_input`) and of
+`session_summaries.attention_json`, and what it does after this slice. "Marker-era" = keeps
+serving questions that existed as markers at deploy until they resolve (max 24 h by default);
+removal tracked in the follow-up idea filed with this PR.
+
+### Writers
+
+| Path | Before | After |
+| --- | --- | --- |
+| `routes/mcp/human-input-tool.ts` (`request_human_input`) | `createAttentionMarker` + `linkAttentionNotification` | `fileQuestionAsk` → `createAsk` (asks row) + `linkQuestionNotification` (`asks.notification_id`); no marker |
+| `ProjectData.createAttentionMarker` RPC (request_human_input branch: resolves check-ins) | ran for questions | branch removed; check-in resolution moved to `ProjectData.recordQuestionAsked` |
+| `ProjectData.linkAttentionNotification` + client | question notification link | removed (no caller) |
+| `answerAttention` (`routes/chat-attention.ts`; callers: resolve route, `ports.chat.answerAttention` → `sam_agent_answer`, inbox answer) | DO claim → live prompt → complete | ask first: `answerQuestionAsk` CAS + durable prompt + `notified_at`; marker-era fallback unchanged |
+| `archiveAttention` (inbox port, `attention:` refs) | DO archive claim | marker-era only; asks archive via `archiveInboxItem` (`closeAsk` + notice) |
+| `message-persistence.ts:resolveAttentionForRoles`, `durability-foundation.ts` (human message) | resolve all markers | unchanged for markers; also `closeQuestionAsksForHumanMessage` (asks → answered, notified) |
+| `attention-expiry.ts` (DO alarm: expiry, escalation, undelivered grace, task outcome) | questions | marker-era only; asks: inbox sweep (`services/inbox/sweep.ts`) + `ProjectData.expireQuestionAsk` (reuses `failExpiredTaskMarker`) |
+| `interaction-store-attention.ts` (permission mirrors), `reconciliation*.ts`, `idle-cleanup*.ts`, `wake-failure.ts`, `provider-limit-attention.ts` | own kinds/sources | unaffected (not questions) |
+| `session-summary-sync.ts` (writes `attention_json`) | copies newest marker | unchanged; asks are never copied into it |
+
+### Readers
+
+| Reader | After |
+| --- | --- |
+| `GET …/attention/:id` (chat card, notification reader) | ask first (same response shape), marker fallback |
+| Chat list D1 index (`services/session-summary-index.ts`) | one project read of open question asks merged into `attention`; live ranking counts chats with an open question |
+| ProjectData `listSessions` / `getSessionsByTaskIds` / `getSession` (chat list fallback, team status `team-core.ts`, account map `routes/account-map.ts`) | `withQuestionAttention` merges open question asks |
+| Web `useSessionReducer` live events | `attention.created` from `recordQuestionAsked`; `attention.resolved` from answer/archive delivery accept, typed message, expiry |
+| Inbox list/count (`inbox-list-core.ts`) | asks part lists questions; attention part lists permission mirrors + marker-era questions |
+| Connector `sam_chat_read` / `sam_chat_interactions` / `sam_work_changes` (`attention-core.ts`) | markers + open question asks, one projection |
+| Connector `sam_chats_list` / `sam_projects_list` (`connector-read-core.ts`) | attention merged / count includes open question asks |
+| Stalled-task classifier (`scheduled/stalled-task-classifier.ts`) | `hasOpenQuestionAsk` (D1) + marker check |
+| Reconciliation candidates (check-in hold) | candidate deferred one lease while an open question ask exists (`resolveCandidateProjectId` D1 query) |
+| Idea "question" status (`idea-work.ts`) | `mergeQuestionAsks` |
+| Archive sharding (`archive-sharding.ts`) | unaffected: asks expire within `inbox.questionMaxWaitMinutes` (≤ 3 days) long before the 7-day archive grace |
+| VM agent | no reference (verified) |
+| `HUMAN_INPUT_TIMEOUT_MS` | removed (replaced by `inbox.questionTimeoutMinutes`); the other three `HUMAN_INPUT_*` remain for marker-era questions |
 
 ## Acceptance criteria
 

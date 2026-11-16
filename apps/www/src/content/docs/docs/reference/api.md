@@ -520,9 +520,10 @@ The list returns `{ pending, settled, cursor }` and needs `task:read` on the pro
 
 Everything agents are waiting on from you, one item per ask, across projects
 (`apps/api/src/routes/inbox.ts`, operations in `packages/operations/src/inbox-*.ts`). The list reads
-each ask where it is stored: questions and permission requests from the chat index
-(`session_summaries`), [secret requests](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret),
-Operations approvals, and inbox asks (reviews and tasks agents file). Nothing is copied.
+each ask where it is stored: inbox asks (questions agents ask with `request_human_input`, and the
+reviews and tasks they file), permission requests from the chat index (`session_summaries`),
+[secret requests](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret) and Operations
+approvals. Nothing is copied.
 
 | Method | Endpoint                                            | Purpose                                        |
 | ------ | --------------------------------------------------- | ---------------------------------------------- |
@@ -543,8 +544,8 @@ that could not be read. You see an ask assigned to you (or an unclaimed team ask
 chats you created, secret requests your agents made (and, when the member whose agent asked
 cannot supply secrets, the requests of members who cannot, if you can), and, as an active
 superadmin, Operations approvals in projects you belong to. Opening, answering or archiving an
-item by `ref` follows the same rules; a question is also open to anyone the chat is shared with. Until questions move into inbox asks, a chat lists only its
-newest open question.
+item by `ref` follows the same rules. A question asked before questions became inbox asks is listed
+from the chat index (`attention:` ref, the newest one per chat) until it is answered or expires.
 
 Each item has a `ref` naming its store (`ask:<id>`, `attention:<sessionId>:<markerId>`,
 `secret:<id>`, `approval:<id>`), `kind` (`question`, `permission`, `form`, `url`, `secret`,
@@ -556,13 +557,15 @@ looks like: `options` or `text` (`{ "answer": "…" }`), `interaction` (`{ "opti
 (`{ "secret": { "value": "…", "replaceExisting": true, "expectedExistingVersion": "…" } }` or
 `{ "decline": true }`), `approval` (`{ "decision": "approve" | "deny", "note": "…" }`) or
 `acknowledge` (`{}` or `{ "answer": "comment" }`). Answers go through the existing path for each
-store: the question answer, the permission answer, secret fulfil/decline, and the approval decision.
+store: the question answer (the same one the chat card uses, so two answers meet at one
+compare-and-set and the loser gets `409`), the permission answer, secret fulfil/decline, and the
+approval decision.
 Secret values and Operations approval decisions are accepted only from the SAM app, never through
 an app connected to the Connector (`403`). Answering or archiving an item filed from a chat needs
 the same right to wake that chat's agent as answering in the chat.
 
-Archive closes an item for every kind: an inbox ask becomes `archived`, a question is resolved
-with reason `archived`, a permission or approval is denied, and a secret request is declined. Each
+Archive closes an item for every kind: an inbox ask (a question too) becomes `archived`, a
+question asked before that change is resolved with reason `archived`, a permission or approval is denied, and a secret request is declined. Each
 tells the agent you will not act. Both writes return `{ ref, outcome, agentNotified }`;
 `agentNotified: false` on an ask means its notice was not queued yet, and SAM retries it for
 `inbox.noticeRetryMinutes`. Writes must come from the app's own origin with
@@ -586,7 +589,7 @@ A chat's creator can give another project member the same controls in that one c
 
 Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`. The server keeps active project members only, stores each person's display name at the time, and returns `400` above `collaboration.commentMentionsMax`.
 
-`GET /api/projects/:id/sessions/:sessionId/attention/:markerId` returns the full saved question an agent asked with `request_human_input`, for the [question reader](/docs/guides/notifications/#read-and-answer-an-agents-question) and the question card in the conversation (`apps/api/src/routes/chat-attention.ts`): the request (its text, choices, `category` (`decision`, `clarification`, `approval`, `error_help`, or `null`), whether it is resolved or expired, and `canAnswer`) and the session's id and topic. It needs `task:read`. `canAnswer` is true only for the chat's owner, or a teammate it is shared with, while the question is open. Add `?context=true` for the messages before it (`messages`): `collaboration.commentContextMessages` of them by default, or `limit`, capped by the session message limit; and for what the agent did since asking (`since`: the messages after it, `activityCount` tool runs, and `truncated` when more happened than the read covers). A question from another chat, or one that isn't an agent question, returns `404`. Answer it with `POST .../attention/:markerId/resolve`.
+`GET /api/projects/:id/sessions/:sessionId/attention/:markerId` returns the full saved question an agent asked with `request_human_input`, for the [question reader](/docs/guides/notifications/#read-and-answer-an-agents-question) and the question card in the conversation (`apps/api/src/routes/chat-attention.ts`): the request (its text, choices, `category` (`decision`, `clarification`, `approval`, `error_help`, or `null`), whether it is resolved or expired, and `canAnswer`) and the session's id and topic. It needs `task:read`. `canAnswer` is true only for the chat's owner, or a teammate it is shared with, while the question is open. Add `?context=true` for the messages before it (`messages`): `collaboration.commentContextMessages` of them by default, or `limit`, capped by the session message limit; and for what the agent did since asking (`since`: the messages after it, `activityCount` tool runs, and `truncated` when more happened than the read covers). A question from another chat, or one that isn't an agent question, returns `404`. Answer it with `POST .../attention/:markerId/resolve` and `{ "answer": "…" }`: `200` with `{ resolved: true, alreadyResolved, answer }` once it reached the agent (or the same answer already had), `202` with `{ inFlight: true }` while the answer is still being delivered (SAM retries it), `409` when a different answer is being delivered or the question is closed, and `400` for an answer outside the choices. `:markerId` is the question's inbox ask id, the id `request_human_input` returns (`apps/api/src/services/inbox/question-asks.ts`); a question asked before questions became inbox asks is read and answered by its attention marker id until it is answered or expires.
 
 `GET /api/projects/:id/secret-requests/:requestId` returns one agent [secret request](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret) for the card in the conversation (`apps/api/src/routes/projects/secret-requests.ts`): the variable name, the agent's reason, the requested expiry, its status (`pending`, `fulfilled`, `declined`, `expired`), who answered it, whether a project variable with that name already exists, and `canResolve`. It needs `secret:read`, and never includes a value. `POST .../fulfill` with `{ "value": "…", "replaceExisting": true, "expectedExistingVersion": "…" }` stores the value as an encrypted project secret and wakes the requesting agent with a notice that names the variable only; it needs `secret:write`, and `replaceExisting` is required when the name already exists (`409` otherwise). `expectedExistingVersion` (the `existing.version` the person confirmed, an opaque fingerprint) is required with it; if it is missing, or the stored value has changed since (or changes before the write), the request returns `409` and stays open. `POST .../decline` closes the request. Both return `{ request, agentNotified }`; `agentNotified: false` means the agent's notice could not be queued yet (SAM retries it for `secrets.notifyRetryMinutes`, and the card asks you to tell the agent). Both are writes from the app's own browser flow: they require an `Origin` header equal to the app origin (`https://app.<BASE_DOMAIN>`; any other or missing origin returns `403`) and `Content-Type: application/json` (`415` otherwise), so another site, including a workspace port on the same domain, cannot submit one on your behalf. An empty value or one over the runtime variable size limit returns `400`, as does a project already at its variable limit; the request stays open. A request that was already answered returns `409`; one past its deadline returns `410`. A request from another project returns `404`.
 

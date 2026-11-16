@@ -769,10 +769,9 @@ aggregate operator-visible counters.
 | `MAX_NOTIFICATIONS_PER_USER`            | `500`                  | Max stored notifications per user                                      |
 | `NOTIFICATION_PAGE_SIZE`                | `50`                   | Default page size for notification list                                |
 | `MAX_NOTIFICATION_PAGE_SIZE`            | `100`                  | Max allowed page size                                                  |
-| `HUMAN_INPUT_TIMEOUT_MS`                | `7200000` (2 hr)       | Initial needs-input response window                                    |
-| `HUMAN_INPUT_ESCALATION_FRACTIONS`      | `0.25,0.75`            | Reminder points within the initial response window                     |
-| `HUMAN_INPUT_UNDELIVERED_GRACE_MS`      | `7200000` (2 hr)       | Extension without confirmed push delivery                              |
-| `HUMAN_INPUT_MAX_WAIT_MS`               | `86400000` (24 hr)     | Hard maximum needs-input marker lifetime                               |
+| `HUMAN_INPUT_ESCALATION_FRACTIONS`      | `0.25,0.75`            | Reminder points, questions asked before the inbox move only            |
+| `HUMAN_INPUT_UNDELIVERED_GRACE_MS`      | `7200000` (2 hr)       | Undelivered grace, questions asked before the inbox move only          |
+| `HUMAN_INPUT_MAX_WAIT_MS`               | `86400000` (24 hr)     | Hard limit, questions asked before the inbox move only                 |
 | `WEB_PUSH_TTL_SECONDS`                  | `86400`                | Push-service message TTL                                               |
 | `WEB_PUSH_VAPID_TTL_SECONDS`            | `43200`                | VAPID authorization-token lifetime                                     |
 | `WEB_PUSH_DELIVERY_TIMEOUT_MS`          | `10000`                | Per-attempt push-service timeout                                       |

@@ -63,6 +63,7 @@ export {
   validateIdeaStatusTransition,
 } from './idea-transitions';
 export { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from './idea-update-core';
+export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
 export { getInboxItem, resolveInboxItem } from './inbox-item-core';
 export { countInbox, listInbox } from './inbox-list-core';
 export {
@@ -86,8 +87,6 @@ export { INBOX_SETTINGS, type InboxSettingName } from './inbox-settings-definiti
 export {
   answerInboxItem,
   archiveInboxItem,
-  createAsk,
-  type CreateAskInput,
   type InboxAnswerInput,
   loadAskNoticeRow,
   notifyClosedAsk,
