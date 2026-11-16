@@ -98,6 +98,9 @@ describe('model-catalog', () => {
           'ministral-3b-latest',
         ])
       );
+      expect(allModels.find((model) => model.id === 'mistral-large-latest')?.name).toBe(
+        'Mistral Large (latest)'
+      );
       expect(isKnownModel('mistral-vibe', 'zai-glm-5-2')).toBe(false);
       expect(allModels.find((model) => model.id === 'mistral-medium-latest')).toMatchObject({
         name: 'Mistral Medium 3.5 (Deprecated)',

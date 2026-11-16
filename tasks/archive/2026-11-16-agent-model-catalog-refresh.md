@@ -24,3 +24,12 @@ Classification: external-api-change, business-logic-change. No new integration, 
 - [ ] Draft PR then ready with CI and CodeRabbit requested.
 - [ ] Deploy free staging installation; authenticated API/selector browser verification; release lease.
 - [ ] CI green, review resolved or best-effort outcome recorded, merge; production deploy and basic smoke.
+
+## Implementation and local validation
+- [x] Audited all supported agents and catalog consumers.
+- [x] Updated verified additions, removals, names, and lifecycle labels; exact models.dev parity: 89 + 34 active ID/name pairs.
+- [x] Shared lint/typecheck/build and 51 files / 975 tests; API catalog route/service 11 tests; web selector/profile-picker 19 tests passed.
+- [x] Local task-completion-validator, constitution-validator, test-engineer, doc-sync-validator PASS; optional Vibe display-name assertion added.
+- [x] New regression assertions failed against original catalog (5 failures), then passed after update.
+
+Release gates remain tracked in PR and SAM: staging, full CI, CodeRabbit, merge and production smoke.
