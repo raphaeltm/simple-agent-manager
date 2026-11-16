@@ -39,6 +39,31 @@ the files it governs with `paths` frontmatter.
   governs (compare a fresh session's load log with `--observed`), or an automated check.
   State the replacement in the PR.
 
+## Taking a Rule Out of Launch Context
+
+Rule 73 was the first rule to leave launch context (2026-11-16). Follow the same steps
+for the next one, and keep the rule at launch if any step cannot be shown.
+
+1. **Split the rule** into the part a program can decide and the part that needs
+   judgment. Write both down in the rule under an "Enforcement" heading.
+2. **Build the check** for the mechanical part, modelled on the original incident. Its
+   tests must reintroduce the incident and fail on it, pass on the fixed code, and
+   include controls for nearby shapes that must not be reported. Delete each guard in the
+   check once and confirm its test goes red.
+3. **Measure noise** on the current tree and across history (sampled commits), and
+   report how much the check examined, so a clean result is not an empty one. A new
+   check starts advisory (project policy f9ae7f88) unless the measurement shows no
+   findings other than the incident; record the numbers in `scripts/quality/README.md`.
+4. **Make it blocking in CI** and give it a `pnpm quality:*` script.
+5. **Scope the judgment text** with `paths` covering every place the rule applies, in
+   every language and storage layer it names (Go, TS, TSX, SQL migrations, Durable Object
+   migrations). Remove the rule from `launchRules` in the same PR.
+6. **Probe a fresh Claude Code session** on the branch: its log must show the rule loads
+   before the first matching edit, for an existing file and a new file. Compare with
+   `pnpm quality:agent-context-budget --observed`.
+7. **State the replacement in the PR**: the check, its measured noise, the scope, the
+   probe evidence, and the launch bytes before and after.
+
 ## Path-Scoped Rules
 
 <!-- BEGIN GENERATED RULE INDEX (pnpm quality:agent-context-budget --write) -->
@@ -96,6 +121,7 @@ work, or planning in one of these areas, open the rule yourself.
 - `71-request-context-must-not-outlive-its-request.md`: A Goroutine That Outlives Its Request Must Not Capture That Request's Context. Loads for: packages/providers; packages/vm-agent
 - `71-tightening-a-column-can-delete-a-capability.md`: A New Required Column Can Silently Delete a Capability for Every Existing Row. Loads for: apps/api; packages/worker-core; packages/project-data
 - `72-error-categories-must-match-the-recovery-action.md`: An Error Category Must Name the Recovery Action, Not the Provider's Vocabulary. Loads for: apps/api; packages/providers
+- `73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State. Loads for: `**/*.go`; `**/*.ts`; `**/*.tsx`; `**/*.sql`
 - `75-external-api-check-then-act.md`: A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure. Loads for: apps/api; packages/repo-hosting; packages/app-deployment; packages/vm-agent (internal/server/vm_jobs.go)
 - `77-library-extension-points-typed-and-exercised.md`: Implement a Library Extension Point Against the Library's Types, and Test It Through the Library. Loads for: apps/api
 - `78-snapshot-capture-must-scale-with-the-session.md`: Snapshot Capture Cost Must Scale With the Session, Not the Repository. Loads for: packages/vm-agent; apps/api (src/services/session-snapshot-capture-cleanup.ts)

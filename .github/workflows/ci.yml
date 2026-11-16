@@ -260,6 +260,7 @@ jobs:
               - '.claude/rules/**'
               - '.claude/settings.json'
               - '.claude/hooks/**'
+              - '.codex/**'
               - 'CLAUDE.md'
               - 'AGENTS.md'
               - '**/AGENTS.md'
@@ -267,6 +268,7 @@ jobs:
               - '**/AGENTS.override.md'
               - 'scripts/quality/agent-*'
               - 'scripts/quality/check-agent-context-budget.ts'
+              - 'scripts/quality/go-optional-fields/**'
             web-ui:
               - 'apps/web/**'
               - 'packages/ui/**'
@@ -876,6 +878,24 @@ jobs:
       # stays under the ceilings in scripts/quality/agent-context-budget.json.
       - name: Agent instruction delivery and budget check
         run: pnpm quality:agent-context-budget --check
+
+      # The Codex rule-delivery hook, the Stop gate shared by Claude Code and Codex, and the
+      # instruction model, each driven through the real script against fixture repositories.
+      - name: Agent instruction and hook tests
+        run: pnpm quality:agent-tooling:test
+
+      # Rule 73, mechanical half: a non-string scalar field of an options or patch value
+      # must not be copied onto existing state without a "not supplied" check. Blocking from
+      # the start: zero findings on the tree and in 25 sampled commits since February 2026,
+      # apart from the original incident, which it reports (scripts/quality/README.md).
+      - name: Setup Go for the optional-field check
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Optional struct fields must not overwrite on absence (rule 73)
+        run: pnpm quality:go-optional-fields
 
       - name: Stale artifact check
         run: pnpm quality:stale-artifacts

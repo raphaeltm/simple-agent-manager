@@ -296,6 +296,11 @@ describe('generated indexes', () => {
     expect(describeScope(both)).toBe('apps/api');
   });
 
+  it('puts wildcard patterns in backticks so Markdown does not read them as emphasis', () => {
+    const anyDepth = rule('.claude/rules/a.md', "paths:\n  - '**/*.go'\n  - 'Makefile'");
+    expect(describeScope(anyDepth)).toBe('`**/*.go`; Makefile');
+  });
+
   it('replaces an existing block and is idempotent', () => {
     const once = applyGeneratedBlock('# Doc\n\nText.\n', renderRootIndex(m));
     expect(once.startsWith('# Doc\n\nText.\n\n' + INDEX_BEGIN)).toBe(true);

@@ -47,6 +47,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/verify-test-quality.mjs",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

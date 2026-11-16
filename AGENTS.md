@@ -180,7 +180,6 @@ Codex does not load `.claude/rules/` by itself. Two steps before you edit:
 - `.claude/rules/59-understand-before-adding.md`: Understand the System Before Adding to It
 - `.claude/rules/60-request-io-and-bundle-budgets.md`: Request I/O and Client Bundle Budgets
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`: A Test Must Reach the Feature the Way Production Does
-- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 - `.claude/rules/74-proxy-signals-must-match-the-condition.md`: A Gate Must Key On Its Condition, Not On A Signal That Merely Correlates
 - `.claude/rules/76-cost-decisions-must-query-billed-metrics.md`: Cost Decisions Must Query Billed Metrics
 - `.claude/rules/81-work-bounds-must-state-throughput.md`: A Work Bound Must State Its Throughput at the Outer Probable Limit

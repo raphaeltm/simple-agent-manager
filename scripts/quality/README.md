@@ -79,13 +79,18 @@ model is in `scripts/quality/agent-instructions.ts`:
   without a reviewed edit to that list;
 - a workspace directory has path-scoped rules and no `AGENTS.md`, or an
   `AGENTS.override.md` would replace one for Codex;
-- a Claude Code hook entry is malformed, names an unknown event, or all hooks are
-  disabled (Claude Code skips such entries without an error);
+- a Claude Code or Codex hook entry is malformed, names an unknown event, or all hooks
+  are disabled (both harnesses skip such entries without an error), or a hook runs a
+  script that does not exist;
 - a generated rule index is stale, or a size ceiling in the budget file is exceeded.
 
 `--write` regenerates the rule index in `.claude/rules/00-rule-routing.md`, the launch-rule
-list in the root `AGENTS.md`, and the "Rules for this directory" section of each nested
+list in the root `AGENTS.md`, the "Rules for this directory" section of each nested
 `AGENTS.md`.
+
+`pnpm quality:agent-tooling:test` (Code Quality Checks) runs the instruction model tests
+and the Codex hook-config checks, and drives the Stop gate below through the real script
+against fixture repositories.
 
 What the check does not prove: that a rule's scope is complete for code that never names
 it, that Codex opens the rules its `AGENTS.md` lists, or that an agent follows a rule it
@@ -104,6 +109,76 @@ A mismatch means the model is wrong about the harness. Use a fresh session: a ru
 was already in context at launch is not loaded a second time when its `paths` match. An
 empty log, or one without `session_start` entries, is reported as a mismatch; pass
 `--lazy-only` to compare lazy loads alone.
+
+## Agent hooks
+
+### Test-quality Stop gate
+
+`.claude/hooks/verify-test-quality.mjs` runs at the end of every Claude Code turn
+(`.claude/settings.json`; observed firing in a fresh session, idea 01M7H32EK6S4E31EHWVSJSENR5).
+It is not configured for Codex: see "Codex hooks" below. It reads every change on the
+branch (commits since the merge base with `origin/main`, staged, unstaged and untracked
+files) and reports two classes:
+
+| Class                      | Meaning                                                                                                                                                                        | Delivery                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| `untested-boundary-change` | API routes, services, Durable Objects or scheduled code, worker-package `src`, web data hooks, or VM agent server code changed, and no test in the tests that cover it changed | feedback: once per session and set         |
+| `shallow-test`             | a changed test is mostly empty mocks (`mockResolvedValue({})`) with no realistic state                                                                                         | block: repeats while open, at most 3 times |
+
+Measured on the last merged PRs as they landed (2026-11-16): `untested-boundary-change`
+flagged 2 of 80 (4 of 300); one was a pure move with existing coverage (#2733), the other
+a web hook changed without a web test (#2774). With a false positive in half the hits, it
+is feedback: the turn continues once with the findings, and the agent adds a test or says
+why none is needed. `shallow-test` flagged 0 of 300, so it blocks, capped so a false
+positive can never trap a session. Revisit both with fresh measurements before changing
+`FINDING_MODES`. Coverage is judged per area, not per file: any changed test in the area's test locations
+(for `apps/api` that is `apps/api/tests/` and colocated tests) counts for every changed
+source file in it. The gate cannot prove a test is a vertical slice; review still decides
+that (`.claude/rules/35-vertical-slice-testing.md`).
+
+### Codex hooks
+
+Codex runs repository hooks (`.codex/config.toml` or `.codex/hooks.json`) only for a
+trusted project, and only hook definitions that have themselves been trusted. SAM-managed
+Codex sessions trust neither: on 2026-11-16 a probe with the hook script committed
+(task 01M7HZ6Q1EVPVPCBN00AM3WN8A) saw no SessionStart, no PreToolUse context and no Stop
+prompt, and the session's `~/.codex/config.toml` had no trust entry for the repository
+(`CODEX_HOME` unset). The same applies to every other setting in `.codex/config.toml`.
+So no repository hook is configured for Codex. A rule-delivery hook (SessionStart and
+PreToolUse injection of path-scoped rule bodies, bounded, with a log) and the Codex Stop
+entry are kept on branch `sam/codex-rule-delivery-hook` until SAM decides whether its
+Codex sessions should trust repository hooks. Until then Codex reaches path-scoped rules
+through the `AGENTS.md` indexes only. `--check` still validates any Codex hook entry
+against the current schema, so a malformed one (like the flat `[[hooks.Stop]]` that held
+no handler) cannot come back unnoticed.
+
+## Rule 73: optional fields must not overwrite on absence
+
+`pnpm quality:go-optional-fields` (`scripts/quality/go-optional-fields/`, Go standard
+library only, blocking in Code Quality Checks) walks every Go package in the repository.
+An options value is a parameter or receiver whose struct type ends in `Opts`, `Options`,
+`Opt`, `Patch` or `Override(s)`, a variadic of such a type or named `opts`/`options`, and any
+`opts[i]` or local bound from one. The check reports a non-string scalar field (bool,
+integer, float, `time.Duration`, or a named type over one) of such a value written onto
+existing state, directly or through an expression (`!o.F`, `time.Duration(o.F)`), or in a
+struct literal replacing a value (`*r = R{F: o.F}`), when no enclosing `if`, `case` or
+early-return condition checks that it was supplied (a mention of the field or a presence
+flag such as `HasF`; else and default branches and `if o.F != r.F` do not count), or when
+the only check is the field's own truthiness. Writes onto a local the function builds itself
+are construction; a local stops counting as built when it is loaded, passed to a call, has
+its address taken or is written through. `//sam:optional-field-ok <reason>` opts a
+statement out. Not covered: writes through helper calls, options types from another
+package, and struct literals stored into maps (usually creates). `main_test.go` pins each
+shape with `// want` annotations in `testdata/`, including every variant a Go review of the
+first version found.
+
+Measured 2026-11-16: 0 findings on the tree (323 Go files, 16 functions taking options).
+Across 25 commits sampled from February to November 2026 the only finding was the
+original incident (`runtime.Lightweight = opt.Lightweight`), at every sampled commit from
+2026-03-16 until its fix in #2055. That is why it started blocking rather than advisory
+(policy f9ae7f88). There is no TypeScript counterpart: strict null checks reject the
+direct form, and the remaining forms (`patch.x ?? false`, spreads) are also how records
+are created, so a lint would be mostly noise.
 
 ## Runtime workflow state
 

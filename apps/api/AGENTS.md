@@ -105,6 +105,7 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`: A Config Flip Ships Only When the Deployed Value Says So
 - `.claude/rules/71-tightening-a-column-can-delete-a-capability.md`: A New Required Column Can Silently Delete a Capability for Every Existing Row
 - `.claude/rules/72-error-categories-must-match-the-recovery-action.md`: An Error Category Must Name the Recovery Action, Not the Provider's Vocabulary
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 - `.claude/rules/75-external-api-check-then-act.md`: A Conflict From a Remote Uniqueness Constraint Is a Signal, Not a Failure
 - `.claude/rules/77-library-extension-points-typed-and-exercised.md`: Implement a Library Extension Point Against the Library's Types, and Test It Through the Library
 - `.claude/rules/78-snapshot-capture-must-scale-with-the-session.md`: Snapshot Capture Cost Must Scale With the Session, Not the Repository
