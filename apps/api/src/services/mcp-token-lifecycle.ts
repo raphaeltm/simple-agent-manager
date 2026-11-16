@@ -87,7 +87,10 @@ type McpTokenWorkspaceVerdict = { reason: string; revoke: boolean } | null;
 /** Account states that may act through an MCP token (see the module comment for `pending`). */
 const MCP_ACCEPTED_USER_STATUSES: ReadonlySet<string> = new Set(['active', 'pending']);
 
-function actorVerdict(row: McpTokenWorkspaceRow, requireApproval: boolean): McpTokenWorkspaceVerdict {
+function actorVerdict(
+  row: McpTokenWorkspaceRow,
+  requireApproval: boolean
+): McpTokenWorkspaceVerdict {
   if (row.joinedUserId === null) return { reason: 'user_missing', revoke: true };
   const userStatus = row.userStatus ?? 'active';
   // Recoverable: an admin can unsuspend, and the agent's token must work again when they do.

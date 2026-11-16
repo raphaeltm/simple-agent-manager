@@ -269,14 +269,17 @@ describe('validateActiveWorkspaceMcpToken', () => {
     ['an active user', 'active', 'user'],
     ['a pending platform admin', 'pending', 'admin'],
     ['a pending superadmin', 'pending', 'superadmin'],
-  ])('accepts %s while approval is required (same exemptions as REST)', async (_label, status, role) => {
-    setUserStatus(status);
-    setUserRole(role);
-    setSignupApprovalSetting('true');
-    seed({ status: 'running' });
+  ])(
+    'accepts %s while approval is required (same exemptions as REST)',
+    async (_label, status, role) => {
+      setUserStatus(status);
+      setUserRole(role);
+      setSignupApprovalSetting('true');
+      seed({ status: 'running' });
 
-    await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
-  });
+      await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
+    }
+  );
 
   it('rejects a member of project A acting through a workspace in project B, while project B owner is accepted', async () => {
     // user-1 is an active owner of project-1 only. user-2 owns project-2.

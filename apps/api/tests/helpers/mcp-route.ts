@@ -119,9 +119,7 @@ export function seedActiveMcpWorkspace(
       schema.workspaces,
       // The lifecycle read joins the current `signup.requireApproval` row.
       schema.platformSettings,
-    ].filter(
-      (table) => !existing.has(getTableConfig(table).name)
-    )
+    ].filter((table) => !existing.has(getTableConfig(table).name))
   );
   sqlite
     .prepare(`INSERT OR IGNORE INTO users (id, email, status) VALUES (?, ?, 'active')`)
