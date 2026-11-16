@@ -70,7 +70,7 @@ parts.push({
 });
 ```
 
-`member(...)` is a `JOIN` on `project_members` with `status = 'active'`, so someone who leaves a project stops seeing its asks immediately. The four parts are joined with `UNION ALL` and run as one D1 round trip. The number on the inbox icon runs the same four `SELECT`s wrapped in `COUNT(*)`, so the badge and the list follow the same rules about what you can act on.
+`member(...)` is a `JOIN` on `project_members` with `status = 'active'`, so someone who leaves a project stops seeing its asks immediately. The four parts are joined with `UNION ALL` and run as one D1 round trip. The number on the inbox icon is a separate request that wraps the same four `SELECT`s in `COUNT(*)`, so the badge and the list follow the same rules about what you can act on, even if an answer landing between the two requests can briefly put them one apart.
 
 Questions, secrets and approvals are read straight from their own rows. Permission requests are the one exception: they come from the chat list's existing index, which each chat keeps up to date in the background, so a permission can linger for a moment after it is answered. Answer a question in its chat card and it drops out of the Inbox on its next refresh, which happens when you open it, when you come back to the tab, and when a notification about an ask arrives over the app's live WebSocket connection. There is no polling timer.
 
@@ -94,7 +94,7 @@ ORDER BY tier, stack_anchor, stack_key, created_at, sort_ref
 
 Every row in a stack gets its stack's oldest `created_at` as `stack_anchor`, so sorting by it keeps the stack together and puts the oldest stack first.
 
-Long lists are paged with **keyset pagination**. Instead of "skip the first 25 rows", the next page asks for rows that sort after the last one you saw: `WHERE (tier, stack_anchor, stack_key, created_at, sort_ref) > (?, ?, ?, ?, ?)`. Offsets go wrong when rows disappear between pages, and in an inbox rows disappear constantly, because answering them is the point.
+Long lists are paged with **keyset pagination**. Instead of "skip the first 25 rows", the next page asks for rows that sort after the last one you saw: `WHERE (tier, stack_anchor, stack_key, created_at, sort_ref) > (?, ?, ?, ?, ?)`. Offsets go wrong when rows disappear between pages, and in an inbox rows disappear constantly, because answering them is the point. Keyset paging avoids that shift, though not every edge case: if a stack is split across two pages and its oldest ask is answered, the rest of the stack sorts later and can show up again on the next page.
 
 One more safeguard: each row is checked against a schema before it is shown. A row that fails, say one with malformed JSON from an older version, is skipped and logged instead of breaking the whole list. One bad record should hide only itself.
 
