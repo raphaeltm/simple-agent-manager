@@ -59,5 +59,6 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/51-runtime-boundary-validation.md`: Runtime boundary validation
 - `.claude/rules/52-model-catalog-lifecycle.md`: Model Catalog Lifecycle (Adding and Retiring Provider Models)
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`: Scheduled Handlers: Isolate Every Step, and Never Use a Liveness Timestamp as an Idleness Signal
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 
 <!-- END GENERATED RULE INDEX -->

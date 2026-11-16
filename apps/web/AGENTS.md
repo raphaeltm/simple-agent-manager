@@ -69,6 +69,7 @@ loads them by itself on file access; other harnesses must open them.
 - `.claude/rules/48-stale-while-revalidate-ui.md`: Stale-While-Revalidate UI (No Hiding, No Refetch Loops)
 - `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`: Horizontal Overflow Inside `overflow-x-hidden` Is Invisible to Document-Level Checks
 - `.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`: An Object Literal in a Render Body Can Remount an Entire Subtree
+- `.claude/rules/73-optional-struct-fields-must-not-overwrite-on-absence.md`: A Zero-Valued Optional Field Must Not Overwrite Existing State
 - `.claude/rules/79-new-enum-values-audit-every-denylist.md`: A New Value in a Shared Status Enum Must Audit Every Denylist Over That Enum
 - `.claude/rules/80-sam-glass.md`: SAM Glass
 - `.claude/rules/82-typed-cards-every-harness.md`: A Typed Chat Card Must Render for Every Agent Harness

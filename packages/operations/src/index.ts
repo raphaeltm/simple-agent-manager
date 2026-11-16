@@ -91,6 +91,35 @@ export {
   loadAskNoticeRow,
   notifyClosedAsk,
 } from './inbox-write-core';
+export { projectFlow, type ProjectFlowInput } from './insights-flow';
+export {
+  getInsightsFlowLimits,
+  INSIGHTS_FLOW_SETTINGS,
+  type InsightsFlowLimits,
+  type InsightsFlowSettingName,
+} from './insights-flow-settings';
+export {
+  DEFAULT_PHASE_STATS_SAMPLE_LIMIT,
+  DEFAULT_PHASE_STATS_WINDOW_DAYS,
+  DEFAULT_PHASE_TIMING_LIST_LIMIT,
+  listPhaseTimings,
+  type ListPhaseTimingsInput,
+  MAX_PHASE_STATS_PHASES,
+  MAX_PHASE_STATS_SAMPLE_LIMIT,
+  MAX_PHASE_STATS_WINDOW_DAYS,
+  MAX_PHASE_TIMING_LIST_LIMIT,
+  nearestRankPercentile,
+  type PhaseDurationStat,
+  phaseDurationStats,
+  type PhaseDurationStatsInput,
+  type PhaseDurationStatsResult,
+  type PhaseTimingRow,
+} from './insights-phase-timings';
+export { runReceipt, type RunReceiptInput } from './insights-receipt';
+export {
+  INSIGHTS_RECEIPT_SETTINGS,
+  type InsightsReceiptSettingName,
+} from './insights-receipt-settings-definition';
 export { getPlatformOperationLimits } from './limits';
 export {
   getFileContext,
@@ -144,6 +173,7 @@ export { projectOverviewGet, type ProjectOverviewInput } from './project-overvie
 export {
   ensurePullRequest,
   getPullRequestStates,
+  openingHeadExistsSql,
   parseProjectPullRequestUrl,
   type PullRequestSnapshot,
   upsertPullRequestSnapshot,

@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Bot,
   Brain,
+  ChartColumn,
   FileCode,
   FolderKanban,
   FolderOpen,
@@ -79,6 +80,8 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Files', path: 'files', icon: <FileCode size={18} /> },
   { label: 'Library', path: 'library', icon: <FolderOpen size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
+  // How work moves from idea to merged (Insights; Flow is live, other tabs follow).
+  { label: 'Insights', path: 'insights', icon: <ChartColumn size={18} /> },
   { label: 'Deployments', path: 'deployments', icon: <Rocket size={18} /> },
   { label: 'Agent Context', path: 'agent-context', icon: <Brain size={18} /> },
   // One item for everything that starts work on its own (it replaced Events and Triggers).

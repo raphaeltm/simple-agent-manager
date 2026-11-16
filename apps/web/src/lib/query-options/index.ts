@@ -143,6 +143,7 @@ export {
   workspacePortsQueryOptions,
   workspaceQueryKeys,
 } from './infrastructure';
+export { insightsQueryKeys, projectFlowQueryOptions } from './insights';
 export {
   libraryFileQueryOptions,
   type LibraryIndexQueryData,
@@ -174,6 +175,7 @@ export {
   projectRuntimeConfigQueryOptions,
 } from './projects';
 export { reportIssueConfigQueryOptions, reportIssueQueryKeys } from './report-issue';
+export { runReceiptQueryKeys, runReceiptQueryOptions } from './run-receipt';
 export {
   activeTasksQueryOptions,
   taskDetailQueryOptions,

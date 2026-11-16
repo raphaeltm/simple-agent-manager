@@ -129,6 +129,12 @@ function Project() {
 const ProjectChat = lazyNamed(loadProjectChat, 'ProjectChat');
 const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'ProjectActivity');
 const ProjectOverview = lazyNamed(loadProjectOverview, 'ProjectOverview');
+const ProjectInsights = lazyNamed(() => import('./pages/insights'), 'ProjectInsights');
+const InsightsFlowTab = lazyNamed(() => import('./pages/insights/FlowTab'), 'FlowTab');
+const InsightsComingSoonTab = lazyNamed(
+  () => import('./pages/insights/ComingSoonTab'),
+  'ComingSoonTab'
+);
 const ProjectAgentChat = lazyNamed(() => import('./pages/ProjectAgentChat'), 'ProjectAgentChat');
 const ProjectCreate = lazyNamed(() => import('./pages/ProjectCreate'), 'ProjectCreate');
 const ProjectDeploymentEnvironmentDetail = lazyNamed(
@@ -329,6 +335,13 @@ export default function App() {
                         {/* Opening a project lands on its Overview (inbox slice F2); chat is one tap away. */}
                         <Route index element={<Navigate to="overview" replace />} />
                         <Route path="overview" element={page(<ProjectOverview />)} />
+                        <Route path="insights" element={page(<ProjectInsights />)}>
+                          <Route index element={<Navigate to="flow" replace />} />
+                          <Route path="flow" element={page(<InsightsFlowTab />)} />
+                          <Route path="agent-setups" element={page(<InsightsComingSoonTab />)} />
+                          <Route path="accounts" element={page(<InsightsComingSoonTab />)} />
+                          <Route path="people" element={page(<InsightsComingSoonTab />)} />
+                        </Route>
                         <Route
                           path="chat"
                           element={page(

@@ -26,15 +26,17 @@ import { BudgetsSection } from './BudgetsSection';
 import { NeedsYouSection, useNeedsYou } from './NeedsYouSection';
 import { OverviewTaskBox } from './OverviewTaskBox';
 import { RecentlySection, RunningNowSection } from './sections';
+import { ThisWeekSection } from './ThisWeekSection';
 import { useProjectOverview } from './useProjectOverview';
 
 /**
- * Phone order of the sections, as Tailwind `order-*` classes (desktop ignores them). `order-3` is
- * kept for the Insights build's This week pane, which sits under Running now.
+ * Phone order of the sections, as Tailwind `order-*` classes (desktop ignores them). The Insights
+ * build's This week pane sits directly under Running now.
  */
 const PHONE_ORDER = {
   needsYou: 'order-1 md:order-none',
   running: 'order-2 md:order-none',
+  thisWeek: 'order-3 md:order-none',
   budgets: 'order-4 md:order-none',
   automations: 'order-5 md:order-none',
   recently: 'order-6 md:order-none',
@@ -144,6 +146,8 @@ export function ProjectOverview() {
             unavailable={overview.isError || unavailable.has('running')}
             className={PHONE_ORDER.running}
           />
+          {/* Insights slice F: the week's flow, linking into Insights. Under Running now. */}
+          <ThisWeekSection projectId={projectId} className={PHONE_ORDER.thisWeek} />
           <BudgetsSection
             projectId={projectId}
             profiles={composer.agentProfiles}
