@@ -33,12 +33,19 @@ type codexACPManagedConfig struct {
 	// cannot give. The hooks come from the repository the user (or their agent) chose, and
 	// they can do nothing the agent cannot already do in this full-access workspace.
 	// Decision: Raphaël, 2026-11-16 (SAM idea 01M7J0TXAHGRY8CWA7Y7SJZAK0).
+	//
+	// Scope, stated so nobody mistakes it for "hooks only": trusting the project loads its
+	// whole .codex/ layer (config.toml, including MCP servers and features, and exec-policy
+	// rules), and bypass_hook_trust also runs user-level (~/.codex) hooks. Codex strips
+	// provider and base-URL keys from project config, and this JSON is the highest config
+	// layer, so the sandbox, approval and model settings above still win.
 	BypassHookTrust bool                         `json:"bypass_hook_trust"`
 	Projects        map[string]codexProjectTrust `json:"projects,omitempty"`
 }
 
 // buildCodexACPManagedConfigEnv renders CODEX_CONFIG. workDir is the session's working
-// directory (the repository checkout); Codex looks up project trust by the cwd first.
+// directory (the repository checkout). It is used verbatim: it is the exact string sent as
+// the ACP session cwd (session_host_handshake.go), which Codex looks up project trust by.
 func buildCodexACPManagedConfigEnv(settings *agentSettingsPayload, workDir string) (string, error) {
 	config := codexACPManagedConfig{
 		SandboxMode:     "danger-full-access",
@@ -48,8 +55,9 @@ func buildCodexACPManagedConfigEnv(settings *agentSettingsPayload, workDir strin
 	if settings != nil {
 		config.Model = settings.Model
 	}
-	if dir := strings.TrimSpace(workDir); dir != "" && path.IsAbs(dir) {
-		config.Projects = map[string]codexProjectTrust{path.Clean(dir): {TrustLevel: "trusted"}}
+	// "/" would trust whatever runs at the filesystem root; no SAM session uses it.
+	if path.IsAbs(workDir) && path.Clean(workDir) != "/" {
+		config.Projects = map[string]codexProjectTrust{workDir: {TrustLevel: "trusted"}}
 	}
 
 	encoded, err := json.Marshal(config)

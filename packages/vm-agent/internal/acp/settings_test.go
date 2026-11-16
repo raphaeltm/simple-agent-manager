@@ -35,11 +35,18 @@ func TestBuildCodexACPManagedConfigEnv(t *testing.T) {
 			wantProjects: map[string]projectTrust{"/workspaces/simple-agent-manager": {TrustLevel: "trusted"}},
 		},
 		{
-			name:         "work dir is cleaned",
-			workDir:      " /workspaces/repo/ ",
-			wantProjects: map[string]projectTrust{"/workspaces/repo": {TrustLevel: "trusted"}},
+			// The key must equal the ACP cwd byte for byte, so it is not rewritten.
+			name:         "dotted repository directory is used verbatim",
+			workDir:      "/workspaces/my.site.org",
+			wantProjects: map[string]projectTrust{"/workspaces/my.site.org": {TrustLevel: "trusted"}},
+		},
+		{
+			name:         "worktree path",
+			workDir:      "/workspaces/repo-wt/feature",
+			wantProjects: map[string]projectTrust{"/workspaces/repo-wt/feature": {TrustLevel: "trusted"}},
 		},
 		{name: "relative work dir is not trusted", workDir: "repo"},
+		{name: "filesystem root is not trusted", workDir: "/"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			envVar, err := buildCodexACPManagedConfigEnv(tc.settings, tc.workDir)
