@@ -23,7 +23,8 @@ Documentation: architecture/security.md header contract and missing-IP behavior.
 - [x] Test real BetterAuth persistence and rate limiting with spoofed XFF; prove regression tests red before fix.
 - [x] Update public security docs and respect file/size budgets.
 - [x] Run lint, typecheck, tests and build; specialist reviews and completion validator.
-- [ ] Check both staging queues, reserve and deploy on turn; Playwright sign-in, stored IP and rate-limit key checks; release.
+- [x] Check both staging queues; reserve/deploy on turn; Playwright sign-in, stored IP and rate-limit key checks.
+- [ ] Confirm requested staging release (run 43947624352).
 - [ ] Ready PR, request/wait CodeRabbit, resolve reviews, green CI, merge and production smoke.
 - [ ] Publish PR/blockers/completion to channel; update idea with PR/commit.
 
@@ -40,4 +41,12 @@ Adjacent main-layout gap: token/device/workload sign-ins invoke internalAdapter 
 
 Final pre-PR validation (2026-11-16): root lint 22/22 tasks; typecheck 36/36; build 18/18; final immutable-head root test 39/39 package tasks passed. First broad run overlapped final test/factory edits and observed old cached module against new assertions in two route tests; final unchanged-head rerun passed. All local reviewers PASS/ADDRESSED through 3deaf9155: security, Cloudflare, completion, tests, docs, constitution. Task stays active pending staging/release evidence.
 
-Sonar review: gate passed but reported S3776 complexity43 and duplicate branches in extracted heartbeat reconciliation. Split selection, backfill and DNS reconciliation into focused internal functions; preserve callback routing, IP ownership and DNS operations. Targeted heartbeat46/46 tests pass; final re-review and full validation rerun required after this delta.
+Sonar review: gate passed but reported S3776 complexity43 and duplicate branches in extracted heartbeat reconciliation. Split selection, backfill and DNS reconciliation into focused internal functions; preserve callback routing, IP ownership and DNS operations. Targeted heartbeat46/46 tests pass; final specialist re-review and full root quality rerun passed on ecd183bac; full ready CI and Sonar subsequently passed.
+
+Final candidate ecd183bac: root lint22/22, typecheck36/36, tests39/39 package tasks (API1057files/15990passing,3files/4cases skipped), build18/18; all specialist delta reviews PASS. Sonar zero open issues. Ready CI43923186178 SUCCESS including required Durable Object Workers aggregate and seven shards. CodeRabbit trusted requests43921956317/43921966225 failed startup; app explicitly posted Review skipped (comment6923900282). Policy wait ended; no findings or retries.
+
+Staging proof, 2026-11-16 20:13 UTC: both queues checked and own turn honored; exact ecd183bac deploy43936363419 plus downstream smoke SUCCESS. Playwright workload sign-in with spoofed XFF/X-Real-IP stored the edge trace's actual IP in D1, preserved hard expiry, and loaded authenticated dashboard/projects/settings (HTTP200). A malformed exchange with rotated XFF returned400 and incremented the same real-IP KV bucket; spoof-IP bucket absent. All task-owned workload sessions revoked through the ordinary smoke user's supported session endpoint, then signed out; D1 confirmed zero fixture sessions. No VMs/workspaces provisioned.
+
+Harness repairs (scratch only): Cloudflare refused attempted CF-Connecting-IP injection403, so the required live test spoofs only XFF/X-Real-IP; sign-out requires JSON body. Managed CF_TOKEN is read-only for D1, so an attempted fixture DELETE was refused without changes; cleanup used supported authenticated session revocation. These were verification harness failures, with no product changes. Release43947624352 requested; confirmation pending. Merge, production monitoring and idea completion report remain pending workflow actions.
+
+Final completion-validator re-review PASS after live staging: A/B/C/F PASS, D/E N/A, no implementation findings. Archived under invoked /do Phase4 step4; lease release, merge, production monitoring, and final coordination/idea report remain pending as explicitly listed above. This archive does not mark the SAM task complete.
