@@ -209,8 +209,12 @@ export async function listInbox(
     LEFT JOIN projects p ON p.id = ranked.project_id
     LEFT JOIN session_summaries ss ON ss.id = ranked.session_id AND ss.project_id = ranked.project_id
     LEFT JOIN tasks t ON t.id = ranked.task_id AND t.project_id = ranked.project_id
-    ${cursor ? 'WHERE (tier, stack_anchor, stack_key, created_at, sort_ref) > (?, ?, ?, ?, ?)' : ''}
-    ORDER BY tier, stack_anchor, stack_key, created_at, sort_ref
+    ${
+      cursor
+        ? 'WHERE (ranked.tier, ranked.stack_anchor, ranked.stack_key, ranked.created_at, ranked.sort_ref) > (?, ?, ?, ?, ?)'
+        : ''
+    }
+    ORDER BY ranked.tier, ranked.stack_anchor, ranked.stack_key, ranked.created_at, ranked.sort_ref
     LIMIT ?`;
   const result = await ctx.env.DATABASE.prepare(sql)
     .bind(...items.params, ...(cursor ?? []), limit + 1)
