@@ -1,5 +1,5 @@
 import { renderHook } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCommandPaletteContext } from '../../../src/hooks/useCommandPaletteContext';
 import type { SessionSummaryItem } from '../../../src/lib/api';
@@ -30,7 +30,7 @@ vi.mock('../../../src/components/NavSidebar', () => ({
 // ── Test Data ──
 
 function makeSession(
-  overrides: Partial<SessionSummaryItem & { createdAt: number }> = {},
+  overrides: Partial<SessionSummaryItem & { createdAt: number }> = {}
 ): SessionSummaryItem & { createdAt: number } {
   return {
     id: 'sess-1',
@@ -65,7 +65,7 @@ function renderContextHook(options?: {
     useCommandPaletteContext({
       chatSessions: options?.chatSessions ?? [],
       projects: options?.projects ?? defaultProjects,
-    }),
+    })
   );
   return { ...result };
 }
@@ -392,9 +392,7 @@ describe('useCommandPaletteContext', () => {
   it('does not show session actions when session belongs to wrong project', () => {
     mockPathname = '/projects/p1/chat/sess-1';
 
-    const sessions = [
-      makeSession({ id: 'sess-1', projectId: 'p2', workspaceId: 'ws-abc' }),
-    ];
+    const sessions = [makeSession({ id: 'sess-1', projectId: 'p2', workspaceId: 'ws-abc' })];
 
     const { result } = renderContextHook({ chatSessions: sessions });
     const labels = result.current.contextActions.map((a) => a.label);
