@@ -41,7 +41,7 @@ beforeEach(() => {
     '0230_publish_job_build_context.sql',
     '0231_publish_job_context_shadow.sql',
     '0242_cloudflare_build_executor.sql',
-    '0243_cloudflare_build_reservation_deletion_guard.sql',
+    '0244_cloudflare_build_reservation_deletion_guard.sql',
   ]) {
     sqlite.exec(
       readFileSync(new URL(`../../../src/db/migrations/${file}`, import.meta.url), 'utf8')
