@@ -71,7 +71,7 @@ other slices. L2 lands only the file layout, with main's current behaviour.
 - [x] Reviews: cloudflare-specialist PASS, architecture-reviewer PASS, task-completion-validator PASS (LOW notes only)
 - [ ] Staging: workspace UI (terminal + agent chat), port URL, public port, expired/missing cookie
       401 page compared with production; cleanup
-- [ ] Draft PR with hold line, `needs-human-review`; CodeRabbit via workflow dispatch; report
+- [x] Draft PR with hold line, `needs-human-review`; CodeRabbit via workflow dispatch; report
 
 ## Acceptance criteria
 
@@ -80,3 +80,9 @@ other slices. L2 lands only the file layout, with main's current behaviour.
 - Existing tests pass with at most file-path edits; entry-level tests untouched.
 - `index.ts` under 800 lines.
 - Staging behaviour for workspace, port, public port and 401 page matches main/production.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2714 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.
+Left unticked (1): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

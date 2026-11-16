@@ -120,3 +120,8 @@ Logging adds none; provider-fetch removes a tee branch.
 - PR #2749 ready for review, head `8a1c6519a1d01f447e67d15cdcbecf30214a997c`, CI 22 pass / 12 skipping / 0 fail. NOT merged: owner approves.
 - CodeRabbit: 1 Minor docs finding (deadline is a cancellation budget, not a whole-attempt bound), fixed in `8a1c6519`, thread resolved; no incremental re-review arrived.
 - Staging done and freed (root accepted strict FREE 06:36:42). Forced-failure/setting-effect check remains a reported gap (tunnel transport).
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2749 (merged 2026-11-15). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Left unticked (1): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

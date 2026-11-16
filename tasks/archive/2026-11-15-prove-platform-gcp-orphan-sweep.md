@@ -100,7 +100,7 @@ approved the extension (event 44439269) with conditions recorded in the checklis
 - [x] Staging no-regression: one natural sweep tick with unchanged platform Hetzner credential,
       zero errors, zero destroyed (no fixtures, swaps or KV/D1 writes)
 - [x] Production first-run deletion-risk read (12:01 UTC; repeat right before the approval request)
-- [ ] PR, CI, CodeRabbit request and wait, merge
+- [x] PR, CI, CodeRabbit request and wait, merge
 - [ ] Deploy Production monitored; health check; one look at the next production sweep run
 
 ## Acceptance criteria
@@ -201,3 +201,9 @@ PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS=240000, PROVIDER_ORPHAN_MIN_AGE_MS=900000 
 - Note: this runtime change is after the staging run (`445e00e85`) and the box proof; it only
   changes how a failed D1 claim lookup inside a user account is counted (failed sweep instead of
   account error). No deletion-path code changed.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2757 (merged 2026-11-15). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.
+Left unticked (1): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

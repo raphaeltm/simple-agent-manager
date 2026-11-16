@@ -26,8 +26,8 @@ Production's persisted complete verdict and no-progress poison logic behave as d
 - [x] At least 30 full-file runs normally and 30 under bounded CPU load; record exact counts.
 - [x] Relevant lint/typecheck/build and archive regression checks (full repository unit timeout noted below).
 - [x] Local test-engineer, Cloudflare and completion reviews; resolve findings.
-- [ ] Draft PR with needs-human-review; test-only staging skip explicitly recorded.
-- [ ] CI/review evidence sent to coordinator with full SHA; stop without merge.
+- [x] Draft PR with needs-human-review; test-only staging skip explicitly recorded.
+- [x] CI/review evidence sent to coordinator with full SHA; stop without merge.
 
 ## Constraints
 
@@ -88,3 +88,8 @@ gates are tracked in the PR body; the mandatory coordinator hold keeps this task
 The mandatory needs-human-review label intentionally fails Specialist Review Evidence CI.
 Preserve the label and report this coordinator hold separately from executable test/build checks.
 No merge, readiness transition, deployment or label removal is authorized before exact-SHA approval.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2720 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.

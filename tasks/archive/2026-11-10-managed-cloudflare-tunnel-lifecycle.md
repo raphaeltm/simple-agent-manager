@@ -167,3 +167,7 @@ regression run.
 - Regression coverage includes resume lookup failure, transport rollback, atomic transport
   persistence, late tunnel/DNS commits after an empty cleanup, and acknowledged POST racing
   node deletion. The lifecycle test was split into a shared fixture and focused suites.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2615 (merged 2026-11-10; this child slice landed through the parent's PR). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.

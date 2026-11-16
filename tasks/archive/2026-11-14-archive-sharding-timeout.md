@@ -13,8 +13,8 @@ The 1,205-row lifecycle case intermittently exceeds Vitest's five-second limit. 
 - [x] Run complete sharding file at least 30 times normally and 30 under bounded CPU load; report counts and timing distributions.
 - [x] Relevant lint/typecheck/tests/build and migration safety checks; specialist and task-completion reviews.
 - [ ] Production change requires coordinator-granted staging slot; test-only skips staging explicitly.
-- [ ] Draft PR, needs-human-review, green CI, CodeRabbit request/wait, exact-SHA coordinator handoff. No merge before approval of that SHA.
-- [ ] After approval, merge with --match-head-commit and monitor main CI / Deploy Production before completing SAM task.
+- [x] Draft PR, needs-human-review, green CI, CodeRabbit request/wait, exact-SHA coordinator handoff. No merge before approval of that SHA.
+- [x] After approval, merge with --match-head-commit and monitor main CI / Deploy Production before completing SAM task.
 
 ## References
 Rules 31 (migration safety), 62 (real trigger), 81 (work-bound throughput); /do workflow. Related worker resumable-cursor test must remain untouched. Use supplied SAM output branch/workspace; task record stays on this branch to preserve the coordinated main merge hold.
@@ -45,3 +45,9 @@ All three mutations repeated after the10s adjustment: removing unique seek fails
 Task-completion-validator at80316bfa0: implementation PASS (A–C/F pass, D/E N/A); evidence hashes/counts/mutations independently checked. Release completion pending; task remains active.
 
 CodeRabbit review: one minor harness reproducibility finding (missing .tmp directory on fresh checkout), fixed with recursive mkdir and verified using empty temporary working directory. Production/test input hashes unchanged; final60run evidence remains applicable. Staging recipe under coordinator discussion; all technical CI passed at e4439205c.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2724 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.
+Left unticked (1): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

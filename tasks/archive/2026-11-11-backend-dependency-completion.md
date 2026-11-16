@@ -24,8 +24,8 @@ Complete only PRs #2628, #2629, #2630, #2635, #2637 and #2639 in one coherent ca
 - [x] Full relevant lint, typecheck, tests, build; VM race/vet and four deployment-platform builds; all three Workers CI shards and aggregate.
 - [x] Local Go/security, Cloudflare/Pulumi, completion/doc/constitution specialist reviews; address findings.
 - [ ] Coordinated exact-candidate staging deployment + browser runtime tests; fresh VM heartbeat/access and cleanup.
-- [ ] Draft replacement PR links originals, exact-head CI/check URLs, residual findings, CodeRabbit request/wait evidence.
-- [ ] Publish readiness evidence; no ready/merge before coordinator's explicit PR + full-head approval.
+- [x] Draft replacement PR links originals, exact-head CI/check URLs, residual findings, CodeRabbit request/wait evidence.
+- [x] Publish readiness evidence; no ready/merge before coordinator's explicit PR + full-head approval.
 
 ## Sources
 
@@ -145,3 +145,9 @@ Coordinator conditionally authorized exactly one further ordinary GCP v4 trial,1
 - Git browsing consumes `isomorphic-git` in `packages/repo-hosting`, no longer in `apps/api`. Exact `1.44.12` supersedes the initial `1.44.11` assignment because original #2635 now targets .12. Official .11→.12 source has three changes: EOF conflict-marker newlines; packaged UMD license; Node-build SHA-1 via crypto alias. Browser implementation remains sha.js. Artifacts consumes the web HTTP adapter; package/type/bundle tests must verify compatibility. Source: https://github.com/isomorphic-git/isomorphic-git/releases/tag/v1.44.12 and its compare/commit diff.
 - Both API and extracted ProjectData test harnesses consume native SQLite. Both manifests request ^13.0.3 and both lock to reviewed 13.0.3; fresh resolver's 13.1.1 was rejected as outside this bounded update. Frozen install passes. Lockfile seeded from current main to retain unrelated versions; only requested package graphs/peer identities may change.
 - Validation and current-main/lock specialist refresh pending at this checkpoint. All earlier runtime evidence is historical. No deployment, live API lifecycle or VM allocation is authorized: same shared-capacity cleanup hold. Candidate stays DRAFT/SAM held; original six stay open until a verified replacement lands. Exact new head requires independent Shepherd review; no readiness/merge approval.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2658 (merged 2026-11-13; replaced #2628/#2629/#2630/#2635/#2637/#2639). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.
+Left unticked (1): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

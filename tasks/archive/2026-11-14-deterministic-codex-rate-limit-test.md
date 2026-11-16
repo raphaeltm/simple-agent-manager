@@ -16,7 +16,7 @@ PR #2722 CI run 43570510620, attempt 2, failed the window rollover assertion wit
 - [x] Run 30 repeated executions including boundary cases and the full file.
 - [x] Temporarily remove production rollover guard, prove regression tests fail, restore production source unchanged.
 - [x] Run affected lint/typecheck and review completion/testing/Cloudflare implications.
-- [ ] Open separate DRAFT PR plus needs-human-review and hand coordinator exact SHA; no staging for test-only change per coordinator.
+- [x] Open separate DRAFT PR plus needs-human-review and hand coordinator exact SHA; no staging for test-only change per coordinator.
 
 ## Acceptance
 
@@ -44,3 +44,8 @@ Why missed: ordinary runs within one minute pass; the test did not control the w
 Process fix: suite-local Date control and strict before/at/after boundary cases, plus the mutation proof above. No new standing instructions are needed for this localized test correction.
 
 Delivery remains in progress: draft PR plus needs-human-review, CI, trusted CodeRabbit request/wait, and coordinator exact-head approval before ready/merge. PR #2722 stays unchanged until this correction merges.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2726 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.

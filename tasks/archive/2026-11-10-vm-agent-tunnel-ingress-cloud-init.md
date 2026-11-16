@@ -105,3 +105,7 @@ Local tests here are not staging proof; the parent runs live staging E2E.
   adequate for now and left provider-level defence in depth for separate future work.
 - Live staging proof (real VM, connector, firewall evidence) is owned by parent task
   `01M719ZRT6MJX696B9FH8TBWX9`.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2615 (merged 2026-11-10; this child slice landed through the parent's PR). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.

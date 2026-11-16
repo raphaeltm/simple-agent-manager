@@ -43,3 +43,8 @@ Full lint (22 tasks), typecheck (36 tasks), test (39 tasks), build (18 tasks) pa
 API: 1014 files / 15178 tests pass, 3 files / 4 tests skipped.
 Shipped-value suites: 13 pass; real Worker drain-relief: 17 pass.
 Local reviews: Cloudflare/environment/constitution PASS; completion/docs/test findings addressed.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2742 (merged 2026-11-15). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Left unticked (6): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

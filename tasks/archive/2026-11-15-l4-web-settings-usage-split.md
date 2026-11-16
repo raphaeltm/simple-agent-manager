@@ -37,8 +37,8 @@ target shape. Pure move: no behaviour change. The coordinator merges, not the au
 - [x] Playwright visual comparison with main at 375 px and 1280 px (`.tmp/l4/compare.spec.ts`: 28/28 PNGs byte-identical, request logs identical)
 - [x] ui-ux-specialist and task-completion-validator reviews (both PASS)
 - [x] Staging deploy and live check of Settings > Usage (Deploy Staging 43666884157 on d109a0c6d; before/after API JSON and page text identical, mobile screenshots byte-identical, 0 console errors)
-- [ ] CodeRabbit requested once ready; wait ~15 min (silence does not block)
-- [ ] PR ready for review. DO NOT MERGE: the coordinator (task 01M7AF82KG9C78WAABTG3V1MN1) verifies and merges
+- [x] CodeRabbit requested once ready; wait ~15 min (silence does not block)
+- [x] PR ready for review. DO NOT MERGE: the coordinator (task 01M7AF82KG9C78WAABTG3V1MN1) verifies and merges
 
 ## Acceptance Criteria
 
@@ -59,3 +59,8 @@ target shape. Pure move: no behaviour change. The coordinator merges, not the au
 
 - `AiUsageSection` hides loaded data during a period-switch refetch (`data && !loading`), rule 48.
 - Hand-rolled fetch hooks instead of TanStack Query in both sections.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2746 (merged 2026-11-15). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.

@@ -151,3 +151,7 @@ The 2026-11-10 state-machine audit (Library `/engineering/research/state-machine
   - The `deleting` node status itself was not reached on staging; it is covered by route tests on a real SQL engine.
 - Cleanup: all D3/D8 workspaces and chats were stopped or deleted, both deployment environments were deleted, and all four VMs (three deployment nodes and one workspace node) were deleted. Tasks 01M75A34RBDASNT5SWTCDYTPN5 and 01M75VBN1QASC4K70M6V34E12A were cancelled. "staging free" was published at 16:16 and 18:12 UTC.
 - Pre-existing gap found: `tasks/backlog/2026-11-11-wake-start-offers-steer.md`.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2627 (merged 2026-11-11). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.

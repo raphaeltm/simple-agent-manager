@@ -92,7 +92,7 @@ the workload identity (OIDC) token SAM already issues through `exec_with_secrets
 - [x] Security auditor + other reviewers
 - [ ] Staging: configure trust, exchange real production token, Playwright as smoke user,
       wrong-audience rejection; confirm production has no configuration
-- [ ] Draft PR with threat model and "When this lands on the self-host branch"
+- [x] Draft PR with threat model and "When this lands on the self-host branch"
 
 - [x] Agent sign-in sessions cannot mint longer-lived credentials (PAT, device approval, connector consent, BetterAuth writes except sign-out) — security review HIGH
 - [x] Optional `agentProfileId` pin; configurable JWKS timeout; JWKS cache max 1 h
@@ -145,3 +145,9 @@ Residuals filed/flagged for Raphaël:
   session is read by later runs; not enforceable route by route.
 - `tasks/backlog/2026-11-11-mcp-connection-url-change-keeps-stored-secret.md` (pre-existing).
 - Old VM agents ignore `sessionNotAfter` until nodes rotate.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2649 (merged 2026-11-11). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.
+Left unticked (1): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

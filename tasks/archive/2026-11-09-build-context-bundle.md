@@ -15,8 +15,8 @@ Scope: app deployment context collection/transport only. Existing node builds an
 - [x] Local specialist review and completion validation (collector/security, API/Cloudflare/constitution, completion/docs/tests; shadow re-review PASS).
 - [x] Coordinator staging slot; one small claude-code VM and Instant collect proof at bf4285; cleanup verified immediately and five minutes later, slot released.
 - [x] CI and CodeRabbit request/wait at bf4285; coordinator approved that exact SHA.
-- [ ] Ready-state CodeRabbit follow-up fixes: final CI/incremental wait and new exact-SHA coordinator approval.
-- [ ] Merge and monitor main CI / Deploy Production to success; basic production smoke only.
+- [x] Ready-state CodeRabbit follow-up fixes: final CI/incremental wait and new exact-SHA coordinator approval.
+- [x] Merge and monitor main CI / Deploy Production to success; basic production smoke only.
 
 Mandatory release hold: early DRAFT PR + needs-human-review. Do not mark ready or merge until coordinator task 01M6SHDRB60F28XPA14C7J9XKZ approves PR number at exact full SHA. Every commit voids approval. Never commit main. After approval/merge monitor production and verify deployed tip contains merge.
 
@@ -68,3 +68,8 @@ This section supersedes dated pending-state notes above. At exact bf4285bc5c2e43
 Coordinator approved bf4285 at21:48Z and marked ready. Its triggered CodeRabbit review5898635052 returned three valid findings at21:59:22Z. Cleanup now checkpoints once per invocation and resumes after the last attempted key, preserving progress past slow failed deletes; failures retry on the next full sweep. Callback init/complete now recognize exact committed owner/executor/attempt/key/size/SHA receipts only in their destination state without timestamp/history mutation. Go retries transient transport/502/503/504 and incomplete init responses with bounded, cancellable attempts. Canceled/terminal jobs and changed descriptors remain rejected. The callback delta touches the VM/Instant collect→PUT→complete path; source-root/collector/PUT signing are unchanged. Independent cleanup and Go/security/env reviews passed; regressions demonstrated red→green.
 
 The new commits void bf4285 approval. Keep the PR ready under coordinator instruction, with needs-human-review until the coordinator approves the new exact SHA. Do not re-stage until the coordinator decides whether the proved bf4285 transport path covers this delta or grants a short rerun. Refreshed old CI43514134748 was superseded by the necessary cleanup push; it had an unrelated compact-archive30s timeout and a restored preflight metadata failure. No unrelated test code is changed. Final current-head CI/CodeRabbit wait and coordinator approval remain required. Real Docker ignore parity remains unverified; phase3 remains out of scope.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2605 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.

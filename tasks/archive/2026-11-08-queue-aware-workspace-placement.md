@@ -269,3 +269,8 @@ F7 tests:
       task-completion-validator PASS, test-engineer HIGH fixed (rebuild-from-running clock reset now
       has a real-SQL route test, proven red without it)
 - [ ] Staging: a queued build on one node, past the old 30-minute mark if bounded, plus cleanup
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2600 (merged 2026-11-09). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Left unticked (1): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

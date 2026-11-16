@@ -83,7 +83,7 @@ re-save today would strand.
       the release from D1.
 - [x] Docs: architecture/security or capacity docs that describe provenance and credential
       re-save.
-- [ ] Rebase on PR #2715 once merged.
+- [x] Rebase on PR #2715 once merged.
 
 ## Tests
 
@@ -153,3 +153,9 @@ owner-credential fallback can delete it (security M2, cloudflare HIGH).
 ## Notes
 
 - Task file kept on the branch rather than pushed to main.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2718 (merged 2026-11-14, after sibling #2715). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.
+Left unticked (4): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

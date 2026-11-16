@@ -22,8 +22,8 @@ The Test job runs Turbo test:coverage, which launches package test processes who
 - [x] Run relevant lint, typecheck, build and broader tests.
 - [x] Local specialist and task-completion reviews; address findings.
 - [x] Test/config only: skip staging and state that in PR; no production archive changes.
-- [ ] Push each unit; create separate DRAFT PR with needs-human-review; CI plus trusted CodeRabbit request and wait.
-- [ ] Send PR URL, full SHA and gate summary to coordinator; STOP until approval of that exact SHA.
+- [x] Push each unit; create separate DRAFT PR with needs-human-review; CI plus trusted CodeRabbit request and wait.
+- [x] Send PR URL, full SHA and gate summary to coordinator; STOP until approval of that exact SHA.
 
 ## Release constraints
 
@@ -60,3 +60,8 @@ The automatic review after approval found one minor evidence-harness interruptio
 ### Incremental review simplification
 
 Review5905726902 identified stale timing disclosure and descendant-cleanup limits in the temporary repeat helper. At the coordinator's explicit direction, remove repeat-files.py from the PR and retain recorded results JSON plus a concise README procedure. README now includes completed middle Test jobs25:27/23:03/34:11 (median25:27, latest greater than serial32:55), separately identifies canceled partial attempts, and avoids claiming stable7:28 savings. CI configuration and both test sources remain byte-identical to a6f8ad869d56857bbc72d096452f9a5a97580ee3. This new evidence-only head needs CI, one incremental CodeRabbit request/wait, and renewed exact-SHA approval. Staging remains skipped as authorized. After merge, track the next three main CI Test durations and flag median above about30minutes.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2728 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.

@@ -43,7 +43,7 @@ keeps the later self-host behaviour slices small.
 - [x] local gates: build order, typecheck, check:fast, api + ai-proxy unit tests, Workers tests touching these modules, file sizes, ast-checks, boundary rules
 - [x] reviews: architecture-reviewer, task-completion-validator, cloudflare-specialist (agent-loop runs inside SamSession/ProjectAgent DOs)
 - [x] staging: read-aloud audio, SAM agent chat, budget/usage page
-- [ ] draft PR, CodeRabbit request via workflow dispatch, report to coordinator
+- [x] draft PR, CodeRabbit request via workflow dispatch, report to coordinator
 
 ## Acceptance criteria
 
@@ -78,3 +78,8 @@ keeps the later self-host behaviour slices small.
   synthesize 200 + audio/mpeg 840,960 B, player 0:03/2:20. `/sam` operator page not exercised (SAM
   disabled for the shared smoke user; it does not use runAgentLoop). VM node deleted, D1 audit 0 live
   nodes; staging FREE 15:43Z.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2733 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.

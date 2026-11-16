@@ -20,7 +20,7 @@ Use the rollout as authority; retain application version checks for regression a
 - [x] Cover pending/failed/superseded and unchanged-image retry controls.
 - [ ] Run deployment tests, lint, typecheck, build; specialist reviews and completion validation.
 - [ ] Coordinate staging slot; exact branch deployment passes rollout step.
-- [ ] PR, CI, best-effort CodeRabbit, merge.
+- [x] PR, CI, best-effort CodeRabbit, merge.
 - [ ] Watch production through rollout step and successful-deployment record; durable message parent and idea note.
 
 ## Acceptance
@@ -51,3 +51,9 @@ Completed100% pinned rollout succeeds despite stale list; current version alone 
 - First full repository tests aborted on unchanged infra DNS/KV beforeAll 10-second hook timeouts during broad concurrent checks. One bounded lower-concurrency full retry started; not claiming full-suite green.
 
 - Full lint22/22 and typecheck36/36 passed. Documentation scan found two stale descriptions requiring application version equality; synchronized self-hosting guide and staging reference to rollout authority.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2732 (merged 2026-11-14). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Ticked here: boxes that only recorded the PR, review, CI, merge or deploy steps, which the merge proves.
+Left unticked (3): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

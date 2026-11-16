@@ -34,3 +34,8 @@ motion, shipped without waiting for review.
 - [x] `/brand/` builds and renders on desktop and mobile with no overflow and no serious axe violations
 - [x] Not linked from anywhere and not indexed
 - [ ] Deployed and verified on staging, then production
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2652 (merged 2026-11-11), follow-up #2656. Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Left unticked (1): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

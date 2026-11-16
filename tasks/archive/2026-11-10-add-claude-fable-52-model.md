@@ -72,3 +72,8 @@ On the final 0.102.0 / 2.1.321 pins:
 
 Skipped at Raphaël's explicit request ("Skip staging if possible"). Verification happens in
 production after deploy.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2614 (merged 2026-11-10). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Left unticked (2): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

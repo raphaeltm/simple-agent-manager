@@ -62,3 +62,8 @@ API reported email-only sign-in, and the emailed code arrived. Raphaël's two pr
   cold load and swapped the whole app for its spinner. A refetch after a confirmed signed-out answer
   is now background revalidation. The code step also survives a full tab reload (address only, five
   minutes, sessionStorage).
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2597 (merged 2026-11-09). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Left unticked (2): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

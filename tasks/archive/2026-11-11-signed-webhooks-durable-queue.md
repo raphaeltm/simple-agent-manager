@@ -229,3 +229,8 @@ extra field mapping and per-automation limits stay out of scope.
 - Idea `01M75HV6542HC5D1VNQ4SGT6PE`; Library `/engineering/research/inbound-webhooks-signed-providers-design.md`
 - `.claude/rules/13-staging-verification.md`, `apps/api/.claude/rules/47-control-loop-io-budget.md`,
   `packages/shared/.claude/rules/79-new-enum-values-audit-every-denylist.md`
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2664 (merged 2026-11-12). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Left unticked (7): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.

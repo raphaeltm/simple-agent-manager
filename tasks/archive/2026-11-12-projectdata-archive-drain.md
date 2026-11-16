@@ -514,3 +514,8 @@ DEFAULT 1` plus a partial index. The pass selects only projects with a flagged f
   (run 43430902403).
 - Recovery gap during the provider pause (worktree outside the primary checkout lost): idea
   `01M7A9VY2A3TPGEA5XV9G9G8BT`.
+
+## Reconciliation (2026-11-16)
+
+Archived by the weekly queue reconciliation: the work shipped in #2700 (merged 2026-11-12) and #2702 (merged 2026-11-13). Production deploys have succeeded since (latest successful Deploy Production at `a0e3baa96`, 2026-11-16 05:24 UTC), so the merged change is live.
+Left unticked (5): verification or follow-up boxes this reconciliation could not confirm from the file alone. Check the PR body for the staging evidence; any genuinely open remainder belongs in a backlog file or the linked idea, not here.
