@@ -24,24 +24,24 @@ Slice A (PR #2776) shipped the inbox backend: one list of every ask an agent mak
 
 ## Checklist
 
-- [ ] API client `lib/api/inbox.ts` + query options `lib/query-options/inbox.ts` (identity-scoped keys, focus refetch, no polling)
-- [ ] Hooks: `useInboxCount`, `useInboxList` (infinite), `useInboxItem`; socket `notification.new`/`updated` invalidates inbox queries
-- [ ] Split `PermissionOptions` (exported, inline/pinned layout) out of `AcpPermissionCard`; chat card unchanged in behaviour
-- [ ] Split `ApprovalDecisionButtons` out of `ApprovalItem`; Admin + chat card unchanged
-- [ ] `AttentionAnswerControls`: injectable submit, "Type a different answer" beside options, radio list + pinned Send above five options, pinned layout
-- [ ] Inbox row, chip row (Needs you, Blocking, Tasks, Reviews, Updates; Archived in ⋯ menu; active chip scrolls into view), stacks, empty state, Updates list
-- [ ] Item view: meta line, title, reason, link chips, collapsed Context, pinned controls per answer spec, Archive + Open chat in top bar, previous/next, stack counter
-- [ ] Auto-advance after answer with one-line receipt; stale item closes itself; failed answer keeps item with error
-- [ ] Archive with Undo window, then send; pending archive flushed on navigation/unmount/pagehide (keepalive)
-- [ ] Pages `/inbox` and `/projects/:id/inbox` (lazy, full-bleed); phone list → item full screen; desktop list beside item
-- [ ] Nav: Inbox in global nav and project nav (replaces project Notifications) with counts, desktop and phone drawer; command palette entry
-- [ ] Inbox icon in the bell slot: desktop popover with safe one-tap answers + Open inbox; phone link to page
-- [ ] Remove NotificationCenter, NotificationQuestionDialog (+loader), NotificationItem, attention-request, ProjectNotifications; redirect `/projects/:id/notifications`
-- [ ] Unit/behavioural tests (answer each kind, archive with/without Undo, failed answer, stale item, last-of-stack → next stack, last overall → empty, nav counts)
-- [ ] Rule 82: typed chat cards still render for every harness after the split
+- [x] API client `lib/api/inbox.ts` + query options `lib/query-options/inbox.ts` (identity-scoped keys, focus refetch, no polling)
+- [x] Hooks: `useInboxCount`, `useInboxList` (infinite), `useInboxItem`; socket `notification.new`/`updated` invalidates inbox queries
+- [x] Split `PermissionOptions` (exported, inline/pinned layout) out of `AcpPermissionCard`; chat card unchanged in behaviour
+- [x] Split `ApprovalDecisionButtons` out of `ApprovalItem`; Admin + chat card unchanged
+- [x] `AttentionAnswerControls`: injectable submit, "Type a different answer" beside options, radio list + pinned Send above five options, pinned layout
+- [x] Inbox row, chip row (Needs you, Blocking, Tasks, Reviews, Updates; Archived in ⋯ menu; active chip scrolls into view), stacks, empty state, Updates list
+- [x] Item view: meta line, title, reason, link chips, collapsed Context, pinned controls per answer spec, Archive + Open chat in top bar, previous/next, stack counter
+- [x] Auto-advance after answer with one-line receipt; stale item closes itself; failed answer keeps item with error
+- [x] Archive with Undo window, then send; pending archive flushed on navigation/unmount/pagehide (keepalive)
+- [x] Pages `/inbox` and `/projects/:id/inbox` (lazy, full-bleed); phone list → item full screen; desktop list beside item
+- [x] Nav: Inbox in global nav and project nav (replaces project Notifications) with counts, desktop and phone drawer; command palette entry
+- [x] Inbox icon in the bell slot: desktop popover with safe one-tap answers + Open inbox; phone link to page
+- [x] Remove NotificationCenter, NotificationQuestionDialog (+loader), NotificationItem, attention-request, ProjectNotifications; redirect `/projects/:id/notifications`
+- [x] Unit/behavioural tests (answer each kind, archive with/without Undo, failed answer, stale item, last-of-stack → next stack, last overall → empty, nav counts)
+- [x] Rule 82: typed chat cards still render for every harness after the split
 - [ ] Playwright audit 375/1280 with stress data; screenshots posted on PR
-- [ ] Docs: notifications/chat-features/collaboration guides; docs screenshot spec
-- [ ] Interface handoff on feature.inbox
+- [x] Docs: notifications/chat-features/collaboration guides; docs screenshot spec
+- [x] Interface handoff on feature.inbox
 
 ## Acceptance criteria
 
@@ -53,3 +53,10 @@ Slice A (PR #2776) shipped the inbox backend: one list of every ask an agent mak
 - Refetches never unmount the list or the open item.
 - Old bell panel and question dialog removed; push, preferences and settings page stay.
 - Staging: real agent `request_human_input` + `request_secret`, one answered and one archived from the inbox at phone and desktop sizes, agent receives both.
+
+## Implementation notes
+
+- PR #2779. The notification socket moved into `AppShell` (one per app, also in Focus mode, where the sidebar hides the icon) and invalidates inbox queries on `notification.new`/`notification.updated`.
+- Answer/archive hand-over: `useInboxWalk` records where an answered item handed over to (`handedOver`) so the render between hiding the item and the URL update never shows an empty item pane.
+- Secrets keep the existing secret-request routes through `SecretRequestForm` (same record, value never enters a query/mutation cache); everything else answers through the slice A inbox routes.
+- Guards proven discriminating: removing the unmount flush reddens "a pending archive is still sent when the page unmounts"; disabling the stale check reddens "closes an item that was answered elsewhere when it opens".
