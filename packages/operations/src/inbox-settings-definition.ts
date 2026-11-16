@@ -63,6 +63,28 @@ export const INBOX_SETTINGS = [
     description: 'Characters of a typed inbox answer or comment.',
     range: { min: 100, max: 20_000 },
   },
+  // System error items (slice E, `inbox-error-core.ts`).
+  {
+    name: 'inbox.automationFailureThreshold',
+    defaultValue: 2,
+    description:
+      'Failed runs in a row that turn an automation into an inbox error item for its owner. The item closes when a run succeeds or the automation is resumed.',
+    range: { min: 1, max: 20 },
+  },
+  {
+    name: 'inbox.errorSweepBatchSize',
+    defaultValue: 10,
+    description:
+      'Error items one step of the five-minute sweep files at most (failed tasks, automations, lost answers). Each costs a few database writes.',
+    range: { min: 1, max: 50 },
+  },
+  {
+    name: 'inbox.errorLookbackMinutes',
+    defaultValue: 30,
+    description:
+      'How far back the sweep looks for failed tasks that have no inbox error item yet. A task that failed longer ago than this is not filed.',
+    range: { min: 5, max: 1_440 },
+  },
   {
     name: 'inbox.noticeRetryMinutes',
     defaultValue: 60,

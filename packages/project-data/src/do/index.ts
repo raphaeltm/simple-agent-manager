@@ -1016,11 +1016,19 @@ export class ProjectData extends DurableObject<Env> {
     messageId: string | null,
     messageCreatedAt: number
   ): Promise<number> {
-    const closed = await questionAsks.closeQuestionAsksForHumanMessage(
-      this.env,
-      { projectId: this.getProjectId(), sessionId, messageId, messageCreatedAt },
-      (type, payload, targetSessionId) => this.broadcastEvent(type, payload, targetSessionId)
-    );
+    // The person is back in the chat: its open questions are answered and its system error
+    // items (inbox slice E) close too. Two independent D1 writes, sent together.
+    const [closed] = await Promise.all([
+      questionAsks.closeQuestionAsksForHumanMessage(
+        this.env,
+        { projectId: this.getProjectId(), sessionId, messageId, messageCreatedAt },
+        (type, payload, targetSessionId) => this.broadcastEvent(type, payload, targetSessionId)
+      ),
+      questionAsks.closeChatErrorAsksForHumanMessage(this.env, {
+        projectId: this.getProjectId(),
+        sessionId,
+      }),
+    ]);
     if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
     return closed;
   }

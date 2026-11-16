@@ -88,6 +88,8 @@ describe('model-catalog', () => {
         expect.arrayContaining([
           'mistral-medium-latest',
           'zai-glm-5-3',
+          'zai-glm-5-3-flash',
+          'mistral-large-4-0',
           'mistral-small-latest',
           'mistral-large-latest',
           'codestral-latest',
@@ -95,6 +97,9 @@ describe('model-catalog', () => {
           'ministral-8b-latest',
           'ministral-3b-latest',
         ])
+      );
+      expect(allModels.find((model) => model.id === 'mistral-large-latest')?.name).toBe(
+        'Mistral Large (latest)'
       );
       expect(isKnownModel('mistral-vibe', 'zai-glm-5-2')).toBe(false);
       expect(allModels.find((model) => model.id === 'mistral-medium-latest')).toMatchObject({
@@ -115,6 +120,8 @@ describe('model-catalog', () => {
       expect(groups.length).toBeGreaterThanOrEqual(1);
       const allModels = groups.flatMap((g) => g.models);
       expect(groups[0]?.models).toEqual([
+        { id: 'gemini-4-carbon', name: 'Gemini 4 Carbon', group: 'Gemini 4 (Latest)' },
+        { id: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen', group: 'Gemini 4 (Latest)' },
         {
           id: 'gemini-4-argon',
           name: 'Gemini 4 Argon',
@@ -160,6 +167,12 @@ describe('model-catalog', () => {
         'gemini-3.5-flash',
         'gemini-3.1-pro',
       ]);
+    });
+
+    it('labels Sonnet 4.5 with its announced retirement date', () => {
+      expect(
+        getModelsForAgent('claude-code').find((m) => m.id === 'claude-sonnet-4-5-20250929')?.name
+      ).toBe('Claude Sonnet 4.5 (Deprecated; retires 2026-11-30)');
     });
 
     it('returns empty array for unknown agent type', () => {

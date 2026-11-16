@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router';
 
 import { getTaskSessions } from '../lib/api';
+import { projectChatPath, projectPath } from '../lib/project-routes';
 import { useProjectContext } from './ProjectContext';
 
 /**
@@ -45,9 +46,9 @@ export function TaskRedirect() {
     );
   }
 
-  const target = sessionId
-    ? `/projects/${projectId}/chat/${sessionId}`
-    : `/projects/${projectId}/chat`;
+  // A task with a chat opens that chat; one without (never started) opens its project's
+  // Overview, where its failure or Running now row is (inbox slice F2).
+  const target = sessionId ? projectChatPath(projectId, sessionId) : projectPath(projectId);
 
   return <Navigate to={target} replace />;
 }

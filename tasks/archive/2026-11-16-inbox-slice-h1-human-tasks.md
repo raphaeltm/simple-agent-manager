@@ -46,7 +46,7 @@ non-blocking work to a person and be woken when the person acts. A human task is
 
 ## Design
 
-- **Storage (D1 0253, additive):** `ask_activity` lifecycle rows (created, step_checked,
+- **Storage (D1 0254, additive):** `ask_activity` lifecycle rows (created, step_checked,
   step_unchecked, claimed, reassigned, done, reopened, archived, cancelled, commented) and
   `asks.steps_checked_json`. Discussion is NOT in D1: it is the anchored comment core with anchor
   kind `inbox_item` (DO migration 081, column `inbox_item_id`).
@@ -75,7 +75,7 @@ non-blocking work to a person and be woken when the person acts. A human task is
 ## Implementation checklist
 
 - [x] Shared types/constants: task detail, activity, event source/types, anchor kind `inbox_item`
-- [x] D1 migration 0253 (`ask_activity`, `asks.steps_checked_json`); schema.ts
+- [x] D1 migration 0254 (`ask_activity`, `asks.steps_checked_json`); schema.ts
 - [x] DO migration 081 + anchor scope/rules/store/adapter for `inbox_item` + Comments inbox
 - [x] Wake policy: `inbox_task_comment` trigger + non-throwing API decision
 - [x] Event visibility guard for `sam.inbox`; inbox wake prompt names author + teammate input

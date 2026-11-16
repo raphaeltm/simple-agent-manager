@@ -159,7 +159,11 @@ beforeEach(() => {
   );
   applySqliteMigration(
     sqlite,
-    new URL('../../../src/db/migrations/0253_ask_activity_human_tasks.sql', import.meta.url)
+    new URL('../../../src/db/migrations/0248_asks_system_errors.sql', import.meta.url)
+  );
+  applySqliteMigration(
+    sqlite,
+    new URL('../../../src/db/migrations/0254_ask_activity_human_tasks.sql', import.meta.url)
   );
   for (const [id, role] of [
     ['owner', 'user'],

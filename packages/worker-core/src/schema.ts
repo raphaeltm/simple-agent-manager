@@ -828,8 +828,10 @@ export const asks = sqliteTable(
     escalationCount: integer('escalation_count').notNull().default(0),
     /** Hard limit on how long an undelivered ask may be extended. */
     maxExpiresAt: integer('max_expires_at'),
-    /** Human tasks: JSON array of ticked step indexes (0253); NULL when none is ticked. */
+    /** Human tasks: JSON array of ticked step indexes (0254); NULL when none is ticked. */
     stepsCheckedJson: text('steps_checked_json'),
+    /** Kind 'error' (slice E, migration 0248): times the thing failed while the item was open. */
+    failureCount: integer('failure_count').notNull().default(1),
   },
   (table) => ({
     openEscalationIdx: index('idx_asks_open_escalation')
@@ -855,6 +857,13 @@ export const asks = sqliteTable(
     unnotifiedIdx: index('idx_asks_unnotified')
       .on(table.resolvedAt)
       .where(sql`notified_at IS NULL AND status IN ('answered', 'done', 'archived', 'expired')`),
+    // System error items (migration 0248).
+    errorTaskIdx: index('idx_asks_error_task')
+      .on(table.sourceTaskId, table.createdAt)
+      .where(sql`kind = 'error'`),
+    errorKeyIdx: index('idx_asks_error_key')
+      .on(table.dedupeKey)
+      .where(sql`kind = 'error' AND dedupe_key IS NOT NULL`),
     projectDedupeIdx: uniqueIndex('idx_asks_project_dedupe')
       .on(table.projectId, table.dedupeKey)
       .where(sql`dedupe_key IS NOT NULL`),
@@ -863,7 +872,7 @@ export const asks = sqliteTable(
 
 export type AskRow = typeof asks.$inferSelect;
 
-/** Lifecycle of an ask, one row per change (human tasks, migration 0253). No discussion text. */
+/** Lifecycle of an ask, one row per change (human tasks, migration 0254). No discussion text. */
 export const askActivity = sqliteTable(
   'ask_activity',
   {
@@ -1325,6 +1334,10 @@ export const tasks = sqliteTable(
       table.priority,
       table.updatedAt
     ),
+    // Inbox system error sweep (migration 0248): recently failed tasks.
+    failedUpdatedIdx: index('idx_tasks_failed_updated')
+      .on(table.updatedAt)
+      .where(sql`status = 'failed'`),
     activeUpdatedIdIdx: index('idx_tasks_active_updated_id')
       .on(table.updatedAt, table.id)
       .where(sql`status IN ('queued', 'delegated', 'in_progress')`),
@@ -3505,6 +3518,14 @@ export const triggerExecutions = sqliteTable(
       .on(table.triggerId, table.status)
       .where(sql`status IN ('queued', 'running')`),
     triggerIdIdx: index('idx_trigger_executions_trigger_id').on(table.triggerId),
+    // Inbox system error sweep (migration 0248): recently failed runs.
+    failedCompletedIdx: index('idx_trigger_executions_failed_completed')
+      .on(table.completedAt)
+      .where(sql`status = 'failed'`),
+    // Inbox automation sweep (migration 0248): an automation's newest finished run.
+    finishedSequenceIdx: index('idx_trigger_executions_trigger_finished')
+      .on(table.triggerId, table.sequenceNumber)
+      .where(sql`status IN ('completed', 'failed')`),
     queueExpiryIdx: index('idx_trigger_queue_expiry')
       .on(table.queueExpiresAt)
       .where(sql`status IN ('waiting','queued')`),

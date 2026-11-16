@@ -21,6 +21,7 @@ import type {
   CredentialLimitsResponse,
   InboxItemContext,
   InboxLink,
+  InstallationLifecycleLatency,
   NotificationResponse,
   NotificationType,
   SessionStateSnapshot,
@@ -36,6 +37,8 @@ import type { ConnectorReadSettingName } from './connector-read-settings-definit
 import type { InboxSettingName } from './inbox-settings-definition';
 import type { OperationInboxTaskPort } from './inbox-task-ports';
 import type { InsightsFlowSettingName } from './insights-flow-settings';
+import type { InsightsInstallationSettingName } from './insights-installation-settings-definition';
+import type { InsightsPageSettingName } from './insights-page-settings';
 import type { InsightsReceiptSettingName } from './insights-receipt-settings-definition';
 import type {
   AgentActivityTask,
@@ -88,7 +91,8 @@ export type OperationSettingName =
   | 'collaboration.ideaUpdatePageSize'
   | InboxSettingName
   | InsightsReceiptSettingName
-  | InsightsFlowSettingName;
+  | InsightsPageSettingName
+  | InsightsInstallationSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;
 
@@ -393,6 +397,15 @@ export interface OperationMissionPort {
   startOrchestration(projectId: string, missionId: string): Promise<void>;
 }
 
+/**
+ * Lifecycle latency over a time range, for Admin Health & cost
+ * (`apps/api/src/services/lifecycle-latency/range-report.ts`). Owned by the lifecycle latency
+ * service, which holds the watched states, their budgets and the percentile code.
+ */
+export interface OperationLifecycleLatencyPort {
+  rangeReport(input: { sinceMs: number; untilMs: number }): Promise<InstallationLifecycleLatency>;
+}
+
 /** A question or permission held as a ProjectData attention marker, with the reader's access. */
 export interface InboxAttentionMarker {
   id: string;
@@ -487,6 +500,22 @@ export interface OperationInboxPort {
    */
   notifyAsk(row: InboxAskNoticeRow, outcome: InboxAskNoticeOutcome): Promise<boolean>;
   /**
+   * A system error item's Retry: the existing task retry (`retrySubtask`), with the person's
+   * authority. Throws an `OperationError` when it is refused.
+   */
+  retryTask(userId: string, projectId: string, taskId: string): Promise<{ newTaskId: string }>;
+  /**
+   * A system error item's Wake: the existing chat wake (`authorizeAgentWake`, then
+   * `ensureSessionRecovery`). Throws an `OperationError` when it is refused.
+   */
+  wakeChat(userId: string, projectId: string, sessionId: string): Promise<void>;
+  /**
+   * A system error item's Resume: a paused automation back to active, the same status change
+   * the trigger PATCH route makes (`triggerStatusUpdates`, resetting the failure window). Needs
+   * `task:write`; throws an `OperationError` when it is refused or the trigger is not paused.
+   */
+  resumeTrigger(userId: string, projectId: string, triggerId: string): Promise<void>;
+  /**
    * An agent filed an ask (`fileAgentAsk`): a blocking question pauses its chat live and pushes
    * to the person, as `request_human_input` always did; other items reach the person's inbox.
    * Never throws; false when no notification was scheduled.
@@ -535,4 +564,5 @@ export interface OperationPorts {
   account: OperationAccountPort;
   workspaces: OperationWorkspacePort;
   missions: OperationMissionPort;
+  lifecycleLatency: OperationLifecycleLatencyPort;
 }

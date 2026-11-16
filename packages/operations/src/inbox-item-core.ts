@@ -54,6 +54,7 @@ async function readStoreRow(
           SELECT 'ask' AS store, a.id AS item_id, NULL AS marker_id, a.project_id,
             a.source_session_id AS session_id, a.source_task_id AS task_id, a.kind, a.blocking,
             a.title, a.body_md AS body, a.status, a.created_at, a.expires_at, a.due_at,
+            a.updated_at, a.failure_count,
             a.answer_spec_json AS extra_json, a.links_json,
             CASE WHEN a.status = 'open' AND pm.role IN (${writers.sql})
               AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?)

@@ -1,0 +1,52 @@
+# L5b: trusted client IP and constant-time comparison
+
+Task: 01M7JNC96XV9DTRFV9TK14GEDP. Landing idea: 01M72M9AEB933ZY8269D376DKC.
+
+## Problem and scope
+Land only the integration branch's shared inbound IP and comparison helpers onto fresh main, porting callers by hand. No cherry-picks, self-host runtime, proxy settings, or unrelated branch changes. Coordinator authorizes merge after all /do gates.
+
+## Preflight and findings
+Classification: security-sensitive-change, business-logic-change, cross-component-change, docs-sync-change.
+Main 10ec60b9c has 12 explicit IP consuming paths (13 raw header reads), plus BetterAuth's default IP resolver. Some callers fall back to untrusted XFF. The branch helper trusts only ingress-overwritten CF-Connecting-IP, validates literals, and returns null on absence/malformed input, causing rate limits to share unknown. Trusted proxies must overwrite this same header from the peer and prevent direct ingress bypass; no forwarding-header mode is added.
+The branch's constant-time helper extracts the existing setup-token comparator. Audit all touched files for other secret equality checks. Main moved provider-specific code into packages; enumerate current apps and packages rather than copy old call-site files.
+Rule 74: trusted peer attribution is the condition; header presence alone is not evidence of trusted ingress. CF overwrites the header; another ingress must enforce equivalent ownership. XFF/X-Real-IP diverge because callers can send them.
+Rule 77 incident: mocked BetterAuth missed an OAuth hook contract. Use real BetterAuth to assert persisted session IP under spoofed forwarding headers, including a failure control.
+Data flow: request -> clientIpFromHeaders -> rate-limit key / diagnostics / node heartbeat / VM-hop XFF; createAuth advanced.ipAddress -> BetterAuth session persistence. Setup token -> constantTimeEqual -> authorization result.
+Documentation: architecture/security.md header contract and missing-IP behavior. Constitution X/XI/XIII: reuse branch helpers, no tunables/dependencies added, missing trusted IP fails closed.
+
+## Implementation checklist
+- [x] Copy four specified helper/test files from origin/sam/selfhost-pass-2 without history.
+- [x] Port every current IP reader and BetterAuth ipAddressHeaders by hand.
+- [x] Extract setup-token comparison; audit touched files and centralize additional secret/token equality.
+- [x] Add constant-time tests: UTF-8, unequal lengths, zero bytes, differences.
+- [x] Test Cloudflare spoof rejection, trusted ingress, malformed/missing input, and reader enumeration including packages.
+- [x] Test real BetterAuth persistence and rate limiting with spoofed XFF; prove regression tests red before fix.
+- [x] Update public security docs and respect file/size budgets.
+- [x] Run lint, typecheck, tests and build; specialist reviews and completion validator.
+- [x] Check both staging queues; reserve/deploy on turn; Playwright sign-in, stored IP and rate-limit key checks.
+- [ ] Confirm requested staging release (run 43947624352).
+- [ ] Ready PR, request/wait CodeRabbit, resolve reviews, green CI, merge and production smoke.
+- [ ] Publish PR/blockers/completion to channel; update idea with PR/commit.
+
+## Acceptance criteria
+Valid Cloudflare IP strings remain unchanged; XFF/X-Real-IP never supply client IP. Trusted ingress's overwritten CF header resolves correctly. Every explicit reader uses the helper; BetterAuth trusts the same header. Touched secret comparisons use the helper and preserve denial behavior. Added non-test code stays below ~1,200 lines; modified sources respect rule 18. Security-auditor, cloudflare-specialist, task-completion-validator complete with findings addressed. Staging proves stored session IP and rate-limit key use actual client despite spoof XFF. All /do gates pass before merge.
+
+## Validation evidence
+Baseline pnpm lint and typecheck passed (existing web hook warnings only). Before fixes, real OAuth tests: 3 failed / 7 passed, storing spoof XFF; reader/rate tests: 3 failed / 14 passed. After fixes: 5 files, 69 tests passed. BetterAuth IPv6 /64 and test-mode localhost normalization retained. API-wide secret equality audit: no additional secret/token equality in touched files beyond setup-token comparator; ID/type/status comparisons remain ordinary equality. Node heartbeat IP/DNS extracted in separate refactor commit: node-lifecycle.ts now 481 lines, auth.ts 494. No additional I/O: helper runs once per former header reader, pure bounded parsing; BetterAuth config resolves on existing createAuth path.
+
+Review repair: 17 obsolete source-text assertions in node-ip-validation.test.ts replaced with behavioral reconciliation tests; 46 tests pass across repaired suite and two route suites. Comment corrected to generic trusted ingress (no absent selfhost deployment claim).
+
+Adjacent main-layout gap: token/device/workload sign-ins invoke internalAdapter outside BetterAuth request context; real workload login red proof stored empty IP.
+- [x] Thread inbound headers through three existing routes into session-factory; persist validated helper IP for normal/capped sessions; test real workload persistence with spoof XFF and missing/malformed controls plus token/device caller payloads.
+
+Final pre-PR validation (2026-11-16): root lint 22/22 tasks; typecheck 36/36; build 18/18; final immutable-head root test 39/39 package tasks passed. First broad run overlapped final test/factory edits and observed old cached module against new assertions in two route tests; final unchanged-head rerun passed. All local reviewers PASS/ADDRESSED through 3deaf9155: security, Cloudflare, completion, tests, docs, constitution. Task stays active pending staging/release evidence.
+
+Sonar review: gate passed but reported S3776 complexity43 and duplicate branches in extracted heartbeat reconciliation. Split selection, backfill and DNS reconciliation into focused internal functions; preserve callback routing, IP ownership and DNS operations. Targeted heartbeat46/46 tests pass; final specialist re-review and full root quality rerun passed on ecd183bac; full ready CI and Sonar subsequently passed.
+
+Final candidate ecd183bac: root lint22/22, typecheck36/36, tests39/39 package tasks (API1057files/15990passing,3files/4cases skipped), build18/18; all specialist delta reviews PASS. Sonar zero open issues. Ready CI43923186178 SUCCESS including required Durable Object Workers aggregate and seven shards. CodeRabbit trusted requests43921956317/43921966225 failed startup; app explicitly posted Review skipped (comment6923900282). Policy wait ended; no findings or retries.
+
+Staging proof, 2026-11-16 20:13 UTC: both queues checked and own turn honored; exact ecd183bac deploy43936363419 plus downstream smoke SUCCESS. Playwright workload sign-in with spoofed XFF/X-Real-IP stored the edge trace's actual IP in D1, preserved hard expiry, and loaded authenticated dashboard/projects/settings (HTTP200). A malformed exchange with rotated XFF returned400 and incremented the same real-IP KV bucket; spoof-IP bucket absent. All task-owned workload sessions revoked through the ordinary smoke user's supported session endpoint, then signed out; D1 confirmed zero fixture sessions. No VMs/workspaces provisioned.
+
+Harness repairs (scratch only): Cloudflare refused attempted CF-Connecting-IP injection403, so the required live test spoofs only XFF/X-Real-IP; sign-out requires JSON body. Managed CF_TOKEN is read-only for D1, so an attempted fixture DELETE was refused without changes; cleanup used supported authenticated session revocation. These were verification harness failures, with no product changes. Release43947624352 requested; confirmation pending. Merge, production monitoring and idea completion report remain pending workflow actions.
+
+Final completion-validator re-review PASS after live staging: A/B/C/F PASS, D/E N/A, no implementation findings. Archived under invoked /do Phase4 step4; lease release, merge, production monitoring, and final coordination/idea report remain pending as explicitly listed above. This archive does not mark the SAM task complete.

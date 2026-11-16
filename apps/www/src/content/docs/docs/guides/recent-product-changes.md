@@ -15,6 +15,10 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   the bottom; the next item opens with a one-line receipt. **Archive** closes an item and tells the
   agent, with a few seconds to **Undo**. Other notifications are under **Updates**.
   → [Inbox](/docs/guides/inbox/)
+- **Projects open on their Overview.** Opening a project shows **Needs you** (the first items of
+  its Inbox) above what is running, budgets, automations and recent work, with a task box that
+  starts work without leaving the page. Chat is one tap away: **Chat** in the project navigation,
+  or the **Chat** button in the phone app bar. → [Project Overview](/docs/guides/project-overview/)
 - **Claude Fable 5.2.** Anthropic's newest frontier model (1M-token context) is selectable for
   Claude Code in an agent profile and through the SAM AI proxy. Sessions that start after the
   update run a Claude Code version that supports it. → [Agent profiles](/docs/guides/agents/#agent-profiles)

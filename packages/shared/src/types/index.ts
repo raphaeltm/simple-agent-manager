@@ -215,7 +215,7 @@ export type {
   WorkspaceStatus,
 } from './workspace';
 // Node class runtime guards (value exports, not types)
-export { isNodeClass, isUserOwnedNodeClass } from './workspace';
+export { isNodeClass, isUserOwnedNodeClass, NODE_BILLING_ENDED_STATUSES } from './workspace';
 // Provider Catalog
 export type {
   LocationInfo,
@@ -831,6 +831,7 @@ export {
 export type {
   RunReceipt,
   RunReceiptAccount,
+  RunReceiptCiFirstTry,
   RunReceiptFacts,
   RunReceiptFactsInput,
   RunReceiptOutcome,
@@ -870,6 +871,19 @@ export {
   INSIGHTS_RANGES,
   isInsightsRange,
 } from './insights-flow';
+
+// Insights · Accounts (Insights slice A)
+export type {
+  InsightsAccount,
+  InsightsAccountKind,
+  InsightsAccountOwner,
+  InsightsAccountSpend,
+  InsightsAccountsSection,
+  InsightsAccountStalls,
+  InsightsStallEpisode,
+  InsightsStallOutcome,
+  ProjectAccountsResponse,
+} from './insights-accounts';
 
 // Knowledge Graph
 export type {
@@ -1194,6 +1208,8 @@ export type {
   InboxAskAnswerShape,
   InboxContextMessage,
   InboxCountResponse,
+  InboxErrorAction,
+  InboxErrorActionOption,
   InboxFilter,
   InboxItem,
   InboxItemContext,
@@ -1215,6 +1231,7 @@ export {
   INBOX_AGENT_URL_LINK_KINDS,
   INBOX_ASK_ANSWER_SHAPES,
   INBOX_CONFIRM_OPTIONS,
+  INBOX_ERROR_ACTIONS,
   INBOX_FILTERS,
   INBOX_ITEM_KINDS,
   INBOX_STORES,
@@ -1246,3 +1263,29 @@ export {
   INBOX_TASK_EVENT_TYPES,
   INBOX_TASK_STEP_EVENT_TYPES,
 } from './inbox-tasks';
+
+// Admin Health & cost (Insights slice H)
+export type {
+  InstallationComputeCurrencySpend,
+  InstallationComputeProviderSpend,
+  InstallationComputeSpend,
+  InstallationComputeWeek,
+  InstallationHealthRange,
+  InstallationHealthResponse,
+  InstallationHealthSection,
+  InstallationHealthWindow,
+  InstallationLatencyIncident,
+  InstallationLatencyIncidentState,
+  InstallationLatencyState,
+  InstallationLifecycleLatency,
+  InstallationMachineDensity,
+  InstallationMachineReuse,
+  InstallationNewMachineReason,
+  InstallationNewMachineReasonKind,
+  InstallationNewMachineReasons,
+} from './insights-installation';
+export {
+  DEFAULT_INSTALLATION_HEALTH_RANGE,
+  INSTALLATION_HEALTH_RANGES,
+  isInstallationHealthRange,
+} from './insights-installation';

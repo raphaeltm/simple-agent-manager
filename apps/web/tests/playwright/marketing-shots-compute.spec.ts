@@ -1523,13 +1523,6 @@ const COST_SUMMARY = {
     daysElapsed: 14,
     daysInMonth: 30,
   },
-  compute: {
-    totalNodeHours: 980.5,
-    totalVcpuHours: 3720.4,
-    estimatedCostUsd: 612.4,
-    activeNodes: 4,
-    vcpuHourCostUsd: 0.0165,
-  },
   period: 'current-month',
   periodLabel: 'September 2026',
 };

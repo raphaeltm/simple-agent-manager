@@ -95,6 +95,17 @@ export {
   getAgentItem,
 } from './inbox-agent-tasks';
 export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
+export {
+  fileSystemError,
+  quotedName,
+  resolveSystemError,
+  SYSTEM_ERROR_SOURCES,
+  type SystemErrorFiled,
+  type SystemErrorInput,
+  systemErrorKey,
+  type SystemErrorResolution,
+  type SystemErrorSource,
+} from './inbox-error-core';
 export { getInboxItem, resolveInboxItem } from './inbox-item-core';
 export { countInbox, listInbox } from './inbox-list-core';
 export {
@@ -143,13 +154,30 @@ export {
   loadAskNoticeRow,
   notifyClosedAsk,
 } from './inbox-write-core';
+export { projectAccounts, type ProjectAccountsInput } from './insights-accounts';
 export { projectFlow, type ProjectFlowInput } from './insights-flow';
 export {
-  getInsightsFlowLimits,
-  INSIGHTS_FLOW_SETTINGS,
-  type InsightsFlowLimits,
-  type InsightsFlowSettingName,
-} from './insights-flow-settings';
+  installationHealth,
+  installationHealthBounds,
+  type InstallationHealthInput,
+  utcWeekStart,
+} from './insights-installation';
+export {
+  densityFromRuns,
+  newMachineReasonsFor,
+  NO_CANDIDATE_REASON,
+  NOT_RECORDED_REASON,
+} from './insights-installation-placements';
+export {
+  INSIGHTS_INSTALLATION_SETTINGS,
+  type InsightsInstallationSettingName,
+} from './insights-installation-settings-definition';
+export {
+  getInsightsPageLimits,
+  INSIGHTS_PAGE_SETTINGS,
+  type InsightsPageLimits,
+  type InsightsPageSettingName,
+} from './insights-page-settings';
 export {
   DEFAULT_PHASE_STATS_SAMPLE_LIMIT,
   DEFAULT_PHASE_STATS_WINDOW_DAYS,

@@ -213,6 +213,7 @@ function toPlacementRow(node: PlacementRowNodeSource | null | undefined) {
     observedHardwareSource:
       node.observed_hardware_source === undefined ? 'observed' : node.observed_hardware_source,
     agentVersion: node.agent_version ?? null,
+    agentReadyAt: new Date().toISOString(),
     healthStatus:
       'health_status' in node ? (node as { health_status?: string }).health_status : undefined,
     lastMetrics:
@@ -1969,7 +1970,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     });
 
     await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({
-      message: 'Specified node is running an incompatible VM agent build',
+      message: 'Specified node agent build differs from the required VM agent build',
       permanent: true,
     });
     expect(rc.advanceToStep).not.toHaveBeenCalled();
