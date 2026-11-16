@@ -13,8 +13,8 @@ No database is required for the MVP.
 ```
 @simple-agent-manager/shared
     ^
-@simple-agent-manager/providers   @simple-agent-manager/worker-core   @simple-agent-manager/scheduler-core
-    ^                                 ^                                   ^
+@simple-agent-manager/providers   @simple-agent-manager/worker-core   @simple-agent-manager/scheduler-core   @simple-agent-manager/cron
+    ^                                 ^                                   ^                                      ^
 worker module packages: project-data, operations, app-deployment, ai-proxy, agent-email, repo-hosting
     ^
 @simple-agent-manager/api
@@ -22,7 +22,7 @@ worker module packages: project-data, operations, app-deployment, ai-proxy, agen
 @simple-agent-manager/web
 ```
 
-Build order matters: shared -> providers / worker-core / scheduler-core -> worker module packages -> api/web.
+Build order matters: shared -> providers / worker-core / scheduler-core / cron -> worker module packages -> api/web.
 Of the worker module packages, project-data also depends on scheduler-core and app-deployment on providers.
 Worker module packages never import from `apps/*`; the worker imports them through public entry points only
 (`eslint.config.mjs`, `boundaryRules`).

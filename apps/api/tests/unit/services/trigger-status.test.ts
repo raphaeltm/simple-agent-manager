@@ -3,6 +3,7 @@
  * real SQLite database (only authentication, project authorization and attribution health are
  * stubbed), so the route is proven to use the shared computation.
  */
+import { cronToNextFire } from '@simple-agent-manager/cron';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +11,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
-import { cronToNextFire } from '../../../src/services/cron-utils';
 import { triggerStatusUpdates } from '../../../src/services/trigger-status';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 

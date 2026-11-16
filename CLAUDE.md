@@ -52,6 +52,7 @@ packages/
 ├── repo-hosting/ # GitHub App and OAuth, GitLab, repository browsing
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
+├── cron/         # Cron expressions for triggers: validation, next fire time, descriptions
 ├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)
 ├── eslint-plugin-sam/ # Unpublished repository-specific ESLint boundary rules
 ├── ui/           # Design system tokens and shared UI components
@@ -78,7 +79,7 @@ ratchet. Scanner and quality-policy commands are documented in `scripts/quality/
 
 ## Build Order
 
-Build packages in dependency order: `shared` -> `providers` / `worker-core` / `scheduler-core` -> the worker module packages (`project-data`, `operations`, `app-deployment`, `ai-proxy`, `agent-email`, `repo-hosting`) -> `cloud-init` -> `api` / `web`
+Build packages in dependency order: `shared` -> `providers` / `worker-core` / `scheduler-core` / `cron` -> the worker module packages (`project-data`, `operations`, `app-deployment`, `ai-proxy`, `agent-email`, `repo-hosting`) -> `cloud-init` -> `api` / `web`
 
 ```bash
 pnpm exec turbo run build --filter=@simple-agent-manager/api^...   # every package the API worker needs, in order
