@@ -111,7 +111,7 @@ export interface OperationInboxTaskPort {
       actor: { kind: 'human' | 'agent'; id: string; name: string | null };
       mentions?: CommentMention[];
     }
-  ): Promise<{ thread: InboxItemCommentThread; commentId: string }>;
+  ): Promise<{ thread: InboxItemCommentThread; commentId: string; idempotent: boolean }>;
   /** Mentioned user ids that are active project members, with display names. */
   resolveMentions(projectId: string, userIds: readonly string[]): Promise<CommentMention[]>;
   /** Mention and participant notifications for a comment. Never throws. */

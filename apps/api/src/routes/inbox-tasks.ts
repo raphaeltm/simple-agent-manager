@@ -79,8 +79,10 @@ projectInboxTaskRoutes.post(
   jsonValidator(StepSchema),
   async (c) => {
     const ctx = context(c);
-    const index = Number.parseInt(requireRouteParam(c, 'index'), 10);
-    if (!Number.isSafeInteger(index) || index < 0) throw errors.badRequest('No such step');
+    const raw = requireRouteParam(c, 'index');
+    // The whole segment must be digits: `parseInt('1junk')` would otherwise address step 1.
+    if (!/^\d{1,4}$/.test(raw)) throw errors.badRequest('No such step');
+    const index = Number(raw);
     const { done } = c.req.valid('json');
     return c.json(await run(() => setTaskStep(ctx, { ...target(c), index, done })));
   }

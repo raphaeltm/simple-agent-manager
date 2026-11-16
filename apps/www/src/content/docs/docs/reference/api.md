@@ -538,8 +538,11 @@ approvals. Nothing is copied.
 A human task (`ask:<id>` of kind `task`) adds its own routes beside these
 (`apps/api/src/routes/inbox-tasks.ts`, operations in `packages/operations/src/inbox-task-core.ts`).
 `GET …/items/:ref` returns it with `task`: steps, assignee, who took it, activity and discussion.
-Each write wakes the agents watching the task, except step ticks and comments by someone who may not
-wake that chat ([Tasks for people](/docs/guides/inbox/#tasks-for-people)).
+Each write wakes the chats watching the task, with these exceptions
+([Tasks for people](/docs/guides/inbox/#tasks-for-people)): step ticks wake only a chat that asked
+for them (`wakeOnSteps`); a comment wakes only the chat that assigned the task, and only when its
+author is the assignee, the member who took it, or a writer of that chat; a chat that attached to the
+task is woken by lifecycle changes, not comments.
 
 | Method | Endpoint                                                 | Purpose                                            |
 | ------ | -------------------------------------------------------- | -------------------------------------------------- |

@@ -108,8 +108,11 @@ person is needed, optional steps and links (`assignAgentTask`,
 project; anyone else is refused when the task is assigned and when it is handed on. The agent keeps
 working, and its chat watches the task.
 
-In the task you can tick its steps, comment, mark it **done**, reopen it, hand it to someone else or
-back to the team, and archive it (`packages/operations/src/inbox-task-core.ts`). A team task is
+A task lists under **Tasks** today, and **Archive** works on it as on any item. Ticking its steps,
+commenting, marking it **done**, reopening it, handing it to someone else or back to the team, and
+**I'll take it** are available through the [API](/docs/reference/api/#inbox)
+(`packages/operations/src/inbox-task-core.ts`); the task view in the Inbox that offers them as
+controls is the next release. A team task is
 listed for every member until one of you presses **I'll take it**: from then on it is theirs, and it
 no longer counts as waiting on the others. Members whose role cannot write tasks (viewers) can read
 a task and comment on it, nothing more.

@@ -40,6 +40,9 @@ async function requireActable(
 ): Promise<{ item: InboxItem; ref: ParsedInboxRef }> {
   await authorizeProjectOperation(ctx, input.projectId, 'task:write');
   const resolved = await resolveInboxItem(ctx, input, true);
+  // A human task has its own rule for who may close it (`canWriteTask`); the task operation
+  // checks it, so the inbox's assignee-only gate must not refuse the filer first.
+  if (resolved.item.kind === 'task' && resolved.ref.store === 'ask') return resolved;
   if (resolved.item.status !== 'open')
     throw new OperationError('conflict', `This inbox item is already ${resolved.item.status}`);
   if (!resolved.item.canAct) throw new OperationError('forbidden', 'You cannot act on this item');

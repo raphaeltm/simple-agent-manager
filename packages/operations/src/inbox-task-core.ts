@@ -45,7 +45,8 @@ function writerRoles(ctx: OperationContext): readonly string[] {
 
 /** Load a task the actor may change; a read-only member gets 403, a stranger not-found. */
 async function loadWritable(ctx: OperationContext, target: TaskTarget): Promise<TaskRow> {
-  await authorizeProjectOperation(ctx, target.projectId);
+  // A write needs the write scope and capability (a read-only token or a viewer is refused).
+  await authorizeProjectOperation(ctx, target.projectId, 'task:write');
   const row = await loadTaskForPerson(ctx, target.projectId, target.askId, ctx.actor.userId);
   if (!canWriteTask(row, ctx.actor.userId, writerRoles(ctx)))
     throw new OperationError('forbidden', 'You cannot change this task');
@@ -226,6 +227,16 @@ export async function commentOnTask(
       mentions,
     }),
   ]);
+  if (created.idempotent) {
+    // A replayed write: the comment, its event and its notifications already happened.
+    return {
+      ref: `ask:${row.id}`,
+      status: row.status,
+      agentNotified: false,
+      threadId: created.thread.id,
+      commentId: created.commentId,
+    };
+  }
   await recordActivity(ctx, {
     projectId: row.projectId,
     askId: row.id,
@@ -297,9 +308,11 @@ export async function claimTask(
   const result = await ctx.env.DATABASE.prepare(
     `UPDATE asks SET claimed_by_user_id = ?, updated_at = ?
       WHERE id = ? AND project_id = ? AND kind = 'task' AND status = 'open'
-        AND assignee_kind = 'team' AND claimed_by_user_id IS NULL`
+        AND assignee_kind = 'team' AND claimed_by_user_id IS NULL
+        AND EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = asks.project_id
+          AND pm.user_id = ? AND pm.status = 'active')`
   )
-    .bind(me, Date.now(), row.id, row.projectId)
+    .bind(me, Date.now(), row.id, row.projectId, me)
     .run();
   if ((result.meta?.changes ?? 0) !== 1)
     throw new OperationError('conflict', 'Someone else took this task first');
@@ -480,7 +493,7 @@ export async function reopenTask(
   const me = ctx.actor.userId;
   const result = await ctx.env.DATABASE.prepare(
     `UPDATE asks AS a SET status = 'open', answer_json = NULL, resolved_by_user_id = NULL,
-            resolved_at = NULL, updated_at = ?
+            resolved_at = NULL, notified_at = NULL, updated_at = ?
       WHERE a.id = ? AND a.project_id = ? AND a.kind = 'task' AND a.status = ?
         AND ${TASK_WRITABLE_SQL}`
   )

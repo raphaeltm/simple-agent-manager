@@ -10,7 +10,6 @@
  * active membership).
  */
 import { INBOX_SETTINGS } from '@simple-agent-manager/operations';
-import { ulid } from '@simple-agent-manager/worker-core';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
@@ -32,55 +31,50 @@ export async function moveDepartedMemberTasksToTeam(
     // re-added in between keeps their tasks.
     const stillGone = `NOT EXISTS (SELECT 1 FROM project_members pm
       WHERE pm.project_id = asks.project_id AND pm.user_id = ? AND pm.status = 'active')`;
-    const [assigned, claimed] = await env.DATABASE.batch([
+    const assignedWhere = `project_id = ? AND kind = 'task' AND status = 'open'
+      AND assignee_kind = 'user' AND assignee_user_id = ? AND ${stillGone}`;
+    const claimedWhere = `project_id = ? AND kind = 'task' AND status = 'open'
+      AND assignee_kind = 'team' AND claimed_by_user_id = ? AND ${stillGone}`;
+    const detail = (fromKind: 'user' | 'team') =>
+      JSON.stringify({
+        reason: 'member_left',
+        fromKind,
+        fromUserId: userId,
+        toKind: 'team',
+        toUserId: null,
+      });
+    // One transaction: the lifecycle rows are written from the same predicate, before the rows
+    // move, so a task never moves without its history (and a failure moves nothing).
+    const results = await env.DATABASE.batch([
+      env.DATABASE.prepare(
+        `INSERT INTO ask_activity (id, ask_id, project_id, actor_kind, actor_id, kind, detail_json,
+           created_at)
+         SELECT lower(hex(randomblob(16))), id, project_id, 'system', NULL, 'reassigned', ?, ?
+           FROM asks WHERE ${assignedWhere}`
+      ).bind(detail('user'), now, projectId, userId, userId),
+      env.DATABASE.prepare(
+        `INSERT INTO ask_activity (id, ask_id, project_id, actor_kind, actor_id, kind, detail_json,
+           created_at)
+         SELECT lower(hex(randomblob(16))), id, project_id, 'system', NULL, 'reassigned', ?, ?
+           FROM asks WHERE ${claimedWhere}`
+      ).bind(detail('team'), now, projectId, userId, userId),
       env.DATABASE.prepare(
         `UPDATE asks SET assignee_kind = 'team', assignee_user_id = NULL, claimed_by_user_id = NULL,
                 updated_at = ?
-          WHERE project_id = ? AND kind = 'task' AND status = 'open'
-            AND assignee_kind = 'user' AND assignee_user_id = ? AND ${stillGone}
-          RETURNING id`
+          WHERE ${assignedWhere} RETURNING id`
       ).bind(now, projectId, userId, userId),
       env.DATABASE.prepare(
-        `UPDATE asks SET claimed_by_user_id = NULL, updated_at = ?
-          WHERE project_id = ? AND kind = 'task' AND status = 'open'
-            AND assignee_kind = 'team' AND claimed_by_user_id = ? AND ${stillGone}
-          RETURNING id`
+        `UPDATE asks SET claimed_by_user_id = NULL, updated_at = ? WHERE ${claimedWhere} RETURNING id`
       ).bind(now, projectId, userId, userId),
     ]);
     const moved = [
-      ...((assigned?.results ?? []) as Array<{ id: string }>).map((row) => ({
-        id: row.id,
-        from: 'user',
-      })),
-      ...((claimed?.results ?? []) as Array<{ id: string }>).map((row) => ({
-        id: row.id,
-        from: 'claim',
-      })),
+      ...((results[2]?.results ?? []) as Array<{ id: string }>),
+      ...((results[3]?.results ?? []) as Array<{ id: string }>),
     ];
     if (moved.length === 0) return 0;
-    await env.DATABASE.batch(
-      moved.map((task) =>
-        env.DATABASE.prepare(
-          `INSERT INTO ask_activity (id, ask_id, project_id, actor_kind, actor_id, kind,
-             detail_json, created_at) VALUES (?, ?, ?, 'system', NULL, 'reassigned', ?, ?)`
-        ).bind(
-          ulid(),
-          task.id,
-          projectId,
-          JSON.stringify({
-            reason: 'member_left',
-            fromKind: task.from === 'user' ? 'user' : 'team',
-            fromUserId: userId,
-            toKind: 'team',
-            toUserId: null,
-          }),
-          now
-        )
-      )
-    );
     const port = createInboxTaskPort(env);
     for (const task of moved) {
-      await port.admitEvent({
+      const queued = await port.admitEvent({
         projectId,
         askId: task.id,
         eventType: 'inbox.task.reassigned',
@@ -94,6 +88,8 @@ export async function moveDepartedMemberTasksToTeam(
         // offboarding request's subrequest budget.
         deferAdmission: true,
       });
+      if (!queued)
+        log.error('inbox.departed_member_task_event_lost', { projectId, askId: task.id, userId });
     }
     log.info('inbox.departed_member_tasks_moved', { projectId, userId, tasks: moved.length });
     return moved.length;

@@ -225,7 +225,7 @@ function assigned(result: AgentAssignResult) {
     : 'Assigned. It does not block you: keep working. You will be woken in this chat when the person comments, takes it, hands it on, finishes, reopens or archives it.';
   const watch = result.watching
     ? ''
-    : ' This chat could not be subscribed to the task; call inbox_write method attach with this ref to watch it.';
+    : ' This chat could not be subscribed to the task yet; repeat this assign call with the same idempotencyKey (or title) to subscribe it.';
   const duplicateHint =
     result.similar.length > 0
       ? ' Similar open items exist (see `similar`): if one already covers this, cancel yours with inbox_write method cancel.'

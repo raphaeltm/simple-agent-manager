@@ -138,6 +138,8 @@ export async function assignAgentTask(
       sourceWorkspaceId: source.workspaceId ?? undefined,
       groupKey: input.groupKey,
       dedupeKey,
+      // Enforced again in the INSERT, so two concurrent assigns cannot both pass the count above.
+      openOfKindPerChat: limits.openTasksPerChat,
     },
     now
   );

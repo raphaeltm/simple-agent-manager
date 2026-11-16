@@ -204,7 +204,7 @@ export function createInboxTaskPort(env: Env): OperationInboxTaskPort {
         actor: { kind: input.actor.kind, id: input.actor.id, name: actorName },
         mentions: input.mentions,
       });
-      return { thread: result.thread, commentId: result.commentId };
+      return { thread: result.thread, commentId: result.commentId, idempotent: result.idempotent };
     },
 
     async resolveMentions(projectId, userIds) {

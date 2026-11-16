@@ -174,13 +174,15 @@ export async function getAgentAsk(
   input: { ref: string }
 ): Promise<InboxAgentItem> {
   const askId = agentAskId(input.ref);
-  // Also an item this chat filed: a task the agent assigned to a teammate is addressed to them,
-  // but the agent that assigned it reads its progress (slice H1).
+  // Also an item this chat filed, and a task another chat of the same person filed: a task
+  // assigned to a teammate is addressed to them, but the person's agents read its progress (H1).
   const row = await ctx.env.DATABASE.prepare(
     `SELECT ${AGENT_ITEM_COLUMNS} FROM asks
-      WHERE id = ? AND project_id = ? AND (${ADDRESSED_TO_CALLER} OR source_session_id = ?)`
+      WHERE id = ? AND project_id = ? AND (${ADDRESSED_TO_CALLER} OR source_session_id = ?
+        OR (kind = 'task' AND (SELECT t.user_id FROM tasks t
+          WHERE t.id = asks.source_task_id AND t.project_id = asks.project_id) = ?))`
   )
-    .bind(askId, source.projectId, source.userId, source.sessionId)
+    .bind(askId, source.projectId, source.userId, source.sessionId, source.userId)
     .first<Record<string, unknown>>();
   if (!row) throw new OperationError('not_found', AGENT_ITEM_NOT_FOUND);
   try {
