@@ -501,7 +501,9 @@ and rechecks ownership, placement authority and resource capacity before selecti
 It uses `TASK_RUNNER_AGENT_READY_TIMEOUT_MS` (default 15 minutes) and
 `TASK_RUNNER_AGENT_POLL_INTERVAL_MS` (default 5 seconds). A reported different build fails
 immediately; a boot that misses its deadline fails with a not-ready reason identifying
-whether the agent version is still missing. The task never replaces the pinned node.
+whether the agent version is still missing. A delayed alarm accepts readiness recorded
+before the deadline; readiness actually reported after the deadline remains refused.
+The task never replaces the pinned node.
 
 ### NodeLifecycle DO
 

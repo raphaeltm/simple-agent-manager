@@ -151,7 +151,11 @@ export async function handleNodeSelection(
       } else if (awaitingReadiness) {
         reason = 'agent has not become ready yet';
       }
-      if (Date.now() >= deadline) {
+      // The callback timestamp is server-assigned. A delayed alarm must not
+      // reject readiness that arrived on time; current version/admission checks still apply.
+      const readyAt = node.agentReadyAt ? Date.parse(node.agentReadyAt) : NaN;
+      const readyByDeadline = !awaitingReadiness && Number.isFinite(readyAt) && readyAt <= deadline;
+      if (Date.now() >= deadline && !readyByDeadline) {
         throw Object.assign(new Error(`Specified node not ready by deadline: ${reason}`), {
           permanent: true,
         });

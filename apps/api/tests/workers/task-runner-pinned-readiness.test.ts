@@ -303,6 +303,46 @@ describe('TaskRunner pinned node readiness', () => {
     await assertNoWorkspace(f, 'creating');
   });
 
+  it('accepts timely readiness when its alarm runs after the persisted deadline', async () => {
+    const f = await fixture();
+    await assertWaiting(f, 'creating');
+    await callback(f, 'heartbeat');
+    await callback(f, 'ready');
+    // Model a delayed alarm without sleeps: the server observed readiness 90s ago,
+    // 30s before its deadline; the latest heartbeat remains fresh at alarm delivery.
+    const deadline = Date.now() - 60_000;
+    const readyAt = new Date(deadline - 30_000).toISOString();
+    await env.DATABASE.prepare('UPDATE nodes SET agent_ready_at = ? WHERE id = ?')
+      .bind(readyAt, f.nodeId)
+      .run();
+    await runInDurableObject(f.stub, async (instance) => {
+      const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+      if (!state) throw new Error('Missing runner state');
+      state.agentReadyStartedAt = deadline - DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS;
+      await instance.ctx.storage.put('state', state);
+    });
+    const selected = await alarm(f);
+    expect(selected.state).toMatchObject({
+      currentStep: 'workspace_creation',
+      completed: false,
+      stepResults: { nodeId: f.nodeId, autoProvisioned: false, workspaceId: null },
+    });
+    const allocated = await alarm(f);
+    expect(allocated.state).toMatchObject({ currentStep: 'workspace_dispatch', completed: false });
+    expect(allocated.state.stepResults.workspaceId).toEqual(expect.any(String));
+    expect(await task(f)).toMatchObject({
+      status: 'delegated',
+      workspace_id: allocated.state.stepResults.workspaceId,
+      auto_provisioned_node_id: null,
+      error_message: null,
+    });
+    expect(
+      await env.DATABASE.prepare('SELECT node_id, status FROM workspaces WHERE id = ?')
+        .bind(allocated.state.stepResults.workspaceId)
+        .first()
+    ).toEqual({ node_id: f.nodeId, status: 'creating' });
+  });
+
   it('refuses readiness arriving after the persisted deadline before a delayed alarm', async () => {
     const f = await fixture();
     await assertWaiting(f, 'creating');
