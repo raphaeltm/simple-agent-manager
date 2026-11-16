@@ -11,7 +11,8 @@ with no I/O, no environment and no Cloudflare runtime. Moved out of
 ## Entry point
 
 `@simple-agent-manager/cron` (`src/index.ts`): `validateCronExpression`, `cronToNextFire`,
-`cronToHumanReadable`. The worker imports these directly; there is no re-export at the old path.
+`cronToHumanReadable`. Consumers (today only the API worker) import these directly; there is no
+re-export at the old path.
 
 ## Key Files
 

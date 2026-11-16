@@ -29,9 +29,13 @@ the services split, following the PR #2681 package template
   `tests/workers/cron-trigger-sweep.test.ts`.
 - Open PRs: only #2784 and #2786 edit an importer (`operation-ports.ts`), on lines away from the
   cron import, so Git merges cleanly. No open PR edits `cron-utils.ts`.
-- Rules: none names `cron-utils.ts`. None of the 35 `apps/api` path-scoped rules is about a pure
-  parser, so the package gets no path-scoped rule. The launch rules (constitution, work bounds)
-  still apply everywhere.
+- Rules: none names `cron-utils.ts`. Every one of the 36 path-scoped rules that loaded for it under
+  `apps/api` (after #2790) was decided individually; PR #2788's body has the table. None applies to
+  a pure parser. Rule 51 (runtime boundary validation) loads for every other worker package because
+  they parse `unknown` JSON, rows or fetch responses. This package receives typed strings, and the
+  untrusted request body is parsed by `apps/api/src/schemas/triggers.ts`, which keeps rule 51.
+  Rule 73 loads anyway (scoped to every `.ts` file since #2790). The launch rules (constitution,
+  81 work bounds) still apply everywhere.
 - First choice was text-to-speech (`services/tts*.ts`). It was dropped because the package needs
   `@mastra/core` and `workers-ai-provider`, and pnpm resolved their peer dependencies (`zod`, `ai`)
   differently for a new importer (zod 4.6.7 vs the worker's 4.5.4). That creates a second instance
@@ -41,20 +45,28 @@ the services split, following the PR #2681 package template
 
 ## Checklist
 
-- [ ] `packages/cron` from the worker-core template: package.json, tsconfig, vitest config, `src/index.ts`, AGENTS.md
-- [ ] `git mv` `cron-utils.ts` to `packages/cron/src/`; `git mv` its unit test to `packages/cron/tests/unit/`
-- [ ] Repoint the 10 source importers and 6 tests to `@simple-agent-manager/cron`
-- [ ] Wire `apps/api/package.json`, lockfile, CI path filters, `quality:runtime-boundary-semantics` scope
-- [ ] `pnpm quality:agent-context-budget --write`, then `--check` (new package directory gets an AGENTS.md index)
-- [ ] CLAUDE.md structure and build order, `08-architecture.md` package list, local-development guide build order
-- [ ] Prove a pure move: moved file identical to main; diff limited to import specifiers; bundle size before and after; test counts
-- [ ] Measure rule load before and after for the moved code
+- [x] `packages/cron` from the worker-core template: package.json, tsconfig, vitest config, `src/index.ts`, AGENTS.md
+- [x] `git mv` `cron-utils.ts` to `packages/cron/src/`; `git mv` its unit test to `packages/cron/tests/unit/`
+- [x] Repoint the 10 source importers and 6 tests to `@simple-agent-manager/cron`
+- [x] Wire `apps/api/package.json`, lockfile, CI path filters (`ci.yml` api/packages/cli, `e2e-smoke.yml`), `quality:runtime-boundary-semantics` scope, `scripts/quality/ast-checks.ts` scope
+- [x] `pnpm quality:agent-context-budget --write`, then `--check` (new package directory gets an AGENTS.md index)
+- [x] CLAUDE.md structure and build order, `08-architecture.md` package list, local-development guide build order
+- [x] Prove a pure move: moved file identical to main; diff limited to import specifiers; bundle size before and after; test counts
+- [x] Measure rule load before and after for the moved code
 
 ## Acceptance criteria
 
 - [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` green; the package builds and tests on its own
-- [ ] `cron-utils.ts` is byte-identical to main after the move
-- [ ] Test case count unchanged (40 moved, the rest unchanged)
-- [ ] Boundary lint covers the new package (no `apps/*` import, entry points only)
+- [x] `cron-utils.ts` is byte-identical to main after the move
+- [x] Test case count unchanged (40 moved, the rest unchanged)
+- [x] Boundary lint covers the new package (no `apps/*` import, entry points only)
 - [ ] Staging: creating a cron trigger stores the right next fire time and description, and the trigger list shows them
-- [ ] Rule bytes on first access of the moved code reported before and after
+- [x] Rule bytes on first access of the moved code reported before and after
+
+## Evidence
+
+- `git diff -M` reports `{apps/api/src/services => packages/cron/src}/cron-utils.ts` as a 100% rename (0 lines changed).
+- Worker bundle (`wrangler deploy --dry-run`): 32,560,747 bytes before, 32,560,844 after. The cron module's code is identical with whitespace removed; the rest of the difference is path comments and wrangler's per-module polyfill init calls.
+- Tests: 40/40 in `packages/cron`; the 5 repointed worker unit test files (41 cases) and `tests/workers/cron-trigger-sweep.test.ts` (19) pass.
+- Rule load on first access: 271.5 KB / 36 rules (`apps/api/src/services/cron-utils.ts`, main `30ae952ae`) → 12.7 KB / 1 rule (`packages/cron/src/cron-utils.ts`).
+- Reviews: architecture-reviewer (no HIGH; web editor's duplicate parser is a follow-up on the seam map), task-completion-validator (no HIGH; ast-checks scope added), cloudflare-specialist (PASS).
