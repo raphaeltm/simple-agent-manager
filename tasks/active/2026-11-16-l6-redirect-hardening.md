@@ -33,3 +33,5 @@ Full lint/typecheck/build pass. Repo-hosting: 143/143 tests. Focused API/guard: 
 Cloudflare default verified against https://developers.cloudflare.com/workers/runtime-apis/request/: new outbound Request defaults follow, incoming client Request manual. BetterAuth1.7.14 token exchange/refresh source uses fetchRefusingRedirects; regression enters actual callback and production getBetterAuthAccessTokenForProvider. No duplicate OAuth transport added.
 
 Staging reserved primary, position5 at 20:43Z, turn estimate22:03:58Z; wake registered. No staging deploy before own turn. PR #2819.
+
+Initial broad suite surfaced a legitimate CLI local-forward redirect regression; explicit application-redirect control now enabled only by authenticated local-forward adapter (manual physical fetch unchanged), required security/Cloudflare re-review pass. Three older health-probe mocks now assert manual. Targeted regressions144pass. Go auth/WebSocket+guard tests pass under race detector; real workerd preview WebSocket2pass. Discriminating pre-fix node suite:3fail/3pass (all200controls pass); Go canonical path leak regression fails all3cases without fix.

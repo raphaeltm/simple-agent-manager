@@ -257,7 +257,10 @@ async function handleLocalForwardProxy(c: Context<{ Bindings: Env }>) {
       // @ts-expect-error Cloudflare Workers support streaming request bodies.
       duplex: c.req.raw.body ? 'half' : undefined,
     },
-    getNodeAgentRequestTimeoutMs(c.env)
+    getNodeAgentRequestTimeoutMs(c.env),
+    // The local CLI must receive app redirects, but the Worker must never follow
+    // them with its internal forwarding credential.
+    { allowApplicationRedirects: true }
   );
 
   return new Response(response.body, {

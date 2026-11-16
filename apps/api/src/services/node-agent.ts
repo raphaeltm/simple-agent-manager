@@ -55,6 +55,8 @@ interface NodeAgentRequestOptions extends RequestInit {
 }
 
 interface FetchNodeAgentControls {
+  /** Only the authenticated local port-forward adapter may return app redirects. */
+  allowApplicationRedirects?: boolean;
   sourceTaskGuard?: VmAgentContainerRequestGuard;
   beforeExternalMutation?: () => Promise<void>;
   recoverContainerOnTimeout?: boolean;
@@ -270,8 +272,8 @@ export async function nodeAgentRequest(
 /** A node redirect is a failed control response. Discard its Location and body:
  * Go's mux can echo a query JWT into both before the route consumes it.
  */
-function nodeResponse(response: Response): Response {
-  if (response.status < 300 || response.status >= 400) return response;
+function nodeResponse(response: Response, allowApplicationRedirects = false): Response {
+  if (allowApplicationRedirects || response.status < 300 || response.status >= 400) return response;
   void response.body?.cancel().catch(() => undefined);
   return new Response('Node redirect refused', { status: response.status });
 }
@@ -291,10 +293,14 @@ export async function fetchNodeAgent(
     beforeExternalMutation,
     recoverContainerOnTimeout = true,
     noWakeContainer = false,
+    allowApplicationRedirects = false,
   } = controls;
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     await beforeExternalMutation?.();
-    return nodeResponse(await fetchWithTimeout(url, options, requestTimeoutMs));
+    return nodeResponse(
+      await fetchWithTimeout(url, options, requestTimeoutMs),
+      allowApplicationRedirects
+    );
   }
 
   const db = drizzle(env.DATABASE, { schema });
@@ -306,7 +312,10 @@ export async function fetchNodeAgent(
 
   if (node?.runtime !== 'cf-container') {
     await beforeExternalMutation?.();
-    return nodeResponse(await fetchWithTimeout(url, options, requestTimeoutMs));
+    return nodeResponse(
+      await fetchWithTimeout(url, options, requestTimeoutMs),
+      allowApplicationRedirects
+    );
   }
 
   const config = getVmAgentContainerConfig(env);
@@ -360,7 +369,7 @@ export async function fetchNodeAgent(
         );
       }),
     ]);
-    return nodeResponse(response);
+    return nodeResponse(response, allowApplicationRedirects);
   } catch (error) {
     const timedOut = error instanceof Error && error.message.startsWith('Request timed out after ');
     if (!timedOut) throw error;
