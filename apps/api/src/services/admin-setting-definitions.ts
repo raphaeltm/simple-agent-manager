@@ -10,6 +10,7 @@ import {
   validateConnectorSetting,
 } from './connector-settings-definition';
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
+import { type InboxSettingName } from './inbox-settings-definition';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
 import { type RuntimeSecretRequestSettingName } from './runtime-secret-request-settings-definition';
@@ -32,6 +33,7 @@ export type AdminSettingName =
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
+  | InboxSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName

@@ -68,11 +68,11 @@ value and **Source** after the reload, nothing was saved: check the value and tr
 
 The **Operations** category includes these chat storage settings:
 
-| Setting                        | Code default | Effect                                                                                                                                     |
-| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                          |
+| Setting                        | Code default | Effect                                                                                                                                              |
+| ------------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat.messageMergingEnabled`   | `false`      | Combine new consecutive assistant text chunks under the first chunk's message ID.                                                                   |
 | `chat.messageMergeMaxRowBytes` | `65536`      | Serialized merged-row cap, from 1 KiB to 256 KiB. Also supplies the admission budget for retry state; batches that cannot fit keep individual rows. |
-| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                   |
+| `chat.messageMergeRecentIds`   | `200`        | Recent reporter IDs retained across credential rotation, from 50 to 2,000; a complete received batch is always retained.                            |
 
 Merging requires an updated reporter that sends its durable outbox incarnation. Older reporters,
 and requests with a missing or malformed incarnation, keep individual inserts and provide **zero
@@ -94,9 +94,9 @@ effective settings and actual reporter versions before forecasting fleet savings
 rollout through successive row-usage windows.
 
 Existing message rows and their comment anchors remain unchanged. Tool, user, system, thinking,
-plan and typed-card rows keep their existing storage format. A connected browser that does not
-advertise incremental append support disables merging for the sessions it watches; a legacy
-project-wide connection disables it for the project. Refresh old tabs to restore eligibility.
+plan and typed-card rows keep their existing storage format. A browser built before merging
+existed disables merging only for a chat it has open, until that chat is closed or the tab is
+refreshed. Its session-list connection does not affect merging.
 
 To roll back, save `false` for `chat.messageMergingEnabled`. The next batch seals any open merged
 row and stores new chunks individually; retry receipts remain available. Previously merged rows
@@ -250,6 +250,23 @@ where it says so and the app continues from there.
 | `secrets.purgeBudgetSeconds`     | 20                  | 1–120         | Seconds the daily purge may run                                                                                                                                                                                         |
 | `secrets.expirySweepBatchSize`   | 10                  | 1–25          | Expired or unnotified requests one five-minute sweep handles (each one notifies its agent)                                                                                                                              |
 | `secrets.notifyRetryMinutes`     | 60                  | 15–1,440      | Minutes during which the sweep retries telling an agent about its request's outcome if the first notice could not be queued                                                                                             |
+
+## Inbox
+
+Listed under **Chat**. Bounds for the [inbox](/docs/reference/api/#inbox) list and for the inbox
+items agents file (`packages/operations/src/inbox-settings-definition.ts`).
+
+| Setting                    | Default | Range      | What it limits                                                                           |
+| -------------------------- | ------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `inbox.listPageSize`       | 25      | 1–200      | Items one list page returns when the app does not ask for a number                       |
+| `inbox.listPageMax`        | 100     | 1–200      | Most items one list page returns                                                         |
+| `inbox.titleMaxChars`      | 200     | 40–1,000   | Characters of an item title; longer titles are refused when the item is filed            |
+| `inbox.bodyMaxChars`       | 4,000   | 200–20,000 | Characters of an item body (the agent's reason)                                          |
+| `inbox.linksMax`           | 20      | 0–100      | Links one item may carry                                                                 |
+| `inbox.openItemsPerChat`   | 20      | 1–500      | Open items one chat may have at once; filing past it is refused                          |
+| `inbox.answerMaxChars`     | 4,000   | 100–20,000 | Characters of a typed answer or comment                                                  |
+| `inbox.noticeRetryMinutes` | 60      | 5–1,440    | Minutes the sweep retries telling an agent its item was answered, archived or expired    |
+| `inbox.sweepBatchSize`     | 10      | 1–50       | Items one five-minute sweep expires or re-notifies (each is a write and an agent notice) |
 
 ## Node provisioning
 
