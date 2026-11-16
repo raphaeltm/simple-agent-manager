@@ -88,7 +88,7 @@ export function Tabs({ tabs, basePath, className }: TabsProps) {
     // also a snap stop).
     const previous = el.previousElementSibling;
     const anchor =
-      previous instanceof HTMLElement && previous.dataset.testid === 'tabs-group-label'
+      previous instanceof HTMLElement && previous.dataset.tabsGroupLabel !== undefined
         ? previous
         : el;
     const raf = requestAnimationFrame(() => {
@@ -145,6 +145,7 @@ export function Tabs({ tabs, basePath, className }: TabsProps) {
                 // A heading for the tabs that follow; not a tab, so arrow keys skip it.
                 <span
                   role="presentation"
+                  data-tabs-group-label=""
                   data-testid="tabs-group-label"
                   className={`inline-flex shrink-0 snap-start items-center self-center whitespace-nowrap px-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-fg-muted ${index > 0 ? 'ml-1 border-0 border-l border-solid border-[var(--sam-hairline)]' : ''}`}
                 >

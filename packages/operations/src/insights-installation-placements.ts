@@ -40,6 +40,12 @@ import type { OperationContext } from './types';
 const HOUR_MS = 3_600_000;
 const WEEK_MS = 7 * 24 * HOUR_MS;
 
+/**
+ * Longest reason text returned. Capacity-gate reasons are short fixed phrases today; this only
+ * bounds the response if a producer ever interpolates something long.
+ */
+const MAX_REASON_CHARS = 200;
+
 /** Labels for the two reasons that are not the capacity gate's own words. */
 export const NO_CANDIDATE_REASON = 'No other machine in the pool to try';
 export const NOT_RECORDED_REASON = 'Placement explanation not recorded';
@@ -111,15 +117,24 @@ export function newMachineReasonsFor(
 export async function readPlacementSections(
   ctx: Pick<OperationContext, 'env'>,
   bounds: HealthWindowBounds,
-  maxPlacements: number
+  maxPlacements: number,
+  maxReasons: number
 ): Promise<PlacementSections> {
-  // A tie on created_at is broken by id so exactly one workspace is first on a machine.
+  // A tie on created_at is broken by id so exactly one workspace is first on a machine. The
+  // placement JSON (kilobytes per row) is read back by primary key only for new-machine
+  // placements, so reused placements never carry it through the sort. `json_valid` keeps one
+  // malformed value from failing the statement.
+  //
+  // Lower bound: a machine whose first workspace row was later removed shows its next placement
+  // as new. Not observed in production (2026-11-16: all 281 first placements in 30 days were
+  // created within an hour of their machine).
   const placementsQuery = ctx.env.DATABASE.prepare(
-    `SELECT id, node_id, created_at, reused,
-            CASE WHEN reused = 0 AND json_valid(pj) THEN json_extract(pj, '$.diagnostics.hosts') END
+    `SELECT x.id, x.node_id, x.created_at, x.reused,
+            CASE WHEN json_valid(pw.placement_explanation_json)
+                 THEN json_extract(pw.placement_explanation_json, '$.diagnostics.hosts') END
               AS hosts_json
        FROM (
-         SELECT w.id, w.node_id, w.created_at, w.placement_explanation_json AS pj,
+         SELECT w.id, w.node_id, w.created_at,
                 EXISTS (
                   SELECT 1 FROM workspaces p
                    WHERE p.node_id = w.node_id
@@ -132,7 +147,8 @@ export async function readPlacementSections(
             AND w.created_at >= ? AND w.created_at < ?
           ORDER BY w.created_at DESC, w.id DESC
           LIMIT ?
-       )`
+       ) x
+       LEFT JOIN workspaces pw ON pw.id = x.id AND x.reused = 0`
   ).bind(
     ...isoBinds(bounds),
     new Date(bounds.readStartMs).toISOString(),
@@ -147,7 +163,14 @@ export async function readPlacementSections(
 
   const [placementResult, warmClaims] = await Promise.all([
     placementsQuery.all<PlacementRow>(),
-    warmClaimsQuery.first<{ claims: number }>(),
+    // A failed count leaves the reuse rate standing and reports the warm-pool part as unknown.
+    warmClaimsQuery.first<{ claims: number }>().catch((error: unknown) => {
+      log.warn('insights_installation.warm_claims_unavailable', {
+        error: error instanceof Error ? error.message : String(error),
+        action: 'reported_unknown',
+      });
+      return undefined;
+    }),
   ]);
   const rows = placementResult.results ?? [];
   const truncated = rows.length > maxPlacements;
@@ -192,16 +215,24 @@ export async function readPlacementSections(
     }
   }
 
-  const reasons: InstallationNewMachineReason[] = [...reasonCounts.entries()]
-    .map(([reason, entry]) => ({ reason, kind: entry.kind, machines: entry.machines }))
+  const ranked: InstallationNewMachineReason[] = [...reasonCounts.entries()]
+    .map(([reason, entry]) => ({
+      reason:
+        reason.length > MAX_REASON_CHARS ? `${reason.slice(0, MAX_REASON_CHARS - 1)}…` : reason,
+      kind: entry.kind,
+      machines: entry.machines,
+    }))
     .sort((a, b) => b.machines - a.machines || a.reason.localeCompare(b.reason));
+  // Most common first; the rest are disclosed as a count, never silently dropped (rule 65).
+  const reasons = ranked.slice(0, maxReasons);
+  const otherReasons = ranked.length - reasons.length;
 
   return {
     reuse: {
       placements,
       onExistingMachine: onExisting,
       onNewMachine: placements - onExisting,
-      fromWarmPool: Number(warmClaims?.claims ?? 0),
+      fromWarmPool: warmClaims === undefined ? null : Number(warmClaims?.claims ?? 0),
       reuseRate: placements > 0 ? onExisting / placements : null,
       weeks: bounds.weekStarts.map((weekStart, index) => {
         const week = weekly[index] ?? { placements: 0, reused: 0 };
@@ -213,7 +244,7 @@ export async function readPlacementSections(
       }),
       truncated,
     },
-    newMachines: { newMachines, reasons },
+    newMachines: { newMachines, reasons, otherReasons },
   };
 }
 

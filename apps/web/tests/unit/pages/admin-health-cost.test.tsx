@@ -75,6 +75,7 @@ function health(overrides: Partial<InstallationHealthResponse> = {}): Installati
         { reason: 'Host agent version is incompatible', kind: 'refused', machines: 20 },
         { reason: 'No other machine in the pool to try', kind: 'no_candidate', machines: 5 },
       ],
+      otherReasons: 3,
     },
     latency: {
       minSamples: 5,
@@ -147,19 +148,41 @@ describe('AdminHealthCost', () => {
     ).toBeInTheDocument();
     expect(within(screen.getByTestId('stat-reuse')).getByText('61%')).toBeInTheDocument();
     expect(within(screen.getByTestId('stat-density')).getByText('2.4')).toBeInTheDocument();
-    expect(
-      screen.getByLabelText('Host agent version is incompatible: 20 machines')
-    ).toBeInTheDocument();
+    // Visible text (with screen-reader suffixes) carries every number, not aria-label alone.
+    const reasonRows = screen.getAllByTestId('reason-row');
+    expect(reasonRows[0]).toHaveTextContent('Host agent version is incompatible20 machines');
+    expect(screen.getByTestId('other-reasons')).toHaveTextContent(
+      '3 less common reasons not listed.'
+    );
     expect(screen.getByLabelText('Week of Nov 9: $100 (Hetzner $100)')).toBeInTheDocument();
-    expect(
-      screen.getByLabelText(
-        'Stop a workspace: p95 31m 00s, budget 10m 00s, 14 episodes, over budget'
-      )
-    ).toBeInTheDocument();
-    expect(
-      screen.getByLabelText('Start a machine: no finished episodes, budget 15m 00s')
-    ).toBeInTheDocument();
+    const latencyRows = screen.getAllByTestId('latency-row');
+    expect(latencyRows[0]).toHaveTextContent(
+      'Stop a workspacep95 31m 00s ✕, budget 10m 00s, 14 episodes, over budget'
+    );
+    expect(latencyRows[1]).toHaveTextContent('Start a machineno data, budget 15m 00s');
     expect(mocks.getInstallationHealth).toHaveBeenCalledWith('month', expect.anything());
+  });
+
+  it('lists every week in a table for readers who cannot hover the chart', async () => {
+    mocks.getInstallationHealth.mockResolvedValue(health());
+    renderPage();
+
+    const table = await screen.findByTestId('spend-table');
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(3); // header + two weeks
+    expect(rows[1]).toHaveTextContent('Nov 9$100Hetzner $100');
+    expect(rows[2]).toHaveTextContent('Nov 16$20.00Google Cloud $20.00');
+  });
+
+  it('leaves out the warm-pool part when that count could not be read', async () => {
+    mocks.getInstallationHealth.mockResolvedValue(
+      health({ reuse: { ...health().reuse!, fromWarmPool: null } })
+    );
+    renderPage();
+
+    const reuse = await screen.findByTestId('stat-reuse');
+    expect(reuse).toHaveTextContent('61 of 100 placements on an existing machine');
+    expect(reuse).not.toHaveTextContent('warm pool');
   });
 
   it('links the open watchdog incident for an over-budget state', async () => {

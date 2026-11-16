@@ -27,6 +27,7 @@ import {
   budgetMs,
   LIFECYCLE_WATCHES,
   type LifecycleLatencySettings,
+  type LifecycleWatch,
   resolveLifecycleLatencySettings,
 } from './watches';
 
@@ -40,7 +41,7 @@ const OPEN_INCIDENT_STATES: readonly InstallationLatencyIncidentState[] = [
 interface EpisodeRow {
   entity_type: string;
   status: string;
-  duration_ms: number;
+  duration_ms: number | null;
 }
 
 interface IncidentRow {
@@ -55,6 +56,26 @@ interface IncidentRow {
 }
 
 const stateKey = (entityType: string, status: string) => `${entityType}.${status}`;
+
+/**
+ * The triage signatures of a watch's two error messages. The messages are fixed per watch, so the
+ * digests are computed once per isolate rather than 22 times per request.
+ */
+const signatureCache = new Map<string, Promise<string[]>>();
+function watchSignatures(watch: LifecycleWatch): Promise<string[]> {
+  const key = stateKey(watch.entityType, watch.status);
+  let cached = signatureCache.get(key);
+  if (!cached) {
+    cached = Promise.all([
+      platformErrorSignature('api', slowStateMessage(watch.entityType, watch.status)),
+      platformErrorSignature('api', regressionMessage(watch)),
+    ]);
+    // A failed digest is not cached, so the next request retries it.
+    cached.catch(() => signatureCache.delete(key));
+    signatureCache.set(key, cached);
+  }
+  return cached;
+}
 
 export async function readLifecycleLatencyRange(
   env: Env,
@@ -72,10 +93,7 @@ export async function readLifecycleLatencyRange(
   const signatures = await Promise.all(
     active.map(async (watch) => ({
       key: stateKey(watch.entityType, watch.status),
-      signatures: await Promise.all([
-        platformErrorSignature('api', slowStateMessage(watch.entityType, watch.status)),
-        platformErrorSignature('api', regressionMessage(watch)),
-      ]),
+      signatures: await watchSignatures(watch),
     }))
   );
   const allSignatures = signatures.flatMap((entry) => entry.signatures);
@@ -127,7 +145,8 @@ export async function readLifecycleLatencyRange(
 
   const durations = new Map<string, number[]>();
   for (const row of episodes.results ?? []) {
-    const duration = Number(row.duration_ms);
+    // julianday() of an unreadable timestamp is NULL, and Number(null) would be a 0 ms sample.
+    const duration = row.duration_ms === null ? Number.NaN : Number(row.duration_ms);
     if (!Number.isFinite(duration)) {
       log.warn('lifecycle_latency.range_episode_skipped', {
         state: stateKey(row.entity_type, row.status),
@@ -157,8 +176,11 @@ export async function readLifecycleLatencyRange(
       ideaId: row.idea_id,
       ideaProjectId: row.idea_project_id,
     };
-    incidentsBySignature.set(row.signature, incident);
-    if (row.canonical_signature) incidentsBySignature.set(row.canonical_signature, incident);
+    // Rows arrive most recently seen first; keep that one when two rows share a signature.
+    if (!incidentsBySignature.has(row.signature)) incidentsBySignature.set(row.signature, incident);
+    if (row.canonical_signature && !incidentsBySignature.has(row.canonical_signature)) {
+      incidentsBySignature.set(row.canonical_signature, incident);
+    }
   }
 
   const noBaseline = latencyStats([]);

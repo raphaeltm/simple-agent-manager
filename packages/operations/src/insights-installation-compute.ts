@@ -87,7 +87,9 @@ export async function readComputeSpend(
             n.provider_instance_price_currency AS currency
        FROM nodes n
       WHERE ${MANAGED_NODE_RAN_IN_WINDOW_SQL}
-      ORDER BY n.created_at DESC, n.id DESC
+      -- Under the cap, keep the machines that cost the most in the window: still running first,
+      -- then those that ended most recently (rule 65). The cap is disclosed as truncated.
+      ORDER BY (n.status NOT IN (${ENDED_STATUS_SQL})) DESC, n.updated_at DESC, n.id DESC
       LIMIT ?`
   )
     .bind(

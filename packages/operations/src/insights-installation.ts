@@ -10,9 +10,10 @@
  *   1  machines for compute spend (`insights-installation-compute.ts`)
  *   2  placements and warm-pool claims (`insights-installation-placements.ts`)
  *   1  running intervals
- *   ≤4 lifecycle latency (`ports.lifecycleLatency.rangeReport`: settings, episodes,
- *      observations, incidents)
- * About 10. Each section is isolated: one that fails is null and named in `unavailable`, and the
+ *   3  lifecycle latency (`ports.lifecycleLatency.rangeReport`: episodes, stuck rows,
+ *      incidents; its settings read hits the cache the limits read just filled)
+ * 9 here, plus 3 in the REST route's session middleware: 12. `admin-health-cost.test.ts` counts
+ * them. Each section is isolated: one that fails is null and named in `unavailable`, and the
  * others still render (`.claude/rules/53`).
  */
 import {
@@ -148,7 +149,12 @@ export async function installationHealth(
       () => readComputeSpend(ctx, bounds, limits['insights.healthMaxNodes']),
       unavailable
     ),
-    readPlacementSections(ctx, bounds, limits['insights.healthMaxPlacements']).catch((error) => {
+    readPlacementSections(
+      ctx,
+      bounds,
+      limits['insights.healthMaxPlacements'],
+      limits['insights.healthMaxReasons']
+    ).catch((error) => {
       log.error('insights_installation.section_failed', {
         section: 'reuse',
         error: error instanceof Error ? error.message : String(error),

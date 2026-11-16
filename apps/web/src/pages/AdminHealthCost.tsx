@@ -60,9 +60,10 @@ export function AdminHealthCost() {
         className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between"
       >
         <div className="min-w-0">
-          <h1 className="m-0 flex items-center gap-2 text-2xl font-bold text-fg-primary">
+          {/* h2: the Admin PageLayout already renders the page's h1. */}
+          <h2 className="m-0 flex items-center gap-2 text-2xl font-bold text-fg-primary">
             Health &amp; cost {refreshing && <Spinner size="sm" />}
-          </h1>
+          </h2>
           <p className="m-0 mt-1 text-sm text-fg-muted">
             This installation · {data ? rangeLabel(data.window) : '…'} · compute costs are estimates
             at each machine&apos;s recorded provider price
@@ -73,6 +74,7 @@ export function AdminHealthCost() {
           options={RANGE_OPTIONS}
           value={range}
           onChange={setRange}
+          size="lg"
           className="w-full shrink-0 sm:w-72"
         />
       </Pane>
@@ -88,7 +90,7 @@ export function AdminHealthCost() {
           <p className="m-0 text-sm text-danger-fg">
             Health &amp; cost could not be loaded: {query.error.message}
           </p>
-          <Button size="sm" variant="secondary" onClick={() => void query.refetch()}>
+          <Button variant="secondary" onClick={() => void query.refetch()}>
             Retry
           </Button>
         </Pane>

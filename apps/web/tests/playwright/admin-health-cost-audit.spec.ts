@@ -144,7 +144,7 @@ function makeHealth(kind: 'normal' | 'stress' | 'empty'): InstallationHealthResp
           },
     newMachines:
       kind === 'empty'
-        ? { newMachines: 0, reasons: [] }
+        ? { newMachines: 0, reasons: [], otherReasons: 0 }
         : {
             newMachines: 280,
             reasons: [
@@ -167,6 +167,7 @@ function makeHealth(kind: 'normal' | 'stress' | 'empty'): InstallationHealthResp
                   ]
                 : []),
             ],
+            otherReasons: kind === 'stress' ? 17 : 0,
           },
     latency: {
       minSamples: 5,
@@ -251,6 +252,15 @@ async function audit(
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: /Health & cost/ })).toBeVisible();
   await screenshot(page, `admin-health-cost-${name}-${theme}`);
+  // The page scrolls inside the app shell, so a viewport shot misses the lower panes: capture each.
+  for (const pane of ['latency-pane', 'spend-pane', 'reasons-pane']) {
+    const locator = page.getByTestId(pane);
+    if ((await locator.count()) === 0) continue;
+    await locator.scrollIntoViewIfNeeded();
+    await locator.screenshot({
+      path: `../../.codex/tmp/playwright-screenshots/admin-health-cost-${name}-${theme}-${pane}.png`,
+    });
+  }
   await assertNoOverflow(page);
   const fits = await page.evaluate(() => {
     const root = document.querySelector('[data-testid="admin-health-cost"]');

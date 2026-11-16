@@ -197,14 +197,16 @@ export function AdminCosts() {
         />
         <Link
           to="/admin/health-cost"
-          className="block rounded-lg no-underline focus-visible:outline-2 focus-visible:outline-focus-ring"
+          className="block rounded-md border border-border-default bg-surface-secondary p-3 no-underline hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring"
           data-testid="costs-compute-link"
         >
-          <KpiCard
-            label="Compute"
-            value="Health & cost →"
-            subtitle="Priced per machine at its recorded provider price"
-          />
+          <div className="text-xs text-fg-muted uppercase tracking-wide">Compute</div>
+          <div className="mt-1 text-sm font-semibold text-accent-fg">
+            View on Health &amp; cost →
+          </div>
+          <div className="text-xs text-fg-muted mt-0.5">
+            Priced per machine at its recorded provider price
+          </div>
         </Link>
       </div>
 

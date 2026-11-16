@@ -67,8 +67,11 @@ export interface InstallationMachineReuse {
   placements: number;
   onExistingMachine: number;
   onNewMachine: number;
-  /** Warm-pool claims recorded in the node decision log during the range (part of "existing"). */
-  fromWarmPool: number;
+  /**
+   * Warm-pool claims recorded in the node decision log during the range (part of "existing");
+   * null when that count could not be read.
+   */
+  fromWarmPool: number | null;
   /** onExistingMachine / placements, 0-1; null with no placements. */
   reuseRate: number | null;
   weeks: { weekStart: string; placements: number; reuseRate: number | null }[];
@@ -108,7 +111,10 @@ export interface InstallationNewMachineReason {
 
 export interface InstallationNewMachineReasons {
   newMachines: number;
+  /** Most common first, capped by the `insights.healthMaxReasons` admin setting. */
   reasons: InstallationNewMachineReason[];
+  /** Distinct reasons left out by that cap. */
+  otherReasons: number;
 }
 
 export type InstallationLatencyIncidentState = 'pending' | 'dispatched' | 'claimed';

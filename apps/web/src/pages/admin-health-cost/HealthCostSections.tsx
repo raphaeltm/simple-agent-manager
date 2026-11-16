@@ -133,7 +133,7 @@ export function StatTiles({
         extra={reuse && <Sparkline values={reuse.weeks.map((week) => week.reuseRate)} />}
         note={
           reuse
-            ? `${reuse.onExistingMachine} of ${reuse.placements} placements on an existing machine · ${reuse.fromWarmPool} from the warm pool`
+            ? `${reuse.onExistingMachine} of ${reuse.placements} placements on an existing machine${reuse.fromWarmPool === null ? '' : ` · ${reuse.fromWarmPool} from the warm pool`}`
             : 'Could not be read'
         }
       />
@@ -164,17 +164,17 @@ function LatencyRow({ state }: { state: InstallationLatencyState }) {
   const p95 = state.p95Ms ?? 0;
   const scale = Math.max(state.budgetMs, p95) * 1.15 || 1;
   const over = state.overBudget;
-  const summary =
-    state.count === 0
-      ? `${label}: no finished episodes, budget ${formatDuration(state.budgetMs)}`
-      : `${label}: p95 ${formatDuration(state.p95Ms)}, budget ${formatDuration(state.budgetMs)}, ${state.count} episodes${over ? ', over budget' : ''}`;
+  // Phone: label and value share a line, the bar runs under them. From `sm`: label, bar, value.
   return (
     <li
-      className="grid grid-cols-1 gap-1 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)_5.5rem] sm:items-center sm:gap-3"
-      aria-label={summary}
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)_5.5rem] sm:gap-y-0"
+      data-testid="latency-row"
     >
       <span className="break-words text-[13px] text-fg-secondary">{label}</span>
-      <div className="relative h-3 rounded-full bg-[var(--sam-hairline)]" aria-hidden="true">
+      <div
+        className="relative col-span-2 row-start-2 h-3 rounded-full bg-[var(--sam-hairline)] sm:col-span-1 sm:col-start-2 sm:row-start-1"
+        aria-hidden="true"
+      >
         {state.count > 0 && (
           <div
             className="absolute inset-y-0 left-0 rounded-full"
@@ -191,9 +191,24 @@ function LatencyRow({ state }: { state: InstallationLatencyState }) {
         />
       </div>
       <span
-        className={`text-right font-mono text-xs ${over ? 'text-danger-fg font-semibold' : 'text-fg-muted'}`}
+        className={`text-right font-mono text-xs sm:col-start-3 sm:row-start-1 ${over ? 'text-danger-fg font-semibold' : 'text-fg-muted'}`}
       >
-        {state.count === 0 ? 'no data' : `${formatDuration(state.p95Ms)}${over ? ' ✕' : ''}`}
+        {state.count === 0 ? (
+          <>
+            no data
+            <span className="sr-only">, budget {formatDuration(state.budgetMs)}</span>
+          </>
+        ) : (
+          <>
+            <span className="sr-only">p95 </span>
+            {formatDuration(state.p95Ms)}
+            {over && <span aria-hidden="true"> ✕</span>}
+            <span className="sr-only">
+              , budget {formatDuration(state.budgetMs)}, {state.count} episodes
+              {over ? ', over budget' : ''}
+            </span>
+          </>
+        )}
       </span>
     </li>
   );
@@ -225,7 +240,7 @@ function LatencyCallout({ state }: { state: InstallationLatencyState }) {
             {' · '}
             <Link
               to={`/projects/${incident.ideaProjectId}/ideas/${incident.ideaId}`}
-              className="font-medium text-accent-fg underline"
+              className="inline-flex min-h-11 items-center font-medium text-accent-fg underline sm:min-h-0"
             >
               Open incident
             </Link>
@@ -246,7 +261,10 @@ export function LatencyPane({ latency }: { latency: InstallationLifecycleLatency
       <PaneHead
         title="Slowest 5% vs budget"
         right={
-          <Link to="/admin/settings" className="text-fg-muted underline">
+          <Link
+            to="/admin/settings"
+            className="inline-flex min-h-11 items-center text-fg-muted underline sm:min-h-0"
+          >
             budgets in Admin › Settings
           </Link>
         }
@@ -352,7 +370,10 @@ export function SpendPane({ compute }: { compute: InstallationComputeSpend | nul
                     ))}
                   </div>
                   <span className="whitespace-nowrap text-[11px] text-fg-muted" aria-hidden="true">
-                    {index % labelStep === 0 || index === lastIndex
+                    {/* Every `labelStep` weeks and always the latest, skipping a label that would
+                        sit right next to the latest one. */}
+                    {(index % labelStep === 0 && lastIndex - index >= labelStep) ||
+                    index === lastIndex
                       ? weekLabel(week.weekStart)
                       : ' '}
                   </span>
@@ -371,6 +392,39 @@ export function SpendPane({ compute }: { compute: InstallationComputeSpend | nul
               </span>
             ))}
           </div>
+          {/* Every week's numbers, for touch and keyboard readers the hover title does not reach. */}
+          <details className="px-4 text-xs text-fg-muted" data-testid="spend-table">
+            <summary className="inline-flex min-h-11 cursor-pointer items-center sm:min-h-0">
+              Show weeks as a table
+            </summary>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[16rem] text-left">
+                <thead>
+                  <tr className="text-fg-muted">
+                    <th className="py-1 pr-3 font-medium">Week of</th>
+                    <th className="py-1 pr-3 font-medium">Total</th>
+                    <th className="py-1 font-medium">By provider</th>
+                  </tr>
+                </thead>
+                <tbody className="font-mono text-fg-secondary">
+                  {compute.weeks.map((week) => (
+                    <tr
+                      key={week.weekStart}
+                      className="border-0 border-t border-solid border-[var(--sam-hairline)]"
+                    >
+                      <td className="py-1 pr-3 font-sans">{weekLabel(week.weekStart)}</td>
+                      <td className="py-1 pr-3">{formatUsd(week.totalUsd)}</td>
+                      <td className="py-1 font-sans">
+                        {week.byProvider
+                          .map((p) => `${providerLabel(p.provider)} ${formatUsd(p.usd)}`)
+                          .join(' · ') || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
         </>
       )}
     </Pane>
@@ -407,11 +461,7 @@ export function ReasonsPane({
         <>
           <ul className="m-0 flex list-none flex-col gap-2.5 px-4">
             {newMachines.reasons.map((reason) => (
-              <li
-                key={reason.reason}
-                className="flex flex-col gap-1"
-                aria-label={`${reason.reason}: ${reason.machines} machines`}
-              >
+              <li key={reason.reason} className="flex flex-col gap-1" data-testid="reason-row">
                 <div className="flex items-baseline justify-between gap-3 text-[13px]">
                   <span
                     className={`min-w-0 break-words ${reason.kind === 'refused' ? 'text-fg-secondary' : 'italic text-fg-muted'}`}
@@ -420,6 +470,10 @@ export function ReasonsPane({
                   </span>
                   <span className="shrink-0 font-mono text-xs text-fg-muted">
                     {reason.machines}
+                    <span className="sr-only">
+                      {' '}
+                      {reason.machines === 1 ? 'machine' : 'machines'}
+                    </span>
                   </span>
                 </div>
                 <div className="h-2 rounded-full bg-[var(--sam-hairline)]" aria-hidden="true">
@@ -437,6 +491,12 @@ export function ReasonsPane({
               </li>
             ))}
           </ul>
+          {newMachines.otherReasons > 0 && (
+            <p className="m-0 px-4 text-xs text-fg-muted" data-testid="other-reasons">
+              {newMachines.otherReasons} less common{' '}
+              {newMachines.otherReasons === 1 ? 'reason' : 'reasons'} not listed.
+            </p>
+          )}
           <p className="m-0 px-4 text-xs text-fg-muted">
             Each reason is the capacity check&apos;s own words for an existing machine it turned
             down. A machine is counted once under each reason it recorded.

@@ -502,7 +502,8 @@ shared `installationHealth` operation (`packages/operations/src/insights-install
 - **Warm machine reuse.** The share of workspace placements that went onto a machine that already
   existed. A placement counts as a new machine when no earlier workspace exists on that machine.
   The note under it gives how many came from the warm pool (warm-pool claims in the node decision
-  log).
+  log). If a machine's first workspace row is later removed, its next placement reads as new, so
+  the rate is a lower bound.
 - **Agents per busy machine.** Agents running at once on a machine, averaged over the time it had
   at least one running. Running time comes from resource telemetry (first to last sample while a
   workspace ran), not from the compute ledger, which runs from a workspace's creation to its
@@ -511,7 +512,7 @@ shared `installationHealth` operation (`packages/operations/src/insights-install
   state in the range against its budget. A state is over budget when it has at least
   `lifecycleLatency.minSamples` finished episodes and its p95 is above the budget. The page also
   shows rows stuck past their budget right now and links any open incident the watchdog or daily
-  check raised for that state.
+  check raised for that state. A state whose budget is 0 is not watched and not shown.
 - **Why new machines were created.** For the first workspace on each new machine, the reasons the
   capacity check gave for turning down every existing machine it considered, in its own words. A
   machine is counted once under each reason it recorded. "No other machine in the pool to try" means
@@ -521,12 +522,13 @@ A section that cannot be read is named at the top of the page; the others still 
 **Operations** settings bound how much the page reads; when a read reaches its cap the page says
 the number is a lower bound.
 
-| Setting                        | Default | Range       | What it controls                                               |
-| ------------------------------ | ------- | ----------- | -------------------------------------------------------------- |
-| `insights.healthMaxNodes`      | 5,000   | 100–50,000  | Machines read for compute spend, newest first                  |
-| `insights.healthMaxPlacements` | 30,000  | 100–200,000 | Workspace placements read for reuse and new-machine reasons    |
-| `insights.healthMaxRuns`       | 30,000  | 100–200,000 | Running intervals read for agents per busy machine             |
-| `insights.healthSpendWeeks`    | 6       | 1–26        | Weeks shown in the compute spend chart and the reuse sparkline |
+| Setting                        | Default | Range       | What it controls                                                               |
+| ------------------------------ | ------- | ----------- | ------------------------------------------------------------------------------ |
+| `insights.healthMaxNodes`      | 5,000   | 100–50,000  | Machines read for compute spend: still running first, then most recently ended |
+| `insights.healthMaxPlacements` | 30,000  | 100–200,000 | Workspace placements read for reuse and new-machine reasons                    |
+| `insights.healthMaxRuns`       | 30,000  | 100–200,000 | Running intervals read for agents per busy machine                             |
+| `insights.healthMaxReasons`    | 30      | 5–200       | New-machine reasons listed, most common first; the rest are counted            |
+| `insights.healthSpendWeeks`    | 6       | 1–26        | Weeks shown in the compute spend chart and the reuse sparkline                 |
 
 **Admin → Costs** covers LLM spend only. Its compute card links here: the earlier flat
 vCPU-hour estimate (`COMPUTE_VCPU_HOUR_COST_USD`) was removed in favour of the per-machine prices

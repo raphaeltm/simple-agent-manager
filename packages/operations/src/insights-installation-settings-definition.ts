@@ -30,6 +30,13 @@ export const INSIGHTS_INSTALLATION_SETTINGS = [
     range: { min: 100, max: 200_000 },
   },
   {
+    name: 'insights.healthMaxReasons',
+    defaultValue: 30,
+    description:
+      'Distinct reasons Admin Health & cost lists for why new machines were created, most common first. The rest are counted.',
+    range: { min: 5, max: 200 },
+  },
+  {
     name: 'insights.healthSpendWeeks',
     defaultValue: 6,
     description:

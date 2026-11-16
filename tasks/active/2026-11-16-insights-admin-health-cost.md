@@ -58,43 +58,56 @@ records on every node.
 
 ## Implementation checklist
 
-- [ ] Shared: move node billing-ended statuses to `packages/shared` and re-export from
+- [x] Shared: move node billing-ended statuses to `packages/shared` and re-export from
       `node-usage-common.ts` (one definition).
-- [ ] Shared types `InstallationHealthResponse` + range type.
-- [ ] Settings definitions `insights.health*` (max nodes, max placements, max intervals, spend
+- [x] Shared types `InstallationHealthResponse` + range type.
+- [x] Settings definitions `insights.health*` (max nodes, max placements, max intervals, spend
       weeks) registered in the admin settings registry.
-- [ ] `apps/api` lifecycle range report: one windowed episode query, stuck-now observations,
+- [x] `apps/api` lifecycle range report: one windowed episode query, stuck-now observations,
       open incidents by triage signature; reuses `latencyStats`/`classifyRegression`;
       export a signature helper from triage grouping instead of copying it.
-- [ ] Port `lifecycleLatency.rangeReport()` in `OperationPorts` + worker implementation.
-- [ ] Operation `installationHealth` in `packages/operations/src/insights-installation*.ts`:
+- [x] Port `lifecycleLatency.rangeReport()` in `OperationPorts` + worker implementation.
+- [x] Operation `installationHealth` in `packages/operations/src/insights-installation*.ts`:
       superadmin check, compute spend per provider per week, reuse rate, agents per busy
       machine, new-machine reasons, lifecycle section; section isolation; malformed rows skipped
       with a warn log; ≤ 15 round trips.
-- [ ] Route `GET /api/admin/health-cost?range=7d|30d|month` (superadmin).
-- [ ] Admin Costs: remove the flat vCPU-hour compute estimate (route, env var, runtime-tunables
+- [x] Route `GET /api/admin/health-cost?range=7d|30d|month` (superadmin).
+- [x] Admin Costs: remove the flat vCPU-hour compute estimate (route, env var, runtime-tunables
       baseline, tests) and point the compute card at Health & cost.
-- [ ] Web: grouped admin nav with "Spend and health"; lazy `AdminHealthCost` page with TanStack
+- [x] Web: grouped admin nav with "Spend and health"; lazy `AdminHealthCost` page with TanStack
       Query, stale-while-revalidate, SAM Glass, prototype layout.
-- [ ] Tests: real-SQL op tests (shared node counted once, price × overlap, unpriced, user-owned
+- [x] Tests: real-SQL op tests (shared node counted once, price × overlap, unpriced, user-owned
       excluded, reuse first-on-node, running intervals vs stopped-undeleted trap, reasons, bad
       JSON row skipped, non-superadmin refused); port test for lifecycle windowed query and
       incident link; route test; web behavioral test; Playwright audit 375/1280.
-- [ ] Docs: admin/self-hosting docs mention Health & cost; remove `COMPUTE_VCPU_HOUR_COST_USD`.
+- [x] Docs: admin/self-hosting docs mention Health & cost; remove `COMPUTE_VCPU_HOUR_COST_USD`.
 
 ## Acceptance criteria
 
-- [ ] Superadmin sees compute spend per provider per week at node prices; a shared node is
+- [x] Superadmin sees compute spend per provider per week at node prices; a shared node is
       counted once.
-- [ ] Reuse rate, agents per busy machine (running intervals), lifecycle p95 vs budget with open
+- [x] Reuse rate, agents per busy machine (running intervals), lifecycle p95 vs budget with open
       incidents linked, and new-machine reasons render with real data on staging.
-- [ ] Non-superadmins get 403 from the route and are redirected from the page.
-- [ ] One malformed row does not fail the page.
-- [ ] Route stays within 15 round trips.
-- [ ] Admin Costs no longer shows the flat vCPU-hour estimate.
-- [ ] Playwright audit at 375 and 1280 with no horizontal overflow.
+- [x] Non-superadmins get 403 from the route and are redirected from the page.
+- [x] One malformed row does not fail the page.
+- [x] Route stays within 15 round trips.
+- [x] Admin Costs no longer shows the flat vCPU-hour estimate.
+- [x] Playwright audit at 375 and 1280 with no horizontal overflow.
 
 ## References
 
 - Prototype: Library `/product/analytics/analytics-prototypes.html?s=admin`
 - Rules 24, 50, 53, 59, 60, 62, 74; apps/api rules 28, 65.
+
+## Progress notes
+
+- Reviewers (Phase 5): task-completion-validator, cloudflare-specialist, security-auditor,
+  performance-reviewer, ui-ux-specialist, doc-sync-validator. No CRITICAL/HIGH code findings.
+  Fixed: NULL episode duration counted as 0 ms; route-level auth + round-trip test (12 trips);
+  cap tests; spend cap keeps running machines first; reason list capped (`insights.healthMaxReasons`)
+  with disclosure; warm-claims read isolated; placement JSON read only for new machines;
+  accessibility (screen-reader text, week table, touch targets, h2); stale marketing copy and shot.
+- Reuse lower bound: production check 2026-11-16 found all 281 first placements in 30 days created
+  within an hour of their machine; documented, not restructured.
+- Pre-existing, unrelated: `admin-chrome-theme-audit` logs/errors cases fail locally on mock drift
+  (`tasks/backlog/2026-11-16-admin-chrome-audit-logs-mock-drift.md`).

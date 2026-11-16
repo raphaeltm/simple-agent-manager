@@ -122,6 +122,29 @@ describe('readLifecycleLatencyRange', () => {
     });
   });
 
+  it('skips an episode with an unreadable timestamp instead of counting it as 0 ms', async () => {
+    for (let i = 0; i < 5; i++) episode('node', 'stopping', 30 * MINUTE, NOW - (i + 1) * 3_600_000);
+    sqlite
+      .prepare(
+        `INSERT INTO lifecycle_state_episodes (id, entity_type, entity_id, status, first_seen_at, last_seen_at, ended_at)
+         VALUES (999, 'node', 'bad', 'stopping', 'garbage', ?, ?)`
+      )
+      .run(new Date(NOW - 60_000).toISOString(), new Date(NOW - 60_000).toISOString());
+
+    const result = await readLifecycleLatencyRange(
+      env,
+      { sinceMs: NOW - 7 * DAY, untilMs: NOW },
+      { ...LIFECYCLE_LATENCY_DEFAULTS }
+    );
+
+    expect(
+      result.states.find((s) => s.entityType === 'node' && s.status === 'stopping')
+    ).toMatchObject({
+      count: 5,
+      p50Ms: 30 * MINUTE,
+    });
+  });
+
   it('does not judge a state with fewer than minSamples episodes', async () => {
     for (let i = 0; i < 4; i++) episode('node', 'creating', 60 * MINUTE, NOW - (i + 1) * 3_600_000);
 

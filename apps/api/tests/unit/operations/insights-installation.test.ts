@@ -25,11 +25,24 @@ describe('installationHealth', () => {
   let env: Env;
   let latency: ReturnType<typeof vi.fn>;
 
-  function ctx(userId = 'admin'): OperationContext {
+  /** `limits` overrides individual admin settings; the rest resolve through the real port. */
+  function ctx(userId = 'admin', limits: Record<string, number> = {}): OperationContext {
     const ports = createOperationPorts(env);
+    const settings = {
+      ...ports.settings,
+      resolveDetailsMany: async (
+        names: Parameters<typeof ports.settings.resolveDetailsMany>[0]
+      ) => {
+        const resolved = await ports.settings.resolveDetailsMany(names);
+        return resolved.map((row, index) => {
+          const override = limits[names[index] as string];
+          return override === undefined ? row : { ...row, value: override };
+        });
+      },
+    };
     return {
       env,
-      ports: { ...ports, lifecycleLatency: { rangeReport: latency } },
+      ports: { ...ports, settings, lifecycleLatency: { rangeReport: latency } },
       requestId: 'test',
       actor: { userId, via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
     };
@@ -202,6 +215,22 @@ describe('installationHealth', () => {
       expect(result.compute?.totalUsd).toBe(4.72);
     });
 
+    it('keeps the still-running machine under the cap and says the total is a lower bound', async () => {
+      node('ended-recently', {
+        status: 'deleted',
+        created_at: iso('2026-11-15T00:00:00Z'),
+        updated_at: iso('2026-11-15T12:00:00Z'),
+      });
+      node('running-long'); // created 2026-11-01, still running: costs the most
+      const result = await installationHealth(
+        ctx('admin', { 'insights.healthMaxNodes': 1 }),
+        { range: '7d' },
+        NOW
+      );
+
+      expect(result.compute).toMatchObject({ totalUsd: 1.68, nodes: 1, truncated: true });
+    });
+
     it('skips a machine with an unreadable timestamp and still prices the rest', async () => {
       node('good');
       node('bad', { status: 'deleted', updated_at: 'not-a-date' });
@@ -303,8 +332,46 @@ describe('installationHealth', () => {
           { reason: 'No other machine in the pool to try', kind: 'no_candidate', machines: 1 },
           { reason: 'Placement explanation not recorded', kind: 'not_recorded', machines: 1 },
         ],
+        otherReasons: 0,
       });
       expect(result.unavailable).toEqual([]);
+    });
+
+    it('lists the most common reasons up to the cap and counts the rest', async () => {
+      const result = await installationHealth(
+        ctx('admin', { 'insights.healthMaxReasons': 2 }),
+        { range: '7d' },
+        NOW
+      );
+
+      expect(result.newMachines?.reasons.map((r) => r.reason)).toEqual([
+        'CPU saturation ceiling reached',
+        'disk reservation budget would be exceeded',
+      ]);
+      expect(result.newMachines?.otherReasons).toBe(3);
+    });
+
+    it('says the reuse rate but not the warm-pool part when the decision log cannot be read', async () => {
+      sqlite.exec('DROP TABLE node_lifecycle_decisions');
+
+      const result = await installationHealth(ctx(), { range: '7d' }, NOW);
+
+      expect(result.reuse).toMatchObject({
+        placements: 6,
+        onExistingMachine: 2,
+        fromWarmPool: null,
+      });
+      expect(result.unavailable).toEqual([]);
+    });
+
+    it('marks placements truncated when the cap is reached', async () => {
+      const result = await installationHealth(
+        ctx('admin', { 'insights.healthMaxPlacements': 3 }),
+        { range: '7d' },
+        NOW
+      );
+
+      expect(result.reuse).toMatchObject({ placements: 3, truncated: true });
     });
 
     it('breaks a tie on creation time by id so exactly one workspace is first', async () => {
@@ -352,6 +419,22 @@ describe('installationHealth', () => {
         runs: 2,
         truncated: false,
       });
+    });
+
+    it('marks running intervals truncated when the cap is reached', async () => {
+      node('a');
+      workspace('w1', 'a', '2026-11-10T00:00:00Z');
+      workspace('w2', 'a', '2026-11-10T00:00:00Z');
+      run('w1', 'a', '2026-11-10T00:00:00Z', '2026-11-10T04:00:00Z');
+      run('w2', 'a', '2026-11-10T02:00:00Z', '2026-11-10T06:00:00Z');
+
+      const result = await installationHealth(
+        ctx('admin', { 'insights.healthMaxRuns': 1 }),
+        { range: '7d' },
+        NOW
+      );
+
+      expect(result.density).toMatchObject({ runs: 1, truncated: true });
     });
 
     it('clips runs to the range and treats back-to-back runs as one agent', async () => {
