@@ -25,11 +25,10 @@ concurrency:
   # event (main pushes, manual runs) gets one group per commit, so a second main merge
   # does not wait for the previous main run to finish. An older main run that finishes
   # late cannot deploy over a newer one: deploy.yml serializes production runs and
-  # scripts/deploy/validate-production-dispatch.ts only accepts the current main tip.
-  # Known limit: if the older run's deploy is queued while the newer one is still
-  # pending, GitHub replaces the pending newer deploy, the older one then fails closed,
-  # and the tip waits for the next merge or a manual Deploy Production dispatch
-  # (/do Phase 7b covers the recovery).
+  # scripts/deploy/validate-production-dispatch.ts only deploys the current main tip.
+  # GitHub keeps one pending deploy run, so an older run's deploy can replace the tip's
+  # pending one; the gate then deploys the tip itself when the tip's CI is green, and
+  # otherwise waits for the tip's own CI completion to trigger its deploy.
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   # Keep main CI runs alive so every successful main merge can trigger production deploy.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

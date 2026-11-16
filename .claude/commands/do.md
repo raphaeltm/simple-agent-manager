@@ -408,7 +408,7 @@ After merging to main, you MUST monitor the production deployment to completion.
      - Whether this is something the agent can fix (code issue) or requires human intervention (missing secrets, infrastructure config)
    - If it's a code issue you introduced: fix it, push to main, and monitor the next deploy
    - If it requires human intervention (missing secrets, permissions, external config): **tell the user explicitly what action they need to take** and do NOT silently move on
-   - **Exception: a fail-closed "does not match the current trusted main tip" at "Re-verify current main after deployment queue"** means a newer commit reached `main` first; your change ships with the tip. Main CI runs overlap, so this deploy run can also have displaced the tip's pending deploy. Check that a Deploy Production run for the current tip succeeded or is queued or running (`gh run list --workflow=deploy.yml --limit=5 --json headSha,status,conclusion,displayTitle` and `git ls-remote origin main`). If none exists and CI on the tip succeeded, start one with `gh workflow run deploy.yml --ref main` (it defaults to the tip and re-checks CI on that exact SHA) and monitor it. Report what you did.
+   - **A successful Deploy Production run that deployed nothing** means a newer commit reached `main` first, or the tip was already deployed: the automatic gate always deploys the current main tip, and only once the tip's own CI succeeded. Your change ships with the tip's deploy; monitor that run instead (`gh run list --workflow=deploy.yml --limit=5`).
 
 5. **Check for pre-existing deploy failures**: Before monitoring your own deploy, check if recent deploys have been failing:
    ```bash
