@@ -20,4 +20,3 @@ export function gitlabAccountScope(
     ? { kind: 'raw' }
     : { kind: 'host', accountIdPrefix: untrustedGitLabAccountSubject(config.host, '') };
 }
-
