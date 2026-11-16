@@ -59,6 +59,7 @@ import {
 import { cronToHumanReadable } from './services/cron-utils';
 import { getInstallationToken } from './services/github-app';
 import { createInboxPort } from './services/inbox/port';
+import { readLifecycleLatencyRange } from './services/lifecycle-latency/range-report';
 import { resolveProfileAccountBindings } from './services/profile-account-bindings';
 import * as projectData from './services/project-data';
 import { describeRootSearchCoverage } from './services/project-data-search-coverage';
@@ -244,6 +245,9 @@ export function createOperationPorts(env: Env): OperationPorts {
     },
     missions: {
       startOrchestration: (projectId, missionId) => startOrchestration(env, projectId, missionId),
+    },
+    lifecycleLatency: {
+      rangeReport: (input) => readLifecycleLatencyRange(env, input),
     },
   };
 }

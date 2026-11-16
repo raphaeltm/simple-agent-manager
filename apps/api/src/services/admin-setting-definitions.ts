@@ -13,6 +13,7 @@ import {
 } from './connector-settings-definition';
 import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type InboxSettingName } from './inbox-settings-definition';
+import { type InsightsInstallationSettingName } from './insights-installation-settings-definition';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
 import { type RuntimeSecretRequestSettingName } from './runtime-secret-request-settings-definition';
@@ -34,6 +35,7 @@ export type AdminSettingName =
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
   | InboxSettingName
+  | InsightsInstallationSettingName
   | RuntimeSecretRequestSettingName
   | AgentEmailSettingName
   | FleetOpsSettingName

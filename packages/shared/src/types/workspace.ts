@@ -65,6 +65,13 @@ export function isNodeClass(value: unknown): value is NodeClass {
   return value === 'managed' || value === 'user-owned';
 }
 
+/**
+ * Node statuses after which a node no longer accrues compute time. For these the node's end time
+ * is its `updated_at` (`getNodeEndedAt`, apps/api `node-usage-calculation.ts`). One list for
+ * metering, quotas and Admin Health & cost.
+ */
+export const NODE_BILLING_ENDED_STATUSES = ['destroyed', 'destroying', 'deleted', 'error'] as const;
+
 /** True only for enrolled BYO machines. Any unknown/absent value is treated as managed (safe default). */
 export function isUserOwnedNodeClass(value: unknown): boolean {
   return value === 'user-owned';

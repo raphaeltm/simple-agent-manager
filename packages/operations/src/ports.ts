@@ -20,6 +20,7 @@ import type {
   AgentProfile,
   CredentialLimitsResponse,
   InboxItemContext,
+  InstallationLifecycleLatency,
   NotificationResponse,
   NotificationType,
   SessionStateSnapshot,
@@ -33,6 +34,7 @@ import type * as schema from '@simple-agent-manager/worker-core/schema';
 import type { ConnectorAnswerChoice } from './connector-answer-input';
 import type { ConnectorReadSettingName } from './connector-read-settings-definition';
 import type { InboxSettingName } from './inbox-settings-definition';
+import type { InsightsInstallationSettingName } from './insights-installation-settings-definition';
 import type {
   AgentActivityTask,
   LimitKey,
@@ -82,7 +84,8 @@ export type OperationSettingName =
   | 'collaboration.ideaUpdateQuoteMaxLength'
   | 'collaboration.ideaAgentNoteMinIntervalSeconds'
   | 'collaboration.ideaUpdatePageSize'
-  | InboxSettingName;
+  | InboxSettingName
+  | InsightsInstallationSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;
 
@@ -387,6 +390,15 @@ export interface OperationMissionPort {
   startOrchestration(projectId: string, missionId: string): Promise<void>;
 }
 
+/**
+ * Lifecycle latency over a time range, for Admin Health & cost
+ * (`apps/api/src/services/lifecycle-latency/range-report.ts`). Owned by the lifecycle latency
+ * service, which holds the watched states, their budgets and the percentile code.
+ */
+export interface OperationLifecycleLatencyPort {
+  rangeReport(input: { sinceMs: number; untilMs: number }): Promise<InstallationLifecycleLatency>;
+}
+
 /** A question or permission held as a ProjectData attention marker, with the reader's access. */
 export interface InboxAttentionMarker {
   id: string;
@@ -491,4 +503,5 @@ export interface OperationPorts {
   account: OperationAccountPort;
   workspaces: OperationWorkspacePort;
   missions: OperationMissionPort;
+  lifecycleLatency: OperationLifecycleLatencyPort;
 }

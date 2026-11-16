@@ -1,0 +1,160 @@
+/**
+ * Admin "Health & cost" (Insights slice H, idea 01M7HTS38KX2G78JD0ESAGMKKH): one aggregated,
+ * superadmin-only read of this installation's compute spend, machine reuse and packing,
+ * lifecycle latency against its budgets, and why new machines were created.
+ *
+ * Everything is derived at read time from the records SAM already keeps; nothing here is stored.
+ * Costs are estimates at the provider list price recorded on each node.
+ */
+
+export const INSTALLATION_HEALTH_RANGES = ['7d', '30d', 'month'] as const;
+export type InstallationHealthRange = (typeof INSTALLATION_HEALTH_RANGES)[number];
+export const DEFAULT_INSTALLATION_HEALTH_RANGE: InstallationHealthRange = 'month';
+
+export function isInstallationHealthRange(value: unknown): value is InstallationHealthRange {
+  return (INSTALLATION_HEALTH_RANGES as readonly unknown[]).includes(value);
+}
+
+/** Sections of the read. A section that fails is null and named in `unavailable`. */
+export type InstallationHealthSection = 'compute' | 'reuse' | 'density' | 'newMachines' | 'latency';
+
+export interface InstallationHealthWindow {
+  range: InstallationHealthRange;
+  /** Inclusive start (ISO). */
+  start: string;
+  /** Exclusive end (ISO): the time of the read. */
+  end: string;
+}
+
+export interface InstallationComputeProviderSpend {
+  provider: string;
+  usd: number;
+  nodeHours: number;
+  /** Priced machines of this provider that ran during the range. */
+  nodes: number;
+}
+
+export interface InstallationComputeWeek {
+  /** Monday 00:00 UTC that starts the week (ISO). */
+  weekStart: string;
+  totalUsd: number;
+  byProvider: { provider: string; usd: number }[];
+}
+
+/**
+ * Machine lifetime × the machine's recorded hourly price, summed per machine. Workspaces share
+ * machines, so a machine is counted once however many workspaces ran on it.
+ */
+export interface InstallationComputeSpend {
+  currency: 'USD';
+  totalUsd: number;
+  byProvider: InstallationComputeProviderSpend[];
+  /** Trailing weeks, oldest first, the current (partial) week last. */
+  weeks: InstallationComputeWeek[];
+  /** Machines that ran during the range with no USD hourly price; they add nothing to the totals. */
+  unpricedNodes: number;
+  /** Managed cloud machines that ran during the range. */
+  nodes: number;
+  /** True when the machine read hit its cap; totals are then a lower bound. */
+  truncated: boolean;
+}
+
+/**
+ * Placements of a workspace on a machine. A placement is on a new machine when no earlier
+ * workspace exists on that machine, and on an existing machine otherwise.
+ */
+export interface InstallationMachineReuse {
+  placements: number;
+  onExistingMachine: number;
+  onNewMachine: number;
+  /** Warm-pool claims recorded in the node decision log during the range (part of "existing"). */
+  fromWarmPool: number;
+  /** onExistingMachine / placements, 0-1; null with no placements. */
+  reuseRate: number | null;
+  weeks: { weekStart: string; placements: number; reuseRate: number | null }[];
+  truncated: boolean;
+}
+
+/**
+ * Agents running at once on a machine, averaged over the time the machine had at least one
+ * agent running. Running time comes from resource telemetry (first to last sample while the
+ * workspace ran), not from the creation-to-deletion compute ledger, which also counts stopped
+ * workspaces that were not deleted yet.
+ */
+export interface InstallationMachineDensity {
+  agentsPerBusyMachine: number | null;
+  busyMachineHours: number;
+  agentHours: number;
+  peakAgentsOnOneMachine: number;
+  /** Machines with at least one running interval in the range. */
+  machines: number;
+  /** Running intervals read. */
+  runs: number;
+  truncated: boolean;
+}
+
+export type InstallationNewMachineReasonKind = 'refused' | 'no_candidate' | 'not_recorded';
+
+/**
+ * One condition that sent a placement to a new machine. `refused` reasons are the capacity
+ * gate's own words for why an existing machine was turned down; a new machine is counted once
+ * under each distinct reason it recorded.
+ */
+export interface InstallationNewMachineReason {
+  reason: string;
+  kind: InstallationNewMachineReasonKind;
+  machines: number;
+}
+
+export interface InstallationNewMachineReasons {
+  newMachines: number;
+  reasons: InstallationNewMachineReason[];
+}
+
+export type InstallationLatencyIncidentState = 'pending' | 'dispatched' | 'claimed';
+
+/** An open platform-feedback incident raised by the lifecycle latency watchdog or daily check. */
+export interface InstallationLatencyIncident {
+  signature: string;
+  state: InstallationLatencyIncidentState;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  occurrences: number;
+  /** Idea tracking the incident, when one was filed, and the project it lives in. */
+  ideaId: string | null;
+  ideaProjectId: string | null;
+}
+
+export interface InstallationLatencyState {
+  entityType: string;
+  status: string;
+  budgetMs: number;
+  /** Finished episodes in the range (lower-bound durations from five-minute samples). */
+  count: number;
+  p50Ms: number | null;
+  p95Ms: number | null;
+  maxMs: number | null;
+  /** True when the per-state sample limit cut off older episodes in the range. */
+  truncated: boolean;
+  /** Enough samples and p95 above budget (the daily check's `over_budget`). */
+  overBudget: boolean;
+  /** Rows in this state right now for longer than its budget. */
+  overBudgetNow: number;
+  incidents: InstallationLatencyIncident[];
+}
+
+export interface InstallationLifecycleLatency {
+  minSamples: number;
+  states: InstallationLatencyState[];
+}
+
+export interface InstallationHealthResponse {
+  window: InstallationHealthWindow;
+  generatedAt: string;
+  compute: InstallationComputeSpend | null;
+  reuse: InstallationMachineReuse | null;
+  density: InstallationMachineDensity | null;
+  newMachines: InstallationNewMachineReasons | null;
+  latency: InstallationLifecycleLatency | null;
+  unavailable: InstallationHealthSection[];
+}
