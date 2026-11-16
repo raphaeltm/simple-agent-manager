@@ -236,3 +236,30 @@ describe('MobileNavDrawer — toggle', () => {
     expect(screen.getByTitle('Test Project')).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// MobileNavDrawer — inbox count (nav parity with the desktop sidebar)
+// ---------------------------------------------------------------------------
+
+describe('MobileNavDrawer — inbox count', () => {
+  it('shows the Inbox count like the desktop sidebar, and none when zero', () => {
+    const onNavigate = vi.fn();
+    render(
+      <MobileNavDrawer
+        onClose={vi.fn()}
+        user={{ name: 'Test User', email: 'test@example.com', image: null }}
+        currentPath="/projects/p1/chat"
+        onNavigate={onNavigate}
+        onSignOut={vi.fn()}
+        navItems={[
+          { label: 'Chat', path: '/projects/p1/chat' },
+          { label: 'Inbox', path: '/projects/p1/inbox', count: 3 },
+          { label: 'Ideas', path: '/projects/p1/ideas', count: 0 },
+        ]}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Inbox, 3' }));
+    expect(onNavigate).toHaveBeenCalledWith('/projects/p1/inbox');
+    expect(screen.getByRole('button', { name: 'Ideas' })).toBeInTheDocument();
+  });
+});
