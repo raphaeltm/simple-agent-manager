@@ -544,8 +544,8 @@ The rest control the checks themselves:
 
 **Admin → Spend and health → Health & cost** (`/admin/health-cost`, superadmins only) shows how
 this installation's machines are doing over the last 7 days, the last 30 days, or the month so far.
-Everything is computed from records SAM already keeps when the page loads; nothing extra is
-stored. The page is served by `GET /api/admin/health-cost?range=7d|30d|month`, which calls the
+Everything except the Cloudflare card is computed from records SAM already keeps when the page
+loads; the Cloudflare card reads a small daily snapshot (below). The page is served by `GET /api/admin/health-cost?range=7d|30d|month`, which calls the
 shared `installationHealth` operation (`packages/operations/src/insights-installation.ts`).
 
 - **Compute spend per provider per week.** Each cloud machine's running time multiplied by the
@@ -583,18 +583,58 @@ shared `installationHealth` operation (`packages/operations/src/insights-install
   capacity check gave for turning down every existing machine it considered, in its own words. A
   machine is counted once under each reason it recorded. "No other machine in the pool to try" means
   there was nothing to reuse.
+- **Cloudflare.** An estimate of what the Cloudflare account costs this month, in USD, kept apart
+  from compute spend: the month so far, a projection for the month, the five product lines with
+  the highest projected cost, everything else summed, and the daily cost for the last 30 days.
+  The projection is what is already spent plus the average of the last 7 days for each remaining
+  day, not the month's running average, so an early spike does not inflate it. It is an estimate
+  from Cloudflare's billed usage analytics at list prices, not an invoice: it covers every Worker
+  on the Cloudflare account (not only this installation's), and leaves out the $5 Workers Paid
+  subscription, R2 operations, and container CPU and disk. The month shown is the month of the
+  latest stored day, so on the 1st it is still the previous month's total.
 
 A section that cannot be read is named at the top of the page; the others still show. These
 **Operations** settings bound how much the page reads; when a read reaches its cap the page says
 the number is a lower bound.
 
-| Setting                        | Default | Range       | What it controls                                                               |
-| ------------------------------ | ------- | ----------- | ------------------------------------------------------------------------------ |
-| `insights.healthMaxNodes`      | 5,000   | 100–50,000  | Machines read for compute spend: still running first, then most recently ended |
-| `insights.healthMaxPlacements` | 30,000  | 100–200,000 | Workspace placements read for reuse and new-machine reasons                    |
-| `insights.healthMaxRuns`       | 30,000  | 100–200,000 | Running intervals read for agents per busy machine                             |
-| `insights.healthMaxReasons`    | 30      | 5–200       | New-machine reasons listed, most common first; the rest are counted            |
-| `insights.healthSpendWeeks`    | 6       | 1–26        | Weeks shown in the compute spend chart and the reuse sparkline                 |
+| Setting                               | Default | Range       | What it controls                                                               |
+| ------------------------------------- | ------- | ----------- | ------------------------------------------------------------------------------ |
+| `insights.healthMaxNodes`             | 5,000   | 100–50,000  | Machines read for compute spend: still running first, then most recently ended |
+| `insights.healthMaxPlacements`        | 30,000  | 100–200,000 | Workspace placements read for reuse and new-machine reasons                    |
+| `insights.healthMaxRuns`              | 30,000  | 100–200,000 | Running intervals read for agents per busy machine                             |
+| `insights.healthMaxReasons`           | 30      | 5–200       | New-machine reasons listed, most common first; the rest are counted            |
+| `insights.healthSpendWeeks`           | 6       | 1–26        | Weeks shown in the compute spend chart and the reuse sparkline                 |
+| `insights.healthCloudflareSeriesDays` | 30      | 7–62        | Days of daily cost shown in the Cloudflare card                                |
+| `insights.healthCloudflareTopLines`   | 5       | 1–19        | Cloudflare product lines listed by projected cost; the rest are summed         |
+
+### Cloudflare cost snapshot
+
+A daily job (the `0 3 * * *` cron, `runCloudflareCostSnapshot()` in
+`apps/api/src/services/cloudflare-cost-snapshot.ts`) asks Cloudflare's GraphQL analytics API for
+the last complete days and stores one row per day per product line in `installation_cost_daily`:
+usage, unit, estimated USD cost and fetch time. It uses the same request and the same billed
+fields as `pnpm quality:cloudflare-cost` (`packages/shared/src/cloudflare-cost/`): Durable Object
+duration from `durableObjectsPeriodicGroups.sum.duration`, Workers requests without tail-worker
+invocations, Workers CPU, Durable Object requests and storage operations, D1 rows and storage, KV
+operations and storage, R2 storage, Workers AI neurons and container memory. A day's cost is its
+share of the month: the monthly allowance is used up by the month's earliest days.
+
+Every run fetches its whole window again in one request and overwrites those days, so late
+analytics and missed days fill in by themselves. Cloudflare serves at most the last 31 days, so a
+gap older than that cannot be filled and the card counts those days as $0 and says how many.
+**Refresh now** on the card runs the job immediately. A failed run is recorded and shown on the
+card; it does not affect the other daily jobs.
+
+The job uses the Worker's existing `CF_API_TOKEN` and `CF_ACCOUNT_ID` secrets. The token needs
+**Account → Account Analytics → Read** (Admin Analytics' Analytics Engine queries need it too).
+Without the secrets the card says what to set; without the permission it says the token cannot
+read account analytics. Nothing else errors. You can add the permission to the existing token in
+the Cloudflare dashboard; no redeploy is needed.
+
+| Setting                               | Default | Range       | What it controls                                                                                                    |
+| ------------------------------------- | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------- |
+| `insights.cloudflareCostBackfillDays` | 30      | 1–31        | Complete days each run fetches and stores again                                                                     |
+| `insights.cloudflareCostQueryLimit`   | 10,000  | 100–100,000 | Rows per analytics dataset one request may return; reaching it fails the run rather than storing a partial estimate |
 
 **Admin → Costs** covers LLM spend only. Its compute card links here: the earlier flat
 vCPU-hour estimate (`COMPUTE_VCPU_HOUR_COST_USD`) was removed in favour of the per-machine prices

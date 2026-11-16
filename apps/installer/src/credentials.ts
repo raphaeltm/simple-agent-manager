@@ -78,6 +78,9 @@ const RUNTIME_ACCOUNT = [
   'Workers Containers Write',
   'Workers Scripts Read',
   'Workers Observability Read',
+  // Admin Analytics (Analytics Engine SQL) and the daily Cloudflare cost snapshot on Admin Health
+  // & cost (GraphQL account analytics, apps/api/src/services/cloudflare-cost-snapshot.ts).
+  'Account Analytics Read',
   'Workers AI Read',
   'Workers AI Write',
   'AI Gateway Read',

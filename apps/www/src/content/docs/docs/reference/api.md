@@ -1280,9 +1280,17 @@ Superadmin only. Backs **Admin → Health & cost**. Optional `range`: `7d`, `30d
 (the default, the calendar month so far in UTC); any other value returns `400`. Returns
 `InstallationHealthResponse` (`packages/shared/src/types/insights-installation.ts`): `window`,
 `compute` (spend per provider and per week at each machine's recorded price), `reuse`, `density`
-(agents per busy machine), `newMachines` (reasons) and `latency` (p95 against budget per watched
-state, with open incidents). A section that fails to read is `null` and named in `unavailable`.
-See [Health & cost](/docs/guides/admin-settings/#health--cost).
+(agents per busy machine), `newMachines` (reasons), `latency` (p95 against budget per watched
+state, with open incidents) and `cloudflare` (the Cloudflare account's estimated USD cost this
+month from the daily snapshot, with the snapshot's status). A section that fails to read is
+`null` and named in `unavailable`. See [Health & cost](/docs/guides/admin-settings/#health--cost).
+
+### `POST /api/admin/health-cost/cloudflare/refresh`
+
+Superadmin only. Runs the daily Cloudflare cost snapshot now (the card's **Refresh now**) and
+returns `InstallationCloudflareRefreshResponse`: `status` (`ok`, `not_configured`,
+`permission_denied` or `error`), the stored window (`firstDay`, `lastDay`), `rowsWritten` and
+`error`. A Cloudflare failure is a `200` with that status, recorded for the card.
 
 ## Operations Approvals
 
