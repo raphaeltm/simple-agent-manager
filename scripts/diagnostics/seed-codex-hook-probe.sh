@@ -10,11 +10,13 @@ set -euo pipefail
 ref=${1:?usage: seed-codex-hook-probe.sh <simple-agent-manager ref>}
 raw="https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/$ref"
 
+fetch() { curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 "$raw/$1"; }
+
 mkdir -p .codex/hooks .claude/hooks .claude/rules src
-curl -fsSL "$raw/.codex/hooks/rule-context.mjs" -o .codex/hooks/rule-context.mjs
-curl -fsSL "$raw/.claude/hooks/verify-test-quality.mjs" -o .claude/hooks/verify-test-quality.mjs
+fetch .codex/hooks/rule-context.mjs >.codex/hooks/rule-context.mjs
+fetch .claude/hooks/verify-test-quality.mjs >.claude/hooks/verify-test-quality.mjs
 # The hook entries of SAM's own .codex/config.toml, without its project table.
-curl -fsSL "$raw/.codex/config.toml" |
+fetch .codex/config.toml |
   sed -n '/^\[\[hooks.SessionStart\]\]/,/^\[projects/p' | sed '/^\[projects/d' >.codex/config.toml
 
 cat >.claude/rules/10-probe.md <<'RULE'

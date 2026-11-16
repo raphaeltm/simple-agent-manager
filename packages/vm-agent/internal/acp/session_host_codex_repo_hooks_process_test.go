@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -186,16 +185,7 @@ func runCodexHookProbe(t *testing.T, adapter, codex, repo, codexConfigEnv, comma
 			}
 			item = map[string]any{"type": "function_call", "call_id": "read-call", "name": tool, "arguments": arguments}
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		for _, event := range []map[string]any{
-			{"type": "response.created", "response": map[string]any{"id": fmt.Sprintf("response-%d", call)}},
-			{"type": "response.output_item.done", "item": item},
-			{"type": "response.completed", "response": map[string]any{"id": fmt.Sprintf("response-%d", call),
-				"usage": map[string]any{"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}}},
-		} {
-			data, _ := json.Marshal(event)
-			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event["type"], data)
-		}
+		writeResponsesTurn(w, call, item)
 	}))
 	defer model.Close()
 
@@ -207,31 +197,10 @@ func runCodexHookProbe(t *testing.T, adapter, codex, repo, codexConfigEnv, comma
 
 	host, _ := newInteractionHost(newInteractionRecorder(t, http.StatusCreated))
 	defer host.Stop()
-	adapterCommand, adapterArgs := adapter, []string{}
-	if filepath.Ext(adapter) == ".js" {
-		adapterCommand, adapterArgs = "node", []string{adapter}
-	}
-	cmd := exec.CommandContext(ctx, adapterCommand, adapterArgs...)
-	cmd.Dir = repo
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Env = append(os.Environ(), "CODEX_PATH="+codex, "CODEX_HOME="+home, "PROBE_API_KEY=probe-only",
-		"CODEX_API_KEY=probe-only", codexConfigEnv, codexACPManagedAgentModeEnv)
-	cmd.Stderr = io.Discard
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		_ = cmd.Wait()
-	}()
+	bin, binArgs := adapterCommand(adapter)
+	stdin, stdout, stop := startACPAdapterProcess(ctx, t, repo, []string{"CODEX_PATH=" + codex, "CODEX_HOME=" + home,
+		"PROBE_API_KEY=probe-only", "CODEX_API_KEY=probe-only", codexConfigEnv, codexACPManagedAgentModeEnv}, bin, binArgs...)
+	defer stop()
 	client := acpsdk.NewClientSideConnection(&sessionHostClient{host: host, interactionGeneration: host.interactionGeneration}, stdin, stdout)
 	host.acpConn = client
 	if _, err := host.initializeACP(ctx, "openai-codex", 10*time.Second); err != nil {
