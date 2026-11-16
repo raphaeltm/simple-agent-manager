@@ -265,8 +265,8 @@ export const TASK_LIFECYCLE_TOOLS = [
   {
     name: 'request_human_input',
     description:
-      'Request human input when you are blocked, need a decision, need clarification, or need approval. ' +
-      'This sends a high-urgency notification to the user and returns immediately — you can continue working or end your turn.',
+      "Alias of inbox_write method ask with blocking true: files one question in the person's inbox (its title is the first sentence of context) and notifies them. " +
+        'Returns immediately; end your turn if you cannot continue, and you will be woken in this chat when they answer. Prefer inbox_write for a title, links or a non-blocking ask.',
     inputSchema: {
       type: 'object' as const,
       properties: {

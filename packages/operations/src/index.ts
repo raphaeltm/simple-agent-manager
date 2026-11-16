@@ -64,6 +64,28 @@ export {
 } from './idea-transitions';
 export { addIdeaUpdate, deleteIdeaUpdate, listIdeaUpdates } from './idea-update-core';
 export { createAsk, type CreateAskInput } from './inbox-ask-create-core';
+export {
+  type AgentAskInput,
+  AgentAskInputSchema,
+  AgentCancelInputSchema,
+  type AgentFileResult,
+  type AgentLinkInput,
+  type AgentReviewInput,
+  AgentReviewInputSchema,
+  AgentUpdateInputSchema,
+  cancelAgentAsk,
+  fileAgentAsk,
+  fileAgentReview,
+  updateAgentAsk,
+} from './inbox-agent-core';
+export {
+  type AgentInboxSource,
+  type AgentListInput,
+  findSimilarAsks,
+  getAgentAsk,
+  listAgentAsks,
+  titleSimilarity,
+} from './inbox-agent-reads';
 export { getInboxItem, resolveInboxItem } from './inbox-item-core';
 export { countInbox, listInbox } from './inbox-list-core';
 export {
@@ -155,6 +177,7 @@ export {
 } from './platform-operations';
 export { type ProfileAccountBinding } from './port-types';
 export {
+  type InboxAskAnnouncement,
   type InboxAskNoticeOutcome,
   type InboxAskNoticeRow,
   type InboxAttentionMarker,

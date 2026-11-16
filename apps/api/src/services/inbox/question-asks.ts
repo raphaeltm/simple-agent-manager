@@ -9,12 +9,9 @@
  * delivery that was not queued keeps `notified_at` NULL and the inbox sweep retries it.
  */
 import {
-  createAsk,
-  getInboxLimits,
-  inboxTitle,
+  fileAgentAsk,
   loadAskNoticeRow,
   notifyClosedAsk,
-  questionSchedule,
 } from '@simple-agent-manager/operations';
 import type { HumanInputCategory } from '@simple-agent-manager/shared';
 import { HUMAN_INPUT_CATEGORIES } from '@simple-agent-manager/shared';
@@ -27,7 +24,6 @@ import { markRejectedBeforeEffects } from '../../lib/operation-effect-boundary';
 import { errors } from '../../middleware/error';
 import { createOperationPorts } from '../../operation-ports';
 import type { authorizeAgentWake } from '../agent-wake-authorization';
-import * as projectDataService from '../project-data';
 import { recordSharedSessionAnswer } from '../session-access';
 
 export interface QuestionAsk {
@@ -242,18 +238,17 @@ export interface FileQuestionInput {
 }
 
 /**
- * File a `request_human_input` question as an `asks` row through the shared create operation
- * (`createAsk`): assignee, per-chat cap and lengths are its checks; the schedule is the
- * `inbox.question*` settings. The chat list shows it live (`recordQuestionAsked`).
+ * File a `request_human_input` question: an alias of a blocking `inbox_write` ask, through the
+ * same operation (`fileAgentAsk`). The title is the context's first sentence; assignee, per-chat
+ * cap, lengths, the `inbox.question*` schedule, the live chat update and the push are its.
  */
 export async function fileQuestionAsk(
   env: Env,
   input: FileQuestionInput
-): Promise<{ id: string; createdAt: number; expiresAt: number }> {
-  const ports = createOperationPorts(env);
+): Promise<{ id: string; createdAt: number; expiresAt: number; notificationScheduled: boolean }> {
   const ctx = {
     env,
-    ports,
+    ports: createOperationPorts(env),
     requestId: '',
     actor: {
       userId: input.userId,
@@ -266,50 +261,29 @@ export async function fileQuestionAsk(
       },
     },
   };
-  const limits = await getInboxLimits(ctx);
-  const now = Date.now();
-  const schedule = questionSchedule(limits, now);
-  const created = await createAsk(
+  const filed = await fileAgentAsk(
     ctx,
     {
       projectId: input.projectId,
-      assigneeKind: 'user',
-      assigneeUserId: input.userId,
-      kind: 'question',
-      blocking: true,
-      title: inboxTitle(input.context, limits.titleMaxChars),
-      body: input.context,
-      answerSpec: input.options?.length
-        ? { type: 'options', options: input.options, allowText: false }
-        : { type: 'text' },
-      sourceSessionId: input.sessionId,
-      sourceTaskId: input.taskId,
-      sourceWorkspaceId: input.workspaceId ?? undefined,
-      category: input.category ?? undefined,
-      expiresAt: schedule.expiresAt,
-      nextEscalationAt: schedule.nextEscalationAt ?? undefined,
-      maxExpiresAt: schedule.maxExpiresAt,
-    },
-    now
-  );
-  try {
-    await projectDataService.recordQuestionAsked(env, input.projectId, {
       sessionId: input.sessionId,
-      askId: created.id,
-      createdAt: now,
-      expiresAt: schedule.expiresAt,
-      reason: input.context,
-      options: input.options ?? [],
-    });
-  } catch (error) {
-    // The question is filed; the chat list shows it on its next read.
-    log.warn('question_ask.live_update_failed', {
-      askId: created.id,
-      projectId: input.projectId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return { id: created.id, createdAt: now, expiresAt: schedule.expiresAt };
+      taskId: input.taskId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+    },
+    {
+      why: input.context,
+      options: input.options?.length ? input.options : undefined,
+      category: input.category ?? undefined,
+      blocking: true,
+    }
+  );
+  return {
+    id: filed.id,
+    createdAt: filed.filedAt,
+    // A blocking question always has an expiry (`questionSchedule`).
+    expiresAt: filed.expiresAt ?? filed.filedAt,
+    notificationScheduled: filed.notificationScheduled,
+  };
 }
 
 /** Link the notification sent for a question, so reminders resend its push (`sweep.ts`). */

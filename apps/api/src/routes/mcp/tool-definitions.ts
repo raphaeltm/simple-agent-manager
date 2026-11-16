@@ -24,6 +24,7 @@ import { WORKFLOW_TOOLS } from './tool-definitions-workflow-tools';
 export { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 export { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
 export { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
+export { INBOX_TOOLS } from './tool-definitions-inbox-tools';
 export { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
@@ -61,6 +62,7 @@ import { PROJECT_EVENT_CHANNEL_TOOLS } from './tool-definitions-project-event-ch
 import { PROJECT_EVENT_TOOLS } from './tool-definitions-project-event-tools';
 import { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
 import { SKILL_TOOLS } from './tool-definitions-skill-tools';
+import { INBOX_TOOLS } from './tool-definitions-inbox-tools';
 import { TASK_LIFECYCLE_TOOLS } from './tool-definitions-task-tools';
 import { TRIGGER_TOOLS } from './tool-definitions-trigger-tools';
 import { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
@@ -70,6 +72,7 @@ export const MCP_TOOLS = [
   ...SECRET_EXEC_TOOLS,
   ...SECRET_REQUEST_TOOLS,
   ...TASK_LIFECYCLE_TOOLS,
+  ...INBOX_TOOLS,
   ...PROJECT_AWARENESS_TOOLS,
   ...SESSION_IDEA_TOOLS,
   ...WORKSPACE_TOOLS,
