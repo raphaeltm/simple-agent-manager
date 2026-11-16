@@ -1393,7 +1393,7 @@ export const pullRequests = sqliteTable(
       table.repository,
       table.headSha
     ),
-    /** The Project Overview's newest merged pull requests (migration 0246). */
+    /** The Project Overview's newest merged pull requests (migration 0249). */
     projectMerged: index('idx_pull_requests_project_state_merged').on(
       table.projectId,
       table.state,

@@ -85,7 +85,7 @@ const RUNNING_SQL = `
             COALESCE(ss.last_message_at, ss.created_at, ss.started_at) DESC, ss.id DESC
    LIMIT ?`;
 
-/** Served by `idx_pull_requests_project_state_merged` (migration 0246): no scan of the project's history. */
+/** Served by `idx_pull_requests_project_state_merged` (migration 0249): no scan of the project's history. */
 const MERGED_PULL_REQUESTS_SQL = `
   SELECT number, url, title, repository, merged_at
     FROM pull_requests

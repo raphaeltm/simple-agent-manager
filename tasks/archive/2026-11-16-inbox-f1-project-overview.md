@@ -95,7 +95,7 @@ an Overview nav item. It is not the landing page yet and has no Needs you sectio
 - Measured round trips for the overview read: 10 D1 + 1 Durable Object = 11 (test
   `stays within the dashboard round-trip budget…`), budget 20.
 - Reviews: security PASS with 3 LOW (LOW-1, LOW-2 fixed; LOW-3 kept by design: a skipped malformed
-  row still counts in `total`). Performance: 3 MEDIUM fixed (migration 0246 index, lighter
+  row still counts in `total`). Performance: 3 MEDIUM fixed (migration 0249 index, lighter
   recent-ideas read, no socket refetch on hidden tabs), ResizeObserver LOW fixed. UI/UX: 3 HIGH
   fixed (waiting-on-you ranking + disclosure, fold/receipt, spoken budgets), M1/M2/M4/M7 and
   LOWs fixed. Task-completion validator: 2 HIGH fixed (nav/route tests, measured round trips),
