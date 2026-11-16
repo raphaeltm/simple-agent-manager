@@ -12,7 +12,11 @@ describe('sanitizeUrl', () => {
     ['returns # for empty string', '', '#'],
     ['returns # for malformed URLs', 'not a url', '#'],
     ['blocks ftp: protocol', 'ftp://files.example.com', '#'],
-    ['preserves full URL including fragments', 'https://example.com/page#section', 'https://example.com/page#section'],
+    [
+      'preserves full URL including fragments',
+      'https://example.com/page#section',
+      'https://example.com/page#section',
+    ],
   ])('%s', (_, input, expected) => {
     expect(sanitizeUrl(input)).toBe(expected);
   });

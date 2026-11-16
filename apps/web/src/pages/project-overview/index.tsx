@@ -3,33 +3,67 @@
  * running, what the accounts have left, which automations are broken, what happened recently,
  * and a task box that starts work without leaving the page.
  *
+ * It is the project's landing page (inbox slice F2): `/projects/:id` redirects here, and chat is
+ * one tap away (the Chat nav item on desktop, the Chat control in the phone app bar).
+ *
  * Layout (`OverviewLayout`): one DOM tree that CSS arranges, so crossing the phone/desktop
  * breakpoint never remounts the task box or a section (`apps/web/.claude/rules/48`, rule 5).
  * - Phone: one scrolling column in `PHONE_ORDER`, the task box pinned under it.
- * - Desktop: a wide `main` column with the task box pinned under it, and a `rail`.
- *
- * Later slices: F2 adds the brief and Needs you. They go at the top of `main`, Running now and
- * Recently move to the `rail`, and `PHONE_ORDER` puts Needs you first. Each is a slot
- * assignment below; no section needs to change.
+ * - Desktop: a wide `main` column (the brief slot, then Needs you) with the task box pinned under
+ *   it, and a `rail` (Running now, This week, Budgets, Automations, Recently).
  */
-import type { ReactNode } from 'react';
+import { MessageSquare } from 'lucide-react';
+import { type ReactNode, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router';
 
+import { useAppShell } from '../../components/AppShell';
 import { useProfileUsages } from '../../components/project-chat/profile-picker';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { useNewChatComposer } from '../project-chat/useNewChatComposer';
 import { useProjectContext } from '../ProjectContext';
 import { AutomationsSection } from './AutomationsSection';
 import { BudgetsSection } from './BudgetsSection';
+import { NeedsYouSection, useNeedsYou } from './NeedsYouSection';
 import { OverviewTaskBox } from './OverviewTaskBox';
 import { RecentlySection, RunningNowSection } from './sections';
 import { useProjectOverview } from './useProjectOverview';
 
-/** Phone order of the sections, as Tailwind `order-*` classes (desktop ignores them). */
+/**
+ * Phone order of the sections, as Tailwind `order-*` classes (desktop ignores them). `order-3` is
+ * kept for the Insights build's This week pane, which sits under Running now.
+ */
 const PHONE_ORDER = {
-  running: 'order-1 md:order-none',
-  budgets: 'order-2 md:order-none',
-  automations: 'order-3 md:order-none',
-  recently: 'order-4 md:order-none',
+  needsYou: 'order-1 md:order-none',
+  running: 'order-2 md:order-none',
+  budgets: 'order-4 md:order-none',
+  automations: 'order-5 md:order-none',
+  recently: 'order-6 md:order-none',
 } as const;
+
+/**
+ * Chat, one tap from the landing page: on a phone it takes the app bar's primary slot (the
+ * project chat puts its own chat-list toggle there). Desktop has the Chat nav item.
+ */
+function usePhoneChatControl(projectId: string) {
+  const isMobile = useIsMobile();
+  const navigate = useNavigate();
+  const { setScreenAction } = useAppShell();
+  const action = useMemo(
+    () =>
+      isMobile
+        ? {
+            label: 'Chat',
+            icon: <MessageSquare size={20} strokeWidth={1.75} />,
+            onClick: () => navigate(`/projects/${projectId}/chat`),
+          }
+        : null,
+    [isMobile, navigate, projectId]
+  );
+  useEffect(() => {
+    setScreenAction(action);
+    return () => setScreenAction(null);
+  }, [action, setScreenAction]);
+}
 
 const GUTTER = 'gap-[var(--sam-space-gutter)]';
 
@@ -77,6 +111,8 @@ export function OverviewLayout({
 export function ProjectOverview() {
   const { projectId } = useProjectContext();
   const overview = useProjectOverview(projectId);
+  const needsYou = useNeedsYou(projectId);
+  usePhoneChatControl(projectId);
   const composer = useNewChatComposer();
   // The same usage the task box's ring shows; Budgets reads it rather than fetching again.
   const profileUsages = useProfileUsages(composer.agentProfiles, projectId, true);
@@ -87,15 +123,34 @@ export function ProjectOverview() {
     <OverviewLayout
       main={
         <>
+          {/* BRIEF SLOT (inbox slice I, spec 4.3): the generated brief renders here, above Needs
+              you. Nothing renders here until then: no placeholder. */}
+          <NeedsYouSection
+            projectId={projectId}
+            needsYou={needsYou}
+            className={PHONE_ORDER.needsYou}
+          />
+        </>
+      }
+      rail={
+        <>
           <RunningNowSection
             projectId={projectId}
             items={overview.running.items}
             total={overview.running.total}
             waitingOnViewerTotal={overview.running.waitingOnViewerTotal}
+            pausedSessionIds={needsYou.pausedSessionIds}
             loading={loading}
             unavailable={overview.isError || unavailable.has('running')}
             className={PHONE_ORDER.running}
           />
+          <BudgetsSection
+            projectId={projectId}
+            profiles={composer.agentProfiles}
+            usages={profileUsages}
+            className={PHONE_ORDER.budgets}
+          />
+          <AutomationsSection projectId={projectId} className={PHONE_ORDER.automations} />
           <RecentlySection
             projectId={projectId}
             ideas={overview.data?.recent.ideas ?? []}
@@ -105,17 +160,6 @@ export function ProjectOverview() {
             pullRequestsUnavailable={overview.isError || unavailable.has('pullRequests')}
             className={PHONE_ORDER.recently}
           />
-        </>
-      }
-      rail={
-        <>
-          <BudgetsSection
-            projectId={projectId}
-            profiles={composer.agentProfiles}
-            usages={profileUsages}
-            className={PHONE_ORDER.budgets}
-          />
-          <AutomationsSection projectId={projectId} className={PHONE_ORDER.automations} />
         </>
       }
       taskBox={

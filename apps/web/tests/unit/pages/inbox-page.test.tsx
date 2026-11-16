@@ -193,6 +193,15 @@ function renderInbox(entry = '/inbox') {
               </>
             }
           />
+          <Route
+            path="/projects/:id/inbox"
+            element={
+              <>
+                <InboxPage projectId="p1" projectName="Acme" />
+                <LocationProbe />
+              </>
+            }
+          />
           <Route path="*" element={<LocationProbe />} />
         </Routes>
       </MemoryRouter>
@@ -723,5 +732,67 @@ describe('InboxPage — error items and malformed rows', () => {
     expect(await screen.findByRole('button', { name: /Title ask:ok/ })).toBeInTheDocument();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe('InboxPage — opened from the Project Overview (slice F2)', () => {
+  const fromOverview = (ref: string) =>
+    `/projects/p1/inbox?${new URLSearchParams({ item: ref, from: 'overview' }).toString()}`;
+
+  it('on a phone, Back from the item returns to the Overview, not the inbox list', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    renderInbox(fromOverview('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    expect(screen.queryByRole('button', { name: 'Back to inbox' })).not.toBeInTheDocument();
+    // The item pane's arrow (the header, with its own button, is hidden by CSS on a phone).
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Back to Overview' }));
+    await waitFor(() => expect(location).toBe('/projects/p1/overview'));
+  });
+
+  it('answering moves to the next item and keeps the way back to the Overview', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' }), item({ ref: 'ask:b' })];
+    installFetch(server);
+    renderInbox(fromOverview('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Yes' }));
+    await within(itemPane()).findByRole('heading', { name: 'Title ask:b' });
+    expect(screen.getByTestId('inbox-receipt')).toHaveTextContent('Sent “Yes”');
+    await waitFor(() => expect(location).toContain('from=overview'));
+    fireEvent.click(within(itemPane()).getByRole('button', { name: 'Back to Overview' }));
+    await waitFor(() => expect(location).toBe('/projects/p1/overview'));
+  });
+
+  it('on desktop, the header offers the way back beside the list', async () => {
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox(fromOverview('ask:a'));
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    const back = screen.getAllByRole('button', { name: 'Back to Overview' });
+    // The header button; the item pane's arrow is phone-only (hidden at md by CSS).
+    expect(back.some((button) => !button.className.includes('md:hidden'))).toBe(true);
+    fireEvent.click(back.find((button) => !button.className.includes('md:hidden'))!);
+    await waitFor(() => expect(location).toBe('/projects/p1/overview'));
+  });
+
+  it('opened from the inbox itself, Back stays in the inbox (control)', async () => {
+    mobile.value = true;
+    server.items = [item({ ref: 'ask:a' })];
+    installFetch(server);
+    renderInbox(`/projects/p1/inbox?item=ask%3Aa`);
+    await within(await screen.findByRole('region', { name: 'Inbox item' })).findByRole('heading', {
+      name: 'Title ask:a',
+    });
+    expect(screen.queryByRole('button', { name: 'Back to Overview' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to inbox' }));
+    await waitFor(() => expect(location).toBe('/projects/p1/inbox'));
   });
 });

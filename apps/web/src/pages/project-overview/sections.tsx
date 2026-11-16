@@ -89,13 +89,25 @@ export function SectionNote({ children }: { children: ReactNode }) {
   return <p className="m-0 px-2 pb-1 text-sm text-fg-muted">{children}</p>;
 }
 
-function RunningIcon({ chat }: { chat: OverviewRunningChat }) {
-  if (chat.state === 'waiting') {
+/**
+ * Whether the chat is paused on something the viewer must answer. The viewer's own inbox decides
+ * (`pausedSessionIds`, from the Needs you list), so Running now and Needs you can never word the
+ * same chat differently (inbox slice F2). Until that list has loaded, the read's own flag stands in.
+ */
+function isPausedOnViewer(chat: OverviewRunningChat, pausedSessionIds: ReadonlySet<string> | null) {
+  if (chat.state === 'starting') return false;
+  return pausedSessionIds
+    ? pausedSessionIds.has(chat.sessionId)
+    : chat.state === 'waiting' && chat.waitingOnViewer;
+}
+
+function RunningIcon({ chat, pausedOnYou }: { chat: OverviewRunningChat; pausedOnYou: boolean }) {
+  if (pausedOnYou || chat.state === 'waiting') {
     return (
       <CircleHelp
         size={18}
         aria-hidden="true"
-        className={chat.waitingOnViewer ? 'text-warning-fg' : 'text-fg-muted'}
+        className={pausedOnYou ? 'text-warning-fg' : 'text-fg-muted'}
       />
     );
   }
@@ -111,21 +123,30 @@ function RunningIcon({ chat }: { chat: OverviewRunningChat }) {
   );
 }
 
-/** "1h 20m · Opus 5.5 Build", "Starting · …", or "Waiting on you · …" in amber. */
-function RunningMeta({ chat, now }: { chat: OverviewRunningChat; now: number }) {
+/**
+ * "1h 20m · Opus 5.5 Build", "Starting · …", or "Paused on this · …" in amber: the inbox's own
+ * phrase for an agent stopped on an item that is in Needs you.
+ */
+function RunningMeta({
+  chat,
+  now,
+  pausedOnYou,
+}: {
+  chat: OverviewRunningChat;
+  now: number;
+  pausedOnYou: boolean;
+}) {
   const lead =
     chat.state === 'starting'
       ? 'Starting'
-      : chat.state === 'waiting'
-        ? chat.waitingOnViewer
-          ? 'Waiting on you'
-          : 'Waiting for an answer'
-        : formatMsSpan(now - chat.startedAt);
+      : pausedOnYou
+        ? 'Paused on this'
+        : chat.state === 'waiting'
+          ? 'Waiting for an answer'
+          : formatMsSpan(now - chat.startedAt);
   return (
     <span className="line-clamp-1 text-[13px] text-fg-muted [overflow-wrap:anywhere]">
-      <span className={chat.state === 'waiting' && chat.waitingOnViewer ? 'text-warning-fg' : ''}>
-        {lead}
-      </span>
+      <span className={pausedOnYou ? 'text-warning-fg' : ''}>{lead}</span>
       {chat.profile && <> · {chat.profile.name}</>}
     </span>
   );
@@ -135,10 +156,12 @@ export function RunningRow({
   chat,
   projectId,
   now,
+  pausedOnYou,
 }: {
   chat: OverviewRunningChat;
   projectId: string;
   now: number;
+  pausedOnYou: boolean;
 }) {
   const title = chat.topic?.trim() || 'New chat';
   return (
@@ -149,13 +172,13 @@ export function RunningRow({
         data-testid="overview-running-row"
       >
         <span className="mt-0.5 flex shrink-0">
-          <RunningIcon chat={chat} />
+          <RunningIcon chat={chat} pausedOnYou={pausedOnYou} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="line-clamp-2 break-words text-[15px] font-medium leading-snug text-fg-primary">
             {title}
           </span>
-          <RunningMeta chat={chat} now={now} />
+          <RunningMeta chat={chat} now={now} pausedOnYou={pausedOnYou} />
         </span>
       </Link>
     </li>
@@ -167,6 +190,7 @@ export function RunningNowSection({
   items,
   total,
   waitingOnViewerTotal,
+  pausedSessionIds,
   loading,
   unavailable,
   className,
@@ -176,6 +200,8 @@ export function RunningNowSection({
   total: number;
   /** Running chats waiting on the viewer, including those past the cap. */
   waitingOnViewerTotal: number;
+  /** Chats paused on one of the viewer's open inbox items; null until the inbox has loaded. */
+  pausedSessionIds: ReadonlySet<string> | null;
   loading: boolean;
   unavailable: boolean;
   className?: string;
@@ -200,7 +226,13 @@ export function RunningNowSection({
       {shown.length > 0 ? (
         <ul className="m-0 flex flex-col p-0" data-testid="overview-running-list">
           {shown.map((chat) => (
-            <RunningRow key={chat.sessionId} chat={chat} projectId={projectId} now={now} />
+            <RunningRow
+              key={chat.sessionId}
+              chat={chat}
+              projectId={projectId}
+              now={now}
+              pausedOnYou={isPausedOnViewer(chat, pausedSessionIds)}
+            />
           ))}
         </ul>
       ) : unavailable ? (

@@ -2,6 +2,7 @@ import type { InboxItem } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
+import { INBOX_FROM_PARAM } from '../../lib/project-routes';
 import { isStaleInboxError } from './inbox-actions';
 import { type InboxView, nextAfter, parseInboxView, walkOrder } from './inbox-model';
 import type { InboxReceipt } from './InboxItemView';
@@ -120,6 +121,9 @@ export function useInboxWalk({
           else out.set('filter', next);
           out.delete('item');
           out.delete('project');
+          // Browsing the inbox by chip: Back from the next item returns to the list, not to the
+          // page that opened the first one.
+          out.delete(INBOX_FROM_PARAM);
           return out;
         },
         { replace: true }

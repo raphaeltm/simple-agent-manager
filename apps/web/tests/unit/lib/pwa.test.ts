@@ -47,7 +47,11 @@ describe('registerAppServiceWorker', () => {
     registerAppServiceWorker({ enabled: true, win, nav });
 
     expect(win.addEventListener).toHaveBeenCalledTimes(1);
-    const [, callback] = win.addEventListener.mock.calls[0] as [string, () => void, AddEventListenerOptions];
+    const [, callback] = win.addEventListener.mock.calls[0] as [
+      string,
+      () => void,
+      AddEventListenerOptions,
+    ];
     callback();
 
     await Promise.resolve();

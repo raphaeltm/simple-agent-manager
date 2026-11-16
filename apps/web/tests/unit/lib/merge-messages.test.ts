@@ -1,8 +1,8 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { hasActiveLoopbackGuidance } from '../../../src/components/project-message-view/SessionStatusBanners';
 import type { ChatMessageResponse } from '../../../src/lib/api';
-import { getLastMessageId,mergeMessages } from '../../../src/lib/merge-messages';
+import { getLastMessageId, mergeMessages } from '../../../src/lib/merge-messages';
 
 function msg(overrides: Partial<ChatMessageResponse> & { id: string }): ChatMessageResponse {
   return {
@@ -18,11 +18,28 @@ function msg(overrides: Partial<ChatMessageResponse> & { id: string }): ChatMess
 
 describe('mergeMessages', () => {
   it('keeps delayed loopback guidance cleared after a retry despite timestamp ties and skew', () => {
-    const prompt = msg({ id: 'prompt-a', role: 'user', content: 'sign in', createdAt: 10, sequence: 1 });
-    const retry = msg({ id: 'prompt-b', role: 'user', content: 'retry', createdAt: 10, sequence: 2 });
-    const diagnostic = msg({ id: 'diagnostic-a', role: 'system',
+    const prompt = msg({
+      id: 'prompt-a',
+      role: 'user',
+      content: 'sign in',
+      createdAt: 10,
+      sequence: 1,
+    });
+    const retry = msg({
+      id: 'prompt-b',
+      role: 'user',
+      content: 'retry',
+      createdAt: 10,
+      sequence: 2,
+    });
+    const diagnostic = msg({
+      id: 'diagnostic-a',
+      role: 'system',
       content: 'This sign-in flow requires a local callback that this session cannot complete.',
-      toolMetadata: { promptMessageId: prompt.id }, createdAt: 10, sequence: 3 });
+      toolMetadata: { promptMessageId: prompt.id },
+      createdAt: 10,
+      sequence: 3,
+    });
     expect(hasActiveLoopbackGuidance(mergeMessages([prompt], [diagnostic], 'append'))).toBe(true);
     const sameMillisecond = mergeMessages([prompt, retry], [diagnostic], 'append');
     expect(sameMillisecond.map((row) => row.id)).toEqual(['prompt-a', 'prompt-b', 'diagnostic-a']);
@@ -30,12 +47,24 @@ describe('mergeMessages', () => {
     const skewed = mergeMessages([prompt, retry], [{ ...diagnostic, createdAt: 20 }], 'append');
     expect(hasActiveLoopbackGuidance(skewed)).toBe(false);
     expect(hasActiveLoopbackGuidance(mergeMessages([], [diagnostic], 'append'))).toBe(false);
-    expect(hasActiveLoopbackGuidance(mergeMessages([prompt], [
-      { ...diagnostic, toolMetadata: { promptMessageId: 'foreign-prompt' } },
-    ], 'append'))).toBe(false);
-    expect(hasActiveLoopbackGuidance(mergeMessages([
-      msg({ id: 'spoof-prompt', role: 'assistant', createdAt: 10, sequence: 1 }),
-    ], [{ ...diagnostic, toolMetadata: { promptMessageId: 'spoof-prompt' } }], 'append'))).toBe(false);
+    expect(
+      hasActiveLoopbackGuidance(
+        mergeMessages(
+          [prompt],
+          [{ ...diagnostic, toolMetadata: { promptMessageId: 'foreign-prompt' } }],
+          'append'
+        )
+      )
+    ).toBe(false);
+    expect(
+      hasActiveLoopbackGuidance(
+        mergeMessages(
+          [msg({ id: 'spoof-prompt', role: 'assistant', createdAt: 10, sequence: 1 })],
+          [{ ...diagnostic, toolMetadata: { promptMessageId: 'spoof-prompt' } }],
+          'append'
+        )
+      )
+    ).toBe(false);
   });
 
   describe('append strategy', () => {
@@ -68,12 +97,8 @@ describe('mergeMessages', () => {
     });
 
     it('does not reconcile optimistic messages with different content', () => {
-      const prev = [
-        msg({ id: 'optimistic-abc', role: 'user', content: 'Hello', createdAt: 1 }),
-      ];
-      const incoming = [
-        msg({ id: 'server-123', role: 'user', content: 'Goodbye', createdAt: 2 }),
-      ];
+      const prev = [msg({ id: 'optimistic-abc', role: 'user', content: 'Hello', createdAt: 1 })];
+      const incoming = [msg({ id: 'server-123', role: 'user', content: 'Goodbye', createdAt: 2 })];
       const result = mergeMessages(prev, incoming, 'append');
       expect(result).toHaveLength(2);
     });
@@ -100,9 +125,7 @@ describe('mergeMessages', () => {
     it('deduplicates confirmed user messages with same content but different IDs (dual-delivery)', () => {
       // Simulates: DO WebSocket persists user message (server-123), then VM agent
       // batch-persists the same content with a different ID (batch-456)
-      const prev = [
-        msg({ id: 'server-123', role: 'user', content: 'Hello world', createdAt: 1 }),
-      ];
+      const prev = [msg({ id: 'server-123', role: 'user', content: 'Hello world', createdAt: 1 })];
       const incoming = [
         msg({ id: 'batch-456', role: 'user', content: 'Hello world', createdAt: 2 }),
       ];
@@ -134,9 +157,7 @@ describe('mergeMessages', () => {
         msg({ id: 'msg-1', role: 'user', content: 'yes', createdAt: 1 }),
         msg({ id: 'msg-2', role: 'assistant', content: 'Done.', createdAt: 2 }),
       ];
-      const incoming = [
-        msg({ id: 'msg-3', role: 'user', content: 'yes', createdAt: 3 }),
-      ];
+      const incoming = [msg({ id: 'msg-3', role: 'user', content: 'yes', createdAt: 3 })];
       const result = mergeMessages(prev, incoming, 'append');
       // Suppressed by content dedup — the next poll (replace) will correct this
       expect(result).toHaveLength(2);
@@ -147,7 +168,7 @@ describe('mergeMessages', () => {
       const afterOptimistic = mergeMessages(
         [],
         [msg({ id: 'optimistic-abc', role: 'user', content: 'Fix the bug', createdAt: 1 })],
-        'append',
+        'append'
       );
       expect(afterOptimistic).toHaveLength(1);
 
@@ -155,7 +176,7 @@ describe('mergeMessages', () => {
       const afterWsBroadcast = mergeMessages(
         afterOptimistic,
         [msg({ id: 'ws-123', role: 'user', content: 'Fix the bug', createdAt: 1 })],
-        'append',
+        'append'
       );
       expect(afterWsBroadcast).toHaveLength(1);
       expect(afterWsBroadcast[0]!.id).toBe('ws-123');
@@ -164,16 +185,14 @@ describe('mergeMessages', () => {
       const afterBatch = mergeMessages(
         afterWsBroadcast,
         [msg({ id: 'batch-456', role: 'user', content: 'Fix the bug', createdAt: 2 })],
-        'append',
+        'append'
       );
       expect(afterBatch).toHaveLength(1);
       expect(afterBatch[0]!.id).toBe('ws-123');
     });
 
     it('reconciles optimistic AND appends new message in a single incoming batch', () => {
-      const prev = [
-        msg({ id: 'optimistic-abc', role: 'user', content: 'Hello', createdAt: 1 }),
-      ];
+      const prev = [msg({ id: 'optimistic-abc', role: 'user', content: 'Hello', createdAt: 1 })];
       const incoming = [
         msg({ id: 'server-123', role: 'user', content: 'Hello', createdAt: 1 }),
         msg({ id: 'server-456', role: 'assistant', content: 'Response', createdAt: 2 }),
@@ -250,12 +269,8 @@ describe('mergeMessages', () => {
     });
 
     it('drops optimistic messages when server has matching confirmed message', () => {
-      const prev = [
-        msg({ id: 'optimistic-xyz', role: 'user', content: 'Hello', createdAt: 1 }),
-      ];
-      const incoming = [
-        msg({ id: 'server-456', role: 'user', content: 'Hello', createdAt: 1 }),
-      ];
+      const prev = [msg({ id: 'optimistic-xyz', role: 'user', content: 'Hello', createdAt: 1 })];
+      const incoming = [msg({ id: 'server-456', role: 'user', content: 'Hello', createdAt: 1 })];
       const result = mergeMessages(prev, incoming, 'replace');
       expect(result).toHaveLength(1);
       expect(result[0]!.id).toBe('server-456');
@@ -266,9 +281,7 @@ describe('mergeMessages', () => {
         msg({ id: 'optimistic-1', role: 'user', content: 'First', createdAt: 1 }),
         msg({ id: 'optimistic-2', role: 'user', content: 'Second', createdAt: 2 }),
       ];
-      const incoming = [
-        msg({ id: 'server-1', role: 'user', content: 'First', createdAt: 1 }),
-      ];
+      const incoming = [msg({ id: 'server-1', role: 'user', content: 'First', createdAt: 1 })];
       const result = mergeMessages(prev, incoming, 'replace');
       expect(result).toHaveLength(2);
       const ids = result.map((m) => m.id);
@@ -316,7 +329,12 @@ describe('mergeMessages', () => {
       // Earlier messages (t=1..3) are preserved, recent range is updated
       expect(result).toHaveLength(6);
       expect(result.map((m) => m.id)).toEqual([
-        'early-1', 'early-2', 'early-3', 'recent-4', 'recent-5', 'recent-6',
+        'early-1',
+        'early-2',
+        'early-3',
+        'recent-4',
+        'recent-5',
+        'recent-6',
       ]);
     });
 
@@ -325,7 +343,7 @@ describe('mergeMessages', () => {
       // recent window. mergeReplace must NOT discard the loaded history —
       // otherwise every poll would clobber the pages the reader already loaded.
       const fullyLoaded = Array.from({ length: 12 }, (_, i) =>
-        msg({ id: `m-${i + 1}`, createdAt: i + 1 }),
+        msg({ id: `m-${i + 1}`, createdAt: i + 1 })
       );
       // Poll returns just the latest 3 messages (t=10..12).
       const pollWindow = [
@@ -336,8 +354,18 @@ describe('mergeMessages', () => {
       const result = mergeMessages(fullyLoaded, pollWindow, 'replace');
       expect(result).toHaveLength(12);
       expect(result.map((m) => m.id)).toEqual([
-        'm-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6',
-        'm-7', 'm-8', 'm-9', 'm-10', 'm-11', 'm-12',
+        'm-1',
+        'm-2',
+        'm-3',
+        'm-4',
+        'm-5',
+        'm-6',
+        'm-7',
+        'm-8',
+        'm-9',
+        'm-10',
+        'm-11',
+        'm-12',
       ]);
     });
 
@@ -348,10 +376,7 @@ describe('mergeMessages', () => {
         msg({ id: 'b', createdAt: 2 }),
         msg({ id: 'c', createdAt: 3 }),
       ];
-      const incoming = [
-        msg({ id: 'c', createdAt: 3 }),
-        msg({ id: 'd', createdAt: 4 }),
-      ];
+      const incoming = [msg({ id: 'c', createdAt: 3 }), msg({ id: 'd', createdAt: 4 })];
       const result = mergeMessages(prev, incoming, 'replace');
       // a and b preserved (t < 3), c from incoming (same ID at boundary), d is new
       expect(result).toHaveLength(4);
@@ -363,11 +388,11 @@ describe('mergeMessages', () => {
       // is in the incoming set. The other must NOT be silently dropped.
       const prev = [
         msg({ id: 'a', createdAt: 1 }),
-        msg({ id: 'b', createdAt: 3 }),  // same timestamp as incoming boundary
-        msg({ id: 'c', createdAt: 3 }),  // same timestamp, NOT in incoming
+        msg({ id: 'b', createdAt: 3 }), // same timestamp as incoming boundary
+        msg({ id: 'c', createdAt: 3 }), // same timestamp, NOT in incoming
       ];
       const incoming = [
-        msg({ id: 'b', createdAt: 3 }),  // server returns b but not c
+        msg({ id: 'b', createdAt: 3 }), // server returns b but not c
         msg({ id: 'd', createdAt: 4 }),
       ];
       const result = mergeMessages(prev, incoming, 'replace');

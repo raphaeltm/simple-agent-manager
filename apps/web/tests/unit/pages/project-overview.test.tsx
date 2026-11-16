@@ -17,6 +17,9 @@ import { ProjectContext } from '../../../src/pages/ProjectContext';
 
 const PROJECT_ID = 'proj-1';
 
+const viewport = vi.hoisted(() => ({ isMobile: false }));
+vi.mock('../../../src/hooks/useIsMobile', () => ({ useIsMobile: () => viewport.isMobile }));
+
 const socket = vi.hoisted(() => ({
   onSessionEvent: null as
     ((event: { type: string; payload: Record<string, unknown> }) => void) | null,
@@ -105,6 +108,8 @@ let submitResponse: { status: number; body: unknown };
 let overviewBody: ProjectOverviewResponse;
 /** Extra GET routes a test serves (automation lists, members), keyed by path. */
 let extraRoutes: Record<string, unknown>;
+/** This project's open inbox items for the viewer, in server (inbox) order. */
+let inboxItems: Record<string, unknown>[];
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -140,6 +145,13 @@ function route(path: string, method: string): Response {
       return json(200, { available: false, hasInfraCredential: true });
     case `/api/projects/${PROJECT_ID}/overview`:
       return json(200, overviewBody);
+    case `/api/projects/${PROJECT_ID}/inbox`:
+      return json(200, { items: inboxItems, nextCursor: null, skipped: 0 });
+    case `/api/projects/${PROJECT_ID}/inbox/count`:
+      return json(200, {
+        needsYou: inboxItems.length,
+        blocking: inboxItems.filter((item) => item.blocking).length,
+      });
     default:
       // Reads this test does not cover (accounts, automations, commands) fail like an
       // unreachable API would; the page must still work around them.
@@ -230,7 +242,40 @@ const AUTOMATION_ROUTES = {
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location">{location.pathname}</div>;
+  return (
+    <>
+      <div data-testid="location">{location.pathname}</div>
+      <div data-testid="location-search">{location.search}</div>
+    </>
+  );
+}
+
+/** One open inbox item, the shape `GET /api/projects/:id/inbox` returns. */
+function inboxItem(ref: string, fields: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ref,
+    store: 'ask',
+    kind: 'question',
+    projectId: PROJECT_ID,
+    projectName: 'Acme Billing',
+    sessionId: `sess-${ref}`,
+    topic: `Chat for ${ref}`,
+    taskId: `task-${ref}`,
+    stackKey: `stack-${ref}`,
+    title: `Question ${ref}?`,
+    body: null,
+    blocking: true,
+    agentState: 'waiting',
+    status: 'open',
+    createdAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+    expiresAt: null,
+    dueAt: null,
+    answerSpec: { type: 'options', options: ['Yes', 'No'], allowText: false },
+    links: [],
+    canAct: true,
+    untrustedContent: true,
+    ...fields,
+  };
 }
 
 function renderOverview() {
@@ -246,6 +291,7 @@ function renderOverview() {
             <Routes>
               <Route path="/projects/:id/overview" element={<ProjectOverview />} />
               <Route path="/projects/:id/chat/:sessionId" element={<div>chat page</div>} />
+              <Route path="/projects/:id/inbox" element={<div>inbox page</div>} />
             </Routes>
             <LocationProbe />
           </ProjectContext.Provider>
@@ -271,6 +317,8 @@ describe('Project Overview', () => {
   beforeEach(() => {
     recorded = [];
     extraRoutes = {};
+    inboxItems = [];
+    viewport.isMobile = false;
     overviewBody = overview([EXISTING]);
     submitResponse = {
       status: 200,
@@ -520,5 +568,99 @@ describe('Project Overview', () => {
     });
     await waitFor(() => expect(reads()).toBeGreaterThan(before));
     hidden.mockRestore();
+  });
+  describe('Needs you (inbox slice F2)', () => {
+    const seven = () =>
+      Array.from({ length: 7 }, (_, i) =>
+        inboxItem(`ask:q${i + 1}`, { title: `Question ${i + 1}?` })
+      );
+
+    it('lists the first five items in inbox order, with the count and a link to the project inbox', async () => {
+      inboxItems = seven();
+      renderOverview();
+      // The quiet "checking" line stands in until the list loads, then the section replaces it.
+      await screen.findByTestId('overview-needs-you-list');
+      const section = screen.getByRole('region', { name: 'Needs you' });
+      const rows = within(section).getAllByTestId('inbox-row');
+      expect(rows).toHaveLength(5);
+      // Server order is the inbox order: the first five, in order, and nothing past the cap.
+      expect(rows.map((row) => row.textContent)).toEqual(
+        [1, 2, 3, 4, 5].map((n) => expect.stringContaining(`Question ${n}?`))
+      );
+      expect(within(section).queryByText('Question 6?')).not.toBeInTheDocument();
+      expect(await within(section).findByRole('link', { name: /All 7/ })).toHaveAttribute(
+        'href',
+        `/projects/${PROJECT_ID}/inbox`
+      );
+    });
+
+    it('shows three rows on a phone', async () => {
+      viewport.isMobile = true;
+      inboxItems = seven();
+      renderOverview();
+      // The quiet "checking" line stands in until the list loads, then the section replaces it.
+      await screen.findByTestId('overview-needs-you-list');
+      const section = screen.getByRole('region', { name: 'Needs you' });
+      expect(within(section).getAllByTestId('inbox-row')).toHaveLength(3);
+    });
+
+    it('opens a tapped item in the project inbox item view, remembering it came from here', async () => {
+      inboxItems = seven();
+      renderOverview();
+      await screen.findByTestId('overview-needs-you-list');
+      const section = screen.getByRole('region', { name: 'Needs you' });
+      fireEvent.click(within(section).getByRole('button', { name: /Question 2\?/ }));
+      await waitFor(() =>
+        expect(screen.getByTestId('location')).toHaveTextContent(`/projects/${PROJECT_ID}/inbox`)
+      );
+      const search = new URLSearchParams(screen.getByTestId('location-search').textContent ?? '');
+      expect(search.get('item')).toBe('ask:q2');
+      expect(search.get('from')).toBe('overview');
+    });
+
+    it('is one quiet line when nothing needs you, not an empty panel', async () => {
+      inboxItems = [];
+      renderOverview();
+      const quiet = await screen.findByTestId('overview-needs-you-quiet');
+      await within(quiet).findByText('Nothing needs you.');
+      expect(within(quiet).getByRole('link', { name: 'Open the project inbox' })).toHaveAttribute(
+        'href',
+        `/projects/${PROJECT_ID}/inbox`
+      );
+      expect(screen.queryByTestId('overview-needs-you-list')).not.toBeInTheDocument();
+      // Liveness: the rest of the page rendered.
+      expect(await screen.findByRole('region', { name: 'Running now' })).toBeInTheDocument();
+    });
+
+    it('words a chat paused on your item "Paused on this" in Running now, whatever the read says', async () => {
+      // The read says working (the agent is blocked mid-turn on a secret request), the inbox says
+      // the agent is paused on the viewer's item: the page follows the inbox.
+      overviewBody = overview([
+        EXISTING,
+        { ...EXISTING, sessionId: 'sess-other', topic: 'Someone else is asked', state: 'waiting' },
+      ]);
+      inboxItems = [
+        inboxItem('secret:sr-1', {
+          store: 'secret',
+          kind: 'secret',
+          sessionId: 'sess-existing',
+          title: 'STRIPE_KEY',
+          answerSpec: { type: 'secret', envKey: 'STRIPE_KEY', requestId: 'sr-1' },
+        }),
+      ];
+      renderOverview();
+      const running = await screen.findByRole('region', { name: 'Running now' });
+      const paused = await within(running).findByRole('link', {
+        name: /Fix rounding in tax totals/,
+      });
+      await within(paused).findByText('Paused on this');
+      expect(within(paused).getByText('Paused on this')).toHaveClass('text-warning-fg');
+      // Control: a chat waiting on someone else is not worded as yours.
+      const other = within(running).getByRole('link', { name: /Someone else is asked/ });
+      expect(within(other).getByText('Waiting for an answer')).not.toHaveClass('text-warning-fg');
+      // And its item is in Needs you.
+      const section = await screen.findByRole('region', { name: 'Needs you' });
+      expect(within(section).getByText('STRIPE_KEY')).toBeInTheDocument();
+    });
   });
 });

@@ -137,9 +137,12 @@ describe('error-reporter', () => {
       // We want to test the queue cap without triggering flush.
       // For this test, make fetch block so isFlushing stays true.
       let resolveFlush: () => void;
-      fetchSpy.mockImplementation(() => new Promise<{ ok: boolean }>((resolve) => {
-        resolveFlush = () => resolve({ ok: true });
-      }));
+      fetchSpy.mockImplementation(
+        () =>
+          new Promise<{ ok: boolean }>((resolve) => {
+            resolveFlush = () => resolve({ ok: true });
+          })
+      );
 
       // Add 25 to trigger flush (fetch blocks, isFlushing=true)
       for (let i = 0; i < 25; i++) {

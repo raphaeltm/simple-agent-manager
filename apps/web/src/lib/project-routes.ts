@@ -15,6 +15,23 @@ const projectRoot = (projectId: string) => `/projects/${encodeURIComponent(proje
 /** The project itself (its default view). */
 export const projectPath = (projectId: string) => projectRoot(projectId);
 
+/** The project's Overview, its landing page (`projectPath` redirects here). */
+export const projectOverviewPath = (projectId: string) => `${projectRoot(projectId)}/overview`;
+
+/**
+ * Query parameter on an inbox item URL saying where it was opened from, so the item view's Back
+ * returns there. `useInboxWalk` copies every parameter when it moves between items, so the value
+ * survives answering, stepping and archiving.
+ */
+export const INBOX_FROM_PARAM = 'from';
+export const INBOX_FROM_OVERVIEW = 'overview';
+
+/** One item in the project inbox's item view, opened from the Overview's Needs you. */
+export const projectInboxItemFromOverviewPath = (projectId: string, ref: string) => {
+  const params = new URLSearchParams({ item: ref, [INBOX_FROM_PARAM]: INBOX_FROM_OVERVIEW });
+  return `${projectRoot(projectId)}/inbox?${params.toString()}`;
+};
+
 /** A chat in the project: the chats automations start, and the chats linked work points at. */
 export const projectChatPath = (projectId: string, sessionId: string) =>
   `${projectRoot(projectId)}/chat/${encodeURIComponent(sessionId)}`;
