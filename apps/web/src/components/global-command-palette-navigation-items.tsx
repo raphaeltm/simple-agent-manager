@@ -102,6 +102,12 @@ export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
         icon: <Cpu size={14} />,
       },
       {
+        id: 'nav-admin-health-cost',
+        label: 'Admin: Health & cost',
+        path: '/admin/health-cost',
+        icon: <BarChart3 size={14} />,
+      },
+      {
         id: 'nav-admin-costs',
         label: 'Admin: Costs',
         path: '/admin/costs',

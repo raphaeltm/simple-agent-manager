@@ -13,7 +13,7 @@ function renderTabs(initialPath = '/projects/123/overview') {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Tabs tabs={tabs} basePath="/projects/123" />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -23,6 +23,34 @@ describe('Tabs', () => {
     expect(screen.getByText('Overview')).toBeInTheDocument();
     expect(screen.getByText('Tasks')).toBeInTheDocument();
     expect(screen.getByText('Settings')).toBeInTheDocument();
+  });
+
+  it('labels each group once before its first tab and keeps arrow keys on tabs only', () => {
+    const grouped: Tab[] = [
+      { id: 'users', label: 'Users', path: 'users', group: 'People' },
+      { id: 'quotas', label: 'Quotas', path: 'quotas', group: 'People' },
+      { id: 'health', label: 'Health & cost', path: 'health-cost', group: 'Spend and health' },
+      { id: 'costs', label: 'Costs', path: 'costs', group: 'Spend and health' },
+    ];
+    render(
+      <MemoryRouter initialEntries={['/admin/quotas']}>
+        <Tabs tabs={grouped} basePath="/admin" />
+      </MemoryRouter>
+    );
+
+    const labels = screen.getAllByTestId('tabs-group-label');
+    expect(labels.map((label) => label.textContent)).toEqual(['People', 'Spend and health']);
+    // The group label sits directly before the first tab of its group.
+    expect(labels[1]?.nextElementSibling).toHaveTextContent('Health & cost');
+    expect(screen.getAllByRole('tab')).toHaveLength(4);
+
+    fireEvent.keyDown(screen.getByText('Quotas'), { key: 'ArrowRight' });
+    expect(document.activeElement).toBe(screen.getByText('Health & cost'));
+  });
+
+  it('renders no group label for ungrouped tabs', () => {
+    renderTabs();
+    expect(screen.queryByTestId('tabs-group-label')).toBeNull();
   });
 
   it('renders a tablist role container', () => {
@@ -146,9 +174,27 @@ describe('Tabs — snap-aware active tab reveal', () => {
     const active = screen.getByRole('tab', { selected: true });
     const list = screen.getByRole('tablist');
     active.getBoundingClientRect = () =>
-      ({ ...opts.tabRect, top: 0, bottom: 40, width: opts.tabRect.right - opts.tabRect.left, height: 40, x: opts.tabRect.left, y: 0, toJSON: () => ({}) }) as DOMRect;
+      ({
+        ...opts.tabRect,
+        top: 0,
+        bottom: 40,
+        width: opts.tabRect.right - opts.tabRect.left,
+        height: 40,
+        x: opts.tabRect.left,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
     list.getBoundingClientRect = () =>
-      ({ ...opts.listRect, top: 0, bottom: 40, width: opts.listRect.right - opts.listRect.left, height: 40, x: opts.listRect.left, y: 0, toJSON: () => ({}) }) as DOMRect;
+      ({
+        ...opts.listRect,
+        top: 0,
+        bottom: 40,
+        width: opts.listRect.right - opts.listRect.left,
+        height: 40,
+        x: opts.listRect.left,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
     Object.defineProperty(list, 'scrollLeft', { value: opts.scrollLeft, writable: true });
     Object.defineProperty(list, 'scrollWidth', { value: opts.scrollWidth, configurable: true });
     Object.defineProperty(list, 'clientWidth', { value: opts.clientWidth, configurable: true });

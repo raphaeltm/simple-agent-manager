@@ -40,6 +40,7 @@ export {
   resolutionStatusQueryOptions,
   sessionAgentCredentialQueryOptions,
 } from './accounts';
+export { adminHealthCostQueryKeys, adminHealthCostQueryOptions } from './admin-health-cost';
 export {
   adminProjectDataArchiveBreakersQueryOptions,
   adminProjectDataArchiveProblemMigrationsQueryOptions,

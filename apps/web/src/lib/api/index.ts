@@ -100,6 +100,7 @@ export {
   updatePlatformCredential,
   updateSignupApprovalConfig,
 } from './admin';
+export { getInstallationHealth } from './admin-health-cost';
 export {
   decideOperationsApproval,
   fetchOperationsApproval,

@@ -1,6 +1,7 @@
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Link } from 'react-router';
 import {
   Area,
   AreaChart,
@@ -158,10 +159,8 @@ export function AdminCosts() {
 
   if (!data) return null;
 
-  const { llm, projection, compute } = data;
-  const combinedCost = llm.totalCostUsd + compute.estimatedCostUsd;
+  const { llm, projection } = data;
   const hasLlmData = llm.totalRequests > 0;
-  const hasComputeData = compute.totalNodeHours > 0;
 
   return (
     <div className="flex flex-col gap-4 min-w-0 overflow-hidden">
@@ -192,15 +191,21 @@ export function AdminCosts() {
           subtitle={`${formatCost(projection.dailyAverageCostUsd)}/day avg`}
         />
         <KpiCard
-          label="Compute Est."
-          value={formatCost(compute.estimatedCostUsd)}
-          subtitle={`${compute.totalVcpuHours.toFixed(1)} vCPU-hrs @ ${formatCost(compute.vcpuHourCostUsd)}/hr`}
+          label="LLM Requests"
+          value={llm.totalRequests.toLocaleString()}
+          subtitle={`${formatTokens(llm.totalInputTokens + llm.totalOutputTokens)} tokens`}
         />
-        <KpiCard
-          label="Combined"
-          value={formatCost(combinedCost)}
-          subtitle={`${llm.totalRequests.toLocaleString()} LLM reqs, ${compute.activeNodes} active nodes`}
-        />
+        <Link
+          to="/admin/health-cost"
+          className="block rounded-lg no-underline focus-visible:outline-2 focus-visible:outline-focus-ring"
+          data-testid="costs-compute-link"
+        >
+          <KpiCard
+            label="Compute"
+            value="Health & cost →"
+            subtitle="Priced per machine at its recorded provider price"
+          />
+        </Link>
       </div>
 
       {/* Daily cost trend */}
@@ -393,12 +398,11 @@ export function AdminCosts() {
       </div>
 
       {/* Empty state */}
-      {!hasLlmData && !hasComputeData && (
+      {!hasLlmData && (
         <Card>
           <div className="p-6 text-center">
             <Body className="text-fg-muted">
-              No cost data available yet. AI Gateway logs and node usage will appear here once
-              activity begins.
+              No LLM cost data yet. AI Gateway logs will appear here once activity begins.
             </Body>
           </div>
         </Card>
