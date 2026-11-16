@@ -72,7 +72,7 @@ account. Prototype: Library `/product/analytics/analytics-prototypes.html?s=acco
       `ComingSoonTab` accounts entry (no dead code)
 - [x] Playwright visual audit 375/1280: normal, empty, stress (many accounts/long names), error
 - [x] Docs: Insights section of the project guide (`apps/www/.../guides/`)
-- [ ] Staging: real project with runs, limit-hit account if staging has one
+- [x] Staging: real project with runs, limit-hit account if staging has one
 - [x] Post read shape on `feature.insights` for slice U
 
 ## Acceptance criteria
@@ -114,3 +114,12 @@ account. Prototype: Library `/product/analytics/analytics-prototypes.html?s=acco
   own credential with a stall but no run in range shows unnamed (errs toward hiding).
 - Staging (both installations busy until ~18:05Z; staging has no limit-wait or rejected-window
   rows, so the live check covers runs/accounts; stalls are covered by tests).
+- Staging (staging2, deploy run 43939646541, 2026-11-16 ~19:58Z): signed in as staging2-agent-admin.
+  "Inject mode budget test": SAM platform 4 + not recorded 1, which matches D1.
+  "Slice E error items": 9 not recorded (no workspace).
+  The API returned 200 with private,no-store; a bad range gave 400; an unknown project gave 404.
+  No console errors, no failed requests, no overflow at 1280 and 375; the 7d switch shows days.
+  staging2 has no limit waits or rejected windows (D1 checked), so stalls are verified by tests only.
+  Found: tab links drop `?range=` (slice F) -> tasks/backlog/2026-11-16-insights-tabs-keep-range.md.
+- Spend: slice U (#2811) still open at finish, so it ships as "not reported", as the coordinator
+  told me on 2026-11-16 18:28Z.
