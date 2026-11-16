@@ -992,7 +992,6 @@ export interface Env
   ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS?: string; // Max task-status CAS attempts after a hard stop (default: 2)
   ORCHESTRATOR_MESSAGE_MAX_LENGTH?: string; // Max length for injected messages to child agents (default: 32768)
   // Attention markers
-  HUMAN_INPUT_TIMEOUT_MS?: string; // Attention marker expiry for needs_input (default: 7200000 = 2 hours)
   HUMAN_INPUT_ESCALATION_FRACTIONS?: string; // Comma-separated fractions of initial window (default: 0.25,0.75)
   HUMAN_INPUT_UNDELIVERED_GRACE_MS?: string; // Extension without confirmed delivery (default: 7200000)
   HUMAN_INPUT_MAX_WAIT_MS?: string; // Hard marker residence limit (default: 86400000)

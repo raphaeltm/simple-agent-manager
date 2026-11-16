@@ -33,6 +33,8 @@ export interface DurabilityFoundationHooks {
   armIdleCleanup(chatSessionId: string): void;
   /** Release durable messages queued behind the (now ended) turn. */
   nudgeDeliveries(chatSessionId: string): number;
+  /** A person's message answers the chat's open questions in D1 `asks` (`question-asks.ts`). */
+  closeQuestionAsks?(sessionId: string, messageId: string): Promise<unknown>;
 }
 
 export async function acceptPromptDelivery(
@@ -59,6 +61,9 @@ export async function finalizeAcceptedPromptDelivery(
   let alarmError: unknown = null;
   try {
     runAcceptedPromptDeliveryHooks(sql, _env, hooks, input, accepted);
+    if (accepted.transcriptInserted && input.senderType === 'human') {
+      await hooks.closeQuestionAsks?.(input.targetSessionId, accepted.transcriptMessageId);
+    }
   } catch (error) {
     hookError = error;
   } finally {
@@ -84,6 +89,21 @@ function runAcceptedPromptDeliveryHooks(
   input: delivery.AcceptPromptDeliveryInput,
   accepted: delivery.AcceptedPromptDelivery
 ): void {
+  // The answer or archive of a question held in D1 `asks` reaches the agent here (`inbox_ask`,
+  // `apps/api/src/services/inbox/ask-notice.ts`); the chat list clears its question live, as it
+  // did when a question marker resolved.
+  const questionAskId = input.sourceKind === 'inbox_ask' ? input.metadata?.questionAskId : null;
+  if (typeof questionAskId === 'string' && questionAskId) {
+    hooks.broadcastEvent(
+      'attention.resolved',
+      {
+        sessionId: input.targetSessionId,
+        markerId: questionAskId,
+        reason: typeof input.metadata?.outcome === 'string' ? input.metadata.outcome : null,
+      },
+      input.targetSessionId
+    );
+  }
   if (accepted.transcriptInserted) {
     idleCleanup.resetIdleCleanup(sql, env, input.targetSessionId);
     if (input.senderType === 'human') {

@@ -154,11 +154,20 @@ async function resolveCandidateProjectId(
   taskId: string,
   sql: SqlStorage
 ): Promise<string | null> {
+  const now = Date.now();
+  // An open question in D1 `asks` (inbox slice G) holds the check-in off, as an open question
+  // marker does in the local candidate query: the agent is waiting on a person, not stalled.
   const taskRow = await env.DATABASE.prepare(
-    `SELECT task_mode, status, project_id, workspace_id, chat_session_id, admission_state
+    `SELECT task_mode, status, project_id, workspace_id, chat_session_id, admission_state,
+            EXISTS (
+              SELECT 1 FROM asks a
+               WHERE a.project_id = tasks.project_id AND a.source_session_id = ?
+                 AND a.kind = 'question' AND a.status = 'open'
+                 AND (a.expires_at IS NULL OR a.expires_at > ?)
+            ) AS open_question
      FROM tasks WHERE id = ? LIMIT 1`
   )
-    .bind(taskId)
+    .bind(sessionId, now, taskId)
     .first<{
       task_mode: string | null;
       admission_state?: string | null;
@@ -166,6 +175,7 @@ async function resolveCandidateProjectId(
       project_id: string | null;
       workspace_id: string | null;
       chat_session_id: string | null;
+      open_question?: number | null;
     }>();
   if (!taskRow) {
     recordReconciliationCandidateInconclusive(sql, env, {
@@ -205,6 +215,12 @@ async function resolveCandidateProjectId(
       taskId,
       reason: 'task_not_active',
     });
+    return null;
+  }
+  if (taskRow.open_question) {
+    // Looked at again one lease later; answering or expiring the question ends the hold, and
+    // the deferral spends no probe attempt.
+    deferReconciliationCandidateUntil(sql, sessionId, now + reconciliationCandidateLeaseMs(env));
     return null;
   }
   return taskRow.project_id;

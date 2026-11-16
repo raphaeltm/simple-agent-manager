@@ -29,6 +29,11 @@ export type MessagePersistenceHooks = {
   recalculateAlarm: () => Promise<void>;
   scheduleSummarySync: () => void;
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
+  /**
+   * A person's chat message answers the chat's open questions in D1 `asks` (inbox slice G), as it
+   * resolves its attention markers. Never throws (`question-asks.ts`).
+   */
+  closeQuestionAsks?: (sessionId: string, messageId: string) => Promise<unknown>;
 };
 
 export type MessageBatchPersistenceResult = {
@@ -224,6 +229,7 @@ async function resolveAttentionForRoles(
       'human_message'
     );
     reason = 'human_message';
+    await hooks.closeQuestionAsks?.(sessionId, firstUserMsg.id);
   } else if (firstAssistantMsg) {
     resolved = attention.resolveAttentionMarkersByKind(
       sql,
