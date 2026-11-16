@@ -89,6 +89,7 @@ export function StatTiles({
   density: InstallationMachineDensity | null;
   cloudflare: InstallationCloudflareCost | null;
 }) {
+  const cloudflareTile = cloudflareTileText(cloudflare);
   // Currencies are never added together: SAM keeps no exchange rates.
   const currencies = compute?.currencies ?? [];
   const totalText = currencies.length
@@ -105,7 +106,7 @@ export function StatTiles({
     compute?.truncated ? 'lower bound: machine cap reached' : null,
   ].filter(Boolean);
   return (
-    <div className="grid grid-cols-1 gap-[var(--sam-space-gutter)] sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-[var(--sam-space-gutter)] sm:grid-cols-2 xl:grid-cols-4">
       <StatTile
         testId="stat-compute"
         label={`Compute · ${rangeText}`}
@@ -141,8 +142,8 @@ export function StatTiles({
       <StatTile
         testId="stat-cloudflare"
         label="Cloudflare · estimated"
-        value={cloudflareTileText(cloudflare).value}
-        note={cloudflareTileText(cloudflare).note}
+        value={cloudflareTile.value}
+        note={cloudflareTile.note}
       />
     </div>
   );

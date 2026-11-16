@@ -132,9 +132,40 @@ type AccountPayload = Partial<{
 }>;
 
 const PERMISSION_PATTERN = /authenticat|not authori[sz]ed|unauthori[sz]ed|permission|forbidden/i;
+/**
+ * Error codes that mean "fix the token", as Cloudflare returned them on 2026-11-16:
+ * - `10000` "Authentication error": a valid token without Account Analytics: Read;
+ * - `9106` "Authentication failed" (HTTP 400): a malformed or revoked token;
+ * - `authz` "not authorized for that account": a token for a different account.
+ */
+const PERMISSION_CODES = new Set(['10000', '9106', '9109', 'authz', 'unauthorized', 'forbidden']);
 
-/** Classifies a non-2xx HTTP status from the GraphQL endpoint. */
-export function cloudflareCostHttpError(status: number): CloudflareCostQueryError {
+function errorList(payload: unknown): GraphQLError[] {
+  if (typeof payload !== 'object' || payload === null) return [];
+  const errors = (payload as { errors?: unknown }).errors;
+  return Array.isArray(errors)
+    ? errors.filter((error): error is GraphQLError => typeof error === 'object' && error !== null)
+    : [];
+}
+
+/**
+ * Classifies a non-2xx response from the GraphQL endpoint. Cloudflare sends its error body on a
+ * failed authentication, so a body is classified by its codes when there is one.
+ */
+export function cloudflareCostHttpError(
+  status: number,
+  payload?: unknown
+): CloudflareCostQueryError {
+  const errors = errorList(payload);
+  if (errors.length > 0) {
+    const classified = classifyErrors(errors);
+    return new CloudflareCostQueryError(
+      classified.kind === 'failed' && (status === 401 || status === 403)
+        ? 'permission'
+        : classified.kind,
+      `${classified.message} (HTTP ${status})`
+    );
+  }
   return new CloudflareCostQueryError(
     status === 401 || status === 403 ? 'permission' : 'failed',
     `Cloudflare GraphQL request failed with HTTP ${status}`
@@ -145,7 +176,10 @@ function classifyErrors(errors: GraphQLError[]): CloudflareCostQueryError {
   const messages = errors.map((error) => String(error.message ?? 'unknown error'));
   const codes = errors.map((error) => String(error.extensions?.code ?? error.code ?? ''));
   const text = messages.join('; ').slice(0, 500);
-  if (codes.includes('10000') || messages.some((m) => PERMISSION_PATTERN.test(m)))
+  if (
+    codes.some((code) => PERMISSION_CODES.has(code)) ||
+    messages.some((m) => PERMISSION_PATTERN.test(m))
+  )
     return new CloudflareCostQueryError('permission', `Cloudflare GraphQL error: ${text}`);
   if (codes.includes('quota'))
     return new CloudflareCostQueryError('range', `Cloudflare GraphQL error: ${text}`);
@@ -163,8 +197,8 @@ export function parseCloudflareCostResponse(payload: unknown, limit: number): Cl
     data?: { viewer?: { accounts?: AccountPayload[] | null } | null } | null;
     errors?: GraphQLError[] | null;
   };
-  if (Array.isArray(response.errors) && response.errors.length > 0)
-    throw classifyErrors(response.errors);
+  const errors = errorList(payload);
+  if (errors.length > 0) throw classifyErrors(errors);
   const account = response.data?.viewer?.accounts?.[0];
   if (!account)
     throw new CloudflareCostQueryError(

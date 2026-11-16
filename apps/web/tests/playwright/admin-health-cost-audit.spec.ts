@@ -338,6 +338,20 @@ async function audit(
     });
   }
   await assertNoOverflow(page);
+  // The Cloudflare card is taller than a phone screen: capture it whole in a tall viewport too,
+  // so its lower half (daily series, Refresh now) is reviewed at the phone's width.
+  const cloudflarePane = page.getByTestId('cloudflare-pane');
+  if ((await cloudflarePane.count()) > 0) {
+    const size = page.viewportSize();
+    if (size) {
+      await page.setViewportSize({ width: size.width, height: 2000 });
+      await cloudflarePane.scrollIntoViewIfNeeded();
+      await cloudflarePane.screenshot({
+        path: `../../.codex/tmp/playwright-screenshots/admin-health-cost-${name}-${theme}-cloudflare-pane-full.png`,
+      });
+      await page.setViewportSize(size);
+    }
+  }
   const fits = await page.evaluate(() => {
     const root = document.querySelector('[data-testid="admin-health-cost"]');
     return root ? root.getBoundingClientRect().right <= window.innerWidth + 1 : false;
@@ -422,6 +436,7 @@ for (const viewport of [
       await expect(page.getByTestId('cloudflare-status')).toContainText(
         'cannot read account analytics'
       );
+      await expect(page.getByTestId('cloudflare-status')).toContainText('Needs attention.');
       await expect(page.getByTestId('cloudflare-line')).toHaveCount(5);
     });
 

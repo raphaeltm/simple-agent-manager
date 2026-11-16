@@ -56,6 +56,12 @@ export function AdminHealthCost() {
     mutationFn: refreshCloudflareCost,
     onSuccess: async (result) => {
       if (result.status === 'ok') toast.success('Cloudflare cost updated');
+      else if (result.status === 'not_configured')
+        toast.error('Cloudflare cost is not set up: see the Cloudflare card');
+      else
+        toast.error(
+          `Cloudflare cost could not be fetched: ${result.error ?? result.status.replace('_', ' ')}`
+        );
       await queryClient.invalidateQueries({ queryKey: adminHealthCostQueryKeys.all(scope ?? '') });
     },
     onError: (error) => {

@@ -14,6 +14,9 @@ import type {
 
 type PricingRow = Omit<CloudflareCostMetricPricing, 'key'>;
 
+/** When the list prices below were last checked against Cloudflare's pricing pages. */
+export const CLOUDFLARE_PRICES_CHECKED_ON = '2026-11-16';
+
 const MILLION = 1_000_000;
 
 const DEFAULT_PRICING: Record<CloudflareCostMetricKey, PricingRow> = {

@@ -116,7 +116,8 @@ export async function queryCloudflareCostRows(config: Config): Promise<Cloudflar
       options: { durableObjectBreakdown: true },
     }),
   });
-  if (!response.ok) throw cloudflareCostHttpError(response.status);
+  if (!response.ok)
+    throw cloudflareCostHttpError(response.status, await response.json().catch(() => null));
   return parseCloudflareCostResponse(await response.json(), config.queryLimit);
 }
 

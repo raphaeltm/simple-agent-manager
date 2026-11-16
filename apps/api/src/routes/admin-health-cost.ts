@@ -5,6 +5,7 @@
  *   (policy 5cb362e8).
  * - POST /api/admin/health-cost/cloudflare/refresh: runs the daily Cloudflare cost snapshot now,
  *   the "Refresh now" button on the Cloudflare card (policy 2b97aefc: admin actions are buttons).
+ *   At most once per `insights.cloudflareCostRefreshMinSeconds`; sooner answers 429.
  * Per-route middleware so nothing leaks to other routers mounted under /api/admin
  * (`.claude/rules/06-api-patterns.md`).
  */
@@ -14,8 +15,13 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
+import { errors } from '../middleware/error';
 import { webOperationContext } from '../operation-ports';
-import { runCloudflareCostSnapshot } from '../services/cloudflare-cost-snapshot';
+import { resolveAdminSetting } from '../services/admin-settings-resolution';
+import {
+  lastCloudflareCostAttemptAt,
+  runCloudflareCostSnapshot,
+} from '../services/cloudflare-cost-snapshot';
 
 export const adminHealthCostRoutes = new Hono<{ Bindings: Env }>();
 
@@ -37,6 +43,19 @@ adminHealthCostRoutes.post(
   requireSuperadmin(),
   async (c) => {
     const userId = getUserId(c);
+    // One analytics request per interval, so repeated presses cannot burn the Cloudflare API
+    // token's GraphQL rate limit, which Admin Analytics shares.
+    const minSeconds = Number(
+      await resolveAdminSetting(c.env, 'insights.cloudflareCostRefreshMinSeconds')
+    );
+    const lastAttemptAt = await lastCloudflareCostAttemptAt(c.env);
+    const waitMs = lastAttemptAt === null ? 0 : lastAttemptAt + minSeconds * 1000 - Date.now();
+    if (waitMs > 0) {
+      log.info('admin.cloudflare_cost_refresh_throttled', { userId, waitMs, action: 'rejected' });
+      throw errors.tooManyRequests(
+        `Cloudflare cost was refreshed moments ago. Try again in ${Math.ceil(waitMs / 1000)} seconds.`
+      );
+    }
     log.info('admin.cloudflare_cost_refresh_requested', { userId });
     // Cloudflare failures come back as a recorded status; the card shows them. Only a settings or
     // D1 failure underneath throws, and the app error handler answers that as a 500.

@@ -183,6 +183,7 @@ export async function installationHealth(
         readCloudflareCost(ctx, nowMs, {
           seriesDays: limits['insights.healthCloudflareSeriesDays'],
           topLines: limits['insights.healthCloudflareTopLines'],
+          projectionDays: limits['insights.healthCloudflareProjectionDays'],
         }),
       unavailable
     ),

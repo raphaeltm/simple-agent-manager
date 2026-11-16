@@ -19,6 +19,7 @@ export {
 } from './graphql';
 export {
   calculateCloudflareMetricCost,
+  CLOUDFLARE_PRICES_CHECKED_ON,
   cloudflareDaysInMonth,
   createCloudflarePricing,
   dailyCloudflareMetricCosts,

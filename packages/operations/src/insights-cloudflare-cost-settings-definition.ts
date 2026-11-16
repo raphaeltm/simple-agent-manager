@@ -17,6 +17,7 @@ export const INSIGHTS_CLOUDFLARE_COST_SETTINGS = [
     defaultValue: 30,
     description:
       'Complete days the daily Cloudflare cost snapshot re-fetches and stores on each run. Cloudflare serves at most the last 31 days.',
+    // max mirrors CLOUDFLARE_ANALYTICS_MAX_DAYS (packages/shared); a test pins the two together.
     range: { min: 1, max: 31 },
   },
   {
@@ -25,6 +26,13 @@ export const INSIGHTS_CLOUDFLARE_COST_SETTINGS = [
     description:
       'Rows per Cloudflare analytics dataset one snapshot request may return. A dataset that reaches it fails the run rather than storing a partial estimate.',
     range: { min: 100, max: 100_000 },
+  },
+  {
+    name: 'insights.cloudflareCostRefreshMinSeconds',
+    defaultValue: 60,
+    description:
+      'Seconds after one Cloudflare cost snapshot attempt before Refresh now on Admin Health & cost may start another. The daily run is not limited.',
+    range: { min: 10, max: 3_600 },
   },
 ] as const;
 

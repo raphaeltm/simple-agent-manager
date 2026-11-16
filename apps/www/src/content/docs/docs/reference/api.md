@@ -1290,7 +1290,9 @@ month from the daily snapshot, with the snapshot's status). A section that fails
 Superadmin only. Runs the daily Cloudflare cost snapshot now (the card's **Refresh now**) and
 returns `InstallationCloudflareRefreshResponse`: `status` (`ok`, `not_configured`,
 `permission_denied` or `error`), the stored window (`firstDay`, `lastDay`), `rowsWritten` and
-`error`. A Cloudflare failure is a `200` with that status, recorded for the card.
+`error`. A Cloudflare failure is a `200` with that status, recorded for the card. A second refresh
+within `insights.cloudflareCostRefreshMinSeconds` (60 by default) of the last attempt returns `429`
+without calling Cloudflare.
 
 ## Operations Approvals
 

@@ -9,6 +9,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import type { OperationContext } from '@simple-agent-manager/operations';
+import {
+  INSIGHTS_CLOUDFLARE_COST_SETTINGS,
+  readCloudflareCost,
+} from '@simple-agent-manager/operations';
+import { CLOUDFLARE_ANALYTICS_MAX_DAYS } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -46,6 +52,7 @@ describe('runCloudflareCostSnapshot', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let payload: unknown;
   let httpStatus: number;
+  let binds: number[];
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
@@ -64,8 +71,22 @@ describe('runCloudflareCostSnapshot', () => {
         })
     );
     vi.stubGlobal('fetch', fetchMock);
+    binds = [];
+    const db = createSqliteD1(sqlite);
+    const prepare = db.prepare.bind(db);
+    // D1 rejects a statement with more than 100 bound parameters; better-sqlite3 does not, so
+    // the test enforces the production ceiling itself (`.claude/rules/69`).
+    db.prepare = (query: string) => {
+      const statement = prepare(query);
+      const bind = statement.bind.bind(statement);
+      statement.bind = (...values: unknown[]) => {
+        binds.push(values.length);
+        return bind(...values);
+      };
+      return statement;
+    };
     env = {
-      DATABASE: createSqliteD1(sqlite),
+      DATABASE: db,
       BASE_DOMAIN: 'example.test',
       CF_API_TOKEN: 'analytics-token',
       CF_ACCOUNT_ID: ACCOUNT_ID,
@@ -111,13 +132,14 @@ describe('runCloudflareCostSnapshot', () => {
   it('maps the GraphQL response to one row per day per product line', async () => {
     const result = await runCloudflareCostSnapshot(env, NOW);
 
+    // Only the two days Cloudflare returned usage for are written (19 product lines each).
     expect(result).toMatchObject({
       status: 'ok',
       firstDay: '2026-10-17',
       lastDay: '2026-11-15',
-      rowsWritten: 30 * 19,
+      rowsWritten: 2 * 19,
     });
-    expect(rows()).toHaveLength(30 * 19);
+    expect(rows()).toHaveLength(2 * 19);
     // Tail-worker invocations are not request billing; their CPU time is.
     expect(row('2026-11-15', 'workersRequests')?.usage_quantity).toBe(261_618 + 311);
     expect(row('2026-11-14', 'workersRequests')?.usage_quantity).toBe(239_740);
@@ -130,8 +152,8 @@ describe('runCloudflareCostSnapshot', () => {
     expect(row('2026-11-15', 'kvStorageGb')?.usage_quantity).toBeCloseTo(756_707 / 1e9);
     expect(row('2026-11-15', 'r2StorageGb')?.usage_quantity).toBeCloseTo(174);
     expect(row('2026-11-15', 'd1RowsRead')?.usage_unit).toBe('rows');
-    // A day Cloudflare returned nothing for is stored as zero, so it is not "missing".
-    expect(row('2026-10-20', 'workersRequests')?.usage_quantity).toBe(0);
+    // A day Cloudflare returned nothing for is not written, so the card counts it as missing.
+    expect(row('2026-10-20', 'workersRequests')).toBeUndefined();
     // R2 above its 10 GB allowance costs 1/30 of a month at that level for the day.
     expect(row('2026-11-15', 'r2StorageGb')?.estimated_cost_usd).toBeCloseTo(
       ((174 - 10) * 0.015) / 30,
@@ -145,8 +167,31 @@ describe('runCloudflareCostSnapshot', () => {
       last_attempt_at: NOW,
       last_success_at: NOW,
       error_message: null,
-      rows_written: 570,
+      rows_written: 38,
     });
+  });
+
+  it("keeps every statement within D1's 100 bound parameters across a full window", async () => {
+    // Usage on all 30 days of the default window: 30 × 19 = 570 rows, 41 statements with a
+    // remainder, so full chunks and a short last chunk both run.
+    const full = structuredClone(FIXTURE) as {
+      data: { viewer: { accounts: { d1StorageAdaptiveGroups: unknown[] }[] } };
+    };
+    full.data.viewer.accounts[0]!.d1StorageAdaptiveGroups = Array.from({ length: 30 }, (_, i) => ({
+      dimensions: {
+        databaseId: 'd1-database-a',
+        date: new Date(Date.UTC(2026, 9, 17 + i)).toISOString().slice(0, 10),
+      },
+      max: { databaseSizeBytes: 544_700_000 },
+    }));
+    payload = full;
+
+    const result = await runCloudflareCostSnapshot(env, NOW);
+
+    expect(binds.length).toBeGreaterThan(40);
+    expect(Math.max(...binds)).toBeLessThanOrEqual(100);
+    expect(result.rowsWritten).toBe(30 * 19);
+    expect(rows()).toHaveLength(30 * 19);
   });
 
   it('is idempotent: a second run upserts the same rows and refreshes their values', async () => {
@@ -199,6 +244,79 @@ describe('runCloudflareCostSnapshot', () => {
     // The stored prefix rows are left alone.
     expect(row('2026-10-01', 'doRowsWritten')?.fetched_at).toBe(1);
   });
+
+  it('never overwrites stored usage with a response that has no data for those days', async () => {
+    await runCloudflareCostSnapshot(env, NOW);
+    const stored = rows();
+    expect(stored.length).toBeGreaterThan(0);
+
+    // A 200 with every dataset empty (a partial analytics outage).
+    payload = { data: { viewer: { accounts: [{}] } }, errors: null };
+    const result = await runCloudflareCostSnapshot(env, NOW + 3_600_000);
+
+    expect(result).toMatchObject({ status: 'ok', rowsWritten: 0 });
+    expect(rows()).toEqual(stored);
+  });
+
+  it('reads back through the Health & cost card what the snapshot wrote', async () => {
+    await runCloudflareCostSnapshot(env, NOW);
+    const ctx = { env } as unknown as OperationContext;
+
+    const card = await readCloudflareCost(ctx, NOW, {
+      seriesDays: 30,
+      topLines: 5,
+      projectionDays: 7,
+    });
+
+    const novemberCost = rows("day LIKE '2026-11-%'").reduce((t, r) => t + r.estimated_cost_usd, 0);
+    expect(card.status).toBe('ok');
+    expect(card.throughDay).toBe('2026-11-15');
+    expect(card.monthToDateUsd).toBeCloseTo(novemberCost, 9);
+    expect(card.missingDays).toBe(13);
+    expect(card.productLines.map((line) => line.key)).toContain('r2StorageGb');
+    expect(card.daily.at(-1)?.costUsd).toBeGreaterThan(0);
+  });
+
+  it.each([
+    [
+      'a token without Account Analytics: Read',
+      200,
+      { success: false, errors: [{ code: 10000, message: 'Authentication error' }] },
+    ],
+    [
+      'the same body on HTTP 403',
+      403,
+      { success: false, errors: [{ code: 10000, message: 'Authentication error' }] },
+    ],
+    [
+      'an invalid token (HTTP 400)',
+      400,
+      { success: false, errors: [{ code: 9106, message: 'Authentication failed (status: 400)' }] },
+    ],
+    [
+      'a token for a different account',
+      200,
+      {
+        data: null,
+        errors: [
+          {
+            message: 'not authorized for that account',
+            path: ['viewer', 'accounts', '0', 'd1AnalyticsAdaptiveGroups'],
+            extensions: { code: 'authz' },
+          },
+        ],
+      },
+    ],
+  ])(
+    "records permission_denied for %s (Cloudflare's real error shape)",
+    async (_name, status, body) => {
+      httpStatus = status;
+      payload = body;
+      const result = await runCloudflareCostSnapshot(env, NOW);
+      expect(result.status).toBe('permission_denied');
+      expect(sync()).toMatchObject({ status: 'permission_denied' });
+    }
+  );
 
   it('records not_configured and makes no request when the token or account is missing', async () => {
     for (const missing of [{ CF_API_TOKEN: '' }, { CF_ACCOUNT_ID: '  ' }]) {
@@ -269,6 +387,15 @@ describe('runCloudflareCostSnapshot', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('refusing a partial cost estimate');
     expect(rows()).toEqual([]);
+  });
+});
+
+describe('insights.cloudflareCostBackfillDays', () => {
+  it("cannot be set past Cloudflare's own analytics limit", () => {
+    const backfill = INSIGHTS_CLOUDFLARE_COST_SETTINGS.find(
+      (setting) => setting.name === 'insights.cloudflareCostBackfillDays'
+    );
+    expect(backfill?.range.max).toBe(CLOUDFLARE_ANALYTICS_MAX_DAYS);
   });
 });
 

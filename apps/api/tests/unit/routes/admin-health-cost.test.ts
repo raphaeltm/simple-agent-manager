@@ -147,6 +147,33 @@ describe('GET /api/admin/health-cost', () => {
     }
   });
 
+  it('answers 429 to a second refresh inside the minimum interval, without running it', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      sqlite
+        .prepare(
+          `UPDATE installation_cost_sync SET last_attempt_at = ? WHERE source = 'cloudflare'`
+        )
+        .run(Date.now() - 5_000);
+      const before = sqlite.prepare(`SELECT * FROM installation_cost_sync`).get();
+      const res = await app().request(
+        '/api/admin/health-cost/cloudflare/refresh',
+        { method: 'POST' },
+        env
+      );
+
+      expect(res.status).toBe(429);
+      expect(((await res.json()) as { message: string }).message).toMatch(
+        /Try again in \d+ seconds/
+      );
+      expect(sqlite.prepare(`SELECT * FROM installation_cost_sync`).get()).toEqual(before);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('refuses the Cloudflare refresh to a non-superadmin without running it', async () => {
     const res = await app().request(
       '/api/admin/health-cost/cloudflare/refresh',

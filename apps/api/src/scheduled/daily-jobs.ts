@@ -38,7 +38,7 @@ export function scheduleDailyJobs(
         forwardGA4Sent: forward.ga4.sent,
         forwardCursorUpdated: forward.cursorUpdated,
       });
-    })()
+    })().catch(logFailure('cron.analytics_forward_failed'))
   );
   // Separate promise: an analytics failure must not skip the audit retention purge.
   waitUntil(runOperationsAuditPurge(env, cron));

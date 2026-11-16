@@ -51,6 +51,13 @@ export const INSIGHTS_INSTALLATION_SETTINGS = [
     range: { min: 7, max: 62 },
   },
   {
+    name: 'insights.healthCloudflareProjectionDays',
+    defaultValue: 7,
+    description:
+      'Most recent days whose average daily Cloudflare cost projects the rest of the month on Admin Health & cost (the CLI default too).',
+    range: { min: 1, max: 31 },
+  },
+  {
     name: 'insights.healthCloudflareTopLines',
     defaultValue: 5,
     description:

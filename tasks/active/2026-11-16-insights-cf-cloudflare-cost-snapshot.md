@@ -58,33 +58,48 @@ a daily, stored, usage-derived estimate with a month projection, on the page the
 
 ## Implementation checklist
 
-- [ ] Shared cloudflare-cost core (types, pricing incl. Workers/KV, analysis, per-day cost, GraphQL)
-- [ ] Script uses the shared core; its tests still pass; new metrics in the report
-- [ ] Migration 0256 (installation_cost_daily + installation_cost_sync), churning list not needed
-- [ ] Settings: backfill days, query limit (job); series days, top lines (card)
-- [ ] Job service with error classification (not_configured / permission_denied / error)
-- [ ] Daily cron wiring in an extracted daily-jobs module (handler.ts under 500 lines)
-- [ ] Superadmin refresh route
-- [ ] `cloudflare` section in installationHealth + shared types; round-trip count test updated
-- [ ] Web: Cloudflare tile + pane (MTD, projection, top lines, daily series, estimate label,
+- [x] Shared cloudflare-cost core (types, pricing incl. Workers/KV, analysis, per-day cost, GraphQL)
+- [x] Script uses the shared core; its tests still pass; new metrics in the report
+- [x] Migration 0256 (installation_cost_daily + installation_cost_sync), churning list not needed
+- [x] Settings: backfill days, query limit (job); series days, top lines (card)
+- [x] Job service with error classification (not_configured / permission_denied / error)
+- [x] Daily cron wiring in an extracted daily-jobs module (handler.ts under 500 lines)
+- [x] Superadmin refresh route
+- [x] `cloudflare` section in installationHealth + shared types; round-trip count test updated
+- [x] Web: Cloudflare tile + pane (MTD, projection, top lines, daily series, estimate label,
       unconfigured / permission / error / never-run states, Refresh now)
-- [ ] Tests: GraphQL fixture -> rows, idempotent upsert on real SQLite, unconfigured, scheduled
+- [x] Tests: GraphQL fixture -> rows, idempotent upsert on real SQLite, unconfigured, scheduled
       isolation, projection math, route auth
-- [ ] Playwright audit 375/1280: realistic, empty, unconfigured, permission-denied
-- [ ] Docs: admin-settings guide, self-hosting token table (Account Analytics: Read, optional),
+- [x] Playwright audit 375/1280: realistic, empty, unconfigured, permission-denied
+- [x] Docs: admin-settings guide, self-hosting token table (Account Analytics: Read, optional),
       env reference note, Health & cost docs
-- [ ] Installer runtime token: request Account Analytics Read
+- [x] Installer runtime token: NOT changed. The installer's OAuth grant has no analytics scope,
+      so requiring the group could break hosted installs. Tracked in idea 01M7KABJJ3H6XQ812REW68MJZT;
+      the self-hosting guide says hosted-installer tokens do not include it yet.
 
 ## Acceptance criteria
 
-- [ ] Daily job writes one row per complete day per product line, idempotently, tail invocations
+- [x] Daily job writes one row per complete day per product line, idempotently, tail invocations
       excluded from Workers requests, DO duration from periodic `sum.duration`
-- [ ] Rows on staging match `pnpm quality:cloudflare-cost` usage for the same days
-- [ ] Card shows MTD, projection (recent-rate), top lines and a daily series, labelled an estimate
-- [ ] Unconfigured / no-permission explains what to set; nothing errors
-- [ ] A failing snapshot cannot break other daily jobs
-- [ ] installationHealth stays within 15 round trips (stated in code and test)
+- [ ] Rows on staging match `pnpm quality:cloudflare-cost` usage for the same days (Phase 6)
+- [x] Card shows MTD, projection (recent-rate), top lines and a daily series, labelled an estimate
+- [x] Unconfigured / no-permission explains what to set; nothing errors
+- [x] A failing snapshot cannot break other daily jobs
+- [x] installationHealth stays within 15 round trips (stated in code and test)
 
 ## References
 
 - `.claude/rules/76-cost-decisions-must-query-billed-metrics.md`, rules 47, 53, 60, 81, 31, 22
+
+## Review outcomes (Phase 5)
+
+- ui-ux-specialist: chart caption + table, dashed stubs for missing days, so-far/projected labels and
+  two-tone bars, non-ok refresh toasts, status emphasis, button above the footnote, 4-up tiles at xl.
+- cloudflare-specialist: `authz`/10000/9106 classified as permission (real shapes probed), bind-count
+  test, rows_written kept from last success, all-zero days never overwrite stored data.
+- security-auditor: refresh throttle (`insights.cloudflareCostRefreshMinSeconds`, 429).
+- constitution-validator: projection days setting, defaults from the settings definitions, prices
+  checked-on date on the card, no hardcoded cron time in UI text, backfill max pinned to Cloudflare's limit.
+- doc-sync-validator: installer change reverted (OAuth scope), doc wording fixed, api-reference skill
+  and quality README updated.
+- task-completion-validator: writer→reader chain test, 30-day full-window bind test.

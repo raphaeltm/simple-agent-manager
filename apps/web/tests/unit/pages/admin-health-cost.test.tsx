@@ -376,12 +376,18 @@ describe('AdminHealthCost', () => {
     expect(pane).toHaveTextContent('November through Nov 15 · projected $36.90 for November');
     expect(pane).toHaveTextContent('not an invoice');
     const lines = screen.getAllByTestId('cloudflare-line');
-    expect(lines[0]).toHaveTextContent('Durable Objects SQLite rows written$4.20 → $9.39');
-    expect(screen.getByTestId('cloudflare-other')).toHaveTextContent(
-      'Everything else (17 lines): $12.61 → $24.11'
+    // Screen readers hear "so far … projected"; the arrow is decoration.
+    expect(lines[0]).toHaveTextContent(
+      'Durable Objects SQLite rows writtenso far $4.20 → , projected $9.39'
     );
-    expect(screen.getByLabelText('Nov 14: no data')).toBeInTheDocument();
-    expect(screen.getByLabelText('Nov 15: $1.25')).toBeInTheDocument();
+    expect(screen.getByTestId('cloudflare-other')).toHaveTextContent(
+      'Everything else (17 lines): $12.61 → , projected $24.11'
+    );
+    // Every day's value is readable in the table, not only in a hover title.
+    const days = screen.getByTestId('cloudflare-daily-table');
+    expect(days).toHaveTextContent('Nov 14no data');
+    expect(days).toHaveTextContent('Nov 15$1.25');
+    expect(screen.getByTestId('cloudflare-daily')).toHaveTextContent('peak $1.25');
     expect(screen.queryByTestId('cloudflare-status')).not.toBeInTheDocument();
   });
 
@@ -404,6 +410,7 @@ describe('AdminHealthCost', () => {
     renderPage();
 
     const status = await screen.findByTestId('cloudflare-status');
+    expect(status).toHaveTextContent('Needs setup.');
     expect(status).toHaveTextContent('CF_API_TOKEN and CF_ACCOUNT_ID');
     expect(status).toHaveTextContent('Account → Account Analytics → Read');
     expect(screen.getByTestId('stat-cloudflare')).toHaveTextContent('Not set up');
@@ -418,8 +425,9 @@ describe('AdminHealthCost', () => {
     );
     renderPage();
 
-    expect(await screen.findByTestId('cloudflare-status')).toHaveTextContent(
-      'cannot read account analytics'
+    const status = await screen.findByTestId('cloudflare-status');
+    expect(status).toHaveTextContent(
+      'Needs attention. The Cloudflare token cannot read account analytics'
     );
     expect(screen.getByTestId('cloudflare-missing')).toHaveTextContent(
       '3 days of November have no data and count as $0.'
@@ -457,6 +465,31 @@ describe('AdminHealthCost', () => {
     expect(await screen.findByText('Cloudflare cost updated')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('stat-cloudflare')).toHaveTextContent('$18.41'));
     expect(mocks.getInstallationHealth).toHaveBeenCalledTimes(2);
+  });
+
+  it('says why when Refresh now could not fetch, or was pressed too soon', async () => {
+    mocks.getInstallationHealth.mockResolvedValue(health());
+    mocks.refreshCloudflareCost.mockResolvedValueOnce({
+      status: 'permission_denied',
+      firstDay: null,
+      lastDay: null,
+      rowsWritten: 0,
+      error: 'Cloudflare GraphQL error: Authentication error',
+    });
+    mocks.refreshCloudflareCost.mockRejectedValueOnce(
+      new Error('Cloudflare cost was refreshed moments ago. Try again in 42 seconds.')
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByTestId('cloudflare-refresh'));
+    expect(
+      await screen.findByText(
+        'Cloudflare cost could not be fetched: Cloudflare GraphQL error: Authentication error'
+      )
+    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('cloudflare-refresh')).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId('cloudflare-refresh'));
+    expect(await screen.findByText(/Try again in 42 seconds/)).toBeInTheDocument();
   });
 
   it('names the Cloudflare section when it could not be read', async () => {

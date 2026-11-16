@@ -13,7 +13,6 @@ import {
   type CloudflareCostMetricKey,
   cloudflareDaysInMonth,
   createCloudflarePricing,
-  DEFAULT_CLOUDFLARE_COST_RECENT_DAYS,
   type InstallationCloudflareCost,
   type InstallationCloudflareCostStatus,
   type InstallationCloudflareProductLine,
@@ -88,7 +87,7 @@ function parseSync(raw: Record<string, unknown> | undefined): SyncRow | null {
 export function summarizeCloudflareCost(
   rows: CostRow[],
   sync: SyncRow | null,
-  options: { seriesDays: number; topLines: number }
+  options: { seriesDays: number; topLines: number; projectionDays: number }
 ): InstallationCloudflareCost {
   const base = {
     status: sync?.status ?? 'never_run',
@@ -135,12 +134,7 @@ export function summarizeCloudflareCost(
       (total, day) => total + (byKeyDay.get(`${key}|${day}`)?.costUsd ?? 0),
       0
     );
-    const projection = projectCloudflareMetric(
-      values,
-      throughDay,
-      metric,
-      DEFAULT_CLOUDFLARE_COST_RECENT_DAYS
-    );
+    const projection = projectCloudflareMetric(values, throughDay, metric, options.projectionDays);
     return {
       key,
       product: metric.product,
@@ -194,7 +188,7 @@ export function summarizeCloudflareCost(
 export async function readCloudflareCost(
   ctx: OperationContext,
   nowMs: number,
-  options: { seriesDays: number; topLines: number }
+  options: { seriesDays: number; topLines: number; projectionDays: number }
 ): Promise<InstallationCloudflareCost> {
   const [rowsResult, syncResult] = await ctx.env.DATABASE.batch<Record<string, unknown>>([
     ctx.env.DATABASE.prepare(

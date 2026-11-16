@@ -17,7 +17,7 @@ import type { Env } from '../../../src/env';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const NOW = Date.parse('2026-11-16T12:00:00.000Z');
-const OPTIONS = { seriesDays: 30, topLines: 3 };
+const OPTIONS = { seriesDays: 30, topLines: 3, projectionDays: 7 };
 const novDay = (day: number) => `2026-11-${String(day).padStart(2, '0')}`;
 
 type Line = Parameters<typeof summarizeCloudflareCost>[0][number];
@@ -50,6 +50,24 @@ describe('summarizeCloudflareCost', () => {
     expect(card.status).toBe('never_run');
   });
 
+  it('projects with the configured number of recent days', () => {
+    // 10M rows written a day for 10 days, then 2M a day for 5 days (allowance 50M).
+    const rows: Line[] = Array.from({ length: 15 }, (_, index) => ({
+      day: novDay(index + 1),
+      key: 'doRowsWritten',
+      usage: index < 10 ? 10_000_000 : 2_000_000,
+      costUsd: 0,
+    }));
+    const project = (projectionDays: number) =>
+      summarizeCloudflareCost(rows, null, { ...OPTIONS, projectionDays }).productLines.find(
+        (line) => line.key === 'doRowsWritten'
+      )?.projectedUsd;
+
+    // MTD 110M. 5-day rate 2M × 15 → 140M → $90; 15-day rate (110/15)M × 15 → 220M → $170.
+    expect(project(5)).toBeCloseTo(90, 6);
+    expect(project(15)).toBeCloseTo(170, 6);
+  });
+
   it('keeps the top lines by projected cost and sums the rest', () => {
     const rows: Line[] = [
       { day: novDay(1), key: 'r2StorageGb', usage: 174, costUsd: 0.08 },
@@ -78,7 +96,7 @@ describe('summarizeCloudflareCost', () => {
     const card = summarizeCloudflareCost(
       rows,
       { status: 'error', lastAttemptAt: null, lastSuccessAt: null, error: 'boom' },
-      { seriesDays: 7, topLines: 5 }
+      { seriesDays: 7, topLines: 5, projectionDays: 7 }
     );
 
     expect(card.status).toBe('error');
