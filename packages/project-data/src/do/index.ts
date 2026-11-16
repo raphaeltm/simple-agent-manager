@@ -72,6 +72,7 @@ import * as logicalTranscript from './logical-transcript';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messageContext from './message-context';
+import { emptyMessageIngestMetrics, refuseMerge } from './message-ingest-metrics';
 import * as messagePersistence from './message-persistence';
 import {
   DEFAULT_MESSAGE_MERGE_CONFIG,
@@ -907,21 +908,28 @@ export class ProjectData extends DurableObject<Env> {
         ? ((await projectDataPorts().operations.messageMergeConfig?.(this.env)) ??
           DEFAULT_MESSAGE_MERGE_CONFIG)
         : DEFAULT_MESSAGE_MERGE_CONFIG;
-      const legacyClient = this.ctx.getWebSockets().some((ws) => {
+      const metrics = emptyMessageIngestMetrics();
+      for (const ws of this.ctx.getWebSockets()) {
         const tags = this.ctx.getTags(ws);
         const sessionTag = tags.find((tag) => tag.startsWith('session:'));
-        return (
+        if (
           (!sessionTag || sessionTag === `session:${sessionId}`) &&
           !tags.includes(CHAT_MESSAGE_APPEND_CAPABILITY)
-        );
-      });
+        ) {
+          if (sessionTag) metrics.legacySessionSocketsMax++;
+          else metrics.legacyProjectSocketsMax++;
+        }
+      }
+      const legacyClient = metrics.legacyProjectSocketsMax + metrics.legacySessionSocketsMax > 0;
+      if (!config.enabled) refuseMerge(metrics, 'setting_disabled');
+      else if (legacyClient) refuseMerge(metrics, 'legacy_client');
       return messagePersistence.persistMessageBatchWithSideEffects(
         this.sql,
         this.env,
         this.messagePersistenceHooks(),
         sessionId,
         batchMessages,
-        { source, config: { ...config, enabled: config.enabled && !legacyClient } }
+        { source, config: { ...config, enabled: config.enabled && !legacyClient }, metrics }
       );
     });
   }
@@ -1018,6 +1026,7 @@ export class ProjectData extends DurableObject<Env> {
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
     return {
+      recordMessageIngest: (metrics) => this.rowUsage.recordMessageIngest(metrics),
       transactionSync: (fn) => this.meteredStorage.transactionSync(fn),
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),

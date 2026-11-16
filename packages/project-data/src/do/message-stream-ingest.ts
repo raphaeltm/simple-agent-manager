@@ -5,6 +5,13 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import {
+  breakMerge,
+  countIngestRole,
+  type MessageIngestMetrics,
+  refuseMerge,
+} from './message-ingest-metrics';
+
 export const DEFAULT_MESSAGE_MERGE_CONFIG = {
   enabled: false,
   maxRowBytes: 64 * 1024,
@@ -108,7 +115,8 @@ export class MessageStreamBatch {
     latestPosition: MessagePosition | null,
     materializedThrough: { createdAt: number; sequence: number } | null,
     messageIds: readonly string[],
-    messageCount: number
+    messageCount: number,
+    private readonly metrics?: MessageIngestMetrics
   ) {
     this.latestPosition = latestPosition;
     this.messageCount = messageCount;
@@ -125,6 +133,7 @@ export class MessageStreamBatch {
           (index === 0 || sequence > (sequences[index - 1] ?? Number.MAX_SAFE_INTEGER))
       );
     const sameSource = sourceKey !== null && previous?.source === sourceKey;
+    if (previous?.open && !sameSource) breakMerge(metrics, 'source');
     const retired = { ...(previous?.retired ?? {}) };
     this.retiredSource = sourceKey !== null && Object.hasOwn(retired, sourceKey) ? sourceKey : null;
     if (sourceKey && !sameSource && !this.retiredSource && previous?.source)
@@ -170,7 +179,25 @@ export class MessageStreamBatch {
           : 0
       : 0;
     this.canMerge = config.enabled && this.canSequence && !this.retiredSource && receiptFits;
+    if (!config.enabled) refuseMerge(metrics, 'setting_disabled');
+    else if (!sourceKey) refuseMerge(metrics, 'missing_incarnation');
+    else if (!validSequence) refuseMerge(metrics, 'invalid_sequence');
+    else if (this.retiredSource) refuseMerge(metrics, 'retired_source');
+    else if (!receiptFits) refuseMerge(metrics, 'receipt_cap');
+    else if (metrics) metrics.mergeReadyBatches++;
     const open = this.state.open;
+    if (open && this.canMerge) {
+      if (open.id !== latestPosition?.id || open.messageCount !== messageCount)
+        breakMerge(metrics, 'intervening_writer');
+      else if (open.turn !== turn) breakMerge(metrics, 'turn');
+      else if (
+        materializedThrough &&
+        (open.createdAt < materializedThrough.createdAt ||
+          (open.createdAt === materializedThrough.createdAt &&
+            open.sequence <= materializedThrough.sequence))
+      )
+        breakMerge(metrics, 'materialized');
+    }
     if (
       !this.canMerge ||
       open?.id !== latestPosition?.id ||
@@ -209,6 +236,8 @@ export class MessageStreamBatch {
 
   /** Role/metadata/origin/gaps/cap/turn boundaries end a run, even on duplicate user echoes. */
   boundary(role: string, toolMetadata: string | null): void {
+    if (this.state.open && (role !== 'assistant' || toolMetadata !== null))
+      breakMerge(this.metrics, role !== 'assistant' ? 'role' : 'metadata');
     if (role !== 'assistant' || toolMetadata !== null) this.state.open = null;
   }
 
@@ -223,6 +252,14 @@ export class MessageStreamBatch {
     const contentBytes = new TextEncoder().encode(JSON.stringify(message.content)).byteLength - 2;
     const open = this.state.open;
     const eligible = this.canMerge && message.role === 'assistant' && message.toolMetadata === null;
+    if (eligible) {
+      if (!open) breakMerge(this.metrics, 'no_open');
+      else if (open.origin !== message.origin) breakMerge(this.metrics, 'origin');
+      else if (sequence !== open.lastSequence + 1) breakMerge(this.metrics, 'sequence_gap');
+      else if (message.createdAt < open.lastCreatedAt) breakMerge(this.metrics, 'timestamp');
+      else if (open.bytes + contentBytes > this.config.maxRowBytes)
+        breakMerge(this.metrics, 'size_cap');
+    }
     if (
       eligible &&
       open &&
@@ -231,6 +268,7 @@ export class MessageStreamBatch {
       message.createdAt >= open.lastCreatedAt &&
       open.bytes + contentBytes <= this.config.maxRowBytes
     ) {
+      if (this.metrics) this.metrics.coalesced++;
       const existing = this.inserts.get(open.id);
       if (existing) existing.content += message.content;
       else {
@@ -261,6 +299,8 @@ export class MessageStreamBatch {
     ).byteLength;
     const newest =
       !this.latestPosition || compareMessagePositions(message, this.latestPosition) >= 0;
+    if (eligible && !newest) breakMerge(this.metrics, 'out_of_order');
+    else if (eligible && bytes > this.config.maxRowBytes) breakMerge(this.metrics, 'size_cap');
     if (newest) this.latestPosition = message;
     this.state.open =
       eligible && newest && bytes <= this.config.maxRowBytes
@@ -285,7 +325,8 @@ export class MessageStreamBatch {
     appends: ChatMessageAppend[];
     state: string;
   } {
-    for (const message of this.inserts.values())
+    for (const message of this.inserts.values()) {
+      if (this.metrics) countIngestRole(this.metrics.inserted, message.role);
       sql.exec(
         `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -298,6 +339,7 @@ export class MessageStreamBatch {
         message.sequence,
         message.origin
       );
+    }
     for (const append of this.updates.values()) {
       const changed = sql
         .exec(
@@ -308,6 +350,7 @@ export class MessageStreamBatch {
         )
         .toArray();
       if (changed.length !== 1) throw new Error('Canonical message append lost its stored base');
+      if (this.metrics) this.metrics.appendStatements++;
     }
     // Refresh duplicates too: a failed local outbox DELETE can resend one old ID
     // alongside arbitrarily many newer batches. Keeping only NEW IDs loses it.
