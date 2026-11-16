@@ -67,10 +67,13 @@ export async function moveDepartedMemberTasksToTeam(
         `UPDATE asks SET claimed_by_user_id = NULL, updated_at = ? WHERE ${claimedWhere} RETURNING id`
       ).bind(now, projectId, userId, userId),
     ]);
-    const moved = [
-      ...((results[2]?.results ?? []) as Array<{ id: string }>),
-      ...((results[3]?.results ?? []) as Array<{ id: string }>),
-    ];
+    const ids = (rows: unknown[] | undefined) =>
+      (rows ?? []).flatMap((row) =>
+        row && typeof row === 'object' && typeof (row as { id?: unknown }).id === 'string'
+          ? [(row as { id: string }).id]
+          : []
+      );
+    const moved = [...ids(results[2]?.results), ...ids(results[3]?.results)].map((id) => ({ id }));
     if (moved.length === 0) return 0;
     const port = createInboxTaskPort(env);
     for (const task of moved) {
