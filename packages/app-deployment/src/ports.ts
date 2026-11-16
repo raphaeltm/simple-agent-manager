@@ -25,7 +25,7 @@ export interface DeploymentSecretCipher {
 
 export type DeploymentPublishJobSettingName =
   | 'deployments.buildExecutor'
-  | `deployments.builder${'DeadlineMs' | 'MaxConcurrent' | 'ProjectMaxConcurrent' | 'CapacityBackoffMs' | 'DrainLimit' | 'DaemonReadyTimeoutMs' | 'HeartbeatIntervalMs' | 'CallbackTimeoutMs' | 'CallbackAttempts' | 'CallbackRetryDelayMs'}`
+  | `deployments.builder${'DeadlineMs' | 'ReservationGraceMs' | 'MaxConcurrent' | 'ProjectMaxConcurrent' | 'CapacityBackoffMs' | 'DrainLimit' | 'DaemonReadyTimeoutMs' | 'HeartbeatIntervalMs' | 'CallbackTimeoutMs' | 'CallbackAttempts' | 'CallbackRetryDelayMs'}`
   | `deployments.buildContext${'CollectionMode' | 'StartTimeoutMs' | 'MaxBytes' | 'CollectTimeoutMs' | 'UploadTtlSeconds' | 'RetentionHours' | 'CleanupBudgetMs' | 'CleanupPageSize'}`
   | 'deployments.publishJobStallMs'
   | 'deployments.publishJobDeadlineMs'

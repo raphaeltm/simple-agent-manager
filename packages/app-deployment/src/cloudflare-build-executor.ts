@@ -7,6 +7,7 @@ import {
   admitCloudflareBuild,
   releaseCloudflareBuildReservation,
 } from './cloudflare-build-admission';
+import { forceReleaseExpiredCloudflareBuild } from './cloudflare-build-reservation-expiry';
 import {
   appendDeploymentPublishJobEvent,
   PUBLISH_JOB_TERMINAL_STATUSES,
@@ -137,6 +138,33 @@ export async function startReservedCloudflareBuild(
 export async function drainCloudflareBuilds(database: D1Database, ports: CloudflareBuildPorts) {
   const db = drizzle(database, { schema });
   const j = schema.deploymentPublishJobs;
+  const graceMs = Number(
+    await ports.settings.resolveSetting('deployments.builderReservationGraceMs')
+  );
+  if (!Number.isSafeInteger(graceMs) || graceMs <= 0)
+    throw new Error('Invalid Cloudflare reservation grace');
+  // Do this before contacting any DO. An unreachable stop must not wedge
+  // capacity or FK-cascaded deletion forever, even if the job sweep was lost.
+  const expired = await db
+    .select()
+    .from(j)
+    .where(
+      and(
+        eq(j.executor, 'cloudflare'),
+        eq(j.contextShadow, false),
+        isNotNull(j.executorInstanceId),
+        lte(j.executorDeadlineAt, new Date(Date.now() - graceMs).toISOString())
+      )
+    )
+    .orderBy(asc(j.executorDeadlineAt), asc(j.id))
+    .limit(ports.classMax);
+  for (const job of expired) {
+    try {
+      await forceReleaseExpiredCloudflareBuild(db, job, graceMs);
+    } catch {
+      log.error('cloudflare_builder.reservation_expiry_failed', { publishJobId: job.id });
+    }
+  }
   const terminal = await db
     .select()
     .from(j)

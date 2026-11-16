@@ -43,6 +43,7 @@ beforeEach(() => {
           'deployments.builderDeadlineMs': 1200000,
           'deployments.builderCapacityBackoffMs': 30000,
           'deployments.builderDrainLimit': 6,
+          'deployments.builderReservationGraceMs': 300000,
         })[name as string],
     },
     builder: {

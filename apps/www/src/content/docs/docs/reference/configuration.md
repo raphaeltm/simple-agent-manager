@@ -2060,6 +2060,7 @@ Edit runtime controls in **Admin → Settings**. Instant sessions always use Clo
 | `deployments.buildExecutor`               | `node`    | VM build executor (`node` or `cloudflare`); explicit Cloudflare selection never silently falls back |
 | `deployments.builderMaxConcurrent`        | 6         | Platform reservations, clamped to the deployed class capacity; maximum 6                            |
 | `deployments.builderProjectMaxConcurrent` | 2         | Per-project reservations; maximum 2                                                                 |
+| `deployments.builderReservationGraceMs` | 300,000 | Grace after the stored builder deadline before cron force-releases unconfirmed reservations with an alert; active jobs become unknown, and physical shutdown may remain unconfirmed |
 | `deployments.builderDeadlineMs`           | 1,200,000 | Absolute deadline after first admission; also capped by the overall publish-job deadline            |
 | `deployments.builderCapacityBackoffMs`    | 30,000    | Delay before retrying platform capacity errors                                                      |
 | `deployments.builderDrainLimit`           | 6         | Maximum queued jobs considered per cron tick                                                        |

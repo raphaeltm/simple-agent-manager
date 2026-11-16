@@ -1,3 +1,5 @@
+import { DEFAULT_DEPLOY_BUILDER_RESERVATION_GRACE_MS } from '@simple-agent-manager/app-deployment';
+
 import { choiceDefinition, integerDefinition } from './admin-setting-definitions';
 import {
   DEFAULT_BUILD_CONTEXT_CLEANUP_BUDGET_MS,
@@ -52,6 +54,13 @@ export const DEPLOYMENT_PUBLISH_SETTINGS = [
     'Operations',
     'Absolute builder deadline after first admission, also capped by the overall publish-job deadline.',
     { min: 10000, max: 1200000 }
+  ),
+  integerDefinition(
+    'deployments.builderReservationGraceMs',
+    DEFAULT_DEPLOY_BUILDER_RESERVATION_GRACE_MS,
+    'Operations',
+    'Grace after the immutable builder deadline before cron force-releases an unconfirmed reservation with an alert. Running jobs become unknown; physical stop may remain unconfirmed.',
+    { min: 1000, max: 3600000 }
   ),
   // Keep VM builds on node until staging proof in SAM idea 01M7H8GCR5FFDEXA70DNMEF8BW is complete.
   choiceDefinition(

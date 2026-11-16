@@ -34,8 +34,10 @@ export const DEFAULT_DEPLOY_BUILDER_PROJECT_MAX_CONCURRENT = 2;
 export const DEFAULT_DEPLOY_BUILDER_CAPACITY_BACKOFF_MS = 30_000;
 export const DEFAULT_DEPLOY_BUILDER_DRAIN_LIMIT = 6;
 export const DEFAULT_DEPLOY_BUILDER_DEADLINE_MS = 20 * 60_000;
+export const DEFAULT_DEPLOY_BUILDER_RESERVATION_GRACE_MS = 5 * 60_000;
 
-/** Reservation ownership outlives a terminal verdict until stop is confirmed.
+/** Reservation ownership outlives a terminal verdict until stop is confirmed
+ * or the exceptional deadline-plus-grace escape revokes it.
  * Both caps are checked in the final mutation, never a preceding SELECT. */
 export async function admitCloudflareBuild(
   db: Db,

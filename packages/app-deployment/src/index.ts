@@ -25,6 +25,7 @@ export {
   isCloudflareBuildDeletionConflict,
 } from './cloudflare-build-admission';
 export * from './cloudflare-build-executor';
+export { forceReleaseExpiredCloudflareBuild } from './cloudflare-build-reservation-expiry';
 export type {
   ComposeImageArtifactDescriptor,
   ComposeImageArtifactDownload,
