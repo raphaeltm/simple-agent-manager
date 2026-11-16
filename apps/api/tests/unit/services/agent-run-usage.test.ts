@@ -64,7 +64,13 @@ describe('agent_run_usage writers and reads', () => {
     await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(100, 20, 1000, 50)]);
     const usage = await read();
     expect(usage?.models).toEqual([
-      expect.objectContaining({ model: 'claude-opus-5-5', input: 100, output: 20, cacheRead: 1000, cacheWrite: 50 }),
+      expect.objectContaining({
+        model: 'claude-opus-5-5',
+        input: 100,
+        output: 20,
+        cacheRead: 1000,
+        cacheWrite: 50,
+      }),
     ]);
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 1 });
   });
@@ -83,7 +89,13 @@ describe('agent_run_usage writers and reads', () => {
 
   it('adds proxy responses and prefers the proxy over the harness for the same run', async () => {
     await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(999, 999)]);
-    const measured = { inputTokens: 10, outputTokens: 4, cacheReadTokens: 100, cacheWriteTokens: 0, reasoningTokens: null };
+    const measured = {
+      inputTokens: 10,
+      outputTokens: 4,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 0,
+      reasoningTokens: null,
+    };
     await recordProxyRunUsage(env, scope(), 'claude-opus-5-5', measured);
     await recordProxyRunUsage(env, scope(), 'claude-opus-5-5', measured);
     const usage = await read();
@@ -94,22 +106,35 @@ describe('agent_run_usage writers and reads', () => {
   });
 
   it('skips a proxied workspace that has no run (no chat session)', async () => {
-    const measured = { inputTokens: 10, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: null };
+    const measured = {
+      inputTokens: 10,
+      outputTokens: 4,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: null,
+    };
     await recordProxyRunUsage(env, { ...scope(), chatSessionId: null }, 'm', measured);
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM agent_run_usage').get()).toEqual({ n: 0 });
   });
 
   it('stores the credential key, never a long legacy reference', async () => {
     const legacy = `cc_credentials:cred-${'KgCluaQx9+Ga5+i+JTSMVBxORYB/j3L90fcFFZrC4rik9mbQ2'.repeat(3)}:iv`;
-    await recordHarnessRunUsage(env, scope({ credentialReference: legacy }), 'epoch-1', [opus(1, 1)]);
-    const row = sqlite.prepare('SELECT credential_key FROM agent_run_usage').get() as { credential_key: string };
+    await recordHarnessRunUsage(env, scope({ credentialReference: legacy }), 'epoch-1', [
+      opus(1, 1),
+    ]);
+    const row = sqlite.prepare('SELECT credential_key FROM agent_run_usage').get() as {
+      credential_key: string;
+    };
     expect(row.credential_key).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
   it('logs and swallows a failed callback write so the limit observations still land', async () => {
     sqlite.exec('DROP TABLE agent_run_usage');
     await expect(
-      recordHarnessTokenReport(env, scope(), { epoch: 'e', models: [{ model: 'm', inputTokens: 1, outputTokens: 1 }] })
+      recordHarnessTokenReport(env, scope(), {
+        epoch: 'e',
+        models: [{ model: 'm', inputTokens: 1, outputTokens: 1 }],
+      })
     ).resolves.toBeUndefined();
   });
 
@@ -120,7 +145,9 @@ describe('agent_run_usage writers and reads', () => {
 
     it('reads nothing for the same chat session id addressed through another project', async () => {
       expect(await read('project-b', 'chat-1')).toBeNull();
-      expect(summarizeRunTokens(await read('project-b', 'chat-1'))).toEqual({ state: 'not_reported' });
+      expect(summarizeRunTokens(await read('project-b', 'chat-1'))).toEqual({
+        state: 'not_reported',
+      });
     });
 
     it('reads the owner project’s run', async () => {
@@ -131,11 +158,24 @@ describe('agent_run_usage writers and reads', () => {
     });
 
     it('scopes the per-account read the same way', async () => {
-      const foreign = await readAccountUsage(env.DATABASE, { projectId: 'project-b', sinceMs: 0, maxRows: 50 });
-      const own = await readAccountUsage(env.DATABASE, { projectId: 'project-a', sinceMs: 0, maxRows: 50 });
+      const foreign = await readAccountUsage(env.DATABASE, {
+        projectId: 'project-b',
+        sinceMs: 0,
+        maxRows: 50,
+      });
+      const own = await readAccountUsage(env.DATABASE, {
+        projectId: 'project-a',
+        sinceMs: 0,
+        maxRows: 50,
+      });
       expect(foreign.rows).toEqual([]);
       expect(own.rows).toEqual([
-        expect.objectContaining({ credentialKey: 'cc_credentials:cred-key', credentialKind: 'api-key', runs: 1, input: 100 }),
+        expect.objectContaining({
+          credentialKey: 'cc_credentials:cred-key',
+          credentialKind: 'api-key',
+          runs: 1,
+          input: 100,
+        }),
       ]);
       expect(own.rows[0]!.estimatedSpendUsd).toBeGreaterThan(0);
     });
@@ -143,17 +183,35 @@ describe('agent_run_usage writers and reads', () => {
 
   it('shows spend only for API-key accounts', async () => {
     await recordHarnessRunUsage(env, scope(), 'epoch-1', [opus(1_000_000, 100_000)]);
-    await recordHarnessRunUsage(env, scope({ chatSessionId: 'chat-max', credentialReference: 'cc_credentials:cred-max' }), 'e', [opus(5, 5)]);
-    await recordHarnessRunUsage(env, scope({ chatSessionId: 'chat-none', credentialReference: null }), 'e', [opus(5, 5)]);
+    await recordHarnessRunUsage(
+      env,
+      scope({ chatSessionId: 'chat-max', credentialReference: 'cc_credentials:cred-max' }),
+      'e',
+      [opus(5, 5)]
+    );
+    await recordHarnessRunUsage(
+      env,
+      scope({ chatSessionId: 'chat-none', credentialReference: null }),
+      'e',
+      [opus(5, 5)]
+    );
 
     const keyed = summarizeRunTokens(await read('project-a', 'chat-1'));
-    expect(keyed).toMatchObject({ state: 'reported', spend: { state: 'estimate', unpricedModels: [] } });
-    if (keyed.state !== 'reported' || keyed.spend.state !== 'estimate') throw new Error('expected estimate');
+    expect(keyed).toMatchObject({
+      state: 'reported',
+      spend: { state: 'estimate', unpricedModels: [] },
+    });
+    if (keyed.state !== 'reported' || keyed.spend.state !== 'estimate')
+      throw new Error('expected estimate');
     // Opus 5.5 catalog prices: $0.005 / 1K input, $0.025 / 1K output.
     expect(keyed.spend.usd).toBeCloseTo(5 + 2.5, 6);
 
-    expect(summarizeRunTokens(await read('project-a', 'chat-max'))).toMatchObject({ spend: { state: 'not_applicable' } });
-    expect(summarizeRunTokens(await read('project-a', 'chat-none'))).toMatchObject({ spend: { state: 'unknown_account' } });
+    expect(summarizeRunTokens(await read('project-a', 'chat-max'))).toMatchObject({
+      spend: { state: 'not_applicable' },
+    });
+    expect(summarizeRunTokens(await read('project-a', 'chat-none'))).toMatchObject({
+      spend: { state: 'unknown_account' },
+    });
   });
 
   it('skips one unreadable row instead of failing the read', async () => {

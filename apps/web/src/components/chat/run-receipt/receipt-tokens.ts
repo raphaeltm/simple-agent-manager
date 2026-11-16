@@ -28,7 +28,8 @@ export function spendLabel(tokens: RunReceiptTokens): string | null {
   if (tokens.state !== 'reported' || tokens.spend.state !== 'estimate') return null;
   if (tokens.spend.usd === null) return 'No catalog price for this model';
   // Sub-cent spend reads as "<$0.01", never "$0.00", so a tiny run is not shown as free.
-  const amount = tokens.spend.usd > 0 && tokens.spend.usd < 0.01 ? '<$0.01' : USD.format(tokens.spend.usd);
+  const amount =
+    tokens.spend.usd > 0 && tokens.spend.usd < 0.01 ? '<$0.01' : USD.format(tokens.spend.usd);
   const partial = tokens.spend.unpricedModels.length > 0 ? ', some models unpriced' : '';
   return `~${amount} estimated${partial}`;
 }
@@ -46,7 +47,8 @@ export function tokensTile(tokens: RunReceiptTokens): {
     };
   }
   const total = totalTokens(tokens.total);
-  const source = tokens.source === 'ai_proxy' ? 'Measured by SAM’s AI proxy' : 'Reported by the agent';
+  const source =
+    tokens.source === 'ai_proxy' ? 'Measured by SAM’s AI proxy' : 'Reported by the agent';
   const spend = spendLabel(tokens);
   return {
     value: `${formatTokens(total)}${tokens.limited ? '+' : ''}`,

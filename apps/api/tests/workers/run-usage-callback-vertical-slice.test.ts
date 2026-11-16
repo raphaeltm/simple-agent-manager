@@ -36,7 +36,10 @@ function postUsage(session: Session, body: unknown) {
     `/api/projects/${session.projectId}/acp-sessions/${session.agentSessionId}/usage`,
     {
       method: 'POST',
-      headers: { Authorization: `Bearer ${session.callbackToken}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${session.callbackToken}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify(body),
     },
     testEnv
@@ -45,7 +48,12 @@ function postUsage(session: Session, body: unknown) {
 
 /** The Go contract fixture, addressed to this session's node and credential. */
 function goTokenReport(session: Session, credentialReference: string) {
-  return { ...contractFixture, nodeId: session.nodeId, credentialReference, credentialGeneration: 1 };
+  return {
+    ...contractFixture,
+    nodeId: session.nodeId,
+    credentialReference,
+    credentialGeneration: 1,
+  };
 }
 
 async function storedRows(projectId: string) {
@@ -124,7 +132,8 @@ describe('run token usage from the VM agent callback to the receipt', () => {
     const suffix = crypto.randomUUID().slice(0, 8);
     const credentialReference = `cc_credentials:cred-run-usage-old-${suffix}`;
     const session = await seedClaudeSession(suffix, credentialReference);
-    const { tokenUsage: _omitted, ...legacy } = goTokenReport(session, credentialReference);
+    const legacy: Record<string, unknown> = { ...goTokenReport(session, credentialReference) };
+    delete legacy.tokenUsage;
     const observedAt = Date.now();
     const response = await postUsage(session, {
       ...legacy,
@@ -163,7 +172,10 @@ describe('run token usage from the VM agent callback to the receipt', () => {
       `/api/projects/${victim.projectId}/acp-sessions/${victim.agentSessionId}/usage`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${attacker.callbackToken}`, 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${attacker.callbackToken}`,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(goTokenReport(victim, credentialReference)),
       },
       testEnv

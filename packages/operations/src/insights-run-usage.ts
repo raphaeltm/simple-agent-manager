@@ -68,7 +68,10 @@ export interface RunUsageModelRow extends RunTokenCounts {
   credentialKind: string | null;
 }
 
-function credentialKindOf(row: { credential_kind: string | null; credential_source: string | null }): string | null {
+function credentialKindOf(row: {
+  credential_kind: string | null;
+  credential_source: string | null;
+}): string | null {
   if (row.credential_kind) return row.credential_kind;
   return row.credential_source === 'platform' ? 'platform' : null;
 }
@@ -158,8 +161,7 @@ function addCounts(total: RunTokenCounts, row: RunTokenCounts): RunTokenCounts {
     output: total.output + row.output,
     cacheRead: total.cacheRead + row.cacheRead,
     cacheWrite: total.cacheWrite + row.cacheWrite,
-    reasoning:
-      row.reasoning === null ? total.reasoning : (total.reasoning ?? 0) + row.reasoning,
+    reasoning: row.reasoning === null ? total.reasoning : (total.reasoning ?? 0) + row.reasoning,
   };
 }
 
@@ -179,7 +181,8 @@ export function summarizeRunTokens(read: RunUsageRead | null): RunReceiptTokens 
   const kinds = new Set(read.models.map((row) => row.credentialKind));
   let spend: RunUsageSpend;
   if (kinds.has(null)) spend = { state: 'unknown_account' };
-  else if (kinds.size === 1 && kinds.has('api-key')) spend = { state: 'estimate', usd: null, unpricedModels: [] };
+  else if (kinds.size === 1 && kinds.has('api-key'))
+    spend = { state: 'estimate', usd: null, unpricedModels: [] };
   else spend = { state: 'not_applicable' };
 
   const models: RunModelUsage[] = [...byModel.entries()].map(([model, counts]) => {

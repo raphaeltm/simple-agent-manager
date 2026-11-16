@@ -44,8 +44,7 @@ const UPSERT_COLUMNS = `project_id, chat_session_id, workspace_id, agent_session
     model, credential_key, credential_source, agent_type, input_tokens, output_tokens,
     cache_read_tokens, cache_write_tokens, reasoning_tokens, created_at, updated_at`;
 const UPSERT_VALUES = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
-const CONFLICT_KEY =
-  'project_id, chat_session_id, source, usage_epoch, model, credential_key';
+const CONFLICT_KEY = 'project_id, chat_session_id, source, usage_epoch, model, credential_key';
 
 /** Cumulative counters: keep the larger of the stored and the reported value, column by column. */
 const HARNESS_UPSERT_SQL = `INSERT INTO agent_run_usage (${UPSERT_COLUMNS})
@@ -109,29 +108,31 @@ async function bindRows(
   now: number
 ): Promise<D1PreparedStatement[]> {
   const credentialKey = (await credentialLimitReferenceKey(scope.credentialReference)) ?? '';
-  return models.filter(hasTokens).map((counts) =>
-    db
-      .prepare(sql)
-      .bind(
-        scope.projectId,
-        scope.chatSessionId,
-        scope.workspaceId,
-        scope.agentSessionId,
-        source,
-        epoch,
-        counts.model.trim(),
-        credentialKey,
-        credentialKey ? scope.credentialSource : null,
-        scope.agentType,
-        count(counts.inputTokens),
-        count(counts.outputTokens),
-        count(counts.cacheReadTokens),
-        count(counts.cacheWriteTokens),
-        optionalCount(counts.reasoningTokens),
-        now,
-        now
-      )
-  );
+  return models
+    .filter(hasTokens)
+    .map((counts) =>
+      db
+        .prepare(sql)
+        .bind(
+          scope.projectId,
+          scope.chatSessionId,
+          scope.workspaceId,
+          scope.agentSessionId,
+          source,
+          epoch,
+          counts.model.trim(),
+          credentialKey,
+          credentialKey ? scope.credentialSource : null,
+          scope.agentType,
+          count(counts.inputTokens),
+          count(counts.outputTokens),
+          count(counts.cacheReadTokens),
+          count(counts.cacheWriteTokens),
+          optionalCount(counts.reasoningTokens),
+          now,
+          now
+        )
+    );
 }
 
 /**

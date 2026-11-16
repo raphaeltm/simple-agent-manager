@@ -61,8 +61,8 @@ export {
   attachTokenUsageAccounting,
   attachUpstreamTokenUsageAccounting,
   estimateInputTokensFromMessages,
-  measuredTokenUsage,
   type MeasuredTokenUsage,
+  measuredTokenUsage,
   optionalExecutionContext,
 } from './ai-token-usage-accounting';
 export { type AiProxyEnv } from './env';

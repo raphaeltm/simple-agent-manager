@@ -29,7 +29,14 @@ const kvEnv = {
 describe('measured run usage from the AI proxy', () => {
   it('reads Anthropic cache reads and writes, separate from input', () => {
     const extracted = extractJsonTokenUsage(
-      { usage: { input_tokens: 20, output_tokens: 9, cache_read_input_tokens: 500, cache_creation_input_tokens: 40 } },
+      {
+        usage: {
+          input_tokens: 20,
+          output_tokens: 9,
+          cache_read_input_tokens: 500,
+          cache_creation_input_tokens: 40,
+        },
+      },
       'anthropic'
     );
     expect(measuredTokenUsage(extracted, 'anthropic')).toEqual({
