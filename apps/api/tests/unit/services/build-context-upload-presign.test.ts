@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { createBuildContextUpload } from '../../../src/services/build-context-upload';
+import {
+  createBuildContextDownload,
+  createBuildContextUpload,
+} from '../../../src/services/build-context-upload';
 import { resetR2S3ClientsForTests } from '../../../src/services/r2-s3-client';
 
 // Real AWS presigner and real S3Client through the worker shim: the build-context upload is signed
@@ -65,5 +68,33 @@ describe('createBuildContextUpload (worker shim)', () => {
     const result = createBuildContextUpload(env, OWNER, DESCRIPTOR, 300);
     expect(result).toBeInstanceOf(Promise);
     await expect(result).rejects.toThrow(/R2 S3 credentials not configured/);
+  });
+});
+
+describe('createBuildContextDownload (worker shim)', () => {
+  it.each([
+    [
+      { CF_ACCOUNT_ID: 'acct123', R2_BUCKET_NAME: 'sam-assets' },
+      'sam-assets.acct123.r2.cloudflarestorage.com',
+      `/${KEY}`,
+    ],
+    [
+      {
+        R2_BUCKET_NAME: 'sam-assets',
+        R2_S3_ENDPOINT: 'https://s3.example.test',
+        R2_S3_BUCKET: 'celld-fleet',
+        R2_S3_KEY_PREFIX: 'r2/sam-assets/',
+      },
+      's3.example.test',
+      `/celld-fleet/r2/sam-assets/${KEY}`,
+    ],
+  ])('signs the download through the same store as the upload: %j', async (store, host, path) => {
+    const env = { ...credentials, ...store } as Env;
+    const upload = await createBuildContextUpload(env, OWNER, DESCRIPTOR, 300);
+    const download = new URL(await createBuildContextDownload(env, upload.r2Key, 300));
+    expect(download.host).toBe(host);
+    expect(download.pathname).toBe(path);
+    expect(download.searchParams.get('X-Amz-Expires')).toBe('300');
+    expect(download.searchParams.get('X-Amz-Signature')).toMatch(/^[a-f0-9]{64}$/);
   });
 });
