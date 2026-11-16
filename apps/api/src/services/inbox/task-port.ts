@@ -21,7 +21,10 @@ import { log } from '../../lib/logger';
 import { decideInboxTaskCommentWake } from '../agent-wake-authorization';
 import { getProjectName, sendNotification, sendNotificationOnce } from '../notification';
 import * as projectDataService from '../project-data';
-import { enqueueAndAdmitProjectEventSourceIntent } from '../project-event-source-outbox';
+import {
+  admitProjectEventSourceIntentById,
+  enqueueProjectEventSourceIntent,
+} from '../project-event-source-outbox';
 import { resolveDeliveryPreference } from '../project-event-subscriptions-access';
 
 const PREVIEW_MAX = 140;
@@ -81,7 +84,35 @@ export function createInboxTaskPort(env: Env): OperationInboxTaskPort {
           occurredAt,
           receivedAt: occurredAt,
         };
-        await enqueueAndAdmitProjectEventSourceIntent(env, event);
+        // Renew the item's watches first, so a task open for days still wakes them (and a closed
+        // one winds them down). A failure is logged: the event is still worth recording.
+        await projectDataService
+          .renewInboxItemWatches(env, input.projectId, {
+            itemId: input.askId,
+            open: input.taskOpen,
+            closedGraceMs: input.closedWatchHours * 60 * 60 * 1000,
+          })
+          .catch((error: unknown) =>
+            log.warn('inbox.task_watch_renew_failed', {
+              projectId: input.projectId,
+              askId: input.askId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          );
+        // The committed intent is the durable part; admission runs after the response when the
+        // request can wait for it, and the outbox reconcile sweep retries it otherwise.
+        const intent = await enqueueProjectEventSourceIntent(env, event);
+        if (input.deferAdmission) return true;
+        const admit = admitProjectEventSourceIntentById(env, intent.id).catch((error: unknown) =>
+          log.warn('inbox.task_event_admit_deferred', {
+            projectId: input.projectId,
+            askId: input.askId,
+            intentId: intent.id,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        );
+        if (input.waitUntil) input.waitUntil(admit);
+        else await admit;
         return true;
       } catch (error) {
         log.error('inbox.task_event_admission_failed', {
@@ -105,7 +136,9 @@ export function createInboxTaskPort(env: Env): OperationInboxTaskPort {
         .bind(input.taskId, input.projectId)
         .first<{ recovery_source_task_id: string | null }>();
       const eventTypes = [
-        ...INBOX_TASK_DEFAULT_WAKE_EVENT_TYPES,
+        ...INBOX_TASK_DEFAULT_WAKE_EVENT_TYPES.filter(
+          (type) => input.includeComments || type !== 'inbox.task.commented'
+        ),
         ...(input.includeSteps ? INBOX_TASK_STEP_EVENT_TYPES : []),
       ];
       const result = await projectDataService.createProjectEventSubscription(env, input.projectId, {
@@ -133,6 +166,22 @@ export function createInboxTaskPort(env: Env): OperationInboxTaskPort {
         expiresAt: null,
       });
       return { subscriptionId: result.subscription.id, created: !result.idempotent };
+    },
+
+    async closeWatches(projectId, askId, closedWatchHours) {
+      await projectDataService
+        .renewInboxItemWatches(env, projectId, {
+          itemId: askId,
+          open: false,
+          closedGraceMs: closedWatchHours * 60 * 60 * 1000,
+        })
+        .catch((error: unknown) =>
+          log.warn('inbox.task_watch_close_failed', {
+            projectId,
+            askId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        );
     },
 
     countWatchers: (projectId, askId) =>
@@ -194,6 +243,19 @@ export function createInboxTaskPort(env: Env): OperationInboxTaskPort {
           if (!recipients.has(userId)) recipients.set(userId, 'comment');
         }
         recipients.delete(input.actor.userId);
+        // Only active members hear about it: a participant who left the project gets nothing.
+        // At most 90 recipients per comment (D1 binds); a mention list is capped at 20 anyway.
+        const candidates = [...recipients.keys()].slice(0, 90);
+        if (candidates.length === 0) return;
+        const active = await env.DATABASE.prepare(
+          `SELECT user_id FROM project_members WHERE project_id = ? AND status = 'active'
+             AND user_id IN (${candidates.map(() => '?').join(', ')})`
+        )
+          .bind(input.projectId, ...candidates)
+          .all<{ user_id: string }>();
+        const members = new Set((active.results ?? []).map((row) => row.user_id));
+        for (const userId of [...recipients.keys()])
+          if (!members.has(userId)) recipients.delete(userId);
         const now = Date.now();
         await Promise.all(
           [...recipients].map(async ([userId, reason]) => {

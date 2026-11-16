@@ -182,6 +182,7 @@ export async function assignAgentTask(
       userId: source.userId,
       agentSessionId: ctx.actor.workspace?.agentSessionId ?? null,
       includeSteps: input.wakeOnSteps,
+      includeComments: true,
     });
   } catch (error) {
     watching = false;
@@ -267,7 +268,8 @@ export async function commentAgentTask(
     threadId: created.thread.id,
     body,
     mentions: [],
-    actor: { userId: source.userId, name: null },
+    // Written by the agent, so never attributed to its person by name.
+    actor: { userId: source.userId, name: 'Agent' },
     participants: [row.assigneeUserId, row.claimedByUserId].filter(
       (id): id is string => Boolean(id) && id !== source.userId
     ),
@@ -285,8 +287,9 @@ export const AgentAttachInputSchema = v.object({
 });
 
 /**
- * Watch an open task another chat assigned: this chat is woken by its changes, like the chat that
- * assigned it. An event subscription on the item, so there is no watcher table; at most
+ * Watch an open task another chat of the same person assigned: this chat is woken when the task
+ * is taken, handed on, finished, reopened or archived (comments wake the assigning chat only). An
+ * event subscription on the item, so there is no watcher table; at most
  * `inbox.watchersPerItemMax` chats watch one task.
  */
 export async function attachAgentTask(
@@ -296,6 +299,14 @@ export async function attachAgentTask(
 ): Promise<{ ref: string; watching: true; alreadyWatching: boolean }> {
   const input = v.parse(AgentAttachInputSchema, rawInput);
   const row = await loadTaskForAgent(ctx, source, askIdOf(input.ref));
+  // Only a task one of this person's chats assigned: the comment wake rule and the "teammate
+  // input" label are decided against the assigning chat's owner, so a chat of anyone else would
+  // be woken by people who have no rights on it.
+  if (row.filerUserId !== source.userId)
+    throw new OperationError(
+      'forbidden',
+      'You can only watch a task that one of your own chats assigned'
+    );
   if (row.status !== 'open')
     throw new OperationError('conflict', `This task is already ${row.status}`);
   const limits = await getInboxLimits(ctx);
@@ -314,6 +325,8 @@ export async function attachAgentTask(
     userId: source.userId,
     agentSessionId: ctx.actor.workspace?.agentSessionId ?? null,
     includeSteps: input.wakeOnSteps,
+    // Lifecycle changes only: comments wake the assigning chat, whose rule they were checked by.
+    includeComments: false,
   });
   return { ref: input.ref, watching: true, alreadyWatching: !watched.created };
 }

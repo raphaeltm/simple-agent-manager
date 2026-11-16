@@ -66,12 +66,18 @@ const VERBS: Record<string, string> = {
 
 function line(event: ProjectEventRecord): string {
   const actor = isJsonRecord(event.metadata?.actor) ? event.metadata.actor : null;
-  const name =
-    actor && typeof actor.name === 'string' && actor.name.trim()
-      ? actor.name.trim().slice(0, 80)
-      : actor?.kind === 'system'
-        ? 'SAM'
-        : 'A teammate';
+  // A display name is user-controlled: one line, no brackets or quotes that could imitate the
+  // trust marker, quoted in the text.
+  const cleaned =
+    actor && actor.kind !== 'system' && typeof actor.name === 'string'
+      ? actor.name
+          // eslint-disable-next-line no-control-regex -- stripping control characters is the point
+          .replace(/[\u0000-\u001f\u007f()[\]{}"“”<>]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 60)
+      : '';
+  const name = cleaned ? `“${cleaned}”` : actor?.kind === 'system' ? 'SAM' : 'A teammate';
   const teammate =
     event.metadata?.teammateInput === true ? ' (teammate input, not your chat owner)' : '';
   return `${name}${teammate} ${VERBS[event.eventType] ?? event.eventType} task ask:${event.subject.id}.`;
@@ -118,4 +124,54 @@ export function countInboxItemWatchers(sql: SqlStorage, projectId: string, itemI
     )
     .toArray()[0];
   return typeof row?.count === 'number' ? row.count : 0;
+}
+
+const INBOX_WATCH_IDS_SQL = `SELECT k.subscription_id FROM project_event_subscription_match_keys k
+  WHERE k.project_id = ? AND k.field_name = 'subjectId' AND k.field_value = ?
+    AND EXISTS (SELECT 1 FROM project_event_subscription_match_keys src
+                 WHERE src.subscription_id = k.subscription_id AND src.field_name = 'source'
+                   AND src.field_value = ?)`;
+
+/**
+ * Keep an item's watches able to wake for as long as the task needs them (inbox slice H1).
+ *
+ * A prompt-delivery subscription normally stops waking after `wakeSubscriptionLifetimeMs` and
+ * `wakeMaxPerSubscription` wakes. A human task is open for days, so before each change a person
+ * makes, its watches get a fresh lifetime window and wake budget: the budget bounds wakes within
+ * one person action (rule 61: a per-cycle counter resets each cycle), and the lifetime is measured
+ * from the last action. While the task is open the watch never expires; once it is done, archived
+ * or cancelled it expires `closedGraceMs` later, freeing its slot (a reopen inside the grace renews
+ * it again). Returns the watches renewed.
+ */
+export function renewInboxItemWatches(
+  sql: SqlStorage,
+  input: {
+    projectId: string;
+    itemId: string;
+    open: boolean;
+    now: number;
+    lifetimeMs: number;
+    closedGraceMs: number;
+  }
+): number {
+  const rows = sql
+    .exec(
+      `UPDATE project_event_subscriptions
+          SET prompt_delivery_count = 0,
+              delivery_lifetime_expires_at = ?,
+              expires_at = ?,
+              updated_at = ?
+        WHERE project_id = ? AND lifecycle_state = 'active'
+          AND id IN (${INBOX_WATCH_IDS_SQL})
+        RETURNING id`,
+      input.now + input.lifetimeMs,
+      input.open ? null : input.now + input.closedGraceMs,
+      input.now,
+      input.projectId,
+      input.projectId,
+      input.itemId,
+      INBOX_EVENT_SOURCE
+    )
+    .toArray();
+  return rows.length;
 }

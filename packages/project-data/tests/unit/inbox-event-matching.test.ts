@@ -130,7 +130,7 @@ describe('sam.inbox event matching', () => {
     ).event;
     const content = inboxWakeContent({ batchId: 'batch-1', events: [event] });
     expect(content).toContain(
-      'Maya (teammate input, not your chat owner) marked done task ask:ask-1'
+      '“Maya” (teammate input, not your chat owner) marked done task ask:ask-1'
     );
     expect(content).toContain('inbox_read method get');
     expect(inboxWakeContent({ batchId: 'batch-2', events: [] })).toBeNull();

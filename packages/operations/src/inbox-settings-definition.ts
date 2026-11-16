@@ -137,6 +137,13 @@ export const INBOX_SETTINGS = [
     range: { min: 10, max: 500 },
   },
   {
+    name: 'inbox.closedTaskWatchHours',
+    defaultValue: 168,
+    description:
+      'Hours a finished, archived or cancelled task keeps waking the chats watching it (so a reopen still reaches them); after that their watch ends and frees its place.',
+    range: { min: 1, max: 2_160 },
+  },
+  {
     name: 'inbox.sweepBatchSize',
     defaultValue: 10,
     description:

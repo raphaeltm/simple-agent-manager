@@ -2330,6 +2330,17 @@ export async function countInboxItemWatchers(
   );
 }
 
+/** Renew an item's watches before admitting a change (`renewInboxItemWatches`). */
+export async function renewInboxItemWatches(
+  env: Env,
+  projectId: string,
+  input: { itemId: string; open: boolean; closedGraceMs: number }
+): Promise<number> {
+  return callProjectDataNoRetry(env, projectId, 'renewInboxItemWatches', (stub) =>
+    stub.renewInboxItemWatches({ projectId, ...input })
+  );
+}
+
 export async function createInboxItemComment(
   env: Env,
   projectId: string,

@@ -410,7 +410,13 @@ export async function cancelAgentAsk(
     .first<{ kind: string; blocking: number }>();
   if (!closed) return explainNoMatch(ctx, source, askId);
   if (closed.kind === 'task') {
-    // A moot human task leaves the person's list; its history says why.
+    // A moot human task leaves the person's list; its history says why, and its watches wind
+    // down like a closed task's.
+    await ctx.ports.inboxTasks.closeWatches(
+      source.projectId,
+      askId,
+      (await getInboxLimits(ctx)).closedTaskWatchHours
+    );
     await recordActivity(ctx, {
       projectId: source.projectId,
       askId,

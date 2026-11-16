@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { moveDepartedMemberTasksToTeam } from '../../src/services/inbox/departed-member-tasks';
+import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
 import { storeMcpToken } from '../../src/services/mcp-token';
 import { inboxRows, materializeWakes, sqlRows } from './helpers/agent-message-channels';
 import {
@@ -424,6 +425,9 @@ describe('human tasks through the real entry points', () => {
       .bind(s.projectId, s.colleagueId)
       .run();
     expect(await moveDepartedMemberTasksToTeam(testEnv, s.projectId, s.colleagueId)).toBe(1);
+    // The handoff commits the event to the outbox only; the reconcile sweep admits it.
+    expect(await wakesFor(s, s.chatSessionId)).toHaveLength(0);
+    await reconcileProjectEventSourceOutbox(testEnv);
     const wakes = await wakesFor(s, s.chatSessionId);
     expect(wakes).toHaveLength(1);
     expect(wakes[0]!.content).toContain('SAM reassigned');

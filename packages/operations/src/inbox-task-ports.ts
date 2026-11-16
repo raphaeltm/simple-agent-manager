@@ -25,6 +25,14 @@ export interface InboxTaskEventInput {
   teammateInput: boolean;
   /** Small ids-only detail (step index, assignee kind, thread id). Never comment text. */
   detail?: Record<string, string | number | boolean | null>;
+  /** Whether the task is still open after this change (renews or winds down its watches). */
+  taskOpen: boolean;
+  /** Hours a closed task keeps its watches (`inbox.closedTaskWatchHours`). */
+  closedWatchHours: number;
+  /** The request's `waitUntil`: admission runs after the response; the outbox sweep retries. */
+  waitUntil?: (promise: Promise<unknown>) => void;
+  /** Commit the intent only and leave admission to the outbox reconcile sweep (bulk callers). */
+  deferAdmission?: boolean;
 }
 
 export interface InboxTaskWatchInput {
@@ -37,6 +45,11 @@ export interface InboxTaskWatchInput {
   agentSessionId: string | null;
   /** Also wake on step ticks (otherwise ticks are recorded only). */
   includeSteps: boolean;
+  /**
+   * Wake on comments. True only for the chat that assigned the task: the comment wake rule is
+   * decided against that chat, so an attached chat hears about lifecycle changes, not comments.
+   */
+  includeComments: boolean;
 }
 
 export interface InboxTaskCommentWakeInput {
@@ -78,6 +91,8 @@ export interface OperationInboxTaskPort {
    * and item. Throws when the chat is not this task's active chat.
    */
   watch(input: InboxTaskWatchInput): Promise<{ subscriptionId: string; created: boolean }>;
+  /** An agent closed the task (cancel): its watches wind down like a closed task's. */
+  closeWatches(projectId: string, askId: string, closedWatchHours: number): Promise<void>;
   /** Active subscriptions on the item (the watcher cap). */
   countWatchers(projectId: string, askId: string): Promise<number>;
   /** Whether a person's comment may wake the filing chat (`decideAgentWake`). Never throws. */

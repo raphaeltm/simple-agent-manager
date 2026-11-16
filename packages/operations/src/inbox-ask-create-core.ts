@@ -114,8 +114,12 @@ export async function createAsk(
           expires_at, source_workspace_id, category, next_escalation_at, max_expires_at,
           created_at, updated_at)
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?
-        WHERE ? IS NULL
-           OR (SELECT COUNT(*) FROM asks WHERE source_session_id = ? AND project_id = ? AND status = 'open') < ?
+        WHERE (? IS NULL
+           OR (SELECT COUNT(*) FROM asks WHERE source_session_id = ? AND project_id = ? AND status = 'open') < ?)
+          -- The assignee is checked again in the write, so a member removed after the check above
+          -- is never assigned (the departed-member handoff would not see the new row).
+          AND (? IS NULL OR EXISTS (SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?
+            AND status = 'active'))
        ON CONFLICT (project_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`
     )
     .bind(
@@ -148,7 +152,10 @@ export async function createAsk(
       input.sourceSessionId ?? null,
       input.sourceSessionId ?? null,
       input.projectId,
-      limits.openItemsPerChat
+      limits.openItemsPerChat,
+      input.assigneeUserId ?? null,
+      input.projectId,
+      input.assigneeUserId ?? null
     )
     .run();
   if ((inserted.meta?.changes ?? 0) === 1) return { ref: `ask:${askId}`, id: askId, created: true };

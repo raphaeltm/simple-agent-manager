@@ -17,6 +17,7 @@
  */
 import { TASK_READABLE_SQL } from '@simple-agent-manager/operations';
 import type { ProjectCommentListResponse } from '@simple-agent-manager/shared';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '@simple-agent-manager/worker-core';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -73,19 +74,19 @@ projectCommentRoutes.get('/', async (c) => {
     // `?? []`: an object still running the previous build returns no inbox-item threads.
     const itemThreads = inbox.inboxItemThreads ?? [];
     const itemIds = [...new Set(itemThreads.map((thread) => thread.itemId))];
-    const readableItems =
-      itemIds.length === 0
-        ? []
-        : ((
-            await c.env.DATABASE.prepare(
-              `SELECT a.id, a.title FROM asks a
-                WHERE a.project_id = ? AND a.kind = 'task'
-                  AND a.id IN (${itemIds.map(() => '?').join(', ')})
-                  AND ${TASK_READABLE_SQL}`
-            )
-              .bind(projectId, ...itemIds, userId, userId)
-              .all<{ id: string; title: string }>()
-          ).results ?? []);
+    // Chunked under the D1 bind limit: projectId and two userId binds ride with each chunk.
+    const readableItems: Array<{ id: string; title: string }> = [];
+    for (const ids of chunk(itemIds, D1_MAX_BOUND_PARAMETERS - 3)) {
+      const rows = await c.env.DATABASE.prepare(
+        `SELECT a.id, a.title FROM asks a
+          WHERE a.project_id = ? AND a.kind = 'task'
+            AND a.id IN (${ids.map(() => '?').join(', ')})
+            AND ${TASK_READABLE_SQL}`
+      )
+        .bind(projectId, ...ids, userId, userId)
+        .all<{ id: string; title: string }>();
+      readableItems.push(...(rows.results ?? []));
+    }
     const readable = new Set(readableItems.map((item) => item.id));
 
     const response: ProjectCommentListResponse = {

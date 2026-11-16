@@ -65,7 +65,7 @@ import * as groupedFtsWallRecovery from './grouped-fts-wall-recovery';
 import * as ideaUpdates from './idea-updates';
 import * as ideaWork from './idea-work';
 import * as idleCleanup from './idle-cleanup';
-import { countInboxItemWatchers } from './inbox-event-wake';
+import { countInboxItemWatchers, renewInboxItemWatches } from './inbox-event-wake';
 import * as inboxItemComments from './inbox-item-comments';
 import * as knowledge from './knowledge';
 import * as libraryFileComments from './library-file-comments';
@@ -2617,6 +2617,19 @@ export class ProjectData extends DurableObject<Env> {
 
   countInboxItemWatchers(projectId: string, itemId: string): number {
     return countInboxItemWatchers(this.sql, projectId, itemId);
+  }
+
+  renewInboxItemWatches(input: {
+    projectId: string;
+    itemId: string;
+    open: boolean;
+    closedGraceMs: number;
+  }): number {
+    return renewInboxItemWatches(this.sql, {
+      ...input,
+      now: Date.now(),
+      lifetimeMs: resolveProjectEventLimits(this.env).wakeSubscriptionLifetimeMs,
+    });
   }
 
   createInboxItemComment(

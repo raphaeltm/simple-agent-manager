@@ -9,11 +9,17 @@
  * the departed member can no longer read or act on the task anyway (every task read joins an
  * active membership).
  */
+import { INBOX_SETTINGS } from '@simple-agent-manager/operations';
 import { ulid } from '@simple-agent-manager/worker-core';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { createInboxTaskPort } from './task-port';
+
+/** Unused for an open task (its watches never expire); required by the event input. */
+const CLOSED_WATCH_HOURS_DEFAULT =
+  INBOX_SETTINGS.find((setting) => setting.name === 'inbox.closedTaskWatchHours')?.defaultValue ??
+  168;
 
 export async function moveDepartedMemberTasksToTeam(
   env: Env,
@@ -81,6 +87,12 @@ export async function moveDepartedMemberTasksToTeam(
         actor: { kind: 'system', id: null, name: 'SAM' },
         teammateInput: false,
         detail: { reason: 'member_left', toKind: 'team' },
+        taskOpen: true,
+        closedWatchHours: CLOSED_WATCH_HOURS_DEFAULT,
+        // Three round trips per task here (watch renewal, intent insert and read); the outbox
+        // reconcile sweep admits the intents, so a member with many tasks cannot exhaust the
+        // offboarding request's subrequest budget.
+        deferAdmission: true,
       });
     }
     log.info('inbox.departed_member_tasks_moved', { projectId, userId, tasks: moved.length });

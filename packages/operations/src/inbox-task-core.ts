@@ -110,20 +110,32 @@ export async function getTaskDetailForPerson(
   });
 }
 
+/** The request's `waitUntil`, so event admission runs after the response (rule 60). */
+export function waitUntilOf(
+  ctx: OperationContext
+): ((promise: Promise<unknown>) => void) | undefined {
+  const execCtx = ctx.execCtx;
+  return execCtx ? (promise) => execCtx.waitUntil(promise) : undefined;
+}
+
 async function admit(
   ctx: OperationContext,
   row: TaskRow,
   eventType: InboxTaskEventType,
   detail?: Record<string, string | number | boolean | null>,
-  teammateInput = true
+  actorName: string | null = null
 ): Promise<boolean> {
+  const limits = await getInboxLimits(ctx);
   return ctx.ports.inboxTasks.admitEvent({
     projectId: row.projectId,
     askId: row.id,
     eventType,
-    actor: { kind: 'user', id: ctx.actor.userId, name: null },
-    teammateInput: teammateInput && ctx.actor.userId !== row.filerUserId,
+    actor: { kind: 'user', id: ctx.actor.userId, name: actorName },
+    teammateInput: ctx.actor.userId !== row.filerUserId,
     detail,
+    taskOpen: eventType !== 'inbox.task.done' && eventType !== 'inbox.task.archived',
+    closedWatchHours: limits.closedTaskWatchHours,
+    waitUntil: waitUntilOf(ctx),
   });
 }
 
@@ -232,6 +244,9 @@ export async function commentOnTask(
           actor: { kind: 'user', id: me, name: myName },
           teammateInput: decision.teammateInput,
           detail: { threadId: created.thread.id, commentId: created.commentId },
+          taskOpen: true,
+          closedWatchHours: limits.closedTaskWatchHours,
+          waitUntil: waitUntilOf(ctx),
         })
       : false;
   const participants = [
@@ -327,7 +342,9 @@ export async function reassignTask(
             updated_at = ?
       WHERE a.id = ? AND a.project_id = ? AND a.kind = 'task' AND a.status = 'open'
         AND a.assignee_kind = ? AND a.assignee_user_id IS ? AND a.claimed_by_user_id IS ?
-        AND ${TASK_WRITABLE_SQL}`
+        AND ${TASK_WRITABLE_SQL}
+        AND (? IS NULL OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = a.project_id
+          AND pm.user_id = ? AND pm.status = 'active'))`
   )
     .bind(
       toTeam ? 'team' : 'user',
@@ -340,7 +357,11 @@ export async function reassignTask(
       row.claimedByUserId,
       me,
       me,
-      me
+      me,
+      // The new assignee is checked again in the write, so a member removed after the read above
+      // cannot be assigned (the departed-member handoff would not see this task).
+      toTeam ? null : (target.assigneeUserId ?? null),
+      toTeam ? null : (target.assigneeUserId ?? null)
     )
     .run();
   if ((result.meta?.changes ?? 0) !== 1) lost();
@@ -373,8 +394,9 @@ export async function reassignTask(
 }
 
 /**
- * Close an open task as done or archived. `notified_at` is set in the same write: the event is
- * the agent's notice, so the ask-notice sweep must not send a second one.
+ * Close an open task as done or archived. The `sam.inbox` event is the agent's notice;
+ * `notified_at` is stamped after it is committed so the ask-notice sweep sends one only when the
+ * event could not be.
  */
 async function closeTask(
   ctx: OperationContext,
@@ -388,7 +410,7 @@ async function closeTask(
   const now = Date.now();
   const result = await ctx.env.DATABASE.prepare(
     `UPDATE asks AS a SET status = ?, answer_json = ?, resolved_by_user_id = ?, resolved_at = ?,
-            notified_at = ?, updated_at = ?
+            updated_at = ?
       WHERE a.id = ? AND a.project_id = ? AND a.kind = 'task' AND a.status = 'open'
         AND ${TASK_WRITABLE_SQL}`
   )
@@ -396,7 +418,6 @@ async function closeTask(
       status,
       note ? JSON.stringify({ text: note }) : null,
       me,
-      now,
       now,
       now,
       row.id,
@@ -416,6 +437,16 @@ async function closeTask(
     at: now,
   });
   const agentNotified = await admit(ctx, row, `inbox.task.${status}`);
+  if (agentNotified) {
+    // The event is the agent's notice. Marked only once it is committed to the outbox: if that
+    // failed, `notified_at` stays NULL and the ask-notice sweep tells the agent instead.
+    await ctx.env.DATABASE.prepare(
+      'UPDATE asks SET notified_at = ? WHERE id = ? AND project_id = ? AND notified_at IS NULL'
+    )
+      .bind(Date.now(), row.id, row.projectId)
+      .run()
+      .catch(() => undefined);
+  }
   return { ref: `ask:${row.id}`, status, agentNotified };
 }
 

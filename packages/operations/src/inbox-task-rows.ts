@@ -177,7 +177,7 @@ export async function loadTaskForPerson(
 }
 
 /**
- * A task as the filing agent (or a chat that may watch it) reads it: filed from this chat, or
+ * A task as an agent reads it: filed from this chat or another chat of the same person, or
  * addressed to the agent's person or the team. Not-found otherwise.
  */
 export async function loadTaskForAgent(
@@ -189,14 +189,23 @@ export async function loadTaskForAgent(
     `SELECT ${TASK_COLUMNS}, NULL AS viewer_role
        FROM asks a
       WHERE a.id = ? AND a.project_id = ? AND a.kind = 'task'
-        AND (a.source_session_id = ? OR a.assignee_kind = 'team' OR a.assignee_user_id = ?)`
+        AND (a.source_session_id = ? OR a.assignee_kind = 'team' OR a.assignee_user_id = ?
+          OR ${TASK_FILER_SQL} = ?)`
   )
-    .bind(askId, source.projectId, source.sessionId, source.userId)
+    .bind(askId, source.projectId, source.sessionId, source.userId, source.userId)
     .first<Record<string, unknown>>();
   if (!raw) notFound();
   try {
     return toTaskRow(raw);
-  } catch {
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: 'inbox.task_row_unreadable',
+        projectId: source.projectId,
+        askId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    );
     return notFound();
   }
 }
