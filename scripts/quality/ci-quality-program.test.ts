@@ -217,8 +217,6 @@ describe('agent instruction check selection', () => {
     '.claude/hooks/log-instructions-loaded.sh',
     '.claude/hooks/verify-test-quality.mjs',
     '.codex/config.toml',
-    '.codex/hooks/rule-context.mjs',
-    '.codex/hooks/rule-scopes.json',
     'scripts/quality/go-optional-fields/main.go',
     'scripts/quality/agent-instructions.ts',
     'scripts/quality/agent-context-budget.json',

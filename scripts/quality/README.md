@@ -82,15 +82,15 @@ model is in `scripts/quality/agent-instructions.ts`:
 - a Claude Code or Codex hook entry is malformed, names an unknown event, or all hooks
   are disabled (both harnesses skip such entries without an error), or a hook runs a
   script that does not exist;
-- a generated rule index or the Codex hook's rule lookup (`.codex/hooks/rule-scopes.json`)
-  is stale, or a size ceiling in the budget file is exceeded.
+- a generated rule index is stale, or a size ceiling in the budget file is exceeded.
 
 `--write` regenerates the rule index in `.claude/rules/00-rule-routing.md`, the launch-rule
 list in the root `AGENTS.md`, the "Rules for this directory" section of each nested
-`AGENTS.md`, and `.codex/hooks/rule-scopes.json`.
+`AGENTS.md`.
 
 `pnpm quality:agent-tooling:test` (Code Quality Checks) runs the instruction model tests
-and drives both hook scripts below through the real script against fixture repositories.
+and the Codex hook-config checks, and drives the Stop gate below through the real script
+against fixture repositories.
 
 What the check does not prove: that a rule's scope is complete for code that never names
 it, that Codex opens the rules its `AGENTS.md` lists, or that an agent follows a rule it
@@ -114,9 +114,9 @@ empty log, or one without `session_start` entries, is reported as a mismatch; pa
 
 ### Test-quality Stop gate
 
-`.claude/hooks/verify-test-quality.mjs` runs at the end of every turn in Claude Code
-(`.claude/settings.json`) and in Codex sessions that trust the project (`.codex/config.toml`;
-SAM-managed Codex sessions do not, see "Codex rule delivery" below). It reads every change on the
+`.claude/hooks/verify-test-quality.mjs` runs at the end of every Claude Code turn
+(`.claude/settings.json`; observed firing in a fresh session, idea 01M7H32EK6S4E31EHWVSJSENR5).
+It is not configured for Codex: see "Codex hooks" below. It reads every change on the
 branch (commits since the merge base with `origin/main`, staged, unstaged and untracked
 files) and reports two classes:
 
@@ -136,20 +136,21 @@ positive can never trap a session. Revisit both with fresh measurements before c
 source file in it. The gate cannot prove a test is a vertical slice; review still decides
 that (`.claude/rules/35-vertical-slice-testing.md`).
 
-### Codex rule delivery
+### Codex hooks
 
-Codex loads only the root `AGENTS.md` by itself. `.codex/hooks/rule-context.mjs`
-(SessionStart and PreToolUse on `Bash` and `apply_patch`) adds the bodies of the
-path-scoped rules that govern the files a tool call touches, most specific scope first,
-capped per call (`SAM_CODEX_RULE_CONTEXT_MAX_BYTES`, default 40,000 bytes, below the
-handler's `additionalContextLimit`), and names the rules it had no room for. The first
-write to files whose rules were never delivered is refused once with the rules attached.
-Deliveries are logged to `.tmp/instruction-loads/codex-<session>.jsonl`.
-
-Codex runs repository hooks only for a trusted project, and only hook definitions that
-have themselves been trusted. SAM-managed Codex sessions do not trust the repository
-today, so these hooks, like the rest of `.codex/config.toml`, do not run there (probe
-evidence on idea 01M7H32EK6S4E31EHWVSJSENR5).
+Codex runs repository hooks (`.codex/config.toml` or `.codex/hooks.json`) only for a
+trusted project, and only hook definitions that have themselves been trusted. SAM-managed
+Codex sessions trust neither: on 2026-11-16 a probe with the hook script committed
+(task 01M7HZ6Q1EVPVPCBN00AM3WN8A) saw no SessionStart, no PreToolUse context and no Stop
+prompt, and the session's `~/.codex/config.toml` had no trust entry for the repository
+(`CODEX_HOME` unset). The same applies to every other setting in `.codex/config.toml`.
+So no repository hook is configured for Codex. A rule-delivery hook (SessionStart and
+PreToolUse injection of path-scoped rule bodies, bounded, with a log) and the Codex Stop
+entry are kept on branch `sam/codex-rule-delivery-hook` until SAM decides whether its
+Codex sessions should trust repository hooks. Until then Codex reaches path-scoped rules
+through the `AGENTS.md` indexes only. `--check` still validates any Codex hook entry
+against the current schema, so a malformed one (like the flat `[[hooks.Stop]]` that held
+no handler) cannot come back unnoticed.
 
 ## Rule 73: optional fields must not overwrite on absence
 

@@ -290,11 +290,14 @@ describe('Stop gate: which base the branch is compared with', () => {
     commit(repo, 'branch work');
     git(repo, 'checkout', '-q', 'main');
     write(repo, 'apps/api/src/services/on-main.ts');
+    // A two-dot diff against main would report this edit as a branch change.
+    write(repo, 'apps/api/src/services/existing.ts', 'export const value = 2;\n');
     commit(repo, 'main moved');
     git(repo, 'checkout', '-q', 'feature');
     const text = reason(runHook(repo));
     expect(text).toContain('apps/api/src/services/on-branch.ts');
     expect(text).not.toContain('on-main.ts');
+    expect(text).not.toContain('existing.ts');
   });
 
   it('prefers origin/main over a stale local main', () => {

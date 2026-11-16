@@ -7,7 +7,7 @@
  *   - two rule files are identical copies,
  *   - a Claude Code or Codex hook entry is malformed (both harnesses skip such entries
  *     silently), or a hook runs a script that does not exist,
- *   - a generated rule index, or the Codex hook's rule lookup, is out of date,
+ *   - a generated rule index is out of date,
  *   - a size ceiling in agent-context-budget.json is exceeded.
  *
  * Usage:
@@ -24,7 +24,6 @@ import { resolve } from 'node:path';
 
 import TOML from '@iarna/toml';
 
-import { CODEX_RULE_SCOPES_FILE, renderCodexRuleScopes } from './agent-codex-rule-scopes';
 import {
   checkClaudeHookConfig,
   checkCodexHookConfig,
@@ -248,7 +247,6 @@ function indexTargets(
       file: ROOT_INDEX_FILE,
       expected: applyGeneratedBlock(read(ROOT_INDEX_FILE), renderRootIndex(model)),
     },
-    { file: CODEX_RULE_SCOPES_FILE, expected: renderCodexRuleScopes(model) },
   ];
   if (files.includes('AGENTS.md')) {
     targets.push({

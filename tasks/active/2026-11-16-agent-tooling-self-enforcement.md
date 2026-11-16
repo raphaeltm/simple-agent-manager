@@ -50,7 +50,7 @@ the right context or is enforced programmatically. Guard first, removal second.
 - [x] Measure hits on the current tree (vm-agent, cli, harness); decide advisory vs blocking per policy f9ae7f88
 - [x] Wire into CI (Code Quality Checks) and a pnpm script
 - [x] Decide and record: TypeScript counterpart feasibility (measured), SQL override-column shape
-- [ ] Launch decision for rule 73: blocking check + full path scope (Go, TS, TSX, SQL migrations, DO migrations) + fresh Claude probe; otherwise keep at launch (check + scope done; probes 01M7HYQHAH3787PH8A0TCV6296, 01M7HYQVK025M14GN4QG9G8WTF pending)
+- [x] Launch decision for rule 73: blocking check + full path scope (Go, TS, TSX, SQL migrations, DO migrations) + fresh Claude probe (C1 01M7HYQHAH3787PH8A0TCV6296: absent at launch, loads with the first Write of a new .ts; C2 01M7HYQVK025M14GN4QG9G8WTF: loads on Read of a .sql before any edit; --observed matches both)
 - [x] Record the procedure in `.claude/rules/00-rule-routing.md`
 
 ### Part 2: Codex rule delivery
@@ -58,14 +58,14 @@ the right context or is enforced programmatically. Guard first, removal second.
 - [x] Dependency-free hook (no node_modules): SessionStart (startup/resume/compact) + PreToolUse (apply_patch, Bash) injects applicable rule bodies, bounded, with a log
 - [x] Hook never blocks or crashes a session; tests drive the real script
 - [x] `.codex/config.toml` entries valid per current schema; `agent-hook-config.ts` validates Codex entries
-- [ ] Codex probe (profile Sol) on the branch: existing file, new file, shell-only, negative control; no truncation (round 1 done: hooks inert in SAM sessions, project untrusted; round 2 01M7HY7P831WQG19HADM5JS85X pending)
+- [x] Codex probe (profile Sol) on the branch: round 1b 01M7HZ6Q1EVPVPCBN00AM3WN8A (script committed) shows no repository hook runs in SAM Codex sessions (project and hooks untrusted). Not good -> not shipped: hook preserved on branch sam/codex-rule-delivery-hook pending the trust decision
 - [x] Add `.codex/**` to the CI agent-instructions filter
 
 ### Part 3: Stop gate
 - [x] Rewrite: merge-base + committed + staged + untracked changes; package-aware boundary paths incl. `packages/project-data/src/do`; source-only (no docs); no `stop_hook_active` bypass of real findings (bounded re-block); no SIGPIPE exit; documented output only
 - [x] Tests drive the real script against fixture git repos, one case per defect with a control
 - [x] Measure false positives on recent merged PRs; choose block vs feedback per finding class
-- [ ] Enable in `.claude/settings.json` and `.codex/config.toml`; verify it fires in a real session of each harness (enabled; Claude probe C1 and Codex round 2 run D pending; Codex entry inert in SAM until the project is trusted)
+- [x] Enable in `.claude/settings.json` (fired in Claude probe C1); Codex entry not shipped: it cannot run in SAM Codex sessions (round 1b), kept on sam/codex-rule-delivery-hook
 
 ### Docs
 - [x] `scripts/quality/README.md`, `.claude/rules/00-rule-routing.md`, `AGENTS.md` notes as needed
@@ -73,9 +73,9 @@ the right context or is enforced programmatically. Guard first, removal second.
 ## Acceptance criteria
 - [x] Rule-73 check fails on the reintroduced incident shape and passes on current code, with controls
 - [x] Measured hit count on current tree stated; rollout mode justified
-- [ ] Launch decision for 73 stated with its evidence (or 73 stays at launch)
-- [ ] Codex hook evidence from a real Codex session, or the exact reason it could not be obtained
-- [ ] Stop gate runs in every Claude Code session and in Codex sessions that trust the project; per-class block/feedback decision with numbers (numbers done; real-session evidence pending)
+- [x] Launch decision for 73 stated with its evidence (or 73 stays at launch)
+- [x] Codex hook evidence from a real Codex session, or the exact reason it could not be obtained
+- [x] Stop gate runs in every Claude Code session (observed); per-class block/feedback decision with numbers. Codex: not possible until SAM trusts repository hooks
 - [ ] All existing checks pass; `pnpm quality:agent-context-budget --check` passes
 
 ## Notes
@@ -86,3 +86,7 @@ the right context or is enforced programmatically. Guard first, removal second.
   layer: no repository hook (rule delivery or Stop gate) runs in SAM-managed Codex sessions.
   Making it run needs a vm-agent change that trusts repository hooks: a security-design decision
   for Raphaël (policy 1b930820), not made in this PR.
+- 2026-11-16 ~11:05: workspace restored twice; .tmp and untracked state are lost on restore, so state lives here and in PR #2790.
+- Reviews: task-completion-validator, go-specialist, security-auditor, test-engineer all returned; fixes in 0854ed500,
+  608503822, f3b156c19 and the commit after it. Codex probe round 2 (01M7HY7P831WQG19HADM5JS85X) stalled on
+  "failed to load workspace requirements" from nested codex exec; asked to wrap up.

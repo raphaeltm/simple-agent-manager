@@ -67,8 +67,6 @@ pnpm-debug.log*
 # committed. Ignore ALL of .codex/ and track ONLY the config we author by hand.
 .codex/*
 !.codex/config.toml
-# Repository hook scripts named by config.toml (rule delivery; see scripts/quality/README.md).
-!.codex/hooks/
 # Playwright audit screenshots write under apps/web cwd, not the repo root
 **/.codex/tmp/
 # Throwaway Playwright specs, e.g. blog UI captures (apps/www/src/content/CLAUDE.md)
