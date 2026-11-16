@@ -95,7 +95,8 @@ export async function releaseCloudflareBuildReservation(
   db: Db,
   jobId: string,
   attempt: number,
-  retryAt?: number
+  retryAt?: number,
+  expectedEpoch?: string | null
 ) {
   const j = schema.deploymentPublishJobs;
   return db
@@ -107,13 +108,17 @@ export async function releaseCloudflareBuildReservation(
         : {
             status: sql`CASE WHEN ${j.status} = 'starting' THEN 'context_ready' ELSE ${j.status} END`,
             currentStep: sql`CASE WHEN ${j.status} = 'starting' THEN 'capacity_backoff' ELSE ${j.currentStep} END`,
-            executorNotBefore: new Date(retryAt).toISOString(),
+            executorNotBefore: new Date(
+              Math.max(retryAt, expectedEpoch ? Date.parse(expectedEpoch) + 1 : 0)
+            ).toISOString(),
           }),
     })
     .where(
       and(
         eq(j.id, jobId),
         eq(j.attempt, attempt),
+        expectedEpoch !== undefined ? sql`${j.executorNotBefore} IS ${expectedEpoch}` : undefined,
+        expectedEpoch !== undefined ? eq(j.executorInstanceId, jobId) : undefined,
         retryAt !== undefined
           ? or(
               eq(j.status, 'starting'),

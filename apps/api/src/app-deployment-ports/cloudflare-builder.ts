@@ -24,7 +24,7 @@ export function createCloudflareBuildPorts(env: Env): CloudflareBuildPorts {
     builder: {
       start: async (job) => {
         try {
-          await stub(job.id).startJob(job.id, job.attempt);
+          await stub(job.id).startJob(job.id, job.attempt, job.executorNotBefore);
           return 'started';
         } catch (error) {
           // Only platform capacity is retryable queue pressure. Never interpret
@@ -33,8 +33,8 @@ export function createCloudflareBuildPorts(env: Env): CloudflareBuildPorts {
           throw error;
         }
       },
-      stop: async (job) => {
-        await stub(job.id).stopJob();
+      stop: async (job, capacity) => {
+        await stub(job.id).stopJob(capacity);
       },
     },
   };

@@ -96,14 +96,39 @@ describe('Cloudflare build final atomic reservation in SQLite D1', () => {
 
 describe('reserved Cloudflare context regression recovery', () => {
   it.each([
-    "status='canceled'", "status='building'", "attempt=2", "executor_instance_id=NULL",
-    "executor_instance_id='foreign'", "context_shadow=1", "executor_deadline_at=NULL", "executor_deadline_at='2000-01-01T00:00:00.000Z'",
-  ])('does not recover an ineligible reservation: %s', async mutation => {
-    seed('job'); await admitCloudflareBuild(db,'job',limits);
+    "status='canceled'",
+    "status='building'",
+    'attempt=2',
+    'executor_instance_id=NULL',
+    "executor_instance_id='foreign'",
+    'context_shadow=1',
+    'executor_deadline_at=NULL',
+    "executor_deadline_at='2000-01-01T00:00:00.000Z'",
+  ])('does not recover an ineligible reservation: %s', async (mutation) => {
+    seed('job');
+    await admitCloudflareBuild(db, 'job', limits);
     sqlite.prepare("UPDATE deployment_publish_jobs SET status='context_ready'").run();
-    sqlite.prepare('UPDATE deployment_publish_jobs SET '+mutation).run();
-    const before=sqlite.prepare('SELECT * FROM deployment_publish_jobs').get();
-    expect(await recoverReservedCloudflareBuild(db,'job',1)).toBeNull();
+    sqlite.prepare('UPDATE deployment_publish_jobs SET ' + mutation).run();
+    const before = sqlite.prepare('SELECT * FROM deployment_publish_jobs').get();
+    expect(await recoverReservedCloudflareBuild(db, 'job', 1)).toBeNull();
     expect(sqlite.prepare('SELECT * FROM deployment_publish_jobs').get()).toEqual(before);
   });
+});
+
+it('capacity release compares the reservation epoch through same-attempt readmission', async () => {
+  seed('job');
+  const first = await admitCloudflareBuild(db, 'job', limits);
+  expect(first).toBeTruthy();
+  const retryAt = Date.now() + 30000;
+  expect(await releaseCloudflareBuildReservation(db, 'job', 1, retryAt, null)).toHaveLength(1);
+  const second = await admitCloudflareBuild(db, 'job', limits, retryAt + 1);
+  expect(second?.executorNotBefore).toBe(new Date(retryAt).toISOString());
+  expect(await releaseCloudflareBuildReservation(db, 'job', 1, retryAt + 60000, null)).toHaveLength(
+    0
+  );
+  expect(
+    sqlite
+      .prepare("SELECT status,executor_instance_id FROM deployment_publish_jobs WHERE id='job'")
+      .get()
+  ).toEqual({ status: 'starting', executor_instance_id: 'job' });
 });

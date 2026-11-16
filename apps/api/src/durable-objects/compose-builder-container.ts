@@ -1,6 +1,7 @@
 import { Container } from '@cloudflare/containers';
 import {
   appendDeploymentPublishJobEvent,
+  type CloudflareBuildStopGuard,
   isCloudflareBuildCapacityError,
   PUBLISH_JOB_TERMINAL_STATUSES,
   recoverReservedCloudflareBuild,
@@ -29,6 +30,7 @@ interface BuildState {
   stopRequested?: boolean;
   version?: string;
   accepted?: boolean;
+  reservationEpoch?: string | null;
 }
 
 /** One DinD microVM per publishJobId, never reused across jobs/projects.
@@ -74,37 +76,57 @@ export class ComposeBuilderContainer extends Container<Env> {
   }
   /** Acknowledge persisted kickoff promptly; cold startup is owned by a DO
    * alarm, not the source HTTP waitUntil's 30-second lifetime. */
-  async startJob(jobId: string, attempt: number) {
-    let { job } = await this.loadJob(jobId, attempt);
-    if (job?.status === 'context_ready' && job.executorInstanceId === job.id) {
-      await recoverReservedCloudflareBuild(drizzle(this.env.DATABASE, { schema }), jobId, attempt);
-      // A competing terminal/progress update may have won the repair CAS.
-      // Inspect it before either the accepted short-circuit or new kickoff.
-      ({ job } = await this.loadJob(jobId, attempt));
-    }
-    if (
-      !job ||
-      job.executorInstanceId !== jobId ||
-      !job.executorDeadlineAt ||
-      PUBLISH_JOB_TERMINAL_STATUSES.has(job.status)
-    )
-      throw errors.conflict('Builder reservation is no longer current');
-    const deadline = Date.parse(job.executorDeadlineAt);
-    if (!Number.isFinite(deadline) || deadline <= Date.now())
-      throw errors.conflict('Builder deadline elapsed');
-    const previous = await this.ctx.storage.get<BuildState>(STATE_KEY);
-    if (previous && (previous.jobId !== jobId || previous.attempt !== attempt))
-      throw errors.conflict('Builder identity cannot be reused');
-    if (previous?.accepted) return { accepted: true, version: previous.version };
-    const stopRetryMs =
-      previous?.stopRetryMs ??
-      Number(await resolveAdminSetting(this.env, 'deployments.builderCapacityBackoffMs'));
-    await this.ctx.storage.put(STATE_KEY, { ...previous, jobId, attempt, deadline, stopRetryMs });
-    await this.schedule(new Date(deadline), 'enforceDeadline');
-    await this.schedule(new Date(), 'launchBuilder', { jobId, attempt });
-    return { accepted: true };
+  async startJob(jobId: string, attempt: number, expectedEpoch: string | null = null) {
+    return this.serialized(async () => {
+      let { job } = await this.loadJob(jobId, attempt);
+      if ((job?.executorNotBefore ?? null) !== expectedEpoch)
+        throw errors.conflict('Builder reservation changed');
+      if (job?.status === 'context_ready' && job.executorInstanceId === job.id) {
+        await recoverReservedCloudflareBuild(
+          drizzle(this.env.DATABASE, { schema }),
+          jobId,
+          attempt
+        );
+        // A competing terminal/progress update may have won the repair CAS.
+        // Inspect it before either the accepted short-circuit or new kickoff.
+        ({ job } = await this.loadJob(jobId, attempt));
+      }
+      if (
+        !job ||
+        job.executorInstanceId !== jobId ||
+        !job.executorDeadlineAt ||
+        PUBLISH_JOB_TERMINAL_STATUSES.has(job.status)
+      )
+        throw errors.conflict('Builder reservation is no longer current');
+      const deadline = Date.parse(job.executorDeadlineAt);
+      if (!Number.isFinite(deadline) || deadline <= Date.now())
+        throw errors.conflict('Builder deadline elapsed');
+      let previous = await this.ctx.storage.get<BuildState>(STATE_KEY);
+      if (previous && (previous.jobId !== jobId || previous.attempt !== attempt))
+        throw errors.conflict('Builder identity cannot be reused');
+      if ((previous?.reservationEpoch ?? null) !== expectedEpoch) previous = undefined;
+      if (previous?.accepted) return { accepted: true, version: previous.version };
+      const stopRetryMs =
+        previous?.stopRetryMs ??
+        Number(await resolveAdminSetting(this.env, 'deployments.builderCapacityBackoffMs'));
+      await this.ctx.storage.put(STATE_KEY, {
+        ...previous,
+        jobId,
+        attempt,
+        deadline,
+        stopRetryMs,
+        reservationEpoch: expectedEpoch,
+      });
+      await this.schedule(new Date(deadline), 'enforceDeadline');
+      await this.schedule(new Date(), 'launchBuilder', {
+        jobId,
+        attempt,
+        notBefore: expectedEpoch,
+      });
+      return { accepted: true };
+    });
   }
-  launchBuilder(identity: { jobId: string; attempt: number }) {
+  launchBuilder(identity: { jobId: string; attempt: number; notBefore?: string | null }) {
     // SDK alarms await callbacks sequentially. Do not hold the hard deadline
     // behind a stalled D1 read or other kickoff work.
     this.ctx.waitUntil(
@@ -113,11 +135,12 @@ export class ComposeBuilderContainer extends Container<Env> {
       })
     );
   }
-  async runBuilder(identity: { jobId: string; attempt: number }) {
+  async runBuilder(identity: { jobId: string; attempt: number; notBefore?: string | null }) {
     // Alarm delivery and cron recovery may overlap. Coalesce the full operation,
     // including stop/requeue, so stale deliveries cannot defeat capacity backoff.
     const run = this.kickoff.then(async () => {
       let { job } = await this.loadJob(identity.jobId, identity.attempt);
+      if ((job?.executorNotBefore ?? null) !== (identity.notBefore ?? null)) return;
       if (job?.status === 'context_ready' && job.executorInstanceId === job.id) {
         job =
           (await recoverReservedCloudflareBuild(
@@ -135,15 +158,15 @@ export class ComposeBuilderContainer extends Container<Env> {
           builder: {
             start: async () => {
               try {
-                await this.launchNow(identity.jobId, identity.attempt);
+                await this.launchNow(identity.jobId, identity.attempt, identity.notBefore ?? null);
                 return 'started';
               } catch (error) {
                 if (isCloudflareBuildCapacityError(error)) return 'capacity';
                 throw error;
               }
             },
-            stop: async () => {
-              await this.stopJob();
+            stop: async (_job, capacity) => {
+              await this.stopJob(capacity);
             },
           },
         },
@@ -153,20 +176,22 @@ export class ComposeBuilderContainer extends Container<Env> {
     this.kickoff = run.catch(() => undefined);
     return run;
   }
-  private async launchNow(jobId: string, attempt: number) {
+  private async launchNow(jobId: string, attempt: number, expectedEpoch: string | null) {
     return this.serialized(async () => {
       const { job } = await this.loadJob(jobId, attempt);
       if (
         !job ||
+        (job.executorNotBefore ?? null) !== expectedEpoch ||
         job.executorInstanceId !== jobId ||
         !job.executorDeadlineAt ||
         !job.agentProfileId ||
         PUBLISH_JOB_TERMINAL_STATUSES.has(job.status)
       )
         throw errors.conflict('Builder reservation is no longer current');
-      const previous = await this.ctx.storage.get<BuildState>(STATE_KEY);
+      let previous = await this.ctx.storage.get<BuildState>(STATE_KEY);
       if (previous && (previous.jobId !== jobId || previous.attempt !== attempt))
         throw errors.conflict('Builder identity cannot be reused');
+      if ((previous?.reservationEpoch ?? null) !== expectedEpoch) previous = undefined;
       // RUN can bind the former bootstrap port after the controller closes it.
       // Never contact that port again after acceptance; status is callback-only.
       if (previous?.accepted) return { version: previous.version };
@@ -181,6 +206,7 @@ export class ComposeBuilderContainer extends Container<Env> {
           previous?.stopRetryMs ??
           Number(await resolveAdminSetting(this.env, 'deployments.builderCapacityBackoffMs')),
         stopRequested: previous?.stopRequested,
+        reservationEpoch: expectedEpoch,
       };
       await this.ctx.storage.put(STATE_KEY, state);
       // Schedule before startup; Container's scheduler owns the underlying alarm.
@@ -316,17 +342,38 @@ export class ComposeBuilderContainer extends Container<Env> {
     if (this.startupInProgress && state)
       await this.schedule(new Date(Date.now() + state.stopRetryMs), 'enforceDeadline');
   }
-  async stopJob() {
-    this.startAbort?.abort();
+  async stopJob(capacity?: CloudflareBuildStopGuard) {
+    if (!capacity) this.startAbort?.abort();
     return this.serialized(async () => {
       const state = await this.ctx.storage.get<BuildState>(STATE_KEY);
+      const db = drizzle(this.env.DATABASE, { schema });
+      if (capacity) {
+        const { job } = await this.loadJob(capacity.jobId, capacity.attempt);
+        if (
+          !job ||
+          job.executorInstanceId !== job.id ||
+          (job.executorNotBefore ?? null) !== capacity.notBefore ||
+          (job.status !== 'starting' && !PUBLISH_JOB_TERMINAL_STATUSES.has(job.status)) ||
+          (state?.accepted &&
+            (state.reservationEpoch ?? null) === capacity.notBefore &&
+            !PUBLISH_JOB_TERMINAL_STATUSES.has(job.status))
+        )
+          return;
+        // A rejected old epoch must not even abort a newer startup.
+        this.startAbort?.abort();
+      }
       await this.stopContainer(state);
-      if (state)
+      if (capacity) {
         await releaseCloudflareBuildReservation(
-          drizzle(this.env.DATABASE, { schema }),
-          state.jobId,
-          state.attempt
+          db,
+          capacity.jobId,
+          capacity.attempt,
+          capacity.retryAt,
+          capacity.notBefore
         );
+      } else if (state) {
+        await releaseCloudflareBuildReservation(db, state.jobId, state.attempt);
+      }
     });
   }
   async enforceDeadline() {

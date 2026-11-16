@@ -1,6 +1,6 @@
 import { log } from '@simple-agent-manager/worker-core';
 import * as schema from '@simple-agent-manager/worker-core/schema';
-import { and, asc, eq, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import {
@@ -14,6 +14,12 @@ import {
 import type { DeploymentLifecyclePort, DeploymentSettingsPort } from './ports';
 
 type Job = schema.DeploymentPublishJobRow;
+export interface CloudflareBuildStopGuard {
+  jobId: string;
+  attempt: number;
+  notBefore: string | null;
+  retryAt: number;
+}
 export interface CloudflareBuildPorts {
   settings: DeploymentSettingsPort;
   lifecycle: DeploymentLifecyclePort;
@@ -21,7 +27,7 @@ export interface CloudflareBuildPorts {
   builder: {
     start(job: Job): Promise<'started' | 'capacity'>;
     /** Resolves only once the container is stopped, including no-running cases. */
-    stop(job: Pick<Job, 'id'>): Promise<void>;
+    stop(job: Pick<Job, 'id'>, capacity?: CloudflareBuildStopGuard): Promise<void>;
   };
 }
 
@@ -73,15 +79,18 @@ export async function startReservedCloudflareBuild(
   try {
     const result = await ports.builder.start(job);
     if (result === 'capacity') {
-      // Even a capacity exception can race a successful start. Confirm stop
-      // before freeing the reservation; failed stop is reconciled by the sweep.
-      await ports.builder.stop(job);
-      await releaseCloudflareBuildReservation(
-        db,
-        job.id,
-        job.attempt,
-        Date.now() + Number(backoffMs)
-      );
+      // Stop and release share the DO serialization boundary and reservation
+      // epoch. A stale capacity response cannot stop a readmitted guest.
+      try {
+        await ports.builder.stop(job, {
+          jobId: job.id,
+          attempt: job.attempt,
+          notBefore: job.executorNotBefore,
+          retryAt: Date.now() + backoffMs,
+        });
+      } catch {
+        log.warn('cloudflare_builder.stop_pending', { publishJobId: job.id });
+      }
     }
     return result === 'started';
   } catch {
@@ -92,6 +101,10 @@ export async function startReservedCloudflareBuild(
       nodeId: job.nodeId,
       workspaceId: job.workspaceId,
       expectedAttempt: job.attempt,
+      expectedStatus: 'starting',
+      expectedExecutor: 'cloudflare',
+      expectedExecutorInstanceId: job.id,
+      expectedReservationEpoch: job.executorNotBefore,
       status: 'failed',
       currentStep: 'builder_start',
       eventType: 'publish.builder.start_failed',
@@ -99,22 +112,22 @@ export async function startReservedCloudflareBuild(
       errorCode: 'builder_start_failed',
       terminal: true,
     });
-    if (changed)
-      await ports.lifecycle.recordPublishJobLifecycleEventBestEffort({
-        projectId: job.projectId,
-        publishJobId: job.id,
-        environmentId: job.environmentId,
-        status: 'failed',
-        terminal: true,
-        source: 'cloudflare_builder.start',
-        occurredAt: Date.now(),
-      });
+    if (!changed) return false;
     try {
       await ports.builder.stop(job);
       await releaseCloudflareBuildReservation(db, job.id, job.attempt);
     } catch {
       log.warn('cloudflare_builder.stop_pending', { publishJobId: job.id });
     }
+    await ports.lifecycle.recordPublishJobLifecycleEventBestEffort({
+      projectId: job.projectId,
+      publishJobId: job.id,
+      environmentId: job.environmentId,
+      status: 'failed',
+      terminal: true,
+      source: 'cloudflare_builder.start',
+      occurredAt: Date.now(),
+    });
     return false;
   }
 }
@@ -157,7 +170,16 @@ export async function drainCloudflareBuilds(database: D1Database, ports: Cloudfl
     )
     .limit(ports.classMax);
   for (const job of starting) await startReservedCloudflareBuild(database, ports, job);
-  const limit = Number(await ports.settings.resolveSetting('deployments.builderDrainLimit'));
+  const [limit, projectMax, deadlineMs] = await Promise.all([
+    ports.settings.resolveSetting('deployments.builderDrainLimit'),
+    ports.settings.resolveSetting('deployments.builderProjectMaxConcurrent'),
+    ports.settings.resolveSetting('deployments.publishJobDeadlineMs'),
+  ]).then(
+    ([batch, project, deadline]) => [Number(batch), Number(project), Number(deadline)] as const
+  );
+  if (![limit, projectMax, deadlineMs].every((value) => Number.isSafeInteger(value) && value > 0))
+    throw new Error('Invalid Cloudflare drain limits');
+  const now = new Date().toISOString();
   const queued = await db
     .select({ id: j.id })
     .from(j)
@@ -167,7 +189,11 @@ export async function drainCloudflareBuilds(database: D1Database, ports: Cloudfl
         eq(j.contextShadow, false),
         eq(j.status, 'context_ready'),
         isNull(j.executorInstanceId),
-        or(isNull(j.executorNotBefore), lte(j.executorNotBefore, new Date().toISOString()))
+        isNotNull(j.contextR2Key),
+        isNotNull(j.contextSha256),
+        sql`${j.createdAt} > ${new Date(Date.now() - deadlineMs).toISOString()}`,
+        sql`(SELECT count(*) FROM deployment_publish_jobs AS active WHERE active.executor = 'cloudflare' AND active.executor_instance_id IS NOT NULL AND active.project_id = ${j.projectId}) < ${projectMax}`,
+        or(isNull(j.executorNotBefore), lte(j.executorNotBefore, now))
       )
     )
     .orderBy(asc(j.queuedAt), asc(j.id))

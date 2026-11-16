@@ -2,8 +2,10 @@ import {
   type CloudflareBuildPorts,
   dispatchCloudflareBuild,
   drainCloudflareBuilds,
+  releaseCloudflareBuildReservation,
 } from '@simple-agent-manager/app-deployment';
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
@@ -43,7 +45,19 @@ beforeEach(() => {
           'deployments.builderDrainLimit': 6,
         })[name as string],
     },
-    builder: { start: vi.fn(async () => 'started' as const), stop: vi.fn(async () => {}) },
+    builder: {
+      start: vi.fn(async () => 'started' as const),
+      stop: vi.fn(async (job, capacity) => {
+        if (capacity)
+          await releaseCloudflareBuildReservation(
+            drizzle(database, { schema }),
+            job.id,
+            capacity.attempt,
+            capacity.retryAt,
+            capacity.notBefore
+          );
+      }),
+    },
     lifecycle: { recordPublishJobLifecycleEventBestEffort: vi.fn(async () => {}) },
   };
 });
@@ -100,4 +114,70 @@ it('cron recovers a reservation whose HTTP caller disappeared before DO kickoff'
   await drainCloudflareBuilds(database, ports);
   expect(ports.builder.start).toHaveBeenCalledTimes(1);
   expect(row()).toMatchObject({ status: 'starting', executor_instance_id: 'job' });
+});
+
+it.each([
+  "status='building'",
+  "status='context_ready',executor_instance_id=NULL",
+  "status='starting',executor_not_before='2099-01-01T00:00:00.000Z'",
+])('stale startup failure cannot fail or stop changed reservation: %s', async (change) => {
+  seed();
+  ports.builder.start = vi.fn(async () => {
+    sqlite.exec('UPDATE deployment_publish_jobs SET ' + change);
+    throw new Error('delayed startup failure');
+  });
+  await dispatchCloudflareBuild(database, ports, 'job');
+  expect(ports.builder.stop).not.toHaveBeenCalled();
+  expect((row() as { status: string }).status).not.toBe('failed');
+  expect(ports.lifecycle.recordPublishJobLifecycleEventBestEffort).not.toHaveBeenCalled();
+});
+it('project-capped backlog cannot hide eligible work behind the drain limit', async () => {
+  for (const id of ['a-active', 'b-active']) {
+    seed(id);
+    sqlite
+      .prepare(
+        "UPDATE deployment_publish_jobs SET status='building',executor_instance_id=id WHERE id=?"
+      )
+      .run(id);
+  }
+  for (let i = 0; i < 8; i++) seed('c-queued-' + i);
+  seed('z-other', 'another-project');
+  await drainCloudflareBuilds(database, ports);
+  expect(ports.builder.start).toHaveBeenCalledWith(expect.objectContaining({ id: 'z-other' }));
+});
+
+it('late capacity result cannot release a same-attempt replacement reservation', async () => {
+  seed();
+  ports.builder.start = vi.fn(async () => {
+    sqlite.exec(
+      "UPDATE deployment_publish_jobs SET executor_not_before='2099-01-01T00:00:00.000Z'"
+    );
+    return 'capacity';
+  });
+  await dispatchCloudflareBuild(database, ports, 'job');
+  expect(row()).toEqual({
+    status: 'starting',
+    executor_instance_id: 'job',
+    executor_not_before: '2099-01-01T00:00:00.000Z',
+  });
+});
+it('expired or incomplete queue entries cannot consume the eligible drain batch', async () => {
+  for (let i = 0; i < 8; i++) {
+    seed('a-bad-' + i, 'bad-' + i);
+    sqlite
+      .prepare('UPDATE deployment_publish_jobs SET context_r2_key=NULL WHERE id=?')
+      .run('a-bad-' + i);
+  }
+  for (let i = 0; i < 8; i++) {
+    seed('b-old-' + i, 'old-' + i);
+    sqlite
+      .prepare(
+        "UPDATE deployment_publish_jobs SET created_at='2000-01-01T00:00:00.000Z' WHERE id=?"
+      )
+      .run('b-old-' + i);
+  }
+  seed('z-good', 'good');
+  await drainCloudflareBuilds(database, ports);
+  expect(ports.builder.start).toHaveBeenCalledTimes(1);
+  expect(ports.builder.start).toHaveBeenCalledWith(expect.objectContaining({ id: 'z-good' }));
 });

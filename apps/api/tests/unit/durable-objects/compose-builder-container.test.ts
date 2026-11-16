@@ -254,6 +254,7 @@ it('persists kickoff before returning without starting a container in the HTTP w
   expect(calls.schedule).toHaveBeenCalledWith(expect.any(Date), 'launchBuilder', {
     jobId: 'job',
     attempt: 1,
+    notBefore: null,
   });
   expect(stored.get('buildJob')).toMatchObject({ jobId: 'job', attempt: 1 });
   await builder.runBuilder({ jobId: 'job', attempt: 1 });
@@ -433,5 +434,52 @@ it('inactive terminal cleanup releases its reservation without waking compute', 
   expect(calls.destroy).not.toHaveBeenCalled();
   expect(sqlite.prepare('SELECT executor_instance_id FROM deployment_publish_jobs').get()).toEqual({
     executor_instance_id: null,
+  });
+});
+
+it('stale capacity stop neither aborts nor destroys a readmitted reservation', async () => {
+  await launch();
+  const signal = calls.start.mock.calls[0]![0].cancellationOptions.abort as AbortSignal;
+  sqlite.exec("UPDATE deployment_publish_jobs SET executor_not_before='2099-01-01T00:00:00.000Z'");
+  await builder.stopJob({ jobId: 'job', attempt: 1, notBefore: null, retryAt: Date.now() + 30000 });
+  expect(signal.aborted).toBe(false);
+  expect(calls.destroy).not.toHaveBeenCalled();
+  expect(
+    sqlite
+      .prepare(
+        'SELECT status,executor_instance_id,executor_not_before FROM deployment_publish_jobs'
+      )
+      .get()
+  ).toEqual({
+    status: 'starting',
+    executor_instance_id: 'job',
+    executor_not_before: '2099-01-01T00:00:00.000Z',
+  });
+});
+
+it('capacity cleanup and readmission rotate the epoch without reusing acceptance state', async () => {
+  calls.start.mockImplementationOnce(async () => {
+    calls.running = true;
+    throw new Error('Maximum number of running containers');
+  });
+  await launch();
+  expect(calls.destroy).toHaveBeenCalledTimes(1);
+  const queued = sqlite
+    .prepare('SELECT executor_not_before,executor_deadline_at FROM deployment_publish_jobs')
+    .get() as { executor_not_before: string; executor_deadline_at: string };
+  expect(queued.executor_not_before).toEqual(expect.any(String));
+  sqlite.exec("UPDATE deployment_publish_jobs SET status='starting',executor_instance_id='job'");
+  await expect(builder.startJob('job', 1, null)).rejects.toThrow('reservation changed');
+  await builder.startJob('job', 1, queued.executor_not_before);
+  await builder.runBuilder({ jobId: 'job', attempt: 1, notBefore: queued.executor_not_before });
+  const signal = calls.start.mock.calls[1]![0].cancellationOptions.abort as AbortSignal;
+  await builder.stopJob({ jobId: 'job', attempt: 1, notBefore: null, retryAt: Date.now() + 60000 });
+  await builder.runBuilder({ jobId: 'job', attempt: 1 });
+  expect(signal.aborted).toBe(false);
+  expect(calls.destroy).toHaveBeenCalledTimes(1);
+  expect(calls.start).toHaveBeenCalledTimes(2);
+  expect(calls.fetch).toHaveBeenCalledTimes(2);
+  expect(sqlite.prepare('SELECT executor_deadline_at FROM deployment_publish_jobs').get()).toEqual({
+    executor_deadline_at: queued.executor_deadline_at,
   });
 });

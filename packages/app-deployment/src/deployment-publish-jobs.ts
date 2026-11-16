@@ -142,6 +142,8 @@ export interface AppendDeploymentPublishJobEventInput {
   workspaceId: string;
   status?: string;
   expectedStatus?: string;
+  expectedReservationEpoch?: string | null;
+  expectedExecutorInstanceId?: string;
   currentStep?: string | null;
   level?: string;
   eventType: string;
@@ -183,6 +185,12 @@ export async function appendDeploymentPublishJobEvent(
       : undefined,
     input.expectedStatus
       ? eq(schema.deploymentPublishJobs.status, input.expectedStatus)
+      : undefined,
+    input.expectedReservationEpoch !== undefined
+      ? sql`${schema.deploymentPublishJobs.executorNotBefore} IS ${input.expectedReservationEpoch}`
+      : undefined,
+    input.expectedExecutorInstanceId !== undefined
+      ? eq(schema.deploymentPublishJobs.executorInstanceId, input.expectedExecutorInstanceId)
       : undefined,
     notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES]),
     input.sourceCollector && terminal
