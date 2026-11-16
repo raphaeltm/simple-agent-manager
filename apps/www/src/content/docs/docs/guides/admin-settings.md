@@ -53,9 +53,10 @@ Security controls that fail closed instead show **Safe fallback in effect**: Con
 access and writes are disabled, registration is allowlisted, redirect hosts are empty,
 and the private SAM assistant is disabled. Existing emergency brakes remain effective.
 The other settings remain available. Use **Reset override** to remove the invalid row,
-or save a valid replacement. Secret values are never displayed. The admin list isolates
-validation failures in `apps/api/src/services/admin-settings-resolution.ts:readAdminSettings`;
-runtime safety fallbacks remain in `resolveAdminSetting`.
+or save a valid replacement. Secret values are never displayed.
+
+<!-- Verified implementation: apps/api/src/services/admin-settings-resolution.ts:readAdminSettings
+     isolates invalid overrides; resolveAdminSetting retains runtime safety fallbacks. -->
 
 ## Change a setting
 
