@@ -875,6 +875,19 @@ export {
   isInsightsRange,
 } from './insights-flow';
 
+// Insights · Accounts (Insights slice A)
+export type {
+  InsightsAccount,
+  InsightsAccountKind,
+  InsightsAccountOwner,
+  InsightsAccountSpend,
+  InsightsAccountsSection,
+  InsightsAccountStalls,
+  InsightsStallEpisode,
+  InsightsStallOutcome,
+  ProjectAccountsResponse,
+} from './insights-accounts';
+
 // Knowledge Graph
 export type {
   AddObservationRequest,

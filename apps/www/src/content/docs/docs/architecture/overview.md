@@ -491,6 +491,20 @@ at its deadline without that delivery check. Either expiry then goes through fai
 preservation (above) instead of stopping the workspace outright, except a check-in whose agent
 kept a reported turn open past the watchdog's hard ceiling, which releases the runtime at once.
 
+### TaskRunner: pinned node startup
+
+A task pinned to a node that is still booting waits before workspace creation, including
+when a heartbeat has reported the matching VM agent build but the startup-ready callback
+has not arrived. `handleNodeSelection()` in
+`apps/api/src/durable-objects/task-runner/node-steps.ts` persists this wait across alarms
+and rechecks ownership, placement authority and resource capacity before selecting the node.
+It uses `TASK_RUNNER_AGENT_READY_TIMEOUT_MS` (default 15 minutes) and
+`TASK_RUNNER_AGENT_POLL_INTERVAL_MS` (default 5 seconds). A reported different build fails
+immediately; a boot that misses its deadline fails with a not-ready reason identifying
+whether the agent version is still missing. A delayed alarm accepts readiness recorded
+before the deadline; readiness actually reported after the deadline remains refused.
+The task never replaces the pinned node.
+
 ### NodeLifecycle DO
 
 Each node gets one `NodeLifecycle` Durable Object, accessed via `env.NODE_LIFECYCLE.idFromName(nodeId)`.

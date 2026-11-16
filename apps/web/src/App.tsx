@@ -131,6 +131,7 @@ const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'Proj
 const ProjectOverview = lazyNamed(loadProjectOverview, 'ProjectOverview');
 const ProjectInsights = lazyNamed(() => import('./pages/insights'), 'ProjectInsights');
 const InsightsFlowTab = lazyNamed(() => import('./pages/insights/FlowTab'), 'FlowTab');
+const InsightsAccountsTab = lazyNamed(() => import('./pages/insights/AccountsTab'), 'AccountsTab');
 const InsightsComingSoonTab = lazyNamed(
   () => import('./pages/insights/ComingSoonTab'),
   'ComingSoonTab'
@@ -339,7 +340,7 @@ export default function App() {
                           <Route index element={<Navigate to="flow" replace />} />
                           <Route path="flow" element={page(<InsightsFlowTab />)} />
                           <Route path="agent-setups" element={page(<InsightsComingSoonTab />)} />
-                          <Route path="accounts" element={page(<InsightsComingSoonTab />)} />
+                          <Route path="accounts" element={page(<InsightsAccountsTab />)} />
                           <Route path="people" element={page(<InsightsComingSoonTab />)} />
                         </Route>
                         <Route

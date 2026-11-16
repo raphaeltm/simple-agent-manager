@@ -309,17 +309,19 @@ Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-api
 | `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                    |
 | `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown |
 
-## Insights flow
+## Insights page
 
-Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow tab
-(`packages/operations/src/insights-flow-settings.ts`).
+Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow and
+Accounts tabs (`packages/operations/src/insights-page-settings.ts`).
 
-| Setting                          | Default | Range  | What it limits                                                                                      |
-| -------------------------------- | ------- | ------ | --------------------------------------------------------------------------------------------------- |
-| `insights.flowIdeaSampleCap`     | 100     | 10–500 | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short |
-| `insights.flowWaitingIdeasLimit` | 5       | 1–20   | Ideas shown under "Ideas waiting longest"                                                           |
-| `insights.flowFlakyChecksLimit`  | 5       | 1–20   | Checks shown under "Flaky checks"                                                                   |
-| `insights.flowReworkWindowDays`  | 7       | 1–30   | Days after a merge in which another pull request on the same branch or idea counts as rework        |
+| Setting                           | Default | Range    | What it limits                                                                                                                          |
+| --------------------------------- | ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `insights.flowIdeaSampleCap`      | 100     | 10–500   | Ideas, newest-updated first, examined for "idea to merged"; the page says when the cap cut it short                                     |
+| `insights.flowWaitingIdeasLimit`  | 5       | 1–20     | Ideas shown under "Ideas waiting longest"                                                                                               |
+| `insights.flowFlakyChecksLimit`   | 5       | 1–20     | Checks shown under "Flaky checks"                                                                                                       |
+| `insights.flowReworkWindowDays`   | 7       | 1–30     | Days after a merge in which another pull request on the same branch or idea counts as rework                                            |
+| `insights.accountsStallScanCap`   | 500     | 50–5,000 | Usage-limit waits and exhausted limit windows, newest first, examined for "Stalled on a limit"; the page says when the cap cut it short |
+| `insights.accountsEpisodesListed` | 10      | 1–50     | Limit stalls listed under "Stalled on a limit"                                                                                          |
 
 ## Node provisioning
 

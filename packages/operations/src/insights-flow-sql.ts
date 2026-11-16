@@ -32,12 +32,32 @@ const TERMINAL = `('completed', 'failed', 'cancelled')`;
 
 /**
  * Task-mode runs that ended since `?` or are still going and started since `?`, with the best
- * state among their pull requests. Binds: project ×4, since ×2, project ×2 (see `runsCte`).
+ * state among their pull requests. Binds, in order: project, project, since, since, project,
+ * project, project. Insights · Accounts reads the same runs, so both tabs count one population.
  *
  * `prs` holds the project's pull requests once (materialized) so each run's lookup by URL is a
  * join, not a scan per run.
+ *
+ * With `account`, each run also carries the agent session that ran it: the newest session of
+ * the run's workspace (same project), preferring one that recorded a credential. Production has
+ * one agent session per workspace, so this is the run's account. The columns are
+ * `account_ref`, `account_source`, `account_agent_type`, `account_user` and `started_day`; no
+ * binds are added.
  */
-function runsCte(): string {
+export function runsCte(options: { account?: boolean } = {}): string {
+  const accountColumns = options.account
+    ? `,
+           s.agent_credential_reference AS account_ref, s.agent_credential_source AS account_source,
+           s.agent_type AS account_agent_type, s.user_id AS account_user,
+           substr(t.created_at, 1, 10) AS started_day`
+    : '';
+  const accountJoins = options.account
+    ? `
+      LEFT JOIN workspaces w ON w.id = t.workspace_id AND w.project_id = t.project_id
+      LEFT JOIN agent_sessions s ON s.id = (
+        SELECT s2.id FROM agent_sessions s2 WHERE s2.workspace_id = w.id
+         ORDER BY s2.agent_credential_reference IS NULL, s2.created_at DESC, s2.id DESC LIMIT 1)`
+    : '';
   return `WITH prs AS MATERIALIZED (
     SELECT url, state, checks_state FROM pull_requests WHERE project_id = ?
   ),
@@ -46,8 +66,8 @@ function runsCte(): string {
            lower(coalesce(t.error_message, '')) AS err,
            (t.provider_limit_wait_json IS NOT NULL OR t.credential_blocked_reason IS NOT NULL) AS limit_flag,
            CASE WHEN t.status IN ${TERMINAL} THEN 0 ELSE 1 END AS running,
-           CASE WHEN t.status IN ${TERMINAL} THEN substr(coalesce(t.completed_at, t.updated_at), 1, 10) END AS ended_day
-      FROM tasks t
+           CASE WHEN t.status IN ${TERMINAL} THEN substr(coalesce(t.completed_at, t.updated_at), 1, 10) END AS ended_day${accountColumns}
+      FROM tasks t${accountJoins}
      WHERE t.project_id = ? AND t.is_idea = 0 AND t.task_mode = 'task'
        AND ((t.status IN ${TERMINAL} AND coalesce(t.completed_at, t.updated_at) >= ?)
             OR (t.status NOT IN ${TERMINAL} AND t.created_at >= ?))
