@@ -3,9 +3,7 @@
  * `node-selection.ts` (rule 18), which re-exports it.
  */
 
-import {
-  normalizePlacementHostSignals,
-} from '@simple-agent-manager/scheduler-core';
+import { normalizePlacementHostSignals } from '@simple-agent-manager/scheduler-core';
 
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
@@ -19,12 +17,8 @@ import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
-import {
-  trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-admission-sql';
-import {
-  loadActiveWorkspaceReservationUsage,
-} from '../../services/workspace-reservation-usage';
+import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-admission-sql';
+import { loadActiveWorkspaceReservationUsage } from '../../services/workspace-reservation-usage';
 import type { NodeLifecycle } from '../node-lifecycle';
 import {
   currentReusableNodeIds,

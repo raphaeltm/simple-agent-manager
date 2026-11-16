@@ -47,8 +47,9 @@ export interface LifecycleStateEvaluation {
 export interface LifecycleLatencyDailyResult {
   evaluations: LifecycleStateEvaluation[];
   regressions: number;
-  purgedEpisodes: number;
-  purgedPhaseTimings: number;
+  /** Rows purged, or null when that purge failed (logged); a failure never skips the other. */
+  purgedEpisodes: number | null;
+  purgedPhaseTimings: number | null;
 }
 
 /** Nearest-rank percentile over an already sorted list. */
@@ -175,18 +176,22 @@ export async function runLifecycleLatencyDailyEvaluation(
   }
 
   const cutoff = new Date(now.getTime() - settings.retentionDays * DAY_MS).toISOString();
-  const purgedEpisodes = await purgeInBatches(
-    env,
-    `DELETE FROM lifecycle_state_episodes WHERE id IN (
+  const purgedEpisodes = await isolatedPurge('lifecycle_state_episodes', () =>
+    purgeInBatches(
+      env,
+      `DELETE FROM lifecycle_state_episodes WHERE id IN (
        SELECT id FROM lifecycle_state_episodes WHERE ended_at < ? ORDER BY ended_at LIMIT ?)`,
-    cutoff
+      cutoff
+    )
   );
   // Phase timings store created_at as epoch ms; same retention, same bounded batches.
-  const purgedPhaseTimings = await purgeInBatches(
-    env,
-    `DELETE FROM lifecycle_phase_timings WHERE id IN (
-       SELECT id FROM lifecycle_phase_timings WHERE created_at < ? ORDER BY created_at LIMIT ?)`,
-    now.getTime() - settings.retentionDays * DAY_MS
+  const purgedPhaseTimings = await isolatedPurge('lifecycle_phase_timings', () =>
+    purgeInBatches(
+      env,
+      `DELETE FROM lifecycle_phase_timings WHERE id IN (
+         SELECT id FROM lifecycle_phase_timings WHERE created_at < ? ORDER BY created_at LIMIT ?)`,
+      now.getTime() - settings.retentionDays * DAY_MS
+    )
   );
 
   log.info('lifecycle_latency.daily_summary', {
@@ -206,6 +211,19 @@ export async function runLifecycleLatencyDailyEvaluation(
     })),
   });
   return { evaluations, regressions, purgedEpisodes, purgedPhaseTimings };
+}
+
+/** One purge's failure is logged and reported as null; it never skips the next step (rule 53). */
+async function isolatedPurge(table: string, purge: () => Promise<number>): Promise<number | null> {
+  try {
+    return await purge();
+  } catch (error) {
+    log.error('lifecycle_latency.purge_failed', {
+      table,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 async function purgeInBatches(env: Env, sql: string, cutoff: string | number): Promise<number> {

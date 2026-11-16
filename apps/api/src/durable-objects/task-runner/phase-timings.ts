@@ -3,8 +3,13 @@ import { storeLifecyclePhaseTimings } from '../../services/lifecycle-timings';
 import type { TaskRunnerState } from './types';
 
 /**
- * Log and store the time spent in the current runner step: one row, one D1 round trip, never
- * throws. Wall-clock phase time includes queued alarms/polls; no per-poll telemetry writes.
+ * Log and store the time spent in the current runner step: one row, one D1 write, never throws.
+ * Wall-clock phase time includes queued alarms/polls and earlier failed attempts of the same
+ * step; no per-poll telemetry writes.
+ *
+ * Every value (step, duration, ids) is read synchronously before the first `await`, so callers
+ * hand the promise to `ctx.waitUntil` and go on mutating `state`: the telemetry write never sits
+ * between a step's own state writes or delays its retry alarm.
  */
 export async function recordRunnerPhase(
   db: D1Database,

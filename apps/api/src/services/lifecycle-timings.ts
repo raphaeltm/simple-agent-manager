@@ -85,8 +85,13 @@ export interface LifecyclePhaseIdentity {
  * when it names a profile of the task's project or the task creator's own global profile, because
  * the REST create path may store a profile name there. All lookups run inside the statement, so
  * attribution costs no round trip. Each value is bound once, in `params` column order.
+ *
+ * Index use (asserted by an EXPLAIN QUERY PLAN test): a runner row finds its task by primary key;
+ * a VM row finds it through `idx_tasks_workspace_id`, a handful of tasks per workspace. The unary
+ * `+` keeps `idx_tasks_project_created_at` out of that plan: with no planner statistics D1 would
+ * otherwise walk every task in the project for every phase row.
  */
-const INSERT_PHASE_TIMING_SQL = `WITH params AS (
+export const INSERT_PHASE_TIMING_SQL = `WITH params AS (
     SELECT ? AS operation, ? AS phase, ? AS outcome, ? AS duration_ms, ? AS project_id,
            ? AS workspace_id, ? AS node_id, ? AS chat_session_id, ? AS task_id, ? AS created_at
   )
@@ -103,15 +108,15 @@ const INSERT_PHASE_TIMING_SQL = `WITH params AS (
                   OR (profile.project_id IS NULL AND profile.user_id = task.user_id))),
          params.created_at
     FROM params
-    LEFT JOIN tasks task ON task.id = (
-      SELECT candidate.id FROM tasks candidate
-       WHERE params.project_id IS NOT NULL
-         AND candidate.project_id = params.project_id
-         AND ((params.task_id IS NOT NULL AND candidate.id = params.task_id)
-              OR (params.task_id IS NULL AND params.workspace_id IS NOT NULL
-                  AND candidate.workspace_id = params.workspace_id))
-       ORDER BY candidate.created_at DESC, candidate.id DESC
-       LIMIT 1)`;
+    LEFT JOIN tasks task ON task.id = COALESCE(
+      (SELECT own.id FROM tasks own
+        WHERE own.id = params.task_id AND own.project_id = params.project_id),
+      (SELECT candidate.id FROM tasks candidate
+        WHERE params.task_id IS NULL
+          AND candidate.workspace_id = params.workspace_id
+          AND +candidate.project_id = params.project_id
+        ORDER BY candidate.created_at DESC, candidate.id DESC
+        LIMIT 1))`;
 
 /**
  * Store already-bounded phases in one D1 batch (one round trip; at most

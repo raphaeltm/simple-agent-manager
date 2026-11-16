@@ -132,7 +132,7 @@ export async function transitionToInProgress(
           attemptId: state.config.recoveryAttemptId,
         })
       );
-      await recordRunnerPhase(rc.env.DATABASE, state, 'success');
+      rc.ctx.waitUntil(recordRunnerPhase(rc.env.DATABASE, state, 'success'));
       state.currentStep = 'running';
       state.completed = true;
       await rc.ctx.storage.put('state', state);
@@ -238,7 +238,7 @@ export async function transitionToInProgress(
     }
   }
 
-  await recordRunnerPhase(rc.env.DATABASE, state, 'success');
+  rc.ctx.waitUntil(recordRunnerPhase(rc.env.DATABASE, state, 'success'));
   state.currentStep = 'running';
   state.completed = true;
   await rc.ctx.storage.put('state', state);

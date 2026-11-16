@@ -257,4 +257,36 @@ describe('lifecycle phase timings storage', () => {
     const remaining = await rows("workspace_id LIKE 'ws-lpt-purge-%'");
     expect(remaining.map((row) => row.workspace_id)).toEqual(['ws-lpt-purge-2']);
   });
+
+  it('still accepts the callback, and still purges episodes, when the timings table is unusable', async () => {
+    const user = 'user-lpt-broken';
+    await seedUser(user);
+    await seedNode('node-lpt-broken', user);
+    await seedWorkspace('ws-lpt-broken', 'node-lpt-broken', user, { status: 'running' });
+    await env.DATABASE.prepare('ALTER TABLE lifecycle_phase_timings RENAME TO lpt_hidden').run();
+    try {
+      const response = await postWorkspaceTimings('ws-lpt-broken', {
+        operation: 'workspace',
+        phases: [{ phase: 'git_clone', durationMs: 5 }],
+      });
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({ accepted: true });
+
+      const result = await runLifecycleLatencyDailyEvaluation(env as never, new Date());
+      expect(result.purgedPhaseTimings).toBeNull();
+      // The other purge and the evaluation itself still ran.
+      expect(result.purgedEpisodes).toBe(0);
+      expect(result.evaluations.length).toBeGreaterThan(0);
+    } finally {
+      await env.DATABASE.prepare('ALTER TABLE lpt_hidden RENAME TO lifecycle_phase_timings').run();
+    }
+    // Liveness control: with the table back, the same callback stores its row.
+    await postWorkspaceTimings('ws-lpt-broken', {
+      operation: 'workspace',
+      phases: [{ phase: 'git_clone', durationMs: 6 }],
+    });
+    expect((await rows('workspace_id = ?', 'ws-lpt-broken')).map((row) => row.duration_ms)).toEqual(
+      [6]
+    );
+  });
 });

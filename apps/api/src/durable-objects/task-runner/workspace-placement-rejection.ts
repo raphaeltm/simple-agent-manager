@@ -28,12 +28,8 @@ import {
   LIFETIME_ADMISSION_CUTOFF_REASON,
 } from '../../services/node-lifetime-admission';
 import { releaseVmProvisioningLease } from '../../services/vm-admission-control';
-import {
-  trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-admission-sql';
-import {
-  loadActiveWorkspaceReservationUsage,
-} from '../../services/workspace-reservation-usage';
+import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-admission-sql';
+import { loadActiveWorkspaceReservationUsage } from '../../services/workspace-reservation-usage';
 import { getTaskReservation } from './node-selection-shared';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';

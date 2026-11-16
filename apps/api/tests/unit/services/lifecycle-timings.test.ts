@@ -1,29 +1,38 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import { recordRunnerPhase } from '../../../src/durable-objects/task-runner/phase-timings';
 import type { TaskRunnerState } from '../../../src/durable-objects/task-runner/types';
 import { log } from '../../../src/lib/logger';
 import {
   boundedLifecycleTimings,
+  INSERT_PHASE_TIMING_SQL,
   LIFECYCLE_PHASES,
   recordLifecycleTimings,
   storeLifecyclePhaseTimings,
 } from '../../../src/services/lifecycle-timings';
-import { applySqliteMigration, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  applySqliteMigration,
+  createDeclaredIndexes,
+  createSchemaTables,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const MIGRATION = new URL(
   '../../../src/db/migrations/0250_lifecycle_phase_timings.sql',
   import.meta.url
 );
 
-/** The shipped migration plus the two tables the INSERT resolves attribution from. */
+/**
+ * The shipped migration, plus the real tasks and agent_profiles tables with every declared index
+ * (a superset of production's), so attribution runs against production's index choices.
+ */
 function phaseTimingDb() {
   const sqlite = new Database(':memory:');
   applySqliteMigration(sqlite, MIGRATION);
-  sqlite.exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT, user_id TEXT,
-    workspace_id TEXT, skill_id TEXT, agent_profile_hint TEXT, created_at TEXT)`);
-  sqlite.exec(`CREATE TABLE agent_profiles (id TEXT PRIMARY KEY, project_id TEXT, user_id TEXT)`);
+  createSchemaTables(sqlite, [schema.tasks, schema.agentProfiles]);
+  createDeclaredIndexes(sqlite, [schema.tasks, schema.agentProfiles]);
   return { sqlite, db: createSqliteD1(sqlite) };
 }
 
@@ -157,7 +166,11 @@ describe('recordRunnerPhase', () => {
          VALUES ('task-1', 'proj-1', 'u1', 'ws-1', 'skill-1', 'profile-1', '2026-11-16T00:00:00Z')`
       )
       .run();
-    sqlite.prepare("INSERT INTO agent_profiles VALUES ('profile-1', 'proj-1', 'u1')").run();
+    sqlite
+      .prepare(
+        "INSERT INTO agent_profiles (id, project_id, user_id) VALUES ('profile-1', 'proj-1', 'u1')"
+      )
+      .run();
     vi.spyOn(log, 'info').mockImplementation(() => {});
 
     await recordRunnerPhase(db, runnerState(), 'success');
@@ -203,5 +216,34 @@ describe('recordRunnerPhase', () => {
       skill_id: null,
     });
     vi.restoreAllMocks();
+  });
+
+  it('captures the step and ids when called, so callers can mutate state while it is stored', async () => {
+    const { sqlite, db } = phaseTimingDb();
+    vi.spyOn(log, 'info').mockImplementation(() => {});
+    const state = runnerState();
+    const pending = recordRunnerPhase(db, state, 'success');
+    // What advanceToStep does right after handing the promise to ctx.waitUntil.
+    state.currentStep = 'agent_session';
+    state.stepResults.workspaceId = 'ws-replaced';
+    await pending;
+    expect(sqlite.prepare('SELECT phase, workspace_id FROM lifecycle_phase_timings').get()).toEqual(
+      { phase: 'workspace_ready', workspace_id: 'ws-1' }
+    );
+    vi.restoreAllMocks();
+  });
+});
+
+describe('INSERT_PHASE_TIMING_SQL query plan', () => {
+  it('finds the task by primary key or workspace index, never by walking the project', () => {
+    const { sqlite } = phaseTimingDb();
+    const plan = (
+      sqlite
+        .prepare(`EXPLAIN QUERY PLAN ${INSERT_PHASE_TIMING_SQL}`)
+        .all(...Array(10).fill(null)) as Array<{ detail: string }>
+    ).map((row) => row.detail);
+    expect(plan.join('\n')).toContain('idx_tasks_workspace_id');
+    expect(plan.join('\n')).not.toContain('idx_tasks_project');
+    expect(plan.some((detail) => /SCAN (candidate|own|task)\b/.test(detail))).toBe(false);
   });
 });

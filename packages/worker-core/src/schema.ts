@@ -5881,7 +5881,7 @@ export const lifecycleStateEpisodes = sqliteTable(
 export const lifecyclePhaseTimings = sqliteTable(
   'lifecycle_phase_timings',
   {
-    id: integer('id').primaryKey({ autoIncrement: true }),
+    id: integer('id').primaryKey(),
     operation: text('operation').notNull(),
     phase: text('phase').notNull(),
     outcome: text('outcome').notNull(),

@@ -11,7 +11,8 @@
 -- Additive only (rule 31): a new table and its indexes. Numbered 0250 to stay clear of 0247/0248
 -- (open PRs #2780, #2781) and 0249 (main).
 CREATE TABLE IF NOT EXISTS lifecycle_phase_timings (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Plain rowid key: no AUTOINCREMENT, so an insert does not also write sqlite_sequence.
+  id INTEGER PRIMARY KEY,
   operation TEXT NOT NULL,
   phase TEXT NOT NULL,
   outcome TEXT NOT NULL,

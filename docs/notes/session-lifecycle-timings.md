@@ -11,7 +11,8 @@ carry the ids the callback already holds (project, workspace, node, chat, and th
 runner rows). The INSERT itself resolves the task (the newest task bound to the workspace
 in the same project), its skill, and its profile hint when that hint names a profile the
 task may use, so attribution costs no extra round trip. Runner rows use operations
-`runner_start` / `runner_wake`. A failed store is logged as
+`runner_start` / `runner_wake` and are written through `ctx.waitUntil`, with every value
+captured when the step ends, so they never delay a step's own state writes. A failed store is logged as
 `session_lifecycle.timings_store_failed` and never fails the callback or runner step.
 Shared reads: `phaseDurationStats` and `listPhaseTimings` in
 `packages/operations/src/insights-phase-timings.ts`.

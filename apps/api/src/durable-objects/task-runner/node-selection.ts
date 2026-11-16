@@ -9,12 +9,8 @@ import {
   pastLifetimeAdmissionCutoffColumnSql,
   resolvePlacementAdmissionPolicy,
 } from '../../services/node-lifetime-admission';
-import {
-  trustedWorkspaceNodeCapacityColumnsSql,
-} from '../../services/workspace-admission-sql';
-import {
-  loadActiveWorkspaceReservationUsage,
-} from '../../services/workspace-reservation-usage';
+import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-admission-sql';
+import { loadActiveWorkspaceReservationUsage } from '../../services/workspace-reservation-usage';
 import { evaluateReusableNodeCandidate, type RankedReusableNode } from './node-placement-candidate';
 import {
   currentReusableNodeIds,
