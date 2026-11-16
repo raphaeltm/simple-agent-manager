@@ -90,6 +90,11 @@ beforeEach(() => {
     },
     waitUntil: calls.waitUntil,
     storage: {
+      kv: {
+        get: (key: string) => stored.get(key),
+        put: (key: string, value: unknown) => stored.set(key, value),
+      },
+      deleteAlarm: vi.fn(async () => {}),
       get: async (key: string) => stored.get(key),
       put: async (key: string, value: unknown) => {
         stored.set(key, value);

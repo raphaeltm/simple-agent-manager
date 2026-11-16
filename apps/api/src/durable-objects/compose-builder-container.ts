@@ -25,12 +25,13 @@ const STATE_KEY = 'buildJob';
 interface BuildState {
   jobId: string;
   attempt: number;
-  deadline: number;
+  deadline?: number;
   stopRetryMs: number;
   stopRequested?: boolean;
   version?: string;
   accepted?: boolean;
   reservationEpoch?: string | null;
+  quiescent?: boolean;
 }
 
 /** One DinD microVM per publishJobId, never reused across jobs/projects.
@@ -46,6 +47,45 @@ export class ComposeBuilderContainer extends Container<Env> {
   private startAbort?: AbortController;
   private startupInProgress = false;
   private kickoff: Promise<unknown> = Promise.resolve();
+  // The SDK invokes these hooks from its constructor. Read durable state rather
+  // than subclass fields, whose initializers have not run at that point.
+  override renewActivityTimeout() {
+    if (this.ctx.storage.kv.get<BuildState>(STATE_KEY)?.quiescent) return;
+    super.renewActivityTimeout();
+  }
+  override async scheduleNextAlarm(ms?: number) {
+    if (!this.ctx.storage.kv.get<BuildState>(STATE_KEY)?.quiescent)
+      await super.scheduleNextAlarm(ms);
+    // A stop may have completed while the SDK awaited storage.sync().
+    if (this.ctx.storage.kv.get<BuildState>(STATE_KEY)?.quiescent)
+      await this.ctx.storage.deleteAlarm();
+  }
+  override async alarm(info?: AlarmInvocationInfo) {
+    if (this.ctx.storage.kv.get<BuildState>(STATE_KEY)?.quiescent) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    try {
+      await super.alarm(info);
+    } finally {
+      // The base alarm snapshots schedules before delivering onStop, then can
+      // rearm that stale snapshot after our terminal cleanup has removed them.
+      if (this.ctx.storage.kv.get<BuildState>(STATE_KEY)?.quiescent)
+        await this.ctx.storage.deleteAlarm();
+    }
+  }
+  private async quiesce(state: BuildState | undefined) {
+    if (state) {
+      const stopped = { ...state, quiescent: true };
+      delete stopped.deadline;
+      // Keep the marker and schedule removal in one synchronous turn so an
+      // admitted retry cannot install fresh timers between these operations.
+      this.ctx.storage.kv.put(STATE_KEY, stopped);
+    }
+    this.deleteSchedules('launchBuilder');
+    this.deleteSchedules('enforceDeadline');
+    await this.ctx.storage.deleteAlarm();
+  }
   private serialized<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.operation.then(fn, fn);
     this.operation = result.catch(() => undefined);
@@ -116,6 +156,8 @@ export class ComposeBuilderContainer extends Container<Env> {
         deadline,
         stopRetryMs,
         reservationEpoch: expectedEpoch,
+        quiescent: false,
+        stopRequested: false,
       });
       await this.schedule(new Date(deadline), 'enforceDeadline');
       await this.schedule(new Date(), 'launchBuilder', {
@@ -250,6 +292,12 @@ export class ComposeBuilderContainer extends Container<Env> {
           // The SDK can start after awaiting internal work even if the signal
           // was already aborted. Reconcile locally before any D1 failure write.
           await this.stopContainer(state);
+          // Startup has settled, but its deadline verdict still needs delivery.
+          await this.ctx.storage.put(STATE_KEY, {
+            ...state,
+            stopRequested: true,
+            quiescent: false,
+          });
           await this.schedule(new Date(), 'enforceDeadline');
         }
       }
@@ -338,10 +386,13 @@ export class ComposeBuilderContainer extends Container<Env> {
     // Calling destroy on an inactive guest can activate platform compute. Read
     // workerd's synchronous running flag, never a fetch/start/state SDK path.
     if (this.ctx.container?.running) await this.destroy();
-    this.deleteSchedules('launchBuilder'); // Includes schedules persisted by older code.
-    this.deleteSchedules('enforceDeadline');
-    if (this.startupInProgress && state)
+    if (this.startupInProgress && state) {
+      this.deleteSchedules('launchBuilder');
+      this.deleteSchedules('enforceDeadline');
       await this.schedule(new Date(Date.now() + state.stopRetryMs), 'enforceDeadline');
+    } else {
+      await this.quiesce(state);
+    }
   }
   async stopJob(capacity?: CloudflareBuildStopGuard) {
     if (!capacity) this.startAbort?.abort();
@@ -430,9 +481,20 @@ export class ComposeBuilderContainer extends Container<Env> {
     // starts the next guest. The current startup owns its failure verdict and
     // deadline; that older notification cannot revoke either.
     if (this.startupInProgress || this.ctx.container?.running) return;
-    const state = await this.ctx.storage.get<BuildState>(STATE_KEY);
+    const state = this.ctx.storage.kv.get<BuildState>(STATE_KEY);
+    // Local cleanup cannot depend on D1 being available or on lifecycle writes.
+    await this.quiesce(state);
     if (!state) return;
     const { db, job } = await this.loadJob(state.jobId, state.attempt);
+    const current = this.ctx.storage.kv.get<BuildState>(STATE_KEY);
+    if (
+      !current?.quiescent ||
+      current.jobId !== state.jobId ||
+      current.attempt !== state.attempt ||
+      (current.reservationEpoch ?? null) !== (state.reservationEpoch ?? null) ||
+      (job?.executorNotBefore ?? null) !== (state.reservationEpoch ?? null)
+    )
+      return;
     if (job && !state.stopRequested && !PUBLISH_JOB_TERMINAL_STATUSES.has(job.status)) {
       const changed = await appendDeploymentPublishJobEvent(db, {
         publishJobId: job.id,
@@ -444,6 +506,8 @@ export class ComposeBuilderContainer extends Container<Env> {
         status: 'failed',
         terminal: true,
         eventType: 'publish.builder.exited',
+        expectedReservationEpoch: state.reservationEpoch ?? null,
+        expectedExecutorInstanceId: state.jobId,
         currentStep: 'builder_exit',
         message: 'Cloudflare builder exited before completing the job',
         errorCode: 'builder_exited',
@@ -460,6 +524,12 @@ export class ComposeBuilderContainer extends Container<Env> {
           occurredAt: Date.now(),
         });
     }
-    await releaseCloudflareBuildReservation(db, state.jobId, state.attempt);
+    await releaseCloudflareBuildReservation(
+      db,
+      state.jobId,
+      state.attempt,
+      undefined,
+      state.reservationEpoch ?? null
+    );
   }
 }
