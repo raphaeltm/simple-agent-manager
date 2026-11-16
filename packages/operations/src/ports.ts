@@ -486,6 +486,22 @@ export interface OperationInboxPort {
    */
   notifyAsk(row: InboxAskNoticeRow, outcome: InboxAskNoticeOutcome): Promise<boolean>;
   /**
+   * A system error item's Retry: the existing task retry (`retrySubtask`), with the person's
+   * authority. Throws an `OperationError` when it is refused.
+   */
+  retryTask(userId: string, projectId: string, taskId: string): Promise<{ newTaskId: string }>;
+  /**
+   * A system error item's Wake: the existing chat wake (`authorizeAgentWake`, then
+   * `ensureSessionRecovery`). Throws an `OperationError` when it is refused.
+   */
+  wakeChat(userId: string, projectId: string, sessionId: string): Promise<void>;
+  /**
+   * A system error item's Resume: a paused automation back to active, the same status change
+   * the trigger PATCH route makes (`triggerStatusUpdates`, resetting the failure window). Needs
+   * `task:write`; throws an `OperationError` when it is refused or the trigger is not paused.
+   */
+  resumeTrigger(userId: string, projectId: string, triggerId: string): Promise<void>;
+  /**
    * An agent filed an ask (`fileAgentAsk`): a blocking question pauses its chat live and pushes
    * to the person, as `request_human_input` always did; other items reach the person's inbox.
    * Never throws; false when no notification was scheduled.

@@ -551,12 +551,14 @@ Each item has a `ref` naming its store (`ask:<id>`, `attention:<sessionId>:<mark
 `secret:<id>`, `approval:<id>`), `kind` (`question`, `permission`, `form`, `url`, `secret`,
 `approval`, `review`, `task`, `error`), project and chat, `title` and `body` (agent text, untrusted),
 `blocking`, `agentState` (`waiting`, `working`, `finished`, `not_started`, `unknown`), `status`,
-`createdAt`, `expiresAt`, `dueAt`, `links`, `canAct`, and `answerSpec`, which says what an answer
+`createdAt`, `updatedAt`, `failureCount` (error items only, otherwise `null`), `expiresAt`, `dueAt`,
+`links`, `canAct`, and `answerSpec`, which says what an answer
 looks like: `options` or `text` (`{ "answer": "…" }`), `interaction` (`{ "optionId": "…" }`,
 `{ "decline": true }` or `{ "formContent": {…} }`), `secret`
 (`{ "secret": { "value": "…", "replaceExisting": true, "expectedExistingVersion": "…" } }` or
 `{ "decline": true }`), `approval` (`{ "decision": "approve" | "deny", "note": "…" }`) or
-`acknowledge` (`{}` or `{ "answer": "comment" }`). Answers go through the existing path for each
+`acknowledge` (`{}` or `{ "answer": "comment" }`), or `actions` (`{ "action": "retry" | "wake" |
+"resume" }`, see below). Answers go through the existing path for each
 store: the question answer (the same one the chat card uses, so two answers meet at one
 compare-and-set and the loser gets `409`), the permission answer, secret fulfil/decline, and the
 approval decision.
@@ -572,6 +574,38 @@ tells the agent you will not act. Both writes return `{ ref, outcome, agentNotif
 `Content-Type: application/json`, like the other answer routes. A missing item and one in another
 project both return `404`; an item that is already closed returns `409`, and one you cannot act
 on returns `403`. The transcript context is returned only to a member who can read the source chat.
+
+#### System error items
+
+SAM files an `error` item itself when something fails that the person should know about; it is
+the only kind SAM files without an agent asking (`packages/operations/src/inbox-error-core.ts`,
+`apps/api/src/services/inbox/`). Each failing thing has one item, addressed to the person who owns
+the task, chat or automation:
+
+| Failure                                                                                         | Found by                                                                                             | Fix offered                                           |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| A task couldn't start, or stopped before it finished                                            | five-minute cron scan of failed tasks (`system-errors.ts`), and inline in the VM-agent task callback | `retry` (the project owner's task retry), `open_chat` |
+| An automation failed `inbox.automationFailureThreshold` runs in a row, or was paused after them | five-minute cron scan of failed runs (`automation-errors.ts`)                                        | `resume` when paused                                  |
+| A chat slept without a fresh snapshot, so unsaved work may be lost                              | the sleep fallback (`session-sleep-fallback.ts`)                                                     | `open_chat`                                           |
+| Your answer to a permission, form or link request was never confirmed delivered                 | the interaction store (`interaction-store-attention.ts`)                                             | `open_chat`                                           |
+| A chat could not be woken to take a message waiting for it                                      | ProjectData's wake failure (`wake-failure.ts`, `project-data-ports/inbox-errors.ts`)                 | `wake` (VM chats), `open_chat`                        |
+| Your inbox answer never reached the agent after the inbox sweep's retries                       | the inbox sweep (`system-errors.ts:fileUndeliveredAskAnswers`)                                       | `open_chat`                                           |
+
+Normal endings never file one: a cancellation, a stop by you or a parent agent, an expected
+question expiry, completion, a superseded wake, an archived chat, or a status you set yourself. A
+task waiting for a provider usage limit is not failed and files nothing; once the wait is blocked,
+it also closes the chat's failed-wake item (`answer_json.resolution` `superseded`,
+`provider-limit-attention.ts`). A repeat failure of
+the same thing updates the open item (`failureCount`, title, body, `updatedAt`) instead of filing
+another. When the thing recovers (a retry starts, the task is run again, the automation runs
+cleanly or is resumed, the chat wakes, or you write in the chat) the item closes by itself
+(`status` `done`). Titles and bodies are SAM's own
+sentences, never the raw error. `answerSpec` is `{ type: "actions", actions: [{ id, label }] }`,
+first action primary; `open_chat` is handled by the app (open the item's chat) and the server
+refuses it. Answering `{ "action": "retry" }` or `{ "action": "resume" }` returns `outcome`
+`retried` or `resumed` and closes the item; `{ "action": "wake" }` returns `wake_requested` and
+the item closes when the chat wakes. A refused fix returns `409` and leaves it open.
+Archiving an error item tells no agent.
 
 ### Shared chat access
 

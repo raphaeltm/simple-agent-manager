@@ -114,7 +114,7 @@ export async function createAsk(
           expires_at, source_workspace_id, category, next_escalation_at, max_expires_at,
           created_at, updated_at)
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?
-        WHERE ? IS NULL
+        WHERE ? IS NULL OR ? = 'error'
            OR (SELECT COUNT(*) FROM asks WHERE source_session_id = ? AND project_id = ? AND status = 'open') < ?
        ON CONFLICT (project_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`
     )
@@ -146,6 +146,9 @@ export async function createAsk(
       now,
       now,
       input.sourceSessionId ?? null,
+      // SAM's own system error items (slice E) are not an agent flooding the chat, and the cap
+      // must not let an agent's items hide a failure from the person.
+      input.kind,
       input.sourceSessionId ?? null,
       input.projectId,
       limits.openItemsPerChat
