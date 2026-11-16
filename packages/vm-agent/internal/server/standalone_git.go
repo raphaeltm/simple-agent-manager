@@ -5,9 +5,12 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/bootstrap"
 )
 
 // standaloneGitCredentialHelperPath is where the standalone git credential
@@ -64,20 +67,27 @@ if [ -n "$path" ]; then
   credential_query="${credential_query}&path=${encoded_path}"
 fi
 
+exchange_token={{ git_credential_exchange_token }}
 curl -fsS --max-time {{ credential_timeout_seconds }} \
+  -H "Authorization: Bearer ${exchange_token}" \
   "${endpoint}?${credential_query}" 2>/dev/null || true
 `
 
-func renderStandaloneGitCredentialHelperScript(timeout time.Duration) (string, error) {
+func renderStandaloneGitCredentialHelperScript(timeout time.Duration, exchangeToken string) (string, error) {
 	if timeout <= 0 {
 		return "", fmt.Errorf("invalid git credential timeout: %s", timeout)
 	}
+	exchangeToken = strings.TrimSpace(exchangeToken)
+	if exchangeToken == "" {
+		return "", fmt.Errorf("git credential exchange token is required")
+	}
 	timeoutSeconds := strconv.FormatFloat(timeout.Seconds(), 'f', -1, 64)
-	return strings.ReplaceAll(
+	script := strings.ReplaceAll(
 		standaloneGitCredentialHelperScriptTemplate,
 		"{{ credential_timeout_seconds }}",
 		timeoutSeconds,
-	), nil
+	)
+	return strings.ReplaceAll(script, "{{ git_credential_exchange_token }}", shellSingleQuote(exchangeToken)), nil
 }
 
 // ConfigureStandaloneGitCredentialHelper installs a git credential helper that
@@ -86,9 +96,18 @@ func renderStandaloneGitCredentialHelperScript(timeout time.Duration) (string, e
 // commands (clone, ls-remote, fetch, push) and `gh` calls authenticate in
 // standalone mode for the whole session, not just the first token lifetime.
 // Failures are non-fatal — the agent can still run without git access.
-func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
-	if err := writeStandaloneGitCredentialHelper(standaloneGitCredentialHelperPath, timeout); err != nil {
-		slog.Warn("standalone git: failed to write credential helper; agent git auth unavailable", "error", err)
+//
+// The helper's exchange bearer is keyed to the container's single workspace
+// (cfg.WorkspaceID); the standalone server serves no other workspace
+// (newPTYManagerForWorkspace and isKnownWorkspaceGitCredentialRequest refuse
+// other IDs). An in-container agent restart reuses the existing helper's bearer
+// while it validates, so a git command in flight keeps authenticating.
+func ConfigureStandaloneGitCredentialHelper(workspaceID string, timeout time.Duration) {
+	if err := installStandaloneGitCredentialExchange(standaloneGitCredentialHelperPath, workspaceID, timeout); err != nil {
+		// Fail closed and visibly: without an installed bearer the local
+		// exchange refuses every request, so git auth is unavailable.
+		slog.Error("standalone git: credential exchange not installed; agent git auth unavailable",
+			"workspaceID", workspaceID, "error", err, "action", "git_auth_disabled")
 		return
 	}
 
@@ -127,8 +146,33 @@ func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
 	slog.Info("standalone git: credential helper configured", "path", standaloneGitCredentialHelperPath)
 }
 
-func writeStandaloneGitCredentialHelper(path string, timeout time.Duration) error {
-	script, err := renderStandaloneGitCredentialHelperScript(timeout)
+// installStandaloneGitCredentialExchange writes the helper at path with the
+// workspace's exchange bearer, reusing the bearer of an existing helper while it
+// still validates, and installs the bearer's digest for a new one.
+func installStandaloneGitCredentialExchange(path, workspaceID string, timeout time.Duration) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return fmt.Errorf("workspace id is required for the git credential exchange")
+	}
+	exchangeToken, reused, err := bootstrap.ResolveGitCredentialExchangeToken(workspaceID, path)
+	if err != nil {
+		return fmt.Errorf("prepare credential exchange: %w", err)
+	}
+	if err := writeStandaloneGitCredentialHelper(path, timeout, exchangeToken); err != nil {
+		return fmt.Errorf("write credential helper: %w", err)
+	}
+	if reused {
+		return nil
+	}
+	if err := bootstrap.InstallGitCredentialExchange(workspaceID, exchangeToken); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("install credential exchange: %w", err)
+	}
+	return nil
+}
+
+func writeStandaloneGitCredentialHelper(path string, timeout time.Duration, exchangeToken string) error {
+	script, err := renderStandaloneGitCredentialHelperScript(timeout, exchangeToken)
 	if err != nil {
 		return fmt.Errorf("render helper: %w", err)
 	}
@@ -144,9 +188,40 @@ func writeStandaloneGitCredentialHelper(path string, timeout time.Duration) erro
 // broader permissions, so the mode is re-applied explicitly. The vm-agent and
 // the agent run as the same node user, so owner-only access is sufficient and
 // avoids exposing the credential exchange.
+//
+// A git or gh process may be executing the file while it is rewritten (an
+// in-container agent restart), so an unchanged script is left alone and a
+// changed one is replaced by rename. If the directory does not let this user
+// create a sibling temp file, the file is rewritten in place as before.
 func writeOwnerOnlyExecutable(path, script string) error {
+	if current, err := os.ReadFile(path); err == nil && string(current) == script {
+		return os.Chmod(path, 0o700)
+	}
+	if err := replaceOwnerOnlyExecutable(path, script); err == nil {
+		return nil
+	}
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
 		return err
 	}
 	return os.Chmod(path, 0o700)
+}
+
+func replaceOwnerOnlyExecutable(path, script string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.WriteString(script); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, 0o700); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }

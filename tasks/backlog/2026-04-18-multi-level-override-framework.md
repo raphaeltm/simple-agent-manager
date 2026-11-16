@@ -144,3 +144,7 @@ This task is a framing document — it does **not** itself ship code. Use it to 
 ## Action
 
 Break this down into phase tasks as capacity allows. Phase 2 (credentials) is already written as its own backlog task and is the next concrete unit of work. After that, pull Phase 3 or Phase 4 depending on user demand.
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. Session details now show the effective model/effort/permissions/provider/skill, which is part of the Phase 4 audit trail. Still open: the source tier per value, the session override control, and phases 3, 5, 6 and 8. Evidence: #2689; `apps/web/src/components/project-message-view/SessionRunConfiguration.tsx:27`.

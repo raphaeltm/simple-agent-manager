@@ -56,3 +56,7 @@ blast radius of this and may be implemented together.
 - `packages/vm-agent/internal/server/git_credential.go` (`fetchGitTokenResponseForWorkspace`)
 - `.claude/rules/28-credential-resolution-fallback-tests.md`
 - `.claude/rules/34-vm-agent-callback-auth.md`
+
+## Reconciliation (2026-11-16)
+
+PARTIAL. #2759 changed the empty-id case, so the planned test no longer fits as written. Still open: `callbackTokenForWorkspace` falls back to the node token with no `slog.Warn` (the helper-bearer path now always reaches that fallback), and there is no test for a secondary workspace with an empty `CallbackToken`. Evidence: #2759; `packages/vm-agent/internal/server/workspace_provisioning.go:28-34`; `git_credential.go:281-284`.
