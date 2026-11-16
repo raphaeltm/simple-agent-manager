@@ -856,6 +856,9 @@ export const asks = sqliteTable(
       .on(table.resolvedAt)
       .where(sql`notified_at IS NULL AND status IN ('answered', 'done', 'archived', 'expired')`),
     // System error items (migration 0248).
+    openErrorSessionIdx: index('idx_asks_open_error_session')
+      .on(table.projectId, table.sourceSessionId, table.createdAt)
+      .where(sql`kind = 'error' AND status = 'open'`),
     errorTaskIdx: index('idx_asks_error_task')
       .on(table.sourceTaskId, table.createdAt)
       .where(sql`kind = 'error'`),

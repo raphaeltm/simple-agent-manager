@@ -29,6 +29,30 @@ export interface QuestionAttentionSummary {
   interactionKind: null;
 }
 
+/**
+ * A failed chat wake (inbox slice E): an open `asks` row of kind `error` with dedupe key
+ * `error:wake:<sessionId>`, read in the shape the `wake_failed` attention marker summary had, so
+ * the chat list's "Wake failed" state needs no client change. There is no marker any more.
+ */
+export const WAKE_FAILED_ASK_SOURCE = 'session_wake';
+export const WAKE_FAILED_KEY_PREFIX = 'error:wake:';
+
+export interface WakeFailedAttentionSummary {
+  markerId: string;
+  kind: 'wake_failed';
+  source: typeof WAKE_FAILED_ASK_SOURCE;
+  createdAt: number;
+  expiresAt: null;
+  reason: string | null;
+  options: string[];
+  category: null;
+  interactionId: null;
+  interactionKind: null;
+}
+
+/** What a chat shows from `asks`: its newest open question, else its open wake failure. */
+export type AskAttentionSummary = QuestionAttentionSummary | WakeFailedAttentionSummary;
+
 export interface OpenQuestionQuery {
   /** One project; or `chats` across projects. */
   projectId?: string;
@@ -100,50 +124,57 @@ export function questionAttentionFromRow(row: Record<string, unknown>): {
 export async function readOpenQuestionAttention(
   db: D1Database,
   query: OpenQuestionQuery
-): Promise<Map<string, QuestionAttentionSummary>> {
-  const bySession = new Map<string, QuestionAttentionSummary>();
+): Promise<Map<string, AskAttentionSummary>> {
+  const bySession = new Map<string, AskAttentionSummary>();
   if (query.sessionIds && query.sessionIds.length === 0) return bySession;
   if (query.chats && query.chats.length === 0) return bySession;
   // Every read is bound to a project (rule 11): one, or each chat's own.
   if (!query.projectId && !query.chats) return bySession;
   const limit = query.limit ?? DEFAULT_OPEN_QUESTION_READ_LIMIT;
-  const conditions = [
-    "kind = 'question'",
-    "status = 'open'",
-    'source_session_id IS NOT NULL',
-    '(expires_at IS NULL OR expires_at > ?)',
-  ];
-  const params: unknown[] = [query.now];
+  // The chat scope both arms share.
+  const scope: string[] = ['source_session_id IS NOT NULL'];
+  const scopeParams: unknown[] = [];
   if (query.projectId) {
-    conditions.push('project_id = ?');
-    params.push(query.projectId);
+    scope.push('project_id = ?');
+    scopeParams.push(query.projectId);
   }
   if (query.chats) {
-    conditions.push(`EXISTS (SELECT 1 FROM json_each(?) chat
+    scope.push(`EXISTS (SELECT 1 FROM json_each(?) chat
       WHERE json_extract(chat.value, '$[0]') = asks.project_id
         AND json_extract(chat.value, '$[1]') = asks.source_session_id)`);
-    params.push(JSON.stringify(query.chats.map((chat) => [chat.projectId, chat.sessionId])));
+    scopeParams.push(JSON.stringify(query.chats.map((chat) => [chat.projectId, chat.sessionId])));
   }
   if (query.sessionIds) {
     // json_each keeps any number of chats inside the bound-parameter ceiling (rule 69).
-    conditions.push('source_session_id IN (SELECT value FROM json_each(?))');
-    params.push(JSON.stringify(query.sessionIds));
+    scope.push('source_session_id IN (SELECT value FROM json_each(?))');
+    scopeParams.push(JSON.stringify(query.sessionIds));
   }
   if (query.assigneeUserId) {
-    conditions.push('assignee_user_id = ?');
-    params.push(query.assigneeUserId);
+    scope.push('assignee_user_id = ?');
+    scopeParams.push(query.assigneeUserId);
   }
+  const columns = `id, kind, source_session_id, title, body_md, answer_spec_json, category,
+                created_at, expires_at`;
   let rows: Record<string, unknown>[];
   try {
+    // Two indexed arms in one round trip: open questions (`idx_asks_open_question`) and open
+    // wake failures (`idx_asks_open_error_session`). Questions sort first, so a chat's first
+    // row is its newest question when it has one.
     const result = await db
       .prepare(
-        `SELECT id, source_session_id, title, body_md, answer_spec_json, category, created_at,
-                expires_at
-           FROM asks WHERE ${conditions.join(' AND ')}
-          ORDER BY created_at DESC, id DESC
-          LIMIT ?`
+        `SELECT * FROM (
+           SELECT 0 AS rank, ${columns} FROM asks
+            WHERE kind = 'question' AND status = 'open' AND (expires_at IS NULL OR expires_at > ?)
+              AND ${scope.join(' AND ')}
+           UNION ALL
+           SELECT 1 AS rank, ${columns} FROM asks
+            WHERE kind = 'error' AND status = 'open'
+              AND dedupe_key LIKE '${WAKE_FAILED_KEY_PREFIX}%'
+              AND ${scope.join(' AND ')}
+         ) ORDER BY rank, created_at DESC, id DESC
+         LIMIT ?`
       )
-      .bind(...params, limit)
+      .bind(query.now, ...scopeParams, ...scopeParams, limit)
       .all<Record<string, unknown>>();
     rows = result.results ?? [];
   } catch (error) {
@@ -157,7 +188,8 @@ export async function readOpenQuestionAttention(
     log.warn('question_asks.read_limit_reached', { projectId: query.projectId ?? null, limit });
   }
   for (const row of rows) {
-    const parsed = questionAttentionFromRow(row);
+    const parsed =
+      row.kind === 'error' ? wakeFailedAttentionFromRow(row) : questionAttentionFromRow(row);
     if (!parsed) {
       log.warn('question_asks.row_skipped', {
         projectId: query.projectId ?? null,
@@ -165,10 +197,35 @@ export async function readOpenQuestionAttention(
       });
       continue;
     }
-    // Newest first, so the first row of a chat is the one it shows.
     if (!bySession.has(parsed.sessionId)) bySession.set(parsed.sessionId, parsed.summary);
   }
   return bySession;
+}
+
+/** One open wake-failure `asks` row as an attention summary, or null (rule 50). */
+export function wakeFailedAttentionFromRow(row: Record<string, unknown>): {
+  sessionId: string;
+  summary: WakeFailedAttentionSummary;
+} | null {
+  const id = text(row.id);
+  const sessionId = text(row.source_session_id);
+  const createdAt = int(row.created_at);
+  if (!id || !sessionId || createdAt === null) return null;
+  return {
+    sessionId,
+    summary: {
+      markerId: id,
+      kind: 'wake_failed',
+      source: WAKE_FAILED_ASK_SOURCE,
+      createdAt,
+      expiresAt: null,
+      reason: text(row.body_md) ?? text(row.title),
+      options: [],
+      category: null,
+      interactionId: null,
+      interactionKind: null,
+    },
+  };
 }
 
 /**
@@ -176,19 +233,25 @@ export async function readOpenQuestionAttention(
  * ask: the newest question for a person, then any other marker. This is `getAttentionSummary`'s
  * rule with both stores taken together (a later `wake_failed` must not hide a question).
  */
-export function preferAttention(marker: unknown, question: QuestionAttentionSummary | undefined) {
-  if (!question) return marker ?? null;
-  if (marker && typeof marker === 'object') {
-    const record = marker as Record<string, unknown>;
-    if (
-      record.kind === 'needs_input' &&
-      typeof record.createdAt === 'number' &&
-      record.createdAt > question.createdAt
+export function preferAttention(marker: unknown, ask: AskAttentionSummary | undefined) {
+  if (!ask) return marker ?? null;
+  const record = marker && typeof marker === 'object' ? (marker as Record<string, unknown>) : null;
+  if (record) {
+    const markerCreatedAt = typeof record.createdAt === 'number' ? record.createdAt : null;
+    if (record.kind === 'needs_input') {
+      // A pending question or permission beats a wake failure, and a newer one beats a question.
+      if (ask.kind !== 'needs_input') return marker;
+      if (markerCreatedAt !== null && markerCreatedAt > ask.createdAt) return marker;
+    } else if (
+      ask.kind !== 'needs_input' &&
+      markerCreatedAt !== null &&
+      markerCreatedAt > ask.createdAt
     ) {
+      // Neither is a question: the newest wins, as in `getAttentionSummary`.
       return marker;
     }
   }
-  return question;
+  return ask;
 }
 
 /** Whether the chat has an open, unexpired question from this task (the stalled-task guard). */

@@ -78,6 +78,49 @@ export async function closeQuestionAsksForHumanMessage(
   }
 }
 
+/**
+ * The person wrote in the chat: the chat's system error items (a failed wake, a sleep that may
+ * have lost work, an answer that never reached the agent; inbox slice E) close as recovered,
+ * open or archived alike, and release their dedupe keys. Bound to the project and the chat
+ * (rule 11). No agent filed them, so no notice is queued (`notified_at` set). Never throws.
+ */
+export async function closeChatErrorAsksForHumanMessage(
+  env: Env,
+  input: { projectId: string | null; sessionId: string }
+): Promise<number> {
+  if (!input.projectId) return 0;
+  const now = Date.now();
+  try {
+    const result = await env.DATABASE.prepare(
+      `UPDATE asks
+          SET status = CASE WHEN status = 'open' THEN 'done' ELSE status END,
+              answer_json = CASE WHEN status = 'open' THEN '{"resolution":"recovered"}' ELSE answer_json END,
+              resolved_at = CASE WHEN status = 'open' THEN ? ELSE resolved_at END,
+              notified_at = COALESCE(notified_at, ?), dedupe_key = NULL, updated_at = ?
+        WHERE project_id = ? AND kind = 'error' AND status IN ('open', 'archived')
+          AND dedupe_key IN (?, ?, ?)`
+    )
+      .bind(
+        now,
+        now,
+        now,
+        input.projectId,
+        `error:wake:${input.sessionId}`,
+        `error:sleep:${input.sessionId}`,
+        `error:delivery:${input.sessionId}`
+      )
+      .run();
+    return result.meta?.changes ?? 0;
+  } catch (error) {
+    log.error('chat_error_asks.close_failed', {
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      ...serializeError(error),
+    });
+    return 0;
+  }
+}
+
 /** Whether the person wrote in the chat after the question was asked (expiry backstop). */
 export function humanMessageSince(sql: SqlStorage, sessionId: string, since: number): boolean {
   return (

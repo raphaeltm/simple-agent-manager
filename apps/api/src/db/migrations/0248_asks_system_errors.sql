@@ -16,7 +16,11 @@
 --
 -- Failing automations are found the same way, from recently failed runs.
 --
--- Additive only: one column with a default and four partial indexes. Existing rows are unaffected.
+-- A failed chat wake is an open error item (dedupe key error:wake:<sessionId>) instead of a
+-- ProjectData wake_failed attention marker; the chat list reads it per chat
+-- (`packages/worker-core/src/question-asks.ts`), so open error items get a per-chat index.
+--
+-- Additive only: one column with a default and five partial indexes. Existing rows are unaffected.
 ALTER TABLE asks ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 1;
 
 CREATE INDEX idx_tasks_failed_updated ON tasks (updated_at) WHERE status = 'failed';
@@ -27,3 +31,6 @@ CREATE INDEX idx_asks_error_key ON asks (dedupe_key) WHERE kind = 'error' AND de
 
 CREATE INDEX idx_trigger_executions_failed_completed ON trigger_executions (completed_at)
   WHERE status = 'failed';
+
+CREATE INDEX idx_asks_open_error_session ON asks (project_id, source_session_id, created_at)
+  WHERE kind = 'error' AND status = 'open';

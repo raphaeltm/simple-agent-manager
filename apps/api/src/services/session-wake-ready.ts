@@ -4,6 +4,7 @@ import type { SessionWakeReadyInput } from '../durable-objects/project-data/sess
 import { parseEnvInt } from '../durable-objects/task-runner/helpers';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { resolveSystemErrorFor } from './inbox/system-errors';
 
 // Shared bound for the wake completion's scheduling and browser notifications.
 export const DEFAULT_WAKE_PROGRESS_BROADCAST_TIMEOUT_MS = 5_000;
@@ -36,6 +37,13 @@ export async function signalSessionWakeReadyBestEffort(
     ]);
     const accepted =
       typeof released === 'number' && Number.isSafeInteger(released) && released >= 0;
+    // The chat woke: its failed-wake inbox item closes by itself (slice E). Never throws.
+    await resolveSystemErrorFor(env, {
+      projectId: input.projectId,
+      source: 'wake',
+      subjectId: input.chatSessionId,
+      resolution: 'recovered',
+    });
     log.info('session_wake.ready_signaled', {
       projectId: input.projectId,
       sessionId: input.chatSessionId,

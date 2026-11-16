@@ -102,7 +102,7 @@ beforeEach(() => {
   createAllSchemaTables(sqlite, schema);
   // The shipped migrations, not the drizzle mirror: the partial indexes are under test too.
   sqlite.exec('DROP TABLE asks');
-  for (const file of ['0245_asks.sql', '0248_asks_system_errors.sql'])
+  for (const file of ['0245_asks.sql', '0247_asks_questions.sql', '0248_asks_system_errors.sql'])
     applySqliteMigration(sqlite, new URL(`../../../src/db/migrations/${file}`, import.meta.url));
   for (const id of ['owner', 'colleague', 'outsider'])
     insert('users', { id, email: `${id}@x.test`, name: id, role: 'user', status: 'active' });

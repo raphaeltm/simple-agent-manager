@@ -1018,6 +1018,11 @@ export class ProjectData extends DurableObject<Env> {
       (type, payload, targetSessionId) => this.broadcastEvent(type, payload, targetSessionId)
     );
     if (closed > 0 && releaseQuestionHold(this.sql, sessionId)) await this.recalculateAlarm();
+    // The person is back in the chat: its system error items close too (inbox slice E).
+    await questionAsks.closeChatErrorAsksForHumanMessage(this.env, {
+      projectId: this.getProjectId(),
+      sessionId,
+    });
     return closed;
   }
 
