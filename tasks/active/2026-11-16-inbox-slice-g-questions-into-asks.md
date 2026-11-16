@@ -98,11 +98,19 @@ exist at deploy time stay answerable and archivable until they resolve or expire
 - [x] Connector pending attention merges question asks
 - [x] Stalled-task classifier reads asks
 - [x] Remove code that only served new needs_input question markers
-- [ ] Tests: capability (ask → sleep → answer via inbox → woken once; archive), concurrent answers,
+- [x] Tests: capability (ask → sleep → answer via inbox → woken once; archive), concurrent answers,
       marker-era vs asks-era overlap, tenancy attack/owner pairs on real SQL (discriminating),
       expiry/reminder schedule, chat list overlay, Connector projection
 - [x] Docs: API reference / admin settings / any doc describing request_human_input storage
 - [x] Idea for removing marker-era question code after overlap: `01M7HC7CN5WY6GEP9G0PP4DG7B`
+
+- [x] Reconciliation check-in hold, idea status, team/account-map reads, Connector lists (from the inventory)
+- [ ] Staging: real Claude Code + Codex agents on a VM (and an Instant check): ask, answer from inbox and card, archive, expiry on a shortened setting, sleeping chat wakes
+
+## Notes
+
+- Reviews: security-auditor, cloudflare-specialist, test-engineer, task-completion-validator all ADDRESSED (see PR #2780).
+- Main rejected the direct task-file push (repository rules), so this file lives on the branch only.
 
 ## Rule 44 inventory
 
@@ -145,11 +153,11 @@ removal tracked in the follow-up idea filed with this PR.
 
 ## Acceptance criteria
 
-- [ ] A new request_human_input question is one `asks` row; no marker, no `attention_json` change
-- [ ] Chat card, chat list needs-input state and the inbox show it as before
-- [ ] Answer via chat card and via inbox: one wins under concurrency; same outcomes as today
-- [ ] Answer to a sleeping chat wakes it and the agent receives the answer once; archive likewise
-- [ ] Expiry and reminders keep today's schedule; expired ask ends `expired`
-- [ ] Marker-era questions stay answerable/archivable until resolved or expired
-- [ ] Tenancy guards on `asks` proven on real SQL with discriminating attack/owner pairs
-- [ ] Limits are admin settings
+- [x] A new request_human_input question is one `asks` row; no marker, no `attention_json` change
+- [x] Chat card, chat list needs-input state and the inbox show it as before (tests; staging pending)
+- [x] Answer via chat card and via inbox: one wins under concurrency; same outcomes as today
+- [ ] Answer to a sleeping chat wakes it and the agent receives the answer once; archive likewise (tests prove one wake-capable delivery; live wake: staging)
+- [x] Expiry and reminders keep today's schedule; expired ask ends `expired`
+- [x] Marker-era questions stay answerable/archivable until resolved or expired
+- [x] Tenancy guards on `asks` proven on real SQL with discriminating attack/owner pairs
+- [x] Limits are admin settings
