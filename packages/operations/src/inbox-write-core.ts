@@ -10,6 +10,7 @@ import {
   type AcpInteractionBrowserAnswer,
   ASK_ASSIGNEE_KINDS,
   ASK_KINDS,
+  HUMAN_INPUT_CATEGORIES,
   type InboxActionResponse,
   type InboxItem,
   type ParsedInboxRef,
@@ -50,6 +51,11 @@ export const CreateAskInputSchema = v.object({
   agentProfileId: v.optional(id),
   groupKey: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(200))),
   dedupeKey: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(200))),
+  // Questions (`request_human_input`, slice G): reminders and the expiry outcome.
+  sourceWorkspaceId: v.optional(id),
+  category: v.optional(v.picklist(HUMAN_INPUT_CATEGORIES)),
+  nextEscalationAt: v.optional(v.pipe(v.number(), v.safeInteger())),
+  maxExpiresAt: v.optional(v.pipe(v.number(), v.safeInteger())),
 });
 export type CreateAskInput = v.InferInput<typeof CreateAskInputSchema>;
 
@@ -114,8 +120,9 @@ export async function createAsk(
       `INSERT INTO asks (id, project_id, assignee_kind, assignee_user_id, kind, blocking, title,
           body_md, answer_spec_json, steps_json, links_json, due_hint, due_at, source_session_id,
           source_task_id, source_message_id, agent_profile_id, group_key, dedupe_key, status,
-          expires_at, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?
+          expires_at, source_workspace_id, category, next_escalation_at, max_expires_at,
+          created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?
         WHERE ? IS NULL
            OR (SELECT COUNT(*) FROM asks WHERE source_session_id = ? AND project_id = ? AND status = 'open') < ?
        ON CONFLICT (project_id, dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`
@@ -141,6 +148,10 @@ export async function createAsk(
       input.groupKey ?? null,
       input.dedupeKey ?? null,
       input.expiresAt ?? null,
+      input.sourceWorkspaceId ?? null,
+      input.category ?? null,
+      input.nextEscalationAt ?? null,
+      input.maxExpiresAt ?? null,
       now,
       now,
       input.sourceSessionId ?? null,
@@ -188,30 +199,38 @@ async function requireActable(
   return resolved;
 }
 
-async function loadNoticeRow(
-  ctx: OperationContext,
+export async function loadAskNoticeRow(
+  ctx: Pick<OperationContext, 'env'>,
   projectId: string,
   askId: string
 ): Promise<InboxAskNoticeRow | null> {
   const row = await ctx.env.DATABASE.prepare(
     `SELECT id, project_id, kind, title, status, answer_json, source_session_id, source_task_id,
-            resolved_by_user_id, assignee_user_id
+            source_workspace_id, resolved_by_user_id, assignee_user_id, created_at
        FROM asks WHERE id = ? AND project_id = ?`
   )
     .bind(askId, projectId)
-    .first<Record<string, string | null>>();
-  if (!row?.id || !row.project_id || !row.kind || !row.title || !row.status) return null;
+    .first<Record<string, string | number | null>>();
+  const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
+  const id = text(row?.id);
+  const rowProjectId = text(row?.project_id);
+  const kind = text(row?.kind);
+  const title = text(row?.title);
+  const status = text(row?.status);
+  if (!row || !id || !rowProjectId || !kind || !title || !status) return null;
   return {
-    id: row.id,
-    projectId: row.project_id,
-    kind: row.kind,
-    title: row.title,
-    status: row.status,
-    answerJson: row.answer_json ?? null,
-    sourceSessionId: row.source_session_id ?? null,
-    sourceTaskId: row.source_task_id ?? null,
-    resolvedByUserId: row.resolved_by_user_id ?? null,
-    assigneeUserId: row.assignee_user_id ?? null,
+    id,
+    projectId: rowProjectId,
+    kind,
+    title,
+    status,
+    answerJson: text(row.answer_json),
+    sourceSessionId: text(row.source_session_id),
+    sourceTaskId: text(row.source_task_id),
+    sourceWorkspaceId: text(row.source_workspace_id),
+    createdAt: typeof row.created_at === 'number' ? row.created_at : null,
+    resolvedByUserId: text(row.resolved_by_user_id),
+    assigneeUserId: text(row.assignee_user_id),
   };
 }
 
@@ -273,6 +292,24 @@ async function answerAsk(
 ): Promise<InboxActionResponse> {
   // Length was checked against `inbox.answerMaxChars` by `answerInboxItem`.
   const answer = input.answer?.trim();
+  if (item.kind === 'question' && item.sessionId) {
+    // A question is answered through the one path a chat card, a notification and the Connector
+    // also use (`answerAttention`, `apps/api/src/routes/chat-attention.ts`), so concurrent answers
+    // from any of them meet at the same compare-and-set and get the same outcomes.
+    if (!answer) throw new OperationError('invalid_input', 'answer is required');
+    const result = await ctx.ports.chat.answerAttention(
+      ctx.actor.userId,
+      item.projectId,
+      item.sessionId,
+      askId,
+      answer
+    );
+    return {
+      ref: item.ref,
+      outcome: result.inFlight ? 'in_flight' : 'answered',
+      agentNotified: !result.inFlight,
+    };
+  }
   const spec = item.answerSpec;
   if (spec.type === 'options' && !(answer && (spec.options.includes(answer) || spec.allowText)))
     throw new OperationError('invalid_input', 'answer must match one of the requested options');
@@ -285,7 +322,7 @@ async function answerAsk(
   const answerJson = answer ? JSON.stringify({ text: answer }) : null;
   if (!(await closeAsk(ctx, item.projectId, askId, status, answerJson)))
     throw new OperationError('conflict', 'This inbox item was already answered or closed');
-  const row = await loadNoticeRow(ctx, item.projectId, askId);
+  const row = await loadAskNoticeRow(ctx, item.projectId, askId);
   const agentNotified = row ? await notifyClosedAsk(ctx, row, status) : false;
   return { ref: item.ref, outcome: status, agentNotified };
 }
@@ -447,7 +484,7 @@ export async function archiveInboxItem(
         await ctx.ports.inbox.authorizeAnswerWake(item.projectId, item.sessionId, me);
       if (!(await closeAsk(ctx, item.projectId, ref.id, 'archived', null)))
         throw new OperationError('conflict', 'This inbox item was already answered or closed');
-      const row = await loadNoticeRow(ctx, item.projectId, ref.id);
+      const row = await loadAskNoticeRow(ctx, item.projectId, ref.id);
       const agentNotified = row ? await notifyClosedAsk(ctx, row, 'archived') : false;
       return { ref: item.ref, outcome: 'archived', agentNotified };
     }

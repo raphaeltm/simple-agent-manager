@@ -5,7 +5,7 @@
  */
 import { HUMAN_INPUT_CATEGORIES, type HumanInputCategory } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import {
@@ -28,6 +28,12 @@ import {
 import { parseOptionalBody, ResolveAttentionAnswerSchema } from '../schemas';
 import { authorizeAgentWake } from '../services/agent-wake-authorization';
 import { readAskContext } from '../services/inbox/ask-context';
+import {
+  answerQuestionAsk,
+  loadQuestionAsk,
+  type QuestionAsk,
+  questionAskRequestState,
+} from '../services/inbox/question-asks';
 import * as projectDataService from '../services/project-data';
 import { recordSharedSessionAnswer } from '../services/session-access';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
@@ -82,6 +88,73 @@ export async function loadAttentionForViewer(
   };
 }
 
+/**
+ * The chat card's read of a question held in D1 `asks`, in the shape a marker read had. Who may
+ * read and answer is decided as for a marker: any reader of the chat reads it, a writer of the
+ * chat (owner, or a grantee whose owner can still write) answers it.
+ */
+async function questionAskAttentionResponse(
+  c: Context<{ Bindings: Env }>,
+  ask: QuestionAsk,
+  role: string,
+  userId: string
+) {
+  const db = drizzle(c.env.DATABASE, { schema });
+  const { session, access } = await projectDataService.getSessionAccess(
+    c.env,
+    ask.projectId,
+    ask.sessionId,
+    userId
+  );
+  if (!session || !access.found || !projectRoleHasCapability(role, 'task:read'))
+    throw errors.notFound('Chat session');
+  const writer =
+    Boolean(access.ownerUserId) &&
+    projectRoleHasCapability(role, 'task:write') &&
+    (access.role === 'owner' ||
+      (access.role === 'grantee' &&
+        Boolean(access.grant) &&
+        (await hasProjectCapability(db, ask.projectId, access.ownerUserId ?? '', 'task:write'))));
+  const now = Date.now();
+  const state = questionAskRequestState(ask, now);
+  const context =
+    c.req.query('context') === 'true'
+      ? await readAskContext(c.env, {
+          projectId: ask.projectId,
+          sessionId: ask.sessionId,
+          askedAt: ask.createdAt,
+          requestedLimit: Number(c.req.query('limit')),
+        })
+      : null;
+  return {
+    request: {
+      id: ask.id,
+      reason: ask.reason,
+      options: ask.options,
+      category: ask.category,
+      createdAt: ask.createdAt,
+      resolvedAt: state.resolvedAt,
+      resolvedAnswer: state.resolvedAnswer,
+      expired: state.expired,
+      canAnswer: ask.status === 'open' && !state.expired && writer,
+    },
+    session: {
+      id: ask.sessionId,
+      topic: typeof session.topic === 'string' ? session.topic : null,
+    },
+    messages: (context?.before ?? []).map((message) => ({
+      id: message.id,
+      sessionId: ask.sessionId,
+      role: message.role,
+      content: message.content,
+      createdAt: message.createdAt,
+      toolMetadata: null,
+      truncated: message.truncated,
+    })),
+    since: context?.since ?? null,
+  };
+}
+
 export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
   // Read-only: no runtime contact or whole-conversation fetch. Context is opt-in.
   chatRoutes.get('/:sessionId/attention/:markerId', async (c) => {
@@ -93,6 +166,9 @@ export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>):
     const { membership } = await requireActiveProjectMembership(db, projectId, userId);
     if (!projectRoleHasCapability(membership.role, 'task:read'))
       throw errors.forbidden('Project capability is required');
+    // A question asked since inbox slice G is an `asks` row; one asked before is a marker.
+    const ask = await loadQuestionAsk(c.env, projectId, sessionId, markerId);
+    if (ask) return c.json(await questionAskAttentionResponse(c, ask, membership.role, userId));
     const { session, marker, writer, canRead } = await loadAttentionForViewer(
       c.env,
       projectId,
@@ -186,6 +262,13 @@ export async function answerAttention(
   });
 
   if (!answer) throw markRejectedBeforeEffects(errors.badRequest('answer is required'));
+
+  // A question asked since inbox slice G is an `asks` row: one compare-and-set, then a durable
+  // prompt (`services/inbox/question-asks.ts`). One asked before is still a marker, below.
+  const ask = await loadQuestionAsk(env, projectId, sessionId, markerId);
+  if (ask) {
+    return answerQuestionAsk(env, { ask, answer, userId, authorization: { writer, wake } });
+  }
 
   const prepared = await projectDataService.prepareAttentionAnswer(
     env,

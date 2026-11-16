@@ -53,7 +53,6 @@ export {
 } from './do/agent-wake-policy';
 export {
   ATTENTION_ARCHIVE_CLAIM,
-  computeHumanInputSchedule,
   parseAttentionOptions,
 } from './do/attention';
 export { CommentNotFoundError } from './do/comment-contracts';

@@ -16,7 +16,12 @@ import {
   MAX_HUMAN_INPUT_OPTION_LENGTH,
   MAX_HUMAN_INPUT_OPTIONS_COUNT,
 } from '@simple-agent-manager/shared';
-import { log, maybeJsonRecord } from '@simple-agent-manager/worker-core';
+import {
+  log,
+  maybeJsonRecord,
+  QUESTION_ASK_SOURCE,
+  questionOptions,
+} from '@simple-agent-manager/worker-core';
 
 import type { OperationProjectDataPort } from './ports';
 import type { OperationDeps } from './types';
@@ -106,9 +111,77 @@ export function projectAttentionMarker(marker: Marker) {
 
 export type PendingAttentionItem = ReturnType<typeof projectAttentionMarker>;
 
+function num(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
+}
+
+function str(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null;
+}
+
 /**
- * Open markers for one chat. A failed read degrades to `unavailable` rather than failing the
- * caller's whole read, and says so: an empty list must mean "nothing open".
+ * The chat's open questions held in D1 `asks` (inbox slice G), as the marker records they replace,
+ * so one projection serves both. Bound to the project and the chat (rule 11). Newest first.
+ */
+async function openQuestionMarkers(
+  deps: OperationDeps,
+  projectId: string,
+  sessionId: string
+): Promise<Marker[]> {
+  const result = await deps.env.DATABASE.prepare(
+    `SELECT id, source_task_id, source_workspace_id, title, body_md, answer_spec_json, category,
+            created_at, expires_at, max_expires_at, escalation_count, next_escalation_at,
+            notification_id, assignee_user_id
+       FROM asks
+      WHERE project_id = ? AND source_session_id = ? AND kind = 'question' AND status = 'open'
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?`
+  )
+    .bind(projectId, sessionId, MAX_OPEN_QUESTIONS_PER_READ)
+    .all<Record<string, unknown>>();
+  const markers: Marker[] = [];
+  for (const row of result.results ?? []) {
+    const id = str(row.id);
+    const createdAt = num(row.created_at);
+    if (!id || createdAt === null) continue;
+    markers.push({
+      id,
+      sessionId,
+      taskId: str(row.source_task_id),
+      workspaceId: str(row.source_workspace_id),
+      kind: 'needs_input',
+      source: QUESTION_ASK_SOURCE,
+      sourceEventId: null,
+      sourceMessageId: null,
+      sourceNotificationId: str(row.notification_id),
+      reason: str(row.body_md) ?? str(row.title),
+      metadata: JSON.stringify({
+        category: str(row.category),
+        options: questionOptions(row.answer_spec_json),
+      }),
+      createdAt,
+      expiresAt: num(row.expires_at),
+      resolvedAt: null,
+      resolvedByMessageId: null,
+      resolvedByActorType: null,
+      resolvedReason: null,
+      notificationUserId: str(row.assignee_user_id),
+      nextEscalationAt: num(row.next_escalation_at),
+      escalationCount: num(row.escalation_count) ?? 0,
+      maxExpiresAt: num(row.max_expires_at),
+      resolvedAnswer: null,
+    });
+  }
+  return markers;
+}
+
+/** A chat holds at most `inbox.openItemsPerChat` open asks; this read is bounded on its own. */
+const MAX_OPEN_QUESTIONS_PER_READ = 50;
+
+/**
+ * Open markers and open questions for one chat, newest first. A failed read degrades to
+ * `unavailable` rather than failing the caller's whole read, and says so: an empty list must
+ * mean "nothing open".
  */
 export async function pendingAttention(
   deps: OperationDeps,
@@ -116,8 +189,16 @@ export async function pendingAttention(
   sessionId: string
 ): Promise<{ items: PendingAttentionItem[]; available: boolean }> {
   try {
-    const markers = await deps.ports.projectData.listActiveAttentionMarkers(projectId, sessionId);
-    return { items: markers.map(projectAttentionMarker), available: true };
+    const [markers, questions] = await Promise.all([
+      deps.ports.projectData.listActiveAttentionMarkers(projectId, sessionId),
+      openQuestionMarkers(deps, projectId, sessionId),
+    ]);
+    return {
+      items: [...questions, ...markers]
+        .sort((left, right) => right.createdAt - left.createdAt)
+        .map(projectAttentionMarker),
+      available: true,
+    };
   } catch (error) {
     log.warn('connector.pending_attention_unavailable', {
       projectId,
