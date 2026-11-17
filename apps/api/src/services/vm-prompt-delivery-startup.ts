@@ -29,6 +29,6 @@ export async function isVmPromptTargetStarting(
       LIMIT 1`
   )
     .bind(projectId, chatSessionId)
-    .first<{ id: string }>();
+    .first();
   return starting !== null;
 }

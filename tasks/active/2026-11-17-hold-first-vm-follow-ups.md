@@ -28,13 +28,13 @@ Data flow: user follow-up → ProjectData acceptPromptDelivery → session_inbox
 
 - [x] Finish writer inventory with exact paths and verification evidence.
 - [x] Real-D1 regression goes red pre-fix for initial queued/delegated follow-ups.
-- [ ] Hold draft/ready/queued/delegated conversations without retained sleep, without recovery or failure.
-- [ ] Real durable inbox keeps retry attempts below cap; delivers after readiness and first turn end.
-- [ ] Existing TTL expires a still-waiting follow-up without renewal.
-- [ ] Genuine slept sessions with queued recovery tasks still reach recovery.
-- [ ] in_progress missing runtime, terminal tasks, project/chat mismatch, snapshot authority and allowWake=false controls retain behavior.
+- [x] Hold draft/ready/queued/delegated conversations without retained sleep, without recovery or failure.
+- [x] Real durable inbox keeps retry attempts below cap; delivers after readiness and first turn end.
+- [x] Existing TTL expires a still-waiting follow-up without renewal.
+- [x] Genuine slept sessions with queued recovery tasks still reach recovery.
+- [x] in_progress missing runtime, terminal tasks, project/chat mismatch, snapshot authority and allowWake=false controls retain behavior.
 - [ ] Relevant local tests, lint/typecheck/build and full dispatched CI complete.
-- [ ] Local specialist reviews complete and findings resolved.
+- [x] Local specialist reviews complete and findings resolved.
 - [ ] Reserve/deploy staging, verify changed flow, clean up and release lease.
 - [ ] Draft PR includes Closes #2847, contribution credit, review/CI/staging evidence and explicit draft-only constraint.
 - [ ] Update SAM idea with PR and findings; leave task file active pending human completion confirmation.
@@ -44,3 +44,5 @@ Data flow: user follow-up → ProjectData acceptPromptDelivery → session_inbox
 Clean pre-fix Workers run (2026-11-17 09:19 UTC): 16 tests collected, 8 expected failures / 8 passing controls, no fixture or collection failures. The draft/ready/queued/delegated inbox slices fail with `wake_refused / sleeping_snapshot_missing`; eventual-delivery/TTL and checkpoint controls fail from the same incorrect classification. Log: `.tmp/2847/red-confirmed.log` (local). Root baseline lint 22/22 and typecheck 36/36 succeeded.
 
 Writer inventory verified by independent Cloudflare review: `submit-vm-task-effects.ts:65–80`, `reserved-task-submission-storage.ts:25–47`, `routes/mcp/dispatch-tool.ts:451–481,610–615`, `project-orchestrator/scheduling.ts:483–518`; `/sam` dispatch/retry and trigger submission use reserved task storage. TaskRunner `workspace-steps.ts:79–86` commits queued → delegated, `in-progress-transition.ts:43–75` commits delegated → in_progress. `session-linking.ts` binds workspace+task before handoff; recovery nullers keep retained sleep history, and sleeping_at is cleared after replacement linkage. These are inspected real writers, while the new regression executes the primary web writer.
+
+Post-fix validation: final startup Workers suite 17/17 passed; three adjacent suites (sleep-claim hold, wake-handoff gate, real wake-event handoff) 50/50 passed. A first combined run caught an incomplete test VM busy response and an overly exact expiration write-count assertion; both fixtures were corrected and final startup run passed. This does not substitute for live staging. Cloudflare specialist PASS; test-engineer finding addressed and re-reviewed PASS; task completion/constitution/doc-sync PASS for implementation, with CI/staging still pending. Root lint (22 tasks), typecheck (36), build (18), final API typecheck and changed-file formatting passed.
