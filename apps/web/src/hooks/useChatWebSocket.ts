@@ -131,10 +131,8 @@ export function useChatWebSocket({
     const API_URL = import.meta.env.VITE_API_URL || '';
     const wsUrl =
       API_URL.replace(/^http/, 'ws') +
-      `/api/projects/${projectId}/sessions/ws?sessionId=${encodeURIComponent(sessionId)}` +
-      (onMessageAppendRef.current
-        ? `&messageAppend=${CHAT_MESSAGE_APPEND_CAPABILITY}&toolReplace=${CHAT_TOOL_REPLACE_CAPABILITY}`
-        : '');
+      `/api/projects/${projectId}/sessions/ws?sessionId=${encodeURIComponent(sessionId)}&toolReplace=${CHAT_TOOL_REPLACE_CAPABILITY}` +
+      (onMessageAppendRef.current ? `&messageAppend=${CHAT_MESSAGE_APPEND_CAPABILITY}` : '');
 
     try {
       const ws = new WebSocket(wsUrl);

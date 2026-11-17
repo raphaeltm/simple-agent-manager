@@ -67,8 +67,9 @@ export const ToolCallCard = React.memo(function ToolCallCard({
     key: string;
     content: ToolCallContentItem[];
   } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadState, setLoadState] = useState<{ key: string; status: 'loading' | 'failed' } | null>(
+    null
+  );
 
   const rawOutputFallback = normalizeRawToolOutput(toolCall.rawOutput);
   const needsLazyLoad = toolCall.contentLoaded === false && !!toolCall.messageId && !!onLoadContent;
@@ -78,26 +79,27 @@ export const ToolCallCard = React.memo(function ToolCallCard({
   if (rawOutputFallback) fallbackContent = [rawOutputFallback];
   const persistedOrFallback = toolCall.content.length > 0 ? toolCall.content : fallbackContent;
   const contentKey = JSON.stringify([toolCall.messageId, toolCall.revision ?? 0]);
+  const loading = needsLazyLoad && loadState?.key === contentKey && loadState.status === 'loading';
+  const loadFailed =
+    needsLazyLoad && loadState?.key === contentKey && loadState.status === 'failed';
   const cached = lazyContent?.key === contentKey ? lazyContent.content : null;
   const displayContent = cached ?? persistedOrFallback;
 
   useEffect(() => {
     if (!expanded || !needsLazyLoad || !onLoadContent || !toolCall.messageId) return;
     let active = true;
-    setLoading(true);
-    setLoadFailed(false);
-    void onLoadContent(toolCall.messageId)
-      .then(
-        (content) => {
-          if (active) setLazyContent({ key: contentKey, content });
-        },
-        () => {
-          if (active) setLoadFailed(true);
+    setLoadState({ key: contentKey, status: 'loading' });
+    void onLoadContent(toolCall.messageId).then(
+      (content) => {
+        if (active) {
+          setLazyContent({ key: contentKey, content });
+          setLoadState(null);
         }
-      )
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+      },
+      () => {
+        if (active) setLoadState({ key: contentKey, status: 'failed' });
+      }
+    );
     return () => {
       active = false;
     };

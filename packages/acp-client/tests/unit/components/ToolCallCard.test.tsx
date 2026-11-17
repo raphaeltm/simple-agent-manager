@@ -340,3 +340,35 @@ describe('canonical tool revisions', () => {
     expect(screen.getByText('current output')).toBeTruthy();
   });
 });
+
+it('shows a newer inline snapshot while an old lazy request is pending or failed', async () => {
+  let finishOld!: (value: ToolCallItem['content']) => void;
+  const old = new Promise<ToolCallItem['content']>((resolve) => {
+    finishOld = resolve;
+  });
+  const load = vi.fn().mockReturnValue(old);
+  const base = {
+    ...createToolCall(),
+    messageId: 'canonical-inline',
+    contentLoaded: false,
+    revision: 1,
+    content: [],
+  };
+  const { rerender } = render(<ToolCallCard toolCall={base} onLoadContent={load} />);
+  fireEvent.click(screen.getByRole('button'));
+  rerender(
+    <ToolCallCard
+      toolCall={{
+        ...base,
+        revision: 2,
+        contentLoaded: true,
+        content: [{ type: 'content', text: 'Inline current output' }],
+      }}
+      onLoadContent={load}
+    />
+  );
+  expect(screen.getByText('Inline current output')).toBeTruthy();
+  finishOld([{ type: 'content', text: 'Old output' }]);
+  await waitFor(() => expect(screen.queryByText('Old output')).toBeNull());
+  expect(screen.getByText('Inline current output')).toBeTruthy();
+});

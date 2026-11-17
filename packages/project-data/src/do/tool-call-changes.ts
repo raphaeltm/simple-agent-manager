@@ -16,7 +16,9 @@ export function sealToolMerging(sql: SqlStorage, sessionId: string): boolean {
     COALESCE(stream_ingest_state, '{"source":"","through":0,"maxSequence":0,"recent":[],"open":null}'),
     '$.toolLegacySeen', json('true'))
     WHERE id = ? AND COALESCE(json_extract(stream_ingest_state, '$.toolLegacySeen'), 0) = 0
-    AND status != 'stopped' RETURNING id`,
+    AND status != 'stopped'
+    AND NOT EXISTS (SELECT 1 FROM project_data_archive_source_intents intent
+      WHERE intent.session_id = chat_sessions.id AND intent.state != 'rehome_exported') RETURNING id`,
       sessionId
     )
     .toArray();

@@ -44,6 +44,119 @@ async function rows(stub: ReturnType<typeof projectDataStub>, session: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe('canonical tool snapshots through real ProjectData ingest', () => {
+  it('preserves canonical comment anchors and reports final activity through sessions_read reader', async () => {
+    const { stub, session } = await fixture();
+    await stub.persistMessageBatch(
+      session,
+      [notification(1, { title: 'Inspect', status: 'pending' }, 'initial')],
+      source
+    );
+    const first = (await rows(stub, session))[0]!;
+    const { thread } = await stub.createCommentThread({
+      sessionId: session,
+      messageId: first.id,
+      quote: 'initial',
+      body: 'Review this call',
+      actor: { kind: 'human', id: 'tool-test-user', name: 'Reviewer' },
+    });
+    await stub.persistMessageBatch(
+      session,
+      [notification(2, { status: 'completed' }, 'final')],
+      source
+    );
+    const updated = (await rows(stub, session))[0]!;
+    expect(updated.id).toBe(first.id);
+    expect(await stub.getCommentThread({ sessionId: session, threadId: thread.id })).toMatchObject({
+      anchor: { kind: 'message', messageId: first.id, quote: 'initial' },
+    });
+    const logical = await stub.archiveSourceGetLogicalTranscript(
+      {
+        projectId: 'tool-test',
+        sessionId: session,
+        ownerName: 'tool-test',
+        generation: 1,
+        migrationId: null,
+      },
+      {
+        before: null,
+        limit: 10,
+        roles: ['user', 'assistant', 'system'],
+        maxScanRows: 5000,
+        maxMessageChars: 10000,
+        maxPageChars: 100000,
+        includeLatest: false,
+        includeToolTitles: true,
+      }
+    );
+    expect(logical.entries).toEqual([
+      expect.objectContaining({
+        kind: 'activity',
+        firstRowId: first.id,
+        rowCount: 1,
+        toolCalls: 1,
+        toolStatuses: { completed: 1 },
+        toolTitles: ['Inspect'],
+        updatedAt: updated.toolMetadata!._samToolUpdatedAt,
+      }),
+    ]);
+  });
+
+  it('keeps reused provider IDs distinct through source rotation, retired fallback and retry', async () => {
+    const { stub, session } = await fixture();
+    const next = { ...source, outboxIncarnation: 'outbox-b' };
+    await stub.persistMessageBatch(session, [notification(1, { status: 'pending' })], source);
+    await stub.persistMessageBatch(
+      session,
+      [{ ...notification(1, { status: 'pending' }), messageId: 'next-start' }],
+      next
+    );
+    const late = notification(2, { status: 'completed' }, 'final-a');
+    await stub.persistMessageBatch(session, [late], source);
+    await stub.persistMessageBatch(
+      session,
+      [{ ...notification(2, { status: 'completed' }, 'final-b'), messageId: 'next-end' }],
+      next
+    );
+    const stored = await rows(stub, session);
+    expect(stored).toHaveLength(4);
+    const identities = stored.map((row) => row.toolMetadata!._samToolCanonicalId);
+    expect(identities[0]).toBe(identities[2]);
+    expect(identities[1]).toBe(identities[3]);
+    expect(identities[0]).not.toBe(identities[1]);
+    expect(await stub.persistMessageBatch(session, [late], source)).toMatchObject({
+      persisted: 0,
+      duplicates: 1,
+    });
+    expect(await rows(stub, session)).toEqual(stored);
+    const logical = await stub.archiveSourceGetLogicalTranscript(
+      {
+        projectId: 'tool-test',
+        sessionId: session,
+        ownerName: 'tool-test',
+        generation: 1,
+        migrationId: null,
+      },
+      {
+        before: null,
+        limit: 10,
+        roles: ['user', 'assistant', 'system'],
+        maxScanRows: 5000,
+        maxMessageChars: 10000,
+        maxPageChars: 100000,
+        includeLatest: false,
+        includeToolTitles: false,
+      }
+    );
+    expect(logical.entries).toEqual([
+      expect.objectContaining({
+        kind: 'activity',
+        rowCount: 4,
+        toolCalls: 2,
+        toolStatuses: { completed: 2 },
+      }),
+    ]);
+  });
+
   it.each([
     [
       'Claude',
@@ -755,4 +868,39 @@ it('seals a failed session before a legacy snapshot and preserves its cached car
   const stored = await rows(stub, session);
   expect(stored).toHaveLength(2);
   expect(stored[0]).toMatchObject({ content: 'first', toolMetadata: { _samToolRevision: 1 } });
+});
+
+it('does not alter an archive-owned failed session anchor while admitting a legacy reader', async () => {
+  const { stub, session } = await fixture();
+  await stub.persistMessageBatch(
+    session,
+    [notification(1, { status: 'completed' }, 'sealed')],
+    source
+  );
+  await stub.failSession(session);
+  await stub.archiveSourcePrepareIntent({
+    projectId: 'tool-test',
+    sessionId: session,
+    migrationId: 'legacy-archive-fence',
+    sourceOwnerName: 'tool-test',
+    targetOwnerName: 'tool-test:archive:g1:s1',
+    targetGeneration: 1,
+    sourceIntentToken: 'legacy-fence-token',
+    now: Date.now() + 60000,
+    minTerminalAgeMs: 1,
+  });
+  let before: unknown;
+  await runInDurableObject(stub, (_instance, state) => {
+    before = state.storage.sql
+      .exec('SELECT stream_ingest_state FROM chat_sessions WHERE id = ?', session)
+      .toArray()[0]?.stream_ingest_state;
+  });
+  await stub.getToolChanges(session, undefined, true);
+  await runInDurableObject(stub, (_instance, state) => {
+    expect(
+      state.storage.sql
+        .exec('SELECT stream_ingest_state FROM chat_sessions WHERE id = ?', session)
+        .toArray()[0]?.stream_ingest_state
+    ).toBe(before);
+  });
 });
