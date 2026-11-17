@@ -83,7 +83,9 @@ choice stays in the page's address. The runs are the same ones Flow counts.
   to the first pull request it opened, over the runs that opened one.
 - **Nudges per run**: messages a person sent into the run's chat while it was going — a typed
   follow-up or a comment addressed to the agent. The task's own first prompt, messages from other
-  agents and SAM's own prompts are not nudges. **Not recorded** when the chats can't be read.
+  agents and SAM's own prompts are not nudges. **Not recorded** when the chats can't be read. An
+  installation that switched durable prompt delivery off (`DURABLE_PROMPT_DELIVERY_ENABLED=false`;
+  it is on by default) does not mark follow-ups, so they are not counted there.
 - **Tokens per merged PR**: the tokens (input, output and cache) that the agent or SAM's AI proxy
   reported for the setup's runs, divided by how many of those runs merged. A run continued after
   waking from sleep shares its chat, and its tokens are counted once. Runs whose agent reports no
@@ -93,17 +95,18 @@ choice stays in the page's address. The runs are the same ones Flow counts.
   runs asked for, with any out-of-memory kills. **Not recorded** when the runs have no resource
   telemetry.
 
-Another member's personal profile or skill is never named; it appears as **A teammate's profile**
-(or skill). **Compared** puts the five busiest setups side by side on merges, time to pull request
-and nudges.
+A figure that covers only some of a setup's runs says **partial**, and a setup with fewer finished
+runs than the suggestion minimum says **few runs**. Another member's personal profile or skill is
+never named; it appears as **A teammate's profile** (or skill). **Compared** puts the five busiest
+setups side by side on merges, time to pull request and nudges.
 
 ### Suggestions
 
 When the numbers support it, the tab suggests a change to one of this project's skills, applied
 with one tap through the skill's own settings (you need permission to edit the project):
 
-- **A default profile for a skill**: offered when, among the skill's finished runs, a profile you
-  can use merged without rework clearly more often (by 20 points by default) than the skill's
+- **A default profile for a skill**: offered when, among the skill's finished runs, a project
+  profile merged without rework clearly more often (by 20 points by default) than the skill's
   current default profile, or than the next-best profile when it has none. Each profile compared
   needs at least 10 finished runs of that skill; with fewer, one run moves the rate by ten points
   and the difference is noise.

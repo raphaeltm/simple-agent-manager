@@ -25,7 +25,11 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
 import { updateSkill } from '../../lib/api';
-import { insightsQueryKeys, projectSetupsQueryOptions } from '../../lib/query-options';
+import {
+  agentQueryKeys,
+  insightsQueryKeys,
+  projectSetupsQueryOptions,
+} from '../../lib/query-options';
 import { useProjectContext } from '../ProjectContext';
 import { Empty, FlowSection } from './flow-parts';
 import { formatPercent } from './format';
@@ -89,7 +93,10 @@ export function AgentSetupsTab() {
         />
       </Pane>
       {data ? (
-        <SetupsBody data={data} projectId={projectId} />
+        // Kept on screen while another range or grouping loads; the busy state says it is stale.
+        <div className="contents" aria-busy={query.isFetching || undefined}>
+          <SetupsBody data={data} projectId={projectId} />
+        </div>
       ) : query.isError ? (
         <LoadError what="agent setups" error={query.error} onRetry={() => void query.refetch()} />
       ) : (
@@ -147,7 +154,12 @@ export function SetupsBody({
             note={`${totalRuns} ${totalRuns === 1 ? 'run' : 'runs'} · ${rangeLabel(data.range)}`}
             testId="insights-section-setups"
           >
-            <SetupsTable groups={data.groups} groupBy={data.groupBy} colors={colors} />
+            <SetupsTable
+              groups={data.groups}
+              groupBy={data.groupBy}
+              colors={colors}
+              minRuns={data.suggestionMinRuns}
+            />
           </FlowSection>
         )
       )}
@@ -191,6 +203,7 @@ function suggestionText(s: InsightsSetupSuggestion): {
   title: string;
   body: string;
   action: string;
+  label: string;
 } {
   if (s.kind === 'default_profile') {
     const versus = s.compared.name ?? 'a teammate’s profile';
@@ -198,6 +211,7 @@ function suggestionText(s: InsightsSetupSuggestion): {
       title: `Use ${s.profile.name} for ${s.skill.name}`,
       body: `${formatPercent(s.profile.mergedCleanRate)} of its ${s.profile.runs} runs merged without rework, against ${formatPercent(s.compared.mergedCleanRate)} for ${versus}${s.currentDefault ? ', the current default' : ''} over ${s.compared.runs} runs.`,
       action: 'Make it the default',
+      label: `Make ${s.profile.name} the default for ${s.skill.name}`,
     };
   }
   const direction = s.suggestedGb < s.currentGb ? 'peaks' : 'needs';
@@ -207,10 +221,12 @@ function suggestionText(s: InsightsSetupSuggestion): {
       s.oomKills === 0 ? 'no out-of-memory kills' : `${s.oomKills} out-of-memory kills`
     }. Requesting ${s.suggestedGb} GB leaves headroom above the peak.`,
     action: `Request ${s.suggestedGb} GB`,
+    label: `Request ${s.suggestedGb} GB for ${s.skill.name}`,
   };
 }
 
 function SuggestionList({ data, projectId }: { data: ProjectSetupsResponse; projectId: string }) {
+  const isMobile = useIsMobile();
   const queryClient = useQueryClient();
   const queryScope = useQueryScope();
   const toast = useToast();
@@ -219,13 +235,19 @@ function SuggestionList({ data, projectId }: { data: ProjectSetupsResponse; proj
       updateSkill(projectId, s.apply.skillId, s.apply.patch),
     onSuccess: (_skill, s) => {
       toast.success(
-        s.kind === 'default_profile'
-          ? `${s.profile.name} is now the default for ${s.skill.name}`
-          : `${s.skill.name} now requests ${s.suggestedGb} GB`
+        `${
+          s.kind === 'default_profile'
+            ? `${s.profile.name} is now the default for ${s.skill.name}`
+            : `${s.skill.name} now requests ${s.suggestedGb} GB`
+        }. You can change it back in the skill's settings.`
       );
-      // The suggestion disappears once the read sees the skill's new settings.
+      // The suggestion disappears once the read sees the skill's new settings, and the skill list
+      // the task form reads picks up the new default or request.
       void queryClient.invalidateQueries({
         queryKey: insightsQueryKeys.setupsOfProject(queryScope, projectId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: agentQueryKeys.skillList(queryScope, projectId),
       });
     },
     onError: (error) => {
@@ -270,11 +292,12 @@ function SuggestionList({ data, projectId }: { data: ProjectSetupsResponse; proj
               <div>
                 <Button
                   variant="raised"
-                  size="sm"
+                  // 44px on a phone (SAM Glass touch targets), compact on desktop.
+                  size={isMobile ? 'md' : 'sm'}
                   loading={pending}
                   disabled={apply.isPending}
                   onClick={() => apply.mutate(s)}
-                  aria-label={`${text.action} for ${s.skill.name}`}
+                  aria-label={text.label}
                 >
                   {text.action}
                 </Button>

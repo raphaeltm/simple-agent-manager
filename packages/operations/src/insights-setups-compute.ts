@@ -75,6 +75,9 @@ export function groupIdentity(run: SetupRun, groupBy: InsightsSetupGrouping): Gr
     return { key: `default:${agent}`, label: null, owner: 'project', agentType: run.agentType };
   }
   const ref = groupBy === 'profile' ? run.profile : run.skill;
+  if (ref.owner === 'not_recorded') {
+    return { key: NOT_RECORDED_KEY, label: null, owner: 'not_recorded', agentType: null };
+  }
   if (!ref.id) return { key: NONE_KEY, label: null, owner: 'none', agentType: null };
   return { key: ref.id, label: ref.name, owner: ref.owner, agentType: null };
 }

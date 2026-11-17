@@ -472,6 +472,100 @@ describe('projectSetups', () => {
     expect(full.sample).toEqual({ runs: 105, cap: 2000, truncated: false });
   });
 
+  it('never echoes a free-text profile hint, which can be a teammate’s profile name', async () => {
+    profile('prof-mate', 'alice-private-prod-deployer', null, 'mate');
+    // A task can name a profile; with no agent session the hint is all the run has.
+    run('hinted', { agent_profile_hint: 'alice-private-prod-deployer' });
+    sqlite.prepare("DELETE FROM agent_sessions WHERE id = 's-hinted'").run();
+    run('named', { agent_profile_hint: 'prof-mate' }); // control: an id resolves to the teammate row
+    const result = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
+    expect(JSON.stringify(result)).not.toContain('alice-private-prod-deployer');
+    expect(result.groups.map((g) => [g.key, g.owner, g.runs])).toEqual([
+      ['prof-mate', 'teammate', 1],
+      ['__not_recorded__', 'not_recorded', 1],
+    ]);
+  });
+
+  it('never reads another project’s profile or skill through a run’s ids', async () => {
+    insert('projects', { id: 'p2', name: 'Other owned', repository: 'acme/other', user_id: 'owner' });
+    profile('prof-foreign', 'Foreign Profile Name', 'p2');
+    insert('skills', {
+      id: 'sk-foreign',
+      project_id: 'p2',
+      user_id: 'owner',
+      name: 'Foreign Skill Name',
+      default_profile_id: 'prof-foreign',
+      resource_requirements_json: JSON.stringify({ minMemoryGb: 64 }),
+    });
+    for (let i = 0; i < 10; i += 1) {
+      run(`f${i}`, { agent_profile_hint: 'prof-foreign', skill_id: 'sk-foreign' });
+      memory(`f${i}`, 1);
+    }
+    const bySkill = await projectSetups(ctx(), { projectId: 'p', groupBy: 'skill', nowMs: NOW });
+    const byProfile = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
+    for (const result of [bySkill, byProfile]) {
+      expect(JSON.stringify(result)).not.toContain('Foreign');
+      expect(result.groups.map((g) => [g.key, g.owner, g.runs])).toEqual([
+        ['__not_recorded__', 'not_recorded', 10],
+      ]);
+      expect(result.suggestions).toEqual([]);
+    }
+
+    // Owner control: the same profile and skill in this project are named and suggested on.
+    sqlite.prepare("UPDATE agent_profiles SET project_id = 'p' WHERE id = 'prof-foreign'").run();
+    sqlite.prepare("UPDATE skills SET project_id = 'p' WHERE id = 'sk-foreign'").run();
+    const owned = await projectSetups(ctx(), { projectId: 'p', groupBy: 'skill', nowMs: NOW });
+    expect(owned.groups[0]).toMatchObject({ key: 'sk-foreign', label: 'Foreign Skill Name' });
+    expect(owned.suggestions.map((s) => s.kind)).toEqual(['request_size']);
+  });
+
+  it('does not suggest the viewer’s personal profile as a project skill default', async () => {
+    profile('mine', 'My Personal', null, 'owner');
+    profile('proj', 'Project Profile', 'p');
+    skill('fix', 'fix');
+    for (let i = 0; i < 10; i += 1) {
+      const url = pullRequest({ state: 'merged', merged_at: iso(5 * DAY) });
+      run(`a${i}`, { skill_id: 'fix', agent_profile_hint: 'mine', output_pr_url: url });
+      run(`b${i}`, { skill_id: 'fix', agent_profile_hint: 'proj' });
+    }
+    const result = await projectSetups(ctx(), { projectId: 'p', groupBy: 'skill', nowMs: NOW });
+    expect(result.suggestions.filter((s) => s.kind === 'default_profile')).toEqual([]);
+    // Control: the same numbers on a project profile are suggested.
+    sqlite.prepare("UPDATE agent_profiles SET project_id = 'p' WHERE id = 'mine'").run();
+    const promoted = await projectSetups(ctx(), { projectId: 'p', groupBy: 'skill', nowMs: NOW });
+    expect(promoted.suggestions.find((s) => s.kind === 'default_profile')).toMatchObject({
+      profile: { id: 'mine' },
+    });
+  });
+
+  it('skips a memory suggestion for a skill whose stored requirements cannot be read', async () => {
+    skill('do', 'do', { resource_requirements_json: '{not json' });
+    skill('ok', 'ok', { resource_requirements_json: JSON.stringify({ minMemoryGb: 8 }) });
+    for (let i = 0; i < 10; i += 1) {
+      run(`d${i}`, { skill_id: 'do' });
+      memory(`d${i}`, 2);
+      run(`o${i}`, { skill_id: 'ok' });
+      memory(`o${i}`, 2);
+    }
+    const result = await projectSetups(ctx(), { projectId: 'p', groupBy: 'skill', nowMs: NOW });
+    expect(result.suggestions.map((s) => s.skill.id)).toEqual(['ok']);
+    expect(result.groups.map((g) => g.runs)).toEqual([10, 10]);
+  });
+
+  it('reads past the default run cap through the real statement and keeps the newest', async () => {
+    const insertMany = sqlite.transaction(() => {
+      for (let i = 0; i < 2100; i += 1) run(`m${i}`, { created_at: iso(6 * DAY - i * 1000) });
+    });
+    insertMany();
+    const started = Date.now();
+    const result = await projectSetups(ctx(), { projectId: 'p', nowMs: NOW });
+    expect(result.sample).toEqual({ runs: 2000, cap: 2000, truncated: true });
+    expect(result.groups.reduce((sum, g) => sum + g.runs, 0)).toBe(2000);
+    expect(nudgeCalls[0]).toHaveLength(2000);
+    expect(nudgeCalls[0]?.map((w) => w.sessionId)).not.toContain('chat-m0');
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
   it('refuses a non-member, a foreign project, an unknown range or grouping', async () => {
     run('a1');
     await expect(projectSetups(ctx('outsider'), { projectId: 'p', nowMs: NOW })).rejects.toThrow();

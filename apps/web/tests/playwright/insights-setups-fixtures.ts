@@ -57,8 +57,27 @@ const REALISTIC_GROUPS: InsightsSetupGroup[] = [
     runs: 41,
     finished: 40,
     mergedClean: 31,
-    mergedCleanRate: 0.78,
+    mergedCleanRate: 31 / 40,
+    merged: 34,
+    pullRequests: 37,
+    medianToPullRequestMs: 38 * MIN,
     usedFor: ['do', 'multi-file'],
+    nudges: { state: 'measured', perRun: 0.6, total: 25, runs: 41 },
+    tokens: {
+      state: 'reported',
+      total: 105_000_000,
+      perMergedPullRequest: 3_100_000,
+      reportedRuns: 41,
+      merged: 34,
+    },
+    memory: {
+      state: 'measured',
+      p90Bytes: 3.4 * GIB,
+      maxBytes: 3.9 * GIB,
+      requestedMb: 8192,
+      runs: 41,
+      oomKills: 0,
+    },
   }),
   group({
     key: 'p-codex',
@@ -66,16 +85,19 @@ const REALISTIC_GROUPS: InsightsSetupGroup[] = [
     runs: 23,
     finished: 23,
     mergedClean: 16,
-    mergedCleanRate: 0.71,
+    mergedCleanRate: 16 / 23,
+    merged: 18,
+    pullRequests: 21,
     medianToPullRequestMs: 46 * MIN,
     usedFor: ['do', 'refactors'],
     nudges: { state: 'measured', perRun: 1.1, total: 25, runs: 23 },
+    // Codex reports usage only since the usage slice shipped: partial coverage.
     tokens: {
       state: 'reported',
-      total: 40_000_000,
+      total: 36_000_000,
       perMergedPullRequest: 2_400_000,
-      reportedRuns: 20,
-      merged: 16,
+      reportedRuns: 17,
+      merged: 15,
     },
     memory: {
       state: 'measured',
@@ -92,16 +114,18 @@ const REALISTIC_GROUPS: InsightsSetupGroup[] = [
     runs: 37,
     finished: 37,
     mergedClean: 20,
-    mergedCleanRate: 0.54,
+    mergedCleanRate: 20 / 37,
+    merged: 24,
+    pullRequests: 33,
     medianToPullRequestMs: 22 * MIN,
     usedFor: ['fix'],
     nudges: { state: 'measured', perRun: 1.9, total: 70, runs: 37 },
     tokens: {
       state: 'reported',
-      total: 30_000_000,
+      total: 38_000_000,
       perMergedPullRequest: 1_600_000,
       reportedRuns: 37,
-      merged: 20,
+      merged: 24,
     },
     memory: {
       state: 'measured',
@@ -120,6 +144,8 @@ const REALISTIC_GROUPS: InsightsSetupGroup[] = [
     finished: 4,
     mergedClean: 1,
     mergedCleanRate: 0.25,
+    merged: 1,
+    pullRequests: 2,
     tokens: { state: 'not_reported' },
     memory: { state: 'not_recorded' },
     nudges: { state: 'not_recorded' },
@@ -202,7 +228,19 @@ function stressGroups(): InsightsSetupGroup[] {
     }),
   ];
   for (let i = 0; i < 25; i += 1) {
-    groups.push(group({ key: `p-${i}`, label: `Profile ${i + 1}`, runs: 30 - i }));
+    const runs = 30 - i;
+    groups.push(
+      group({
+        key: `p-${i}`,
+        label: `Profile ${i + 1}`,
+        runs,
+        finished: runs,
+        mergedClean: Math.floor(runs * 0.6),
+        mergedCleanRate: Math.floor(runs * 0.6) / runs,
+        merged: Math.floor(runs * 0.7),
+        pullRequests: Math.floor(runs * 0.8),
+      })
+    );
   }
   groups.push(
     group({

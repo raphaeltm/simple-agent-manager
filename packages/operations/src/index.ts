@@ -160,7 +160,6 @@ export {
   type InsightsCloudflareCostSettingName,
 } from './insights-cloudflare-cost-settings-definition';
 export { projectFlow, type ProjectFlowInput } from './insights-flow';
-export { projectSetups, type ProjectSetupsInput } from './insights-setups';
 export {
   installationHealth,
   installationHealthBounds,
@@ -216,6 +215,7 @@ export {
   type RunUsageRead,
   summarizeRunTokens,
 } from './insights-run-usage';
+export { projectSetups, type ProjectSetupsInput } from './insights-setups';
 export { getPlatformOperationLimits } from './limits';
 export {
   getFileContext,

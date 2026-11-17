@@ -12,8 +12,8 @@
  * 90th percentile is not just the largest of a handful of runs.
  *
  * Only this project's own skills are suggested on (a teammate's personal skill or a global one is
- * edited elsewhere), and only profiles the skill can point at: project profiles and the viewer's
- * own (`requireProjectProfile` in `apps/api/src/services/skills.ts` accepts exactly those).
+ * edited elsewhere), and only project profiles as a default: every member's runs of the skill can
+ * resolve those (`resolveAgentProfile`), while a personal profile resolves only for its owner.
  */
 import {
   type InsightsSetupSuggestion,
@@ -73,7 +73,10 @@ function defaultProfileSuggestion(
     const arm = arms.get(run.profile.id) ?? {
       id: run.profile.id,
       name: run.profile.name,
-      applicable: run.profile.owner === 'project' || run.profile.owner === 'you',
+      // A project skill runs for every member, and each member's run resolves the default
+      // against project profiles and their own (`resolveAgentProfile`). The viewer's personal
+      // profile would fail for everyone else, so only project profiles are suggested.
+      applicable: run.profile.owner === 'project',
       runs: 0,
       clean: 0,
     };

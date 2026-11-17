@@ -14,12 +14,14 @@
  * in `insights-setups.test.ts`. If the batch fails as a whole its statement is retried once alone
  * (`runInsightsBatch`), at most 5.
  *
- * Throughput (rule 81): the runs statement reads at most `insights.setupsRunScanCap` runs (default
- * 2,000, newest first), and the response says when the cap cut the range short. At the outer limit
- * (a 90-day range on a project running 100 tasks a day, 9,000 runs) the page covers the newest
- * 2,000, about the last 20 days, and says so; raising the setting to 10,000 covers it all. The
- * nudge read probes each of those runs' chats once through a partial index of user messages, so
- * its cost grows with runs, not with transcript size.
+ * Throughput (rule 81): the response covers at most `insights.setupsRunScanCap` runs (default
+ * 2,000, newest first) and says when the cap cut the range short. The cap bounds what leaves D1 and
+ * what the nudge read probes, not what D1 reads: Flow's run population (`runsCte`) is built for the
+ * whole range before the newest runs are picked, as Flow and Accounts already do, at about one
+ * indexed lookup per run for its session. At the outer limit (a 90-day range on a project running
+ * 100 tasks a day, 9,000 runs) D1 reads those 9,000 runs and the project's pull requests and
+ * returns 2,000, about the last 20 days; a test drives more runs than the cap through the real
+ * statement. The nudge read costs one indexed read per distinct chat (`run-nudges.ts`).
  */
 import {
   DEFAULT_INSIGHTS_RANGE,
@@ -97,8 +99,10 @@ function ref(
   owner: RunRow['profile_owner']
 ): SetupRef {
   if (!id) return { id: null, name: null, owner: 'none' };
-  // Joined by id but no row came back: deleted, or a profile this project cannot see.
-  if (!owner) return { id, name: null, owner: 'not_recorded' };
+  // Joined by id but no row came back: deleted, a profile this project cannot see, or a profile
+  // hint that is free text (a task can name a profile). The raw value is never echoed: it may be
+  // a teammate's personal profile name.
+  if (!owner) return { id: null, name: null, owner: 'not_recorded' };
   return { id, name: owner === 'teammate' ? null : (name ?? null), owner };
 }
 

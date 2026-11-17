@@ -288,6 +288,9 @@ test.describe('Insights', () => {
     await expect(visible).toHaveCount(1);
     await expect(visible).toContainText('Opus 5.5 Chat');
     await expect(visible).toContainText('78%');
+    await expect(visible).toContainText('34 merged');
+    // A measure that covers only some runs says so in words.
+    await expect(visible).toContainText('2.4M· partial');
     await expect(visible).toContainText('3.1M');
     await expect(visible).toContainText('3.4 / 8 GB');
     await expect(visible).toContainText('No profile');
@@ -297,6 +300,18 @@ test.describe('Insights', () => {
     await expect(page.getByText('Use Sonnet 5.5 Fast for fix')).toBeVisible();
     await expect(page.getByText('do asks for 8 GB but peaks at 3.4 GB')).toBeVisible();
     await capture(page, 'insights-setups-realistic');
+  });
+
+  test('agent setups at a tablet width uses cards, not a squeezed table', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'Desktop (1280x800)', 'one extra width is enough');
+    await page.setViewportSize({ width: 900, height: 800 });
+    await setupScene(page, 'realistic');
+    await page.goto(`${BASE}/agent-setups`);
+    await expect(page.getByTestId('insights-setups-cards')).toBeVisible();
+    await expect(page.getByTestId('insights-setups-table')).toBeHidden();
+    await capture(page, 'insights-setups-tablet-900');
   });
 
   test('switching the grouping asks for it and keeps the URL', async ({ page }) => {
@@ -321,13 +336,13 @@ test.describe('Insights', () => {
     const patches: Array<{ skillId: string; body: unknown }> = [];
     await setupScene(page, 'realistic', [], 'realistic', 'realistic', patches);
     await page.goto(`${BASE}/agent-setups`);
-    const button = page.getByRole('button', { name: 'Make it the default for fix' });
+    const button = page.getByRole('button', { name: 'Make Sonnet 5.5 Fast the default for fix' });
     await expect(button).toBeVisible();
     await button.click();
     await expect
       .poll(() => patches)
       .toEqual([{ skillId: 'sk-fix', body: { defaultProfileId: 'p-sonnet' } }]);
-    await expect(page.getByText('Sonnet 5.5 Fast is now the default for fix')).toBeVisible();
+    await expect(page.getByText(/Sonnet 5\.5 Fast is now the default for fix/)).toBeVisible();
     await expect(page.getByTestId('insights-setups-suggestion')).toHaveCount(1);
     // Liveness: the other suggestion is still offered.
     await expect(page.getByRole('button', { name: 'Request 4.5 GB for do' })).toBeVisible();
