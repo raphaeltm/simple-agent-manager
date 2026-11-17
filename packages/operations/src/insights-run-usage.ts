@@ -227,3 +227,31 @@ export function summarizeRunTokens(
     limited: read.limited,
   };
 }
+
+const SQL_IDENTIFIER = /^[A-Za-z_]\w*$/;
+
+/**
+ * Measured tokens (input, output, cache read and write) per run, for a set of runs at once
+ * (Insights · Agent setups). `runsTable` is a table or CTE with `id` and `sessionColumn`; one
+ * bind, the project id. The same source rule as `readRunUsage`: when the AI proxy measured a chat
+ * its rows are the only ones counted, because the proxied harness reports the same calls. A run
+ * with no rows is absent from the result (not reported, never zero). Sums with TOTAL(), which
+ * cannot overflow. `CROSS JOIN` keeps `runsTable` the outer loop (SQLite never reorders it), so
+ * each run is an index search on `idx_agent_run_usage_key` `(project_id, chat_session_id, …)`, not a
+ * pass over the project's whole usage history.
+ */
+export function runTokenTotalsSql(runsTable: string, sessionColumn: string): string {
+  if (!SQL_IDENTIFIER.test(runsTable) || !SQL_IDENTIFIER.test(sessionColumn)) {
+    throw new Error('Invalid SQL identifier');
+  }
+  return `SELECT k.id,
+           TOTAL(u.input_tokens) + TOTAL(u.output_tokens) + TOTAL(u.cache_read_tokens)
+             + TOTAL(u.cache_write_tokens) AS tokens
+      FROM ${runsTable} k
+      CROSS JOIN agent_run_usage u ON u.project_id = ? AND u.chat_session_id = k.${sessionColumn}
+     WHERE u.source = 'ai_proxy'
+        OR NOT EXISTS (SELECT 1 FROM agent_run_usage x
+                        WHERE x.project_id = u.project_id
+                          AND x.chat_session_id = u.chat_session_id AND x.source = 'ai_proxy')
+     GROUP BY k.id`;
+}

@@ -21,7 +21,7 @@ import { bucketLabel, formatDuration } from './format';
  * Series colours for the chart. Green is left out (it means working or primary in SAM Glass), and
  * so is amber (waiting on you). Accounts beyond these share "Other".
  */
-const SERIES_COLORS = [
+export const SERIES_COLORS = [
   'var(--sam-admin-chart-series-2)',
   'var(--sam-admin-chart-series-3)',
   'var(--sam-admin-chart-series-9)',
@@ -29,7 +29,7 @@ const SERIES_COLORS = [
   'var(--sam-admin-chart-series-12)',
 ] as const;
 /** "Other" and runs whose account was not recorded: neutral slate, never a loud hue. */
-const NEUTRAL_COLOR = 'var(--sam-person-auto)';
+export const NEUTRAL_COLOR = 'var(--sam-person-auto)';
 
 const KIND_LABELS: Record<InsightsAccount['kind'], string> = {
   subscription: 'Subscription',

@@ -7,8 +7,7 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log, serializeError } from '../lib/logger';
-import { releaseUnallocatedNodeTunnel } from './node-tunnel-journal';
+import { releaseNodeIngressBeforeVm } from './node-provisioning-ingress';
 
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
 
@@ -78,15 +77,7 @@ export async function releaseTunnelBeforeVm(
   runtimeIncarnationId: string,
   reason = 'provisioning_failed_before_vm'
 ): Promise<void> {
-  try {
-    await releaseUnallocatedNodeTunnel(env, nodeId, runtimeIncarnationId, reason);
-  } catch (releaseErr) {
-    log.error('node_provisioning.tunnel_release_failed', {
-      nodeId,
-      runtimeIncarnationId,
-      ...serializeError(releaseErr),
-    });
-  }
+  await releaseNodeIngressBeforeVm(env, nodeId, runtimeIncarnationId, reason);
 }
 
 /**

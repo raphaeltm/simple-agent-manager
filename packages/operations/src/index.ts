@@ -155,6 +155,10 @@ export {
   notifyClosedAsk,
 } from './inbox-write-core';
 export { projectAccounts, type ProjectAccountsInput } from './insights-accounts';
+export {
+  INSIGHTS_CLOUDFLARE_COST_SETTINGS,
+  type InsightsCloudflareCostSettingName,
+} from './insights-cloudflare-cost-settings-definition';
 export { projectFlow, type ProjectFlowInput } from './insights-flow';
 export {
   installationHealth,
@@ -162,6 +166,10 @@ export {
   type InstallationHealthInput,
   utcWeekStart,
 } from './insights-installation';
+export {
+  readCloudflareCost,
+  summarizeCloudflareCost,
+} from './insights-installation-cloudflare';
 export {
   densityFromRuns,
   newMachineReasonsFor,
@@ -207,6 +215,7 @@ export {
   type RunUsageRead,
   summarizeRunTokens,
 } from './insights-run-usage';
+export { projectSetups, type ProjectSetupsInput } from './insights-setups';
 export { getPlatformOperationLimits } from './limits';
 export {
   getFileContext,

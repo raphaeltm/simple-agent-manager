@@ -1039,6 +1039,21 @@ export async function getRunReceiptFacts(
   );
 }
 
+export async function countRunNudges(
+  env: Env,
+  projectId: string,
+  windows: Parameters<ProjectData['countRunNudges']>[0],
+  maxWindows: number
+): Promise<ReturnType<ProjectData['countRunNudges']>> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'countRunNudges',
+    (stub) => stub.countRunNudges(windows, maxWindows),
+    'idempotent_read'
+  );
+}
+
 export async function getMessages(
   env: Env,
   projectId: string,

@@ -9,6 +9,50 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 If you'd rather not fork and configure a repository, the [installer](/docs/guides/installer/) builds and deploys a complete SAM in your Cloudflare account from your browser, and updates it later (check [who can use the hosted installer today](/docs/guides/installer/)). This guide is the fork-based path: more steps, and full control over every setting.
 
+## Single-box transport foundation
+
+The single-box deployment is being landed in separate slices. Its reverse-tunnel API foundation
+is build-specific: lease allocation and frps authorization live under `apps/api/src/selfhost/`
+and are absent from the Cloudflare Worker entry. Setting `VM_AGENT_TRANSPORT=reverse-tunnel`
+on a Cloudflare deployment does not install that transport and fails before VM allocation.
+
+The self-host build supplies the frpc boot renderer and installs its transport adapter before
+requests or Durable Object dispatch. It appends the migration manifest from
+`apps/api/src/selfhost/reverse-tunnel-migrations.ts` to the **same database's** flat migration
+projection after the shared migrations, rejecting filename collisions. Cloudflare databases do
+not receive the reverse-tunnel lease table. Existing boxes keep the additive table created by
+the earlier migration number.
+
+The transport setting admits new leases. Existing allocations adopt their original lease only
+while its exact stored owner remains live. Cleanup and the backstop follow the installed
+self-host driver, so changing the setting cannot strand an old lease. A build without that
+driver performs no reverse-lease SQL.
+
+Lease credentials and frps session IDs use separate HKDF-derived HMAC keys. One pinned frps
+instance owns session replacement. Its Login plugin must apply the server-selected `run_id`
+with `unchange: false`, and every subsequent operation checks that session against the lease.
+Credential-key rotation recovery is tracked separately. Changing the root key rejects stale
+resume derivation and old session IDs, but a credential matching the stored lease hash can
+still log in and obtain the new session ID; root-key rotation alone does not revoke that lease. Full gateway, cloud-init and installer packaging follow this foundation.
+
+The self-host build supplies these bootstrap settings; they are not Cloudflare Worker bindings:
+
+| Setting | Default and contract |
+| --- | --- |
+| `REVERSE_TUNNEL_GATEWAY_SECRET` | Required random secret, at least 32 characters, shared with the frps/plugin gateway. |
+| `REVERSE_TUNNEL_GATEWAY_SECRET_ALTERNATE` | Unset; optional second gateway secret during a coordinated rotation. |
+| `REVERSE_TUNNEL_PORT_RANGE_START` / `REVERSE_TUNNEL_PORT_RANGE_END` | `20000` / `29999`; ports 1024–65535, at most 20,000 ports; must match frps `allowPorts`. |
+| `REVERSE_TUNNEL_HEARTBEAT_TIMEOUT_SECONDS` | `90`; 60–3600 seconds; the build must supply the same timeout to frps. |
+| `REVERSE_TUNNEL_PORT_REUSE_MIN_AGE_SECONDS` | `180`; cannot be shorter than twice the heartbeat timeout; maximum 86400 seconds. |
+
+Allocation considers the whole bounded port range in one atomic SQL statement, with indexed
+history lookups. Release checks all active leases in one local statement, without network calls
+or pagination. At the outer normal limit of 20,000 active leases, one backstop pass releases all
+eligible leases; the later gateway slice schedules that backstop every five minutes. A newly
+freed port still waits for its cooling interval. A full range and a cooling range have distinct
+errors so operators can distinguish capacity exhaustion from a wait for safe reuse.
+
+
 ## Prerequisites
 
 | Requirement              | Purpose                   | Tier                 |
@@ -64,6 +108,8 @@ Set **Zone Resources** to your specific domain and **Account Resources** to your
 The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. SAM also enables the Cloudflare Container instant-session runtime by default, so **Containers: Edit** is required for the default Worker deploy. The same deploy automatically builds and versions the container vm-agent; no prebuilt image, registry credential, or manual vm-agent version is required. The **Account → SSL and Certificates → Edit** permission is required for issuing per-node Origin CA certificates used for VM-agent TLS — without it, new nodes cannot obtain a TLS certificate and will fail to boot.
 
 **Optional — VM Cloudflare Tunnels:** To use outbound-only VM agent connections for newly provisioned workspace and deployment VMs, grant the runtime token **Account → Cloudflare One Connector: cloudflared → Edit** (the API catalog calls this `Cloudflare One Connector: cloudflared Write`) and set the GitHub Environment variable `VM_AGENT_TRANSPORT` to `cloudflare-tunnel`. Manual deployments use `CF_API_TOKEN` for runtime operations, so update that token before enabling the setting. The hosted installer includes this permission in newly created runtime tokens; existing installations need their runtime token permission updated. DNS Edit is also required. No per-machine token setup is needed: SAM creates, configures, and removes the tunnels. Existing VMs and instant containers keep their current transport, and deployment VMs keep serving app routes on their public IP. See [VM transport configuration](/docs/reference/configuration/#vm-transport-and-tls).
+
+**Optional — Account Analytics read:** Add **Account → Account Analytics → Read** so superadmins see what the Cloudflare account costs. It powers the Cloudflare card on **Admin → Health & cost** (a daily usage-derived estimate of this month's Cloudflare cost and a projection) and the Analytics Engine charts on **Admin → Analytics**. Without it, the Cloudflare card says the token cannot read account analytics and what to add; the Admin → Analytics charts and the optional daily analytics forward fail with a generic error. Runtime tokens created by the hosted installer do not include this permission yet. You can add it to an existing token in the Cloudflare dashboard; no redeploy is needed. See [Health & cost](/docs/guides/admin-settings/#cloudflare-cost-snapshot).
 
 **Optional — Workers AI read:** [AI models for agents](/docs/guides/ai-models-for-agents/) works without extra permissions. Model calls and the model list use the Worker's own Workers AI binding and go through your AI Gateway. Adding **Account → Workers AI → Read** also lets agents fetch a model's full input schema with `list_ai_models`. Without it, agents get the model's documentation link instead. Model calls are billed to this Cloudflare account, and each project has a monthly limit.
 
@@ -336,7 +382,7 @@ stop routing to them) or `D1_SESSION_MODE=disabled` to keep the replicas but rou
 query at the primary. Replication needs no extra API-token permission beyond the
 **Account → Cloudflare Workers: D1 → Edit** grant the deploy token already requires.
 
-The reviewed default churning selectors are `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
+The reviewed default churning selectors are listed in the [configuration reference](/docs/reference/configuration/) (`DEFAULT_D1_MIGRATION_CHURNING_TABLES` in `scripts/deploy/d1-migration-churning-tables.ts`). All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
@@ -487,6 +533,20 @@ Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `
 
 Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured, plus **Email me a sign-in code** when the deploy prepared email.
 
+**Check that setup is closed.** Once you have signed in as the first superadmin, nobody else can
+use the setup page. Confirm it from any machine:
+
+```bash
+curl -i https://api.yourdomain.com/api/setup/status
+# Should return: HTTP/2 410 with "error":"SETUP_CLOSED"
+```
+
+A `200` response with `"open":true` means setup is still open to anyone holding the `SETUP_TOKEN`:
+finish setup now. If it shows `"forced":true`, the `SETUP_FORCE=true` lockout-recovery override is
+set; remove it from the Worker's variables once you have recovered access, because it keeps setup
+open even after a superadmin exists. See the
+[security advisory on setup takeover](/blog/security-advisory-setup-takeover/) for why this matters.
+
 If you enabled GitLab in platform configuration, create a test project from a GitLab repository and start a lightweight chat before inviting users. That validates the OAuth app, repository metadata propagation, and workspace credential helper path together.
 
 ## Updating an Existing Self-Hosted Instance
@@ -532,6 +592,8 @@ There's no rollback. If a release misbehaves, update to a newer one that fixes i
 4. Wait for the workflow to finish, then re-run the health check above.
 
 Use the manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
+
+### Deploys wait for container rollout
 
 Staging and production deployments wait for container application rollouts to reach
 100% before reporting success. Wrangler returning successfully only means the
@@ -751,7 +813,7 @@ admission records is part of the parent section C integration.
 | Medium (vc2-4c-8gb) | 4 vCPU, 8GB RAM, 160GB  | ~$40    |
 | Large (vc2-6c-16gb) | 6 vCPU, 16GB RAM, 320GB | ~$80    |
 
-Vultr bills hourly and the default region is `fra` (Frankfurt). When you create the Vultr Personal Access Token, its **IP access control** allowlist must be set to **Allow All IPv4/IPv6** — SAM calls the Vultr API from Cloudflare Workers, which have no static egress IP, so a restricted allowlist will reject provisioning requests.
+Vultr bills hourly. Machines go to the regions your [compute pool](/docs/guides/compute-pools/) allows; `fra` (Frankfurt) is only the provider fallback when nothing else names a region. When you create the Vultr Personal Access Token, its **IP access control** allowlist must be set to **Allow All IPv4/IPv6** — SAM calls the Vultr API from Cloudflare Workers, which have no static egress IP, so a restricted allowlist will reject provisioning requests.
 
 **DigitalOcean:**
 
@@ -761,7 +823,7 @@ Vultr bills hourly and the default region is `fra` (Frankfurt). When you create 
 | Medium (s-4vcpu-8gb) | 4 vCPU, 8GB RAM, 160GB  | ~$48    |
 | Large (s-8vcpu-16gb) | 8 vCPU, 16GB RAM, 320GB | ~$96    |
 
-DigitalOcean bills hourly, defaults to `fra1` (Frankfurt), and requires a Full Access Personal Access Token (or equivalent custom scopes for droplets, block storage, tags, account, actions, images, regions, and sizes).
+DigitalOcean bills hourly (machines go to the regions your compute pool allows; `fra1`, Frankfurt, is only the provider fallback) and requires a Full Access Personal Access Token (or equivalent custom scopes for droplets, block storage, tags, account, actions, images, regions, and sizes).
 
 **UpCloud:**
 
@@ -771,7 +833,7 @@ DigitalOcean bills hourly, defaults to `fra1` (Frankfurt), and requires a Full A
 | Medium (4xCPU-8GB) | 4 vCPU, 8GB RAM  | ~$24            |
 | Large (8xCPU-16GB) | 8 vCPU, 16GB RAM | ~$48            |
 
-UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; the default zone is `de-fra1` (Frankfurt). Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
+UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; machines go to the zones your compute pool allows, with `de-fra1` (Frankfurt) as the provider fallback. Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
 
 ### Unresponsive machines are released automatically
 
@@ -910,7 +972,7 @@ choosing ongoing sampling. The generated configuration redacts query strings fro
 and terminal URLs can contain credentials. Traces can still include URL paths and database
 statement metadata; restrict access to observability data as you would for production logs.
 
-### Application deployment builds
+## Application deployment builds
 
 Instant sessions publish applications through a dedicated Cloudflare Container build executor. Cloudflare Containers are already part of SAM's supported setup, so this adds no separate cloud account or manual secret prerequisite. Deployment targets remain VMs. VM sessions retain the node executor by default; keep `deployments.buildExecutor=node` in **Admin → Settings** until a staging VM trial verifies a served release with unchanged source build/save counters. VM publishing through Cloudflare remains unverified. `DEPLOY_BUILDER_INSTANCE_TYPE` and `DEPLOY_BUILDER_MAX_INSTANCES` are deployment-time sizing controls; see the [configuration reference](/docs/reference/configuration/#cloudflare-application-build-executor).
 

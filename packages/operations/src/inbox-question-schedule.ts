@@ -62,6 +62,9 @@ export function questionUndeliveredExtension(
       Math.max(limits.questionTimeoutMinutes, limits.questionMaxWaitMinutes) * MINUTE_MS;
   return {
     maxExpiresAt,
-    extendedExpiry: Math.min(maxExpiresAt, now + limits.questionUndeliveredGraceMinutes * MINUTE_MS),
+    extendedExpiry: Math.min(
+      maxExpiresAt,
+      now + limits.questionUndeliveredGraceMinutes * MINUTE_MS
+    ),
   };
 }

@@ -152,7 +152,8 @@ vi.mock('../../src/schemas', async (importOriginal) => {
   };
 });
 
-vi.mock('../../src/routes/workspaces/_helpers', () => ({
+vi.mock('../../src/routes/workspaces/_helpers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/routes/workspaces/_helpers')>()),
   assertWorkspaceAcceptsCallback: vi.fn(async (_env: unknown, workspace: unknown) => workspace),
   assertWorkspaceCallbackResourceById: vi.fn(async () => ({
     workspaceId: 'test-workspace',
@@ -240,6 +241,8 @@ const mockEnv = {
   DATABASE: {} as D1Database,
   KV: { get: (...args: unknown[]) => mockKvGet(...args), put: vi.fn() },
   AI_PROXY_ENABLED: 'true',
+  AI_GATEWAY_ID: 'gateway',
+  CF_ACCOUNT_ID: 'account',
   BASE_DOMAIN: 'example.com',
   JWT_PUBLIC_KEY: 'key',
   ENCRYPTION_KEY: 'test-key',
@@ -323,6 +326,23 @@ beforeEach(async () => {
 afterEach(() => attributionSqlite?.close());
 
 describe('runtime.ts always-proxy', () => {
+  it.each(['claude-code', 'openai-codex', 'opencode'])(
+    'returns 404 for unproxied custom-baseURL %s credential, never the key',
+    async (agentType) => {
+      mockWorkspaceOnly();
+      mockGetDecryptedAgentKey.mockResolvedValueOnce({
+        credential: 'custom-private-key',
+        credentialKind: 'api-key',
+        credentialSource: 'user',
+        baseUrl: 'https://custom.example.com/v1',
+        providerDialect: agentType === 'claude-code' ? 'anthropic' : 'openai-compatible',
+      });
+      const response = await postAgentKey(agentType, { AI_PROXY_ENABLED: 'false' });
+      expect(response.status).toBe(404);
+      expect(await response.text()).not.toContain('custom-private-key');
+    }
+  );
+
   it('authenticates message persistence before reading or validating the JSON body', async () => {
     const authError = Object.assign(new Error('Unauthorized'), {
       statusCode: 401,

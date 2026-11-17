@@ -1,3 +1,7 @@
+vi.mock('../../../src/services/platform-capabilities', async (original) => ({
+  ...(await original<typeof import('../../../src/services/platform-capabilities')>()),
+  resolveLlmEndpointCapability: async () => null,
+}));
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -85,6 +89,7 @@ type TestEnv = {
   KV: { get: ReturnType<typeof vi.fn> };
   AI_PROXY_ENABLED: string;
   AI_PROXY_ALLOWED_MODELS?: string;
+  AI_GATEWAY_ID: string;
   CF_ACCOUNT_ID: string;
   CF_API_TOKEN: string;
   AI_PROXY_REQUEST_BODY_MAX_BYTES?: string;
@@ -100,6 +105,7 @@ function makeEnv(overrides: Partial<TestEnv> = {}): TestEnv {
     KV: { get: vi.fn().mockResolvedValue(null) },
     AI_PROXY_ENABLED: 'true',
     AI_PROXY_ALLOWED_MODELS: '@cf/test/model',
+    AI_GATEWAY_ID: 'gateway',
     CF_ACCOUNT_ID: 'acct',
     CF_API_TOKEN: 'cf-token',
     ...overrides,
@@ -378,7 +384,7 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     expect(res.status).toBe(200);
     await res.text();
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.openai.com/v1/responses');
+    expect(url).toBe('https://gateway.ai.cloudflare.com/v1/acct/gateway/openai/v1/responses');
     expect(init.body).toBe(JSON.stringify({ model: 'gpt-4.1', input: 'Say hi' }));
     expectUsageIncrement(8, 3);
   });
@@ -413,7 +419,7 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     expect(res.status).toBe(200);
     await res.text();
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.openai.com/v1/responses');
+    expect(url).toBe('https://gateway.ai.cloudflare.com/v1/acct/gateway/openai/v1/responses');
     expect(init.body).toBe(JSON.stringify({ model: 'gpt-6.1-sol', input: 'Use a tool', tools }));
     expectUsageIncrement(6, 2);
   });

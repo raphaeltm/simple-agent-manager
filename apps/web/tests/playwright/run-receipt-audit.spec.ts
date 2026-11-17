@@ -13,6 +13,7 @@ import {
   screenshot,
   seedTheme,
 } from './audit-helpers';
+import { docsShot } from './docs-shot';
 
 const PROJECT_ID = 'proj-receipt-1';
 const SESSION_ID = 'cs-receipt-1';
@@ -609,7 +610,14 @@ test.describe('Run receipt — chat tool rail', () => {
   });
 
   test('shows measured tokens per model with an API-key spend estimate', async ({ page }) => {
-    const drawer = await openReceipt(page, { receipt: makeReceipt({ tokens: TOKENS_REPORTED }) });
+    // An API-key account: only those get a spend estimate (the docs image shows this scene).
+    const base = makeReceipt();
+    const drawer = await openReceipt(page, {
+      receipt: makeReceipt({
+        tokens: TOKENS_REPORTED,
+        account: base.account ? { ...base.account, accountName: 'Work API key' } : null,
+      }),
+    });
     await expect(drawer.getByText('2.6M')).toBeVisible();
     await expect(drawer.getByText('Incl. 2.2M cache · Reported by the agent')).toBeVisible();
     const models = drawer.getByTestId('receipt-token-models');
@@ -620,6 +628,8 @@ test.describe('Run receipt — chat tool rail', () => {
     );
     await expect(drawer.getByText('Not reported')).toHaveCount(0);
     await assertInViewport(page);
+    // Docs image (chat-features.md, Run Receipt): the open receipt beside the chat.
+    if ((page.viewportSize()?.width ?? 0) >= 1280) await docsShot(page, 'run-receipt');
     await capture(page, 'run-receipt-tokens');
   });
 

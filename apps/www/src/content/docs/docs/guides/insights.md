@@ -1,17 +1,25 @@
 ---
 title: Insights
-description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks, the ideas that have waited longest, and which accounts carried the work.
+description: See how work moves from idea to merged in a project — merge times, CI on the first try, why runs stop, flaky checks, the ideas that have waited longest, which agent setups work best, and which accounts carried the work.
 ---
 
 **Insights** is a project page, in the project's navigation on desktop and on a phone. It shows how
 work moves from idea to merged pull request, over the last **7**, **30** or **90 days** (the range
 control at the top right; the range stays in the page's address, so a link keeps it).
 
-It has four tabs. **Flow** and **Accounts** are described below. **Agent setups** and **People** are
-coming; until then each says what it will show.
+It has four tabs. **Flow**, **Agent setups** and **Accounts** are described below. **People** is
+coming; until then it says what it will show.
 
 Every number is worked out from what SAM already records about tasks, ideas, pull requests and
 their checks. Nothing is estimated: when SAM has no record for something, the page says so.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/insights-flow-mobile.png 2x" />
+  <img
+    src="/images/docs/insights-flow.png"
+    alt="The Insights page on its Flow tab, with 7, 30 and 90 days selectable and 30 days selected (on a phone the screen shows the four figures, two by two). Four figures: Idea to merged, median 1.6 days, 9.6 hours faster than the previous 30 days; CI passes first try 64%, up 6 points; Waiting on a person, median 22 min across 41 asks; Rework within 7 days 11%, down 3 points. Below, Runs per week by outcome shows six weekly bars split into merged, closed without merge and failed, and Why runs stopped before finishing lists Pull request waiting to merge 31, CI failing 18, Hit a usage limit 9, Workspace setup failed 6 and Agent stopped responding 4. Flaky checks and Ideas waiting longest begin underneath."
+  />
+</picture>
 
 ## Flow
 
@@ -65,6 +73,57 @@ Open ideas a person filed in the range, oldest first (ideas an automation or inc
 left out, as on the Ideas page), with how many runs worked on each and where it stands
 (not started, pull request open with CI red, stuck, and so on). Select one to open it.
 
+## Agent setups
+
+Which setup does this kind of work best on this repository. Choose what a setup is with **Group
+by**: the agent **Profile** a run used, the **Skill** it ran, or the **Model** (the model the
+profile or skill asked for; runs that asked for none appear as the agent's **default model**). The
+choice stays in the page's address. The runs are the same ones Flow counts.
+
+### Each setup
+
+- **Runs**, and how many merged a pull request.
+- **Merged without rework**: of the runs that finished, the share whose pull request merged and was
+  not followed, within the rework window, by another pull request on the same branch. A run that
+  failed or was stopped counts against its setup. Flow's rework figure also counts a follow-up
+  linked to the same idea; this tab counts the same-branch kind only, so the two can differ.
+- **Median to pull request**: from the run being asked for (time waiting for a machine included)
+  to the first pull request it opened, over the runs that opened one.
+- **Nudges per run**: messages a person sent into the run's chat while it was going — a typed
+  follow-up or a comment addressed to the agent. The task's own first prompt, messages from other
+  agents and SAM's own prompts are not nudges. **Not recorded** when the chats can't be read. An
+  installation that switched durable prompt delivery off (`DURABLE_PROMPT_DELIVERY_ENABLED=false`;
+  it is on by default) does not mark follow-ups, so they are not counted there.
+- **Tokens per merged PR**: the tokens (input, output and cache) that the agent or SAM's AI proxy
+  reported for the setup's runs, divided by how many of those runs merged. A run continued after
+  waking from sleep shares its chat, and its tokens are counted once. Runs whose agent reports no
+  tokens are left out and the figure says how many did report; with none it reads **Not
+  reported**. SAM never estimates tokens.
+- **Memory p90 / requested**: the 90th percentile of each run's peak memory against the memory the
+  runs asked for, with any out-of-memory kills. **Not recorded** when the runs have no resource
+  telemetry.
+
+A figure that covers only some of a setup's runs says **partial**, and a setup with fewer finished
+runs than the suggestion minimum says **few runs**. Another member's personal profile or skill is
+never named; it appears as **A teammate's profile** (or skill). **Compared** puts the five busiest
+setups side by side on merges, time to pull request and nudges.
+
+### Suggestions
+
+When the numbers support it, the tab suggests a change to one of this project's skills, applied
+with one tap through the skill's own settings (you need permission to edit the project):
+
+- **A default profile for a skill**: offered when, among the skill's finished runs, a project
+  profile merged without rework clearly more often (by 20 points by default) than the skill's
+  current default profile, or than the next-best profile when it has none. Each profile compared
+  needs at least 10 finished runs of that skill; with fewer, one run moves the rate by ten points
+  and the difference is noise.
+- **A memory request for a skill**: offered when at least 10 of the skill's runs recorded their
+  peak memory and the 90th percentile, plus 25% headroom, differs from what the skill asks for by
+  a gigabyte or more. It never suggests asking for less after an out-of-memory kill.
+
+Once applied, the suggestion goes away because the skill no longer matches it.
+
 ## Accounts
 
 Which account each run used, and how often an account's usage limit paused the work. An account
@@ -87,8 +146,9 @@ whose agent session recorded no credential appear as **Account not recorded**.
   long in total (**Paused now** while one is still going).
 - **Limits now** (your own accounts): the provider's last-reported windows, the same chip as the chat
   header. Open it for every window and when it resets.
-- **Spend** (API keys): **Not reported** for now. SAM does not yet record how many tokens each run
-  used, and it does not estimate.
+- **Spend** (API keys): **Not reported** for now: this tab does not add up spend yet. Each run's
+  tokens per model, and an estimated spend for runs on an API key, are on its chat's
+  [Receipt](/docs/guides/chat-features/#run-receipt).
 
 The ring around each account's icon is its colour in the chart below.
 
@@ -117,14 +177,15 @@ the tab says so rather than showing it empty.
 
 ## On the Overview
 
-The [Project Overview](/docs/guides/project-overview/) shows a small **This week** pane with three of
-these numbers and the top blocker, and links here. The top blocker is the most common reason runs
+The [Project Overview](/docs/guides/project-overview/) shows a small **This week** pane for the last 7 days: pull requests **Merged**, **Idea → merged**
+and **CI first try**, and the top blocker, with a link here. The top blocker is the most common reason runs
 stopped (other than a person or coordinator stopping them on purpose) or the flakiest check,
 whichever affected more work.
 
 ## For administrators
 
 How many ideas "idea to merged" looks at, how many flaky checks and waiting ideas are listed, the
-rework window, how many limit waits the Accounts tab examines and how many stalls it lists are
-runtime settings under **Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`).
+rework window, how many limit waits the Accounts tab examines and how many stalls it lists, and
+how many runs Agent setups examines and when it makes a suggestion, are runtime settings under
+**Admin → Settings → Operations** (`insights.flow*`, `insights.accounts*`, `insights.setups*`).
 See [Admin settings](/docs/guides/admin-settings/).

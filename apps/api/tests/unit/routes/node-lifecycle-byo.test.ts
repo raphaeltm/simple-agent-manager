@@ -234,6 +234,11 @@ describe('node-lifecycle BYO gates', () => {
   });
 
   describe('Origin CA issuance gate (critique #2)', () => {
+    it('denies Origin CA for managed reverse-tunnel nodes even with NULL tunnel_id', async () => {
+      state.node = makeNode({ nodeClass: 'managed', transport: 'reverse-tunnel', tunnelId: null });
+      const res = await appRequest('/api/nodes/node-1/origin-ca-certificate', VALID_CSR, true);
+      expect(res.status).toBe(403);
+    });
     it('denies wildcard cert issuance for a user-owned node', async () => {
       state.node = makeNode({ nodeClass: 'user-owned', transport: 'cloudflare-tunnel' });
       const res = await appRequest('/api/nodes/node-1/origin-ca-certificate', VALID_CSR, true);
@@ -380,6 +385,21 @@ describe('node-lifecycle BYO gates', () => {
       );
     }
 
+    it.each(['cloudflare-tunnel', 'reverse-tunnel'])('F21: stored %s suppresses IP/DNS with NULL tunnel_id', async (transport) => {
+      state.node = makeNode({ transport, tunnelId: null, ipAddress: null });
+      const res = await heartbeatFrom('203.0.113.9');
+      expect(res.status).toBe(200);
+      expect(state.updates.length).toBeGreaterThan(0);
+      expect(state.dns.create).toBeNull();
+      expect(state.updates.some((u) => 'ipAddress' in u)).toBe(false);
+    });
+    it('F21: deployment CF tunnel can backfill its app IP with NULL tunnel_id, without DNS', async () => {
+      state.node = makeNode({ transport: 'cloudflare-tunnel', nodeRole: 'deployment',
+        tunnelId: null, ipAddress: null, status: 'creating' });
+      expect((await heartbeatFrom('203.0.113.9')).status).toBe(200);
+      expect(state.updates.some((u) => u.ipAddress === '203.0.113.9')).toBe(true);
+      expect(state.dns.create).toBeNull();
+    });
     it('ignores the connecting IP of a workspace tunnel node even when one is sent', async () => {
       state.node = makeNode({
         transport: 'cloudflare-tunnel',

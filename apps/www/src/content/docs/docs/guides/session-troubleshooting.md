@@ -8,8 +8,13 @@ label in the session list. Find what you are seeing below. The section it points
 your work is safe and what to do next. Everything here applies to both
 [Instant and VM sessions](/docs/guides/instant-sessions/) unless it says otherwise.
 
-- **Needs input** in the session list. The agent, or SAM, is waiting for an answer from the person
-  who started the chat. → [Find what it's waiting for](#the-agent-is-waiting-for-you)
+- **Needs input** in the session list, or an item in your [Inbox](/docs/guides/inbox/). The agent,
+  or SAM, is waiting for an answer from the person who started the chat.
+  → [Find what it's waiting for](#the-agent-is-waiting-for-you)
+- **A Problem in your Inbox**, such as **"Fix login" couldn't start** or **Couldn't wake "Ship
+  billing"**. SAM filed it because something of yours failed; its button is the fix.
+  → [Problems SAM files for you](/docs/guides/inbox/#problems-sam-files-for-you), then the matching
+  section below ([wake failed](#wake-failed), [task failed](#when-a-task-fails))
 - **"Waiting for provider limit reset at…"**, **Waiting** or **Needs you** on the task's Dashboard
   card, or a red **BLOCKED** badge on the chat in the session list. The agent hit a usage limit;
   SAM carries on after the reset, unless it says **Blocked**. (A subtask with that badge also reads
@@ -124,7 +129,9 @@ phone, open the session list with the list icon at the right of the project-name
 on that icon says how many chats need attention. Open the chat and look for one of these:
 
 - **A card in the chat** — a permission request, under the step it's about, or a question or a link
-  to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If
+  to open, at the end of the chat. Each one also sends you a notification and appears in your
+  [Inbox](/docs/guides/inbox/), where a permission can be answered directly. Answer it there or on
+  the card; the agent carries on once it has your answer. If
   the card says the request expired or was cancelled, the agent was told no, so send a message
   saying how to continue. SAM respects pending requests until their response deadline; waiting for
   your answer is not treated as a stall. See
@@ -496,7 +503,8 @@ or a subtask reporting back. The system message starts with **Wake failed:** and
 when SAM refused the wake outright it reads `Wake failed: <reason> (<code>)`, and when it ran out of
 time retrying, it repeats the last reason it hit. The session list keeps the chat marked
 **Wake failed** until you reply. Anything you sent is still in the transcript; the agent never
-received it.
+received it. SAM also files a **Problem** in your Inbox, **Couldn't wake** and the chat's name, with
+**Wake the chat** (VM chats only) and **Open chat**; it closes by itself once the chat wakes.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/chat-wake-failed-mobile.png 2x" />
@@ -567,6 +575,12 @@ happens while the workspace is still running, SAM tries to keep the workspace: i
 workspace, and puts the chat to sleep. That usually takes a few minutes, but if the agent was in the
 middle of a turn SAM waits for it to end, for up to eight hours. Until then the chat stays awake with
 the failure card showing: wait for it to go to sleep rather than using **Retry**.
+
+SAM also files a **Problem** in your Inbox within about five minutes: **"…" couldn't start** or
+**"…" stopped before it finished**. Its **Retry** (offered to the project's owner when the failure
+can be retried) starts a new task with the original request right away, in a new chat and
+workspace; the tool rail's **Retry** pre-fills a new chat for you to check and send instead. To continue the work this chat already did, use **Open chat** and reply
+there once it is asleep, as below.
 
 SAM's stalled-turn check respects unanswered permission requests and questions until their
 response deadline. Waiting for your answer is not treated as an agent stall. If SAM detects a
