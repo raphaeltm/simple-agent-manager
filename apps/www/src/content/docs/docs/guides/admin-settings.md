@@ -47,6 +47,17 @@ shows as **operations · cron Sweeps Enabled**), and shows:
   />
 </picture>
 
+If an older stored override no longer meets the current bounds or type, its card shows
+**Default in effect, stored value invalid**, with the stored text for nonsecret settings.
+Security controls that fail closed instead show **Safe fallback in effect**: Connector
+access and writes are disabled, registration is allowlisted, redirect hosts are empty,
+and the private SAM assistant is disabled. Existing emergency brakes remain effective.
+The other settings remain available. Use **Reset override** to remove the invalid row,
+or save a valid replacement. Secret values are never displayed.
+
+<!-- Verified implementation: apps/api/src/services/admin-settings-resolution.ts:readAdminSettings
+     isolates invalid overrides; resolveAdminSetting retains runtime safety fallbacks. -->
+
 ## Change a setting
 
 1. Find the setting and change its value.
@@ -315,6 +326,7 @@ Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-api
 | `insights.receiptSlowFactorPercent`      | 150     | 101–1,000   | Percentage of the usual duration at which a phase is listed as slow                |
 | `insights.receiptSlowMinSeconds`         | 60      | 0–3,600     | Phases shorter than this are never listed as slowing a run down                    |
 | `insights.receiptMemoryNearLimitPercent` | 90      | 50–100      | Peak memory at or above this share of the requested memory is listed as a slowdown |
+| `insights.receiptTokenRowsMax`           | 64      | 8–1,000     | Token-usage rows (model × account × agent restart) one receipt reads; more shows a floor |
 
 ## Insights page
 

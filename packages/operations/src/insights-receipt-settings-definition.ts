@@ -58,6 +58,13 @@ export const INSIGHTS_RECEIPT_SETTINGS = [
       'Peak memory at or above this percentage of the requested memory is listed as slowing a run down.',
     range: { min: 50, max: 100 },
   },
+  {
+    name: 'insights.receiptTokenRowsMax',
+    defaultValue: 64,
+    description:
+      'Most token-usage rows (one per model, account and agent restart) one run receipt reads. A run with more says its totals are a floor.',
+    range: { min: 8, max: 1_000 },
+  },
 ] as const;
 
 export type InsightsReceiptSettingName = (typeof INSIGHTS_RECEIPT_SETTINGS)[number]['name'];

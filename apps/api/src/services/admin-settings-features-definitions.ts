@@ -363,6 +363,7 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     OPERATOR_DEFAULTS.disabled,
     'Operations',
     'Disable the private SAM assistant for every account. Does not opt users in.',
-    {}
+    // Inverse polarity: containment requires the disabled switch to be true.
+    { unavailableValue: true }
   ),
 ];

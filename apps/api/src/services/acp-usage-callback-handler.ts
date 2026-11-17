@@ -16,6 +16,7 @@ import {
 } from '../middleware/rate-limit';
 import { type AcpActivityBinding, buildAcpActivityBinding } from './acp-activity-admission';
 import { assertAcpActivityCallbackResourcesActive } from './acp-activity-callback-flush';
+import { type HarnessTokenUsageReport, recordHarnessTokenReport } from './agent-run-usage';
 import {
   type CredentialLimitObservation,
   credentialLimitReferenceKey,
@@ -48,6 +49,7 @@ export interface AcpUsageCallbackReport {
   observedAt?: number;
   source?: string;
   rateLimits: AcpUsageLimitObservationReport[];
+  tokenUsage?: HarnessTokenUsageReport;
 }
 
 type ExistingAcpSession = NonNullable<Awaited<ReturnType<typeof projectDataService.getAcpSession>>>;
@@ -418,6 +420,23 @@ export async function handleAcpUsageCallback(
   }
 
   const serverAttribution = await assertServerAttributionMatchesCallback(row, body);
+  if (body.tokenUsage && binding.chatSessionId) {
+    // Every identity is server-verified above: project and chat session from the bound ACP
+    // session and the D1 workspace row, the credential from the server's own attribution.
+    await recordHarnessTokenReport(
+      c.env,
+      {
+        projectId,
+        chatSessionId: binding.chatSessionId,
+        workspaceId: row.workspace_id,
+        agentSessionId: row.id,
+        agentType: row.agent_type ?? body.agentType ?? null,
+        credentialReference: serverAttribution?.credentialReference ?? null,
+        credentialSource: serverAttribution?.credentialSource ?? null,
+      },
+      body.tokenUsage
+    );
+  }
   if (!serverAttribution || body.rateLimits.length === 0) {
     log.info('acp_usage.no_supported_credential_limit_observation', {
       projectId,

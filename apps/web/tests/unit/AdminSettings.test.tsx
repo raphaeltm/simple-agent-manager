@@ -306,3 +306,53 @@ describe('draft revision anchors', () => {
     );
   });
 });
+
+it('shows invalid stored text beside the default and permits a confirmed null reset', async () => {
+  mocks.fetchAdminSettings.mockResolvedValue({
+    ...base,
+    settings: [
+      field('chat.profileUsageWindowDays', {
+        type: 'integer',
+        category: 'Chat',
+        value: 14,
+        defaultValue: 14,
+        source: 'default',
+        storedValueInvalid: true,
+        storedValue: '-1',
+      }),
+    ],
+  });
+  render(<AdminSettings />);
+  expect(await screen.findByText('Default in effect, stored value invalid.')).toBeVisible();
+  expect(screen.getByText('Stored value: -1')).toBeVisible();
+  expect(screen.getByLabelText('chat · profile Usage Window Days')).toHaveValue(14);
+  fireEvent.click(screen.getByRole('button', { name: 'Reset override' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply change' }));
+  await waitFor(() =>
+    expect(mocks.patchAdminSettings).toHaveBeenCalledWith(2, [
+      { name: 'chat.profileUsageWindowDays', value: null },
+    ])
+  );
+});
+
+it('labels a safety fallback and never displays secret stored text', async () => {
+  mocks.fetchAdminSettings.mockResolvedValue({
+    ...base,
+    settings: [
+      field('integration.github.clientSecret', {
+        secret: true,
+        storedValueInvalid: true,
+        storedValueFallback: 'safe',
+        storedValue: 'private-stored-secret',
+        source: 'default',
+        value: null,
+      }),
+    ],
+  });
+  render(<AdminSettings />);
+  expect(
+    await screen.findByText('Safe fallback in effect, stored value invalid.')
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/private-stored-secret/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Reset override' })).toBeEnabled();
+});
