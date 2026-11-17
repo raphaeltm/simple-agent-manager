@@ -8,8 +8,11 @@
  */
 import { DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS } from '@simple-agent-manager/shared';
 
+import type { Env } from '../env';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
+import { resolveNodeAgentRoute, retargetNodeAgentUrl } from './node-agent-route';
+import { nodeTransportExtension } from './node-transport-extension';
 import type {
   RuntimeWorkspaceSnapshot,
   TaskLivenessNodeHealthProbeEnv,
@@ -69,9 +72,33 @@ function isNodeHealthProbeTimeout(err: unknown): boolean {
   return err.name === 'AbortError' || err.message.startsWith('Request timed out after ');
 }
 
+/** Reject with the message `fetchWithTimeout` uses, so both count as a probe timeout. */
+async function withinBudget<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Request timed out after ${timeoutMs}ms`)),
+      timeoutMs
+    );
+  });
+  try {
+    return await Promise.race([work, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Probe a VM node's `/health`. `nodeTransport` comes from the liveness snapshot the caller
+ * already loaded, so every node on a public transport makes exactly the one fetch it always
+ * made, with no D1 read. A node on a build-extension transport (the self-host reverse tunnel)
+ * has no public hostname: its route is resolved inside the same time budget, and a failure
+ * there is an inconclusive `error`/`timeout`, never a terminal verdict.
+ */
 export async function probeNodeHealthForTaskLiveness(
-  env: TaskLivenessNodeHealthProbeEnv,
-  nodeId: string
+  env: Env,
+  nodeId: string,
+  nodeTransport: string | null = null
 ): Promise<TaskLivenessNodeHealthProbeResult> {
   const timeoutMs = getTaskLivenessNodeHealthProbeTimeoutMs(env);
   if (!env.BASE_DOMAIN) {
@@ -84,14 +111,23 @@ export async function probeNodeHealthForTaskLiveness(
     };
   }
 
-  const url = `${getNodeBackendBaseUrl(nodeId, {
-    BASE_DOMAIN: env.BASE_DOMAIN,
-    VM_AGENT_PROTOCOL: env.VM_AGENT_PROTOCOL,
-    VM_AGENT_PORT: env.VM_AGENT_PORT,
-  })}/health`;
-
+  let url = `${getNodeBackendBaseUrl(nodeId, env)}/health`;
+  let fetchTimeoutMs = timeoutMs;
   try {
-    const response = await fetchWithTimeout(url, { method: 'GET', redirect: 'manual' }, timeoutMs);
+    if (nodeTransport && nodeTransportExtension(nodeTransport)) {
+      const startedAt = Date.now();
+      const route = await withinBudget(
+        resolveNodeAgentRoute(env, nodeId, { runtime: 'vm', transport: nodeTransport }),
+        timeoutMs
+      );
+      url = retargetNodeAgentUrl(url, route);
+      fetchTimeoutMs = Math.max(1, timeoutMs - (Date.now() - startedAt));
+    }
+    const response = await fetchWithTimeout(
+      url,
+      { method: 'GET', redirect: 'manual' },
+      fetchTimeoutMs
+    );
     return {
       outcome: response.ok ? 'ok' : 'failed',
       timeoutMs,

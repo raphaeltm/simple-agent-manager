@@ -14,6 +14,7 @@ import {
 import { verifyCallbackToken } from './jwt';
 import { getRuntimeLimits } from './limits';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
+import { provisionsExtensionTransportNodes } from './node-transport-extension';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
   assertRelayProvisioningAuthority,
@@ -178,7 +179,7 @@ export async function findSessionSnapshotUploadRelay(
   source: RelaySourceNode | null = null
 ): Promise<RelayNode | null> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
-  if (!requiredVersion) return null;
+  if (!requiredVersion || !!provisionsExtensionTransportNodes(env)) return null;
 
   const allocation = await resolveRelayAllocation(env, {
     userId,
@@ -208,6 +209,8 @@ export async function findSessionSnapshotUploadRelay(
         AND n.node_role = 'workspace'
         AND n.node_class != 'user-owned'
         AND n.runtime = 'vm'
+        -- A relay URL goes to another VM over the public hostname; tunnel-only nodes have none.
+        AND COALESCE(n.transport, 'vm-public-dns') != 'reverse-tunnel'
         AND n.cloud_provider = ?
         AND n.vm_location = ?
         AND n.provider_instance_type = ?
@@ -398,7 +401,10 @@ export async function resolveSessionSnapshotUploadTargets(
       ? { home: authorizationTarget('home'), wip: authorizationTarget('wip') }
       : undefined,
     needsRelayProvisioning:
-      input.directUploadAvailable && !input.directUploadSupported && relay === null,
+      input.directUploadAvailable &&
+      !input.directUploadSupported &&
+      relay === null &&
+      !provisionsExtensionTransportNodes(env),
   };
 }
 
@@ -414,7 +420,7 @@ export async function ensureSessionSnapshotUploadRelay(
   input: { userId: string; sourceNodeId: string; projectId: string | null }
 ): Promise<void> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
-  if (!requiredVersion) return;
+  if (!requiredVersion || !!provisionsExtensionTransportNodes(env)) return;
   const source = await loadRelaySourceNode(env, input.userId, input.sourceNodeId);
   if (!sourceStillNeedsRelay(source, requiredVersion)) return;
   if (await findSessionSnapshotUploadRelay(env, input.userId, input.projectId, source)) return;

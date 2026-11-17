@@ -19,6 +19,16 @@ import { parseWorkspaceSubdomain } from '../lib/workspace-subdomain';
 import { isPastHardExpiry } from '../services/agent-sign-in/session-cap';
 import { signTerminalToken, verifyTerminalToken } from '../services/jwt';
 import { getNodeBackendBaseUrl } from '../services/node-agent-readiness';
+import {
+  type NodeAgentRoute,
+  NodeAgentRouteError,
+  resolveNodeAgentRoute,
+} from '../services/node-agent-route';
+import {
+  gatewayDecisionResponse,
+  gatewayUnsupportedRuntimeResponse,
+  isGatewayAuthorizationRequest,
+} from '../services/node-websocket-gateway';
 import { assertSessionUserApproved } from '../services/signup-approval';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { assertTerminalTokenSessionLive } from '../services/terminal-token-liveness';
@@ -132,15 +142,16 @@ export async function workspaceSubdomainProxy(
   }
 
   const workspaceStatus = workspace.status as WorkspaceStatus;
-  const nodeRuntime = workspace.nodeId
-    ? ((
-        await db
-          .select({ runtime: schema.nodes.runtime })
-          .from(schema.nodes)
-          .where(eq(schema.nodes.id, workspace.nodeId))
-          .get()
-      )?.runtime ?? 'vm')
-    : 'vm';
+  // One node read, as before; `transport` routes a build-extension node (self-host tunnel).
+  const nodeRow = workspace.nodeId
+    ? await db
+        .select({ runtime: schema.nodes.runtime, transport: schema.nodes.transport })
+        .from(schema.nodes)
+        .where(eq(schema.nodes.id, workspace.nodeId))
+        .get()
+    : undefined;
+  const nodeRuntime = nodeRow?.runtime ?? 'vm';
+  const gatewayRequest = isGatewayAuthorizationRequest(c.req.raw);
 
   if (workspaceStatus !== 'running' && workspaceStatus !== 'recovery') {
     // Allow boot-log WebSocket during creation for real-time streaming
@@ -168,6 +179,7 @@ export async function workspaceSubdomainProxy(
   }
 
   if (nodeRuntime === 'cf-container') {
+    if (gatewayRequest) return gatewayUnsupportedRuntimeResponse();
     const containerConfig = getVmAgentContainerConfig(c.env);
     if (!containerConfig.enabled) {
       return c.json(
@@ -310,7 +322,8 @@ export async function workspaceSubdomainProxy(
 
   // Proxy to the VM agent via its proxied (orange-clouded) backend hostname.
   // The explicit scriptless *.vm route prevents recursion through this Worker.
-  // Its DNS record selects legacy public-IP or Cloudflare Tunnel transport.
+  // Its DNS record selects legacy public-IP or Cloudflare Tunnel transport; a node on a
+  // build-extension transport (self-host reverse tunnel) is routed by `resolveNodeAgentRoute`.
   const routedNodeId = (workspace.nodeId || workspaceId).toLowerCase();
   const backendHostname = `${routedNodeId}.vm.${baseDomain}`;
   log.info('ws_proxy_route', {
@@ -330,7 +343,22 @@ export async function workspaceSubdomainProxy(
     },
     c.env
   );
-  const vmUrl = new URL(getNodeBackendBaseUrl(routedNodeId, c.env));
+  let nodeRoute: NodeAgentRoute;
+  try {
+    nodeRoute = await resolveNodeAgentRoute(c.env, workspace.nodeId || workspaceId, nodeRow);
+  } catch (err) {
+    // A tunnel-only node without a current lease: unreachable, never the public hostname.
+    if (!(err instanceof NodeAgentRouteError)) throw err;
+    log.warn('ws_proxy_node_unroutable', {
+      workspaceId,
+      nodeId: workspace.nodeId,
+      action: 'rejected',
+    });
+    return c.json({ error: 'NODE_UNREACHABLE', message: 'Node is not reachable' }, 503);
+  }
+  const vmUrl = new URL(
+    nodeRoute.kind === 'container' ? getNodeBackendBaseUrl(routedNodeId, c.env) : nodeRoute.origin
+  );
   vmUrl.pathname = url.pathname;
   vmUrl.search = url.search;
 
@@ -374,6 +402,9 @@ export async function workspaceSubdomainProxy(
   // the original. X-Forwarded-Proto is always https since clients connect via CF edge.
   headers.set('X-Forwarded-Host', hostname);
   headers.set('X-Forwarded-Proto', 'https');
+
+  // Self-hosted WebSocket gateway: same auth and headers above; the box's Caddy carries it.
+  if (gatewayRequest) return gatewayDecisionResponse(c.req.raw, nodeRoute, { url: vmUrl, headers });
 
   let response: Response;
   try {
