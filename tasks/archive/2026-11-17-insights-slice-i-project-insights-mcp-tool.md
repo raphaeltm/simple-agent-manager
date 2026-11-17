@@ -48,7 +48,7 @@ credentialName` and credential-id account keys (`cred:<id>`).
 - [x] Tests: project-scope attack + owner control (real SQL), rate limit at-limit + window rollover,
       contract test through the real MCP route per method, projection strips text fields
 - [x] Docs: MCP/API reference, server instructions only if needed, tool description short
-- [ ] Staging: every method against real data, cross-project rejection, rate limit
+- [x] Staging: every method against real data, cross-project rejection, rate limit
 
 ## Acceptance criteria
 
@@ -68,3 +68,9 @@ credentialName` and credential-id account keys (`cred:<id>`).
 - Deferred by design: the per-chat budget can be multiplied by new chats (security M1); new chats
   come only from dispatch/triggers and every call also spends the task-keyed /mcp HTTP limit.
 - The Connector path spends the per-user `connector.readRateLimitPerMinute` budget, not the chat one.
+- Staging (2026-11-17, head f82f114d1, deploy run 44082452764): a real Claude Code agent on staging
+  (task 01M7MRYVPXAB9XERY3ZKM09Q04, Test Project 1, Instant runtime) called every method; values match
+  the REST pages; cross-project, missing-task and stray-argument refusals; 30 admitted then the
+  per-chat refusal. The VM-runtime attempt failed at node provisioning (GCP STS exchange 400),
+  unrelated to this change; reported on feature.insights.
+- Codex review P2: per-phase sampling cap (rule 65) fixed; `phaseNames` filter added.
