@@ -55,14 +55,16 @@ export async function acceptPromptDelivery(
   const accepted = hooks.transactionSync(() =>
     delivery.acceptPromptDeliveryInTransaction(sql, env, input)
   );
-  await finalizeAcceptedPromptDelivery(sql, env, hooks, input, accepted);
   const projectId = hooks.getProjectId();
-  if (accepted.transcriptInserted && input.senderType === 'human' && projectId) {
+  if (input.senderType === 'human' && projectId) {
     // Only a lane's head is claimed, so a message queued behind a delivery already parked for a
     // provider-limit hold would never learn of the hold and would expire on its ordinary TTL.
-    // Apply the hold now. Off the send path; a sleeping chat costs one D1 read, an awake one none.
+    // Apply the hold now. Registered before the fallible finalizer, and for an idempotent retry of
+    // the same delivery too, so a failed first attempt cannot skip it. Off the send path; a
+    // sleeping chat costs one D1 read, an awake one none.
     hooks.waitUntil(holdAcceptedPromptDelivery(sql, env, hooks, projectId, input.targetSessionId));
   }
+  await finalizeAcceptedPromptDelivery(sql, env, hooks, input, accepted);
   return accepted;
 }
 

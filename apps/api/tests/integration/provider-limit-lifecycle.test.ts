@@ -1464,6 +1464,24 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       expect(wakeAsks()).toEqual([]);
     });
 
+    it('keeps a message whose accept finalizer failed after it was committed', async () => {
+      seedInboxOwner();
+      const wait = await parkAndSleep();
+      vi.mocked(hooks.recalculateAlarm).mockRejectedValueOnce(new Error('alarm unavailable'));
+      await expect(accept('Sent while the alarm write failed')).rejects.toThrow(
+        'alarm unavailable'
+      );
+      await Promise.all(deliveries.splice(0));
+      // The delivery was committed before the finalizer failed; the hold still reached it.
+      expect(
+        doDb
+          .prepare(
+            "SELECT expires_at AS expiresAt, next_attempt_at AS nextAttemptAt FROM session_inbox WHERE sender_type = 'human'"
+          )
+          .get()
+      ).toEqual({ expiresAt: wait.nextRetryAt + ttl(), nextAttemptAt: wait.nextRetryAt });
+    });
+
     it('lets a non-human delivery expire on its own deadline, without a wake error', async () => {
       seedInboxOwner();
       await parkAndSleep();
