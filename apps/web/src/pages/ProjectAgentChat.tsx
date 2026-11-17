@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useParams } from 'react-router';
 
 import { useAgentChat } from '../hooks/useAgentChat';
+import { usePlatformCapabilities } from '../hooks/usePlatformCapabilities';
 import { API_URL } from '../lib/api/client';
 import { useProjectContext } from './ProjectContext';
 import { glass, glow, MessageBubble } from './sam-prototype/components';
@@ -26,6 +27,7 @@ export function ProjectAgentChat() {
   const { setInputValue: setChatInputValue } = chat;
 
   const agentLabel = project?.name ?? 'Project Agent';
+  const { speechToText } = usePlatformCapabilities();
 
   // WebGL fluid background
   useWebGLBackground(canvasRef, amplitudeRef);
@@ -217,31 +219,33 @@ export function ProjectAgentChat() {
                 } as React.CSSProperties
               }
             />
-            {/* Mic button */}
-            <button
-              type="button"
-              onClick={voice.toggle}
-              disabled={voice.state === 'processing'}
-              aria-label={
-                voice.state === 'recording'
-                  ? 'Stop recording'
-                  : voice.state === 'processing'
-                    ? 'Transcribing audio...'
-                    : voice.state === 'error'
-                      ? 'Voice input error — try again'
-                      : 'Start voice input'
-              }
-              className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
-              style={micButtonStyle}
-            >
-              {voice.state === 'recording' ? (
-                <Square className="w-4 h-4" aria-hidden="true" />
-              ) : voice.state === 'processing' ? (
-                <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Mic className="w-4 h-4" aria-hidden="true" />
-              )}
-            </button>
+            {/* Mic button: voice input needs the installation's speech-to-text service */}
+            {speechToText && (
+              <button
+                type="button"
+                onClick={voice.toggle}
+                disabled={voice.state === 'processing'}
+                aria-label={
+                  voice.state === 'recording'
+                    ? 'Stop recording'
+                    : voice.state === 'processing'
+                      ? 'Transcribing audio...'
+                      : voice.state === 'error'
+                        ? 'Voice input error — try again'
+                        : 'Start voice input'
+                }
+                className="p-3 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
+                style={micButtonStyle}
+              >
+                {voice.state === 'recording' ? (
+                  <Square className="w-4 h-4" aria-hidden="true" />
+                ) : voice.state === 'processing' ? (
+                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Mic className="w-4 h-4" aria-hidden="true" />
+                )}
+              </button>
+            )}
             {/* Send button */}
             <button
               type="button"

@@ -1,4 +1,4 @@
-/** Real migration chain: archive 0237 remains applied when recovery scan 0254 is installed. */
+/** Real migration chain: archive 0237 remains applied when recovery scan 0257 is installed. */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 const directory = join(process.cwd(), 'src/db/migrations');
 const archiveMigration = '0237_archive_reclaim_pending.sql';
-const recoveryMigration = '0254_provider_limit_recovery_scan_index.sql';
+const recoveryMigration = '0257_provider_limit_recovery_scan_index.sql';
 const migrations = readdirSync(directory)
   .filter((file) => file.endsWith('.sql'))
   .sort();

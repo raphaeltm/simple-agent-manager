@@ -1673,7 +1673,9 @@ and refuses a 307 or 308 that would carry a request body to another origin.
 
 | Admin setting           | Default | Meaning                                                                                                                                              |
 | ----------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `outbound.maxRedirects` | `3`     | Redirect hops a guarded fetch follows, each re-checked, range 0–10. `0` refuses every redirect. Used by `check_dns_status`. If settings cannot be read, no redirect is followed. Category **Operations**. |
+| `outbound.maxRedirects` | `3`     | Redirect hops a guarded fetch follows, each re-checked, range 0–10. `0` refuses every redirect. Used by GitLab profile/API calls and `check_dns_status`. If settings cannot be read, no redirect is followed. Category **Operations**. |
+
+GitLab sign-in and API requests refuse private and metadata hosts. OAuth code exchange and token refresh refuse redirects; profile and API requests follow only validated hops within the configured cap. Node control calls refuse redirects. Workspace previews preserve application redirects while refusing any redirect that exposes the SAM proxy token.
 
 The check reads names, not DNS answers: a public name that resolves to a private address passes.
 On Cloudflare the Worker's request leaves from Cloudflare's network, not from the installation's

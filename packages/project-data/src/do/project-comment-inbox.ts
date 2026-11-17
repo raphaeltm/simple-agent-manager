@@ -4,8 +4,8 @@
  *
  * Every anchor kind lives in the shared anchored comment tables (DO migration 073), so the
  * inbox is one ranked read with a single budget, then a split back into the per-kind API
- * shapes. The response keeps message and file threads apart because the clients map them
- * with different mappers.
+ * shapes. The response keeps message, file and inbox-item threads apart because the clients
+ * map them with different mappers.
  */
 import { hydrateThreadRecordsByIds, listProjectThreadCandidates } from './anchored-comment-store';
 import type {
@@ -18,6 +18,7 @@ import {
   resolveProjectCommentListMaxBytes,
 } from './comment-normalization';
 import { readSessionTopics, toMessageCommentThread } from './comments';
+import { toInboxItemCommentThread } from './inbox-item-comments';
 import { toLibraryFileCommentThread } from './library-file-comments';
 import type { Env } from './types';
 
@@ -65,12 +66,14 @@ export function listProjectCommentInbox(
   const records = hydrateThreadRecordsByIds(sql, selectedIds);
   const messageThreads = records.flatMap((record) => toMessageCommentThread(record) ?? []);
   const fileThreads = records.flatMap((record) => toLibraryFileCommentThread(record) ?? []);
-  const returnedCount = messageThreads.length + fileThreads.length;
+  const inboxItemThreads = records.flatMap((record) => toInboxItemCommentThread(record) ?? []);
+  const returnedCount = messageThreads.length + fileThreads.length + inboxItemThreads.length;
   const sessionIds = [...new Set(messageThreads.map((thread) => thread.sessionId))];
 
   return {
     messageThreads,
     fileThreads,
+    inboxItemThreads,
     sessions: readSessionTopics(sql, sessionIds),
     // Truncated either because the byte budget skipped a thread, or because more rows match
     // than were returned. `totalCount` is the honest signal; this stays for callers that

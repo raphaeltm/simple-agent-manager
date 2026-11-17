@@ -43,6 +43,18 @@ a feature back on, replace that whole block with your own `[features]` table, fo
 example `[features]` followed by `apps = true`. SAM keeps any value you set there
 and adds its defaults for the features you leave out.
 
+Hooks your repository defines for Codex (in `.codex/config.toml` or
+`.codex/hooks.json`) run in SAM sessions, as Claude Code runs the hooks in
+`.claude/settings.json`. The session's working directory is a trusted Codex
+project, so Codex also reads the repository's `.codex/config.toml` (MCP servers
+and features included) and its command rules. Codex normally waits for someone
+to review each hook, which nobody can do in a SAM session, so SAM skips that
+review when it starts the agent; this also covers hooks in the workspace's
+`~/.codex`. SAM's own sandbox, approval and model settings still take
+precedence, and Codex ignores provider and base-URL settings in a repository.
+Hooks run with the session's credentials, whoever wrote them, so review changes
+to `.codex/` like any other code you let the agent run.
+
 ### Gemini CLI
 
 | Property      | Value                                                  |
@@ -843,8 +855,8 @@ change.
 | `update_task_status`                                                                                               | Report progress                                                                                                                                                                                                                                                                                                                                                                |
 | `complete_task`                                                                                                    | Mark current work as done. Pass the pull request URL as `evidence.prUrl`; it is saved on the task alongside optional test, staging, CI, manual verification, and note evidence.                                                                                                                                                                                                |
 | `request_human_input`                                                                                              | Alias of `inbox_write` method `ask` with blocking on: files one question in the person's inbox and notifies them; non-blocking                                                                                                                                                                                                                                                 |
-| `inbox_write`                                                                                                      | File what you need from a person in their inbox: `ask` (one question, one answer shape), `review`, and `update` / `cancel` of your own open item                                                                                                                                                                                                                               |
-| `inbox_read`                                                                                                       | `list` open items from this chat or project (check before filing), `get` one item with its answer and outcome                                                                                                                                                                                                                                                                  |
+| `inbox_write`                                                                                                      | File what you need from a person in their inbox: `ask` (one question, one answer shape), `review`, `assign` (a non-blocking task for a person or the team), `comment` (reply in a task), `attach` (watch a task another chat of the same person assigned), and `update` / `cancel` of your own open item                                                                                                                                                                                                                               |
+| `inbox_read`                                                                                                       | `list` open items from this chat or project (check before filing), `get` one item with its answer and outcome (a task with its steps, assignee, activity and discussion)                                                                                                                                                                                                                                                                  |
 
 `tasks_read` method `get` keeps `outputPrUrl`, `outputSummary`, and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. The SAM session (Anthropic tool) variant returns a single `finalAssistantMessage` (the latest assistant message, content capped to 2,000 characters) instead of the full array. If session diagnostics are unavailable, task details still return and the diagnostic fields are empty/null.
 

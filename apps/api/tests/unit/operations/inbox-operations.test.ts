@@ -147,6 +147,7 @@ beforeEach(() => {
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
   // The shipped migration, not the drizzle mirror: its partial unique index is under test.
+  sqlite.exec('DROP TABLE ask_activity');
   sqlite.exec('DROP TABLE asks');
   applySqliteMigration(
     sqlite,
@@ -159,6 +160,10 @@ beforeEach(() => {
   applySqliteMigration(
     sqlite,
     new URL('../../../src/db/migrations/0248_asks_system_errors.sql', import.meta.url)
+  );
+  applySqliteMigration(
+    sqlite,
+    new URL('../../../src/db/migrations/0254_ask_activity_human_tasks.sql', import.meta.url)
   );
   for (const [id, role] of [
     ['owner', 'user'],

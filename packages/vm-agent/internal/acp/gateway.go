@@ -27,6 +27,10 @@ const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.102.0"
 const claudeCodeMinVersion = "2.1.321"
 const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.321"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
+
+// Bumping either Codex pin: rerun TestCodexRunsRepositoryHooksWithSAMConfig with the new
+// packages. Repository hooks rely on the adapter trusting the session roots as projects and
+// on Codex honouring the bypass_hook_trust thread override (session_host_agent_config.go).
 const codexACPInstallPackage = "@agentclientprotocol/codex-acp@2.1.1"
 const codexCLIInstallPackage = "@openai/codex@0.160.0"
 const codexACPInstallCommand = "npm install -g " + codexACPInstallPackage + " " + codexCLIInstallPackage

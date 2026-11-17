@@ -115,6 +115,7 @@ import { googleAuthRoutes } from './routes/google-auth';
 import { ideaUpdateRoutes } from './routes/idea-updates';
 import { ideaRoutes } from './routes/ideas';
 import { inboxRoutes, projectInboxRoutes } from './routes/inbox';
+import { projectInboxTaskRoutes } from './routes/inbox-tasks';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
@@ -133,6 +134,7 @@ import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
 import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { orchestratorRoutes } from './routes/orchestrator';
+import { platformCapabilitiesRoutes } from './routes/platform-capabilities';
 import { policyRoutes } from './routes/policies';
 import { profileRuntimeRoutes } from './routes/profile-runtime';
 import { projectAgentRoutes } from './routes/project-agent';
@@ -274,6 +276,8 @@ app.get('/api/config/artifacts-enabled', (c) => {
   applyCacheHeaders(c, 'public-config');
   return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
 });
+
+app.route('/api/config', platformCapabilitiesRoutes);
 
 // Public config — whether agents can run on Instant (Cloudflare Containers) with no cloud account.
 app.get('/api/config/instant-runtime', (c) => {
@@ -425,6 +429,8 @@ app.route('/api/projects/:projectId/ideas', ideaRoutes);
 app.route('/api/projects/:projectId/overview', projectOverviewRoutes);
 app.route('/api/projects/:projectId/insights', projectInsightsRoutes);
 app.route('/api/projects/:projectId/inbox', projectInboxRoutes);
+// Human tasks (inbox slice H1): steps, comments, claim, reassign, done, reopen.
+app.route('/api/projects/:projectId/inbox', projectInboxTaskRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);

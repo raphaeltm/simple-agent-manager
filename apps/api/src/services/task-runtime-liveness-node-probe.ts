@@ -91,7 +91,7 @@ export async function probeNodeHealthForTaskLiveness(
   })}/health`;
 
   try {
-    const response = await fetchWithTimeout(url, { method: 'GET' }, timeoutMs);
+    const response = await fetchWithTimeout(url, { method: 'GET', redirect: 'manual' }, timeoutMs);
     return {
       outcome: response.ok ? 'ok' : 'failed',
       timeoutMs,

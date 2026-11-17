@@ -7,6 +7,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProjectChatComposer } from '../../../src/components/project-chat/ProjectChatComposer';
 import { FollowUpInput } from '../../../src/components/project-message-view/FollowUpInput';
 
+// Cloudflare behaviour: every platform service present (absent case: platform-capabilities-ui.test.tsx).
+vi.mock('../../../src/hooks/usePlatformCapabilities', () => ({
+  usePlatformCapabilities: () => ({ speechToText: true, textToSpeech: true }),
+}));
+
 vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@simple-agent-manager/acp-client')>();
   return {
