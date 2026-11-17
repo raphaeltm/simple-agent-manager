@@ -412,8 +412,11 @@ async function archiveCheckinHold(ctx: OperationContext): Promise<ArchiveCheckin
 }
 
 /**
- * Archive means closed. A question or review closes without telling the agent; a permission,
- * approval or secret request is denied or declined through its own answer path.
+ * Archive means closed, and it tells no agent anything (Raphaël, 2026-11-17, revising spec
+ * decision 4 of idea 01M7G03ZCQ6TM6CMEYDRKQ8ST9): the agent stays where it is, and a person who
+ * wants it to act answers or writes in the chat. A question, review, result or task closes; a secret
+ * request closes as declined and an approval as denied, both unannounced; a pending permission
+ * leaves the inbox and stays answerable in its chat.
  */
 export async function archiveInboxItem(
   ctx: OperationContext,
@@ -446,8 +449,8 @@ export async function archiveInboxItem(
     }
     case 'attention': {
       if (item.answerSpec.type === 'interaction') {
-        // A permission is archived by denying it through its own answer path.
-        return answerInboxItem(ctx, { projectId: input.projectId, ref: input.ref, decline: true });
+        await ctx.ports.inbox.archiveInteraction(me, item.projectId, ref.sessionId, ref.markerId);
+        return { ref: item.ref, outcome: 'archived', agentNotified: false };
       }
       const result = await ctx.ports.inbox.archiveAttention(
         me,
@@ -459,13 +462,13 @@ export async function archiveInboxItem(
       return { ref: item.ref, outcome: 'archived', agentNotified: result.agentNotified };
     }
     case 'secret': {
-      const result = await ctx.ports.inbox.declineSecret(me, item.projectId, ref.id);
-      return { ref: item.ref, outcome: 'declined', agentNotified: result.agentNotified };
+      await ctx.ports.inbox.archiveSecret(me, item.projectId, ref.id);
+      return { ref: item.ref, outcome: 'declined', agentNotified: false };
     }
     case 'approval': {
       requireWebApprovalDecision(ctx);
-      const result = await ctx.ports.inbox.decideApproval(me, ref.id, 'deny', null);
-      return { ref: item.ref, outcome: result.outcome, agentNotified: result.agentNotified };
+      const result = await ctx.ports.inbox.archiveApproval(me, ref.id);
+      return { ref: item.ref, outcome: result.outcome, agentNotified: false };
     }
   }
 }

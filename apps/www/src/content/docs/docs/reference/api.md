@@ -606,21 +606,20 @@ approval decision.
 Secret values and Operations approval decisions are accepted only from the SAM app, never through
 an app connected to the Connector (`403`). Answering an item filed from a chat needs the same
 right to wake that chat's agent as answering in the chat. Archiving wakes nothing: an inbox ask
-needs only that it is yours to act on, and a question asked before questions moved to inbox asks
-needs the right to write in its chat.
+needs only that it is yours to act on, and a question asked before questions moved to inbox asks or
+a pending permission needs the right to write in its chat.
 
-Archive closes an item for every kind. A question, review or result becomes `archived` (a
-question asked before questions moved to inbox asks is resolved with reason `archived`) and the
-agent is not told: it stays where it is until you answer something or write in its chat. Archiving
-a question also holds SAM's automatic check-ins off that chat until someone writes in it, for at
-most `inbox.archiveCheckinHoldHours`. A permission or approval is denied and a secret request is
-declined, which the agent does hear. Archiving a task tells the chats watching it. Both writes
-return `{ ref, outcome, agentNotified }`; for an answer or an archived task, `agentNotified: false`
-means the notice was not queued yet, and SAM retries it for `inbox.noticeRetryMinutes`. The
-exception is **Got it** on a result (an empty `acknowledge` answer): it closes the item without
-telling the agent, by design, so nothing is retried. A non-empty reply to a review or result whose
-agent has finished returns `400`, because it could not be delivered. Writes must come from the
-app's own origin with
+Archive closes an item for every kind and tells no agent (`agentNotified` is always `false`). A
+question, review, result or task becomes `archived` (a question asked before questions moved to
+inbox asks is resolved with reason `archived`); a secret request becomes `declined` and an approval
+`denied`; a pending permission, form or link request leaves the inbox without an answer and stays
+answerable in its chat. Archiving a question also holds SAM's automatic check-ins off that chat
+until someone writes in it, for at most `inbox.archiveCheckinHoldHours`. Both writes return
+`{ ref, outcome, agentNotified }`; for an answer, `agentNotified: false` means the notice was not
+queued yet, and SAM retries it for `inbox.noticeRetryMinutes`. The exception is **Got it** on a
+result (an empty `acknowledge` answer): it closes the item without telling the agent, by design,
+so nothing is retried. A non-empty reply to a review or result whose agent has finished returns
+`400`, because it could not be delivered. Writes must come from the app's own origin with
 `Content-Type: application/json`, like the other answer routes. A missing item and one in another
 project both return `404`; an item that is already closed returns `409`, and one you cannot act
 on returns `403`. The transcript context is returned only to a member who can read the source chat.

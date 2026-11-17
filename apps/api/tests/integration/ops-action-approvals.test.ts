@@ -44,6 +44,7 @@ import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
 import { adminOperationsApprovalRoutes } from '../../src/routes/admin-operations-approvals';
+import { createInboxPort } from '../../src/services/inbox/port';
 import {
   callMcpTool,
   createJsonKv,
@@ -370,6 +371,21 @@ describe('execute refusals (each is a guard in the claim CAS)', () => {
     expect(outcome.error?.message).toContain('denied');
     expect(edges.executeAction).not.toHaveBeenCalled();
     expect(row(approval.id).status).toBe('denied');
+  });
+
+  it('archiving from the inbox denies the ticket and tells the agent nothing', async () => {
+    const approval = await request('delete_node', NODE_A);
+    edges.acceptPromptDelivery.mockClear();
+    await expect(createInboxPort(env).archiveApproval('admin', approval.id)).resolves.toEqual({
+      outcome: 'denied',
+    });
+    expect(row(approval.id)).toMatchObject({ status: 'denied', decided_by: 'admin' });
+    // No decision prompt; the admin route's deny above ("refuses a denied ticket") is the control
+    // that a deny is otherwise delivered.
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+    const outcome = await execute(approval.id, 'delete_node', NODE_A);
+    expect(outcome.error?.message).toContain('denied');
+    expect(edges.executeAction).not.toHaveBeenCalled();
   });
 
   it('refuses an expired approval, and runs an unexpired control', async () => {

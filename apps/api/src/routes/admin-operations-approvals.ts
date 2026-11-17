@@ -84,6 +84,7 @@ adminOperationsApprovalRoutes.post(
       decision: body.decision,
       deciderUserId: getUserId(c),
       note: body.note?.trim() || null,
+      delivery: 'notify_agent',
     });
     if (outcome.outcome === 'not_found') throw errors.notFound('Approval');
     if (outcome.outcome !== 'decided') {

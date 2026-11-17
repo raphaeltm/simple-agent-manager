@@ -709,7 +709,7 @@ describe('inbox answers and archives for every store', () => {
     ).toEqual({ status: 'denied', decided_by: 'admin' });
   });
 
-  it('archiving a permission declines it through the interaction answer path', async () => {
+  it('archiving a permission answers nothing: the item leaves the inbox and the agent is not told', async () => {
     const c = ctx('owner');
     c.ports.inbox.attentionMarker = vi.fn().mockResolvedValue({
       id: 'm-perm',
@@ -728,26 +728,19 @@ describe('inbox answers and archives for every store', () => {
       canRead: true,
       canWrite: true,
     });
-    c.ports.access.requireSessionWriter = vi.fn().mockResolvedValue({});
-    const prepared = { decision: { kind: 'declined' } };
-    c.ports.connector.prepareAgentAnswer = vi.fn().mockResolvedValue(prepared);
-    c.ports.chat.answerAgentInteraction = vi.fn().mockResolvedValue({ accepted: true });
+    c.ports.inbox.archiveInteraction = vi.fn().mockResolvedValue(undefined);
+    c.ports.connector.prepareAgentAnswer = vi.fn();
+    c.ports.chat.answerAgentInteraction = vi.fn();
     await expect(
       archiveInboxItem(c, { projectId: P1, ref: 'attention:chat-1:m-perm' })
-    ).resolves.toMatchObject({ outcome: 'declined' });
-    expect(c.ports.connector.prepareAgentAnswer).toHaveBeenCalledWith(
-      P1,
-      'chat-1',
-      'interaction-1',
-      expect.objectContaining({ decline: true })
-    );
-    expect(c.ports.chat.answerAgentInteraction).toHaveBeenCalledWith(
-      'owner',
-      P1,
-      'chat-1',
-      'interaction-1',
-      prepared
-    );
+    ).resolves.toEqual({
+      ref: 'attention:chat-1:m-perm',
+      outcome: 'archived',
+      agentNotified: false,
+    });
+    expect(c.ports.inbox.archiveInteraction).toHaveBeenCalledWith('owner', P1, 'chat-1', 'm-perm');
+    expect(c.ports.connector.prepareAgentAnswer).not.toHaveBeenCalled();
+    expect(c.ports.chat.answerAgentInteraction).not.toHaveBeenCalled();
   });
 
   it('a question a member can only read is not theirs to see or answer', async () => {

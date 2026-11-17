@@ -470,6 +470,35 @@ export async function fulfillRuntimeSecretRequest(
 }
 
 /** Caller has verified `secret:write` on the project. */
+/**
+ * Archive a pending secret request from the inbox: it closes as declined and the agent is told
+ * nothing (Raphaël, 2026-11-17: every inbox kind archives silently). `notified_at` is set in the
+ * closing write, so the notice sweep (`retryRuntimeSecretRequestNotices`) never sends one, and the
+ * request is no longer pending, so its expiry does not tell the agent either.
+ */
+export async function archiveRuntimeSecretRequest(
+  db: Db,
+  input: { projectId: string; requestId: string; actorUserId: string }
+): Promise<void> {
+  const { row } = await getRuntimeSecretRequest(db, input.projectId, input.requestId);
+  const now = Date.now();
+  assertStillPending(row, now);
+  const resolution = {
+    status: 'declined',
+    resolvedBy: input.actorUserId,
+    resolvedAt: now,
+    notifiedAt: now,
+  } as const;
+  if (!(await claimPendingRequest(db, row, resolution, now))) {
+    throw errors.conflict('This secret request was already answered or has expired');
+  }
+  log.info('runtime_secret_request.archived', {
+    requestId: row.id,
+    projectId: row.projectId,
+    actorUserId: input.actorUserId,
+  });
+}
+
 export async function declineRuntimeSecretRequest(
   env: Env,
   db: Db,

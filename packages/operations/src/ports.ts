@@ -492,6 +492,16 @@ export interface OperationInboxPort {
     markerId: string,
     hold: ArchiveCheckinHold
   ): Promise<{ agentNotified: boolean }>;
+  /**
+   * Remove a pending ACP interaction (permission, form, link) from the inbox. Nothing is
+   * answered: the agent is not told, and the interaction stays answerable in its chat.
+   */
+  archiveInteraction(
+    userId: string,
+    projectId: string,
+    sessionId: string,
+    markerId: string
+  ): Promise<void>;
   fulfilSecret(
     userId: string,
     projectId: string,
@@ -503,12 +513,16 @@ export interface OperationInboxPort {
     projectId: string,
     requestId: string
   ): Promise<{ agentNotified: boolean }>;
+  /** Close a pending secret request as declined without telling the agent. */
+  archiveSecret(userId: string, projectId: string, requestId: string): Promise<void>;
   decideApproval(
     userId: string,
     approvalId: string,
     decision: 'approve' | 'deny',
     note: string | null
   ): Promise<{ outcome: string; agentNotified: boolean }>;
+  /** Deny an Operations approval without telling the agent. */
+  archiveApproval(userId: string, approvalId: string): Promise<{ outcome: string }>;
   /** Authorizes waking the agent in a chat for this actor (`authorizeAgentWake`); throws when refused. */
   authorizeAnswerWake(projectId: string, sessionId: string, userId: string): Promise<void>;
   /**

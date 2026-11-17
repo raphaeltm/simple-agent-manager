@@ -16,11 +16,13 @@ import { handleAppError } from '../../src/middleware/app-error-handler';
 import { acpInteractionCallbackRoute } from '../../src/routes/projects/acp-interaction-callback';
 import { signCallbackToken } from '../../src/services/jwt';
 import * as projectDataService from '../../src/services/project-data';
+import { get, post } from './helpers/inbox-harness';
 import {
   seedAgentSession,
   seedInstallation,
   seedNode,
   seedProject,
+  seedSignedInUser,
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
@@ -151,6 +153,71 @@ describe('ACP interaction notifications and undelivered answers (slice E)', () =
     });
     // The tool call the agent asked about never reaches the notification.
     expect(JSON.stringify(needsInput)).not.toContain('CANARY');
+
+    await runInDurableObject(store, async (_instance, state) => {
+      state.storage.sql.exec(`DELETE FROM outbox`);
+      await state.storage.deleteAlarm();
+    });
+  });
+
+  it('archiving a permission from the inbox answers nothing: it leaves the inbox and stays pending in the chat', async () => {
+    const { userId, projectId, chatSessionId, interactionId, store } = await setup();
+    await drain(store);
+    const readInteraction = () =>
+      runInDurableObject(store, async (_instance, state) => {
+        return state.storage.sql
+          .exec(
+            'SELECT state, attention_marker_id FROM interactions WHERE interaction_id = ?',
+            interactionId
+          )
+          .one() as { state: string; attention_marker_id: string | null };
+      });
+    const before = await readInteraction();
+    const markerId = before.attention_marker_id!;
+    expect(markerId).toBeTruthy();
+    const ref = `attention:${chatSessionId}:${markerId}`;
+    const project = testEnv.PROJECT_DATA.get(testEnv.PROJECT_DATA.idFromName(projectId));
+    const syncSummaries = () =>
+      runInDurableObject(project, async (instance) => {
+        await (
+          instance as unknown as { runSummarySyncLocked(): Promise<void> }
+        ).runSummarySyncLocked();
+      });
+    await syncSummaries();
+    const cookie = await seedSignedInUser(userId);
+    type List = { items: { ref: string }[] };
+    // Liveness: the permission is in the person's inbox before the archive.
+    expect((await get<List>('/api/inbox', cookie)).body.items.map((i) => i.ref)).toContain(ref);
+
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockClear();
+    const archived = await post(
+      `/api/projects/${projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
+      cookie
+    );
+    expect(archived.status).toBe(200);
+    expect(archived.body).toEqual({ ref, outcome: 'archived', agentNotified: false });
+    // Nothing went to the runtime, and the interaction is exactly as pending as it was.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await readInteraction()).toEqual(before);
+    const { marker } = await projectDataService.getAttentionRequest(
+      testEnv,
+      projectId,
+      chatSessionId,
+      markerId,
+      userId
+    );
+    expect(marker).toMatchObject({ resolvedReason: 'archived' });
+    // It leaves the inbox and a re-run of the projection job does not bring it back.
+    await drain(store);
+    await syncSummaries();
+    expect((await get<List>('/api/inbox', cookie)).body.items.map((i) => i.ref)).not.toContain(ref);
+    // A second archive is a conflict, not a second write.
+    const again = await post(
+      `/api/projects/${projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
+      cookie
+    );
+    expect([404, 409]).toContain(again.status);
 
     await runInDurableObject(store, async (_instance, state) => {
       state.storage.sql.exec(`DELETE FROM outbox`);

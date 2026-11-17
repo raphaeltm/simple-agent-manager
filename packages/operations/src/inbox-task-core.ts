@@ -407,9 +407,10 @@ export async function reassignTask(
 }
 
 /**
- * Close an open task as done or archived. The `sam.inbox` event is the agent's notice;
+ * Close an open task as done or archived. Done: the `sam.inbox` event is the agent's notice, and
  * `notified_at` is stamped after it is committed so the ask-notice sweep sends one only when the
- * event could not be.
+ * event could not be. Archived: no event, and `notified_at` is set in the closing write, so no
+ * watcher is told (every inbox archive is silent; Raphaël, 2026-11-17).
  */
 async function closeTask(
   ctx: OperationContext,
@@ -421,9 +422,10 @@ async function closeTask(
   requireOpen(row);
   const me = ctx.actor.userId;
   const now = Date.now();
+  const silent = status === 'archived';
   const result = await ctx.env.DATABASE.prepare(
     `UPDATE asks AS a SET status = ?, answer_json = ?, resolved_by_user_id = ?, resolved_at = ?,
-            updated_at = ?
+            updated_at = ?, notified_at = CASE WHEN ? THEN ? ELSE a.notified_at END
       WHERE a.id = ? AND a.project_id = ? AND a.kind = 'task' AND a.status = 'open'
         AND ${TASK_WRITABLE_SQL}`
   )
@@ -432,6 +434,8 @@ async function closeTask(
       note ? JSON.stringify({ text: note }) : null,
       me,
       now,
+      now,
+      silent ? 1 : 0,
       now,
       row.id,
       row.projectId,
@@ -449,6 +453,7 @@ async function closeTask(
     actorId: me,
     at: now,
   });
+  if (silent) return { ref: `ask:${row.id}`, status, agentNotified: false };
   const agentNotified = await admit(ctx, row, `inbox.task.${status}`);
   if (agentNotified) {
     // The event is the agent's notice. Marked only once it is committed to the outbox: if that
@@ -474,7 +479,7 @@ export async function completeTask(
   return closeTask(ctx, target, 'done', note);
 }
 
-/** Archive means closed: the watching agents are told the person will not act. */
+/** Archive means closed: the task leaves the inbox and no watching agent is told. */
 export async function archiveTask(
   ctx: OperationContext,
   target: TaskTarget
