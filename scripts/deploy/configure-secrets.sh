@@ -9,6 +9,31 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Registers a value with GitHub's log masker before anything else can print it (policy
+# 795e72a6, .claude/rules/83-no-secret-readback-in-ci.md). GitHub masks only values it knows,
+# matching line by line: a value read back from Pulumi is unknown to it, and the JSON-escaped
+# form of a multi-line value is one line it would not otherwise match. So every non-blank line
+# and the JSON-escaped form are registered. Outside GitHub Actions nothing is printed, because
+# the command itself carries the value.
+mask_secret_value() {
+  local value="$1"
+  if [ "${GITHUB_ACTIONS:-}" != "true" ] || [ -z "$value" ]; then
+    return 0
+  fi
+  local line escaped
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ -n "${line//[[:space:]]/}" ]; then
+      printf '::add-mask::%s\n' "$line"
+    fi
+  done <<<"$value"
+  escaped="$(printf '%s' "$value" | json_escape_stdin)"
+  escaped="${escaped:1:${#escaped}-2}"
+  if [ -n "$escaped" ] && [ "$escaped" != "$value" ]; then
+    printf '::add-mask::%s\n' "$escaped"
+  fi
+}
+
 # Prints a Pulumi stack output on stdout, or nothing when it cannot be read, so
 # callers keep their override precedence. A failed read names its cause on
 # stderr. Only Pulumi's stderr is ever shown: its stdout carries the secret.
@@ -25,6 +50,9 @@ read_pulumi_secret() {
     status=1
     step="pulumi stack select $PULUMI_STACK"
   else
+    # Legacy readback, masked by load_pulumi_secret before any other use. Removal is tracked in
+    # tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md and idea 01M7M5PJCY4T3CR715AFKRM74R.
+    # sam:secret-readback-allowed tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md
     value="$(cd infra && pulumi stack output "$output_name" --show-secrets 2>"$stderr_file")" || status=$?
   fi
 
@@ -51,6 +79,7 @@ load_pulumi_secret() {
   local output_name="$2"
   local value
   value="$(read_pulumi_secret "$output_name")"
+  mask_secret_value "$value"
   if [ -z "$value" ]; then
     PULUMI_EMPTY_OUTPUTS+=("$output_name")
   fi
@@ -348,6 +377,7 @@ if [[ -n "${VAPID_PRIVATE_KEY:-}" ]]; then
 elif [[ -n "$PULUMI_VAPID_PRIVATE_KEY_PEM" ]]; then
   echo "Using Web Push VAPID key from Pulumi state (auto-persisted)"
   VAPID_PRIVATE_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-private-from-pem)"
+  mask_secret_value "$VAPID_PRIVATE_KEY"
   VAPID_PUBLIC_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-public-from-pem)"
 else
   echo -e "${RED}ERROR: No Web Push VAPID key available from an explicit override or Pulumi state${NC}" >&2
@@ -489,6 +519,11 @@ fi
 AGENT_SIGN_IN_TRUST="${AGENT_SIGN_IN_TRUST:-}"
 if [ -n "$AGENT_SIGN_IN_TRUST" ]; then
   set_worker_secret "AGENT_SIGN_IN_TRUST" "$AGENT_SIGN_IN_TRUST" "$ENVIRONMENT" "false"
+elif [ "${AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET:-false}" = "true" ]; then
+  # A secondary installation's trust is its own GitHub secret (AGENT_SIGN_IN_TRUST_<INSTALLATION>)
+  # or a Worker secret an admin set by hand; deploys never derive one, so an unset GitHub secret
+  # leaves whatever the Worker has.
+  echo -e "${YELLOW}ℹ  AGENT_SIGN_IN_TRUST not supplied for this installation — leaving the Worker secret unchanged${NC}"
 else
   echo -e "${YELLOW}ℹ  AGENT_SIGN_IN_TRUST not set — agent sign-in disabled; removing any previous value${NC}"
   queue_stale_worker_secret_delete "AGENT_SIGN_IN_TRUST"
