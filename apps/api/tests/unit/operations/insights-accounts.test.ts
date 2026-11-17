@@ -529,6 +529,8 @@ describe('projectAccounts', () => {
   });
 
   it('attaches the last-reported limit windows to your own accounts only', async () => {
+    // The account usage port also reads wall time when expiring limit windows.
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
     run('a1', 'cc-max');
     run('m1', 'cc-mate', {}, { user_id: 'mate' });
     insert('credential_limit_windows', {
