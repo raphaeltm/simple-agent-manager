@@ -121,6 +121,32 @@ function proseIsAllowed(words: string): boolean {
   );
 }
 
+/** Punctuation that attaches to the word before it, so no space goes in front of it. */
+const ATTACHES_LEFT = /^[,.;:!?)'’]/;
+
+/**
+ * Models often write the text around a ref without the spaces ("Deciding on the" + ref +
+ * "is required"), which would render the words run into the item's name. Put a single space
+ * at every text/ref boundary that has none, except before punctuation that attaches left.
+ * Two refs side by side get a space between them too.
+ */
+function spaceAroundRefs(parts: OverviewBriefPart[]): void {
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index];
+    if (!part || !('ref' in part)) continue;
+    const before = parts[index - 1];
+    if (before && 'text' in before && before.text && !/\s$/.test(before.text)) before.text += ' ';
+    const after = parts[index + 1];
+    if (after && 'text' in after) {
+      if (after.text && !/^\s/.test(after.text) && !ATTACHES_LEFT.test(after.text)) {
+        after.text = ` ${after.text}`;
+      }
+    } else if (after && 'ref' in after) {
+      parts.splice(index + 1, 0, { text: ' ' });
+    }
+  }
+}
+
 /**
  * One sentence of the reply as SAM's own parts, or null when it must be dropped: a handle not
  * issued for this prompt, a control character, no item named, or prose that is not allowed.
@@ -149,6 +175,7 @@ function toSentence(
     else if (text) parts.push({ text });
   }
   if (cited.length === 0 || !proseIsAllowed(words)) return null;
+  spaceAroundRefs(parts);
   // Trim the sentence's outer whitespace; inner spacing between text and refs is kept.
   const first = parts.at(0);
   if (first && 'text' in first) first.text = first.text.trimStart();

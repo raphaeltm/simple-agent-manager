@@ -156,4 +156,23 @@ describe('parseBriefReply', () => {
       },
     });
   });
+
+  it('puts a space at every text/ref boundary the model left without one (real staging reply shape)', () => {
+    // Captured from the first live staging brief: the model wrote no spaces around refs.
+    const result = parseBriefReply(
+      reply(
+        sentence({ text: 'Deciding on the' }, { ref: 'a1' }, { text: 'is required to proceed.' }),
+        sentence({ ref: 'c1' }, { text: ', ' }, { ref: 'f1' }, { ref: 'm1' }, { text: '.' })
+      ),
+      handles
+    );
+    if (!result.ok) throw new Error('expected ok');
+    const rendered = result.brief.sentences.map((s) =>
+      s.parts.map((part) => ('text' in part ? part.text : `[${part.ref.id}]`)).join('')
+    );
+    expect(rendered).toEqual([
+      'Deciding on the [ask-1] is required to proceed.',
+      '[chat-1], [chat-2] [trigger-1].',
+    ]);
+  });
 });
