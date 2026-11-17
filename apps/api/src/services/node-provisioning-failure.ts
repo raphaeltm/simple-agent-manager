@@ -9,8 +9,8 @@ import { log, serializeError } from '../lib/logger';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { type DurableNodeAllocation,NodeAllocationUncertainError } from './node-allocation-recovery';
 import type { ProvisionNodeOptions } from './node-provisioning';
+import { settleNodeTunnelIngress } from './node-provisioning-ingress';
 import { creatingProvisioningPredicate, releaseTunnelBeforeVm, truncateNodeErrorMessage } from './node-provisioning-predicates';
-import { settleNodeTunnels } from './node-tunnel-cleanup';
 import type { NodeTunnelProvisioningPhase } from './node-tunnel-provisioning';
 import { recordTunnelProvisioningFailure } from './node-tunnel-provisioning-failure';
 import { persistError } from './observability';
@@ -179,6 +179,6 @@ export async function handleNodeProvisioningFailure(err: unknown, input: {
     // After the row writes above: a deleted row or rejection proof makes the incarnation
     // non-live, which releases its tunnel. A possibly-created VM keeps it until node
     // teardown records termination proof. Never throws; the cron sweep is the backstop.
-    if (tunnelJournaled) await settleNodeTunnels(env, node.id, 'provisioning_failed');
+    if (tunnelJournaled) await settleNodeTunnelIngress(env, node.id, 'provisioning_failed');
   }
 }

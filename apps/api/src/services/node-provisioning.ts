@@ -45,13 +45,10 @@ import {
   deleteCreatedProviderVmDirectly,
 } from './node-provisioning-race-cleanup';
 export { resolveHetznerBaseImageOverride } from './node-provisioning-image';
+import { prepareNodeTunnelIngress } from './node-provisioning-ingress';
 import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 import { resolveManagedNodeTransport, type TunnelEnv } from './node-tunnel-config';
-import {
-  ensureNodeTunnelForProvisioning,
-  type NodeTunnelProvisioning,
-  type NodeTunnelProvisioningPhase,
-} from './node-tunnel-provisioning';
+import type { NodeTunnelProvisioningPhase } from './node-tunnel-provisioning';
 import {
   createProviderForUser,
   exactProviderCredentialBindingFromPlacementSnapshot,
@@ -179,12 +176,13 @@ export async function provisionNode(
     // A resumed allocation keeps the transport its (possibly already created) VM was
     // booted with; only a new incarnation reads the installation's current choice.
     const transport = resuming
-      ? node.transport === 'cloudflare-tunnel'
-        ? 'cloudflare-tunnel'
+      ? node.transport && node.transport !== 'vm-public-dns'
+        ? node.transport
         : null
       : resolveManagedNodeTransport(tunnelEnv, {
           runtime: node.runtime,
           nodeClass: node.nodeClass,
+          nodeRole: node.nodeRole,
         });
     if (!resuming)
       await assertNodeAllocationPlanCurrent(
@@ -258,25 +256,16 @@ export async function provisionNode(
 
     const isDeploymentNode = !!deploymentContext;
 
-    // Journal + create the incarnation's named tunnel BEFORE the provider VM exists, so
-    // every later failure can find and remove it (services/node-tunnel-provisioning.ts).
-    let tunnel: NodeTunnelProvisioning | null = null;
-    if (transport === 'cloudflare-tunnel') {
-      if (!provisioningRuntimeIncarnationId) {
-        throw new Error('Tunnel transport requires a runtime incarnation');
-      }
-      tunnelJournaled = true;
-      tunnel = await ensureNodeTunnelForProvisioning(env, {
-        nodeId: node.id,
-        userId: node.userId,
-        runtimeIncarnationId: provisioningRuntimeIncarnationId,
-        signal: options?.signal,
-        onPhase: (phase) => {
-          tunnelPhase = phase;
-        },
-      });
-      tunnelPhase = null;
-    }
+    const ingress = await prepareNodeTunnelIngress(env, transport, {
+      nodeId: node.id, userId: node.userId,
+      runtimeIncarnationId: provisioningRuntimeIncarnationId,
+      signal: options?.signal,
+      onOwnershipRecorded: () => { tunnelJournaled = true; },
+      onPhase: (phase) => { tunnelPhase = phase; },
+    });
+    const { tunnel } = ingress;
+    const tunnelIngress = !!tunnel || !!ingress.renderCloudInit;
+    tunnelPhase = null;
 
     const cloudInit = buildNodeCloudInit({
       env,
@@ -287,6 +276,7 @@ export async function provisionNode(
       taskContext,
       deploymentContext,
       tunnel,
+      renderCloudInit: ingress.renderCloudInit,
     });
 
     if (!validateCloudInitSize(cloudInit)) {
@@ -491,7 +481,7 @@ export async function provisionNode(
     // A record (the heartbeat never creates one for them, keyed on nodes.tunnel_id). A
     // deployment tunnel node still serves its app routes on the public IP, so it waits for
     // one; its heartbeat records that IP without an A record (routes/node-lifecycle.ts).
-    if (!vm.ip && (!tunnel || isDeploymentNode)) {
+    if (!vm.ip && (!tunnelIngress || isDeploymentNode)) {
       log.info('node_provisioning.awaiting_ip_backfill', {
         nodeId: node.id,
         providerInstanceId: vm.id,
@@ -534,7 +524,7 @@ export async function provisionNode(
 
     let backendDnsRecordId: string | null = null;
     let dnsErrorMessage: string | null = null;
-    if (!tunnel) {
+    if (!tunnelIngress) {
       try {
         backendDnsRecordId = durable
           ? await createNodeBackendDNSRecord(node.id, vm.ip, env, providerContext?.signal, true)
