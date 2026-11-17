@@ -415,7 +415,7 @@ describe('answering a question', () => {
     ).rejects.toMatchObject({ code: 'conflict' });
   });
 
-  it('archiving from the inbox closes it and tells the agent in question words', async () => {
+  it('archiving from the inbox closes it and tells the agent nothing', async () => {
     const { id } = await question();
     const ctx = {
       env,
@@ -428,12 +428,11 @@ describe('answering a question', () => {
       requestId: 't',
     };
     await expect(archiveInboxItem(ctx, { projectId: P1, ref: `ask:${id}` })).resolves.toMatchObject(
-      { outcome: 'archived', agentNotified: true }
+      { outcome: 'archived', agentNotified: false }
     );
     expect(askRow(id).status).toBe('archived');
-    const delivery = edges.acceptPromptDelivery.mock.calls[0]![2];
-    expect(delivery.deliveryContent).toContain('archived your question');
-    expect(delivery.metadata).toMatchObject({ questionAskId: id, outcome: 'archived' });
+    expect(askRow(id).notified_at).not.toBeNull();
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
     // A late answer from the chat card meets the archived row.
     await expect(answer(id, 'eu')).rejects.toMatchObject({ statusCode: 409 });
   });

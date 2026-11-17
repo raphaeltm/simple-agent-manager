@@ -45,7 +45,7 @@ describe('inbox capability through the real entry points', () => {
     vi.unstubAllGlobals();
   });
 
-  it('a request_human_input question is one asks row that reaches the right inbox; archiving tells the agent', async () => {
+  it('a request_human_input question is one asks row that reaches the right inbox; archiving tells no one', async () => {
     const s = await seed();
     const result = await callTool(s.token, 'request_human_input', {
       context: 'Should I deploy the billing fix to staging first?',
@@ -93,27 +93,36 @@ describe('inbox capability through the real entry points', () => {
     );
     expect(count.body).toEqual({ needsYou: 1, blocking: 1 });
 
-    // The agent ends its turn and the chat sleeps; archiving queues one wake-capable prompt.
+    // The agent ends its turn and the chat sleeps. Archive closes the item and tells no one: the
+    // chat stays asleep, no prompt is queued, and the notice sweep does not send one later.
     expect(await s.project.sleepSession(s.chatSessionId)).toBe(true);
     const archived = await post(
       `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
       s.ownerCookie
     );
     expect(archived.status).toBe(200);
-    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
+    const closed = await testEnv.DATABASE.prepare(
+      'SELECT status, notified_at FROM asks WHERE id = ?'
+    )
+      .bind(askId)
+      .first<{ status: string; notified_at: number | null }>();
+    expect(closed?.status).toBe('archived');
+    expect(closed?.notified_at).not.toBeNull();
+    // Liveness: the sweep ran and found no notice to retry.
+    await expect(runInboxAskSweep(testEnv, Date.now() + 2 * 60_000)).resolves.toMatchObject({
+      noticesRetried: 0,
+    });
     const snapshot = await s.project.getDurableExecutionSnapshot(s.chatSessionId);
-    const notices = snapshot.deliveries.filter(
-      (delivery: { id: string }) => delivery.id === `inbox-ask:${askId}`
-    );
-    expect(notices).toEqual([
-      expect.objectContaining({ sourceKind: 'inbox_ask', sourceTaskId: s.taskId }),
-    ]);
+    expect(
+      snapshot.deliveries.filter((delivery: { id: string }) => delivery.id === `inbox-ask:${askId}`)
+    ).toEqual([]);
     const { messages } = await s.project.getMessages(s.chatSessionId, 50);
     expect(
       messages.filter((message: { content: string }) =>
         message.content.includes('archived your question')
       )
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     // The item leaves the inbox; a late answer loses.
     const after = await get<ListBody>('/api/inbox', s.ownerCookie);
     expect(after.body.items.map((entry) => entry.ref)).not.toContain(ref);
@@ -181,7 +190,7 @@ describe('inbox capability through the real entry points', () => {
 
   // Overlap (slice G): a question asked before the deploy is still a ProjectData marker and stays
   // answerable and archivable through its own path until it resolves or expires.
-  it('a marker-era question reaches the right inbox and archiving tells the agent', async () => {
+  it('a marker-era question reaches the right inbox and archiving tells no one, even a live agent', async () => {
     const s = await seed();
     await s.project.createAttentionMarker({
       sessionId: s.chatSessionId,
@@ -278,28 +287,18 @@ describe('inbox capability through the real entry points', () => {
     );
     expect(plain.status).toBe(415);
 
-    // Archive: the live agent receives the "will not act" prompt, then the marker resolves.
-    vi.stubGlobal('fetch', fetchMock);
-    fetchMock.mockImplementation(
-      async () =>
-        new Response(JSON.stringify({ status: 'accepted' }), {
-          status: 202,
-          headers: { 'Content-Type': 'application/json' },
-        })
-    );
+    // Archive: the agent is running and reachable, and still receives nothing; the marker resolves.
+    fetchMock.mockClear();
     const archived = await post(
       `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref)}/archive`,
       s.ownerCookie
     );
     expect(archived.status).toBe(200);
-    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
     const prompt = fetchMock.mock.calls.find(([input]) =>
-      (typeof input === 'string' ? input : input.url).includes(
-        `/workspaces/${s.workspaceId}/agent-sessions/${s.agentSessionId}/prompt`
-      )
+      (typeof input === 'string' ? input : input.url).includes('/prompt')
     );
-    expect(prompt).toBeTruthy();
-    expect(String(prompt?.[1]?.body)).toContain('will not act on it');
+    expect(prompt).toBeUndefined();
 
     const markerId = ref.split(':')[2]!;
     const { marker } = await s.project.getAttentionRequest(s.chatSessionId, markerId, s.ownerId);
@@ -320,9 +319,9 @@ describe('inbox capability through the real entry points', () => {
 
   it('a marker-era item on a chat whose workspace is gone archives without telling anyone', async () => {
     // Production shape (2026-11-17): a SAM check-in pause left on a chat whose task was cancelled,
-    // workspace deleted and session stopped. Archive tried to tell the (absent) agent, the
-    // live-agent resolver 404'd, the claim was released, and the inbox read the 404 as "already
-    // handled" and showed the item again: it could never be archived.
+    // workspace deleted and session stopped. Archive used to tell the agent, the live-agent
+    // resolver 404'd, the claim was released, and the inbox read the 404 as "already handled" and
+    // showed the item again: it could never be archived.
     const s = await seed();
     await s.project.createAttentionMarker({
       sessionId: s.chatSessionId,
@@ -399,7 +398,7 @@ describe('inbox capability through the real entry points', () => {
     expect(after.body.items.map((item) => item.ref)).not.toContain(ref);
   });
 
-  it('an ask filed through the internal operation lists, archives and queues the agent notice', async () => {
+  it('an ask filed through the internal operation lists and archives without an agent notice', async () => {
     const s = await seed();
     const { samInboxAskCreate } = await import('@simple-agent-manager/operations');
     const ctx = webOperationContext(
@@ -421,12 +420,14 @@ describe('inbox capability through the real entry points', () => {
       `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(created.ref)}/archive`,
       s.ownerCookie
     );
-    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: true });
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
     const row = await testEnv.DATABASE.prepare('SELECT status, notified_at FROM asks WHERE id = ?')
       .bind(created.id)
       .first<{ status: string; notified_at: number | null }>();
     expect(row).toMatchObject({ status: 'archived' });
+    // Settled in the closing write, so the notice sweep has nothing to retry.
     expect(row?.notified_at).not.toBeNull();
+    await runInboxAskSweep(testEnv, Date.now() + 2 * 60_000);
     const delivered = await runInDurableObject(s.project, async (_instance, state) =>
       state.storage.sql
         .exec(
@@ -435,8 +436,7 @@ describe('inbox capability through the real entry points', () => {
         )
         .toArray()
     );
-    expect(delivered).toHaveLength(1);
-    expect(String(delivered[0]?.content)).toContain('will not act on it');
+    expect(delivered).toHaveLength(0);
     const archivedList = await get<ListBody>('/api/inbox?filter=archived', s.ownerCookie);
     expect(archivedList.body.items.map((item) => item.ref)).toContain(created.ref);
   });

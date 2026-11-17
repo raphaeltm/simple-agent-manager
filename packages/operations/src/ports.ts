@@ -471,7 +471,7 @@ export interface OperationInboxPort {
     askedAt: number;
     userId: string;
   }): Promise<InboxItemContext | null>;
-  /** Resolve a question with reason `archived` and tell the agent the person will not act. */
+  /** Resolve a question with reason `archived`; the agent is not told. */
   archiveAttention(
     userId: string,
     projectId: string,

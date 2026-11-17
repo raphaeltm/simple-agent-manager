@@ -474,10 +474,9 @@ describe('inbox asks writes', () => {
     edges.acceptPromptDelivery.mockRejectedValueOnce(new Error('DO unavailable'));
     const c = ctx('owner');
     c.ports.inbox.authorizeAnswerWake = vi.fn().mockResolvedValue(undefined);
-    await expect(archiveInboxItem(c, { projectId: P1, ref: 'ask:notice' })).resolves.toMatchObject({
-      outcome: 'archived',
-      agentNotified: false,
-    });
+    await expect(
+      answerInboxItem(c, { projectId: P1, ref: 'ask:notice', answer: 'Looks good' })
+    ).resolves.toMatchObject({ outcome: 'answered', agentNotified: false });
     expect(askRow('notice').notified_at).toBeNull();
     const resolvedAt = Number(askRow('notice').resolved_at);
     await expect(runInboxAskSweep(env, resolvedAt + 120_000)).resolves.toMatchObject({
@@ -492,13 +491,27 @@ describe('inbox asks writes', () => {
         sourceKind: 'inbox_ask',
         sourceTaskId: 'task-1',
         targetSessionId: 'chat-1',
-        metadata: expect.objectContaining({ creatorUserId: 'owner', outcome: 'archived' }),
+        metadata: expect.objectContaining({ creatorUserId: 'owner', outcome: 'answered' }),
       })
     );
     // Retried once: a second sweep has nothing left to do.
     await expect(runInboxAskSweep(env, resolvedAt + 180_000)).resolves.toMatchObject({
       noticesRetried: 0,
     });
+  });
+
+  it('archiving an ask sends no notice, now or from the sweep', async () => {
+    ask('quiet', { source_session_id: 'chat-1', source_task_id: 'task-1' });
+    await expect(
+      archiveInboxItem(ctx('owner'), { projectId: P1, ref: 'ask:quiet' })
+    ).resolves.toMatchObject({ outcome: 'archived', agentNotified: false });
+    expect(askRow('quiet').status).toBe('archived');
+    expect(askRow('quiet').notified_at).not.toBeNull();
+    const resolvedAt = Number(askRow('quiet').resolved_at);
+    await expect(runInboxAskSweep(env, resolvedAt + 120_000)).resolves.toMatchObject({
+      noticesRetried: 0,
+    });
+    expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
   });
 
   it('the sweep expires an open ask past its deadline and leaves an unexpired one', async () => {
@@ -737,7 +750,7 @@ describe('inbox answers and archives for every store', () => {
     ).rejects.toMatchObject({ code: 'not_found' });
   });
 
-  it('archiving an ask filed from a chat needs the agent-wake grant, and a refusal changes nothing', async () => {
+  it('archiving an ask filed from a chat needs no agent-wake grant, because it wakes nothing', async () => {
     ask('from-chat', { source_session_id: 'chat-1', source_task_id: 'task-1' });
     const c = ctx('owner');
     c.ports.inbox.authorizeAnswerWake = vi
@@ -745,9 +758,16 @@ describe('inbox answers and archives for every store', () => {
       .mockRejectedValue(new OperationError('forbidden', 'Not a writer of this chat'));
     await expect(
       archiveInboxItem(c, { projectId: P1, ref: 'ask:from-chat' })
-    ).rejects.toMatchObject({ code: 'forbidden' });
-    expect(askRow('from-chat').status).toBe('open');
+    ).resolves.toMatchObject({ outcome: 'archived', agentNotified: false });
+    expect(c.ports.inbox.authorizeAnswerWake).not.toHaveBeenCalled();
+    expect(askRow('from-chat').status).toBe('archived');
     expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
+    // Control: the same grant still gates an answer, which does wake the agent.
+    ask('answer-gated', { source_session_id: 'chat-1', source_task_id: 'task-1' });
+    await expect(
+      answerInboxItem(c, { projectId: P1, ref: 'ask:answer-gated', answer: 'Looks good' })
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    expect(askRow('answer-gated').status).toBe('open');
   });
 
   it('the closing write is bound to the project it read (a row moved in between is not closed)', async () => {
