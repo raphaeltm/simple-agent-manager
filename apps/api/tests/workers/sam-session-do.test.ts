@@ -213,6 +213,27 @@ describe('SamSession durable operator in workerd', () => {
     ).toBe(409);
   });
 
+  it('refuses an explicitly selected limited-tool model before inference or tool execution', async () => {
+    const { request, stub } = await setup();
+    await stub.testEnvironment({ SAM_MODEL: '@cf/meta/llama-4-scout-17b-16e-instruct' });
+    const { turn } = (await (
+      await request('/turns', 'POST', {
+        requestKey: 'limited-tools',
+        message: 'List my projects',
+      })
+    ).json()) as { turn: Turn };
+    await vi.waitFor(async () => {
+      const history = (await (await request('/turns')).json()) as History;
+      expect(history.turns.find((item) => item.id === turn.id)).toMatchObject({
+        state: 'interrupted',
+      });
+    });
+    expect(modelRequests).toHaveLength(0);
+    expect(
+      await stub.testSql('SELECT id FROM operator_actions WHERE turn_id=?', [turn.id])
+    ).toEqual([]);
+  });
+
   it('runs the actual Anthropic gateway adapter with unified billing and records its usage', async () => {
     const { request, stub, userId } = await setup();
     await stub.testEnvironment({ SAM_MODEL: 'claude-sonnet-5', AI_PROXY_BILLING_MODE: 'unified' });

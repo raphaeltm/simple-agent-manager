@@ -2,7 +2,7 @@
 
 ## Preflight and scope
 
-Classes: external-api-change, cross-component-change, docs-sync-change.
+Classes: external-api-change, cross-component-change, docs-sync-change, business-logic-change (review reconciliation).
 User explicitly forbids staging deployment and validation. Open a PR; never claim production changed without deployed evidence.
 Existing flow: SamSession /turns → operator/agent.ts runOperatorTurn → resolveSamConfig → PLATFORM_AI_MODELS → operator/model.ts resolveOperatorModel → Mastra OpenAI-compatible Workers AI gateway. operator/context.ts projects persisted history, and Mastra executes operator tools with SQLite receipts. Model change adds no queries or control loops.
 
@@ -32,7 +32,7 @@ Local results:
 - Deployment generation/workflow contracts: 2 files, 120 tests passed, including intentional default retune versus immutable audit baseline.
 - Shared build/lint, API typecheck, changed API/quality ESLint, instruction context budget: passed.
 - Initial native run exposed test-only shared env override leakage; setup now clears SAM_MODEL to use code default. Initial unit/deploy failures corrected as above.
-- Existing Wrangler SAM_MODEL binding retained and updated in place, preserving the explicit deployment model binding without adding any bindings. No migrations, new infrastructure, auth changes, new settings or dependencies.
+- Redundant Wrangler SAM_MODEL removed; fallback recorded in OMITTED_WORKER_VAR_DEFAULTS and probed through resolveSamConfig. Both workflow sync steps forward an explicit SAM_MODEL through the existing logged optional override path. Normal deployment removes the old binding without keep-vars. No migrations, new infrastructure, auth changes, new settings or dependencies.
 - Local specialist review confirmed Cloudflare, constitution and doc-sync PASS; task completion findings ADDRESSED after green reruns. PR/CI pending.
 - Staging explicitly skipped by user; no deploy or validation. Production still old model; needs normal reviewed release and post-deploy binding + health verification.
 
@@ -40,3 +40,9 @@ Local results:
 
 PR https://github.com/raphaeltm/simple-agent-manager/pull/2860. Codex GitHub review reported no findings; CodeRabbit request succeeded but review was rate-limited, so no re-trigger. Initial smoke, secret scan and benchmarks passed.
 PR Evidence description corrected to use full paths and explicit official-documentation wording; local event-payload preflight passes. Sonar flagged 2 changed lines in pre-existing duplicated Anthropic fixture blocks (3.6% new-line duplication). Hoisted read-only Claude test configuration to suite scope; focused suite 39/39 and ESLint pass, local reviewer confirms unchanged behavior and no config mutation. New head CI must pass before merge. Staging remains forbidden; no production changes.
+
+## Scope and binding review reconciliation
+
+Codex review comments 4598890169 and 4598890182 addressed. Catalog hierarchy scopes remain unchanged; explicit account assistant SAM_MODEL now checks the existing good reliability floor plus Chat Completions tool support. Configured custom endpoint owns its capabilities instead of its catalog billing entry. No fabricated excellent rating. Model guard is centralized in operator/model.ts; pure controls cover default, limited, none, false Chat Completions support and custom override, plus real native positive/negative paths.
+
+Redundant binding removed, documented as omitted code default, both deploy sync mappings forward SAM_MODEL, and tests prove override and absence. Local results: full native 67/67, deploy contracts 122/122, contract+omitted defaults 10/10; native default/limited targeted check 2 pass and 24 intentionally filtered. API typecheck/lint and context budget passed. Final five-skill local review PASS. PR Evidence and Sonar passed on prior head after original fixes; fresh head CI pending. No staging or production mutations.

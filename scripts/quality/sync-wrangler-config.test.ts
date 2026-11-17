@@ -211,6 +211,20 @@ describe('sync wrangler config', () => {
     }
   );
 
+  it('omits the default SAM model binding and forwards a logged explicit override', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 'sam-test');
+    vi.stubEnv('SAM_MODEL', 'claude-sonnet-5');
+    const info = vi.spyOn(console, 'log').mockImplementation(() => {});
+    expect(getApiWorkerVars({}, outputs, 'prod', 'analytics-dataset', true).SAM_MODEL).toBe(
+      'claude-sonnet-5'
+    );
+    expect(info.mock.calls.flat().join(' ')).toContain('SAM_MODEL');
+    vi.stubEnv('SAM_MODEL', '');
+    expect(getApiWorkerVars({}, outputs, 'prod', 'analytics-dataset', true)).not.toHaveProperty(
+      'SAM_MODEL'
+    );
+  });
+
   it('forwards optional VM boot recovery overrides without requiring defaults as bindings', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     const overrides = {
@@ -1352,7 +1366,7 @@ describe('Worker vars omitted because they equal the code default', () => {
       } else if (dead.has(name)) {
         expect(OMITTED_WORKER_VAR_DEFAULTS, name).not.toHaveProperty(name);
       } else {
-        expect(OMITTED_WORKER_VAR_DEFAULTS[name], name).toBe(value);
+        expect(OMITTED_WORKER_VAR_DEFAULTS[name], name).toBe(retuned[name] ?? value);
       }
     }
     expect(bindingAudit.removedDead).toEqual([
@@ -1379,6 +1393,8 @@ describe('Worker vars omitted because they equal the code default', () => {
             )
           ),
           ...checkedIn.vars,
+          // Deliberate retirement migration, independently pinned above.
+          SAM_MODEL: OMITTED_WORKER_VAR_DEFAULTS.SAM_MODEL,
         },
       });
       const after = varsFor(environment, checkedIn);
