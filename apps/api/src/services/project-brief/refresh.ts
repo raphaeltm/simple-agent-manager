@@ -14,8 +14,9 @@
  *    `deferred`: changed, but the last brief is younger than `minIntervalMinutes`; marked stale.
  * 4. Claim a generation with a compare-and-set that also enforces the daily cap and the minimum
  *    interval. `capped` / `busy`: not claimed; the stored brief stays, marked stale.
- * 5. Call the model through the SAM AI Gateway (`fetchWorkersAIChatCompletion`), validate the
- *    reply (`parseBriefReply`), and write it under the claim. `generated` or `failed`.
+ * 5. Call the model through the SAM AI Gateway (`fetchWorkersAIChatCompletion`), or through the
+ *    admin's OpenAI-compatible endpoint when one is set, validate the reply (`parseBriefReply`),
+ *    and write it under the claim. `generated` or `failed`.
  *
  * Cost bound: at most `dailyCap` model calls per project per UTC day, and never two within
  * `minIntervalMinutes`. The count is taken when the call is claimed, so failures (and attempts
@@ -34,6 +35,7 @@ import * as v from 'valibot';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { fetchWorkersAIChatCompletion, WorkersAIGatewayError } from '../ai-proxy-shared';
+import { LlmUnavailableError } from '../llm-chat-target';
 import { getTaskTitleModelControls } from '../task-title';
 import { parseBriefReply } from './parse';
 import { buildBriefPrompt } from './prompt';
@@ -128,6 +130,9 @@ function callModel(
   // already knows; a change of model must add its controls there too.
   const controls = getTaskTitleModelControls(DEFAULT_PROJECT_BRIEF_MODEL);
   return fetchWorkersAIChatCompletion(env, {
+    // A short summary like a task title: with an admin OpenAI-compatible endpoint set, the brief
+    // uses the title model there (`llm.openAICompatible.taskTitleModel`), so no second setting.
+    purpose: 'taskTitle',
     modelId: DEFAULT_PROJECT_BRIEF_MODEL,
     maxTokens: BRIEF_MAX_OUTPUT_TOKENS,
     timeoutMs,
@@ -145,6 +150,8 @@ function callModel(
 function failureReason(error: unknown): string {
   if (error instanceof BriefDeadlineError) return 'deadline';
   if (error instanceof WorkersAIGatewayError) return `gateway_${error.status}`;
+  // No model route on this installation, or its settings could not be read.
+  if (error instanceof LlmUnavailableError) return `unavailable_${error.reason}`;
   if (error instanceof Error && error.name === 'TimeoutError') return 'timeout';
   return 'model_call_failed';
 }

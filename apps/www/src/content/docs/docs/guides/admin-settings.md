@@ -776,6 +776,14 @@ the model's published price ($0.10 per million input and $0.30 per million outpu
 costs at most about $0.0004: about $0.01 per project per day and $0.30 per project per month in the
 worst case. Quiet projects make no calls.
 
+When an [OpenAI-compatible model server](#use-an-openai-compatible-model-server) is set, the brief
+goes there instead, with the titles model (`llm.openAICompatible.taskTitleModel`, else
+`llm.openAICompatible.model`). The same call limits apply; the price is that server's. With no model
+route at all, briefs are not written and each Overview is just its sections.
+
+<!-- Verified: services/project-brief/refresh.ts:callModel (purpose 'taskTitle'),
+     services/ai-proxy-shared.ts:fetchWorkersAIChatCompletion, services/llm-chat-target.ts. -->
+
 ## Email
 
 These limit [email triggers](/docs/guides/email-triggers/) (preview). Every value is a whole number.
@@ -1088,7 +1096,8 @@ configuration is required.
 
 Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
 The endpoint replaces Workers AI chat calls and the SAM agent's model route. Purpose-specific
-model settings are available for agents, titles, diagnosis and the Workers AI proxy route.
+model settings are available for agents, titles (also used by the
+[Project Overview brief](#project-overview-brief)), diagnosis and the Workers AI proxy route.
 Private hosts require the separate `allowPrivateNetwork` confirmation; metadata hosts are always
 refused. Reset the base URL to restore normal routing. See the
 [endpoint configuration reference](/docs/reference/configuration/#openai-compatible-model-endpoint)

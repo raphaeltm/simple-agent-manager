@@ -20,6 +20,19 @@ import { projectOverviewRoutes } from '../../src/routes/project-overview';
 import { invalidateAdminSettings } from '../../src/services/admin-settings';
 import { callTool, fetchMock, ORIGIN, seed, type Seeded, testEnv } from './helpers/inbox-harness';
 
+/**
+ * The env the routes run with: the Miniflare env plus the Cloudflare account and gateway id a
+ * deployment has, so the brief resolves the SAM AI Gateway target (`resolveWorkersAiChatTarget`)
+ * exactly as staging and production do. Same D1 binding, so settings writes and cache
+ * invalidation through `testEnv` apply to it.
+ */
+const routeEnv = {
+  ...testEnv,
+  CF_ACCOUNT_ID: 'test-account',
+  CF_API_TOKEN: 'test-token',
+  AI_GATEWAY_ID: 'test-gateway',
+} as Env;
+
 /** Background work the Overview route hands to `waitUntil`, awaited by the test. */
 let background: Promise<unknown>[] = [];
 const executionCtx = {
@@ -40,11 +53,11 @@ function app() {
 }
 
 /** One page view, then everything it scheduled in the background. */
-async function viewOverview(s: Seeded): Promise<ProjectOverviewResponse> {
+async function viewOverview(s: Seeded, env: Env = routeEnv): Promise<ProjectOverviewResponse> {
   const response = await app().request(
     `/api/projects/${s.projectId}/overview`,
     { headers: { Cookie: s.ownerCookie } },
-    testEnv,
+    env,
     executionCtx
   );
   expect(response.status).toBe(200);
@@ -62,7 +75,7 @@ async function answer(s: Seeded, ref: string, text: string) {
       headers: { Cookie: s.ownerCookie, 'Content-Type': 'application/json', Origin: ORIGIN },
       body: JSON.stringify({ answer: text }),
     },
-    testEnv,
+    routeEnv,
     executionCtx
   );
   expect(response.status).toBe(200);
@@ -108,7 +121,9 @@ async function allowNextCheck(s: Seeded) {
     .run();
 }
 
-const GATEWAY = /\/chat\/completions$/;
+/** The one SAM AI Gateway path: Workers AI's OpenAI-compatible endpoint behind the gateway. */
+const GATEWAY =
+  /^https:\/\/gateway\.ai\.cloudflare\.com\/v1\/test-account\/test-gateway\/workers-ai\/v1\/chat\/completions$/;
 let modelReplies: string[] = [];
 const gatewayCalls = () =>
   fetchMock.mock.calls.filter(([input]) =>
@@ -298,6 +313,25 @@ describe('Overview brief through the real entry points', () => {
     expect(gatewayCalls()).toHaveLength(1);
   });
 
+  it('with no model route on the installation the page is just its sections and nothing is sent', async () => {
+    const s = await seed();
+    await soloProject(s);
+    await askAndRun(s);
+    // The bare Miniflare env has no Cloudflare account and no admin model endpoint.
+    const view = await viewOverview(s, testEnv);
+    expect(view.brief).toBeNull();
+    expect(view.unavailable).not.toContain('brief');
+    expect(view.running.items.map((chat) => chat.sessionId)).toContain(s.chatSessionId);
+    expect(gatewayCalls()).toHaveLength(0);
+    expect(
+      await testEnv.DATABASE.prepare(
+        'SELECT brief_json, last_error FROM project_briefs WHERE project_id = ?'
+      )
+        .bind(s.projectId)
+        .first()
+    ).toEqual({ brief_json: null, last_error: 'unavailable_not_configured' });
+  });
+
   it('a quiet project shows nothing and never calls the model', async () => {
     const s = await seed();
     await soloProject(s);
@@ -430,7 +464,7 @@ describe('Overview brief through the real entry points', () => {
       app().request(
         `/api/projects/${s.projectId}/overview`,
         { headers: { Cookie: s.ownerCookie } },
-        testEnv,
+        routeEnv,
         executionCtx
       ),
       new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 5_000)),
