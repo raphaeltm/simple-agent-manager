@@ -378,6 +378,32 @@ describe('workflowTargetFor (deploy-staging.yml)', () => {
   });
 });
 
+describe('deploy-staging.yml smoke-token probe', () => {
+  const workflow = readFileSync(
+    new URL('../../.github/workflows/deploy-staging.yml', import.meta.url),
+    'utf8'
+  );
+  const probe =
+    workflow.match(
+      /      - name: Check smoke token on a secondary installation\n[\s\S]*?(?=\n      - name:)/
+    )?.[0] ?? '';
+
+  it('runs only for a secondary installation, never the primary', () => {
+    expect(probe).not.toBe('');
+    // workflowTargetFor gives the primary an empty installation and a secondary its name.
+    expect(workflowTargetFor('staging', 'sammy.party').installation).toBe('');
+    expect(workflowTargetFor('staging2', 'sammy.party').installation).toBe('staging2');
+    expect(probe).toContain("needs.lease.outputs.installation != ''");
+    expect(probe).not.toContain('needs.lease.outputs.credential_environment');
+  });
+
+  it('skips only on a refusal and never prints the token', () => {
+    expect(probe).toContain('if [ "$status" = "401" ]; then');
+    expect(probe).toContain('--data-binary @-');
+    expect(probe).not.toMatch(/echo[^\n]*SMOKE_TEST_TOKEN/);
+  });
+});
+
 describe('resolveInstallationZone', () => {
   const accountId = 'acct';
   function fakeCloudflare(zones: unknown[], subdomain: unknown = { subdomain: 'account-sub' }) {

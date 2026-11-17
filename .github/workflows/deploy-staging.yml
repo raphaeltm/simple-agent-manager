@@ -253,7 +253,9 @@ jobs:
       # The token goes from the GitHub secret straight to the request body on stdin.
       - name: Check smoke token on a secondary installation
         id: smoke_token
-        if: ${{ needs.lease.outputs.installation != needs.lease.outputs.credential_environment && !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN != '' }}
+        # `installation` is empty for the primary installation (workflowTargetFor), so this never
+        # runs there: on the primary a refused token must fail the smoke tests, not skip them.
+        if: ${{ needs.lease.outputs.installation != '' && !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN != '' }}
         run: |
           status="$(node -e 'process.stdout.write(JSON.stringify({ token: process.env.SMOKE_TEST_TOKEN }))' |
             curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' \
