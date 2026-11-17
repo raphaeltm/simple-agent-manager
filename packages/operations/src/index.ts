@@ -160,6 +160,7 @@ export {
   type InsightsCloudflareCostSettingName,
 } from './insights-cloudflare-cost-settings-definition';
 export { projectFlow, type ProjectFlowInput } from './insights-flow';
+export { projectSetups, type ProjectSetupsInput } from './insights-setups';
 export {
   installationHealth,
   installationHealthBounds,

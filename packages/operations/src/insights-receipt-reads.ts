@@ -275,7 +275,9 @@ export function earliest(...values: Array<number | null>): number | null {
   return known.length ? Math.min(...known) : null;
 }
 
-export function reservationOf(row: TaskRow): { memoryMb: number; cpuMillis: number } | null {
+export function reservationOf(
+  row: Pick<TaskRow, 'id' | 'workspace_reservation' | 'task_reservation'>
+): { memoryMb: number; cpuMillis: number } | null {
   for (const raw of [row.workspace_reservation, row.task_reservation]) {
     try {
       const parsed = parseStoredResolvedReservationJson(raw);
