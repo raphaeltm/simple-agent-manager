@@ -10,6 +10,7 @@ import { NODE_TUNNEL_SETTINGS } from './admin-settings-node-tunnel-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
 import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
+import { OVERVIEW_BRIEF_SETTINGS } from './admin-settings-overview-brief-definitions';
 import { PROJECT_EVENT_SETTINGS } from './admin-settings-project-event-definitions';
 import { AI_PROXY_SETTINGS } from './ai-proxy-settings';
 import { llmEndpointSettingDefinitions } from './llm-endpoint-settings';
@@ -43,6 +44,7 @@ const definitions = [
   ...OPERATIONS_TELEMETRY_SETTINGS,
   ...OUTBOUND_SETTINGS,
   ...INSTRUCTION_BUDGET_SETTINGS,
+  ...OVERVIEW_BRIEF_SETTINGS,
 ];
 
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(

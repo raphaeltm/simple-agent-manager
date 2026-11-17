@@ -1004,7 +1004,7 @@ admin setting `performance.projectRecentTimeoutMs`.
 ### `GET /api/projects/:projectId/overview`
 
 The Project Overview's one read (`projectOverviewGet`, `packages/operations/src/project-overview.ts`).
-Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequests }, unavailable, generatedAt }`:
+Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequests }, brief, unavailable, generatedAt }`:
 
 - `running.items`: awake chats whose task is queued, delegated or in progress and that are starting,
   mid-turn, or paused on an open question, newest activity first. Each has `sessionId`, `taskId`,
@@ -1012,8 +1012,17 @@ Returns `{ projectId, running: { items, total }, recent: { ideas, mergedPullRequ
   `lastActivityAt` and `profile` (`{ id, name }` or null). `running.total` counts every running chat.
 - `recent.ideas`: the most recently updated ideas, open or closed, in the Ideas list's item shape.
 - `recent.mergedPullRequests`: `{ number, url, title, repository, mergedAt }`, newest merge first.
-- `unavailable`: sections whose read failed this time (`running`, `ideas`, `pullRequests`); they
-  come back empty rather than failing the whole response.
+- `brief`: the generated brief (`readProjectBrief`, `packages/operations/src/project-brief-read.ts`)
+  or null. `{ sentences: [{ parts: [{ text } | { ref: { kind, id, label, url? } }] }], generatedAt,
+stale, refreshing }`. `kind` is `ask`, `chat`, `automation`, `account`, `pullRequest` or `idea`;
+  clients build links from `kind` and `id` (a pull request carries its stored https `url`). Claims
+  about items that have closed since are already removed.
+- `unavailable`: sections whose read failed this time (`running`, `ideas`, `pullRequests`,
+  `brief`); they come back empty rather than failing the whole response.
+
+After responding, the route checks in the background whether the brief needs rewriting
+(`refreshProjectBriefIfDue`, `apps/api/src/services/project-brief/refresh.ts`); the response never
+waits for the model.
 
 Optional query `runningLimit` and `recentLimit` (defaults 5 and 3, at most 20). Requires project
 membership.
