@@ -80,7 +80,7 @@ Pull requests opened before the migration, or whose `opened` event SAM missed, h
 
 ## Flaky checks come for free
 
-Once failures survive reruns, another useful number appears without any extra data: **flaky checks**. A check is flaky when it failed and then passed **on the same commit**. Nothing in the code changed between the two runs, so the failure was not caused by the change.
+Once failures survive reruns, another useful number appears without any extra data: **flaky checks**. A check is flaky when it failed and then passed **on the same commit**. Nothing in the code changed between the two runs, so the check gave two different answers for the same code. That does not say who is to blame: a timing bug the change introduced can flip a check just as well as a slow test runner. It says the check's result is not reliable on its own, which is worth knowing before you rerun it a third time.
 
 ```sql title="packages/operations/src/insights-flow-sql.ts"
 -- Simplified: the real statement also counts the total for "showing 5 of 14".
