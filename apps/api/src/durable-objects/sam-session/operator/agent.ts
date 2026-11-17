@@ -11,7 +11,12 @@ import {
   OperatorGroundingError,
 } from './grounding';
 import type { OperatorLive } from './live';
-import { operatorProviderOptions, recordOperatorStepUsage, resolveOperatorModel } from './model';
+import {
+  assertOperatorModelSupportsTools,
+  operatorProviderOptions,
+  recordOperatorStepUsage,
+  resolveOperatorModel,
+} from './model';
 import { assertOperatorExecution, operatorTools } from './operations';
 import type { OperatorStore, OperatorTurn } from './store';
 
@@ -81,6 +86,7 @@ export async function runOperatorAgent(options: {
     model !== null &&
     'provider' in model &&
     String(model.provider).startsWith('sam-openai-compatible');
+  assertOperatorModelSupportsTools(catalogModel, customEndpoint);
   assertCurrent();
   let toolAttempted = false;
   let inferenceFailed = false;

@@ -443,6 +443,7 @@ export interface StalledTaskClassifierConfig {
 }
 
 export interface OperationsPort {
+  skipUnsubscribedGitHubCi?(env: Env): Promise<boolean>;
   messageMergeConfig?(env: Env): Promise<import('./message-stream-ingest').MessageMergeConfig>;
   /** Cached admin setting, refreshed only at object initialization and usage-window flush. */
   rowUsageIntervalMs?(env: Env): Promise<number>;

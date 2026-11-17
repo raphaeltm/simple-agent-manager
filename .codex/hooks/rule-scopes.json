@@ -1232,6 +1232,27 @@
           "literal": 39
         }
       ]
+    },
+    {
+      "path": ".claude/rules/83-no-secret-readback-in-ci.md",
+      "title": "No Secret Readback or Printing in CI",
+      "patterns": [
+        {
+          "pattern": ".github/**",
+          "regex": "^\\.github\\/.*$",
+          "literal": 8
+        },
+        {
+          "pattern": "scripts/**",
+          "regex": "^scripts\\/.*$",
+          "literal": 8
+        },
+        {
+          "pattern": "infra/**",
+          "regex": "^infra\\/.*$",
+          "literal": 6
+        }
+      ]
     }
   ]
 }

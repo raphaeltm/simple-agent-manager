@@ -20,3 +20,15 @@ export interface ChatMessageAppend {
   offset: number;
   revision: number;
 }
+
+/** Full canonical tool snapshots require replacement, independently of text appends. */
+export const CHAT_TOOL_REPLACE_CAPABILITY = 'tool-replace-v1';
+
+/** Revision lives in durable tool metadata, so compact/history/archive reads retain it. */
+export function toolMessageRevision(metadata: unknown): number {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return 0;
+  const revision = (metadata as Record<string, unknown>)._samToolRevision;
+  return typeof revision === 'number' && Number.isSafeInteger(revision) && revision > 0
+    ? revision
+    : 0;
+}

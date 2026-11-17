@@ -1149,6 +1149,17 @@ describe('deploy reusable workflow', () => {
     }
   });
 
+  it('forwards an explicit SAM model override into every config sync', () => {
+    expect(extractOptionalWorkerEnvVars()).toContain('SAM_MODEL');
+    for (const sync of [
+      stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
+      stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
+    ]) {
+      expect(sync).toContain('SAM_MODEL: ${{ vars.SAM_MODEL }}');
+    }
+    expect(checkedInDefault('SAM_MODEL')).toBe('@cf/deepseek-ai/deepseek-v4.1-flash-1017');
+  });
+
   it('forwards ACP interaction controls into every wrangler config sync env', () => {
     const optionalWorkerVars = extractOptionalWorkerEnvVars();
     const syncBlocks = [

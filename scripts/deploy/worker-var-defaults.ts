@@ -30,6 +30,7 @@
  * `_RATE_LIMIT_WINDOW_SECONDS`), which the proof test cannot call.
  */
 export const OMITTED_WORKER_VAR_DEFAULTS: Readonly<Record<string, string>> = {
+  SAM_MODEL: '@cf/deepseek-ai/deepseek-v4.1-flash-1017',
   // Managed VM tunnel transport, connector startup, and owned-resource cleanup
   VM_AGENT_TRANSPORT: 'vm-public-dns',
   VM_AGENT_TUNNEL_PORT: '8444',

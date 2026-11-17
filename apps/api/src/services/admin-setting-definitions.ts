@@ -39,7 +39,9 @@ export type AdminSettingName =
   | AiProxySettingName
   | DeploymentPublishJobSettingName
   | 'deployments.publishCallbackMaxBodyBytes'
+  | 'events.skipUnsubscribedGitHubCi'
   | 'chat.messageMergingEnabled'
+  | 'chat.toolCallMergingEnabled'
   | 'chat.messageMergeMaxRowBytes'
   | 'chat.messageMergeRecentIds'
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`

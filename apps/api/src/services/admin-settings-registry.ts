@@ -12,6 +12,7 @@ import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telem
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
 import { OUTBOUND_SETTINGS } from './admin-settings-outbound-definitions';
 import { OVERVIEW_BRIEF_SETTINGS } from './admin-settings-overview-brief-definitions';
+import { PROJECT_EVENT_SETTINGS } from './admin-settings-project-event-definitions';
 import { AI_PROXY_SETTINGS } from './ai-proxy-settings';
 import { llmEndpointSettingDefinitions } from './llm-endpoint-settings';
 export {
@@ -34,6 +35,7 @@ const definitions = [
   ...llmEndpointSettingDefinitions(),
   ...AI_PROXY_SETTINGS,
   ...MESSAGE_MERGE_SETTINGS,
+  ...PROJECT_EVENT_SETTINGS,
   ...DEPLOYMENT_PUBLISH_SETTINGS,
   ...CORE_SETTINGS,
   ...NODE_TUNNEL_SETTINGS,

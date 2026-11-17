@@ -191,12 +191,25 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
           const loaded = readDetail();
           if (!loaded) return;
           const read = loaded.messages.filter((message) => !addedLive.has(message.id));
-          const found = await readMessagesAfter(projectId, sessionId, read);
-          if (found.length === 0) return;
+          const found = await readMessagesAfter(
+            projectId,
+            sessionId,
+            read,
+            undefined,
+            loaded.toolChanges?.revision
+          );
+          if (found.messages.length === 0 && !found.resetRequired) return;
           queryClient.setQueryData<ChatSessionDetailResponse>(
             queryKey,
             (current) =>
-              current && { ...current, messages: mergeMessages(current.messages, found, 'append') }
+              current && {
+                ...current,
+                toolChanges: found.toolChanges,
+                hasMore: found.resetRequired ? (found.hasMore ?? true) : current.hasMore,
+                messages: found.resetRequired
+                  ? found.messages
+                  : mergeMessages(current.messages, found.messages, 'append'),
+              }
           );
         })
         .catch((err: unknown) => {
@@ -229,6 +242,7 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
         // Rows written while the window merged (a socket row, a send, an older
         // page) are in neither of its inputs; keep them.
         const merging = new Set(current.messages.map((message) => message.id));
+        if (merged.toolChanges?.resetRequired) return merged;
         const arrived = latest?.messages.filter((message) => !merging.has(message.id)) ?? [];
         // Checked here, after every await: an overtaken read keeps the newer snapshots.
         const overtaken = latest && isCurrent ? !isCurrent() : false;

@@ -754,17 +754,12 @@ describe('hardening', () => {
     const firstHeld = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    let markFirstReached!: () => void;
-    const firstReached = new Promise<void>((resolve) => {
-      markFirstReached = resolve;
-    });
     let batches = 0;
     let firstRan: Promise<unknown> = Promise.resolve();
     env.DATABASE.batch = (async (statements: D1PreparedStatement[]) => {
       batches += 1;
       if (batches === 1) {
         firstRan = firstHeld.then(() => realBatch(statements));
-        markFirstReached();
         return firstRan;
       }
       // Second submit: both have now passed every pre-check. Run the first transaction, then this.
@@ -773,26 +768,27 @@ describe('hardening', () => {
       return realBatch(statements);
     }) as typeof env.DATABASE.batch;
 
-    const firstSubmit = fulfill(request.id, { value: SENTINEL });
-    // Async encryption can reorder arrivals; establish which submit owns the held batch.
-    await firstReached;
-    const secondSubmit = fulfill(request.id, { value: OTHER_SENTINEL });
-    const [first, second] = await Promise.all([firstSubmit, secondSubmit]);
+    const [first, second] = await Promise.all([
+      fulfill(request.id, { value: SENTINEL }),
+      fulfill(request.id, { value: OTHER_SENTINEL }),
+    ]);
     expect(batches).toBe(2);
-    // The first batch to run claims; the second finds the request answered and writes nothing.
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(409);
+    // Encryption can reorder arrivals at the batch barrier. Exactly one request claims;
+    // the loser must not overwrite whichever request actually won.
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+    const winnerValue = first.status === 200 ? SENTINEL : OTHER_SENTINEL;
+    const loser = first.status === 409 ? first : second;
     const stored = envRow('STRIPE_API_KEY') as { stored_value: string; secret_request_id: string };
     expect(stored.secret_request_id).toBe(request.id);
     const { envVars } = await execEnv(['STRIPE_API_KEY']);
-    expect(envVars.find((item) => item.key === 'STRIPE_API_KEY')?.value).toBe(SENTINEL);
+    expect(envVars.find((item) => item.key === 'STRIPE_API_KEY')?.value).toBe(winnerValue);
     expect(requestRow(request.id)).toMatchObject({
       status: 'fulfilled',
       resolved_by: 'owner',
       resolved_at: Date.parse('2026-11-12T10:00:00Z'),
     });
     expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(1);
-    expectNoLeak(await second.text());
+    expectNoLeak(await loser.text());
   });
 
   it('a value created after the pre-check but before the write is neither replaced nor claimed', async () => {

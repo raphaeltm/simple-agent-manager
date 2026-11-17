@@ -429,7 +429,7 @@ GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot 
 :::
 
 :::note
-Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required. Generated `RandomId` key encodings (`b64Std`, `b64Url`, `dec`, `hex`) are marked secret, but Pulumi cannot encrypt the special resource ID through secret-output annotations; that ID is the same key bytes encoded as unpadded base64url. Keep the state backend and backups private. Annotation updates preserve existing keys and do not rotate credentials.
+Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets (`scripts/deploy/configure-secrets.sh`), registering every value it reads from Pulumi with GitHub's log masking before any other use. No manual setup required. Generated `RandomId` key encodings (`b64Std`, `b64Url`, `dec`, `hex`) are marked secret, but Pulumi cannot encrypt the special resource ID through secret-output annotations; that ID is the same key bytes encoded as unpadded base64url. Keep the state backend and backups private. Annotation updates preserve existing keys and do not rotate credentials.
 :::
 
 :::note[Generated-key metadata preview]

@@ -8,6 +8,7 @@ import { handleGitHubWebhook } from '../../src/routes/github-webhook';
 import { admitGitHubWebhookProjectEvents } from '../../src/services/github-project-event-producer';
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
 import * as projectDataService from '../../src/services/project-data';
+import { useFullProjectEventHistory } from './helpers/full-project-event-history';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 const TEST_PREFIX = `github-project-events-${Date.now()}`;
@@ -88,6 +89,8 @@ async function githubWebhookSignature(secret: string, body: string): Promise<str
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('')}`;
 }
+
+useFullProjectEventHistory();
 
 describe('GitHub ProjectData event producer', () => {
   it('admits signed webhook route events through the producer into ProjectData', async () => {

@@ -1095,6 +1095,31 @@ available, the runtime deadline governs legacy platform configuration and sessio
 Pending cache loads expire on deadline; late results cannot republish stale data. No deployment
 configuration is required.
 
+## GitHub CI event storage
+
+`events.skipUnsubscribedGitHubCi` defaults to **on** in Operations. In
+`ProjectData.admitProjectEvent` (`packages/project-data/src/do/index.ts`), a GitHub
+`check_run`, `check_suite`, or `workflow_run` event with no matching active, unexpired
+subscription returns `skipped_no_subscriber` with no event receipt or match written.
+Other GitHub events, channel publications, lifecycle, schedule, workflow and credential
+history retain their existing behavior (`project-events.ts`). Subscriptions do not
+backfill earlier CI events: check current GitHub status before and immediately after
+subscribing.
+
+The superadmin event inspector no longer lists skipped CI events. Its CI storage
+summary shows the effective switch and counts by source/type in the current usage
+window (`ProjectEventInspector.tsx`). These counters live only in the object's memory:
+they reset on window flush or eviction, and are not a durable traffic history. The
+existing `project_data.row_usage` log includes the same bounded admission counters;
+overflow is disclosed separately. An empty event list does not establish an absence
+of CI traffic.
+
+Turn the switch **off** to retain all future unmatched CI receipts. This does not
+recover earlier skipped events. Already stored receipts keep their delivery-key
+replay, duplicate count and fingerprint-conflict behavior in either mode. A skipped
+event has no delivery-key ledger; a later redelivery is evaluated against the
+subscriptions active at that later admission. GitHub trigger execution remains
+independent of canonical project-event storage (`routes/github-webhook.ts`).
 ## Use an OpenAI-compatible model server
 
 Under **AI models**, set `llm.openAICompatible.baseUrl`, the model ID and optional API key.
