@@ -19,6 +19,7 @@
  * statements, a few tens of milliseconds of SQLite work; the caller bounds the windows.
  */
 import type { RunNudgeCounts, RunNudgeWindow } from '@simple-agent-manager/shared';
+import { log } from '@simple-agent-manager/worker-core';
 
 import { HUMAN_PROMPT_DELIVERY_TRIGGERS } from './agent-wake-policy';
 
@@ -58,7 +59,17 @@ export function countRunNudges(
   const counts = windows.slice(0, cap).map((window) => {
     let chat = times.get(window.sessionId);
     if (chat === undefined) {
-      chat = humanMessageTimes(sql, window.sessionId);
+      try {
+        chat = humanMessageTimes(sql, window.sessionId);
+      } catch (error) {
+        // One unreadable chat is not recorded; it never takes every other run's count with it.
+        log.warn('run_nudges.chat_skipped', {
+          sessionId: window.sessionId,
+          error: error instanceof Error ? error.message : String(error),
+          action: 'not_recorded',
+        });
+        chat = null;
+      }
       times.set(window.sessionId, chat);
     }
     // `created_at > from` leaves out a prompt that started the run.

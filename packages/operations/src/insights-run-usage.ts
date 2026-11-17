@@ -236,8 +236,9 @@ const SQL_IDENTIFIER = /^[A-Za-z_]\w*$/;
  * bind, the project id. The same source rule as `readRunUsage`: when the AI proxy measured a chat
  * its rows are the only ones counted, because the proxied harness reports the same calls. A run
  * with no rows is absent from the result (not reported, never zero). Sums with TOTAL(), which
- * cannot overflow. Served by the `idx_agent_run_usage_key` prefix
- * `(project_id, chat_session_id, source)`.
+ * cannot overflow. `CROSS JOIN` keeps `runsTable` the outer loop (SQLite never reorders it), so
+ * each run is an index search on `idx_agent_run_usage_key` `(project_id, chat_session_id, …)`, not a
+ * pass over the project's whole usage history.
  */
 export function runTokenTotalsSql(runsTable: string, sessionColumn: string): string {
   if (!SQL_IDENTIFIER.test(runsTable) || !SQL_IDENTIFIER.test(sessionColumn)) {
@@ -247,7 +248,7 @@ export function runTokenTotalsSql(runsTable: string, sessionColumn: string): str
            TOTAL(u.input_tokens) + TOTAL(u.output_tokens) + TOTAL(u.cache_read_tokens)
              + TOTAL(u.cache_write_tokens) AS tokens
       FROM ${runsTable} k
-      JOIN agent_run_usage u ON u.project_id = ? AND u.chat_session_id = k.${sessionColumn}
+      CROSS JOIN agent_run_usage u ON u.project_id = ? AND u.chat_session_id = k.${sessionColumn}
      WHERE u.source = 'ai_proxy'
         OR NOT EXISTS (SELECT 1 FROM agent_run_usage x
                         WHERE x.project_id = u.project_id
