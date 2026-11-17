@@ -15,7 +15,7 @@ the right of the app bar on a phone. Links that point at one chat (a notificatio
   <source media="(max-width: 40em)" srcset="/images/docs/project-overview-mobile.png 2x" />
   <img
     src="/images/docs/project-overview.png"
-    alt="A project's Overview on a desktop. Needs you, with a count of 5 and an All 5 link, lists a permission to run a migration with 4 minutes left, an approval, and a stack of three questions from the chat Ship billing. Below it is the task box with To, the profile Opus 5.5 Build and Send. On the right, Running now lists five chats, the first paused on a question in amber; This week shows Merged 28, Idea to merged 1.6d and CI first try 64% with the top blocker, a flaky check; Budgets shows one ring per account, Personal Max and Work Pro, with Personal Max's 5-hour window 38% left."
+    alt="A project's Overview. Needs you, with a count of 5 and an All 5 link, lists a permission to run a migration with 4 minutes left, an approval, and a stack of three questions from the chat Ship billing. Running now lists the chats agents are working on, the first paused on a question in amber. The task box (Start a task…) is at the bottom. On a desktop, the right column also shows This week (Merged 28, Idea to merged 1.6d, CI first try 64%, and a flaky check as the top blocker) and Budgets, one ring per account; on a phone the sections stack, and the screen shows Needs you and the start of Running now."
   />
 </picture>
 

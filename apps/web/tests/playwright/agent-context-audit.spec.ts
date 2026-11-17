@@ -564,6 +564,7 @@ test.describe('Agent Context — Desktop', () => {
     const summary = page.getByLabel('Policy size in agent sessions');
     await expect(summary).toContainText('from 2 pinned policies');
     await expect(summary).toContainText('2 on demand');
+    await assertNoOverflow(page);
     await docsShot(page, 'agent-context-policies');
   });
 

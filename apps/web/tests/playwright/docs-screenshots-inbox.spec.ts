@@ -7,6 +7,7 @@
  */
 import { expect, test } from '@playwright/test';
 
+import { assertNoOverflow } from './audit-helpers';
 import { docsShot } from './docs-shot';
 import { KIND_ITEMS, setupInboxMocks } from './inbox-fixtures';
 
@@ -28,6 +29,7 @@ test.describe('docs: inbox on a desktop', () => {
     const params = new URLSearchParams({ item: 'ask:err-1', project: 'p-billing' });
     await page.goto(`/inbox?${params.toString()}`);
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+    await assertNoOverflow(page);
     await docsShot(page, 'inbox-problem');
   });
 
