@@ -125,10 +125,33 @@ describe('inbox item comment scope', () => {
   });
 
   it('the project Comments read returns inbox-item threads apart from message and file threads', () => {
-    const inbox = listProjectCommentInbox(sql, env, {});
+    const inbox = listProjectCommentInbox(sql, env, { readableInboxItemIds: ['ask-1'] });
     expect(inbox.inboxItemThreads.map((thread) => thread.itemId)).toEqual(['ask-1']);
     expect(inbox.messageThreads).toHaveLength(1);
     expect(inbox.fileThreads).toHaveLength(1);
     expect(inbox.totalCount).toBe(3);
+  });
+
+  it('applies task visibility before page selection and counting', () => {
+    const hidden = itemComments.createInboxItemComment(sql, env, {
+      itemId: 'ask-hidden',
+      body: 'hidden task discussion',
+      actor: MAYA,
+    }).thread;
+    sql.exec(`UPDATE anchored_comment_threads SET updated_at = 9000 WHERE id = ?`, hidden.id);
+    sql.exec(`UPDATE anchored_comment_threads SET updated_at = 8000 WHERE id = ?`, itemThreadId);
+    sql.exec(`UPDATE anchored_comment_threads SET updated_at = 7000 WHERE id = ?`, fileThreadId);
+    sql.exec(`UPDATE anchored_comment_threads SET updated_at = 1000 WHERE id = ?`, sessionThreadId);
+
+    const inbox = listProjectCommentInbox(sql, env, {
+      limit: 3,
+      readableInboxItemIds: ['ask-1'],
+    });
+
+    expect(inbox.inboxItemThreads.map((thread) => thread.itemId)).toEqual(['ask-1']);
+    expect(inbox.messageThreads.map((thread) => thread.id)).toEqual([sessionThreadId]);
+    expect(inbox.fileThreads.map((thread) => thread.id)).toEqual([fileThreadId]);
+    expect(inbox.totalCount).toBe(3);
+    expect(inbox.hasMore).toBe(false);
   });
 });

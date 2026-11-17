@@ -80,6 +80,8 @@ const ReplyRowSchema = v.object({
 
 const CandidateRowSchema = v.object({
   id: v.string(),
+  anchor_kind: v.picklist(STORED_COMMENT_ANCHOR_KINDS),
+  inbox_item_id: v.nullable(v.string()),
   updated_at: v.number(),
   estimated_bytes: v.number(),
 });
@@ -331,7 +333,8 @@ export function listThreadRecords(
  * No scope predicate, by design: this Durable Object *is* the project, so every row belongs
  * to it. `updated_at` is bumped by every reply and status change, so `updated_at DESC`
  * means "most recently active", the order a reader triaging an inbox needs
- * (.claude/rules/65). Returns up to `limit + 1` candidates and the true total.
+ * (.claude/rules/65). Returns up to `limit + 1` cheap candidates. Viewer-specific
+ * inbox-item authorization is applied by `listProjectCommentInbox` before selection.
  */
 export function listProjectThreadCandidates(
   sql: SqlStorage,
@@ -350,7 +353,6 @@ export function listProjectThreadCandidates(
     params.push(input.status);
   }
   if (input.after) {
-    // Keyset cursor. The count below only runs on the first window, before any cursor.
     conditions.push('(t.updated_at < ? OR (t.updated_at = ? AND t.id > ?))');
     params.push(input.after.updatedAt, input.after.updatedAt, input.after.id);
   }
@@ -359,6 +361,8 @@ export function listProjectThreadCandidates(
   const rows = sql
     .exec(
       `SELECT t.id,
+              t.anchor_kind,
+              t.inbox_item_id,
               t.updated_at,
               length(CAST(COALESCE(t.body, '') AS BLOB)) +
                 COALESCE(length(CAST(t.quote AS BLOB)), 0) +
@@ -375,13 +379,6 @@ export function listProjectThreadCandidates(
       input.limit + 1
     )
     .toArray();
-  // The total is the same for every window, so only the first one counts it.
-  const countRow = input.after
-    ? null
-    : sql
-        .exec(`SELECT COUNT(*) AS count FROM anchored_comment_threads t ${whereClause}`, ...params)
-        .toArray()[0];
-
   return {
     candidates: parseProjectCommentThreadCandidates(
       rows,
@@ -390,9 +387,45 @@ export function listProjectThreadCandidates(
       log,
       'comments.project_candidate_row_skipped'
     ),
-    totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
     windowFull: rows.length > input.limit,
   };
+}
+
+/**
+ * Count only threads this viewer may see. Inbox-item ids come from the API's D1 authorization
+ * query; batching keeps every SQLite statement under the bind ceiling.
+ */
+export function countReadableProjectThreads(
+  sql: SqlStorage,
+  status: string | null,
+  readableInboxItemIds: readonly string[]
+): number {
+  const statusClause = status ? ' AND status = ?' : '';
+  const statusParams = status ? [status] : [];
+  const nonItemRow = sql
+    .exec(
+      `SELECT COUNT(*) AS count FROM anchored_comment_threads
+       WHERE anchor_kind <> 'inbox_item'${statusClause}`,
+      ...statusParams
+    )
+    .toArray()[0];
+  let total = typeof nonItemRow?.count === 'number' ? nonItemRow.count : 0;
+
+  const readableIds = [...new Set(readableInboxItemIds)];
+  const batchSize = D1_MAX_BOUND_PARAMETERS - statusParams.length;
+  for (const batch of chunk(readableIds, batchSize)) {
+    const placeholders = batch.map(() => '?').join(', ');
+    const row = sql
+      .exec(
+        `SELECT COUNT(*) AS count FROM anchored_comment_threads
+         WHERE anchor_kind = 'inbox_item' AND inbox_item_id IN (${placeholders})${statusClause}`,
+        ...batch,
+        ...statusParams
+      )
+      .toArray()[0];
+    if (typeof row?.count === 'number') total += row.count;
+  }
+  return total;
 }
 
 /** Hydrate the ids the project-wide ranking already selected, in the given order. */

@@ -7,6 +7,7 @@ import type {
   LibraryFileCommentThread,
   MessageCommentReply,
   MessageCommentThread,
+  StoredCommentAnchorKind,
 } from '@simple-agent-manager/shared';
 
 export type CommentActor = CommentAuthor;
@@ -133,11 +134,19 @@ export type ListFileCommentThreadsResult = {
 export type ListProjectCommentThreadsInput = {
   status?: CommentStatus | null;
   limit?: number | null;
+  /**
+   * Inbox-item ids the caller has already authorized for this viewer in D1. Omission fails
+   * closed for inbox-item threads; message and library-file threads remain project-readable.
+   */
+  readableInboxItemIds?: string[];
 };
 
 /** One cheap, `updated_at DESC`-ranked candidate row from a project-wide read. */
 export type ProjectCommentThreadCandidate = {
   id: string;
+  anchorKind: StoredCommentAnchorKind;
+  /** Present only for `inbox_item` candidates, whose visibility is viewer-specific. */
+  inboxItemId: string | null;
   updatedAt: number;
   /** Estimated content bytes: root body + quote + reply bodies. */
   estimatedBytes: number;
@@ -146,8 +155,6 @@ export type ProjectCommentThreadCandidate = {
 /** One capped window of the `updated_at DESC, id ASC` ranking across every anchor kind. */
 export type ListProjectCommentThreadCandidatesPage = {
   candidates: ProjectCommentThreadCandidate[];
-  /** Total rows matching the filter, ignoring the cap. Counted on the first window only. */
-  totalCount: number;
   /** More rows exist after this window. */
   windowFull: boolean;
 };
