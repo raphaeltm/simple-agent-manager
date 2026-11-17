@@ -158,9 +158,9 @@ SAM picks the account for a run in this order, most specific first (`explainReso
 
 1. The account you chose for this chat ([Using another account for one chat](#using-another-account-for-one-chat)).
 1. Your account for this profile.
-2. Your account for this project.
-3. Your default account for the agent.
-4. SAM's platform account, where the agent has one.
+1. Your account for this project.
+1. Your default account for the agent.
+1. SAM's platform account, where the agent has one.
 
 Pins are per person. Yours change which of your accounts runs your work; they never change a
 teammate's.
@@ -429,6 +429,10 @@ coming before an agent stops on it.
   Choosing it changes only this chat's account, and a line then says **This chat runs on Work Max
   instead of Personal Pro**, with an undo. A skill or chat option that changes the agent clears the
   choice, because the chat would then run a different agent.
+  Mind which way a number counts: the chip in a chat and on the account cards shows how much is
+  **used** (`78%` means a fifth is left), while the Profiles page and the new-chat picker show how much
+  is **left** and say so.
+
 - **Agents** can read the same numbers with the `workspace_read` tool (`method: "credential_limits"`), so an agent
   coordinating others can pause before a limit and schedule itself to wake after the reset.
 
@@ -573,7 +577,8 @@ Some names carry a note. **(API key only)** works only when Codex uses an OpenAI
 ChatGPT subscription connected with **Connect with Codex**. **Deprecated for ChatGPT sign-in** is
 being withdrawn for ChatGPT subscriptions. **(Deprecated)** still works but is on its way out, and
 **(Deprecated; routes to … on 2026-12-01)** means the provider starts answering that name with the
-newer model on that date. **(Legacy; routes to …)** already does: choosing it runs the newer model.
+newer model on that date. **(Deprecated; retires …)** stops working on that date, as Claude Sonnet
+4.5 does on 2026-11-30: move profiles off it before then. **(Legacy; routes to …)** already does: choosing it runs the newer model.
 Prefer a model without a note for new profiles. When a model leaves the list, a profile that used it keeps its ID as a custom model; if the
 provider stops offering it, chats fail with
 [Model unavailable for this account](/docs/guides/session-troubleshooting/#the-agent-or-a-tool-cant-sign-in),
@@ -855,8 +860,8 @@ change.
 | `update_task_status`                                                                                               | Report progress                                                                                                                                                                                                                                                                                                                                                                |
 | `complete_task`                                                                                                    | Mark current work as done. Pass the pull request URL as `evidence.prUrl`; it is saved on the task alongside optional test, staging, CI, manual verification, and note evidence.                                                                                                                                                                                                |
 | `request_human_input`                                                                                              | Alias of `inbox_write` method `ask` with blocking on: files one question in the person's inbox and notifies them; non-blocking                                                                                                                                                                                                                                                 |
-| `inbox_write`                                                                                                      | File what you need from a person in their inbox: `ask` (one question, one answer shape), `review`, `assign` (a non-blocking task for a person or the team), `comment` (reply in a task), `attach` (watch a task another chat of the same person assigned), and `update` / `cancel` of your own open item                                                                                                                                                                                                                               |
-| `inbox_read`                                                                                                       | `list` open items from this chat or project (check before filing), `get` one item with its answer and outcome (a task with its steps, assignee, activity and discussion)                                                                                                                                                                                                                                                                  |
+| `inbox_write`                                                                                                      | File what you need from a person in their inbox: `ask` (one question, one answer shape), `review`, `assign` (a non-blocking task for a person or the team), `comment` (reply in a task), `attach` (watch a task another chat of the same person assigned), and `update` / `cancel` of your own open item                                                                       |
+| `inbox_read`                                                                                                       | `list` open items from this chat or project (check before filing), `get` one item with its answer and outcome (a task with its steps, assignee, activity and discussion)                                                                                                                                                                                                       |
 
 `tasks_read` method `get` keeps `outputPrUrl`, `outputSummary`, and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. The SAM session (Anthropic tool) variant returns a single `finalAssistantMessage` (the latest assistant message, content capped to 2,000 characters) instead of the full array. If session diagnostics are unavailable, task details still return and the diagnostic fields are empty/null.
 

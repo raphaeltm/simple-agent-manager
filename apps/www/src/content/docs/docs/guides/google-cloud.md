@@ -145,6 +145,19 @@ For `SERVICE_DISABLED`, open Google's activation link, confirm the selected proj
 
 SAM currently maps Google 403 responses to generic permission advice, including disabled-API responses. The two messages above therefore do not, by themselves, prove that your account needs more permissions.
 
+### A task skipped a region, or failed with “Quota … exceeded”
+
+Google enforces quotas per metric and region, for example
+`Quota 'T2D_CPUS' exceeded. Limit: 24.0 in region europe-west1.` SAM treats a refusal like this as
+ruling out only that bucket: it skips the offerings the quota also rules out and keeps trying smaller
+machines, other families and other regions in your pool before moving to another provider. Each
+skipped attempt in the task's placement record names the quota and region. See
+[how SAM handles a Google Cloud quota](/docs/guides/compute-pools/#provider-order) for the details.
+
+To stop hitting it, raise the quota in the Google Cloud Console (**IAM & Admin → Quotas**) for that
+metric and region, or allow more regions or machine families in your pool. An `SSD_TOTAL_GB` refusal
+is about boot disks: see the boot disk notes under [Machine types, zones and prices](#machine-types-zones-and-prices).
+
 ### Google Cloud appears twice in the node pool
 
 Two accounts such as **Google Cloud · SAM GCP Prod** and **Google Cloud · Infrastructure settings (2)** can represent different connections. A connection that was disconnected, deleted or disabled no longer appears in the pool at all. Older SAM versions can also show one GCP connection twice with identical machine offerings because they count its old and new credential-store copies as separate pool sources. Current versions recognize these managed copies as one connection.

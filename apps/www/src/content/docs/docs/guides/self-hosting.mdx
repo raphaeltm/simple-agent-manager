@@ -489,6 +489,20 @@ Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `
 
 Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured, plus **Email me a sign-in code** when the deploy prepared email.
 
+**Check that setup is closed.** Once you have signed in as the first superadmin, nobody else can
+use the setup page. Confirm it from any machine:
+
+```bash
+curl -i https://api.yourdomain.com/api/setup/status
+# Should return: HTTP/2 410 with "error":"SETUP_CLOSED"
+```
+
+A `200` response with `"open":true` means setup is still open to anyone holding the `SETUP_TOKEN`:
+finish setup now. If it shows `"forced":true`, the `SETUP_FORCE=true` lockout-recovery override is
+set; remove it from the Worker's variables once you have recovered access, because it keeps setup
+open even after a superadmin exists. See the
+[security advisory on setup takeover](/blog/security-advisory-setup-takeover/) for why this matters.
+
 If you enabled GitLab in platform configuration, create a test project from a GitLab repository and start a lightweight chat before inviting users. That validates the OAuth app, repository metadata propagation, and workspace credential helper path together.
 
 ## Updating an Existing Self-Hosted Instance
@@ -534,6 +548,8 @@ There's no rollback. If a release misbehaves, update to a newer one that fixes i
 4. Wait for the workflow to finish, then re-run the health check above.
 
 Use the manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
+
+### Deploys wait for container rollout
 
 Staging and production deployments wait for container application rollouts to reach
 100% before reporting success. Wrangler returning successfully only means the
@@ -753,7 +769,7 @@ admission records is part of the parent section C integration.
 | Medium (vc2-4c-8gb) | 4 vCPU, 8GB RAM, 160GB  | ~$40    |
 | Large (vc2-6c-16gb) | 6 vCPU, 16GB RAM, 320GB | ~$80    |
 
-Vultr bills hourly and the default region is `fra` (Frankfurt). When you create the Vultr Personal Access Token, its **IP access control** allowlist must be set to **Allow All IPv4/IPv6** — SAM calls the Vultr API from Cloudflare Workers, which have no static egress IP, so a restricted allowlist will reject provisioning requests.
+Vultr bills hourly. Machines go to the regions your [compute pool](/docs/guides/compute-pools/) allows; `fra` (Frankfurt) is only the provider fallback when nothing else names a region. When you create the Vultr Personal Access Token, its **IP access control** allowlist must be set to **Allow All IPv4/IPv6** — SAM calls the Vultr API from Cloudflare Workers, which have no static egress IP, so a restricted allowlist will reject provisioning requests.
 
 **DigitalOcean:**
 
@@ -763,7 +779,7 @@ Vultr bills hourly and the default region is `fra` (Frankfurt). When you create 
 | Medium (s-4vcpu-8gb) | 4 vCPU, 8GB RAM, 160GB  | ~$48    |
 | Large (s-8vcpu-16gb) | 8 vCPU, 16GB RAM, 320GB | ~$96    |
 
-DigitalOcean bills hourly, defaults to `fra1` (Frankfurt), and requires a Full Access Personal Access Token (or equivalent custom scopes for droplets, block storage, tags, account, actions, images, regions, and sizes).
+DigitalOcean bills hourly (machines go to the regions your compute pool allows; `fra1`, Frankfurt, is only the provider fallback) and requires a Full Access Personal Access Token (or equivalent custom scopes for droplets, block storage, tags, account, actions, images, regions, and sizes).
 
 **UpCloud:**
 
@@ -773,7 +789,7 @@ DigitalOcean bills hourly, defaults to `fra1` (Frankfurt), and requires a Full A
 | Medium (4xCPU-8GB) | 4 vCPU, 8GB RAM  | ~$24            |
 | Large (8xCPU-16GB) | 8 vCPU, 16GB RAM | ~$48            |
 
-UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; the default zone is `de-fra1` (Frankfurt). Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
+UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; machines go to the zones your compute pool allows, with `de-fra1` (Frankfurt) as the provider fallback. Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
 
 ### Unresponsive machines are released automatically
 
@@ -912,7 +928,7 @@ choosing ongoing sampling. The generated configuration redacts query strings fro
 and terminal URLs can contain credentials. Traces can still include URL paths and database
 statement metadata; restrict access to observability data as you would for production logs.
 
-### Application deployment builds
+## Application deployment builds
 
 Instant sessions publish applications through a dedicated Cloudflare Container build executor. Cloudflare Containers are already part of SAM's supported setup, so this adds no separate cloud account or manual secret prerequisite. Deployment targets remain VMs. VM sessions retain the node executor by default; keep `deployments.buildExecutor=node` in **Admin → Settings** until a staging VM trial verifies a served release with unchanged source build/save counters. VM publishing through Cloudflare remains unverified. `DEPLOY_BUILDER_INSTANCE_TYPE` and `DEPLOY_BUILDER_MAX_INSTANCES` are deployment-time sizing controls; see the [configuration reference](/docs/reference/configuration/#cloudflare-application-build-executor).
 
