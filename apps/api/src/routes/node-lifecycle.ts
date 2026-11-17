@@ -269,7 +269,7 @@ nodeLifecycleRoutes.post('/:id/origin-ca-certificate', async (c) => {
   if (!nodeRow || nodeStatusTerminatesCallbacks(nodeRow.status)) {
     rejectTerminalNodeCallback(nodeId, nodeRow?.status, 'origin_ca_certificate');
   }
-  if (isUserOwnedNodeClass(nodeRow.nodeClass) || nodeRow.transport === 'cloudflare-tunnel') {
+  if (isUserOwnedNodeClass(nodeRow.nodeClass) || (nodeRow.transport === 'cloudflare-tunnel' || nodeRow.transport === 'reverse-tunnel')) {
     log.error('node_origin_ca_certificate.denied_user_owned', {
       nodeId,
       nodeClass: nodeRow.nodeClass,

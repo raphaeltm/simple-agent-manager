@@ -9,6 +9,7 @@ import {
 import { type TaskMode } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import type { NodeBootRenderer } from './node-transport-extension';
 import { nodeTunnelBootVariables } from './node-tunnel-config';
 import type { NodeTunnelProvisioning } from './node-tunnel-provisioning';
 import { errorReportCloudInitVariables } from './vm-error-report-config';
@@ -28,6 +29,7 @@ export interface NodeCloudInitInput {
   deploymentContext?: { environmentId: string };
   /** Present only for tunnel-transport workspace nodes. */
   tunnel?: NodeTunnelProvisioning | null;
+  renderCloudInit?: NodeBootRenderer;
 }
 
 export function buildNodeCloudInit(input: NodeCloudInitInput): string {
@@ -92,5 +94,5 @@ export function buildNodeCloudInit(input: NodeCloudInitInput): string {
     variables.cloudflareTunnelPort = tunnel.tunnelPort;
     Object.assign(variables, nodeTunnelBootVariables(env));
   }
-  return generateCloudInit(variables);
+  return input.renderCloudInit ? input.renderCloudInit(variables) : generateCloudInit(variables);
 }
