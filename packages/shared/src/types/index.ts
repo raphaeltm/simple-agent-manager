@@ -888,6 +888,7 @@ export type {
   InsightsAccountSpend,
   InsightsAccountsSection,
   InsightsAccountStalls,
+  InsightsAccountTokens,
   InsightsStallEpisode,
   InsightsStallOutcome,
   ProjectAccountsResponse,

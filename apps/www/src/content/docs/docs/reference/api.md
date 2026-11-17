@@ -1082,22 +1082,29 @@ Query `range` is `7d`, `30d` or `90d` (default `30d`; anything else is `400`). R
 membership. Sent with `Cache-Control: private, no-store`: the body carries the caller's own account
 names and limit windows. Returns `ProjectAccountsResponse`
 (`packages/shared/src/types/insights-accounts.ts`):
-`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, unavailable, generatedAt }`.
+`{ projectId, range, since, until, bucket, buckets, accounts, stallEpisodes, totals, usageLimited, unavailable, generatedAt }`.
 
-- `accounts`: most runs first. Each is `{ key, name, owner, kind, agentType, credentials, runs, merged, runsByBucket, stalls, usage, spend }`.
+- `accounts`: most runs first. Each is `{ key, name, owner, kind, agentType, credentials, runs, merged, runsByBucket, stalls, usage, tokens, spend }`.
   `owner` is `you`, `teammate`, `project`, `platform` or `not_recorded`; `kind` is `subscription`,
   `api_key`, `platform` or `unknown`. Only the caller's own credentials are rows of their own with a
   `name` (`key` is `cred:<credentialId>`); everyone else's are grouped by owner, agent and kind, with
   `name: null` and `credentials` saying how many they stand for. `runs` counts the same runs as
   Flow, attributed to the agent session that ran them; `runsByBucket` lines up with `buckets`.
 - `stalls`: `{ episodes, totalMs, ongoing }`. `usage`: the caller's own last-reported limit windows
-  (`CredentialLimitCredentialSummary`), else `null`. `spend`: `{ state: 'not_reported' }` for API
-  keys, `null` otherwise.
+  (`CredentialLimitCredentialSummary`), else `null`. `tokens`: `{ total, perMergedPullRequest }` from
+  the measured usage since the range began (`agent_run_usage`; a proxied run counted once, from the AI
+  proxy rows), or `null` when none was recorded. `spend` (API keys only, `null` otherwise):
+  `{ state: 'not_reported' }` with no usage, `{ state: 'private' }` for another member's personal
+  key, or `{ state: 'reported', costUsd, perMergedPullRequestUsd, unpricedModels }`, an estimate at
+  SAM's catalog prices where `costUsd` is `null` when nothing could be priced and a non-empty
+  `unpricedModels` makes it partial. Read by `accountUsageStatement`
+  (`packages/operations/src/insights-run-usage.ts`).
 - `stallEpisodes`: `{ items, total, listed, truncated }`; each item is
   `{ accountKey, window, startedAt, endedAt, durationMs, runs, outcome }`, newest first, where
   `outcome` is `resumed`, `ended` (the run ended while waiting), `blocked` or `ongoing`. `truncated` means the scan cap
   (`insights.accountsStallScanCap`) left older limit waits out.
-- `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`).
+- `usageLimited`: the usage read hit `insights.accountsUsageRowCap`, so tokens and spend are a floor.
+- `unavailable`: sections whose read failed this time (`runs`, `stalls`, `usage`, `tokens`).
 
 ### `GET /api/projects/:projectId/insights/setups`
 
