@@ -12,8 +12,8 @@
  */
 import { INSIGHTS_PEOPLE_ASK_KINDS } from '@simple-agent-manager/shared';
 
-import type { FlowStatement } from './insights-flow-sql';
 import { TASK_FILER_SQL, TASK_WRITABLE_SQL } from './inbox-task-rows';
+import type { FlowStatement } from './insights-flow-sql';
 
 const KINDS_SQL = INSIGHTS_PEOPLE_ASK_KINDS.map((kind) => `'${kind}'`).join(', ');
 

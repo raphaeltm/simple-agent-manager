@@ -5,10 +5,9 @@
  * is fetched through the real `/insights/people` route. Every value the tab shows here was written
  * by the production writers, on the Workers runtime's D1.
  */
+import type { ProjectPeopleResponse } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { ProjectPeopleResponse } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';

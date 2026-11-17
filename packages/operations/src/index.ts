@@ -155,7 +155,6 @@ export {
   notifyClosedAsk,
 } from './inbox-write-core';
 export { projectAccounts, type ProjectAccountsInput } from './insights-accounts';
-export { projectPeople, type ProjectPeopleInput } from './insights-people';
 export { projectFlow, type ProjectFlowInput } from './insights-flow';
 export {
   installationHealth,
@@ -179,6 +178,7 @@ export {
   type InsightsPageLimits,
   type InsightsPageSettingName,
 } from './insights-page-settings';
+export { projectPeople, type ProjectPeopleInput } from './insights-people';
 export {
   DEFAULT_PHASE_STATS_SAMPLE_LIMIT,
   DEFAULT_PHASE_STATS_WINDOW_DAYS,

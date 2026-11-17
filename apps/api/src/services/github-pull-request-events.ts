@@ -8,11 +8,11 @@ import {
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { resolveAdminSetting } from './admin-settings';
-import { ingestPullRequestReviewWebhook } from './github-pull-request-reviews';
 import {
   findProjectsForGitHubRepository,
   type GitHubProjectCandidate,
 } from './github-project-repositories';
+import { ingestPullRequestReviewWebhook } from './github-pull-request-reviews';
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
