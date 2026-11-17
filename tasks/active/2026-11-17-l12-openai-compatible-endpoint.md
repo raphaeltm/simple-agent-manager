@@ -21,7 +21,7 @@ Rule 74: condition is an operator-enabled proxy with an addressable gateway or e
 - [x] Centralize proxy availability after auth; preserve #2674 unauthenticated 401.
 - [x] Direct-upstream paths; agent-key 404 when custom endpoint is not served, malformed-row controls.
 - [x] Split passthrough to <=500 lines, guard all 3 fetches, reduce outbound baseline by 3, redirect regression tests.
-- [ ] Focused behavioral and cross-boundary tests with discriminating guards; lint/typecheck/test/build.
+- [x] Focused behavioral and cross-boundary tests with discriminating guards; lint/typecheck/test/build (full collection plus all corrected-file reruns).
 - [x] Docs reflect settings and behavior, no unrelated spec edits.
 - [ ] Draft PR, then complete candidate ready + CodeRabbit request; required local security, Cloudflare, performance and completion reviews.
 - [ ] Check both staging leases, reserve and follow queue, deploy final candidate; live 401, SAM-mode chat, title generation, SAM agent, refused-private endpoint routing then reset settings; cleanup/release.
@@ -33,7 +33,7 @@ Idea 01M72M9AEB933ZY8269D376DKC; task 01M7KNA1CNRHWG13CMNB2SVMP5; coordinator 01
 
 ## Implementation evidence (in progress)
 
-- Endpoint capability reads existing shared cache, 60s TTL; test proves 30 calls/fresh D1 facades =>1 snapshot read/0 credentials, then expiry =>2. The atomic URL/key snapshot covers local mutation fencing and remote writes through another binding: oldpairuntilTTL, thennewpair. All-corrupt matching key rows refuse503; mixedbad+good and intentionally keyless endpoints remain usable.
+- Endpoint capability reads existing shared cache, 60s TTL; test proves 30 calls/fresh D1 facades =>1 snapshot read/0 credentials, then expiry =>2. The atomic URL/key snapshot covers local mutation fencing and remote writes through another binding: the old pair until TTL, then the new pair. All-corrupt matching key rows refuse503; mixed corrupt and good rows and intentionally keyless endpoints remain usable.
 - 13 endpoint tests pass, including actual SAM operator AI SDK doGenerate guarded-fetch extension; title/diagnosis settings timeout100ms of400ms budget, private endpoint refusal, coldoutage503, no forced include_usage.
 - Three passthrough guards remove baseline3; shared/title/diagnosis/SAM forwarding delegation also lowers their baseline entries.43 passthrough tests pass including same-origin redirects, private/metadata refusals, cross-origin307 body refusal, cross-origin303 credential stripping at all3sites.
 - Agent-key custom-baseUrl404 table includes Claude, Codex, OpenCode. Existing parser untouched; composable credential malformed-row suites must remain green.
@@ -41,5 +41,8 @@ Idea 01M72M9AEB933ZY8269D376DKC; task 01M7KNA1CNRHWG13CMNB2SVMP5; coordinator 01
 - Root lint/typecheck/build62tasks passed before final rotation/retention fixes; latest package151tests pass. Fullroot suite currently running.
 - Draft PR#2829. Initial task-only mainpush rejectedGH013 required check, taskrecord kept infeaturePR. Existing SAM-assigned workspace was already isolated outputbranch at fresh origin/main60a11bb27; no extra worktree necessary.
 - Staging queues checked02:48UTC; primary reserved run44005681667 success, position3 turn04:03:57–04:13:57UTC, wake d39eaf5b-db90-4827-87a5-91edcf7bb58c at04:04. No deploy yet.
-- Specialist early findings fixed: coldoutage fail-open, raw string URL parsing, OpenCode early keyreturn, authcatch mapping, URL/keyrotation, KVcostretention. Finalreviews: performance+completion implementationPASS, CloudflarePASS, finalsecurityall-badkeyguardrecheckpending.
+- Specialist early findings fixed: coldoutage fail-open, raw string URL parsing, OpenCode early keyreturn, authcatch mapping, URL/keyrotation, KVcostretention. All four required specialist reviews pass the implementation; final security review includes the all-corrupt-key guard.
 - References: existing installed @mastra/core1.81 OpenAICompatibleConfig has no fetch extension; installed @ai-sdk/openai-compatible2.0.87 typed fetch extension and includeUsage defaultfalse verified before integration; official provider reference https://ai-sdk.dev/providers/openai-compatible-providers corroborates. Exact existing lockfile/API protocol reused; no modelcatalog changes.
+
+- Full validation: all other package suites passed; API collected 16,476 tests in 1,079 files. All 62 failures came from 15 files loaded before corrections; a fresh combined rerun passed all 260 tests in those files (JSON success=true). Final merged-main analytics checks passed 62 tests. Root lint/typecheck/build passed 62 tasks; final cached checks after merging main are running.
+- Added direct dependency audit evidence for the already-resolved SDK version. The latest main analytics change merged cleanly before candidate readiness.
