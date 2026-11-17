@@ -42,6 +42,7 @@ import { registerChatSessionDetailRoute } from './chat-session-detail';
 import { registerChatSessionListRoute } from './chat-session-list';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
+import { readChatToolChanges } from './chat-tool-changes';
 import { registerChatWorkloadIdentityRoute } from './chat-workload-identity';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
@@ -162,6 +163,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
 
   const compact = getCompactMode(c.req.query('compact'), getDefaultCompactMode(c.env));
 
+  const toolChanges = await readChatToolChanges(c, projectId, sessionId);
   const messagesResult = await projectDataService.getMessages(
     c.env,
     projectId,
@@ -174,7 +176,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
     order
   );
 
-  return c.json(messagesResult);
+  return c.json({ ...messagesResult, ...(toolChanges ? { toolChanges } : {}) });
 });
 
 /**
@@ -204,6 +206,8 @@ chatRoutes.get('/:sessionId/messages/:messageId/tool-content', async (c) => {
     throw errors.notFound('Message tool content');
   }
 
+  // A canonical tool ID has mutable output; browser/proxy caches must revalidate it.
+  c.header('Cache-Control', 'no-store');
   return c.json(toolContent);
 });
 

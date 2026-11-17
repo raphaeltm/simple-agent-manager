@@ -42,6 +42,45 @@ import { invalidateAdminSettings } from '../../src/services/admin-settings';
 afterEach(() => vi.restoreAllMocks());
 
 describe('ProjectData operation row usage in workerd', () => {
+  it('emits admission source counts and resets them at the next usage window', async () => {
+    const spy = vi.spyOn(console, 'log');
+    const stub = stubFor();
+    await stub.ensureProjectId('event-counter-flush');
+    await runInDurableObject(stub, (instance) => {
+      const usage = meter(instance);
+      const start = Date.now();
+      usage.flush(start + 15 * 60_000);
+      spy.mockClear();
+      usage.setProjectEventStoragePolicy(true);
+      usage.run('admitProjectEvent', () =>
+        usage.recordProjectEvent('github', 'check_run.completed', 'skipped_no_subscriber')
+      );
+      usage.flush(start + 30 * 60_000);
+      const emitted = spy.mock.calls
+        .map(([line]) => JSON.parse(String(line)))
+        .find((line) => line.event === 'project_data.row_usage');
+      expect(emitted.projectEventAdmissions).toMatchObject({
+        skipUnsubscribedGitHubCi: true,
+        overflowCalls: 0,
+        counts: { 'github:check_run.completed': { calls: 1, skipped: 1, created: 0 } },
+      });
+      expect(usage.projectEventAdmissions(true)).toMatchObject({
+        windowStart: start + 30 * 60_000,
+        counts: {},
+        overflowCalls: 0,
+      });
+      spy.mockClear();
+      usage.run('next-window', () => usage.recordProjectEvent('sam', 'task.completed', 'created'));
+      usage.flush(start + 45 * 60_000);
+      const next = spy.mock.calls
+        .map(([line]) => JSON.parse(String(line)))
+        .find((line) => line.event === 'project_data.row_usage');
+      expect(next.projectEventAdmissions.counts).toEqual({
+        'sam:task.completed': { calls: 1, created: 1, skipped: 0, duplicate: 0, conflict: 0 },
+      });
+    });
+  });
+
   it('attributes a real message batch RPC and adds no SQL writes', async () => {
     const spy = vi.spyOn(console, 'log');
     const stub = stubFor();
