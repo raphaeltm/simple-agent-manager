@@ -1,4 +1,3 @@
-import { useFullProjectEventHistory } from './helpers/full-project-event-history';
 import type { AdmitProjectEventInput } from '@simple-agent-manager/project-data/internal/do/project-events';
 import {
   runProjectEventWakeMaterializationBatch,
@@ -27,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
 import * as svc from '../../src/services/project-data';
+import { useFullProjectEventHistory } from './helpers/full-project-event-history';
 import { seedMaterializationFairnessPrefix } from './helpers/project-event-fairness-fixture';
 import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 import {

@@ -1,15 +1,14 @@
 import { type ProjectEventAdmissionResult } from '@simple-agent-manager/shared';
 
+import { createMatchesForEvent, matchingSubscriptionsForEvent } from './project-event-matching';
 import { type AdmitProjectEventInput } from './project-events-contracts';
 import { findNewerCredentialLimitEvent } from './project-events-credential-supersession';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { assertProjectBinding, normalizeProjectEventInput } from './project-events-normalization';
 import { ensureProjectEventRetentionScheduled } from './project-events-scheduler';
 import {
-  createMatchesForEvent,
   insertMatchIfAbsent,
   listMatchesForEvent,
-  matchingSubscriptionsForEvent,
   readEventByDeliveryKey,
   readEventById,
 } from './project-events-storage-helpers';

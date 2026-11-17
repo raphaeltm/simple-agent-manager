@@ -7,10 +7,10 @@ Reduce Durable Object SQLite writes from GitHub CI admissions without breaking s
 ## Preflight and research (main a3d3246c0)
 
 Classes: business-logic-change, cross-component-change, public-surface-change, docs-sync-change. Billing unit: DO SQLite rows, including index entries, hidden KV and alarm writes. No new external API integration or infrastructure component.
-Data flow: signed POST /api/github/webhook -> durable GitHub inbox processing -> github-project-event-producer -> ProjectData client -> ProjectData.admitProjectEvent -> synchronous transaction -> subscription match -> wake materialization -> durable prompt queue -> runtime steer.
+Data flow: signed POST /api/github/webhook -> synchronous github-project-event-producer -> ProjectData client -> ProjectData.admitProjectEvent -> synchronous transaction -> subscription match -> wake materialization -> durable prompt queue -> runtime steer.
 Read parent newest baseline update 01M7KY3Z5FAHAKRWT5FMKBMH55. Cost tool first failed HTTP 401 on placeholder env; managed exec_with_secrets recovered successfully (job sx-41f248d3cd852a28589da9de855b641865704175a8dfaac9bd92c1ed47d6df13). Account 11-16: 2.85M written, 835.4M read; MTD 28.56M written. Two-day projection includes pre-fix regime and is not a causal savings estimate.
 
-## Reader inventory (verified code; finish call-site audit before implementation)
+## Reader inventory (verified on current main)
 
 | Reader                                                          | Unsubscribed history?                                                                                    | Decision / validation                                                                                                                                                                                                                            |
 | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -29,15 +29,15 @@ Read parent newest baseline update 01M7KY3Z5FAHAKRWT5FMKBMH55. Cost tool first f
 
 ## Implementation checklist
 
-- [ ] Finish full reader/caller inventory and measure source split read-only or add bounded production counters
-- [ ] Pin current real-workerd stored admission writes and investigate avoidable indexes/checkpoint writes
-- [ ] Add typed runtime kill switch and exact GitHub CI scope; preserve existing receipts
-- [ ] Reuse canonical filter predicates for zero-write skip; distinct outcome with no event
-- [ ] Add in-memory source/type/outcome counters to existing row_usage window and inspector disclosure
-- [ ] Real signed webhook -> real DO skip/store/wake tests; prove guard mutation red; alarms unchanged on skip
-- [ ] Tests for off mode, scope, expired and mismatched subscriptions, existing duplicate/conflict, late subscriptions
-- [ ] Measure real-workerd before/after skip/store reads and writes, with row meter
-- [ ] Update public docs and inspector UX; desktop/mobile screenshot audit if UI changes
+- [x] Finish full reader/caller inventory and measure source split read-only or add bounded production counters
+- [x] Pin current real-workerd stored admission writes and investigate avoidable indexes/checkpoint writes
+- [x] Add typed runtime kill switch and exact GitHub CI scope; preserve existing receipts
+- [x] Reuse canonical filter predicates for zero-write skip; distinct outcome with no event
+- [x] Add in-memory source/type/outcome counters to existing row_usage window and inspector disclosure
+- [x] Real signed webhook -> real DO skip/store/wake tests; prove guard mutation red; alarms unchanged on skip
+- [x] Tests for off mode, scope, expired and mismatched subscriptions, existing duplicate/conflict, late subscriptions
+- [x] Measure real-workerd before/after skip/store reads and writes, with row meter
+- [x] Update public docs and inspector UX; desktop/mobile screenshot audit if UI changes
 - [ ] Full lint/typecheck/test/build; local specialist and task-completion reviews
 - [ ] Staging lease, real webhook path if possible, subscribed CI runtime wake, cleanup
 - [ ] Ready PR, CI and CodeRabbit gate, merge, monitor deploy
@@ -49,7 +49,7 @@ Zero project_events rows and zero SQLite writes per skipped admission; existing 
 
 ## References
 
-Rules 07, 13, 28, 47, 62, 68, 76, 81. Prior cost work: project-event-cost-plans.test.ts, github-project-event-cost-wake.test.ts; migration 077 already removed redundant event indexes. Wake occupancy incident rule 47 requirement 12: do not copy another record's deadline. No schema/migration change yet planned.
+Rules 07, 13, 28, 47, 62, 68, 76, 81. Prior cost work: project-event-cost-plans.test.ts, github-project-event-cost-wake.test.ts; migration 077 already removed redundant event indexes. Wake occupancy incident rule 47 requirement 12: do not copy another record's deadline. Embedded SQLite migration 082 narrows only the credential-window expression index to recorded rows with non-null windowType; no table or Wrangler namespace/tag migration. Existing lookup always compares windowType, so excluded rows cannot match.
 
 ### Additional verified readers and decisions
 
@@ -57,7 +57,7 @@ Standing watches (`project-standing-watches-runner.ts`) select existing `project
 
 ### Measured implementation evidence
 
-Real workerd, production RowUsage meter: pre-change credential index cold stored admission 9 SQL writes (receipt 5 + first scheduler state 4), steady stored 5; narrowed credential index steady stored 4; skipped admission 0. Baseline aggregate 7.1 writes/call includes changing mix and alarm work; do not claim fixture writes explain every production call. Expanded route/rollback/scope/receipt controls: 10 passed. Surgical guard deletion: 5 expected failures, 5 controls passed; restore/rebuild completed.
-New diagnostic cardinality bound reuses 32-label ceiling. Every admission finishes in the same request; overflow increments a memory counter, never defers work or writes a row. Matcher retains existing 200-active-subscription/100-matches limits and 5 indexed event keys; worst case checks all 200 bounded subscription filters, with no new per-event timer or retry. 2300 admissions/hour is under 1/sec; no backlog is introduced. Need volume fixture and exact plans before final acceptance.
+Real workerd, production RowUsage meter: pre-change credential index cold stored admission 9 SQL writes (receipt 5 + first scheduler state 4), steady stored 5; narrowed credential index steady stored 4; skipped admission 0. Baseline aggregate 7.1 writes/call includes changing mix and alarm work; do not claim fixture writes explain every production call. Final signed-route/rollback/scope/receipt/expiry/overflow suite: 13 passed; five core event suites: 87 passed. Matched admission: 26→25 writes. Actual credential lookup query uses the partial index (captured EXPLAIN plan in workerd). Surgical guard deletion: 5 expected failures, 5 controls passed; restore/rebuild completed.
+New diagnostic cardinality bound reuses 32-label ceiling. Every admission finishes in the same request; overflow increments a memory counter, never defers work or writes a row. Matcher retains existing 200-active-subscription/100-matches limits and 5 indexed event keys; worst case checks all 200 bounded subscription filters, with no new per-event timer or retry. 2300 admissions/hour is under 1/sec; no backlog is introduced. The 34-type fixture proves all admissions complete while only 32 diagnostic buckets are retained, with two overflow calls disclosed; snapshot cloning is covered.
 
 Coordinator explicitly accepts the inspector as a changed reader (durable message c7ec03d2-fa49-4306-9681-375220c4f9a2): replace skipped CI row visibility with disclosed volatile window counts, default ON, test kill switch. This is an intentional diagnostic contract change, not a claim that the old inspector never read those rows.

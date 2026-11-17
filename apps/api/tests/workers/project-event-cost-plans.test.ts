@@ -3,7 +3,7 @@ import { MIGRATIONS } from '@simple-agent-manager/project-data/internal/do/migra
 import { admitProjectEvent } from '@simple-agent-manager/project-data/internal/do/project-events';
 import { runProjectEventRetention } from '@simple-agent-manager/project-data/internal/do/project-events-status-retention';
 import { env, evictDurableObject, runInDurableObject } from 'cloudflare:test';
-import { afterEach,describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { useFullProjectEventHistory } from './helpers/full-project-event-history';

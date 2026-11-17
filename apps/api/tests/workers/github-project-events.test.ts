@@ -1,7 +1,7 @@
 import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { Hono } from 'hono';
-import { afterEach,describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { handleGitHubWebhook } from '../../src/routes/github-webhook';

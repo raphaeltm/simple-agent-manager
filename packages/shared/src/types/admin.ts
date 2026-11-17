@@ -5,12 +5,12 @@ import type {
   ProjectEventDisplayData,
   ProjectEventFilterV1,
   ProjectEventMatchState,
+  ProjectEventRecentStatus,
   ProjectEventRequestedDeliveryMode,
   ProjectEventResolvedDeliveryMode,
   ProjectEventSeverity,
   ProjectEventStorageAccountingRecord,
   ProjectEventSubject,
-  ProjectEventRecentStatus,
   ProjectEventSubscriptionOwner,
   ProjectEventSubscriptionState,
 } from './project-events';
