@@ -35,3 +35,5 @@ Original mainwriter independently reproduced1024fresh epochs/1024rows. Candidate
 Taskplan-only mainpush was refused by branchprotectionGH013 requiredWorkers after normal integration of concurrentmain. Plan carried in originalfeaturePR instead; no bypass. No user-facing retention selected and no history deleted.
 
 SonarCloud currenthead94836719 reports only duplicate test setup (29newlines/5.5% overall), zero issues/security findings. Shared withUsageCap fixture now owns cap seeding/session creation/cleanup for both capped tests; identical assertions and real trigger preserved, Workers6/6 rerun PASS. No quality threshold or exclusion changed. Full local lint/typecheck PASS; test/build still pending.
+
+Full-suite follow-up: 1092 API suites/16656 tests passed; one suite failed collection because its logger mock hid createModuleLogger newly reached by canonical settings. Preserve real logger exports with importOriginal while retaining existing log spies; proxy43/43 PASS, independent test review PASS. Full quality rerun pending. No production runtime delta.
