@@ -160,6 +160,7 @@ function createInstance(doDb: Database.Database, env: Env) {
   };
   const ctx = {
     storage,
+    waitUntil: vi.fn(),
     blockConcurrencyWhile: async <T>(fn: () => Promise<T>): Promise<T> => fn(),
   };
   const instance = new CredentialSetupSession(ctx as never, env);
@@ -209,14 +210,18 @@ function createFixture(envOverrides: Record<string, string> = {}): Fixture {
   return { d1, doDb, env, sandbox };
 }
 
-async function startSession(fixture: Fixture, toWaitingForUser: boolean) {
+async function startSession(
+  fixture: Fixture,
+  toWaitingForUser: boolean,
+  agentType: 'openai-codex' | 'claude-code' = 'openai-codex'
+) {
   const handle = createInstance(fixture.doDb, fixture.env);
   await handle.instance.create({
     id: SESSION_ID,
     userId: USER_ID,
     projectId: null,
     scope: 'user',
-    agentType: 'openai-codex',
+    agentType,
     credentialKind: 'oauth-token',
     provider: 'openai',
     agentName: 'OpenAI Codex',
@@ -377,9 +382,10 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     expect(handle.storage.deleteAlarm).not.toHaveBeenCalled();
   });
 
-  it('scrubs on recovery after a cancellation interrupted during provisioning', async () => {
+  it('conservatively scrubs legacy NULL-flight cleanup interrupted during provisioning', async () => {
     const fixture = createFixture();
     const first = await startSession(fixture, false);
+    fixture.doDb.prepare('UPDATE setup_session SET cleanup_sandbox_io_pending = NULL').run();
     vi.mocked(destroySandboxInstance).mockImplementation(() => new Promise(() => {}));
     void first.instance.cancel();
     await vi.waitFor(() => expect(destroySandboxInstance).toHaveBeenCalledTimes(1));
@@ -437,9 +443,12 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     const restarted = createInstance(fixture.doDb, fixture.env);
     await restarted.instance.alarm();
 
-    // A resumed cleanup still scrubs: on Cloudflare the container outlives the dead
-    // isolate, so the captured credential may still be on it.
-    expect(scrubCalls(fixture.sandbox)).toEqual([[`rm -rf '${SETUP_HOME}'`, expect.anything()]]);
+    // The original scrub settled before the interrupted destroy; durable proof
+    // avoids issuing another potentially restarting SDK call.
+    expect(fixture.doDb.prepare('SELECT cleanup_scrub_state FROM setup_session').get()).toEqual({
+      cleanup_scrub_state: 2,
+    });
+    expect(scrubCalls(fixture.sandbox)).toHaveLength(0);
     expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), SESSION_ID, {
       sandboxId: SESSION_ID,
     });
@@ -680,10 +689,12 @@ describe('CredentialSetupSession teardown — the claim', () => {
     const alarm = instance.alarm();
     await vi.waitFor(() => expect(fixture.sandbox.readFile).toHaveBeenCalled());
 
-    await instance.cancel(); // claims and finishes the whole teardown meanwhile
-    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    await instance.cancel(); // terminalizes immediately, defers destruction until the read settles
+    expect(d1Status(fixture.d1)).toBe('cancelled');
+    expect(destroySandboxInstance).not.toHaveBeenCalled();
     releaseRead?.();
     await alarm;
+    await instance.alarm(); // recovery finishes the single owed cleanup
 
     expect(doRow(fixture.doDb)).toMatchObject({
       status: 'cancelled',
@@ -842,10 +853,325 @@ describe('CredentialSetupSession teardown — never-started container', () => {
   });
 });
 
+describe('CredentialSetupSession teardown — unresolved asynchronous operations', () => {
+  it.each(['acquisition', 'mkdir', 'writeFile', 'driver'])(
+    'defers teardown across cancelled provisioning %s and prevents late SDK operations',
+    async (phase) => {
+      const fixture = createFixture();
+      const first = await startSession(fixture, false);
+      let finishFlight: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        finishFlight = resolve;
+      });
+      const result = { stdout: '', stderr: '', exitCode: 0 };
+      if (phase === 'acquisition')
+        vi.mocked(getSandboxInstance).mockImplementationOnce(async () => {
+          await gate;
+          return fixture.sandbox as never;
+        });
+      else if (phase === 'writeFile')
+        fixture.sandbox.writeFile.mockImplementationOnce(async () => {
+          await gate;
+        });
+      else {
+        if (phase === 'driver') fixture.sandbox.exec.mockResolvedValueOnce(result);
+        fixture.sandbox.exec.mockImplementationOnce(async () => {
+          await gate;
+          return result;
+        });
+      }
+      const provision = first.instance.alarm();
+      await vi.waitFor(() =>
+        expect(
+          phase === 'acquisition'
+            ? getSandboxInstance
+            : phase === 'writeFile'
+              ? fixture.sandbox.writeFile
+              : fixture.sandbox.exec
+        ).toHaveBeenCalledTimes(phase === 'driver' ? 2 : 1)
+      );
+      const beforeExecs = fixture.sandbox.exec.mock.calls.length;
+      const beforeWrites = fixture.sandbox.writeFile.mock.calls.length;
+      try {
+        await first.instance.cancel();
+        expect(d1Status(fixture.d1)).toBe('cancelled');
+        expect(destroySandboxInstance).not.toHaveBeenCalled();
+        expect(releaseSetupSlot).not.toHaveBeenCalled();
+        const restarted = createInstance(fixture.doDb, fixture.env);
+        await restarted.instance.alarm();
+        expect(destroySandboxInstance).not.toHaveBeenCalled();
+        expect(fixture.sandbox.exec).toHaveBeenCalledTimes(beforeExecs);
+        finishFlight?.();
+        await provision;
+        expect(fixture.sandbox.writeFile).toHaveBeenCalledTimes(beforeWrites);
+        expect(fixture.sandbox.exec).toHaveBeenCalledTimes(beforeExecs);
+        await restarted.instance.alarm();
+        expect(scrubCalls(fixture.sandbox)).toHaveLength(0);
+        expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+        expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+        expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0 });
+        expect(d1Status(fixture.d1)).toBe('cancelled');
+      } finally {
+        finishFlight?.();
+        await provision;
+      }
+    }
+  );
+
+  it('preserves terminal D1 when the original admitting write lands after cancellation', async () => {
+    const fixture = createFixture();
+    const handle = await startSession(fixture, false);
+    const realDb = fixture.env.DATABASE;
+    let releaseWrite: (() => void) | undefined;
+    let writeHeld = false;
+    const gate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    fixture.env.DATABASE = {
+      ...realDb,
+      prepare(query: string) {
+        const statement = realDb.prepare(query);
+        return {
+          ...statement,
+          bind: (...args: unknown[]) => {
+            const bound = statement.bind(...args);
+            if (args[0] !== 'admitting') return bound;
+            return {
+              ...bound,
+              run: async () => {
+                writeHeld = true;
+                await gate;
+                return bound.run();
+              },
+            };
+          },
+        };
+      },
+    } as Env['DATABASE'];
+    const provision = handle.instance.alarm();
+    try {
+      await vi.waitFor(() => expect(writeHeld).toBe(true));
+      await handle.instance.cancel();
+      expect(d1Status(fixture.d1)).toBe('cancelled');
+      releaseWrite?.();
+      await provision;
+      // Assert before recovery can repair a resurrected active mirror.
+      expect(d1Status(fixture.d1)).toBe('cancelled');
+      expect(doRow(fixture.doDb)).toMatchObject({ status: 'cancelled', cleanup_pending: 1 });
+      await handle.instance.alarm();
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0 });
+    } finally {
+      releaseWrite?.();
+      await provision;
+    }
+  });
+
+  it('keeps an issued scrub pending across eviction and tears down only after its original promise settles', async () => {
+    const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
+    const first = await startSession(fixture, true);
+    let settleScrub: (() => void) | undefined;
+    const scrub = new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
+      settleScrub = () => resolve({ stdout: '', stderr: '', exitCode: 0 });
+    });
+    fixture.sandbox.exec.mockClear().mockImplementation(() => scrub);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const cancel = first.instance.cancel();
+    await vi.waitFor(() => expect(scrubCalls(fixture.sandbox)).toHaveLength(1));
+    const restarted = createInstance(fixture.doDb, fixture.env);
+    const recovery = restarted.instance.alarm();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await recovery;
+
+    expect(destroySandboxInstance).not.toHaveBeenCalled();
+    expect(releaseSetupSlot).not.toHaveBeenCalled();
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1 });
+    expect(scrubCalls(fixture.sandbox)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(25_000);
+    await cancel;
+    expect(destroySandboxInstance).not.toHaveBeenCalled();
+    first.storage.setAlarm.mockClear();
+    settleScrub?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.storage.setAlarm).toHaveBeenCalledTimes(1);
+    await restarted.instance.alarm();
+    expect(scrubCalls(fixture.sandbox)).toHaveLength(1);
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0 });
+  });
+
+  it('keeps cleanup deferred until overlapping poll and verification SDK flights both settle', async () => {
+    const fixture = createFixture();
+    fixture.d1
+      .prepare("UPDATE agent_credential_setup_sessions SET agent_type = 'claude-code'")
+      .run();
+    const handle = await startSession(fixture, true, 'claude-code');
+    let finishPoll: (() => void) | undefined;
+    let finishCode: (() => void) | undefined;
+    const pollGate = new Promise<void>((resolve) => {
+      finishPoll = resolve;
+    });
+    const codeGate = new Promise<void>((resolve) => {
+      finishCode = resolve;
+    });
+    fixture.sandbox.exec.mockClear();
+    fixture.sandbox.readFile.mockClear().mockImplementationOnce(async () => {
+      await pollGate;
+      return {
+        content: JSON.stringify({
+          status: 'waiting_for_user',
+          verificationUrl: 'https://example.com/verify',
+        }),
+      };
+    });
+    fixture.sandbox.writeFile.mockClear().mockImplementationOnce(async () => {
+      await codeGate;
+    });
+    const poll = handle.instance.alarm();
+    await vi.waitFor(() => expect(fixture.sandbox.readFile).toHaveBeenCalledTimes(1));
+    const code = handle.instance.submitVerificationCode('test-code').then(
+      () => undefined,
+      () => undefined
+    );
+    await vi.waitFor(() => expect(fixture.sandbox.writeFile).toHaveBeenCalledTimes(1));
+    try {
+      await handle.instance.cancel();
+      expect(d1Status(fixture.d1)).toBe('cancelled');
+      expect(destroySandboxInstance).not.toHaveBeenCalled();
+      finishPoll?.();
+      await poll;
+      const row = fixture.doDb
+        .prepare('SELECT cleanup_sandbox_io_pending FROM setup_session')
+        .get() as { cleanup_sandbox_io_pending: number };
+      expect(row.cleanup_sandbox_io_pending).toBeGreaterThan(0);
+      await handle.instance.alarm();
+      expect(destroySandboxInstance).not.toHaveBeenCalled();
+      expect(releaseSetupSlot).not.toHaveBeenCalled();
+      expect(fixture.sandbox.exec).not.toHaveBeenCalled();
+      expect(fixture.sandbox.readFile).toHaveBeenCalledTimes(1);
+      finishCode?.();
+      await code;
+      await handle.instance.alarm();
+      expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+      expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+      expect(doRow(fixture.doDb)).toMatchObject({ status: 'cancelled', cleanup_pending: 0 });
+      expect(d1Status(fixture.d1)).toBe('cancelled');
+    } finally {
+      finishPoll?.();
+      finishCode?.();
+      await Promise.all([poll, code]);
+    }
+  });
+
+  it('quarantines an unsettled scrub and never re-arms after late original settlement', async () => {
+    const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
+    fixture.env.OBSERVABILITY_DATABASE = {} as D1Database;
+    const first = await startSession(fixture, true);
+    let settleScrub: (() => void) | undefined;
+    const gate = new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
+      settleScrub = () => resolve({ stdout: '', stderr: '', exitCode: 0 });
+    });
+    fixture.sandbox.exec.mockClear().mockImplementation(() => gate);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const cancel = first.instance.cancel();
+    await vi.waitFor(() => expect(scrubCalls(fixture.sandbox)).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await cancel;
+    for (
+      let attempt = 1;
+      attempt <= DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS;
+      attempt++
+    ) {
+      const restarted = createInstance(fixture.doDb, fixture.env);
+      await restarted.instance.alarm();
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1, cleanup_attempts: attempt });
+    }
+    const quarantined = createInstance(fixture.doDb, fixture.env);
+    await quarantined.instance.alarm();
+    expect(doRow(fixture.doDb)).toMatchObject({
+      cleanup_pending: 1,
+      cleanup_attempts: DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS + 1,
+    });
+    expect(persistError).toHaveBeenCalledTimes(1);
+    expect(destroySandboxInstance).not.toHaveBeenCalled();
+    expect(releaseSetupSlot).not.toHaveBeenCalled();
+    first.storage.setAlarm.mockClear();
+    settleScrub?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.storage.setAlarm).not.toHaveBeenCalled();
+    await quarantined.instance.alarm();
+    expect(quarantined.storage.setAlarm).not.toHaveBeenCalled();
+    expect(persistError).toHaveBeenCalledTimes(1);
+    expect(
+      fixture.doDb
+        .prepare('SELECT cleanup_scrub_state, cleanup_sandbox_destroyed FROM setup_session')
+        .get()
+    ).toEqual({ cleanup_scrub_state: 2, cleanup_sandbox_destroyed: null });
+    expect(doRow(fixture.doDb).cleanup_pending).toBe(1);
+  });
+
+  it.each(['pool', 'd1'])(
+    'bounds a stalled recovery %s write and preserves its cleanup obligation',
+    async (step) => {
+      const fixture = createFixture();
+      await interruptTeardown(fixture);
+      vi.mocked(destroySandboxInstance).mockReset().mockResolvedValue(undefined);
+      if (step === 'pool')
+        vi.mocked(releaseSetupSlot).mockImplementation(() => new Promise(() => {}));
+      let repairStarted = false;
+      if (step === 'd1') {
+        const realDb = fixture.env.DATABASE;
+        fixture.env.DATABASE = {
+          ...realDb,
+          prepare(query: string) {
+            const statement = realDb.prepare(query);
+            if (!query.includes('completed_at') || !query.includes('IN (')) return statement;
+            return {
+              ...statement,
+              bind: (...args: unknown[]) => {
+                const bound = statement.bind(...args);
+                return {
+                  ...bound,
+                  run: () => {
+                    repairStarted = true;
+                    return new Promise(() => {});
+                  },
+                };
+              },
+            };
+          },
+        } as Env['DATABASE'];
+      }
+      const restarted = createInstance(fixture.doDb, fixture.env);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let finished = false;
+      const recovery = restarted.instance.alarm().then(() => {
+        finished = true;
+      });
+      await vi.waitFor(() =>
+        expect(
+          step === 'pool' ? vi.mocked(releaseSetupSlot).mock.calls.length > 0 : repairStarted
+        ).toBe(true)
+      );
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(finished).toBe(true);
+      await recovery;
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1 });
+      expect(restarted.storage.deleteAlarm).not.toHaveBeenCalled();
+    }
+  );
+});
+
 describe('CredentialSetupSession teardown — recovery I/O budget', () => {
   it('never starts a late scrub after acquisition outlives its recovery deadline', async () => {
     const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
     await interruptTeardown(fixture);
+    // Legacy pending cleanup has no positive scrub/provision settlement metadata.
+    fixture.doDb
+      .prepare(
+        'UPDATE setup_session SET cleanup_scrub_state = NULL, cleanup_sandbox_io_pending = NULL'
+      )
+      .run();
     const config = await import('../../../src/services/credential-setup-config');
     // Prove the cleanup consumer uses its configurable recovery budget.
     const budget = vi
@@ -880,42 +1206,54 @@ describe('CredentialSetupSession teardown — recovery I/O budget', () => {
     }
   });
 
-  it('bounds stalled recovery scrub and destroy separately below the interactive timeout', async () => {
-    const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
-    await interruptTeardown(fixture);
-    vi.mocked(destroySandboxInstance)
-      .mockReset()
-      .mockImplementation(() => new Promise(() => {}));
-    fixture.sandbox.exec.mockClear().mockImplementation(() => new Promise(() => {}));
-    const restarted = createInstance(fixture.doDb, fixture.env);
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    let finished = false;
-    const recovery = restarted.instance.alarm().then(() => {
-      finished = true;
-    });
-    await vi.waitFor(() => expect(scrubCalls(fixture.sandbox)).toHaveLength(1));
-
-    await vi.advanceTimersByTimeAsync(4_000);
-    expect(destroySandboxInstance).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
-    expect(finished).toBe(false);
-    await vi.advanceTimersByTimeAsync(4_000);
-    expect(finished).toBe(false);
-    await vi.advanceTimersByTimeAsync(1_000);
-    await recovery;
-
-    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
-    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1 });
-    expect(
-      fixture.doDb.prepare('SELECT cleanup_sandbox_destroyed FROM setup_session').get()
-    ).toEqual({ cleanup_sandbox_destroyed: null });
-    expect(restarted.storage.deleteAlarm).not.toHaveBeenCalled();
-  });
+  it.each(['scrub', 'destroy'])(
+    'bounds stalled recovery %s separately below the interactive timeout',
+    async (step) => {
+      const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
+      await interruptTeardown(fixture);
+      vi.mocked(destroySandboxInstance)
+        .mockReset()
+        .mockImplementation(() => new Promise(() => {}));
+      if (step === 'scrub') {
+        fixture.doDb
+          .prepare(
+            'UPDATE setup_session SET cleanup_scrub_state = NULL, cleanup_sandbox_io_pending = NULL'
+          )
+          .run();
+        fixture.sandbox.exec.mockClear().mockImplementation(() => new Promise(() => {}));
+      }
+      const restarted = createInstance(fixture.doDb, fixture.env);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      let finished = false;
+      const recovery = restarted.instance.alarm().then(() => {
+        finished = true;
+      });
+      await vi.waitFor(() =>
+        expect(
+          step === 'scrub'
+            ? scrubCalls(fixture.sandbox).length
+            : vi.mocked(destroySandboxInstance).mock.calls.length
+        ).toBe(1)
+      );
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(finished).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await recovery;
+      expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 1 });
+      expect(
+        fixture.doDb.prepare('SELECT cleanup_sandbox_destroyed FROM setup_session').get()
+      ).toEqual({ cleanup_sandbox_destroyed: null });
+      if (step === 'scrub') {
+        expect(destroySandboxInstance).not.toHaveBeenCalled();
+        expect(releaseSetupSlot).not.toHaveBeenCalled();
+      }
+      expect(restarted.storage.deleteAlarm).not.toHaveBeenCalled();
+    }
+  );
 });
 
 describe('CredentialSetupSession teardown — scrub timeout', () => {
-  it('abandons a scrub exec that never settles after SANDBOX_EXEC_TIMEOUT_MS and still destroys', async () => {
+  it('returns after the interactive scrub deadline but retains uncertainty until SDK settlement', async () => {
     const fixture = createFixture({ SANDBOX_EXEC_TIMEOUT_MS: '30000' });
     const { instance } = await startSession(fixture, true);
     fixture.sandbox.exec.mockImplementation(() => new Promise(() => undefined));
@@ -933,9 +1271,9 @@ describe('CredentialSetupSession teardown — scrub timeout', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     await cancel;
 
-    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
-    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
-    expect(doRow(fixture.doDb).cleanup_pending).toBe(0);
+    expect(destroySandboxInstance).not.toHaveBeenCalled();
+    expect(releaseSetupSlot).not.toHaveBeenCalled();
+    expect(doRow(fixture.doDb).cleanup_pending).toBe(1);
   });
 });
 

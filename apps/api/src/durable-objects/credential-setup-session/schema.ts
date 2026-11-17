@@ -36,6 +36,10 @@ export type SetupSessionRow = {
   cleanup_attempts: number | null;
   /** 1 only after sandbox.destroy() succeeds; recovery must not restart that sandbox. */
   cleanup_sandbox_destroyed: number | null;
+  /** NULL: not invoked; 1: SDK exec may still start work; 2: original exec settled. */
+  cleanup_scrub_state: number | null;
+  /** NULL legacy; positive count of original SDK flights; 0 all observed settled. */
+  cleanup_sandbox_io_pending: number | null;
 };
 
 export type DeviceAuthDetailsRow = {
@@ -54,6 +58,11 @@ const CLEANUP_COLUMNS: ReadonlyArray<readonly [name: string, ddl: string]> = [
   ['cleanup_pending', 'ALTER TABLE setup_session ADD COLUMN cleanup_pending INTEGER'],
   ['cleanup_from_status', 'ALTER TABLE setup_session ADD COLUMN cleanup_from_status TEXT'],
   ['cleanup_attempts', 'ALTER TABLE setup_session ADD COLUMN cleanup_attempts INTEGER'],
+  ['cleanup_scrub_state', 'ALTER TABLE setup_session ADD COLUMN cleanup_scrub_state INTEGER'],
+  [
+    'cleanup_sandbox_io_pending',
+    'ALTER TABLE setup_session ADD COLUMN cleanup_sandbox_io_pending INTEGER',
+  ],
   [
     'cleanup_sandbox_destroyed',
     'ALTER TABLE setup_session ADD COLUMN cleanup_sandbox_destroyed INTEGER',

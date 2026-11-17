@@ -38,7 +38,6 @@
 import type { AgentType, CredentialKind } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 import { drizzle } from 'drizzle-orm/d1';
-import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
@@ -57,11 +56,18 @@ import {
 } from '../../services/credential-setup-config';
 import { persistError } from '../../services/observability-errors';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
-import { getSandboxConfig, getSandboxInstance, shellQuote } from '../../services/sandbox';
+import { getSandboxInstance, shellQuote } from '../../services/sandbox';
 import { CredentialValidator } from '../../services/validation';
 import { runSetupSessionCleanup } from './cleanup';
 import { type SetupSessionD1Extra, updateSetupSessionD1Status } from './d1-status';
-import { type DeviceAuthState, DeviceAuthStateSchema, driverFailure } from './driver-state';
+import { type DeviceAuthState, driverFailure } from './driver-state';
+import {
+  armCleanupAlarmBestEffort,
+  beginSandboxFlight,
+  readDeviceAuthState,
+  runProvisioningSandboxSteps,
+  trackSandboxFlight,
+} from './lifecycle-io';
 import {
   type DeviceAuthDetailsRow,
   ensureSetupSessionSchema,
@@ -142,8 +148,8 @@ export class CredentialSetupSession extends DurableObject<Env> {
       `INSERT OR REPLACE INTO setup_session (
         id, user_id, project_id, scope, agent_type, credential_kind, provider,
         agent_name, status, pool_lease_id, codex_home, expires_at, capture_poll_ms,
-        error_code, error_message, completed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, NULL, NULL, NULL)`,
+        error_code, error_message, completed_at, cleanup_sandbox_io_pending
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, NULL, NULL, NULL, 0)`,
       params.id,
       params.userId,
       params.projectId,
@@ -251,16 +257,22 @@ export class CredentialSetupSession extends DurableObject<Env> {
       throw new Error('Invalid Claude verification code');
     }
 
-    const sandbox = await getSandboxInstance(this.env, row.id);
-    await sandbox.writeFile(`${row.codex_home}/${CLAUDE_VERIFICATION_CODE_FILE}`, normalizedCode);
-    const current = this.readRow();
-    if (!current || current.status !== 'waiting_for_user') {
-      throw new Error('Claude Code setup is no longer waiting for a verification code');
-    }
-    this.setStatus(row.id, 'exchanging');
-    await this.updateD1Status(row.id, 'exchanging');
-    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
-    return this.getState() ?? this.terminalState(row, 'exchanging');
+    return this.withSandboxFlight(row, async () => {
+      const sandbox = await getSandboxInstance(this.env, row.id);
+      if (this.readRow()?.status !== 'waiting_for_user')
+        throw new Error('Claude Code setup is no longer waiting for a verification code');
+      await sandbox.writeFile(`${row.codex_home}/${CLAUDE_VERIFICATION_CODE_FILE}`, normalizedCode);
+      const current = this.readRow();
+      if (!current || current.status !== 'waiting_for_user') {
+        throw new Error('Claude Code setup is no longer waiting for a verification code');
+      }
+      this.setStatus(row.id, 'exchanging');
+      await this.updateD1Status(row.id, 'exchanging');
+      if (this.readRow()?.status !== 'exchanging')
+        return this.getState() ?? this.terminalState(row, 'cancelled');
+      await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+      return this.getState() ?? this.terminalState(row, 'exchanging');
+    });
   }
 
   /**
@@ -305,6 +317,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
       }
       // waiting_for_user | exchanging | capturing — observe driver failure and capture output.
       const driverState = await this.readDeviceAuthState(row);
+      if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return;
       if (driverState?.status === 'failed') {
         const failure = driverFailure(driverState, setupDisplayName(row.agent_type));
         log.warn('credential_setup.driver_failed', {
@@ -329,34 +342,27 @@ export class CredentialSetupSession extends DurableObject<Env> {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // State-machine steps
-  // ---------------------------------------------------------------------------
-
   private async provision(row: SetupSessionRow): Promise<void> {
     const displayName = setupDisplayName(row.agent_type);
+    const settle = beginSandboxFlight(this.sql, row.id, () =>
+      armCleanupAlarmBestEffort(this.ctx, row)
+    );
     try {
-      const sandbox = await getSandboxInstance(this.env, row.id);
-      // Per-session setup home. For Codex this is CODEX_HOME; for Claude Code it
-      // is CLAUDE_CONFIG_DIR. mkdir first so provider CLIs can write there.
-      // Built in a variable (not inline in .exec) so the SQL-injection AST rule
-      // doesn't false-match this SHELL command — the path is already shellQuote()d.
-      const mkdirCmd = `mkdir -p ${shellQuote(row.codex_home)}`;
-      await sandbox.exec(mkdirCmd, {
-        timeout: getSandboxConfig(this.env).execTimeoutMs,
-      });
-      if (row.agent_type === 'openai-codex') {
-        await sandbox.writeFile(
-          `${row.codex_home}/config.toml`,
-          'cli_auth_credentials_store = "file"\n'
-        );
-      }
-      const statePath = `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`;
-      const startCommand = this.startSetupDriverCommand(row, statePath);
-      await sandbox.exec(startCommand, {
-        timeout: getSandboxConfig(this.env).execTimeoutMs,
-      });
+      const currentFlight = await runProvisioningSandboxSteps(
+        this.env,
+        row,
+        () => this.readRow()?.status === 'provisioning',
+        this.startSetupDriverCommand(row, `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`)
+      );
+      if (!currentFlight) return;
+      const current = this.readRow();
+      if (!current || current.status !== 'provisioning') return;
+      this.setStatus(current.id, 'admitting');
+      await this.updateD1Status(current.id, 'admitting', { started: true });
+      if (this.readRow()?.status !== 'admitting') return;
+      await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
     } catch (err) {
+      await settle();
       const message = err instanceof Error ? err.message : String(err);
       // The Sandbox SDK answers a container start that can never succeed (no such image,
       // no matching container application, out of memory) with its permanent-startup
@@ -376,12 +382,9 @@ export class CredentialSetupSession extends DurableObject<Env> {
           : `Failed to prepare ${displayName} sign-in`
       );
       return;
+    } finally {
+      await settle();
     }
-    const current = this.readRow();
-    if (!current || current.status !== 'provisioning') return;
-    this.setStatus(current.id, 'admitting');
-    await this.updateD1Status(current.id, 'admitting', { started: true });
-    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
   }
 
   private startSetupDriverCommand(row: SetupSessionRow, statePath: string): string {
@@ -475,22 +478,25 @@ export class CredentialSetupSession extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
   }
 
-  private async readDeviceAuthState(row: SetupSessionRow): Promise<DeviceAuthState | null> {
-    try {
-      const sandbox = await getSandboxInstance(this.env, row.id);
-      const path = `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`;
-      const existence = await sandbox.exists(path);
-      if (!existence.exists) return null;
-      const file = await sandbox.readFile(path);
-      const parsedRaw = JSON.parse(file.content ?? '') as unknown;
-      const result = v.safeParse(DeviceAuthStateSchema, parsedRaw);
-      // A partial/mid-flush write or an unrecognized status parses invalid —
-      // degrade to null (caller keeps polling), matching the pre-validation
-      // blind-cast behavior for any state that didn't drive a status branch.
-      return result.success ? result.output : null;
-    } catch {
-      return null;
-    }
+  private readDeviceAuthState(row: SetupSessionRow): Promise<DeviceAuthState | null> {
+    return this.withSandboxFlight(row, () =>
+      readDeviceAuthState(
+        this.env,
+        row,
+        () => !isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled'),
+        `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`
+      )
+    );
+  }
+
+  private withSandboxFlight<T>(row: SetupSessionRow, run: () => Promise<T>): Promise<T> {
+    return trackSandboxFlight(
+      this.sql,
+      this.ctx,
+      row.id,
+      () => armCleanupAlarmBestEffort(this.ctx, row),
+      run
+    );
   }
 
   private readDeviceAuthDetails(): DeviceAuthDetailsRow | null {
@@ -505,23 +511,30 @@ export class CredentialSetupSession extends DurableObject<Env> {
   }
 
   private async attemptCapture(row: SetupSessionRow): Promise<void> {
-    const sandbox = await getSandboxInstance(this.env, row.id);
-    const credentialPath = `${row.codex_home}/${credentialFileName(row.agent_type)}`;
+    const file = await this.withSandboxFlight(row, async () => {
+      if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return null;
+      const sandbox = await getSandboxInstance(this.env, row.id);
+      if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return null;
+      const credentialPath = `${row.codex_home}/${credentialFileName(row.agent_type)}`;
 
-    const existence = await sandbox.exists(credentialPath);
-    if (!existence.exists) {
-      await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
-      return;
-    }
+      const existence = await sandbox.exists(credentialPath);
+      if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return null;
+      if (!existence.exists) {
+        await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+        return null;
+      }
 
-    let current = this.readRow();
-    if (!current || isTerminalSetupStatus(current.status)) return;
-    if (current.status !== 'capturing') {
-      this.setStatus(current.id, 'capturing');
-      await this.updateD1Status(current.id, 'capturing');
-    }
+      const current = this.readRow();
+      if (!current || isTerminalSetupStatus(current.status)) return null;
+      if (current.status !== 'capturing') {
+        this.setStatus(current.id, 'capturing');
+        await this.updateD1Status(current.id, 'capturing');
+      }
 
-    const file = await sandbox.readFile(credentialPath);
+      if (isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return null;
+      return sandbox.readFile(credentialPath);
+    });
+    if (!file || isTerminalSetupStatus(this.readRow()?.status ?? 'cancelled')) return;
     let content = file.content ?? '';
     if (row.agent_type === 'claude-code') content = content.trim();
 
@@ -542,7 +555,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
       return;
     }
 
-    current = this.readRow();
+    let current = this.readRow();
     if (!current || isTerminalSetupStatus(current.status)) return;
     this.setStatus(current.id, 'saving');
     await this.updateD1Status(current.id, 'saving');
@@ -626,7 +639,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
   ): Promise<void> {
     // Arm the recovery alarm before any I/O (it replaces any pending poll alarm);
     // the cleanup deletes it when it finishes.
-    await this.armCleanupAlarmBestEffort(claimed);
+    await armCleanupAlarmBestEffort(this.ctx, claimed);
     // D1 terminal FIRST: the create route's one-active lookup reads D1, so an isolate
     // death during the sandbox I/O must not leave this row active.
     await this.updateD1Status(claimed.id, finalStatus, {
@@ -667,16 +680,18 @@ export class CredentialSetupSession extends DurableObject<Env> {
       // sandbox error text belongs in the alert. Pool leases independently expire
       // on admission, while this row preserves the unresolved cleanup obligation.
       if (this.env.OBSERVABILITY_DATABASE) {
-        await persistError(
-          this.env.OBSERVABILITY_DATABASE,
-          {
-            source: 'api',
-            level: 'error',
-            message: 'credential_setup.cleanup_abandoned',
-            sessionId: row.id,
-            context: { status: row.status, cleanupFromStatus: row.cleanup_from_status, attempts },
-          },
-          this.env
+        this.ctx.waitUntil(
+          persistError(
+            this.env.OBSERVABILITY_DATABASE,
+            {
+              source: 'api',
+              level: 'error',
+              message: 'credential_setup.cleanup_abandoned',
+              sessionId: row.id,
+              context: { status: row.status, cleanupFromStatus: row.cleanup_from_status, attempts },
+            },
+            this.env
+          ).catch(() => log.error('credential_setup.cleanup_alert_failed', { sessionId: row.id }))
         );
       }
       return;
@@ -693,7 +708,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
 
   private async resumeClaimedCleanup(row: SetupSessionRow): Promise<void> {
     // Re-arm before I/O so a death during this run is retried as well.
-    await this.armCleanupAlarmBestEffort(row);
+    await armCleanupAlarmBestEffort(this.ctx, row);
     await this.runCleanup(row, true);
   }
 
@@ -703,7 +718,8 @@ export class CredentialSetupSession extends DurableObject<Env> {
         env: this.env,
         sql: this.sql,
         deleteAlarm: () => this.deleteAlarmBestEffort(),
-        rearmAlarm: () => this.armCleanupAlarmBestEffort(row),
+        waitUntil: (work) => this.ctx.waitUntil(work),
+        rearmAlarm: () => armCleanupAlarmBestEffort(this.ctx, row),
       },
       row,
       resumed
@@ -717,16 +733,6 @@ export class CredentialSetupSession extends DurableObject<Env> {
     });
     this.cleanupInFlight = flight;
     return flight;
-  }
-
-  private async armCleanupAlarmBestEffort(row: SetupSessionRow): Promise<void> {
-    try {
-      await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
-    } catch {
-      // Recovery scheduling must never prevent D1 terminalization or inline cleanup.
-      // The pending marker remains authoritative if cleanup also fails.
-      log.error('credential_setup.cleanup_alarm_failed', { sessionId: row.id });
-    }
   }
 
   private async deleteAlarmBestEffort(): Promise<void> {

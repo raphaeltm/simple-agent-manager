@@ -1152,13 +1152,17 @@ for all keys, budgets, proxy availability and accounting limits.
 
 ## Guided-login cleanup recovery
 
-`credentialSetup.cleanupRecoveryStepTimeoutMs` (Operations) limits each sandbox scrub and
-destruction step when a guided credential-login cleanup is retried by its recovery alarm.
-The default is 5,000 ms per step (range 1–10,000 ms), capped by `SANDBOX_EXEC_TIMEOUT_MS`.
-The alarm makes at most three recovery attempts: sandbox work takes at most 10 seconds per
-attempt by default, plus the bounded settings read and pool/D1 bookkeeping. Only recovery
-reads this setting; inline cancellation keeps the interactive sandbox timeout.
+`credentialSetup.cleanupRecoveryStepTimeoutMs` (Operations) limits each remote step when a
+guided credential-login cleanup is retried by its recovery alarm: D1 repair, sandbox scrub,
+sandbox destruction and pool release. The default is 5,000 ms per step (range 1–10,000 ms),
+capped by `SANDBOX_EXEC_TIMEOUT_MS`. At most three recovery attempts run. Remote waits total
+at most 20 seconds per attempt by default (40 seconds at the maximum), plus the existing
+bounded settings read. Only recovery reads this setting; inline cancellation keeps the
+interactive sandbox timeout.
 
-A deadline stops waiting; it does not cancel the underlying SDK operation. A timed-out
-destruction never records destruction proof. Unfinished cleanup remains marked pending;
-after the recovery cap it is quarantined and reported as an operator-visible platform error.
+A deadline stops waiting; it does not cancel an SDK operation. Cleanup cannot record
+successful destruction or release its pool slot while earlier sandbox work may still start
+the container. Unfinished cleanup remains marked pending. If an isolate dies before that
+work's settlement is observed, recovery preserves the uncertainty. After the recovery cap,
+the session is quarantined and reported as an operator-visible platform error; a late
+settlement does not reset the cap. A timed-out destruction never records destruction proof.

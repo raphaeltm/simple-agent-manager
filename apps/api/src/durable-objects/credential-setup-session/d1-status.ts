@@ -47,7 +47,8 @@ export async function updateSetupSessionD1Status(
   }
   binds.push(id);
   let where = 'id = ?';
-  if (extra?.onlyIfActive) {
+  // A late active-phase write must never resurrect a cancellation/terminal row.
+  if (extra?.onlyIfActive || ACTIVE_SETUP_STATUSES.some((active) => active === status)) {
     where += ` AND status IN (${ACTIVE_SETUP_STATUSES.map(() => '?').join(', ')})`;
     binds.push(...ACTIVE_SETUP_STATUSES);
   }

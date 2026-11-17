@@ -140,6 +140,8 @@ interface FakeRow {
   cleanup_from_status: string | null;
   cleanup_attempts: number | null;
   cleanup_sandbox_destroyed: number | null;
+  cleanup_scrub_state: number | null;
+  cleanup_sandbox_io_pending: number | null;
 }
 
 function createFakeSql() {
@@ -190,6 +192,8 @@ function createFakeSql() {
         cleanup_from_status: null,
         cleanup_attempts: null,
         cleanup_sandbox_destroyed: null,
+        cleanup_scrub_state: null,
+        cleanup_sandbox_io_pending: 0,
       };
       return { toArray: () => [] };
     }
@@ -224,6 +228,36 @@ function createFakeSql() {
       if (row) row = { ...row, cleanup_pending: 0 };
       return { toArray: () => [] };
     }
+    if (q.includes('update setup_session set cleanup_sandbox_io_pending = coalesce')) {
+      if (row)
+        row = { ...row, cleanup_sandbox_io_pending: (row.cleanup_sandbox_io_pending ?? 0) + 1 };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_sandbox_io_pending = max')) {
+      if (row)
+        row = {
+          ...row,
+          cleanup_sandbox_io_pending: Math.max(0, (row.cleanup_sandbox_io_pending ?? 0) - 1),
+        };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_scrub_state = 1')) {
+      if (row) row = { ...row, cleanup_scrub_state: 1 };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_scrub_state = 2')) {
+      if (row) row = { ...row, cleanup_scrub_state: 2 };
+      return { toArray: () => [] };
+    }
+    if (q.startsWith('select cleanup_scrub_state'))
+      return { toArray: () => (row ? [{ cleanup_scrub_state: row.cleanup_scrub_state }] : []) };
+    if (q.startsWith('select cleanup_pending, cleanup_attempts'))
+      return {
+        toArray: () =>
+          row
+            ? [{ cleanup_pending: row.cleanup_pending, cleanup_attempts: row.cleanup_attempts }]
+            : [],
+      };
     if (q.includes('update setup_session set cleanup_sandbox_destroyed = 1')) {
       if (row) row = { ...row, cleanup_sandbox_destroyed: 1 };
       return { toArray: () => [] };
@@ -276,6 +310,7 @@ function createFakeCtx() {
   return {
     storage: { sql, setAlarm, deleteAlarm },
     blockConcurrencyWhile,
+    waitUntil: vi.fn(),
     _sql: sql,
   };
 }

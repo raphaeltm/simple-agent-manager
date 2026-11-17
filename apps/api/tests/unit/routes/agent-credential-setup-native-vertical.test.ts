@@ -110,6 +110,7 @@ function createDoContext() {
           provider,
           agent_name: agentName,
           status: 'provisioning',
+          cleanup_sandbox_io_pending: 0,
           pool_lease_id: poolLeaseId,
           codex_home: codexHome,
           expires_at: expiresAt,
@@ -127,6 +128,20 @@ function createDoContext() {
         row = { ...row, cleanup_pending: 1, cleanup_from_status: args[0], cleanup_attempts: 0 };
       } else if (normalized.includes('set cleanup_pending = 0') && row) {
         row = { ...row, cleanup_pending: 0 };
+      } else if (normalized.includes('set cleanup_scrub_state = 1') && row) {
+        row = { ...row, cleanup_scrub_state: 1 };
+      } else if (normalized.includes('set cleanup_scrub_state = 2') && row) {
+        row = { ...row, cleanup_scrub_state: 2 };
+      } else if (normalized.includes('set cleanup_sandbox_io_pending = coalesce') && row) {
+        row = {
+          ...row,
+          cleanup_sandbox_io_pending: Number(row.cleanup_sandbox_io_pending ?? 0) + 1,
+        };
+      } else if (normalized.includes('set cleanup_sandbox_io_pending = max') && row) {
+        row = {
+          ...row,
+          cleanup_sandbox_io_pending: Math.max(0, Number(row.cleanup_sandbox_io_pending ?? 0) - 1),
+        };
       } else if (normalized.includes('set cleanup_sandbox_destroyed = 1') && row) {
         row = { ...row, cleanup_sandbox_destroyed: 1 };
       } else if (normalized.includes('set cleanup_attempts = ?') && row) {
@@ -143,6 +158,22 @@ function createDoContext() {
       if (normalized.includes('select * from setup_session')) {
         return { toArray: () => (row ? [{ ...row }] : []) };
       }
+      if (normalized.startsWith('select cleanup_scrub_state'))
+        return {
+          toArray: () => (row ? [{ cleanup_scrub_state: row.cleanup_scrub_state ?? null }] : []),
+        };
+      if (normalized.startsWith('select cleanup_pending, cleanup_attempts'))
+        return {
+          toArray: () =>
+            row
+              ? [
+                  {
+                    cleanup_pending: row.cleanup_pending ?? null,
+                    cleanup_attempts: row.cleanup_attempts ?? null,
+                  },
+                ]
+              : [],
+        };
       if (normalized.includes('select verification_url, user_code')) {
         return { toArray: () => (details ? [{ ...details }] : []) };
       }
@@ -155,6 +186,7 @@ function createDoContext() {
       setAlarm: vi.fn().mockResolvedValue(undefined),
       deleteAlarm: vi.fn().mockResolvedValue(undefined),
     },
+    waitUntil: vi.fn(),
     blockConcurrencyWhile: vi.fn(async (callback: () => Promise<unknown>) => callback()),
   };
 }
