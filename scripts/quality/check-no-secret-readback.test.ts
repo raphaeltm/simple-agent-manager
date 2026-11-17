@@ -77,6 +77,8 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['/usr/bin/printenv', 'env-dump'],
   ['export', 'env-dump'],
   ['command env', 'env-dump'],
+  ['env ADDED=1', 'env-dump'],
+  ['        run: env -i ADDED=1 | sort', 'env-dump'],
   ['        run: command printenv', 'env-dump'],
   ['sudo env | sort', 'env-dump'],
   ['set', 'env-dump'],

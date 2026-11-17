@@ -60,13 +60,16 @@ once the trust names it, otherwise `staging2-agent-admin` (superadmin) or `stagi
 Add the returned cookie for `.sammy2.party`. The issuer and allowed source project/user are the
 same as for `staging`.
 
-The trust comes from the `staging` Environment's GitHub secret `AGENT_SIGN_IN_TRUST_STAGING2`.
-Deploys pass it straight to `configure-secrets.sh` as `SECONDARY_AGENT_SIGN_IN_TRUST`, in the same
-bulk secret write, and never derive it from staging's trust. Its `allowedTargets` must include
-`staging2-test-user`. The Worker value still in place from earlier deploys names only the two
-bootstrap users, so signing in as `staging2-test-user` returns 403 until that secret is set.
-While the secret is unset, a deploy leaves staging2's Worker secret as it is; revoking the trust
-therefore also means deleting the Worker secret by hand.
+The trust comes from the `staging` Environment's GitHub secret `AGENT_SIGN_IN_TRUST_STAGING2`, which
+Raphaël sets by hand: staging's issuer and source, with `allowedTargets`
+`["staging2-agent-admin","staging2-agent-user","staging2-test-user"]`. Deploys pass it straight to
+`configure-secrets.sh` as `SECONDARY_AGENT_SIGN_IN_TRUST`, in the same bulk secret write, and never
+derive it from staging's trust. The first staging2 deploy after the secret is set (and PR #2841 is
+on the deployed ref) applies it. Before that, the Worker value from earlier deploys names only the
+two bootstrap users, so signing in as `staging2-test-user` returns 403. While the secret is unset,
+a deploy leaves staging2's Worker secret as it is (`AGENT_SIGN_IN_TRUST_KEEP_WHEN_UNSET`), so
+staging2 is never left without a trust; revoking it therefore also means deleting the Worker
+secret by hand.
 
 The staging smoke token works on staging2 only where a registration row already exists (the
 one made before 2026-11-17 does). Deploys no longer register it, because that needs staging2's
@@ -84,9 +87,7 @@ hand, once per installation:
    first, as superadmin, in the D1 console. Then add its credentials (Claude Code, GCP) and the
    Google infrastructure integration.
 2. Admin → Infrastructure: pick the shared pool's machines, at most 2 nodes.
-3. GitHub → Environments → `staging`: the `AGENT_SIGN_IN_TRUST_STAGING2` secret. It is staging's
-   trust JSON with `allowedTargets` naming `staging2-test-user` (and the bootstrap users, if
-   wanted).
+3. GitHub → Environments → `staging`: the `AGENT_SIGN_IN_TRUST_STAGING2` secret described above.
 
 Earlier deploys copied some rows into staging2 by the old, now removed path: platform
 credentials `staging2-bootstrap-cloud` (Hetzner) and `staging2-bootstrap-agent-claude-code`, the
