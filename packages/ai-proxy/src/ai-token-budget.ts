@@ -16,7 +16,7 @@ import { log } from '@simple-agent-manager/worker-core';
 
 import { getUserBudgetSettings } from './ai-budget-settings';
 import { hasLocalAiCostMetering } from './ai-gateway-availability';
-import { checkMonthlyCostCap } from './ai-monthly-cost-cap';
+import { checkMonthlyCostCap, type MonthlyCostCeilingPort } from './ai-monthly-cost-cap';
 import type { AiProxyEnv } from './env';
 
 export {
@@ -26,13 +26,17 @@ export {
   getAdminAiAllowance,
   getAiBudgetLimits,
   getUserBudgetSettings,
+  MONTHLY_COST_CAP_UNAVAILABLE_MESSAGE,
   saveUserBudgetSettings,
   validateBudgetUpdate,
 } from './ai-budget-settings';
 export {
   buildMonthlyCostCacheKey,
   checkMonthlyCostCap,
+  effectiveMonthlyCostCapUsd,
   getCachedMonthlyCost,
+  type MonthlyCostCeilingPort,
+  resolveMonthlyCostCeilingUsd,
 } from './ai-monthly-cost-cap';
 
 export interface TokenBudget {
@@ -67,7 +71,8 @@ interface AiTokenBudgetCounterStub extends DurableObjectStub {
     attribution: AiProviderUsageAttribution,
     inputTokens: number,
     outputTokens: number,
-    estimatedCostUsd: number
+    estimatedCostUsd: number,
+    modelId?: string
   ): Promise<void>;
   getProviderUsage(startDateKey: string): Promise<AiProviderUsageEntry[]>;
 }
@@ -329,7 +334,9 @@ export async function incrementProviderUsage(
   inputTokens: number,
   outputTokens: number,
   env?: AiProxyEnv,
-  estimatedCostUsd = 0
+  estimatedCostUsd = 0,
+  /** Catalog model SAM priced this call from; adds a per-model row (DO only, ai-model-usage.ts). */
+  modelId?: string
 ): Promise<void> {
   const counter = getBudgetCounter(env, userId);
   if (counter) {
@@ -338,7 +345,8 @@ export async function incrementProviderUsage(
       attribution,
       inputTokens,
       outputTokens,
-      estimatedCostUsd
+      estimatedCostUsd,
+      ...(modelId ? [modelId] : [])
     );
     return;
   }
@@ -452,14 +460,15 @@ export type AiUsageGateResult =
 export async function checkAiUsageGate(
   kv: KVNamespace,
   userId: string,
-  env: AiProxyEnv
+  env: AiProxyEnv,
+  ports: MonthlyCostCeilingPort
 ): Promise<AiUsageGateResult> {
   const budget = await checkTokenBudget(kv, userId, env);
   if (!budget.allowed) {
     return { allowed: false, reason: 'daily-token-budget', budget };
   }
 
-  const monthlyCap = await checkMonthlyCostCap(kv, userId, env);
+  const monthlyCap = await checkMonthlyCostCap(kv, userId, env, ports);
   if (!monthlyCap.allowed) {
     return { allowed: false, reason: 'monthly-cost-cap', monthlyCap };
   }

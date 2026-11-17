@@ -35,6 +35,7 @@ function fixture() {
   const env = { KV: kv } as AiProxyEnv;
   return { rows, kv, env };
 }
+const NO_CEILING = { monthlyCostCeilingUsd: async () => 0 };
 afterEach(() => vi.useRealTimers());
 
 describe('direct-upstream metering, without forced include_usage', () => {
@@ -62,9 +63,14 @@ describe('direct-upstream metering, without forced include_usage', () => {
     );
     vi.setSystemTime(new Date('2026-10-31T23:59:00Z'));
     expect(await getLocalMonthlyAiCostUsd(kv, 'user', env)).toBe(firstCost);
-    expect(await checkMonthlyCostCap(kv, 'user', env)).toMatchObject({ allowed: false });
+    expect(await checkMonthlyCostCap(kv, 'user', env, NO_CEILING)).toMatchObject({
+      allowed: false,
+    });
     vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));
-    expect(await checkMonthlyCostCap(kv, 'user', env)).toMatchObject({ allowed: true, costUsd: 0 });
+    expect(await checkMonthlyCostCap(kv, 'user', env, NO_CEILING)).toMatchObject({
+      allowed: true,
+      costUsd: 0,
+    });
   });
 
   it('meters a platform response into the same local store that the monthly cap reads', async () => {
@@ -78,7 +84,7 @@ describe('direct-upstream metering, without forced include_usage', () => {
       { usage: { prompt_tokens: 100, completion_tokens: 100 } },
       { env, userId: 'user', format: 'openai', costModelId: model.id, onMeasuredUsage: measured }
     );
-    expect(await checkMonthlyCostCap(kv, 'user', env)).toMatchObject({
+    expect(await checkMonthlyCostCap(kv, 'user', env, NO_CEILING)).toMatchObject({
       allowed: false,
       capUsd: 0.000001,
     });

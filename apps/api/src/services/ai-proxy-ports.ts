@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { resolveAdminSetting } from './admin-settings-resolution';
+import { AI_PROXY_MONTHLY_COST_CEILING_SETTING } from './ai-proxy-settings';
 import { getPlatformAgentCredential } from './platform-credentials';
 
 /**
@@ -23,5 +24,8 @@ export function aiProxyPorts(env: Env, db?: ReturnType<typeof drizzle>): AiProxy
     },
     externalReadTimeoutMs: async () =>
       Number(await resolveAdminSetting(env, 'performance.externalReadTimeoutMs')),
+    // Per-isolate cached admin settings snapshot: at most one D1 read per cache TTL.
+    monthlyCostCeilingUsd: async () =>
+      Number(await resolveAdminSetting(env, AI_PROXY_MONTHLY_COST_CEILING_SETTING)),
   };
 }

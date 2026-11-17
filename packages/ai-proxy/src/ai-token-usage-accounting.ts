@@ -270,15 +270,11 @@ async function incrementExtractedUsage(
           cacheWriteInputTokens: writes,
         })
       : 0;
-    await incrementProviderUsage(
-      options.env.KV,
-      options.userId,
-      provider,
-      inputTokens,
-      outputTokens,
-      options.env,
-      ...(options.costModelId ? ([costUsd] as const) : [])
-    );
+    const args = [options.env.KV, options.userId, provider, inputTokens, outputTokens] as const;
+    // A priced call also records its catalog model (per-model breakdown without a gateway).
+    if (model) await incrementProviderUsage(...args, options.env, costUsd, model.id);
+    else if (options.costModelId) await incrementProviderUsage(...args, options.env, costUsd);
+    else await incrementProviderUsage(...args, options.env);
   }
   // Budget accounting is the billing control and runs first; run usage is telemetry and must
   // never delay or starve it.

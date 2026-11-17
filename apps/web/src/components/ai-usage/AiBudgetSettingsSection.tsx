@@ -115,6 +115,13 @@ export function BudgetSettingsSection() {
     }
   }
 
+  const cap = budget?.monthlyCostCap;
+  const ceilingUsd = cap?.ceilingUsd ?? null;
+  // The installation ceiling, not the user's own cap, is what binds.
+  const capFromCeiling =
+    ceilingUsd !== null &&
+    (budget?.settings.monthlyCostCapUsd == null || budget.settings.monthlyCostCapUsd > ceilingUsd);
+
   if (loading) {
     return (
       <div className="flex justify-center py-4">
@@ -172,13 +179,19 @@ export function BudgetSettingsSection() {
             limit={budget.effectiveLimits.dailyOutputTokenLimit}
             unit="tokens"
           />
-          {budget.settings.monthlyCostCapUsd !== null && (
+          {cap?.effectiveCapUsd != null && (
             <BudgetBar
-              label="Monthly Cost Cap"
+              label={capFromCeiling ? 'Monthly Cost Cap (installation limit)' : 'Monthly Cost Cap'}
               used={budget.monthCostUsd}
-              limit={budget.settings.monthlyCostCapUsd}
+              limit={cap.effectiveCapUsd}
               unit="$"
             />
+          )}
+          {cap && !cap.available && (
+            <Body className="text-fg-muted text-xs m-0" data-testid="monthly-cap-unavailable">
+              Monthly cost caps are not available on this installation: SAM cannot price AI spend
+              here. Daily token limits still apply.
+            </Body>
           )}
           {budget.exceeded && (
             <div
@@ -252,21 +265,31 @@ export function BudgetSettingsSection() {
               />
             </div>
 
-            <div>
-              <label htmlFor="monthlyCap" className="block text-sm font-medium mb-1">
-                Monthly Cost Cap (USD)
-              </label>
-              <input
-                id="monthlyCap"
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={monthlyCap}
-                onChange={(e) => setMonthlyCap(e.target.value)}
-                placeholder="No limit"
-                className="w-full px-3 py-2.5 min-h-[44px] rounded-md text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
-              />
-            </div>
+            {cap?.available !== false && (
+              <div>
+                <label htmlFor="monthlyCap" className="block text-sm font-medium mb-1">
+                  Monthly Cost Cap (USD)
+                </label>
+                <input
+                  id="monthlyCap"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  max={ceilingUsd ?? undefined}
+                  value={monthlyCap}
+                  onChange={(e) => setMonthlyCap(e.target.value)}
+                  placeholder={ceilingUsd !== null ? formatCost(ceilingUsd) : 'No limit'}
+                  aria-describedby={ceilingUsd !== null ? 'monthlyCapCeiling' : undefined}
+                  className="w-full px-3 py-2.5 min-h-[44px] rounded-md text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
+                />
+                {ceilingUsd !== null && (
+                  <p id="monthlyCapCeiling" className="text-fg-muted text-xs mt-1 mb-0">
+                    Your administrator limits everyone to {formatCost(ceilingUsd)} a month. You can
+                    set a lower cap; leaving it empty uses that limit.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div>
               <label htmlFor="alertThreshold" className="block text-sm font-medium mb-1">

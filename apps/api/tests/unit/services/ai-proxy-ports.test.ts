@@ -72,4 +72,11 @@ describe('aiProxyPorts', () => {
       'performance.externalReadTimeoutMs'
     );
   });
+
+  it('reads the installation monthly ceiling admin setting as a number', async () => {
+    mocks.resolveAdminSetting.mockResolvedValueOnce(25);
+
+    await expect(aiProxyPorts(env).monthlyCostCeilingUsd()).resolves.toBe(25);
+    expect(mocks.resolveAdminSetting).toHaveBeenCalledWith(env, 'aiProxy.monthlyCostCeilingUsd');
+  });
 });
