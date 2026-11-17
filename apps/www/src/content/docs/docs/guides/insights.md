@@ -13,6 +13,14 @@ coming; until then it says what it will show.
 Every number is worked out from what SAM already records about tasks, ideas, pull requests and
 their checks. Nothing is estimated: when SAM has no record for something, the page says so.
 
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/insights-flow-mobile.png 2x" />
+  <img
+    src="/images/docs/insights-flow.png"
+    alt="The Insights page on its Flow tab, with 7, 30 and 90 days selectable and 30 days selected (on a phone the screen shows the four figures, two by two). Four figures: Idea to merged, median 1.6 days, 9.6 hours faster than the previous 30 days; CI passes first try 64%, up 6 points; Waiting on a person, median 22 min across 41 asks; Rework within 7 days 11%, down 3 points. Below, Runs per week by outcome shows six weekly bars split into merged, closed without merge and failed, and Why runs stopped before finishing lists Pull request waiting to merge 31, CI failing 18, Hit a usage limit 9, Workspace setup failed 6 and Agent stopped responding 4. Flaky checks and Ideas waiting longest begin underneath."
+  />
+</picture>
+
 ## Flow
 
 ### The four figures
@@ -138,8 +146,9 @@ whose agent session recorded no credential appear as **Account not recorded**.
   long in total (**Paused now** while one is still going).
 - **Limits now** (your own accounts): the provider's last-reported windows, the same chip as the chat
   header. Open it for every window and when it resets.
-- **Spend** (API keys): **Not reported** for now. SAM does not yet record how many tokens each run
-  used, and it does not estimate.
+- **Spend** (API keys): **Not reported** for now: this tab does not add up spend yet. Each run's
+  tokens per model, and an estimated spend for runs on an API key, are on its chat's
+  [Receipt](/docs/guides/chat-features/#run-receipt).
 
 The ring around each account's icon is its colour in the chart below.
 
@@ -168,8 +177,8 @@ the tab says so rather than showing it empty.
 
 ## On the Overview
 
-The [Project Overview](/docs/guides/project-overview/) shows a small **This week** pane with three of
-these numbers and the top blocker, and links here. The top blocker is the most common reason runs
+The [Project Overview](/docs/guides/project-overview/) shows a small **This week** pane for the last 7 days: pull requests **Merged**, **Idea → merged**
+and **CI first try**, and the top blocker, with a link here. The top blocker is the most common reason runs
 stopped (other than a person or coordinator stopping them on purpose) or the flakiest check,
 whichever affected more work.
 

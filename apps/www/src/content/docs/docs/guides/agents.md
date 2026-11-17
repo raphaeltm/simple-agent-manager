@@ -158,9 +158,9 @@ SAM picks the account for a run in this order, most specific first (`explainReso
 
 1. The account you chose for this chat ([Using another account for one chat](#using-another-account-for-one-chat)).
 1. Your account for this profile.
-2. Your account for this project.
-3. Your default account for the agent.
-4. SAM's platform account, where the agent has one.
+1. Your account for this project.
+1. Your default account for the agent.
+1. SAM's platform account, where the agent has one.
 
 Pins are per person. Yours change which of your accounts runs your work; they never change a
 teammate's.
@@ -429,6 +429,10 @@ coming before an agent stops on it.
   Choosing it changes only this chat's account, and a line then says **This chat runs on Work Max
   instead of Personal Pro**, with an undo. A skill or chat option that changes the agent clears the
   choice, because the chat would then run a different agent.
+  Mind which way a number counts: the chip in a chat and on the account cards shows how much is
+  **used** (`78%` means a fifth is left), while the Profiles page and the new-chat picker show how much
+  is **left** and say so.
+
 - **Agents** can read the same numbers with the `workspace_read` tool (`method: "credential_limits"`), so an agent
   coordinating others can pause before a limit and schedule itself to wake after the reset.
 
@@ -517,7 +521,7 @@ profile's name to edit it, or use its **⋯** menu to edit or delete it.
   <source media="(max-width: 40em)" srcset="/images/docs/profiles-page-mobile.png 2x" />
   <img
     src="/images/docs/profiles-page.png"
-    alt="A project's Agent Profiles page with Name and Most room sort buttons and a table of six profiles. Each row shows the model and effort, the resources it asks for (Default resources, Medium VM, 4 vCPU · 7.5 GB, or Instant container) and a usage strip for its account, such as 5h 94% and Wk 46% in orange for Backend Builder. Code Reviewer's 5h window shows 0% with a reset arrow, and OpenCode Explorer reads No account connected."
+    alt="A project's Agent Profiles page with Name and Most room sort buttons and a table of six profiles. Each row shows the model and effort, the resources it asks for (Default resources, Medium VM, 4 vCPU · 7.5 GB, or Instant container) and a strip of how much is left on its account: Backend Builder has 6% of its 5-hour window left in red and 54% of its week; Careful Builder 28%, 12% of its Opus limit and 69%; Code Reviewer's 5-hour window is back to 100% with a reset arrow. OpenCode Explorer reads No account connected."
   />
 </picture>
 
@@ -546,7 +550,7 @@ Type `@` in a chat message to choose a profile from the mention list. Mentions a
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/new-chat-profiles-mobile.png 2x" />
-  <img src="/images/docs/new-chat-profiles.png" alt="A new chat asking 'Who should take this?', with 'Pick a profile, then describe the task below.' Under Recent are three profile cards, each with its description, what runs it and a ring around its icon showing the usage left: Brainstormer, selected and checked, 'Claude · Opus 5.5 · max effort', with an almost empty orange ring and '6% left · resets 53m'; Careful Builder, with a nearly full green ring; and Code Reviewer, 'Codex · GPT-6 Astra · high effort'. Below them is All 6 profiles. Above the message box a strip reads '6% left on Personal Max · resets in 53m', and To shows Brainstormer with the same ring, with the attach and Chat options buttons on the right." />
+  <img src="/images/docs/new-chat-profiles.png" alt="A new chat asking 'Who should take this?', with 'Pick a profile, then describe the task below.' Under Recent are three profile cards, each with its description, what runs it and a ring around its icon showing the usage left: Brainstormer, selected and checked, 'Claude · Opus 5.5 · max effort', with an almost empty orange ring and '5h 6% left · resets 53m · Week 39% left · resets 2d 23h'; Careful Builder, with a nearly full green ring; and Code Reviewer, 'Codex · GPT-6 Astra · high effort'. Below them is All 6 profiles. Above the message box a strip reads '5h limit · 6% left on Personal Max · resets in 53m' with a Run on Team Claude button showing that account's limits, and To shows Brainstormer with the same ring, then 'on Personal Max', the account this chat will run on, with the attach and Chat options buttons on the right." />
 </picture>
 
 - **The profile you used last is pre-selected.** A new chat starts with the profile you last picked yourself for a new chat in this project in the last 30 days, unless you've hidden it. Chats the SAM assistant started for you count; chats that automations, the Connector or other agents started don't. Otherwise it's the first profile you haven't hidden, in alphabetical order. Change it any time before you send. **Start work** on an [idea](/docs/guides/ideas/#start-work-on-an-idea) pre-selects the same way.
@@ -554,7 +558,7 @@ Type `@` in a chat message to choose a profile from the mention list. Mentions a
 - **To** above the message box names the chosen profile, and **on _account_** beside it the account
   the chat runs on (see [Using another account for one chat](#using-another-account-for-one-chat)). Select **To** to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. Profiles whose account has no [usage](#usage-limits) left wait in a folded **Out for now** section near the end. **New**, **Edit** and **Manage** are at the bottom.
 
-![The profile list opened from To, titled 'Start with…', with Edit list and a close button. Recent lists Brainstormer (checked), Careful Builder and Code Reviewer. Chat & explore lists Quick Questions and Release Notes. Build & open PRs lists Frontend Builder. Each row shows what runs it, such as 'Codex · GPT-6 Luna · medium effort', and a ring around its icon for the usage left; Brainstormer and Frontend Builder, on the same nearly used-up Claude account, also read '6% left, resets 53m'. New, Edit and Manage are at the bottom.](/images/docs/new-chat-profile-list.png)
+![The profile list opened from To, titled 'Start with…', with Edit list and a close button. Recent lists Brainstormer (checked), Careful Builder and Code Reviewer. Chat & explore lists Quick Questions and Release Notes. Build & open PRs lists Frontend Builder. Each row shows what runs it and on which account, such as 'Codex · GPT-6 Luna · medium effort · Work ChatGPT', a ring around its icon for the usage left, and small bars for each limit in percent left; Brainstormer, on the nearly used-up Personal Max account, shows 5h 6% in red and Wk 39% in amber. New, Edit and Manage are at the bottom.](/images/docs/new-chat-profile-list.png)
 
 - **Hide profiles you don't pick by hand.** In that list, select **Edit list**, then the eye next to a profile. Or accept the suggestion to hide every profile you haven't picked in the last 30 days (a superadmin can change the 30 days with [`chat.profileUsageWindowDays`](/docs/guides/admin-settings/#chat)). Hiding only changes your own list in this project: triggers, agents that dispatch work, @mentions and other members still use the profile. Hidden profiles stay at the end of the list, and you can show them again there.
 - **Skill, model, effort and resources are under Chat options**, the sliders button at the end of the **To** row, after the attach button. A number on the button shows how many you've set for this chat; anything left blank comes from the skill or profile, and each blank field shows that default. The model and effort lists follow the agent the chat will run, so only efforts that agent supports are offered, and switching to a profile with a different agent clears a model or effort you picked. **To** shows the model and effort that will actually run. These choices apply to this one chat only.
@@ -573,7 +577,8 @@ Some names carry a note. **(API key only)** works only when Codex uses an OpenAI
 ChatGPT subscription connected with **Connect with Codex**. **Deprecated for ChatGPT sign-in** is
 being withdrawn for ChatGPT subscriptions. **(Deprecated)** still works but is on its way out, and
 **(Deprecated; routes to … on 2026-12-01)** means the provider starts answering that name with the
-newer model on that date. **(Legacy; routes to …)** already does: choosing it runs the newer model.
+newer model on that date. **(Deprecated; retires …)** stops working on that date, as Claude Sonnet
+4.5 does on 2026-11-30: move profiles off it before then. **(Legacy; routes to …)** already does: choosing it runs the newer model.
 Prefer a model without a note for new profiles. When a model leaves the list, a profile that used it keeps its ID as a custom model; if the
 provider stops offering it, chats fail with
 [Model unavailable for this account](/docs/guides/session-troubleshooting/#the-agent-or-a-tool-cant-sign-in),
@@ -855,8 +860,8 @@ change.
 | `update_task_status`                                                                                               | Report progress                                                                                                                                                                                                                                                                                                                                                                |
 | `complete_task`                                                                                                    | Mark current work as done. Pass the pull request URL as `evidence.prUrl`; it is saved on the task alongside optional test, staging, CI, manual verification, and note evidence.                                                                                                                                                                                                |
 | `request_human_input`                                                                                              | Alias of `inbox_write` method `ask` with blocking on: files one question in the person's inbox and notifies them; non-blocking                                                                                                                                                                                                                                                 |
-| `inbox_write`                                                                                                      | File what you need from a person in their inbox: `ask` (one question, one answer shape), `review`, `assign` (a non-blocking task for a person or the team), `comment` (reply in a task), `attach` (watch a task another chat of the same person assigned), and `update` / `cancel` of your own open item                                                                                                                                                                                                                               |
-| `inbox_read`                                                                                                       | `list` open items from this chat or project (check before filing), `get` one item with its answer and outcome (a task with its steps, assignee, activity and discussion)                                                                                                                                                                                                                                                                  |
+| `inbox_write`                                                                                                      | File what you need from a person in their inbox: `ask` (one question, one answer shape), `review`, `assign` (a non-blocking task for a person or the team), `comment` (reply in a task), `attach` (watch a task another chat of the same person assigned), and `update` / `cancel` of your own open item                                                                       |
+| `inbox_read`                                                                                                       | `list` open items from this chat or project (check before filing), `get` one item with its answer and outcome (a task with its steps, assignee, activity and discussion)                                                                                                                                                                                                       |
 
 `tasks_read` method `get` keeps `outputPrUrl`, `outputSummary`, and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. The SAM session (Anthropic tool) variant returns a single `finalAssistantMessage` (the latest assistant message, content capped to 2,000 characters) instead of the full array. If session diagnostics are unavailable, task details still return and the diagnostic fields are empty/null.
 

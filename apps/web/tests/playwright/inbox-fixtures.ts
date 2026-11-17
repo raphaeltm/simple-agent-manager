@@ -162,8 +162,10 @@ export const KIND_ITEMS: Item[] = [
     blocking: false,
     agentState: 'not_started',
     topic: 'Fix rounding in tax totals',
-    title: 'Couldn’t start: the GitHub App no longer has access to acme/billing',
-    body: 'Each run stopped at "clone repository".',
+    // The shape SAM files (`taskFailureError`): the quoted task name, never the error text, and
+    // the classified explanation as the body.
+    title: '“Fix rounding in tax totals” couldn’t start',
+    body: 'The workspace or VM did not finish starting up.',
     // Slice E's error actions (first is primary; Open chat only navigates).
     answerSpec: {
       type: 'actions',
