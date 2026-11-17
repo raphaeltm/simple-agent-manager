@@ -23,7 +23,7 @@ the answer right there: **Allow** / **Deny** for a permission (never "always all
 a question with three or fewer short options, and **Looks good** for a review. Anything else opens
 the item on the Inbox page; **Open inbox** opens the page. On a phone the icon opens the page.
 
-![The Inbox quick view on a desktop: a permission with Allow once and Deny buttons, an approval, a question stack, a task and a review with a Looks good button, and an Open inbox button at the bottom.](/images/docs/inbox-quick-view.png)
+![The Inbox quick view on a desktop: a permission with Allow once and Deny buttons, an approval, a question stack, a task, a review with a Looks good button and a Problem, and an Open inbox button at the bottom.](/images/docs/inbox-quick-view.png)
 
 ## The list
 
@@ -113,26 +113,34 @@ Only an agent can assign a task today. To hand work to a teammate, ask the agent
 example _"assign adding the Stripe production key to Ana"_, or _"give the pricing decision to the
 team"_. The teammate gets a **Task** row in their Inbox and a push.
 
-An agent assigns a task to one project member or to the team, with a one-sentence title, why a
-person is needed, optional steps and links (`assignAgentTask`,
-`packages/operations/src/inbox-agent-tasks.ts`). The member must be an active member of the
-project; anyone else is refused when the task is assigned and when it is handed on. The agent keeps
-working, and its chat watches the task.
+### If you were given a task
 
-A task lists under **Tasks** today, and **Archive** works on it as on any item. Ticking its steps,
-commenting, marking it **done**, reopening it, handing it to someone else or back to the team, and
-**I'll take it** are available through the [API](/docs/reference/api/#inbox)
-(`packages/operations/src/inbox-task-core.ts`); the task view in the Inbox that offers them as
-controls is the next release. A team task is
-listed for every member until one of you presses **I'll take it**: from then on it is theirs, and it
-no longer counts as waiting on the others. Members whose role cannot write tasks (viewers) can read
-a task and comment on it, nothing more.
+The task opens in your Inbox like any item: its title, why a person is needed, its steps and links,
+and the chat it came from. In the app today a task is read-only:
+
+1. Do the work.
+2. Tell the agent: **Open chat** (the speech bubble at the top) and reply in its chat, for example
+   _"done, the key is in the production environment"_.
+3. **Archive** the task. That closes it and wakes the agent that assigned it.
+
+Controls for ticking steps, commenting on the task, marking it **done**, handing it on and
+**I'll take it** come with the task view in the next release; until then they are available through
+the [API](/docs/reference/api/#inbox).
+
+### How tasks work
+
+An agent assigns a task to one project member or to the team, with a one-sentence title, why a
+person is needed, optional steps and links. The member must be an active member of the project;
+anyone else is refused when the task is assigned and when it is handed on. The agent keeps working,
+and its chat watches the task. A team task is listed for every member until one of you takes it:
+from then on it is theirs, and it no longer counts as waiting on the others. Members whose role
+cannot write tasks (viewers) can read a task and comment on it, nothing more.
 
 The agent that assigned the task is woken in its chat when you comment, take it, hand it on, mark it
 done, reopen it or archive it. Ticking steps is recorded and does not wake it unless it asked for
 that. A comment wakes it only when it comes from the assignee, the member who took the task, or
 someone who can write in the agent's chat; anyone else's comment is kept, and the agent reads it the
-next time it wakes (`decideInboxTaskCommentWake`, `apps/api/src/services/agent-wake-authorization.ts`).
+next time it wakes.
 A comment from someone other than the chat's owner reaches the agent as a teammate's input, not as
 an instruction from the owner. Another chat of the same person can watch the task instead of
 assigning a duplicate (`attach`); it is woken when the task is taken, handed on, finished, reopened
@@ -144,6 +152,10 @@ people who can read the task. If you leave the project, your open tasks go to th
 is told. If the agent's chat is archived or its work has finished, the task stays open for you; the
 changes are recorded but no longer wake that chat.
 
+Implementation: `assignAgentTask` (`packages/operations/src/inbox-agent-tasks.ts`), the task
+operations in `packages/operations/src/inbox-task-core.ts`, and comment wakes in
+`decideInboxTaskCommentWake` (`apps/api/src/services/agent-wake-authorization.ts`).
+
 Limits are in [Admin settings](/docs/guides/admin-settings/#inbox): open tasks per chat
 (`inbox.openTasksPerChat`), steps per task (`inbox.taskStepsMax`), chats watching one task
 (`inbox.watchersPerItemMax`), activity rows shown (`inbox.taskActivityMax`), and how long a finished
@@ -154,15 +166,21 @@ task still wakes its watching chats, so a reopen reaches them (`inbox.closedTask
 When something of yours fails, SAM files a **Problem** item for you itself, with the fix as its
 button (`packages/operations/src/inbox-error-core.ts`, `apps/api/src/services/inbox/system-errors.ts`):
 
-| What failed                                                        | Example title                                                   | Buttons                                |
-| ------------------------------------------------------------------ | --------------------------------------------------------------- | -------------------------------------- |
-| A task failed to start or stopped before finishing                 | **"Fix login" couldn't start**                                  | **Retry**, **Open chat**               |
-| A chat couldn't wake                                               | **Couldn't wake "Ship billing"**                                | **Wake the chat**, **Open chat**       |
-| A chat went to sleep without a fresh snapshot, so work may be lost | **"Ship billing" went to sleep without saving its latest work** | **Open chat**                          |
-| An automation keeps failing, or SAM paused it                      | **Automation "Nightly deps" was paused after 3 failed runs**    | **Resume** when paused, otherwise none |
-| Your answer to an agent was never confirmed delivered              | **Your answer didn't reach the agent in "Ship billing"**        | **Open chat**                          |
+| What failed                                                        | Example title                                                   | Buttons                                     |
+| ------------------------------------------------------------------ | --------------------------------------------------------------- | ------------------------------------------- |
+| A task failed to start or stopped before finishing                 | **"Fix login" couldn't start**                                  | **Retry** (when available), **Open chat**   |
+| A chat couldn't wake                                               | **Couldn't wake "Ship billing"**                                | **Wake the chat** (VM chats), **Open chat** |
+| A chat went to sleep without a fresh snapshot, so work may be lost | **"Ship billing" went to sleep without saving its latest work** | **Open chat**                               |
+| An automation keeps failing, or SAM paused it                      | **Automation "Nightly deps" was paused after 3 failed runs**    | **Resume** when paused, otherwise none      |
+| Your answer to an agent was never confirmed delivered              | **Your answer didn't reach the agent in "Ship billing"**        | **Open chat**                               |
 
-![A Problem open in the Inbox on a desktop. The list on the left ends with "Couldn't start: the GitHub App no longer has access to acme/billing", from the chat Fix rounding in tax totals, never started. The open item reads Problem · Never started, the same title, "Each run stopped at clone repository", a collapsed Context line, and Retry and Open chat buttons pinned at the bottom.](/images/docs/inbox-problem.png)
+![A Problem open in the Inbox on a desktop. The list on the left ends with "“Fix rounding in tax totals” couldn't start", never started. The open item reads Problem · Never started, the same title, "The workspace or VM did not finish starting up.", a collapsed Context line, and Retry and Open chat buttons pinned at the bottom.](/images/docs/inbox-problem.png)
+
+**Retry** starts the task again from its original request, in a new chat and workspace; it does
+not continue the failed chat. To keep the work the chat already did, use **Open chat** and reply
+there (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)). **Retry**
+is offered only when the failure can be retried and you own the project, and **Wake the chat** only
+for VM chats: an Instant chat wakes when you reply in it.
 
 A task you stop yourself, or one that ends normally, files nothing. A failed task gets its item
 within about five minutes. If the same thing fails again, the open item is updated instead of a

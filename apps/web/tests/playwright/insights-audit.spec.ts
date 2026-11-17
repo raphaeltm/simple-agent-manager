@@ -29,8 +29,8 @@ const USER_ID = 'user-insights';
 const BASE = `/projects/${PROJECT_ID}/insights`;
 
 const MOCK_USER = makeMockUser({
-  email: 'raph@example.com',
-  name: 'Raph',
+  email: 'dana@example.com',
+  name: 'Dana Reyes',
   sessionId: 'session-insights',
   userId: USER_ID,
 });

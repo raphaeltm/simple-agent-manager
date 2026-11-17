@@ -34,7 +34,8 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   → [Project Overview](/docs/guides/project-overview/)
 - **Insights shows how work moves.** A new project page: the median time from idea to merged pull
   request, how often CI passes first try, how long questions wait for a person, why runs stopped,
-  flaky checks, and (**Accounts** tab) which accounts carried the work and when they ran out.
+  flaky checks. **Agent setups** compares profiles, skills or models by how often their runs merge
+  without rework, and **Accounts** shows which accounts carried the work and when they ran out.
   → [Insights](/docs/guides/insights/)
 - **Every task has a receipt.** **Receipt** in the chat's tool rail shows how the run ended, where
   its time went, whether its first push passed CI, and its tokens per model, with an estimated cost
@@ -79,6 +80,8 @@ Also changed this week:
 
 Which release brought what, if you update a self-hosted instance:
 
+- **v2026.11.10**: pool region rows and account switches, the optional VM Cloudflare Tunnel
+  transport, the sign-in page waiting for its options.
 - **v2026.11.12**: signed webhooks, agent secret requests, Cloudflare Tunnel hardening, provider-limit
   **Cancel task** / **Start anyway**, agent sign-in to test instances.
 - **v2026.11.13**: session details configuration, secret cards for Codex.
@@ -89,8 +92,8 @@ Which release brought what, if you update a self-hosted instance:
 - **v2026.11.16**: the Inbox in the web app, the Project Overview, Cloudflare Container deployment
   builds, container image reuse, the provisioning attempt deadline.
 - **The next release after v2026.11.16** (not yet tagged when this was written): Overview as the
-  landing page, Problems, agent inbox tools and tasks for people, Insights, run receipts, Health &
-  cost, Pinned / On demand policies, Codex repository hooks.
+  landing page, Problems, agent inbox tools and tasks for people, Insights (Flow, Agent setups,
+  Accounts), run receipts, Health & cost, Pinned / On demand policies, Codex repository hooks.
 
 Also for admins:
 
@@ -226,8 +229,8 @@ Which release brought what, if you update a self-hosted instance:
 - **v2026.11.09**: the provider order editor, the 15 GB disk default, hosted trials removed,
   hardened deployment publishing.
 - **v2026.11.10**: the new first-run setup and onboarding, email sign-in, SAM-hosted repositories
-  during onboarding, Claude Fable 5.2, pool region rows, the optional VM Cloudflare Tunnel
-  transport.
+  during onboarding, Claude Fable 5.2 (it also brought the first items of the next cycle: pool region
+  rows, the optional VM tunnel transport and the sign-in page change).
 
 Also for admins:
 

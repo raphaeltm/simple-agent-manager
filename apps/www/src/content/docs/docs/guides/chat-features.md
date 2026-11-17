@@ -423,7 +423,7 @@ phone. It is built from records SAM already keeps (`runReceipt`,
 `packages/operations/src/insights-receipt.ts`), and it says when it has nothing to measure from
 rather than guessing.
 
-![The Receipt panel open beside a chat on a desktop. It reads Merged, PR #2771 · CI passed · first push failed · 42m, with a link to the pull request. Where the time went is a coloured bar with Waiting for a machine 40s, Setup 3m 10s, Agent working 21m, Waiting on a person 8m 20s and CI 9m. Tiles show Tokens 2.6M including 2.2M cache, Account Personal Max, Peak memory 3.1 GB of 4.0 GB requested, and Tool calls 186. Tokens by model lists claude-opus-5-5 at about $3.98 and claude-haiku-5-5 at about $0.14, then about $4.12 estimated at SAM's model prices.](/images/docs/run-receipt.png)
+![The Receipt panel open beside a chat on a desktop. It reads Merged, PR #2771 · CI passed · first push failed · 42m, with a link to the pull request. Where the time went is a coloured bar with Waiting for a machine 40s, Setup 3m 10s, Agent working 21m, Waiting on a person 8m 20s and CI 9m. Tiles show Tokens 2.6M including 2.2M cache, Account Work API key, Peak memory 3.1 GB of 4.0 GB requested, and Tool calls 186. Tokens by model lists claude-opus-5-5 at about $3.98 and claude-haiku-5-5 at about $0.14, then about $4.12 estimated at SAM's model prices.](/images/docs/run-receipt.png)
 
 - **Outcome**: the pull request the run opened, whether it merged, the state of its checks on
   the latest commit, and whether the first push passed CI (**first push passed** or **first push

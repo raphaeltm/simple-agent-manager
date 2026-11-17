@@ -10,14 +10,14 @@ import { docsShot } from './docs-shot';
 
 const MOCK_USER = makeMockUser({
   email: 'test@example.com',
-  name: 'Test User',
+  name: 'Dana Reyes',
   sessionId: 'session-1',
   userId: 'user-1',
 });
 
 const MOCK_PROJECT = {
   id: 'proj-1',
-  name: 'Test Project',
+  name: 'Acme Billing',
   repository: 'testuser/test-repo',
   defaultBranch: 'main',
   userId: 'user-1',
@@ -170,8 +170,8 @@ const INJECT_MODE_POLICIES = [
 /** Readable, realistic policies for the docs image (agent-context.md); no stress cases. */
 const DOCS_POLICIES = [
   makePolicy({ id: 'pd1', category: 'rule', title: 'Never merge with a failing check', content: 'Wait for every required check to pass before merging. A red check blocks the merge, even when the failure looks unrelated.' }),
-  makePolicy({ id: 'pd2', category: 'constraint', title: 'Migrations only add columns', content: 'Database migrations may add tables and columns but never drop or rename them in the same release.' }),
   makePolicy({ id: 'pd3', category: 'preference', title: 'Blog posts stay technical', content: 'Posts on the engineering blog cover what we built and how, not pricing or sales.', injectMode: 'on_demand' }),
+  makePolicy({ id: 'pd2', category: 'constraint', title: 'Migrations only add columns', content: 'Database migrations may add tables and columns but never drop or rename them in the same release.' }),
   makePolicy({ id: 'pd4', category: 'delegation', title: 'Agents choose test strategy themselves', content: 'Pick the test approach without asking; explain the choice in the pull request.', injectMode: 'on_demand' }),
 ];
 

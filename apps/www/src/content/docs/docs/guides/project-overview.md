@@ -31,7 +31,7 @@ the right of the app bar on a phone. Links that point at one chat (a notificatio
 ### Needs you
 
 The first items of this project's [Inbox](/docs/guides/inbox/): the questions, permission requests,
-secrets, approvals, reviews and problems waiting for you, in the same order as the Inbox. A phone
+secrets, approvals, reviews, tasks and problems waiting for you, in the same order as the Inbox. A phone
 shows three, a desktop five; the number next to the heading counts them all, and **All**, followed by
 that number, opens the project Inbox.
 

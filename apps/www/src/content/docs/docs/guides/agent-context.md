@@ -58,22 +58,24 @@ policies are not sent to agents. To switch one off without deleting it, edit it 
 Every policy has a two-way switch for how agents receive it:
 
 - **Pinned** (the default): its full text is sent to every agent session in the project.
-- **On demand**: agents get only its title in a list, and its full text only when the task they were
-  given matches it. An agent can still read any listed policy in full with `policies_read`.
+- **On demand**: agents get only its title in a list, and its full text only when their work matches
+  it: the task's title and description, the chat's topic, or the idea it is working on. An agent can still read any listed policy in full with `policies_read`.
 
 Above the cards, a summary shows what this costs every session, for example _"4,210 characters sent
-to every agent session from 12 pinned policies"_ and _"6 on demand, listed by title (640
+to every agent session from 12 pinned policies (all policies, not just filtered ones)"_ (the count
+ignores the filter) and _"6 on demand, listed by title (640
 characters) and sent in full only when they match the task"_.
 
-![The Policies tab of Agent Context. A summary reads "316 characters sent to every agent session from 2 pinned policies" and "2 on demand, listed by title (121 characters) and sent in full only when they match the task". Below it, the rule "Never merge with a failing check" and the constraint "Migrations only add columns" are both active, each with its content and a Pinned / On demand switch set to Pinned, with how many characters it adds to every agent session.](/images/docs/agent-context-policies.png)
+![The Policies tab of Agent Context. A summary reads "316 characters sent to every agent session from 2 pinned policies" and "2 on demand, listed by title (121 characters) and sent in full only when they match the task". Below it, the rule "Never merge with a failing check" is set to Pinned and "Adds 173 characters to every agent session", and the preference "Blog posts stay technical" is set to On demand: "Title only in every session (54 characters); full text when it matches the task".](/images/docs/agent-context-policies.png)
 
 Pin what must hold for every piece of work: security rules, merge rules, things that broke
 production before. Set narrow policies on demand: a rule about blog posts, a pricing preference, how
 to run one integration. Long pinned policies crowd the instructions every agent reads before it
 starts, and an agent whose instructions are too long may not read them all.
 
-A policy is sent in full on demand when enough of its distinctive words appear in the task: two
-points per title word and one per body word, with 2 points needed by default. Administrators set
+A policy is sent in full on demand when enough of its distinctive words appear in that text: two
+points per title word and one per body word, with 2 points needed by default, and at most 5 on-demand
+policies of one category in full per session. Administrators set
 that threshold, how much on-demand text a session gets, and the overall size of the instructions in
 [Admin settings](/docs/guides/admin-settings/#agent-instructions). Pinned policies are never trimmed.
 To undo, select **Pinned** again.

@@ -46,8 +46,8 @@ const LONG_TITLE =
 const LONG_TOKEN = `refactor-${'unbroken-identifier-'.repeat(8)}end`;
 
 const MOCK_USER = makeMockUser({
-  email: 'raph@example.com',
-  name: 'Raph',
+  email: 'dana@example.com',
+  name: 'Dana Reyes',
   sessionId: 'session-overview',
   userId: USER_ID,
 });
@@ -510,8 +510,8 @@ async function setupScene(page: Page, options: SceneOptions) {
           members: [
             {
               userId: USER_ID,
-              name: 'Raph',
-              email: 'raph@example.com',
+              name: 'Dana Reyes',
+              email: 'dana@example.com',
               avatarUrl: null,
               role: 'owner',
               status: 'active',

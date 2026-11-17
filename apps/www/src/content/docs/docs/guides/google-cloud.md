@@ -150,8 +150,7 @@ SAM currently maps Google 403 responses to generic permission advice, including 
 Google enforces quotas per metric and region, for example
 `Quota 'T2D_CPUS' exceeded. Limit: 24.0 in region europe-west1.` SAM treats a refusal like this as
 ruling out only that bucket: it skips the offerings the quota also rules out and keeps trying smaller
-machines, other families and other regions in your pool before moving to another provider. Each
-skipped attempt in the task's placement record names the quota and region. See
+machines, other families and other regions in your pool before moving to another provider. See
 [how SAM handles a Google Cloud quota](/docs/guides/compute-pools/#provider-order) for the details.
 
 To stop hitting it, raise the quota in the Google Cloud Console (**IAM & Admin → Quotas**) for that

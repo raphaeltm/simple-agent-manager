@@ -610,7 +610,14 @@ test.describe('Run receipt — chat tool rail', () => {
   });
 
   test('shows measured tokens per model with an API-key spend estimate', async ({ page }) => {
-    const drawer = await openReceipt(page, { receipt: makeReceipt({ tokens: TOKENS_REPORTED }) });
+    // An API-key account: only those get a spend estimate (the docs image shows this scene).
+    const base = makeReceipt();
+    const drawer = await openReceipt(page, {
+      receipt: makeReceipt({
+        tokens: TOKENS_REPORTED,
+        account: base.account ? { ...base.account, accountName: 'Work API key' } : null,
+      }),
+    });
     await expect(drawer.getByText('2.6M')).toBeVisible();
     await expect(drawer.getByText('Incl. 2.2M cache · Reported by the agent')).toBeVisible();
     const models = drawer.getByTestId('receipt-token-models');
