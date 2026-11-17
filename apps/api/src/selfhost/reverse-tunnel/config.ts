@@ -161,8 +161,8 @@ export function reverseTunnelUpstreamOrigin(port: number): string {
 
 function base64Url(bytes: ArrayBuffer): string {
   let binary = '';
-  for (const byte of new Uint8Array(bytes)) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  for (const byte of new Uint8Array(bytes)) binary += String.fromCodePoint(byte);
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
 
 function hex(bytes: ArrayBuffer): string {

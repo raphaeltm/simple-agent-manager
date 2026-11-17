@@ -175,15 +175,14 @@ export async function provisionNode(
   try {
     // A resumed allocation keeps the transport its (possibly already created) VM was
     // booted with; only a new incarnation reads the installation's current choice.
-    const transport = resuming
-      ? node.transport && node.transport !== 'vm-public-dns'
-        ? node.transport
-        : null
-      : resolveManagedNodeTransport(tunnelEnv, {
-          runtime: node.runtime,
-          nodeClass: node.nodeClass,
-          nodeRole: node.nodeRole,
-        });
+    let transport = node.transport === 'vm-public-dns' ? null : node.transport;
+    if (!resuming) {
+      transport = resolveManagedNodeTransport(tunnelEnv, {
+        runtime: node.runtime,
+        nodeClass: node.nodeClass,
+        nodeRole: node.nodeRole,
+      });
+    }
     if (!resuming)
       await assertNodeAllocationPlanCurrent(
         env,
