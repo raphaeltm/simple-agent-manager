@@ -331,7 +331,7 @@ Listed under **Chat**. Bounds for the [run receipt](/docs/reference/api/#get-api
 ## Insights page
 
 Listed under **Operations**. Bounds for the project [Insights](/docs/guides/insights/) Flow, Agent
-setups and Accounts tabs (`packages/operations/src/insights-page-settings.ts`).
+setups, Accounts and People tabs (`packages/operations/src/insights-page-settings.ts`).
 
 | Setting                                  | Default | Range      | What it limits                                                                                                                          |
 | ---------------------------------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -345,6 +345,8 @@ setups and Accounts tabs (`packages/operations/src/insights-page-settings.ts`).
 | `insights.setupsSuggestionMinRuns`       | 10      | 3–200      | Finished runs each compared setup needs before Agent setups suggests a skill change                                                     |
 | `insights.setupsSuggestionMinGapPercent` | 20      | 5–80       | Points by which a profile must beat the one it is compared with to be suggested as a skill default                                      |
 | `insights.setupsMemoryHeadroomPercent`   | 25      | 0–200      | Headroom added to the 90th-percentile peak memory when suggesting a memory request                                                      |
+| `insights.peopleWaitingItemsListed`      | 10      | 1–50       | Open items listed per person under "Waiting on" (each person still shows how many are open)                                             |
+| `insights.peopleReviewScanCap`           | 2,000   | 100–20,000 | Review requests in the range, newest first, examined for "Review pickup"; the page says when the cap cut it short                       |
 
 ## Node provisioning
 

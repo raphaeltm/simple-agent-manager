@@ -138,10 +138,7 @@ const InsightsAgentSetupsTab = lazyNamed(
   'AgentSetupsTab'
 );
 const InsightsAccountsTab = lazyNamed(() => import('./pages/insights/AccountsTab'), 'AccountsTab');
-const InsightsComingSoonTab = lazyNamed(
-  () => import('./pages/insights/ComingSoonTab'),
-  'ComingSoonTab'
-);
+const InsightsPeopleTab = lazyNamed(() => import('./pages/insights/PeopleTab'), 'PeopleTab');
 const ProjectAgentChat = lazyNamed(() => import('./pages/ProjectAgentChat'), 'ProjectAgentChat');
 const ProjectCreate = lazyNamed(() => import('./pages/ProjectCreate'), 'ProjectCreate');
 const ProjectDeploymentEnvironmentDetail = lazyNamed(
@@ -353,7 +350,7 @@ export default function App() {
                           <Route path="flow" element={page(<InsightsFlowTab />)} />
                           <Route path="agent-setups" element={page(<InsightsAgentSetupsTab />)} />
                           <Route path="accounts" element={page(<InsightsAccountsTab />)} />
-                          <Route path="people" element={page(<InsightsComingSoonTab />)} />
+                          <Route path="people" element={page(<InsightsPeopleTab />)} />
                         </Route>
                         <Route
                           path="chat"

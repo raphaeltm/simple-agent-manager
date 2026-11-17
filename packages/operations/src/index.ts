@@ -186,6 +186,7 @@ export {
   type InsightsPageLimits,
   type InsightsPageSettingName,
 } from './insights-page-settings';
+export { projectPeople, type ProjectPeopleInput } from './insights-people';
 export {
   DEFAULT_PHASE_STATS_SAMPLE_LIMIT,
   DEFAULT_PHASE_STATS_WINDOW_DAYS,
