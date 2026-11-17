@@ -11,6 +11,8 @@
  * - `approval`: D1 `operations_action_approvals`
  */
 
+import type { InboxTaskDetail } from './inbox-tasks';
+
 export const INBOX_STORES = ['ask', 'attention', 'secret', 'approval'] as const;
 export type InboxStore = (typeof INBOX_STORES)[number];
 
@@ -180,6 +182,8 @@ export interface InboxItemContext {
 
 export interface InboxItemResponse {
   item: InboxItem;
+  /** Steps, assignee, claim, activity and discussion; set for kind `task` only (slice H1). */
+  task?: InboxTaskDetail | null;
   /** Null when not requested or the reader has no access to the source chat. */
   context: InboxItemContext | null;
 }
@@ -297,5 +301,7 @@ export interface InboxAgentItem {
   answer: string | null;
   /** Why the filing agent cancelled it. */
   cancelReason: string | null;
+  /** Kind `task` only: steps, assignee, claim, activity and discussion (slice H1). */
+  task?: InboxTaskDetail;
   untrustedContent: true;
 }

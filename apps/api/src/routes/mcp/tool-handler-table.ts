@@ -28,7 +28,10 @@ import {
 } from './idea-tools';
 import {
   handleInboxAsk,
+  handleInboxAssign,
+  handleInboxAttach,
   handleInboxCancelItem,
+  handleInboxComment,
   handleInboxGetItem,
   handleInboxListItems,
   handleInboxReview,
@@ -211,6 +214,9 @@ export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   ['inbox_review', handleInboxReview],
   ['inbox_update_item', handleInboxUpdateItem],
   ['inbox_cancel_item', handleInboxCancelItem],
+  ['inbox_assign', handleInboxAssign],
+  ['inbox_comment', handleInboxComment],
+  ['inbox_attach', handleInboxAttach],
   ['inbox_list_items', handleInboxListItems],
   ['inbox_get_item', handleInboxGetItem],
   ['request_secret', handleRequestSecret],

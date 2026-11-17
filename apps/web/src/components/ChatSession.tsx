@@ -21,6 +21,7 @@ import React, {
   useState,
 } from 'react';
 
+import { usePlatformCapabilities } from '../hooks/usePlatformCapabilities';
 import {
   getAgentSettings,
   getTerminalToken,
@@ -89,6 +90,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
 
     // Resolve transcription API URL once (stable across renders)
     const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
+    const { speechToText } = usePlatformCapabilities();
 
     // Parse workspace URL once
     const wsHostInfo = useMemo(() => {
@@ -349,7 +351,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
           session={acpSession}
           messages={acpMessages}
           availableCommands={acpMessages.availableCommands}
-          transcribeApiUrl={transcribeApiUrl}
+          transcribeApiUrl={speechToText ? transcribeApiUrl : undefined}
           agentSettings={agentSettings}
           agentSettingsLoading={agentSettingsLoading}
           permissionModes={permissionModes}

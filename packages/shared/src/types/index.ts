@@ -389,6 +389,7 @@ export type {
   ProjectCommentSessionRef,
   ReplyToLibraryFileCommentThreadRequest,
   ReplyToMessageCommentThreadRequest,
+  StoredCommentAnchorKind,
   UpdateLibraryFileCommentThreadStatusRequest,
   UpdateMessageCommentThreadStatusRequest,
 } from './comments';
@@ -398,6 +399,7 @@ export {
   COMMENT_STATUSES,
   MESSAGE_COMMENT_AUTHOR_KINDS,
   MESSAGE_COMMENT_THREAD_STATUSES,
+  STORED_COMMENT_ANCHOR_KINDS,
 } from './comments';
 
 // ProjectData event subscription core
@@ -1244,6 +1246,31 @@ export {
   INBOX_WRITE_TOOL,
   parseInboxRef,
 } from './inbox';
+export type {
+  AskActivityKind,
+  AskActorKind,
+  InboxItemCommentThread,
+  InboxTaskActionResponse,
+  InboxTaskActivity,
+  InboxTaskAssignee,
+  InboxTaskCommentRequest,
+  InboxTaskCommentResponse,
+  InboxTaskDetail,
+  InboxTaskDoneRequest,
+  InboxTaskEventType,
+  InboxTaskReassignRequest,
+  InboxTaskStep,
+  InboxTaskStepRequest,
+} from './inbox-tasks';
+export {
+  ASK_ACTIVITY_KINDS,
+  ASK_ACTOR_KINDS,
+  INBOX_EVENT_SOURCE,
+  INBOX_EVENT_SUBJECT_TYPE,
+  INBOX_TASK_DEFAULT_WAKE_EVENT_TYPES,
+  INBOX_TASK_EVENT_TYPES,
+  INBOX_TASK_STEP_EVENT_TYPES,
+} from './inbox-tasks';
 
 // Admin Health & cost (Insights slices H and CF)
 export type {

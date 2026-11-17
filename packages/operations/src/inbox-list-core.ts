@@ -83,7 +83,8 @@ export function inboxItemsSql(
   const member = (column: string) =>
     `JOIN project_members pm ON pm.project_id = ${column} AND pm.user_id = ? AND pm.status = 'active'`;
 
-  // asks: assigned to me, or a team item nobody else has claimed.
+  // asks: assigned to me, or a team item. A team task another member took stays listed for
+  // everyone (slice H1) but is not actionable, so it leaves "needs you" and the count.
   {
     const scope = projectScope('a.project_id');
     const status =
@@ -106,14 +107,15 @@ export function inboxItemsSql(
           a.created_at AS created_at, a.expires_at AS expires_at, a.due_at AS due_at,
           a.updated_at AS updated_at, a.failure_count AS failure_count,
           a.answer_spec_json AS extra_json, a.links_json AS links_json,
-          CASE WHEN a.status = 'open' AND pm.role IN (${taskWriters.sql}) THEN 1 ELSE 0 END AS can_act,
+          CASE WHEN a.status = 'open' AND pm.role IN (${taskWriters.sql})
+            AND (a.assignee_kind = 'user' OR a.claimed_by_user_id IS NULL OR a.claimed_by_user_id = ?)
+            THEN 1 ELSE 0 END AS can_act,
           CASE WHEN a.due_at IS NOT NULL THEN 0 WHEN a.blocking = 1 THEN 1 ELSE 2 END AS tier,
           COALESCE(a.project_id || ':' || a.group_key, a.source_session_id, 'ask:' || a.id) AS stack_key
         FROM asks a ${member('a.project_id')}
         WHERE ${status}${kind}${scope.sql}
-          AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?)
-            OR (a.assignee_kind = 'team' AND (a.claimed_by_user_id IS NULL OR a.claimed_by_user_id = ?)))`,
-      params: [...taskWriters.params, me, ...statusParams, ...scope.params, me, me],
+          AND ((a.assignee_kind = 'user' AND a.assignee_user_id = ?) OR a.assignee_kind = 'team')`,
+      params: [...taskWriters.params, me, me, ...statusParams, ...scope.params, me],
     });
   }
 

@@ -7,6 +7,7 @@
  * reactions are outside this slice. Message comments carry structured
  * @mentions of project members (`CommentMention`); library-file comments do not.
  */
+import type { InboxItemCommentThread } from './inbox-tasks';
 import type { SessionViewerAccess } from './session-access';
 
 export const COMMENT_STATUSES = ['open', 'sent', 'resolved'] as const;
@@ -73,6 +74,14 @@ export type CommentAnchor = MessageCommentAnchor | LibraryFileCommentAnchor;
 
 export const COMMENT_ANCHOR_KINDS = ['message', 'library_file'] as const;
 export type CommentAnchorKind = (typeof COMMENT_ANCHOR_KINDS)[number];
+
+/**
+ * Every anchor kind the comment store holds: the kinds above (the `CommentAnchor` union clients
+ * render) plus `inbox_item`, discussion on an inbox item such as a human task (inbox slice H1),
+ * which is read through the task view rather than as a `CommentAnchor`.
+ */
+export const STORED_COMMENT_ANCHOR_KINDS = [...COMMENT_ANCHOR_KINDS, 'inbox_item'] as const;
+export type StoredCommentAnchorKind = (typeof STORED_COMMENT_ANCHOR_KINDS)[number];
 
 export type MessageCommentSourceMessageContext = {
   id: string;
@@ -334,10 +343,16 @@ export interface ProjectCommentListResponse {
   sessions: ProjectCommentSessionRef[];
   /** Filenames for every file referenced by `fileThreads`. Same reasoning. */
   files: ProjectCommentFileRef[];
+  /**
+   * Discussion on human tasks (inbox slice H1), limited to tasks the viewer may read, with the
+   * task titles. Optional for clients built before the field existed.
+   */
+  inboxItemThreads?: InboxItemCommentThread[];
+  inboxItems?: Array<{ ref: string; id: string; title: string }>;
   /** True when the row or byte budget kept the response from covering every thread. */
   hasMore: boolean;
   /**
-   * Total threads in the project across both anchor kinds, matching the same
+   * Total threads in the project across every anchor kind, matching the same
    * status filter. Present so a truncated list can never be read as a complete
    * one (.claude/rules/65-capped-selection-must-rank-and-disclose.md).
    */

@@ -26,9 +26,12 @@
  *   that denies `grantee`. Select it per project from a project setting resolved by the
  *   API caller and passed as `mode`; the DO fence would read the same setting from the
  *   delivery's recorded `wake.mode`, so a prompt is judged by the rule it was queued under.
- * - `assignee_only` (human tasks): add a trigger kind carrying the task's assignee and
- *   claimer, and allow only those people plus session writers. The trigger, not the mode,
- *   carries what the rule needs, so existing triggers are unaffected.
+ *
+ * Human tasks (inbox slice H1) use the trigger `inbox_task_comment`: a person's comment on a
+ * task wakes the chat that assigned it when the author is the task's assignee or the member who
+ * took it (request field `inboxTask`), or a writer of that chat as for every other trigger.
+ * Anyone else's comment is recorded and reaches the agent at its next wake. The trigger, not the
+ * mode, carries what the rule needs, so existing triggers are unaffected.
  */
 
 /**
@@ -40,6 +43,7 @@ export const HUMAN_PROMPT_DELIVERY_TRIGGERS = ['user_followup', 'comment_directi
 export const HUMAN_AGENT_WAKE_TRIGGERS = [
   ...HUMAN_PROMPT_DELIVERY_TRIGGERS,
   'attention_answer',
+  'inbox_task_comment',
 ] as const;
 export type AgentWakeTrigger = (typeof HUMAN_AGENT_WAKE_TRIGGERS)[number];
 export type HumanPromptDeliveryTrigger = (typeof HUMAN_PROMPT_DELIVERY_TRIGGERS)[number];
@@ -67,6 +71,11 @@ export interface AgentWakeRequest {
   sessionId: string;
   actorUserId: string;
   access: AgentWakeActorAccess;
+  /**
+   * Trigger `inbox_task_comment` only: the task's assignee (a person's task) and the member who
+   * took it (a team task), as stored on the `asks` row. Ignored for every other trigger.
+   */
+  inboxTask?: { assigneeUserId: string | null; claimedByUserId: string | null };
 }
 
 export interface AgentWakeGrant {
@@ -78,7 +87,8 @@ export interface AgentWakeGrant {
   actorUserId: string;
   /** The session owner whose agent, workspace and credentials run the prompt. */
   onBehalfOfUserId: string;
-  actorRole: 'owner' | 'grantee';
+  /** `assignee`: the task's assignee or claimer (trigger `inbox_task_comment`). */
+  actorRole: 'owner' | 'grantee' | 'assignee';
   grantId: string | null;
   /** True when someone other than the owner caused it: the prompt is teammate input. */
   teammateInput: boolean;
@@ -111,16 +121,29 @@ export function decideAgentWake(request: AgentWakeRequest): AgentWakeDecision {
       if (access.role === 'grantee' && access.grantId) {
         return grant(request, mode, access.ownerUserId, 'grantee', access.grantId);
       }
+      if (request.trigger === 'inbox_task_comment' && isTaskAssignee(request)) {
+        return grant(request, mode, access.ownerUserId, 'assignee', null);
+      }
       return deny;
     }
   }
+}
+
+/** The actor is the task's assignee or the member who took it. Never matches a null field. */
+function isTaskAssignee(request: AgentWakeRequest): boolean {
+  const task = request.inboxTask;
+  if (!task) return false;
+  return (
+    (task.assigneeUserId !== null && task.assigneeUserId === request.actorUserId) ||
+    (task.claimedByUserId !== null && task.claimedByUserId === request.actorUserId)
+  );
 }
 
 function grant(
   request: AgentWakeRequest,
   mode: AgentWakePolicyMode,
   ownerUserId: string,
-  actorRole: 'owner' | 'grantee',
+  actorRole: 'owner' | 'grantee' | 'assignee',
   grantId: string | null
 ): AgentWakeGrant {
   return {

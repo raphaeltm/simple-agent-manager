@@ -103,7 +103,8 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
       },
       get: {
         tool: 'inbox_get_item',
-        summary: "one item with its status, the person's answer and outcome",
+        summary:
+          "one item with its status, the person's answer and outcome; a task with steps, assignee, activity and discussion",
       },
     },
   },
@@ -123,6 +124,16 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
       review: {
         tool: 'inbox_review',
         summary: 'ask the person to evaluate something you made; answered "Looks good" or a reply',
+      },
+      assign: {
+        tool: 'inbox_assign',
+        summary:
+          'hand a person (or the team) non-blocking work only a person can do; you keep working and are woken when they act',
+      },
+      comment: { tool: 'inbox_comment', summary: "reply in a task's discussion" },
+      attach: {
+        tool: 'inbox_attach',
+        summary: 'watch a task another of your chats assigned instead of assigning a duplicate',
       },
       update: { tool: 'inbox_update_item', summary: 'edit the wording or links of your open item' },
       cancel: {
