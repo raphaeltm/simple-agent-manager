@@ -29,7 +29,7 @@
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@hono/node-server": "1.19.9",
     "@hono/valibot-validator": "0.6.1",
-    "@mastra/core": "1.81.0",
+    "@mastra/core": "1.83.0",
     "@modelcontextprotocol/server": "2.3.1",
     "@simple-agent-manager/agent-email": "workspace:*",
     "@simple-agent-manager/ai-proxy": "workspace:*",
