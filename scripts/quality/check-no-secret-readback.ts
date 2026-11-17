@@ -128,6 +128,15 @@ export const RULES: readonly Rule[] = [
     ),
     shellOnly: true,
   },
+  // `declare -p NAME`, `typeset -p A B`: print the named variables' values. Names only, so an
+  // assignment (`declare -p X=1` is not valid; `declare X=1` has no -p) is not matched.
+  {
+    id: 'env-dump',
+    pattern: new RegExp(
+      String.raw`${COMMAND_START}(?:declare|typeset)\s+-[A-Za-z]*p[A-Za-z]*(?:\s+[A-Za-z_]\w*)+\s*(?:$|[|>;&])`
+    ),
+    shellOnly: true,
+  },
   {
     id: 'env-dump',
     pattern: new RegExp(String.raw`${COMMAND_START}${EXECUTABLE_PATH}printenv\b`),

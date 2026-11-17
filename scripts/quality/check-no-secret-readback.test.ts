@@ -79,6 +79,8 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['/usr/bin/printenv', 'env-dump'],
   ['export', 'env-dump'],
   ['command env', 'env-dump'],
+  ['declare -p SECRET_NAME', 'env-dump'],
+  ['        run: typeset -p CF_API_TOKEN | cat', 'env-dump'],
   ['sudo -E env', 'env-dump'],
   ['        run: sudo -u runner printenv', 'env-dump'],
   ['sudo --preserve-env env | sort', 'env-dump'],
@@ -146,6 +148,8 @@ const NEGATIVE = [
   'command -v node',
   'sudo env FOO=1 make deploy',
   'sudo -u runner make deploy',
+  'declare -a items=(a b)',
+  'declare -r MAX=3',
 ];
 
 describe('check-no-secret-readback rules', () => {
