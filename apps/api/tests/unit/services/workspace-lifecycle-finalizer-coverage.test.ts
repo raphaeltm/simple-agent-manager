@@ -75,6 +75,8 @@ const ALLOWLIST: Record<string, string> = {
     'Abandons a fresh deployment node record after environment-link race loss before any workspace can reference the node.',
   'services/node-provisioning.ts':
     'Compensates failed in-flight VM allocation: capacity failures remove only the creating row matching provider/runtime identity, and strict teardown destroys the newly allocated runtime after lifecycle/authority races. It does not close an admitted workspace; normal node/workspace deletion remains owned by node-resource-lifecycle.ts and node-resource-deletion.ts.',
+  'services/node-provisioning-failure.ts':
+    'Extracted failure finalization removes only a creating node after pre-identity provider rejection, fenced on exact incarnation and rejection proof, before any workspace can be admitted. No workspace/session exists to finalize; only node-row deletion is permitted.',
   'services/node-provisioning-race-cleanup.ts':
     'Extracted from node-provisioning.ts: strict teardown of a provider VM that provisioning created but lost the lifecycle/authority race to publish. No workspace exists on that VM yet, so no lifecycle a finalizer owns can be open; it permits only the strict external-delete primitive.',
   'services/provisioning-authority.ts':
@@ -100,6 +102,7 @@ const PROVISIONING_COMPENSATION_KINDS: Record<string, ReadonlySet<string>> = {
     'workspace_or_node_drizzle_delete',
     'strict_node_delete_helper',
   ]),
+  'services/node-provisioning-failure.ts': new Set(['workspace_or_node_drizzle_delete']),
   'services/node-provisioning-race-cleanup.ts': new Set(['strict_node_delete_helper']),
 };
 
