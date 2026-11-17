@@ -5,6 +5,7 @@ import type {
   ProjectEventDisplayData,
   ProjectEventFilterV1,
   ProjectEventMatchState,
+  ProjectEventRecentStatus,
   ProjectEventRequestedDeliveryMode,
   ProjectEventResolvedDeliveryMode,
   ProjectEventSeverity,
@@ -198,6 +199,7 @@ export interface AdminProjectEventInspectorTotals {
 }
 
 export interface AdminProjectEventInspectorResponse {
+  admission?: ProjectEventRecentStatus['admission'];
   generatedAt: number;
   limit: number;
   project: AdminProjectEventInspectorProject;

@@ -51,7 +51,10 @@ export type PublishProjectEventChannelInput = {
   actor: ProjectEventChannelActor;
 };
 
-export type PublishProjectEventChannelResult = ProjectEventAdmissionResult & {
+export type PublishProjectEventChannelResult = Exclude<
+  ProjectEventAdmissionResult,
+  { outcome: 'skipped_no_subscriber' }
+> & {
   channel: ProjectEventChannel;
   sequence: number;
 };

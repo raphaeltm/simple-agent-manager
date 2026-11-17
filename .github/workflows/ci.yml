@@ -137,6 +137,7 @@ jobs:
               - 'tests/fixtures/acp-activity-report-v1.json'
               - 'tests/fixtures/deploy-release/**'
               - 'tests/fixtures/durable-execution-protocol-v1.json'
+              - 'tests/fixtures/session-snapshot-restore-transcript-only-v1.json'
             web:
               - *workspace-root
               - 'apps/web/**'
@@ -183,6 +184,8 @@ jobs:
               - 'apps/web/src/components/AgentSettingsCard.tsx'
             vm-agent:
               - 'packages/vm-agent/**'
+              # Shared with the Worker tests; a fixture-only edit must run the Go half too.
+              - 'tests/fixtures/session-snapshot-restore-transcript-only-v1.json'
               - 'apps/api/Dockerfile.vm-agent-container'
               - 'scripts/ci/verify-codex-runtime-image.sh'
               - 'scripts/deploy/prepare-codex-runtime-artifact.sh'
@@ -409,6 +412,14 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Policy 795e72a6 / rule 83: no Pulumi secret readback, credential decryption, shell
+      # tracing or environment dumps in workflow, deploy, infra or CI-script code. Here, not in a
+      # path-filtered job, so every PR runs it whatever it touches. Blocking from the start: zero
+      # findings outside real instances in 25 sampled commits since June 2026
+      # (scripts/quality/README.md).
+      - name: No secret readback in CI code (policy 795e72a6)
+        run: pnpm quality:no-secret-readback
 
       - name: Install verified Gitleaks release
         env:
