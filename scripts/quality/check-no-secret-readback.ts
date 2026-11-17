@@ -113,9 +113,9 @@ export const RULES: readonly Rule[] = [
   {
     id: 'env-dump',
     pattern: new RegExp(
-      // Options only, no command or names after them: `env -0`, `env -u NAME`, a bare `export`
-      // or `declare -x` all print the (exported) environment.
-      String.raw`${COMMAND_START}${EXECUTABLE_PATH}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+))*|printenv|export(?:\s+-p)?|(?:declare|typeset)(?:\s+-[A-Za-z]+)*)\s*(?:$|[|>;&])`
+      // Options only, no command or names after them: `env -0`, `env -u NAME`, a bare `export`,
+      // `declare -x` or `set` all print the (exported) environment.
+      String.raw`${COMMAND_START}${EXECUTABLE_PATH}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+))*|printenv|export(?:\s+-p)?|(?:declare|typeset)(?:\s+-[A-Za-z]+)*|set)\s*(?:$|[|>;&])`
     ),
     shellOnly: true,
   },
@@ -251,6 +251,16 @@ export function scanText(
   return result;
 }
 
+/**
+ * A JS method chain split across lines: the next line starts with `.name`/`?.` (or `[` outside
+ * shell, where `[ ... ]` is a test), or this line ends with `name.`. Shell and YAML files carry
+ * inline JS in heredocs, so the `.name` forms apply to them too.
+ */
+function continuesChain(text: string, next: string, shell: boolean): boolean {
+  if (/^\s*\??\.[A-Za-z_$]/.test(next) || /[\w$)\]]\.\s*$/.test(text)) return true;
+  return !shell && /^\s*\[/.test(next);
+}
+
 /** Physical lines a logical line may span, so a pathological file cannot make the scan quadratic. */
 const MAX_CONTINUATION_LINES = 20;
 
@@ -270,7 +280,7 @@ function logicalLine(
     const next = lines[index + 1];
     if (/\\\s*$/.test(text)) {
       text = `${text.replace(/\\\s*$/, '')} ${next.trim()}`;
-    } else if (!shell && (/^\s*(?:\??\.|\[)/.test(next) || /\.\s*$/.test(text))) {
+    } else if (continuesChain(text, next, shell)) {
       text = `${text.trimEnd()}${next.trim()}`;
     } else {
       break;

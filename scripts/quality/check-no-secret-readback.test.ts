@@ -76,6 +76,8 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['/usr/bin/env -0', 'env-dump'],
   ['/usr/bin/printenv', 'env-dump'],
   ['export', 'env-dump'],
+  ['set', 'env-dump'],
+  ['        run: set | sort', 'env-dump'],
   ['declare -x', 'env-dump'],
   ['typeset -px | sort', 'env-dump'],
   ['env --unset=PATH | sort', 'env-dump'],
@@ -127,6 +129,8 @@ const NEGATIVE = [
   'env -i PATH="$PATH" bash run.sh',
   '/usr/bin/env node scripts/deploy/run.mjs',
   'bash scripts/ci/x.sh -x-ray-mode',
+  'set -euo pipefail; set -- "$@"',
+  'set +e',
 ];
 
 describe('check-no-secret-readback rules', () => {
@@ -200,6 +204,12 @@ describe('statements split across lines', () => {
       1,
     ],
     ['x.sh', 'echo start\nset \\\n  -x\necho done', 'xtrace', 2],
+    [
+      'x.yml',
+      "        run: |\n          node --input-type=module <<'JS'\n          const p = await crypto.subtle\n            .decrypt(a, b, c);\n          JS",
+      'decryption',
+      3,
+    ],
     [
       'x.sh',
       'pulumi stack output \\\n  --stack staging \\\n  --show-secrets encryptionKey',
