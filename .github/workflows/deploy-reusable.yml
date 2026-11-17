@@ -1979,9 +1979,8 @@ jobs:
       # A secondary installation shares this environment's account-level credentials but not
       # its identity: OAuth/App callbacks, signing, encryption and analytics overrides belong to
       # the primary installation, so they are not passed and Pulumi generates the keys. Its agent
-      # sign-in trust is its own GitHub secret (AGENT_SIGN_IN_TRUST_STAGING2; wire a new installation's
-      # secret below), handed straight to configure-secrets.sh; when it is unset the Worker secret is
-      # left as it is.
+      # sign-in trust is its own GitHub secret (AGENT_SIGN_IN_TRUST_STAGING2), set by "Configure
+      # Secondary Agent Sign-In Trust" below; configure-secrets.sh leaves it alone.
       # Nothing here reads, derives or copies a secret (.claude/rules/83-no-secret-readback-in-ci.md).
       - name: Configure Worker Secrets
         if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
