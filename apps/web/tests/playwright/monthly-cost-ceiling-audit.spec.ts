@@ -115,7 +115,21 @@ async function setup(page: Page, scenario: Scenario, puts: Puts = []) {
       });
     }
     if (path === '/api/usage/compute') {
-      return respond({ currentPeriod: null, activeSessions: [], nodes: [], totals: {} });
+      return respond({
+        currentPeriod: {
+          totalNodeHours: 0,
+          totalVcpuHours: 0,
+          platformNodeHours: 0,
+          platformVcpuHours: 0,
+          userNodeHours: 0,
+          userVcpuHours: 0,
+          activeNodes: 0,
+          activeWorkspaces: 0,
+          start: '2026-11-01T00:00:00Z',
+          end: '2026-11-30T23:59:59Z',
+        },
+        activeSessions: [],
+      });
     }
     if (path.startsWith('/api/credentials') || path.startsWith('/api/github')) return respond([]);
     if (path === '/api/projects') return respond({ projects: [] });
