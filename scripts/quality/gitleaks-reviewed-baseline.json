@@ -71,7 +71,9 @@
       "owner": "security",
       "reviewedAt": "2026-11-06T12:30:14.413Z",
       "expiresAt": "2026-12-06T12:30:14.413Z",
-      "digests": ["eb95f7cd4b658cb44cbce7fbf945705166d8af057ddf8f65475f8f7f69bdc028"]
+      "digests": [
+        "eb95f7cd4b658cb44cbce7fbf945705166d8af057ddf8f65475f8f7f69bdc028"
+      ]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -87,24 +89,14 @@
       ]
     },
     {
-      "classification": "code-identifier",
-      "reason": "Reviewed PEM header/footer string references in convertPkcs1ToPkcs8() at shifted line positions after KV caching code added earlier in github-app.ts; same code as main lines 189/196/207, now at 204/211/222.",
-      "owner": "security",
-      "reviewedAt": "2026-08-19T00:00:00.000Z",
-      "expiresAt": "2026-11-17T00:00:00.000Z",
-      "digests": [
-        "1b2e5830af04890ec8044656187a4435d76062a4c0c4b19b561046bac67d32a0",
-        "0ed74e33345c51812e64da9c1525503195b08302331375958aaa089366731f2d",
-        "47c37335119e59f588cdc57fe5b2c667193257ab22d0164ee26ec1ac02139c0e"
-      ]
-    },
-    {
       "classification": "synthetic-test-fixture",
       "reason": "Reviewed deterministic unit-test encryption key literal introduced in an intermediate compute-pool reconciliation commit and removed from the current tree; exact PR-range finding only, not live credential material.",
       "owner": "security",
       "reviewedAt": "2026-08-29T00:00:00.000Z",
       "expiresAt": "2026-11-27T00:00:00.000Z",
-      "digests": ["1c07295d3aedeb8f1aaa6f5e33e7d9150bdd0171741d258ee02cc59809aae0c9"]
+      "digests": [
+        "1c07295d3aedeb8f1aaa6f5e33e7d9150bdd0171741d258ee02cc59809aae0c9"
+      ]
     },
     {
       "classification": "documented-example",
@@ -112,7 +104,9 @@
       "owner": "security",
       "reviewedAt": "2026-11-06T12:30:14.413Z",
       "expiresAt": "2026-12-06T12:30:14.413Z",
-      "digests": ["9677b1effbe286eaf5f4a5217b92e8956d54f96d8550b6956ebda0446285d24b"]
+      "digests": [
+        "9677b1effbe286eaf5f4a5217b92e8956d54f96d8550b6956ebda0446285d24b"
+      ]
     },
     {
       "classification": "code-identifier",
@@ -120,7 +114,9 @@
       "owner": "security",
       "reviewedAt": "2026-11-12T08:20:00.000Z",
       "expiresAt": "2026-12-12T08:20:00.000Z",
-      "digests": ["15613fa56910bf18e53abb4161fda7fda6689b25010a23bd1e30d254ccc8ade5"]
+      "digests": [
+        "15613fa56910bf18e53abb4161fda7fda6689b25010a23bd1e30d254ccc8ade5"
+      ]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -128,7 +124,9 @@
       "owner": "security",
       "reviewedAt": "2026-09-27T00:00:00.000Z",
       "expiresAt": "2026-12-26T00:00:00.000Z",
-      "digests": ["6e7d007b454a727e2d53a1ccfb0b9b3bf6b38081674abc35260efe50410cbc21"]
+      "digests": [
+        "6e7d007b454a727e2d53a1ccfb0b9b3bf6b38081674abc35260efe50410cbc21"
+      ]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -151,7 +149,9 @@
       "owner": "security",
       "reviewedAt": "2026-09-29T00:00:00.000Z",
       "expiresAt": "2026-12-28T00:00:00.000Z",
-      "digests": ["662cc0d541ef21f3ab25c0d51d96e5959d225d317f9930c4b151d449dce64376"]
+      "digests": [
+        "662cc0d541ef21f3ab25c0d51d96e5959d225d317f9930c4b151d449dce64376"
+      ]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -159,7 +159,9 @@
       "owner": "security",
       "reviewedAt": "2026-11-09T01:00:00.000Z",
       "expiresAt": "2026-12-09T01:00:00.000Z",
-      "digests": ["c76d36e487bee10de3b2aa6bb76a1a7aea74c8ecea171f2be31ae244a366cd50"]
+      "digests": [
+        "c76d36e487bee10de3b2aa6bb76a1a7aea74c8ecea171f2be31ae244a366cd50"
+      ]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -167,7 +169,9 @@
       "owner": "security",
       "reviewedAt": "2026-11-10T09:21:52.185Z",
       "expiresAt": "2026-12-10T09:21:52.185Z",
-      "digests": ["753cf5e5f0b0593379205af9e29a8f277d5e70a4cb78aec374dc3b006eec7de2"]
+      "digests": [
+        "753cf5e5f0b0593379205af9e29a8f277d5e70a4cb78aec374dc3b006eec7de2"
+      ]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -200,7 +204,9 @@
       "owner": "security",
       "reviewedAt": "2026-11-14T01:20:00.000Z",
       "expiresAt": "2026-12-14T01:20:00.000Z",
-      "digests": ["3baab23fcd18d079d16ea924fd23f9846a7353b819614beeaf9fa2698251b2ee"]
+      "digests": [
+        "3baab23fcd18d079d16ea924fd23f9846a7353b819614beeaf9fa2698251b2ee"
+      ]
     },
     {
       "classification": "synthetic-test-fixture",
