@@ -20,8 +20,8 @@
  * DO's SQLite, the D1 row, logs, or the browser. Only non-secret lifecycle
  * metadata is persisted. Every terminal state runs teardown so a vanished browser
  * leaves no orphan (rules 43/47):
- *   1. Synchronously claim the terminal status in DO SQLite, mark cleanup pending
- *      (with the pre-claim status), and arm a recovery alarm.
+ *   1. Arm a recovery alarm, then synchronously claim the terminal status in DO
+ *      SQLite and mark cleanup pending with its pre-claim status.
  *   2. Mark the D1 row terminal BEFORE any sandbox I/O, so an isolate that dies
  *      mid-teardown never leaves D1 active for the create route's one-active lookup.
  *   3. `./cleanup.ts`: scrub the setup dir (skipped when teardown starts from
@@ -30,7 +30,7 @@
  *      this isolate instead of starting a second one.
  * If the isolate dies during step 3, `alarm()` finds a terminal row with
  * `cleanup_pending = 1` and resumes the cleanup with at most
- * DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS work attempts. Unsettled SDK
+ * its snapshotted recovery work cap, plus at most two success continuations. SDK
  * flights wait for settlement or an immutable watchdog without spending attempts.
  *
  * Storage: embedded SQLite (wrangler `new_sqlite_classes`). The constructor runs
@@ -48,10 +48,8 @@ import {
 } from '../../middleware/project-auth';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
 import {
-  DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS,
   getClaudeOauthTokenMaxLength,
   getClaudeVerificationCodeMaxLength,
-  getSetupSessionCleanupRecoveryConfig,
   isTerminalSetupStatus,
   SANDBOX_PERMANENT_STARTUP_MESSAGE,
   type SetupSessionStatus,
@@ -65,6 +63,7 @@ import {
   cleanupAttemptLimit,
   deferPendingCleanup,
   ensureCleanupWake,
+  snapshotCleanupPolicy,
 } from './cleanup-recovery';
 import { type SetupSessionD1Extra, updateSetupSessionD1Status } from './d1-status';
 import { type DeviceAuthState, driverFailure } from './driver-state';
@@ -615,7 +614,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
   }
 
   // ---------------------------------------------------------------------------
-  // Teardown — always completes every step (best-effort), never throws.
+  // Teardown — establish a durable wake before committing a terminal claim.
   // ---------------------------------------------------------------------------
 
   private async teardown(
@@ -623,12 +622,30 @@ export class CredentialSetupSession extends DurableObject<Env> {
     errorCode?: string,
     errorMessage?: string
   ): Promise<void> {
-    // Atomically claim teardown (rule 45): if a concurrent cancel()/sweep already
-    // terminalized this session while this call awaited sandbox I/O, no-op. The read,
-    // the status write and the cleanup marker below are synchronous (no await between),
-    // so the claim is atomic within this DO instance and the cleanup is owed once.
+    if (this.cleanupInFlight) {
+      await this.cleanupInFlight;
+      return this.teardown(finalStatus, errorCode, errorMessage);
+    }
+    await this.trackCleanup(this.claimAndFinishTeardown(finalStatus, errorCode, errorMessage));
+  }
+
+  private async claimAndFinishTeardown(
+    finalStatus: 'completed' | 'failed' | 'cancelled' | 'expired',
+    errorCode?: string,
+    errorMessage?: string
+  ): Promise<void> {
+    const before = this.readRow();
+    if (!before || isTerminalSetupStatus(before.status)) return;
+    // Failure leaves D1 active for the existing sweep; no terminal orphan is created.
+    await armCleanupAlarmBestEffort(this.ctx, before, true);
+    // Recheck after arming: cancellation cannot cross the saving commit point.
     const current = this.readRow();
-    if (!current || isTerminalSetupStatus(current.status)) return;
+    if (
+      !current ||
+      isTerminalSetupStatus(current.status) ||
+      (finalStatus === 'cancelled' && current.status === 'saving')
+    )
+      return;
     this.setStatus(current.id, finalStatus, { errorCode, errorMessage, completed: true });
     // Record that cleanup is owed, and from which status (it decides whether to scrub),
     // so the recovery alarm can resume a cleanup that a dead isolate never finished.
@@ -642,9 +659,8 @@ export class CredentialSetupSession extends DurableObject<Env> {
     this.sql.exec(`DELETE FROM device_auth_details WHERE singleton = 1`);
     const claimed = this.readRow();
     if (!claimed) return;
-    // Registered before the first await: the recovery alarm armed below can fire while
-    // the D1 write is still in flight, and must join this run rather than start its own.
-    await this.trackCleanup(this.finishTeardown(claimed, finalStatus, errorCode, errorMessage));
+    // The registered flight also covers D1, so a firing alarm joins this run.
+    await this.finishTeardown(claimed, finalStatus, errorCode, errorMessage);
   }
 
   private async finishTeardown(
@@ -653,9 +669,6 @@ export class CredentialSetupSession extends DurableObject<Env> {
     errorCode?: string,
     errorMessage?: string
   ): Promise<void> {
-    // Arm the recovery alarm before any I/O (it replaces any pending poll alarm);
-    // the cleanup deletes it when it finishes.
-    await armCleanupAlarmBestEffort(this.ctx, claimed);
     // D1 terminal FIRST: the create route's one-active lookup reads D1, so an isolate
     // death during the sandbox I/O must not leave this row active.
     await this.updateD1Status(claimed.id, finalStatus, {
@@ -692,17 +705,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
   }
 
   private async runCleanup(row: SetupSessionRow, resumed: boolean): Promise<void> {
-    if (resumed && row.cleanup_recovery_max_attempts == null) {
-      const policy = await getSetupSessionCleanupRecoveryConfig(this.env);
-      this.sql.exec(
-        `UPDATE setup_session SET cleanup_recovery_max_attempts = ? WHERE id = ? AND cleanup_recovery_max_attempts IS NULL`,
-        (row.cleanup_attempts ?? 0) > 0
-          ? DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS
-          : policy.maxAttempts,
-        row.id
-      );
-      row = this.readRow() ?? row;
-    }
+    if (resumed) row = await snapshotCleanupPolicy(this.env, this.sql, row);
     return runSetupSessionCleanup(
       {
         env: this.env,

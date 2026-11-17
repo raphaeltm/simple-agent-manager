@@ -112,6 +112,7 @@ function createDoContext() {
           status: 'provisioning',
           cleanup_sandbox_io_pending: 0,
           cleanup_recovery_max_attempts: null,
+          cleanup_settlement_credit: null,
           pool_lease_id: poolLeaseId,
           codex_home: codexHome,
           expires_at: expiresAt,
@@ -132,7 +133,11 @@ function createDoContext() {
       } else if (normalized.includes('set cleanup_scrub_state = 1') && row) {
         row = { ...row, cleanup_scrub_state: 1 };
       } else if (normalized.includes('set cleanup_scrub_state = ?') && row) {
-        row = { ...row, cleanup_scrub_state: args[0] };
+        row = {
+          ...row,
+          cleanup_scrub_state: args[0],
+          cleanup_settlement_credit: args[1] === 1 ? 1 : row.cleanup_settlement_credit,
+        };
       } else if (normalized.includes('set cleanup_sandbox_io_pending = coalesce') && row) {
         row = {
           ...row,
@@ -144,7 +149,13 @@ function createDoContext() {
           cleanup_sandbox_io_pending: Math.max(0, Number(row.cleanup_sandbox_io_pending ?? 0) - 1),
         };
       } else if (normalized.includes('set cleanup_sandbox_destroyed = 1') && row) {
-        row = { ...row, cleanup_sandbox_destroyed: 1 };
+        row = {
+          ...row,
+          cleanup_sandbox_destroyed: 1,
+          cleanup_settlement_credit: args[0] === 1 ? 1 : row.cleanup_settlement_credit,
+        };
+      } else if (normalized.includes('set cleanup_settlement_credit = 0') && row) {
+        row = { ...row, cleanup_settlement_credit: 0 };
       } else if (normalized.includes('set cleanup_recovery_max_attempts = ?') && row) {
         if (row.cleanup_recovery_max_attempts == null)
           row = { ...row, cleanup_recovery_max_attempts: args[0] };

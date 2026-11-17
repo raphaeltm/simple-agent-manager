@@ -57,7 +57,7 @@ COLUMN` would ship unscanned. Fix: move all DO-SQLite DDL into
 - [x] Split commit: `schema.ts` (DDL + row types), `d1-status.ts` (D1 status writer) with no behaviour change
 - [x] Add `schema.ts` to `DO_MIGRATION_FILES`; scanner test asserts it is scanned and passes
 - [x] Additive cleanup columns via PRAGMA + literal guarded `ALTER TABLE ADD COLUMN` in `schema.ts`
-- [x] Teardown: claim + `cleanup_pending` + alarm + D1 terminal before any sandbox I/O
+- [x] Teardown: required alarm + synchronous claim/`cleanup_pending` + D1 terminal before any sandbox I/O
 - [x] `cleanup.ts`: scrub (skipped only on initial `provisioning` cleanup; resumed cleanup scrubs unless destruction was durably confirmed; bounded), destroy, release, D1 repair (`onlyIfActive`), clear marker + alarm
 - [x] Alarm: terminal row with `cleanup_pending = 1` resumes cleanup; joins inline flight; capped attempts
 - [x] `withTimeout` exported from `services/sandbox.ts`
@@ -138,8 +138,17 @@ Sonar's green aggregate still exposed four open findings through its PR issue AP
 
 - [x] Alarm completion verifies a durable future wake while nonquarantined cleanup remains owed; missing or unknown alarm state throws for Cloudflare native bounded retries (up to six). Inline terminal/resource cleanup remains best-effort. Abrupt alarm termination is retried by the platform; no sweep selection is widened.
 - [x] Original destruction is tracked across acquisition and raw SDK completion, including beyond the helper's former hidden30s timeout. Only original success plus durable proof permits settlement. Failed proof writes preserve uncertainty; late success cannot restart a destroyed sandbox.
-- [x] Operations cleanupRecoveryMaxAttempts default3/range1–10; first recovery snapshots its cap. Existing legacy attempts retain3; alreadyquarantined legacy rows cannot revive. Both settings share one cached override read; inline starts add no remote settings reads. Maximum remote wait budget400s/default60s across the episode, plus bounded settings reads and final local alarm lookup.
+- [x] Operations cleanupRecoveryMaxAttempts default3/range1–10; first recovery snapshots its cap. Existing legacy attempts retain3; alreadyquarantined legacy rows cannot revive. Both settings share one cached override read; inline starts add no remote settings reads. Maximum remote wait budget480s/default100s including two one-use success continuations across the episode, plus bounded settings reads and final local alarm lookup.
 - [x] Independent CF/security/constitution/doc review PASS; config10/10 and existing/native42/42 pass. Destroy race RED reproduced premature pool release after5s. Latest abeebb142 actual Sonar issues0/hotspots0 and E2EsmokeSUCCESS.
 - [ ] Final new regressions/quality checks, fresh push/CI, live staging and production merge-hold release still required.
 
 Final latest delta evidence: teardown56/56 +existing30/native12 +recoveryconfig10 =108/108 pass. Real helper observes original SDK destruction beyond35s. Root surgical removal of the alarm-finally wake assertion reproduces the failed rejection expectation (.tmp/l19-alarm-wake-red.log); assertion restored and targeted green required. Independent source/security/CF/doc reviews PASS.
+
+## Finalization proof and initial wake follow-ups
+
+- [x] Resumed provisioning always scrubs unless successful scrub or destruction is proven. A settled SDK call can have launched a background driver; zero pending calls is not evidence of an empty credential directory.
+- [x] Late positive original scrub/destruction grants a one-use continuation credit, atomically with its proof; consumption precedes any new attempt. At most two successes/credits exist per episode; failures grant none and quarantine remains final. Five pre-fix regressions failed while late-failure controls passed.
+- [x] Required initial alarm precedes terminal claim, after in-flight registration. A failed arm leaves DO/D1 active and eligible for the existing sweep; no UI retry assumption or sweep widening. Fresh state after arming preserves cancellation's saving commit boundary; joined finalizers re-evaluate their own terminal intent.
+- [x] Independent source/CF/security review PASS. Existing/native42/42 pass; final teardown race suites remain pending.
+
+Latest final delta local verification: teardown66/66 +existing30/native12 +config10=118/118 PASS. Requiredinitialarm surgical mutation was RED (cancel improperly resolved), restored targeted test GREEN. Realcapture saving-race and concurrentarming joins covered. All latest source/CF/security/doc reviewers PASS; TypeScript/lint/format/migration/secret guards PASS. NewheadCI/live gates remain mandatory.

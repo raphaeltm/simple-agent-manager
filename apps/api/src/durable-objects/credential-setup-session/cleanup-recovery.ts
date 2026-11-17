@@ -1,7 +1,10 @@
 /** Pending SDK work has a watchdog, not a failed-network-attempt budget. */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS } from '../../services/credential-setup-config';
+import {
+  DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS,
+  getSetupSessionCleanupRecoveryConfig,
+} from '../../services/credential-setup-config';
 import { persistError } from '../../services/observability-errors';
 import { getSandboxConfig } from '../../services/sandbox';
 import type { SetupSessionRow } from './schema';
@@ -15,6 +18,24 @@ export function readCleanupRow(sql: SqlStorage, sessionId: string): SetupSession
   return sql
     .exec<SetupSessionRow>('SELECT * FROM setup_session WHERE id = ?', sessionId)
     .toArray()[0];
+}
+
+/** Resolve once per episode; already-started legacy recovery keeps its old policy. */
+export async function snapshotCleanupPolicy(
+  env: Env,
+  sql: SqlStorage,
+  row: SetupSessionRow
+): Promise<SetupSessionRow> {
+  if (row.cleanup_recovery_max_attempts != null) return row;
+  const policy = await getSetupSessionCleanupRecoveryConfig(env);
+  sql.exec(
+    `UPDATE setup_session SET cleanup_recovery_max_attempts = ? WHERE id = ? AND cleanup_recovery_max_attempts IS NULL`,
+    (row.cleanup_attempts ?? 0) > 0
+      ? DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS
+      : policy.maxAttempts,
+    row.id
+  );
+  return readCleanupRow(sql, row.id) ?? row;
 }
 
 function pendingDeadline(env: Env, row: SetupSessionRow): number | null {
@@ -114,6 +135,12 @@ export async function claimCleanupAttempt(
   row: SetupSessionRow
 ): Promise<boolean> {
   row = readCleanupRow(sql, row.id) ?? row;
+  // Quarantine is final even if an original SDK promise succeeds afterwards.
+  if ((row.cleanup_attempts ?? 0) > cleanupAttemptLimit(row)) return false;
+  if (row.cleanup_settlement_credit === 1) {
+    sql.exec('UPDATE setup_session SET cleanup_settlement_credit = 0 WHERE id = ?', row.id);
+    return true;
+  }
   const attempts = (row.cleanup_attempts ?? 0) + 1;
   if (attempts > cleanupAttemptLimit(row)) {
     await quarantineCleanup(ctx, env, sql, row);

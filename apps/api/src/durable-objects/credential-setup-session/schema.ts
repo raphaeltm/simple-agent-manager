@@ -36,6 +36,8 @@ export type SetupSessionRow = {
   cleanup_attempts: number | null;
   /** Immutable per-cleanup retry policy; NULL legacy retains the original cap. */
   cleanup_recovery_max_attempts: number | null;
+  /** One late successful scrub/destroy may continue its existing work attempt. */
+  cleanup_settlement_credit: number | null;
   /** 1 only after sandbox.destroy() succeeds; recovery must not restart that sandbox. */
   cleanup_sandbox_destroyed: number | null;
   /** NULL: scrub needed; 1: SDK exec may still start work; 2: scrub succeeded. */
@@ -63,6 +65,10 @@ const CLEANUP_COLUMNS: ReadonlyArray<readonly [name: string, ddl: string]> = [
   [
     'cleanup_recovery_max_attempts',
     'ALTER TABLE setup_session ADD COLUMN cleanup_recovery_max_attempts INTEGER',
+  ],
+  [
+    'cleanup_settlement_credit',
+    'ALTER TABLE setup_session ADD COLUMN cleanup_settlement_credit INTEGER',
   ],
   ['cleanup_scrub_state', 'ALTER TABLE setup_session ADD COLUMN cleanup_scrub_state INTEGER'],
   [

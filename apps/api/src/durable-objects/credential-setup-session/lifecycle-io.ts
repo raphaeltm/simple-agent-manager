@@ -122,11 +122,13 @@ export async function runProvisioningSandboxSteps(
 /** Failure to schedule recovery must not block D1 terminalization or inline cleanup. */
 export async function armCleanupAlarmBestEffort(
   ctx: DurableObjectState,
-  row: SetupSessionRow
+  row: SetupSessionRow,
+  required = false
 ): Promise<void> {
   try {
     await ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
   } catch {
     log.error('credential_setup.cleanup_alarm_failed', { sessionId: row.id });
+    if (required) throw new Error('Credential setup cleanup alarm could not be scheduled');
   }
 }

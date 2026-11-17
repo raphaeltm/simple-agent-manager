@@ -40,18 +40,16 @@ export interface SetupSessionCleanupContext {
  * The initial scrub is skipped when teardown started from `provisioning`: an exec
  * could start a container that never started and wait out the SDK's start retries
  * before the destroy.
- * A resumed cleanup scrubs unless destruction was durably confirmed: the Sandbox
- * container outlives the dead DO isolate, so the captured credential may still be
- * on it, and the destroy
- * after the scrub is best-effort. (The integration branch also skipped it on resume,
+ * A resumed cleanup scrubs unless scrubbing or destruction durably succeeded:
+ * the Sandbox container outlives the dead DO isolate, so the captured credential
+ * may still be on it, and the destroy after the scrub is best-effort. (The integration branch also skipped it on resume,
  * because on celld the exec starts a fresh container; that is self-host only.)
  */
 function skipsScrub(row: SetupSessionRow, resumed: boolean): boolean {
   return (
     row.cleanup_scrub_state === 2 ||
     row.cleanup_sandbox_destroyed === 1 ||
-    (row.cleanup_from_status === 'provisioning' &&
-      (!resumed || row.cleanup_sandbox_io_pending === 0))
+    (row.cleanup_from_status === 'provisioning' && !resumed)
   );
 }
 
@@ -152,7 +150,9 @@ async function scrubSetupDirectory(
         const observed = execution.then(
           async (result) => {
             const succeeded = result.success === true && result.exitCode === 0;
-            await recordScrubSettled(context, row.id, succeeded, () => settled(!scrubAllowed));
+            await recordScrubSettled(context, row.id, succeeded, !scrubAllowed, () =>
+              settled(!scrubAllowed)
+            );
             if (!succeeded)
               log.warn('credential_setup.scrub_failed', {
                 sessionId: row.id,
@@ -161,7 +161,9 @@ async function scrubSetupDirectory(
             return result;
           },
           async (error: unknown) => {
-            await recordScrubSettled(context, row.id, false, () => settled(!scrubAllowed));
+            await recordScrubSettled(context, row.id, false, !scrubAllowed, () =>
+              settled(!scrubAllowed)
+            );
             throw error;
           }
         );
@@ -203,7 +205,13 @@ async function destroySetupSandbox(
           // Commit before settlement/rearm so recovery never recreates this sandbox.
           // If proof cannot persist, retain uncertainty instead of permitting exec.
           try {
-            sql.exec(`UPDATE setup_session SET cleanup_sandbox_destroyed = 1 WHERE id = ?`, row.id);
+            sql.exec(
+              `UPDATE setup_session SET cleanup_sandbox_destroyed = 1,
+               cleanup_settlement_credit = CASE WHEN ? = 1 THEN 1 ELSE cleanup_settlement_credit END
+               WHERE id = ?`,
+              awaitingDestruction ? 0 : 1,
+              row.id
+            );
           } catch {
             log.error('credential_setup.destroy_proof_failed', { sessionId: row.id });
             throw new Error('Setup destruction proof could not be persisted');
@@ -260,12 +268,16 @@ async function recordScrubSettled(
   context: SetupSessionCleanupContext,
   sessionId: string,
   succeeded: boolean,
+  afterTimeout: boolean,
   settleFlight: () => Promise<void>
 ): Promise<void> {
   try {
     context.sql.exec(
-      `UPDATE setup_session SET cleanup_scrub_state = ? WHERE id = ? AND cleanup_scrub_state = 1`,
+      `UPDATE setup_session SET cleanup_scrub_state = ?,
+       cleanup_settlement_credit = CASE WHEN ? = 1 THEN 1 ELSE cleanup_settlement_credit END
+       WHERE id = ? AND cleanup_scrub_state = 1`,
       succeeded ? 2 : null,
+      succeeded && afterTimeout ? 1 : 0,
       sessionId
     );
     await settleFlight();

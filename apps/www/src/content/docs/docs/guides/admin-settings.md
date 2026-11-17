@@ -1161,8 +1161,9 @@ when recovery first begins; changing it affects future cleanups. Legacy cleanup 
 progress keeps its original cap of three. Waiting for an
 already-issued SDK operation does not consume an attempt. Remote waits total
 at most 20 seconds per attempt by default (40 seconds at the maximum), plus the existing
-bounded settings read. The maximum configured cap allows 400 seconds of remote waits across
-all attempts; the default allows 60 seconds. Only recovery reads these settings; inline cancellation keeps the
+bounded settings read. Late successful scrubbing and destruction may each continue once without spending
+another attempt. Including these two bounded continuation passes, the maximum configured
+cap allows 480 seconds of remote waits; the default allows 100 seconds. Only recovery reads these settings; inline cancellation keeps the
 interactive sandbox timeout.
 
 A deadline stops waiting; it does not cancel an SDK operation. Cleanup cannot record
@@ -1177,3 +1178,9 @@ original successful completion records destruction proof, and recovery waits bef
 sandbox operation or pool release. A rejected or nonzero scrub remains retryable until scrub
 or destruction succeeds. If an alarm cannot establish a durable next wake while cleanup is
 still owed, it fails so Cloudflare can apply its bounded alarm retry policy.
+
+Initial cancellation establishes its recovery alarm before committing a terminal state. If
+arming fails, cancellation fails with the session still active and eligible for the existing
+sweep. Recovery scrubs a provisioning sandbox after its SDK flight settles because a
+background login driver may already have started. A late successful scrub or destruction
+can finish its current attempt once; it never reopens quarantined cleanup.

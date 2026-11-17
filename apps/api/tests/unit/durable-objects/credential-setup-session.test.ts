@@ -140,6 +140,7 @@ interface FakeRow {
   cleanup_from_status: string | null;
   cleanup_attempts: number | null;
   cleanup_recovery_max_attempts: number | null;
+  cleanup_settlement_credit: number | null;
   cleanup_sandbox_destroyed: number | null;
   cleanup_scrub_state: number | null;
   cleanup_sandbox_io_pending: number | null;
@@ -193,6 +194,7 @@ function createFakeSql() {
         cleanup_from_status: null,
         cleanup_attempts: null,
         cleanup_recovery_max_attempts: null,
+        cleanup_settlement_credit: null,
         cleanup_sandbox_destroyed: null,
         cleanup_scrub_state: null,
         cleanup_sandbox_io_pending: 0,
@@ -248,7 +250,12 @@ function createFakeSql() {
       return { toArray: () => [] };
     }
     if (q.includes('update setup_session set cleanup_scrub_state = ?')) {
-      if (row) row = { ...row, cleanup_scrub_state: args[0] };
+      if (row)
+        row = {
+          ...row,
+          cleanup_scrub_state: args[0],
+          cleanup_settlement_credit: args[1] === 1 ? 1 : row.cleanup_settlement_credit,
+        };
       return { toArray: () => [] };
     }
     if (q.startsWith('select cleanup_scrub_state'))
@@ -267,7 +274,16 @@ function createFakeSql() {
             : [],
       };
     if (q.includes('update setup_session set cleanup_sandbox_destroyed = 1')) {
-      if (row) row = { ...row, cleanup_sandbox_destroyed: 1 };
+      if (row)
+        row = {
+          ...row,
+          cleanup_sandbox_destroyed: 1,
+          cleanup_settlement_credit: args[0] === 1 ? 1 : row.cleanup_settlement_credit,
+        };
+      return { toArray: () => [] };
+    }
+    if (q.includes('update setup_session set cleanup_settlement_credit = 0')) {
+      if (row) row = { ...row, cleanup_settlement_credit: 0 };
       return { toArray: () => [] };
     }
     if (q.includes('update setup_session set cleanup_recovery_max_attempts = ?')) {
