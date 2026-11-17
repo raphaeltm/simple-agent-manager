@@ -215,6 +215,7 @@ export {
   type RunUsageRead,
   summarizeRunTokens,
 } from './insights-run-usage';
+export { projectSetups, type ProjectSetupsInput } from './insights-setups';
 export { getPlatformOperationLimits } from './limits';
 export {
   getFileContext,

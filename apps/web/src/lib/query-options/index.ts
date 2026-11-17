@@ -148,6 +148,7 @@ export {
   insightsQueryKeys,
   projectAccountsQueryOptions,
   projectFlowQueryOptions,
+  projectSetupsQueryOptions,
 } from './insights';
 export {
   libraryFileQueryOptions,
