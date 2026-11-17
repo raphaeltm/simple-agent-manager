@@ -24,9 +24,10 @@
  *      (with the pre-claim status), and arm a recovery alarm.
  *   2. Mark the D1 row terminal BEFORE any sandbox I/O, so an isolate that dies
  *      mid-teardown never leaves D1 active for the create route's one-active lookup.
- *   3. `./cleanup.ts`: scrub the setup dir (skipped from `provisioning` or on a
- *      resumed run), destroy the sandbox, release the pool slot, repair D1, then
- *      clear the marker and the alarm.
+ *   3. `./cleanup.ts`: scrub the setup dir (skipped when teardown starts from
+ *      `provisioning`), destroy the sandbox, release the pool slot, repair D1, then
+ *      clear the marker and the alarm. The alarm joins a cleanup already running in
+ *      this isolate instead of starting a second one.
  * If the isolate dies during step 3, `alarm()` finds a terminal row with
  * `cleanup_pending = 1` and resumes the cleanup, at most
  * DEFAULT_SETUP_SESSION_MAX_CLEANUP_RECOVERY_ATTEMPTS times.
@@ -611,7 +612,17 @@ export class CredentialSetupSession extends DurableObject<Env> {
     this.sql.exec(`DELETE FROM device_auth_details WHERE singleton = 1`);
     const claimed = this.readRow();
     if (!claimed) return;
+    // Registered before the first await: the recovery alarm armed below can fire while
+    // the D1 write is still in flight, and must join this run rather than start its own.
+    await this.trackCleanup(this.finishTeardown(claimed, finalStatus, errorCode, errorMessage));
+  }
 
+  private async finishTeardown(
+    claimed: SetupSessionRow,
+    finalStatus: SetupSessionStatus,
+    errorCode?: string,
+    errorMessage?: string
+  ): Promise<void> {
     // Arm the recovery alarm before any I/O (it replaces any pending poll alarm);
     // the cleanup deletes it when it finishes.
     await this.ctx.storage.setAlarm(Date.now() + claimed.capture_poll_ms);
@@ -622,7 +633,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
       errorMessage,
       completed: true,
     });
-    await this.startCleanup(claimed, false);
+    await this.runCleanup(claimed, false);
   }
 
   /** Alarm path: resume a cleanup that an earlier isolate claimed but never finished. */
@@ -654,17 +665,26 @@ export class CredentialSetupSession extends DurableObject<Env> {
       cleanupFromStatus: row.cleanup_from_status,
       attempt: attempts,
     });
-    // Re-arm before I/O so a death during this run is retried as well.
-    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
-    await this.startCleanup(row, true);
+    await this.trackCleanup(this.resumeClaimedCleanup(row));
   }
 
-  private startCleanup(row: SetupSessionRow, resumed: boolean): Promise<void> {
-    const flight = runSetupSessionCleanup(
+  private async resumeClaimedCleanup(row: SetupSessionRow): Promise<void> {
+    // Re-arm before I/O so a death during this run is retried as well.
+    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+    await this.runCleanup(row, true);
+  }
+
+  private runCleanup(row: SetupSessionRow, resumed: boolean): Promise<void> {
+    return runSetupSessionCleanup(
       { env: this.env, sql: this.sql, deleteAlarm: () => this.deleteAlarmBestEffort() },
       row,
       resumed
-    ).finally(() => {
+    );
+  }
+
+  /** Record `run` as this isolate's cleanup. Call it before `run`'s caller awaits anything. */
+  private trackCleanup(run: Promise<void>): Promise<void> {
+    const flight = run.finally(() => {
       if (this.cleanupInFlight === flight) this.cleanupInFlight = null;
     });
     this.cleanupInFlight = flight;

@@ -243,9 +243,12 @@ async function interruptTeardown(fixture: Fixture) {
     seen.push(`destroy:${d1Status(fixture.d1)}`);
     return new Promise<void>(() => undefined);
   });
+  // Clear the provisioning-time alarms so assertions see only the claim-time one.
+  handle.storage.setAlarm.mockClear();
+  const cancelledAt = Date.now();
   void handle.instance.cancel();
   await vi.waitFor(() => expect(destroySandboxInstance).toHaveBeenCalledTimes(1));
-  return { ...handle, seen };
+  return { ...handle, seen, cancelledAt };
 }
 
 function createRouteApp() {
@@ -274,7 +277,7 @@ afterEach(() => {
 describe('CredentialSetupSession teardown — interrupted after the DO claim', () => {
   it('marks D1 terminal before any sandbox I/O, so a new create for the same user and agent starts a fresh session', async () => {
     const fixture = createFixture();
-    const { storage, seen } = await interruptTeardown(fixture);
+    const { storage, seen, cancelledAt } = await interruptTeardown(fixture);
 
     // D1 was already terminal when the scrub and the destroy were called.
     expect(seen).toEqual(['scrub:cancelled', 'destroy:cancelled']);
@@ -287,7 +290,12 @@ describe('CredentialSetupSession teardown — interrupted after the DO claim', (
       cleanup_from_status: 'waiting_for_user',
       cleanup_attempts: 0,
     });
-    expect(storage.setAlarm).toHaveBeenLastCalledWith(expect.any(Number));
+    expect(storage.setAlarm).toHaveBeenCalledTimes(1);
+    expect(storage.setAlarm.mock.calls[0]?.[0]).toBeGreaterThanOrEqual(cancelledAt + POLL_MS);
+    // The sign-in URL and user code are gone with the claim, not after the cleanup.
+    expect(fixture.doDb.prepare('SELECT COUNT(*) AS n FROM device_auth_details').get()).toEqual({
+      n: 0,
+    });
     expect(storage.deleteAlarm).not.toHaveBeenCalled();
     expect(releaseSetupSlot).not.toHaveBeenCalled(); // the "process" never got that far
 
@@ -328,10 +336,9 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     const restarted = createInstance(fixture.doDb, fixture.env);
     await restarted.instance.alarm();
 
-    // No scrub on a resumed cleanup: whether the container survived the isolate death is
-    // unknown, and an exec would start a fresh empty one just to scrub it. Destroy still
-    // removes the container if it survived.
-    expect(scrubCalls(fixture.sandbox)).toHaveLength(0);
+    // A resumed cleanup still scrubs: on Cloudflare the container outlives the dead
+    // isolate, so the captured credential may still be on it.
+    expect(scrubCalls(fixture.sandbox)).toEqual([[`rm -rf '${SETUP_HOME}'`, expect.anything()]]);
     expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), SESSION_ID, {
       sandboxId: SESSION_ID,
     });
@@ -370,11 +377,20 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
 
     const cancel = handle.instance.cancel();
     await vi.waitFor(() => expect(destroySandboxInstance).toHaveBeenCalledTimes(1));
-    // Hold the inline destroy open while the alarm runs past its row read: the row
-    // is terminal with cleanup still pending at this point.
-    const alarm = handle.instance.alarm();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Hold the inline destroy open while the alarm reaches the resume path: the row is
+    // terminal with cleanup still pending at this point.
     expect(doRow(fixture.doDb)).toMatchObject({ status: 'cancelled', cleanup_pending: 1 });
+    const resume = vi.spyOn(
+      handle.instance as unknown as { resumeCleanup: () => unknown },
+      'resumeCleanup'
+    );
+    handle.storage.setAlarm.mockClear();
+    const alarm = handle.instance.alarm();
+    await vi.waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
+    // Past the resume decision: a second run would have counted an attempt and re-armed
+    // synchronously before its first await.
+    expect(doRow(fixture.doDb).cleanup_attempts).toBe(0);
+    expect(handle.storage.setAlarm).not.toHaveBeenCalled();
     expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
     openGate?.();
     await Promise.all([cancel, alarm]);
@@ -382,6 +398,54 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
     expect(releaseSetupSlot).toHaveBeenCalledTimes(1);
     expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 0 });
+  });
+
+  it('an alarm that fires during the claim-time D1 write joins the teardown, not a second cleanup', async () => {
+    const fixture = createFixture();
+    const handle = await startSession(fixture, true);
+    const realDb = fixture.env.DATABASE;
+    let releaseD1: (() => void) | undefined;
+    const d1Gate = new Promise<void>((resolve) => {
+      releaseD1 = resolve;
+    });
+    let held = false;
+    fixture.env.DATABASE = {
+      ...realDb,
+      prepare(query: string) {
+        const statement = realDb.prepare(query);
+        // Hold only the claim-time terminal write (the repair carries an active-status IN list).
+        if (held || !query.includes('completed_at') || query.includes('IN (')) return statement;
+        held = true;
+        return {
+          ...statement,
+          bind: (...args: unknown[]) => {
+            const bound = statement.bind(...args);
+            return { ...bound, run: async () => (await d1Gate, bound.run()) };
+          },
+        };
+      },
+    } as Env['DATABASE'];
+
+    const cancel = handle.instance.cancel();
+    await vi.waitFor(() => expect(held).toBe(true));
+    // The recovery alarm fires while D1 is still being written: nothing has started the
+    // sandbox cleanup yet, so only the in-flight registration can stop a second one.
+    const resume = vi.spyOn(
+      handle.instance as unknown as { resumeCleanup: () => unknown },
+      'resumeCleanup'
+    );
+    const alarm = handle.instance.alarm();
+    await vi.waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
+    // Still holding D1: an unjoined alarm would already have counted an attempt.
+    expect(doRow(fixture.doDb).cleanup_attempts).toBe(0);
+    releaseD1?.();
+    await Promise.all([cancel, alarm]);
+
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(releaseSetupSlot).toHaveBeenCalledTimes(1);
+    expect(scrubCalls(fixture.sandbox)).toHaveLength(1);
+    expect(doRow(fixture.doDb)).toMatchObject({ cleanup_pending: 0, cleanup_attempts: 0 });
+    expect(d1Status(fixture.d1)).toBe('cancelled');
   });
 
   it('gives up after the recovery cap instead of re-arming forever', async () => {
@@ -409,6 +473,73 @@ describe('CredentialSetupSession teardown — recovery alarm', () => {
     expect(last.storage.setAlarm).not.toHaveBeenCalled();
     expect(last.storage.deleteAlarm).toHaveBeenCalledTimes(1);
     expect(doRow(fixture.doDb)).toMatchObject({ status: 'cancelled', cleanup_pending: 0 });
+  });
+});
+
+describe('CredentialSetupSession teardown — the claim', () => {
+  it('an alarm step that awaited sandbox I/O across a completed cancel does not tear down again', async () => {
+    const fixture = createFixture();
+    const { instance } = await startSession(fixture, true);
+    let releaseRead: (() => void) | undefined;
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    // The driver reports failure, but the read is held: the alarm passed its own
+    // non-terminal check and is now awaiting sandbox I/O.
+    fixture.sandbox.readFile.mockClear(); // startSession's admitting step already read it
+    fixture.sandbox.readFile.mockImplementationOnce(async () => {
+      await readGate;
+      return { content: JSON.stringify({ status: 'failed', code: 'process_exited' }) };
+    });
+    const alarm = instance.alarm();
+    await vi.waitFor(() => expect(fixture.sandbox.readFile).toHaveBeenCalled());
+
+    await instance.cancel(); // claims and finishes the whole teardown meanwhile
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    releaseRead?.();
+    await alarm;
+
+    expect(doRow(fixture.doDb)).toMatchObject({
+      status: 'cancelled',
+      cleanup_pending: 0,
+      cleanup_from_status: 'waiting_for_user',
+    });
+    expect(d1Status(fixture.d1)).toBe('cancelled');
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(releaseSetupSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it('a cancel during saving does not claim: the credential write is the commit point', async () => {
+    const fixture = createFixture();
+    const { instance } = await startSession(fixture, true);
+    fixture.doDb.prepare(`UPDATE setup_session SET status = 'saving'`).run();
+
+    const result = await instance.cancel();
+
+    expect(result.status).toBe('saving');
+    expect(doRow(fixture.doDb)).toMatchObject({ status: 'saving', cleanup_pending: null });
+    expect(destroySandboxInstance).not.toHaveBeenCalled();
+    expect(releaseSetupSlot).not.toHaveBeenCalled();
+  });
+
+  it('TTL expiry on the alarm tears down through the same path', async () => {
+    const fixture = createFixture();
+    const { instance } = await startSession(fixture, true);
+    fixture.doDb.prepare('UPDATE setup_session SET expires_at = ?').run(Date.now() - 1);
+
+    await instance.alarm();
+
+    const row = fixture.d1
+      .prepare('SELECT status, error_code FROM agent_credential_setup_sessions WHERE id = ?')
+      .get(SESSION_ID);
+    expect(row).toEqual({ status: 'expired', error_code: 'setup_session_expired' });
+    expect(scrubCalls(fixture.sandbox)).toHaveLength(1);
+    expect(destroySandboxInstance).toHaveBeenCalledTimes(1);
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), LEASE_ID);
+    expect(doRow(fixture.doDb)).toMatchObject({
+      cleanup_pending: 0,
+      cleanup_from_status: 'waiting_for_user',
+    });
   });
 });
 
@@ -587,6 +718,27 @@ describe('CredentialSetupSession — cleanup columns on an existing object', () 
       cleanup_attempts: 0,
     });
     expect(scrubCalls(fixture.sandbox)).toHaveLength(1);
+  });
+
+  it('does not resume a terminal row torn down before the columns existed (cleanup_pending NULL)', async () => {
+    const fixture = createFixture();
+    const { instance, storage } = createInstance(fixture.doDb, fixture.env);
+    fixture.doDb
+      .prepare(
+        `INSERT INTO setup_session (id, user_id, project_id, scope, agent_type, credential_kind,
+          provider, agent_name, status, pool_lease_id, codex_home, expires_at, capture_poll_ms)
+         VALUES (?, ?, NULL, 'user', 'openai-codex', 'oauth-token', 'openai', 'OpenAI Codex',
+          'cancelled', ?, ?, ?, ?)`
+      )
+      .run(SESSION_ID, USER_ID, LEASE_ID, SETUP_HOME, Date.now() + 900_000, POLL_MS);
+
+    await instance.alarm();
+
+    expect(doRow(fixture.doDb).status).toBe('cancelled'); // liveness: the row is the one read
+    expect(fixture.sandbox.exec).not.toHaveBeenCalled();
+    expect(destroySandboxInstance).not.toHaveBeenCalled();
+    expect(releaseSetupSlot).not.toHaveBeenCalled();
+    expect(storage.setAlarm).not.toHaveBeenCalled();
   });
 });
 

@@ -26,7 +26,8 @@ a5bce064e, acf865e32). This slice ports the part that matters on Cloudflare.
 | Branch change | Ported? | Why |
 | --- | --- | --- |
 | Teardown reorder: D1 terminal before sandbox I/O, `cleanup_pending` marker, recovery alarm, bounded resume | Yes | Isolate death mid-teardown happens on Cloudflare too |
-| Skip scrub when teardown starts from `provisioning`, or on a resumed cleanup | Yes | On Cloudflare the exec restarts a never-started container; destroy removes the filesystem anyway |
+| Skip scrub when teardown starts from `provisioning` | Yes | On Cloudflare the exec restarts a never-started container; destroy removes the filesystem anyway |
+| Skip scrub on a resumed cleanup | No (review M2) | celld-only reasoning; on Cloudflare the container outlives the dead isolate, so a resume must still scrub the captured credential |
 | Bound the scrub exec with `withTimeout` | Yes | The exec timeout does not cover the SDK's container start before it |
 | Alarm joins an inline cleanup instead of running a second one | Yes (plain join) | The recovery alarm fires at `capture_poll_ms` (3 s), usually while the inline cleanup is running (rule 45) |
 | Alarm stops waiting after `2 x exec timeout + 30 s` (`settleSharedFlight`) | No | Only celld drops a request's sandbox calls; on Cloudflare every cleanup step is bounded |
@@ -54,25 +55,40 @@ a5bce064e, acf865e32). This slice ports the part that matters on Cloudflare.
 
 ## Implementation checklist
 
-- [ ] Split commit: `schema.ts` (DDL + row types), `d1-status.ts` (D1 status writer) with no behaviour change
-- [ ] Add `schema.ts` to `DO_MIGRATION_FILES`; scanner test asserts it is scanned and passes
-- [ ] Additive cleanup columns via PRAGMA + literal guarded `ALTER TABLE ADD COLUMN` in `schema.ts`
-- [ ] Teardown: claim + `cleanup_pending` + alarm + D1 terminal before any sandbox I/O
-- [ ] `cleanup.ts`: scrub (skipped from `provisioning` / resumed, bounded), destroy, release, D1 repair (`onlyIfActive`), clear marker + alarm
-- [ ] Alarm: terminal row with `cleanup_pending = 1` resumes cleanup; joins inline flight; capped attempts
-- [ ] `withTimeout` exported from `services/sandbox.ts`
-- [ ] `sandbox_runtime_unavailable` for the SDK permanent start message (constant in `credential-setup-config.ts`)
-- [ ] Port `credential-setup-session-teardown.test.ts` (real SQLite DO + D1, real create route) minus celld-only cases; update fake SQL in existing tests
-- [ ] Prove guards discriminating (D1-first ordering, scrub skip, join, attempt cap)
-- [ ] Docs: check public docs for guided login error codes
+- [x] Split commit: `schema.ts` (DDL + row types), `d1-status.ts` (D1 status writer) with no behaviour change
+- [x] Add `schema.ts` to `DO_MIGRATION_FILES`; scanner test asserts it is scanned and passes
+- [x] Additive cleanup columns via PRAGMA + literal guarded `ALTER TABLE ADD COLUMN` in `schema.ts`
+- [x] Teardown: claim + `cleanup_pending` + alarm + D1 terminal before any sandbox I/O
+- [x] `cleanup.ts`: scrub (skipped from `provisioning` / resumed, bounded), destroy, release, D1 repair (`onlyIfActive`), clear marker + alarm
+- [x] Alarm: terminal row with `cleanup_pending = 1` resumes cleanup; joins inline flight; capped attempts
+- [x] `withTimeout` exported from `services/sandbox.ts`
+- [x] `sandbox_runtime_unavailable` for the SDK permanent start message (constant in `credential-setup-config.ts`)
+- [x] Port `credential-setup-session-teardown.test.ts` (real SQLite DO + D1, real create route) minus celld-only cases; update fake SQL in existing tests
+- [x] Prove guards discriminating (D1-first ordering, scrub skip, join, attempt cap)
+- [x] Docs: check public docs for guided login error codes
 
 ## Acceptance criteria
 
-- [ ] A teardown interrupted after the claim leaves D1 terminal and the create route starts a fresh session (test)
-- [ ] A restarted instance finishes an interrupted cleanup on its alarm; the next alarm is a no-op (test)
-- [ ] An alarm during an inline cleanup does not run a second destroy/release (test)
-- [ ] Recovery gives up after the cap instead of re-arming forever (test)
-- [ ] Teardown from `provisioning` does no scrub exec; still destroys and releases (test)
-- [ ] The SDK permanent start message maps to `sandbox_runtime_unavailable`; other errors keep `sandbox_provision_failed` (test)
-- [ ] `quality:do-migration-safety` scans the constructor DDL
+- [x] A teardown interrupted after the claim leaves D1 terminal and the create route starts a fresh session (test)
+- [x] A restarted instance finishes an interrupted cleanup on its alarm; the next alarm is a no-op (test)
+- [x] An alarm during an inline cleanup does not run a second destroy/release (test)
+- [x] Recovery gives up after the cap instead of re-arming forever (test)
+- [x] Teardown from `provisioning` does no scrub exec; still destroys and releases (test)
+- [x] The SDK permanent start message maps to `sandbox_runtime_unavailable`; other errors keep `sandbox_provision_failed` (test)
+- [x] `quality:do-migration-safety` scans the constructor DDL
 - [ ] Staging: Instant session gets an agent reply; guided credential login completes on Cloudflare containers; a forced container start failure shows the right error, not a hang
+
+## Review-driven changes (Phase 5)
+
+- cloudflare-specialist M1 / validator: the recovery alarm could start a second cleanup while
+  teardown's claim-time D1 write was in flight (`cleanupInFlight` was set only after it).
+  Fixed: `trackCleanup()` registers the whole post-claim run before the first await. Test:
+  "an alarm that fires during the claim-time D1 write joins the teardown" (red on old ordering).
+- cloudflare-specialist M2: resumed cleanup now scrubs (see scope table).
+- test-engineer: claim guard, claim-time alarm, `device_auth_details` delete, `saving` early
+  return, TTL expiry and legacy terminal rows now have discriminating tests; the join test no
+  longer sleeps on the wall clock.
+- test-engineer: the DO migration scanner missed a single-quoted `DROP TABLE` after an
+  apostrophe in a comment (per-quote-style regexes paired delimiters globally). Replaced with a
+  comment-aware tokenizer; it extracts 65 more real SQL lines in existing migration files, all
+  still passing; regression test is red on the old extractor.

@@ -26,21 +26,17 @@ export interface SetupSessionCleanupContext {
   deleteAlarm(): Promise<void>;
 }
 
-type ScrubSkipReason = 'never_left_provisioning' | 'resumed_after_interruption';
-
 /**
- * Why the setup-dir scrub is skipped, or null to run it.
- * - `never_left_provisioning`: no driver ran and no sign-in URL was shown, so no
- *   credential can exist; an exec would start a container that never started and wait
- *   out the SDK's start retries before the destroy could run.
- * - `resumed_after_interruption`: the isolate died mid-cleanup, so whether the container
- *   survived is unknown, and an exec would start a fresh, empty one only to scrub it.
- * In both cases the destroy (step 2) still removes the container's filesystem.
+ * The scrub is skipped only when teardown started from `provisioning`: no driver ran and
+ * no sign-in URL was shown, so no credential can exist, and an exec would start a
+ * container that never started and wait out the SDK's start retries before the destroy.
+ * A resumed cleanup still scrubs: on Cloudflare the Sandbox container outlives the DO
+ * isolate that died, so the captured credential may still be on it, and the destroy
+ * after the scrub is best-effort. (The integration branch also skipped it on resume,
+ * because on celld the exec starts a fresh container; that is self-host only.)
  */
-function scrubSkipReason(row: SetupSessionRow, resumed: boolean): ScrubSkipReason | null {
-  if (row.cleanup_from_status === 'provisioning') return 'never_left_provisioning';
-  if (resumed) return 'resumed_after_interruption';
-  return null;
+function skipsScrub(row: SetupSessionRow): boolean {
+  return row.cleanup_from_status === 'provisioning';
 }
 
 export async function runSetupSessionCleanup(
@@ -51,10 +47,12 @@ export async function runSetupSessionCleanup(
   const { env, sql } = context;
   const execTimeoutMs = getSandboxConfig(env).execTimeoutMs;
 
-  // 1. Delete the captured credential file and scrub the setup dir.
-  const skipScrub = scrubSkipReason(row, resumed);
-  if (skipScrub) {
-    log.info('credential_setup.scrub_skipped', { sessionId: row.id, reason: skipScrub });
+  // 1. Delete the captured credential file and scrub the setup dir (bounded).
+  if (skipsScrub(row)) {
+    log.info('credential_setup.scrub_skipped', {
+      sessionId: row.id,
+      reason: 'never_left_provisioning',
+    });
   } else {
     try {
       const sandbox = await getSandboxInstance(env, row.id);

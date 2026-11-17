@@ -73,6 +73,35 @@ describe('DO migration safety — SQL extraction covers every string form', () =
   });
 });
 
+describe('DO migration safety — comments cannot shift string pairing', () => {
+  const sqlOf = (content: string) => extractSqlFromTypeScript(content).map((r) => r.sql);
+
+  it('still sees a single-quoted DROP after an apostrophe in a comment', () => {
+    // Incident shape: credential-setup-session/schema.ts had `teardown's` in a doc
+    // comment, and a `sql.exec('DROP TABLE ...')` after it reported PASS.
+    const content = [
+      `/** 1 while teardown's sandbox cleanup has not finished. */`,
+      `const DDL = 'ALTER TABLE setup_session ADD COLUMN cleanup_pending INTEGER';`,
+      `sql.exec('DROP TABLE device_auth_details');`,
+    ].join('\n');
+    const found = extractSqlFromTypeScript(content);
+    expect(found.map((r) => r.sql)).toContain('DROP TABLE device_auth_details');
+    expect(found.find((r) => r.sql.startsWith('DROP'))?.lineStart).toBe(3);
+  });
+
+  it('does not scan prose in comments, and keeps // inside strings', () => {
+    const content = [
+      `// DROP TABLE in a comment is documentation, not a statement`,
+      `/* DELETE FROM chat_messages explains why we never do this */`,
+      `const url = 'https://example.com/x'; sql.exec("UPDATE t SET a = 1 WHERE id = 'x'");`,
+    ].join('\n');
+    const sql = sqlOf(content);
+    expect(sql.some((s) => /DROP TABLE/.test(s))).toBe(false);
+    expect(sql.some((s) => /DELETE FROM/.test(s))).toBe(false);
+    expect(sql).toContain("UPDATE t SET a = 1 WHERE id = 'x'");
+  });
+});
+
 describe('DO migration safety check', () => {
   it('passes on the current codebase DO migrations', () => {
     const result = execSync(

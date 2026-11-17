@@ -87,35 +87,61 @@ const ALLOWLISTED_VIOLATIONS = new Set<string>([]);
  *
  * Rule 31 calls this gate one that "cannot be bypassed", so a quoting style must
  * never be able to bypass it.
+ *
+ * The file is tokenized in one left-to-right pass that skips `//` and `/* *\/`
+ * comments, rather than matching each quote style with its own regex over the whole
+ * file. Per-style regexes pair delimiters globally, so a single apostrophe in a
+ * comment (`teardown's`) shifted every later single-quoted string out of phase and
+ * a `sql.exec('DROP TABLE ...')` after it reported PASS.
  */
 export function extractSqlFromTypeScript(
   content: string
 ): { sql: string; lineStart: number }[] {
   const results: { sql: string; lineStart: number }[] = [];
-
   const SQL_KEYWORDS = /\b(CREATE|DROP|DELETE|INSERT|UPDATE|ALTER|TRUNCATE|SELECT)\b/i;
-
-  // One pass per string form. Each pattern is anchored to its own delimiter and
-  // consumes escapes, so a quote character appearing INSIDE a differently-quoted
-  // string cannot pair with a delimiter from a neighbouring statement and produce
-  // a garbled, unscannable capture that spans two statements.
-  const stringPatterns = [
-    /`([^`\\]*(?:\\.[^`\\]*)*)`/g, // template literal
-    /'((?:[^'\\]|\\.)*)'/g, // single-quoted
-    /"((?:[^"\\]|\\.)*)"/g, // double-quoted
-  ];
-
-  for (const pattern of stringPatterns) {
-    let match;
-    while ((match = pattern.exec(content)) !== null) {
-      const sqlContent = match[1];
-      // Only include if it looks like SQL
-      if (!SQL_KEYWORDS.test(sqlContent)) continue;
-      const lineStart = content.substring(0, match.index).split('\n').length;
-      results.push({ sql: sqlContent, lineStart });
+  let line = 1;
+  let i = 0;
+  while (i < content.length) {
+    const char = content[i];
+    const next = content[i + 1];
+    if (char === '/' && next === '/') {
+      const end = content.indexOf('\n', i);
+      i = end === -1 ? content.length : end; // the newline itself is counted below
+      continue;
     }
+    if (char === '/' && next === '*') {
+      const end = content.indexOf('*/', i + 2);
+      const stop = end === -1 ? content.length : end + 2;
+      for (let k = i; k < stop; k++) if (content[k] === '\n') line++;
+      i = stop;
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      const lineStart = line;
+      let body = '';
+      let j = i + 1;
+      while (j < content.length && content[j] !== char) {
+        if (content[j] === '\\') {
+          body += content[j] + (content[j + 1] ?? '');
+          if (content[j + 1] === '\n') line++;
+          j += 2;
+          continue;
+        }
+        // A newline ends an unterminated '...' or "..." (not a string after all).
+        if (content[j] === '\n') {
+          if (char !== '`') break;
+          line++;
+        }
+        body += content[j];
+        j++;
+      }
+      if (SQL_KEYWORDS.test(body)) results.push({ sql: body, lineStart });
+      i = j < content.length && content[j] === char ? j + 1 : j;
+      continue;
+    }
+    if (char === '\n') line++;
+    i++;
   }
-
   return results;
 }
 
