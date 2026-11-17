@@ -3,9 +3,10 @@ title: Inbox
 description: One place for everything your agents need from you — questions, permissions, secrets, approvals, reviews and tasks — across every project, on a phone or a desktop.
 ---
 
-The Inbox lists every open ask an agent has made of you: a question, a permission request, a
-secret, an Operations approval, or a review. You answer from the Inbox instead of opening each
-chat. It replaced the notification bell panel and the project **Notifications** page.
+The Inbox lists everything waiting on you: an agent's question, permission request, secret,
+Operations approval, review or task for a person, and the **Problems** SAM files itself when
+something of yours fails. You answer from the Inbox instead of opening each chat. It replaced the
+notification bell panel and the project **Notifications** page.
 
 ## Open the Inbox
 
@@ -50,13 +51,16 @@ The item shows its kind and the agent's state, the ask, the agent's reason, link
 files or pull requests it mentioned, and **Context**: the messages before the ask and what the agent
 has done since. The answer controls stay pinned at the bottom:
 
-| Kind       | Answer                                                                                                                                                                                              |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Question   | One of the agent's options, or **Type a different answer** when it allows free text. With more than five options they become a list with one **Send** button.                                       |
-| Permission | The exact options the agent's tool offered, such as **Allow once**, **Always allow in this chat** or **Deny**. The command it wants to run is shown above them.                                     |
-| Secret     | The secure value field; it is saved encrypted and never shown to the agent ([details](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)). **Decline** says you will not supply it. |
-| Approval   | **Approve** or **Deny** (superadmins, Operations project).                                                                                                                                          |
-| Review     | **Looks good**, or **Reply** with a comment.                                                                                                                                                        |
+| Kind               | Answer                                                                                                                                                                                              |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Question           | One of the agent's options, or **Type a different answer** when it allows free text. With more than five options they become a list with one **Send** button.                                       |
+| Permission         | The exact options the agent's tool offered, such as **Allow once**, **Always allow in this chat** or **Deny**. The command it wants to run is shown above them.                                     |
+| Secret             | The secure value field; it is saved encrypted and never shown to the agent ([details](/docs/guides/secret-execution/#let-the-agent-ask-you-for-a-secret)). **Decline** says you will not supply it. |
+| Approval           | **Approve** or **Deny** (superadmins, Operations project).                                                                                                                                          |
+| Review             | **Looks good**, or **Reply** with a comment.                                                                                                                                                        |
+| Task               | Read-only in the Inbox for now: the task's title, why a person is needed, its steps and links. **Archive** closes it. See [Tasks for people](#tasks-for-people).                                    |
+| Problem            | The fix for what failed, such as **Retry** or **Wake the chat**. See [Problems SAM files for you](#problems-sam-files-for-you).                                                                     |
+| Form, Sign-in link | Answered in the chat: the item says **This request is answered in its chat.** with an **Answer in chat** button.                                                                                    |
 
 After you answer, a one-line receipt confirms what was sent and the next item opens. Answering the
 last item of a stack moves on to the next stack; answering the last item leaves an empty Inbox. If
@@ -74,7 +78,8 @@ Agents file items with their `inbox_write` tool, and read what is already open w
 (`apps/api/src/routes/mcp/inbox-tools.ts`, over `packages/operations/src/inbox-agent-core.ts`).
 Every session is told that people read their inbox, not chats: an agent that ends its turn with a
 question only in its message has asked nobody, so it files an item instead
-(`apps/api/src/routes/mcp/instruction-inbox-guidance.ts`). Nothing is filed on an agent's behalf.
+(`apps/api/src/routes/mcp/instruction-inbox-guidance.ts`). SAM files nothing on an agent's behalf;
+the only items SAM files itself are [Problems](#problems-sam-files-for-you).
 The tools need a session started from a task or a project chat, as `request_human_input` always did;
 a chat opened directly on a workspace has no inbox to file into.
 
@@ -103,6 +108,10 @@ An item you answer in the chat card or in the Inbox is the same record: answerin
 both, and the agent is woken in its chat with your answer.
 
 ## Tasks for people
+
+Only an agent can assign a task today. To hand work to a teammate, ask the agent in its chat, for
+example _"assign adding the Stripe production key to Ana"_, or _"give the pricing decision to the
+team"_. The teammate gets a **Task** row in their Inbox and a push.
 
 An agent assigns a task to one project member or to the team, with a one-sentence title, why a
 person is needed, optional steps and links (`assignAgentTask`,
@@ -140,10 +149,29 @@ Limits are in [Admin settings](/docs/guides/admin-settings/#inbox): open tasks p
 (`inbox.watchersPerItemMax`), activity rows shown (`inbox.taskActivityMax`), and how long a finished
 task still wakes its watching chats, so a reopen reaches them (`inbox.closedTaskWatchHours`).
 
+## Problems SAM files for you
+
+When something of yours fails, SAM files a **Problem** item for you itself, with the fix as its
+button (`packages/operations/src/inbox-error-core.ts`, `apps/api/src/services/inbox/system-errors.ts`):
+
+| What failed                                                        | Example title                                                   | Buttons                                |
+| ------------------------------------------------------------------ | --------------------------------------------------------------- | -------------------------------------- |
+| A task failed to start or stopped before finishing                 | **"Fix login" couldn't start**                                  | **Retry**, **Open chat**               |
+| A chat couldn't wake                                               | **Couldn't wake "Ship billing"**                                | **Wake the chat**, **Open chat**       |
+| A chat went to sleep without a fresh snapshot, so work may be lost | **"Ship billing" went to sleep without saving its latest work** | **Open chat**                          |
+| An automation keeps failing, or SAM paused it                      | **Automation "Nightly deps" was paused after 3 failed runs**    | **Resume** when paused, otherwise none |
+| Your answer to an agent was never confirmed delivered              | **Your answer didn't reach the agent in "Ship billing"**        | **Open chat**                          |
+
+A task you stop yourself, or one that ends normally, files nothing. A failed task gets its item
+within about five minutes. If the same thing fails again, the open item is updated instead of a
+new one filed. When it recovers (the task is retried, the chat wakes, the automation runs), the
+item closes by itself. An item you archived stays archived while the thing keeps failing.
+
 ## Archive
 
 **Archive** (the box at the top) means you will not act on the item: it closes, and the agent is
-told. A permission is denied, a secret declined and an approval denied. For a few seconds the
+told. A permission is denied, a secret declined and an approval denied. A Problem has no agent, so
+archiving it tells no one. For a few seconds the
 receipt offers **Undo**; nothing is sent until that time is up. If you leave the page or close the
 tab first, the archive is sent then.
 
