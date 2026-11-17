@@ -30,6 +30,7 @@ export type AdminSettingValue = boolean | number | string | readonly string[] | 
 export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
 
 export type AdminSettingName =
+  | 'security.accountLinkProofTtlSeconds'
   | DeploymentPublishJobSettingName
   | 'deployments.publishCallbackMaxBodyBytes'
   | 'chat.messageMergingEnabled'

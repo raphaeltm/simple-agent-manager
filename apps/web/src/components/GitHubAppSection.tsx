@@ -1,9 +1,12 @@
-import type { GitHubInstallation } from '@simple-agent-manager/shared';
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
-import { getGitHubInstallUrl, listGitHubInstallations, listRepositories } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { getGitHubInstallUrl, listRepositories } from '../lib/api';
+import { ApiClientError } from '../lib/api/client';
+import { githubInstallationsQueryOptions } from '../lib/query-options';
 
 /**
  * GitHub App section for settings page.
@@ -11,49 +14,34 @@ import { getGitHubInstallUrl, listGitHubInstallations, listRepositories } from '
  */
 export function GitHubAppSection() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
-  const [repoCount, setRepoCount] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [installUrl, setInstallUrl] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const installationsQuery = useQuery(githubInstallationsQueryOptions(scope));
+  const installations = installationsQuery.data ?? [];
+  const installUrlQuery = useQuery({
+    queryKey: ['auth', scope, 'github-install-url'],
+    queryFn: getGitHubInstallUrl,
+    enabled: Boolean(scope),
+    retry: false,
+  });
+  const repos = useQuery({
+    queryKey: ['auth', scope, 'github-repository-count'],
+    queryFn: () => listRepositories(),
+    enabled: Boolean(scope) && installations.length > 0,
+  });
+  const repoCount = repos.data?.repositories.length ?? null;
+  const loading = installationsQuery.isLoading;
+  const notConnected =
+    installationsQuery.error instanceof ApiClientError &&
+    installationsQuery.error.code === 'GITHUB_NOT_CONNECTED';
+  const installUnavailable =
+    installUrlQuery.error instanceof ApiClientError &&
+    installUrlQuery.error.code === 'GITHUB_APP_NOT_CONFIGURED'
+      ? installUrlQuery.error.message
+      : null;
+  const installUrl = installUrlQuery.data?.url ?? null;
+  const [callbackError, setError] = useState<string | null>(null);
+  const error = callbackError ?? (notConnected ? null : installationsQuery.error?.message);
   const [showSuccess, setShowSuccess] = useState(false);
-
-  const loadInstallations = useCallback(async () => {
-    try {
-      setError(null);
-      const data = await listGitHubInstallations();
-      setInstallations(data);
-
-      // Load repo count if there are installations
-      if (data.length > 0) {
-        try {
-          const result = await listRepositories();
-          setRepoCount(result.repositories.length);
-        } catch {
-          // Non-critical, don't show error
-          setRepoCount(null);
-        }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load installations');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const loadInstallUrl = useCallback(async () => {
-    try {
-      const { url } = await getGitHubInstallUrl();
-      setInstallUrl(url);
-    } catch (err) {
-      console.error('Failed to get install URL:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadInstallations();
-    loadInstallUrl();
-  }, [loadInstallations, loadInstallUrl]);
 
   // Show feedback message if redirected from GitHub App installation
   useEffect(() => {
@@ -91,9 +79,26 @@ export function GitHubAppSection() {
     return <Alert variant="error">{error}</Alert>;
   }
 
+  if (notConnected) {
+    return (
+      <div
+        data-testid="github-app-section"
+        className="sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)] min-w-0 p-4"
+      >
+        <p className="m-0 text-sm text-fg-muted">
+          Connect GitHub above, then install the GitHub App on the accounts whose repositories SAM
+          should use.
+        </p>
+      </div>
+    );
+  }
+
   if (installations.length === 0) {
     return (
-      <div className="glass-surface rounded-lg p-4 flex flex-col gap-4">
+      <div
+        data-testid="github-app-section"
+        className="sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)] min-w-0 p-4 flex flex-col gap-4"
+      >
         {showSuccess && (
           <Alert variant="info" onDismiss={() => setShowSuccess(false)}>
             GitHub App installation completed. It may take a moment for the installation to appear.
@@ -102,6 +107,7 @@ export function GitHubAppSection() {
         <p className="text-fg-muted">
           Install the GitHub App to access your repositories for workspace creation.
         </p>
+        {installUnavailable && <Alert variant="warning">{installUnavailable}</Alert>}
         <div>
           <Button onClick={handleInstallClick} disabled={!installUrl}>
             <svg className="h-5 w-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
@@ -115,47 +121,72 @@ export function GitHubAppSection() {
   }
 
   return (
-    <div className="glass-surface rounded-lg p-4 flex flex-col gap-4">
+    <div
+      data-testid="github-app-section"
+      className="sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)] min-w-0 p-4 flex flex-col gap-4"
+    >
       {showSuccess && (
         <Alert variant="success" onDismiss={() => setShowSuccess(false)}>
           GitHub App installed successfully!
         </Alert>
       )}
 
-      <div className="flex items-center justify-between p-4 bg-success-tint border border-success/30 rounded-md">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap gap-2 items-center justify-between p-4 bg-success-tint border border-success/30 rounded-md">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <div className="h-10 w-10 bg-success-tint rounded-full flex items-center justify-center">
-            <svg className="h-5 w-5 text-success-fg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            <svg
+              className="h-5 w-5 text-success-fg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5 13l4 4L19 7"
+              />
             </svg>
           </div>
           <div>
             <p className="font-medium text-success-fg">Connected</p>
             <p className="text-sm text-fg-muted">
               {installations.length} account{installations.length > 1 ? 's' : ''}
-              {repoCount !== null && ` \u00b7 ${repoCount} repositor${repoCount === 1 ? 'y' : 'ies'} accessible`}
+              {repoCount !== null &&
+                ` \u00b7 ${repoCount} repositor${repoCount === 1 ? 'y' : 'ies'} accessible`}
             </p>
           </div>
         </div>
         <button
           onClick={handleInstallClick}
-          className="py-1 px-3 text-sm text-accent bg-transparent border-none cursor-pointer"
+          disabled={!installUrl}
+          className="sam-raised min-h-11 py-1 px-3 rounded-md text-sm text-fg-primary border-none cursor-pointer"
         >
           Add More
         </button>
       </div>
 
-      <div className="glass-surface rounded-md overflow-hidden">
+      <div className="rounded-md min-w-0">
         {installations.map((inst, i) => (
           <div
             key={inst.id}
-            className={`py-3 px-4 flex items-center justify-between ${i > 0 ? 'border-t border-border-default' : ''}`}
+            className={`py-3 px-4 flex flex-col items-stretch sm:flex-row sm:items-center justify-between gap-2 min-w-0 ${i > 0 ? 'border-t border-border-default' : ''}`}
           >
-            <div className="flex items-center gap-3">
-              <div className="h-8 w-8 bg-inset rounded-full flex items-center justify-center">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="h-8 w-8 shrink-0 bg-inset rounded-full flex items-center justify-center">
                 {inst.accountType === 'organization' ? (
-                  <svg className="h-4 w-4 text-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  <svg
+                    className="h-4 w-4 text-fg-muted"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                    />
                   </svg>
                 ) : (
                   <svg className="h-4 w-4 text-fg-muted" fill="currentColor" viewBox="0 0 24 24">
@@ -163,8 +194,10 @@ export function GitHubAppSection() {
                   </svg>
                 )}
               </div>
-              <div>
-                <p className="font-medium text-sm text-fg-primary">{inst.accountName}</p>
+              <div className="min-w-0">
+                <p className="font-medium text-sm text-fg-primary break-words">
+                  {inst.accountName}
+                </p>
                 <p className="text-xs text-fg-muted capitalize">{inst.accountType}</p>
               </div>
             </div>

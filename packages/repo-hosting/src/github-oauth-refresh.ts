@@ -2,7 +2,7 @@
  * GitHub OAuth user-token refresh, used when a stored user access token expires.
  * Re-exported from `../auth` for existing callers.
  */
-import { createModuleLogger } from '@simple-agent-manager/worker-core';
+import { AppError, createModuleLogger } from '@simple-agent-manager/worker-core';
 import * as v from 'valibot';
 
 import type { Env } from './env';
@@ -59,7 +59,15 @@ export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     log.warn('github_oauth_refresh_failed', { status: response.status });
-    throw new Error('GitHub OAuth refresh failed');
+    throw new AppError(
+      response.status >= 500 || response.status === 429 ? 503 : 401,
+      response.status >= 500 || response.status === 429
+        ? 'GITHUB_UNAVAILABLE'
+        : 'GITHUB_REAUTH_REQUIRED',
+      response.status >= 500 || response.status === 429
+        ? 'GitHub is temporarily unavailable. Please try again later.'
+        : 'Your GitHub authorization needs to be renewed. Sign out and back in.'
+    );
   }
 
   const errorResult = v.safeParse(githubRefreshTokenErrorSchema, body);
@@ -68,7 +76,16 @@ export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
       status: response.status,
       error: errorResult.output.error,
     });
-    throw new Error('GitHub OAuth refresh failed');
+    const invalid = ['bad_refresh_token', 'invalid_grant', 'expired_token'].includes(
+      errorResult.output.error
+    );
+    throw new AppError(
+      invalid ? 401 : 503,
+      invalid ? 'GITHUB_REAUTH_REQUIRED' : 'GITHUB_UNAVAILABLE',
+      invalid
+        ? 'Your GitHub authorization needs to be renewed. Sign out and back in.'
+        : 'GitHub authorization could not be checked. Please try again later.'
+    );
   }
 
   const data = v.parse(githubRefreshTokenSuccessSchema, body);

@@ -1,24 +1,26 @@
-import type {ProjectAccessRequestResponse, ProjectInviteGithubAccessStatus, ProjectInviteLinkResponse, ProjectInviteLinkStatus, ProjectMemberResponse} from '@simple-agent-manager/shared';
-import {and, eq} from 'drizzle-orm';
-import {drizzle} from 'drizzle-orm/d1';
-
+import type {
+  ProjectAccessRequestResponse,
+  ProjectInviteGithubAccessStatus,
+  ProjectInviteLinkResponse,
+  ProjectInviteLinkStatus,
+  ProjectMemberResponse,
+} from '@simple-agent-manager/shared';
+import { and, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
-import type {Env} from '../../env';
-import {log} from '../../lib/logger';
-
-
-import {errors} from '../../middleware/error';
-
-
-import {clearCredentialAttributionHealthCache} from '../../services/credential-attribution-health';
-import {getUserInstallationRepositories} from '../../services/github-app';
-import {getExternalInstallationId} from '../../services/github-installation-ids';
-import {getGitHubUserAccessTokenForOwner, getGitHubUserAccessTokenWithHeaders} from '../../services/github-user-access-token';
-
-import {clearProjectMultiplayerStateCache} from '../../services/project-multiplayer';
-
-
+import type { Env } from '../../env';
+import { log } from '../../lib/logger';
+import { errors } from '../../middleware/error';
+import { clearCredentialAttributionHealthCache } from '../../services/credential-attribution-health';
+import { getUserInstallationRepositories } from '../../services/github-app';
+import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { githubUserTokenUnavailableError } from '../../services/github-token-errors';
+import {
+  getGitHubUserAccessTokenForOwner,
+  getGitHubUserAccessTokenWithHeaders,
+} from '../../services/github-user-access-token';
+import { clearProjectMultiplayerStateCache } from '../../services/project-multiplayer';
 
 const INVITE_TOKEN_PREFIX = 'sam_inv_';
 
@@ -57,7 +59,10 @@ export async function hmacInviteToken(rawToken: string, secret: string): Promise
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
-export function inviteStatus(row: schema.ProjectInviteLink, now = new Date()): ProjectInviteLinkStatus {
+export function inviteStatus(
+  row: schema.ProjectInviteLink,
+  now = new Date()
+): ProjectInviteLinkStatus {
   if (row.revokedAt) return 'revoked';
   if (new Date(row.expiresAt).getTime() <= now.getTime()) return 'expired';
   return 'active';
@@ -168,29 +173,32 @@ export async function evaluateRequesterGithubAccess(input: {
     };
   }
 
-  const accessToken =
-    input.currentRequestUserId === input.requesterUserId
-      ? await getGitHubUserAccessTokenWithHeaders(
-          input.env,
-          input.headers,
-          input.requesterUserId,
-          'project-invite-request'
-        )
-      : await getGitHubUserAccessTokenForOwner(
-          input.env,
-          input.requesterUserId,
-          'project-invite-approval'
-        );
-  if (!accessToken) {
-    return {
-      status: 'missing-token',
-      checkedAt,
-      message:
-        'Requester must reauthenticate with GitHub before repository access can be verified.',
-    };
-  }
-
   try {
+    const accessToken =
+      input.currentRequestUserId === input.requesterUserId
+        ? await getGitHubUserAccessTokenWithHeaders(
+            input.env,
+            input.headers,
+            input.requesterUserId,
+            'project-invite-request'
+          )
+        : await getGitHubUserAccessTokenForOwner(
+            input.env,
+            input.requesterUserId,
+            'project-invite-approval'
+          );
+    if (!accessToken) {
+      const unavailable = await githubUserTokenUnavailableError(input.env, input.requesterUserId);
+      return {
+        status: 'missing-token',
+        checkedAt,
+        message:
+          unavailable.error === 'GITHUB_NOT_CONNECTED'
+            ? 'Requester has not connected GitHub. Connect it in Settings → GitHub before running work.'
+            : 'Requester must reauthenticate with GitHub before repository access can be verified.',
+      };
+    }
+
     const installation = await getProjectInstallation(input.db, input.project);
     const externalInstallationId = getExternalInstallationId(installation);
     const repositories = await getUserInstallationRepositories(
@@ -293,4 +301,3 @@ export async function loadAccessRequestWithUser(
   }
   return toAccessRequestResponse(row);
 }
-

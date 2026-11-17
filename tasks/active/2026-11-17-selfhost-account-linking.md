@@ -12,14 +12,14 @@ Email/Google users need a GitHub identity for GitHub-backed work. Explicit linki
 - StagingTestResources and verification reference have no approved interactive GitHub identity. Coordinator informed on feature.selfhost-landing; real OAuth staging evidence blocks merge.
 
 ## Checklist
-- [ ] Independent adversarial design review and threat model; static callback URIs
-- [ ] Step-up, session-bound explicit linking (GitHub/GitLab only), callback enforcement
-- [ ] Preserve verified SAM email across differently emailed provider sign-ins
-- [ ] Owner notification and safe unlink without lockout
-- [ ] Email-code guard prevents provider/session loss (F15)
-- [ ] Token errors distinguish unconnected, expired, provider outage (F14), configuration and unavailable feature
-- [ ] Connected accounts, onboarding gate, auth banner, app section and member warnings use one canonical operation
-- [ ] Behavioral real-library/SQL regressions; adversarial controls; mobile/desktop Playwright audit
+- [x] Independent adversarial design review and threat model; static callback URIs
+- [x] Step-up, session-bound explicit linking (GitHub/GitLab only), callback enforcement
+- [x] Preserve verified SAM email across differently emailed provider sign-ins
+- [x] Owner notification and safe unlink without lockout
+- [x] Email-code guard prevents provider/session loss (F15)
+- [x] Token errors distinguish unconnected, expired, provider outage (F14), configuration and unavailable feature
+- [x] Connected accounts, onboarding gate, auth banner, app section and member warnings use one canonical operation
+- [x] Behavioral real-library/SQL regressions; adversarial controls; mobile/desktop Playwright audit
 - [ ] Docs and API contract sync, local checks and all specialist reviews
 - [ ] Both staging leases checked; approved GitHub identity; real login/link/notification/unlink/Google refusal/session IP
 - [ ] Draft PR, ready CI, CodeRabbit request/wait, gates, merge and production smoke; idea/channel update
@@ -29,3 +29,6 @@ Email user completes step-up then links different-email GitHub, returns with unc
 
 ## References
 SAM task 01M7KNB1V0BPYHJQSN5MFZBVEW; idea 01M72M9AEB933ZY8269D376DKC; integration origin/sam/selfhost-pass-2; decisions D4/C5/C6/C8/F1/F14/F15. Rules 11,17,19,24,28,30,48,62,77; /do and sam-glass.
+
+## Validation checkpoint
+Independent security design/final reviews PASS; unlink concurrency fixed and reverified. Test-engineer real BetterAuth/SQLite auth and regression suites91/91; token/route contracts27/27; web5378 tests PASS; UI production-build Playwright40/40 in both themes at375/1280 with discriminating overflow/onboarding checks. Full checks rerun pending. Proof TTL uses existing D1 admin settings (OAuth category), default300sec range60..900; no new environment/deploy configuration. Real staging OAuth, owner email delivery and storedIP still blocked on approved GitHub interactive test identity/inbox; coordinator notified. PR2830 remains unmerged.
