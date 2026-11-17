@@ -1686,6 +1686,35 @@ describe('ProjectChat profile setup wizard', () => {
     await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Chat'));
   });
 
+  it('waits for the initial profile list before offering quick start', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    let resolveProfiles!: (profiles: ReturnType<typeof makeAgentProfile>[]) => void;
+    mocks.listAgentProfiles.mockReturnValue(
+      new Promise((resolve) => {
+        resolveProfiles = resolve;
+      })
+    );
+    renderProjectChat();
+
+    await waitFor(() => expect(mocks.listAgents).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: /Start chatting with/ })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Describe what you want the agent to do...')).toBeDisabled();
+    expect(mocks.createAgentProfile).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveProfiles([makeAgentProfile({ name: 'Existing Chat' })]);
+    });
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Existing Chat'));
+    expect(screen.queryByRole('button', { name: /Start chatting with/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Describe what you want the agent to do...')
+    ).not.toBeDisabled();
+    expect(mocks.createAgentProfile).not.toHaveBeenCalled();
+  });
+
   it('one click creates exactly one Instant chat profile and unlocks the composer', async () => {
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.getInstantRuntimeEnabled.mockResolvedValue(true);
@@ -1778,52 +1807,40 @@ describe('ProjectChat profile setup wizard', () => {
     expect(screen.getByRole('button', { name: /Cloud VM/i })).not.toBeDisabled();
   });
 
-  it('learns Instant availability live in a wizard opened before the installation answered', async () => {
-    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
-    let answer: (enabled: boolean) => void = () => {};
-    mocks.getInstantRuntimeEnabled.mockReturnValue(
-      new Promise<boolean>((resolve) => {
-        answer = resolve;
-      })
-    );
-    renderProjectChat();
+  it.each([false, true])(
+    'updates the open wizard when Instant availability resolves to %s',
+    async (enabled) => {
+      mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+      let answer!: (enabled: boolean) => void;
+      mocks.getInstantRuntimeEnabled.mockReturnValue(
+        new Promise<boolean>((resolve) => {
+          answer = resolve;
+        })
+      );
+      renderProjectChat();
 
-    await openProfileWizardFromGate();
-    chooseWorkType(/Chat and explore/i);
-    const instant = screen.getByRole('button', { name: /Instant container/i });
-    // Unknown is not available: Instant cannot be picked before the answer.
-    expect(instant).toBeDisabled();
-    expect(instant).toHaveAccessibleDescription(
-      'Checking whether this installation can run Instant…'
-    );
-
-    await act(async () => answer(false));
-    await waitFor(() =>
+      await openProfileWizardFromGate();
+      chooseWorkType(/Chat and explore/i);
+      const instant = screen.getByRole('button', { name: /Instant container/i });
+      expect(instant).toBeDisabled();
       expect(instant).toHaveAccessibleDescription(
-        'Instant is not available on this installation: it needs Cloudflare Containers.'
-      )
-    );
-    expect(instant).toBeDisabled();
-  });
+        'Checking whether this installation can run Instant…'
+      );
 
-  it('enables Instant in the wizard once the installation says it can run it', async () => {
-    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
-    let answer: (enabled: boolean) => void = () => {};
-    mocks.getInstantRuntimeEnabled.mockReturnValue(
-      new Promise<boolean>((resolve) => {
-        answer = resolve;
-      })
-    );
-    renderProjectChat();
-
-    await openProfileWizardFromGate();
-    chooseWorkType(/Chat and explore/i);
-    const instant = screen.getByRole('button', { name: /Instant container/i });
-    expect(instant).toBeDisabled();
-    await act(async () => answer(true));
-    await waitFor(() => expect(instant).not.toBeDisabled());
-    expect(instant).not.toHaveAttribute('aria-describedby');
-  });
+      await act(async () => answer(enabled));
+      if (enabled) {
+        await waitFor(() => expect(instant).not.toBeDisabled());
+        expect(instant).not.toHaveAttribute('aria-describedby');
+      } else {
+        await waitFor(() =>
+          expect(instant).toHaveAccessibleDescription(
+            'Instant is not available on this installation: it needs Cloudflare Containers.'
+          )
+        );
+        expect(instant).toBeDisabled();
+      }
+    }
+  );
 
   it('a click before the installation answers waits for it and then picks the runtime', async () => {
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);

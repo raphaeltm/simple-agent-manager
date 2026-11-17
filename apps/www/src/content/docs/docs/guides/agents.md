@@ -5,6 +5,13 @@ description: Configure and use AI coding agents in SAM — Claude Code, OpenAI C
 
 SAM supports seven AI coding agents. You connect the ones you want to use, then choose which to run for a given chat by selecting an **agent profile**.
 
+If a project has no profiles and you have connected exactly one agent, choose
+**Start chatting with &lt;agent&gt;** in project chat or the Overview task box. That click
+creates one **&lt;agent&gt; Chat** profile; opening the page creates nothing. The profile
+uses Instant where this installation supports it, and a Cloud VM otherwise.
+Choose **Customize** to open the profile wizard instead. With several connected
+agents, use the wizard to choose one.
+
 ## Supported Agents
 
 ### Claude Code

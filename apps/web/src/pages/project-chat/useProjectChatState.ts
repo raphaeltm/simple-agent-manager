@@ -476,6 +476,7 @@ export function useProjectChatState() {
     selectedAgentType,
     setSelectedAgentType,
     agentProfiles,
+    profilesLoading: profileChoice.profilesLoading,
     selectedProfileId,
     setSelectedProfileId: profileChoice.setSelectedProfileId,
     profilePicker: profileChoice.profilePicker,
