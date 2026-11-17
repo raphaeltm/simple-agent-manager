@@ -189,7 +189,14 @@ export function ComputePoolOverview({
     (allowedCount === 0 ? POOL_STATE_WARNINGS['configured-empty'] : undefined) ??
     // A switched-off account keeps its picks but is never placed on, so its machines cannot fit.
     defaultWorkspaceFitWarning(
-      groups.filter((group) => !isCapacitySourceExcluded(pool, group.key)),
+      groups
+        .filter((group) => !isCapacitySourceExcluded(pool, group.key))
+        .flatMap((group) => group.rows.filter((row) => row.allowed))
+        .map((row) => ({
+          vcpu: row.vcpu,
+          memoryMb: row.ramGb === null ? null : row.ramGb * 1024,
+          diskGb: row.diskGb,
+        })),
       placementSettings
     );
   const sentence = allowedMachinesSentence(groups);

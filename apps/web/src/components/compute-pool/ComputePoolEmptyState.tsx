@@ -1,9 +1,11 @@
 import type {
   CapacityPoolScope,
+  SafeCapacityPoolPlacementSettingsSummary,
   SafeEffectiveCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
 import { Link } from 'react-router';
 
+import { defaultWorkspaceFitWarning } from '../../lib/compute-pool-default-fit';
 import { knownProviderLocation, providerDisplayName } from '../../lib/compute-pool-offering-fields';
 import { joinNatural } from './machine-labels';
 import { TEXT_LINK_CLASS } from './styles';
@@ -34,18 +36,30 @@ interface ComputePoolEmptyStateProps {
   scope: CapacityPoolScope;
   projectId: string | null;
   shared: SafeEffectiveCapacityPoolSummary | undefined;
+  /** The installation's resolved placement settings, from the same pool response. */
+  placementSettings?: SafeCapacityPoolPlacementSettingsSummary;
 }
 
 /**
  * Shown when this scope has no pool. If the installation still provides machines, say
  * so: work runs on them, so a personal cloud account is optional, not required.
  */
-export function ComputePoolEmptyState({ scope, projectId, shared }: ComputePoolEmptyStateProps) {
+export function ComputePoolEmptyState({
+  scope,
+  projectId,
+  shared,
+  placementSettings,
+}: ComputePoolEmptyStateProps) {
   const sharedReady =
     shared?.scope === 'installation' &&
     shared.state === 'configured-ready' &&
     shared.availableCandidateCount > 0;
   const machines = sharedReady && shared ? sharedMachinesPhrase(shared) : null;
+  // Someone on the shared pool sees only its safe summary, which still lists machine sizes.
+  const fitWarning =
+    sharedReady && shared
+      ? defaultWorkspaceFitWarning(shared.nativeOfferings ?? [], placementSettings)
+      : null;
 
   if (scope === 'installation') {
     return (
@@ -87,6 +101,14 @@ export function ComputePoolEmptyState({ scope, projectId, shared }: ComputePoolE
     <div className="grid gap-3 rounded-md border border-border-default bg-inset p-4">
       <p className="m-0 font-medium text-fg-primary">{title}</p>
       <p className="m-0 text-sm text-fg-muted [overflow-wrap:anywhere]">{body}</p>
+      {fitWarning && (
+        <p
+          role="status"
+          className="m-0 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-sm text-fg-primary"
+        >
+          {fitWarning}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Link to={connectHref} className={PRIMARY_LINK}>
           {isProject ? 'Connect a cloud account to this project' : 'Connect a cloud account'}

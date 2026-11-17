@@ -270,6 +270,63 @@ describe('DefaultCapacityPoolsPanel', () => {
       ).not.toBeInTheDocument();
     });
 
+    /** What an ordinary user without a pool receives: the shared pool's safe summary only. */
+    function safeSharedSummary(memoryMb: number, platformDefaults: { minMemoryGb: number }) {
+      const { placementSettings } = withInstallationSettings(
+        { minVcpu: 2, minMemoryGb: platformDefaults.minMemoryGb },
+        1024
+      );
+      return {
+        ...response(null, null),
+        placementSettings,
+        effectiveSummary: {
+          scope: 'installation' as const,
+          state: 'configured-ready' as const,
+          strategy: 'balanced' as const,
+          exhaustionPolicy: 'queue' as const,
+          availableCandidateCount: 1,
+          nativeOfferings: [
+            {
+              provider: 'hetzner' as const,
+              location: 'fsn1',
+              providerInstanceType: 'cx23',
+              displayName: 'cx23',
+              vcpu: 2,
+              memoryMb,
+              diskGb: 40,
+              price: '€4.49/mo',
+            },
+          ],
+        },
+      };
+    }
+
+    it('warns an ordinary user whose shared pool cannot fit the installation default', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        safeSharedSummary(4096, { minMemoryGb: 4 })
+      );
+
+      renderPanel({ scope: 'user' });
+
+      expect(await screen.findByText("You're using shared machines")).toBeInTheDocument();
+      expect(screen.getByText(/No allowed machine can run a default workspace/)).toHaveTextContent(
+        'at least 2 vCPU, 5 GB of memory and 15 GB of disk'
+      );
+    });
+
+    it('stays quiet for an ordinary user whose shared pool fits (control)', async () => {
+      mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
+        safeSharedSummary(8192, { minMemoryGb: 4 })
+      );
+
+      renderPanel({ scope: 'user' });
+
+      expect(await screen.findByText("You're using shared machines")).toBeInTheDocument();
+      expect(
+        screen.queryByText(/No allowed machine can run a default workspace/)
+      ).not.toBeInTheDocument();
+    });
+
     it('stays quiet when an allowed machine fits the installation default', async () => {
       mocks.fetchUserDefaultCapacityPools.mockResolvedValue(
         withInstallationSettings({ minVcpu: 2, minMemoryGb: 4 }, 1024)

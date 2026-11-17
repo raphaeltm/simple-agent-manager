@@ -281,6 +281,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                 scope={scope}
                 projectId={projectId}
                 shared={query.data.effectiveSummary}
+                placementSettings={query.data.placementSettings}
               />
             ))}
         </>

@@ -1,12 +1,21 @@
 import type { SafeCapacityPoolPlacementSettingsSummary } from '@simple-agent-manager/shared';
 
-import type { MachineGroup } from './compute-pool-machines';
 import { formatOfferingNumber } from './compute-pool-offerings';
 
 /** What a default workspace asks for on this installation, as the pool response reports it. */
 type DefaultFitSettings = Pick<SafeCapacityPoolPlacementSettingsSummary, 'resourceDefaults'> & {
   hostMemoryReserveMb?: number;
 };
+
+/**
+ * One machine the pool may place on: a row of the pool the person can see, or an offering of
+ * the shared pool's safe summary (`effectiveSummary.nativeOfferings`) when they cannot.
+ */
+export interface FitMachine {
+  vcpu: number | null;
+  memoryMb: number | null;
+  diskGb: number | null;
+}
 
 /**
  * A plain warning when no allowed machine in the pool can hold a workspace that asks for this
@@ -20,24 +29,23 @@ type DefaultFitSettings = Pick<SafeCapacityPoolPlacementSettingsSummary, 'resour
  * (that has its own warning), or when any allowed machine's size is unknown (we cannot tell).
  */
 export function defaultWorkspaceFitWarning(
-  groups: MachineGroup[],
+  allowed: FitMachine[],
   settings: DefaultFitSettings | null | undefined
 ): string | null {
   const defaults = settings?.resourceDefaults.platformDefaults;
   const reserveMb = settings?.hostMemoryReserveMb;
   if (!defaults || reserveMb === undefined) return null;
-  const allowed = groups.flatMap((group) => group.rows.filter((row) => row.allowed));
   if (allowed.length === 0) return null;
   const neededMemoryMb = defaults.minMemoryGb * 1024;
   // A machine of unknown size counts as a fit: say nothing rather than warn about a guess.
   // Disk mirrors placement (`capacityCandidateSatisfiesReservation`): checked only when known,
   // with no host reserve.
   const fits = allowed.some(
-    ({ vcpu, ramGb, diskGb }) =>
+    ({ vcpu, memoryMb, diskGb }) =>
       vcpu === null ||
-      ramGb === null ||
+      memoryMb === null ||
       (vcpu >= defaults.minVcpu &&
-        ramGb * 1024 - reserveMb >= neededMemoryMb &&
+        memoryMb - reserveMb >= neededMemoryMb &&
         (diskGb === null || diskGb >= defaults.minDiskGb))
   );
   if (fits) return null;
