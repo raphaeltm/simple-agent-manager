@@ -639,6 +639,23 @@ export async function linkSessionToWorkspace(
   );
 }
 
+/** Cancel pending prompts without discarding saved work or inventing access revocation. */
+export async function cancelUnissuedSessionPrompts(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  taskId: string
+): Promise<number> {
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    sessionId,
+    'cancelUnissuedSessionPrompts'
+  );
+  const stub = await getStub(env, projectId);
+  return stub.cancelUnissuedSessionPrompts(sessionId, taskId);
+}
+
 export async function stopSession(
   env: Env,
   projectId: string,

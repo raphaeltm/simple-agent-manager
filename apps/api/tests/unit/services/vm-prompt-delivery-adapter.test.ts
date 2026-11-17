@@ -517,7 +517,8 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'project-1',
       'chat-1',
-      request.sourceTaskGuard
+      request.sourceTaskGuard,
+      { isDeliveryStillAuthorized: expect.any(Function) }
     );
     expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
   });

@@ -86,6 +86,8 @@ export async function reactivateSleepingTask(
     // D1 batches are transactional. The task update is the parent-state
     // compare-and-set: if an automated wake has terminalized or no longer owns this
     // conversation when the transaction begins, every later statement is a no-op.
+    // A fresh human follow-up may reactivate an observed terminal outcome, but
+    // cannot overwrite cancellation that landed while placement was awaited.
     const results = await database.batch([
       database
         .prepare(
@@ -107,6 +109,7 @@ export async function reactivateSleepingTask(
                   updated_at = ?
             WHERE id = ?
               AND project_id = ?
+              AND status = ? AND completed_at IS ?
               AND (? = 0 OR status NOT IN ('completed', 'failed', 'cancelled'))
               ${sleepingRepair ? "AND status = 'sleeping' AND workspace_id IS ?" : ''}
               ${approvalFence.sql}
@@ -131,6 +134,8 @@ export async function reactivateSleepingTask(
           now,
           taskId,
           context.project.id,
+          context.sourceTask?.status ?? existing.status,
+          context.sourceTask ? context.sourceTask.completedAt : existing.completedAt,
           sourceTaskGuard ? 1 : 0,
           ...(sleepingRepair ? [sleepingRepair.workspaceId] : []),
           ...approvalFence.params,
@@ -342,6 +347,9 @@ export async function ensureSessionRecovery(
   }
 
   const recoveryAttemptId = ulid();
+  if (options.isDeliveryStillAuthorized && !(await options.isDeliveryStillAuthorized())) {
+    return { status: 'unavailable', reason: 'source_task_not_wakeable' };
+  }
   const claim = await claimSessionSnapshotRecovery(db, env, {
     chatSessionId,
     userId: context.snapshot.userId,
@@ -446,4 +454,7 @@ export async function ensureSessionRecovery(
   }
 }
 
-export { canRepairSessionRecoveryRunner,startMissingSessionRecoveryRunner } from './session-recovery-owner-runner';
+export {
+  canRepairSessionRecoveryRunner,
+  startMissingSessionRecoveryRunner,
+} from './session-recovery-owner-runner';

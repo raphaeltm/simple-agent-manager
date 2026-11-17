@@ -112,6 +112,7 @@ import { runStandingWatchAlarm } from './project-standing-watches-runner';
 import * as standingWatches from './project-standing-watches-storage';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
+import { cancelUnissuedSessionPrompts } from './prompt-delivery-cancellation';
 import {
   type ProviderLimitAttentionResult,
   syncProviderLimitAttention,
@@ -941,6 +942,26 @@ export class ProjectData extends DurableObject<Env> {
         }
       );
     });
+  }
+
+  /** Retire only unissued prompts of the exact cancelled task; later messages stay eligible. */
+  async cancelUnissuedSessionPrompts(sessionId: string, taskId: string): Promise<number> {
+    const cancelled = await this.withArchiveTranscriptLock(() => {
+      messages.assertTranscriptWriteAllowed(this.sql, sessionId, 'cancelUnissuedSessionPrompts');
+      return this.meteredStorage.transactionSync(() =>
+        cancelUnissuedSessionPrompts(this.sql, sessionId, taskId)
+      );
+    });
+    if (cancelled) {
+      this.recalculateAlarm().catch((error) =>
+        log.warn('prompt_delivery.cancel_recalculate_alarm_failed', {
+          sessionId,
+          taskId,
+          ...serializeError(error),
+        })
+      );
+    }
+    return cancelled;
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {

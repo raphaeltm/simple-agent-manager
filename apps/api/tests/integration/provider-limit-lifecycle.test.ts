@@ -360,7 +360,8 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
         env,
         PROJECT,
         CHAT,
-        expect.objectContaining({ taskId: TASK })
+        expect.objectContaining({ taskId: TASK }),
+        { isDeliveryStillAuthorized: expect.any(Function) }
       );
       const prompt = sql
         .exec('SELECT content FROM session_inbox WHERE source_kind = ?', 'scheduled_action')
@@ -425,7 +426,8 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       env,
       PROJECT,
       CHAT,
-      expect.objectContaining({ taskId: TASK })
+      expect.objectContaining({ taskId: TASK }),
+      { isDeliveryStillAuthorized: expect.any(Function) }
     );
   });
 

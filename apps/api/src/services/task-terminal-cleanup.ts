@@ -101,6 +101,19 @@ export async function cleanupTerminalTaskResources(
   if (options.requireStopAcknowledgement && (!task || !task.projectId)) {
     throw new Error('SAM stop target identity is unconfirmed');
   }
+  // A parked task has no workspace, but still owns accepted prompt deliveries.
+  // Cancel unissued work before stopSession publishes turn-end and nudges queues.
+  if (options.status === 'cancelled' && task?.projectId && task.chatSessionId) {
+    await options.beforeSideEffect?.();
+    await projectDataService.cancelUnissuedSessionPrompts(
+      env,
+      task.projectId,
+      task.chatSessionId,
+      task.id
+    );
+    await options.beforeSideEffect?.();
+    await projectDataService.stopSession(env, task.projectId, task.chatSessionId);
+  }
   if (!task?.workspaceId || !task.projectId) {
     return;
   }
@@ -188,7 +201,10 @@ export async function cleanupTerminalTaskResources(
     });
   }
 
-  if (workspace?.chatSessionId) {
+  if (
+    workspace?.chatSessionId &&
+    !(options.status === 'cancelled' && workspace.chatSessionId === task.chatSessionId)
+  ) {
     try {
       await options.beforeSideEffect?.();
       if (options.status === 'failed') {
@@ -199,6 +215,15 @@ export async function cleanupTerminalTaskResources(
           options.errorMessage ?? task.errorMessage ?? null
         );
       } else {
+        if (options.status === 'cancelled') {
+          await projectDataService.cancelUnissuedSessionPrompts(
+            env,
+            task.projectId,
+            workspace.chatSessionId,
+            task.id
+          );
+          await options.beforeSideEffect?.();
+        }
         await projectDataService.stopSession(env, task.projectId, workspace.chatSessionId);
       }
     } catch (err) {

@@ -168,6 +168,8 @@ export function applyPromptDeliveryResult(
       sql.exec(
         `UPDATE session_inbox
        SET delivery_state = 'retry_wait',
+           prompt_delivery_phase = CASE WHEN ? IN ('busy', 'receipt_not_found')
+             THEN 'preparing' ELSE prompt_delivery_phase END,
            delivery_attempts = MIN(delivery_attempts, ?),
            next_attempt_at = CASE WHEN wake_ready_attempt_id = attempt_id
              AND prompt_delivery_phase = 'preparing' AND ? IN ('not_ready', 'busy') THEN ? ELSE ? END,
@@ -177,6 +179,7 @@ export function applyPromptDeliveryResult(
            adapter_protocol_version = ?,
            receipt_supported = ?
        WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?`,
+        result.reason,
         retryAttemptOrdinal,
         result.reason,
         now,
@@ -203,8 +206,8 @@ export function applyPromptDeliveryResult(
          receipt_state = ?,
          receipt_runtime_identity = ?,
          receipt_checked_at = ?,
-         adapter_protocol_version = ?,
-         receipt_supported = ?
+         adapter_protocol_version = COALESCE(?, adapter_protocol_version),
+         receipt_supported = COALESCE(?, receipt_supported)
      WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?`,
       state,
       result.reason,

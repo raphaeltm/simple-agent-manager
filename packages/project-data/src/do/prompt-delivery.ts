@@ -387,6 +387,45 @@ export function claimDuePromptDeliveries(
   return claims;
 }
 
+/** Verify the exact live claim, including the durable possible-send checkpoint. */
+export function promptDeliveryClaimIsCurrent(sql: SqlStorage, claim: PromptDeliveryClaim): boolean {
+  return (
+    sql
+      .exec(
+        `SELECT 1 FROM session_inbox WHERE id = ? AND target_session_id = ?
+       AND delivery_state = 'delivering' AND attempt_id = ?
+       AND ((? = 'submit' AND prompt_delivery_phase IN ('preparing', 'submitting'))
+         OR (? = 'reconcile' AND (prompt_delivery_phase = 'submitting' OR prompt_delivery_phase IS NULL)))`,
+        claim.message.id,
+        claim.message.targetSessionId,
+        claim.attemptId,
+        claim.mode,
+        claim.mode
+      )
+      .toArray().length > 0
+  );
+}
+
+/** A current possible-send checkpoint cannot turn a failed authority read into a fresh submit. */
+export function promptDeliveryClaimSubmissionCheckpoint(
+  sql: SqlStorage,
+  claim: PromptDeliveryClaim
+): { runtimeIdentity: string | null } | null {
+  const row = sql
+    .exec(
+      `SELECT runtime_identity FROM session_inbox WHERE id=? AND target_session_id=?
+       AND delivery_state='delivering' AND attempt_id=?
+       AND (prompt_delivery_phase='submitting' OR prompt_delivery_phase IS NULL)`,
+      claim.message.id,
+      claim.message.targetSessionId,
+      claim.attemptId
+    )
+    .toArray()[0];
+  return row
+    ? { runtimeIdentity: typeof row.runtime_identity === 'string' ? row.runtime_identity : null }
+    : null;
+}
+
 /** Persist the possible-send boundary and reject preparation owned by an older attempt. */
 export function markPromptDeliverySubmitting(
   sql: SqlStorage,
