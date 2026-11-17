@@ -5,6 +5,7 @@ import {
   DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
   DEFAULT_AI_PROXY_MODEL,
   DEFAULT_DEBUG_AGENT_MODEL,
+  DEFAULT_PROJECT_BRIEF_MODEL,
   DEFAULT_SANDBOX_MODEL,
   DEFAULT_TASK_TITLE_MODEL,
   DEFAULT_TTS_CLEANUP_MODEL,
@@ -132,6 +133,7 @@ describe('AI Model Registry', () => {
         DEFAULT_AI_PROXY_MODEL,
         DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
         DEFAULT_SAM_MODEL,
+        DEFAULT_PROJECT_BRIEF_MODEL,
       };
       for (const [name, modelId] of Object.entries(defaults)) {
         expect(platformIds.has(modelId), `${name} (${modelId}) missing from PLATFORM_AI_MODELS`).toBe(

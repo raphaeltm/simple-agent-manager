@@ -6,6 +6,13 @@
 /** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
 export const DEFAULT_TASK_TITLE_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
+/**
+ * Workers AI model for the Project Overview brief (inbox slice I). A small, inexpensive model
+ * through the same SAM AI Gateway path as task titles ($0.10 / $0.30 per million input / output
+ * tokens, see its PLATFORM_AI_MODELS entry).
+ */
+export const DEFAULT_PROJECT_BRIEF_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+
 /** Defaults for the tightly scoped deployment debugging agent. */
 export const DEFAULT_DEBUG_AGENT_MODEL = '@cf/zai-org/glm-5.2';
 export const DEFAULT_DEBUG_AGENT_MAX_TURNS = 6;

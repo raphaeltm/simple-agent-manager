@@ -267,6 +267,36 @@ export {
   type OperationPorts,
   type ProjectEventErrorKind,
 } from './ports';
+export {
+  BRIEF_ASKS_SQL,
+  BRIEF_FACT_TEXT_MAX_CHARS,
+  BRIEF_FAILED_CHATS_SQL,
+  BRIEF_FAILING_AUTOMATIONS_SQL,
+  BRIEF_MERGED_PULL_REQUESTS_SQL,
+  BRIEF_NEW_IDEAS_SQL,
+  type BriefFacts,
+  briefFactsAreQuiet,
+  briefFactsFingerprint,
+  briefText,
+  readBriefFacts,
+} from './project-brief-facts';
+export {
+  BRIEF_MAX_SENTENCES,
+  BRIEF_PENDING_TTL_MS,
+  readProjectBrief,
+  type StoredBrief,
+  StoredBriefSchema,
+} from './project-brief-read';
+export {
+  defaultProjectBriefSettings,
+  getProjectBriefSettings,
+  type ProjectBriefSettings,
+} from './project-brief-settings';
+export {
+  PROJECT_BRIEF_ENABLED_SETTING,
+  PROJECT_BRIEF_INTEGER_SETTINGS,
+  type ProjectBriefSettingName,
+} from './project-brief-settings-definition';
 export { projectOverviewGet, type ProjectOverviewInput } from './project-overview';
 export {
   ensurePullRequest,
