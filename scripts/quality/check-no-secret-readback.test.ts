@@ -67,6 +67,8 @@ const POSITIVE: Array<[string, RuleId]> = [
   ['declare -p', 'env-dump'],
   ['printenv CF_API_TOKEN', 'env-dump'],
   ['        run: env', 'env-dump'],
+  ['env -0', 'env-dump'],
+  ['        run: env --null | sort', 'env-dump'],
   ['      - run: printenv | sort', 'env-dump'],
   ['cd infra && env | grep KEY', 'env-dump'],
   ['pulumi config get encryptionKey --stack staging', 'show-secrets'],
@@ -110,6 +112,8 @@ const NEGATIVE = [
   'bash scripts/deploy/configure-secrets.sh "$DEPLOY_ENV"',
   'set -e; grep -x needle file',
   'trap cleanup EXIT',
+  'env -u HOME node deploy.mjs',
+  'env -i PATH="$PATH" bash run.sh',
 ];
 
 describe('check-no-secret-readback rules', () => {
@@ -135,6 +139,9 @@ describe('check-no-secret-readback rules', () => {
     ["const x = 1;\nexport { decryptCredential } from './crypto';", 2],
     ["import { encrypt as seal } from '../../apps/api/src/services/encryption';", 1],
     ["import {\n  encrypt,\n} from '../../apps/api/src/services/encryption.ts';", 1],
+    ["const { decryptCredential } = await import('./crypto');", 1],
+    ["const { decryptToken: open } = require('./crypto');", 1],
+    ["const x = 1;\nconst {\n  encryptToken,\n  decryptToken,\n} = require('./crypto');", 2],
   ])('reports a decrypt import: %s', (text, line) => {
     const result = scanText('x.ts', text, isOpen);
     expect(result.findings.map((finding) => [finding.rule, finding.line])).toEqual([
@@ -145,6 +152,7 @@ describe('check-no-secret-readback rules', () => {
   it.each([
     "import { encryptToken } from './credentials';\nimport { readFileSync } from 'node:fs';",
     "// import { decryptToken } from './credentials';",
+    "const { encryptToken } = require('./credentials');",
   ])('does not report the import %s', (text) => {
     expect(scanText('x.ts', text, isOpen).findings).toEqual([]);
   });

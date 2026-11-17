@@ -8,8 +8,8 @@
  *   show-secrets  reading secret values back out of Pulumi (`--show-secrets`, `showSecrets`
  *                 unless `false`, `pulumi config get`)
  *   decryption    decrypting stored credentials (`subtle.decrypt`, `createDecipheriv`, importing
- *                 a decrypt helper or the API's encryption module: multi-line, re-export and
- *                 dynamic imports included)
+ *                 a decrypt helper or the API's encryption module: multi-line, re-export,
+ *                 dynamic and destructured require/import included)
  *   xtrace        shell tracing (`set -x` in any flag cluster or position, `set -o xtrace`,
  *                 `bash -x`, a `-x` shebang, SHELLOPTS=xtrace, BASH_XTRACEFD, `trap ... DEBUG`)
  *   env-dump      dumping the environment (`env`, `printenv`, `export -p`, `declare -p`)
@@ -104,7 +104,8 @@ export const RULES: readonly Rule[] = [
   {
     id: 'env-dump',
     pattern: new RegExp(
-      String.raw`${COMMAND_START}(?:env|printenv|export\s+-p|declare\s+-p)\s*(?:$|[|>;&])`
+      // Options only, no command after them: `env -0`, `env --null` still print everything.
+      String.raw`${COMMAND_START}(?:env(?:\s+-[-\w]+)*|printenv|export\s+-p|declare\s+-p)\s*(?:$|[|>;&])`
     ),
     shellOnly: true,
   },
@@ -133,12 +134,20 @@ const IMPORT_STATEMENT = /^[ \t]*(?:import|export)\b[^;'"]*?\bfrom\s*['"]([^'"]+
 const DECRYPT_NAME = /\bdecrypt\w*/i;
 const ENCRYPTION_MODULE = /\/services\/encryption(?:\.[cm]?[jt]s)?$/;
 
+/** `const { decryptX } = require(...)` or `= await import(...)`, which can span lines. */
+const DESTRUCTURED_LOAD =
+  /\b(?:const|let|var)\s*\{([^}]*)\}\s*=\s*(?:await\s+)?(?:require|import)\s*\(/g;
+
 export function decryptImportLines(text: string): number[] {
   const lines: number[] = [];
+  const lineOf = (index: number) => text.slice(0, index).split('\n').length;
   for (const match of text.matchAll(IMPORT_STATEMENT)) {
     if (DECRYPT_NAME.test(match[0]) || ENCRYPTION_MODULE.test(match[1])) {
-      lines.push(text.slice(0, match.index).split('\n').length);
+      lines.push(lineOf(match.index));
     }
+  }
+  for (const match of text.matchAll(DESTRUCTURED_LOAD)) {
+    if (DECRYPT_NAME.test(match[1])) lines.push(lineOf(match.index));
   }
   return lines;
 }
