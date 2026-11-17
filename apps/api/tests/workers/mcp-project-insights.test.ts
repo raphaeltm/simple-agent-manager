@@ -240,6 +240,7 @@ describe('project_insights through /mcp', () => {
     const invalid = await call(token, { method: 'nope' });
     expect(invalid.error?.message).toBe('Invalid method');
     // So are calls the schema accepts but the method refuses: a missing or a foreign argument.
+    expect((await call(token, { method: 'flow', rang: '7d' })).error?.message).toBe('Invalid rang');
     expect((await call(token, { method: 'receipt' })).error?.message).toBe('receipt needs taskId');
     expect((await call(token, { method: 'flow', taskId: 'x' })).error).toMatchObject({
       code: -32602,

@@ -1183,7 +1183,9 @@ Connector lists; sam-mcp tool `project_insights`, `apps/api/src/routes/mcp/proje
   lifecycle phase from `phaseDurationStats`, over at most the 500 newest successful rows of each
   operation and phase. Each (operation, phase) is read newest first from one range of an index
   keyed on every filter (migration 0260), and the read stops at its sample, so the cost does not
-  grow with stored history; `truncated` says when older rows were left out. An argument the method does not read, or a missing one it needs, is `invalid_input`.
+  grow with stored history. Each stat's `truncated` says its pair had older rows left out (the
+  response-level `truncated` says any did). An undeclared argument, an argument the method does not
+  read, or a missing one it needs is `invalid_input`.
 - Numbers only: no task, pull request or idea titles, no idea notes, no agent questions, no account
   names or credential references, no names of a teammate's profiles. CI check names are kept
   (capped at 100 characters) because they identify a flaky check. Accounts are keyed `account-1`,

@@ -99,8 +99,16 @@ describe('insights phase timings reads', () => {
           count: 1,
           medianMs: 5_000,
           p90Ms: 5_000,
+          truncated: false,
         },
-        { operation: 'workspace', phase: 'git_clone', count: 10, medianMs: 50, p90Ms: 90 },
+        {
+          operation: 'workspace',
+          phase: 'git_clone',
+          count: 10,
+          medianMs: 50,
+          p90Ms: 90,
+          truncated: false,
+        },
       ],
     });
 
@@ -118,6 +126,7 @@ describe('insights phase timings reads', () => {
         count: 1,
         medianMs: 1_000_000,
         p90Ms: 1_000_000,
+        truncated: false,
       },
     ]);
   });
@@ -132,8 +141,22 @@ describe('insights phase timings reads', () => {
 
     const result = await phaseDurationStats(db, { projectId: 'p', skillId: 'skill-1', now: NOW });
     expect(result.stats).toEqual([
-      { operation: 'workspace', phase: 'devcontainer_up', count: 1, medianMs: 900, p90Ms: 900 },
-      { operation: 'workspace', phase: 'git_clone', count: 1, medianMs: 40, p90Ms: 40 },
+      {
+        operation: 'workspace',
+        phase: 'devcontainer_up',
+        count: 1,
+        medianMs: 900,
+        p90Ms: 900,
+        truncated: false,
+      },
+      {
+        operation: 'workspace',
+        phase: 'git_clone',
+        count: 1,
+        medianMs: 40,
+        p90Ms: 40,
+        truncated: false,
+      },
     ]);
   });
 
@@ -152,9 +175,10 @@ describe('insights phase timings reads', () => {
       now: NOW,
     });
     expect(capped.truncated).toBe(true);
-    expect(capped.stats.map((stat) => [stat.phase, stat.count])).toEqual([
-      ['devcontainer_up', 1],
-      ['git_clone', 5],
+    // Only the cut pair says so: the rare phase's median is over every row it has.
+    expect(capped.stats.map((stat) => [stat.phase, stat.count, stat.truncated])).toEqual([
+      ['devcontainer_up', 1, false],
+      ['git_clone', 5, true],
     ]);
     // The newest five git_clone rows are the ones kept (durations 107..111).
     expect(capped.stats[1]).toMatchObject({ medianMs: 109, p90Ms: 111 });
@@ -407,7 +431,14 @@ describe('insights phase timings reads', () => {
       now: NOW,
     });
     expect(result.stats).toEqual([
-      { operation: 'runner_wake', phase: 'phase-63', count: 1, medianMs: 7, p90Ms: 7 },
+      {
+        operation: 'runner_wake',
+        phase: 'phase-63',
+        count: 1,
+        medianMs: 7,
+        p90Ms: 7,
+        truncated: false,
+      },
     ]);
   });
 });

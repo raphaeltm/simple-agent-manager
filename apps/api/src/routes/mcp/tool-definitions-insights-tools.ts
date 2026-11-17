@@ -28,7 +28,7 @@ export const INSIGHTS_TOOLS = [
       type: 'object' as const,
       properties: {
         method: { type: 'string', enum: [...PROJECT_INSIGHTS_METHODS] },
-        taskId: id('receipt: the task to read.'),
+        taskId: id('receipt (required): the task to read.'),
         range: {
           type: 'string',
           enum: [...INSIGHTS_RANGES],
@@ -39,8 +39,8 @@ export const INSIGHTS_TOOLS = [
           enum: [...INSIGHTS_SETUP_GROUPINGS],
           description: 'setups: grouping (default profile).',
         },
-        skillId: id('phases: one skill (or agentProfileId).'),
-        agentProfileId: id('phases: one agent profile.'),
+        skillId: id('phases: exactly one of skillId or agentProfileId.'),
+        agentProfileId: id('phases: exactly one of skillId or agentProfileId.'),
         operation: {
           type: 'string',
           pattern: '^[a-z_]{1,32}$',

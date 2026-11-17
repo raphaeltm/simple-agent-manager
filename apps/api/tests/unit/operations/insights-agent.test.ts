@@ -9,6 +9,7 @@ import {
   OperationError,
   PROJECT_INSIGHTS_METHODS,
   projectInsights,
+  ProjectInsightsInputSchema,
 } from '@simple-agent-manager/operations';
 import {
   agentAccounts,
@@ -27,6 +28,7 @@ import type {
   ProjectSetupsResponse,
   RunReceipt,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 import { describe, expect, it } from 'vitest';
 
 const SECRET = 'SENTINEL-TEXT';
@@ -374,6 +376,21 @@ describe('projectInsights input rules', () => {
     await expect(
       projectInsights(ctx, { projectId: 'p', method: 'flow', taskId: 't' })
     ).rejects.toMatchObject({ code: 'invalid_input', message: 'method flow does not take taskId' });
+  });
+
+  it('refuses an undeclared argument instead of dropping it (strict schema)', () => {
+    const typo = v.safeParse(ProjectInsightsInputSchema, {
+      projectId: 'p',
+      method: 'flow',
+      rang: '7d',
+    });
+    expect(typo.success).toBe(false);
+    expect(typo.issues?.[0]?.path?.map((item) => item.key)).toEqual(['rang']);
+    // Control: the same call spelled right parses.
+    expect(
+      v.safeParse(ProjectInsightsInputSchema, { projectId: 'p', method: 'flow', range: '7d' })
+        .success
+    ).toBe(true);
   });
 
   it('requires taskId for receipt and exactly one of skill or profile for phases', async () => {

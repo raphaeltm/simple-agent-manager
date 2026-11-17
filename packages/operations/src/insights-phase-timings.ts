@@ -59,12 +59,14 @@ export interface PhaseDurationStat {
   count: number;
   medianMs: number;
   p90Ms: number;
+  /** This pair had more successful rows in the window than its sample: median and p90 are over
+   *  its newest `count` rows. Also true for every pair when the total row bound was reached. */
+  truncated: boolean;
 }
 
 export interface PhaseDurationStatsResult {
   windowDays: number;
-  /** True when a phase had more rows in the window than its sample cap, so older ones were left
-   *  out, or when the total row bound was reached. Every phase still gets its newest rows. */
+  /** True when any stat is `truncated`. Every pair still gets its newest rows. */
   truncated: boolean;
   /** Only phases with at least one successful sample; ordered by operation, then phase. */
   stats: PhaseDurationStat[];
@@ -262,10 +264,13 @@ export async function phaseDurationStats(
   const rows = result.results ?? [];
 
   const groups = new Map<string, { operation: string; phase: string; durations: number[] }>();
-  let truncated = rows.length >= MAX_PHASE_STATS_TOTAL_ROWS;
+  // The total bound trims by row number across every pair, so when it is reached no pair can be
+  // shown to be complete.
+  const totalBoundReached = rows.length >= MAX_PHASE_STATS_TOTAL_ROWS;
+  const cutPairs = new Set<string>();
   for (const raw of rows) {
     if (typeof raw.rn === 'number' && raw.rn > sampleLimit) {
-      truncated = true;
+      cutPairs.add(`${String(raw.operation)}\u0000${String(raw.phase)}`);
       continue;
     }
     // One malformed row costs that row, not the read (`apps/api/.claude/rules/50`).
@@ -294,10 +299,11 @@ export async function phaseDurationStats(
         count: sorted.length,
         medianMs: nearestRankPercentile(sorted, 0.5),
         p90Ms: nearestRankPercentile(sorted, 0.9),
+        truncated: totalBoundReached || cutPairs.has(`${operation}\u0000${phase}`),
       };
     })
     .sort((a, b) => a.operation.localeCompare(b.operation) || a.phase.localeCompare(b.phase));
-  return { windowDays, truncated, stats };
+  return { windowDays, truncated: stats.some((stat) => stat.truncated), stats };
 }
 
 /**

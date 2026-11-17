@@ -48,7 +48,9 @@ export type ProjectInsightsMethod = (typeof PROJECT_INSIGHTS_METHODS)[number];
 
 const id = v.pipe(v.string(), v.minLength(1), v.maxLength(200));
 
-export const ProjectInsightsInputSchema = v.object({
+/** Strict: an undeclared argument (a typo such as `rang`) is refused, as the advertised JSON
+ *  schemas say (`additionalProperties: false`), rather than dropped and run with a default. */
+export const ProjectInsightsInputSchema = v.strictObject({
   projectId: id,
   method: v.picklist(PROJECT_INSIGHTS_METHODS),
   taskId: v.optional(id),
