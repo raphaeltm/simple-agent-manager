@@ -20,7 +20,7 @@ Email/Google users need a GitHub identity for GitHub-backed work. Explicit linki
 - [x] Token errors distinguish unconnected, expired, provider outage (F14), configuration and unavailable feature
 - [x] Connected accounts, onboarding gate, auth banner, app section and member warnings use one canonical operation
 - [x] Behavioral real-library/SQL regressions; adversarial controls; mobile/desktop Playwright audit
-- [ ] Docs and API contract sync, local checks and all specialist reviews
+- [x] Docs and API contract sync, local checks and all specialist reviews
 - [ ] Both staging leases checked; approved GitHub identity; real login/link/notification/unlink/Google refusal/session IP
 - [ ] Draft PR, ready CI, CodeRabbit request/wait, gates, merge and production smoke; idea/channel update
 
@@ -35,3 +35,16 @@ Independent security design/final reviews PASS; unlink concurrency fixed and rev
 
 ## Final review corrections
 Sonar reported12 small maintainability/accessibility findings; resolved without changing authentication semantics (label variables, setter naming, decorative SVGs, readonly props, repeated predicate and invite-token loop). Full local run38/39: web425files passed, API16,478 passed/1failed. The new real-route TTL override test exposed OAuth-category legacy string-only resolution rejecting a numeric override. Moved the emailed proof lifetime to the existing Email category and guide path; focused32/32 passes; final full API rerun in progress. This is a real setting-boundary bug, not a flake; no test bypass. Security independently reverified.
+
+## Resumed release checkpoint (2026-11-17)
+Full API final run16479passed/4skipped/0failed, web5378passed, local production UI40/40 passed; all required independent reviews completed PASS/ADDRESSED. Proof TTL is in **Email**, not the legacy OAuth category; real numeric override regression passes.
+
+Raphaël explicitly approved Inbox `ask:01M7M9GFK90E73NBPWQ14KBESD` at09:02:34UTC: “C: Merge without the live run (I approve the exception)”. This waives only real GitHub login/consent/link, external mail delivery and unlinking a real provider. Returning-user, step-up/callback/replay/stolen-session, preserved-email, owner notification invocation and safe unlink are covered by real BetterAuth/SQLite vertical slices with external HTTP/mail faked. No accounts created or personal/production credentials used.
+
+Main e5c5aa4f7 merged; additive settings conflicts independently reviewed PASS. Fresh lint22/22, typecheck36/36, build18/18, real auth81/81 and settings34/34 PASS. Initial checks required frozen-lockfile installation of main's new dependency; no lockfile/code workaround.
+
+CI44053442421 passed API/web/package/Workers tests and Sonar0newissues. PR Evidence initially saw the old human-review label; exception is now documented and label removed. One existing chat-switching browser assertion expected the pre-#2760 exact tail cursor; the test mock also ignored the sequence bound. Correct the fixture to full ordered cursors and explicitly exercise cached-return refresh, proving stale expectation fails. Auth/product code remains unchanged.
+
+Remaining release gates: final-head fullCI; normal exact-head staging deployment; workload/token sign-in; Settings375/1280; step-up initiation and missing-proof refusal; Google refusal; stored sessionIP; missing-link403 connect prompt; API/console checks; cleanup/lease release; archive, merge, production monitoring and idea/channel completion. These are not waived. Staging2 reserved, queued turn and durable wake recorded in local state. Final operational evidence belongs in PR2830's Staging Verification section.
+
+Test repair review PASS: full tuple cursor comparison and guaranteed cached-return refresh preserve explicit older-history admission. Reverting only the expected overlap sequence causes both mobile/desktop assertions to fail; restored. Desktop comment locator updated to its real accessible name. This is test-only CI maintenance in the same audit file, with no production behavior change. Final live/CI/merge evidence is tracked in PR2830; task record archived after independent implementation-completion review, operational completion remains pending.
