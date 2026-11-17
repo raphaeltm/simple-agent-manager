@@ -368,10 +368,7 @@ function buildCredentialAuthoritySql(
     // Reconciliation must satisfy migration 0125's non-null FK with a secret-free anchor.
     // It is not credential authority: accept only this attachment/version's exact anchor
     // (or the older null shape), then validate the real cc_* binding below.
-    const anchorId = externalCapacitySourceCredentialId(
-      externalRef,
-      snapshot.placementCredentialVersion
-    );
+    const anchorId = externalCapacitySourceCredentialId(externalRef, snapshot.placementCredentialVersion);
     return {
       sql: `AND (s.credential_id IS NULL OR s.credential_id = ?)
         AND s.platform_credential_id IS NULL

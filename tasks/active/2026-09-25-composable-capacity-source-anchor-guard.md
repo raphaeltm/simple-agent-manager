@@ -116,6 +116,15 @@ Regression coverage here must drive the real writer rather than hand-seed the an
   real pool editing → real placement selection → `createNodeRecord` → allocation guard →
   existing-node reuse (101 entries, exercising bind-budget chunking) → final workspace insert.
   All statements enforce `D1_MAX_BOUND_PARAMETERS`; schema is the complete shipped D1 chain.
-- Root test suite and specialist review pending. Staging reservation run `44054221451`;
+- Focused allocation/effective-pool suites passed 119/119 across three files. Existing real
+  workerd final-admission suite passed 3/3. `quality:file-sizes` and `git diff --check` passed.
+- Local security, Cloudflare, completion/test, docs-sync and constitution reviews completed
+  without blocking findings. The maximum composed workspace statement uses 97/100 D1 binds;
+  deployment admission uses at most 55, relay at most 35, allocation validation 29, and reuse
+  chunks at 74 node IDs plus 26 authority binds. No extra database round trips were added.
+- CodeRabbit requested once via trusted workflow `44054989276`; it responded rate-limited
+  on 2026-11-17 at 09:23:52 UTC. No review; wait ended per policy, no retry.
+- Root test suite and manual full CI pending. Staging reservation run `44054221451`;
   primary staging turn estimated 10:43:57 UTC. No staging deployment yet.
 - No production deployment, merge, or readiness action permitted.
+- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2853 (held in SAM).
