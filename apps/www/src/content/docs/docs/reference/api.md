@@ -1001,12 +1001,21 @@ operation `sam_run_receipt`). Everything is derived when you ask, from records S
   requested. `measured` is false when no history was recorded (Instant runs record none).
 - `toolCalls`: `{ total, byKind, scanLimited }`, or null when the chat was archived or the read
   failed. `scanLimited` means the counts are a floor.
-- `tokens`: `{ state: "not_reported" }`. SAM never estimates token use.
+- `tokens`: `{ state: "not_reported" }` when nothing measured the run (SAM never estimates token
+  use), else `{ state: "reported", source, models, total, spend, limited }`
+  (`packages/shared/src/types/insights-run-usage.ts`). `source` is `ai_proxy` when SAM's AI proxy
+  measured the run's calls, else `harness`. Each model carries `input` (excluding cache), `output`,
+  `cacheRead`, `cacheWrite` and `reasoning` (null when not reported apart from output); `model` is
+  null when the agent did not name it. `spend` is `estimate` (USD from SAM's model prices) only for
+  an API-key account, `not_applicable` for subscription and platform accounts, `unknown_account`
+  when the account could not be identified, and `private` for another member's personal key.
+  Tokens are read for the task's chat session, so tasks sharing a chat share its totals. `limited` means the totals are a
+  floor (`insights.receiptTokenRowsMax`).
 - `slowedDown`: up to three items, largest delay first. A machine wait or setup is listed only when
   it took at least `insights.receiptSlowFactorPercent` of the usual duration for recent runs of the
   same skill (or profile) in the project.
 - `unavailable`: parts whose read failed this time (`outcome`, `toolCalls`, `comparison`,
-  `account`); the rest of the receipt is still returned.
+  `account`, `tokens`); the rest of the receipt is still returned.
 
 Requires project membership. A task in another project and a missing task both return `404`. The
 admin settings under `insights.receipt*` bound every read.

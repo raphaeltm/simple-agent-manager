@@ -149,7 +149,7 @@ export function buildDailyCostRows(
   const inWindow = (day: string) => day >= window.firstDay && day <= window.lastDay;
   const writtenDays = [
     ...new Set([...fetchedByDay.keys(), ...[...stored.keys()].filter(inWindow)]),
-  ].sort();
+  ].sort((a, b) => a.localeCompare(b));
   const rows: DailyCostRow[] = [];
   for (const month of [...new Set(writtenDays.map((day) => day.slice(0, 7)))]) {
     const lastDay = writtenDays.filter((day) => day.startsWith(month)).at(-1);

@@ -141,6 +141,7 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 		return nil, err
 	}
 	h.storeOpencodeUsageProbeKey(agentType, cred, settings)
+	h.storeRunUsageModel(settings)
 	envVars, settings = h.applyModelAndExtraEnv(agentType, settings, envVars)
 	envVars, err = protectManagedSecretEnv(envVars, secretEnvKeys)
 	if err != nil {

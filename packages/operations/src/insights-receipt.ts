@@ -6,8 +6,8 @@
  *
  * Round trips (`.claude/rules/60`, receipt budget 8): authorization (1), settings (1, cached per
  * isolate), the task read (1), then in parallel the pull request (≤1), the ProjectData facts
- * (≤1) and the comparable runs (≤1), and the account name for the person who ran it (≤1).
- * At most 7.
+ * (≤1), the comparable runs (≤1) and the run's token usage (≤1, slice U), and the account name
+ * for the person who ran it (≤1). At most 8.
  *
  * Scope: every statement binds `project_id` (rule 11). A task in another project and a task that
  * does not exist return the same not-found. Child tables without a project column
@@ -36,6 +36,7 @@ import {
   reservationOf,
 } from './insights-receipt-reads';
 import { getInsightsReceiptLimits } from './insights-receipt-settings';
+import { readRunUsage, summarizeRunTokens } from './insights-run-usage';
 import type { OperationContext } from './types';
 
 /** Run one part of the receipt; a failure empties that part and names it, not the receipt. */
@@ -92,7 +93,7 @@ export async function runReceipt(
   const sessionId = row.chat_session_id ?? row.workspace_session_id ?? null;
   const unavailable: RunReceiptSection[] = [];
 
-  const [pullRequest, facts, usual] = await Promise.all([
+  const [pullRequest, facts, usual, tokenUsage] = await Promise.all([
     part('outcome', context, null, () => readPullRequest(ctx, projectId, row), unavailable),
     sessionId && agentStartAt !== null
       ? part(
@@ -117,6 +118,20 @@ export async function runReceipt(
       () => readUsual(ctx, projectId, row, limits, now),
       unavailable
     ),
+    sessionId
+      ? part(
+          'tokens',
+          context,
+          null,
+          () =>
+            readRunUsage(ctx.env.DATABASE, {
+              projectId,
+              chatSessionId: sessionId,
+              maxRows: limits.receiptTokenRowsMax,
+            }),
+          unavailable
+        )
+      : Promise.resolve(null),
   ]);
   const account = await part(
     'account',
@@ -190,7 +205,10 @@ export async function runReceipt(
             scanLimited: facts.toolCalls.scanLimited,
           }
         : null,
-    tokens: { state: 'not_reported' },
+    // Spend on a person's own key is theirs to see, like the account name (`readAccount`).
+    tokens: summarizeRunTokens(tokenUsage, {
+      spendVisible: account?.isOwnSession === true || account?.credentialSource !== 'user',
+    }),
     slowedDown: slowedDown(
       {
         phases,

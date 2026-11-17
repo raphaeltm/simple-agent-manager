@@ -845,6 +845,14 @@ export type {
   RunReceiptWaitingInterval,
 } from './insights-receipt';
 export { RUN_RECEIPT_PHASE_KEYS } from './insights-receipt';
+// Run usage (Insights slice U)
+export type {
+  RunModelUsage,
+  RunReceiptTokens,
+  RunTokenCounts,
+  RunUsageSource,
+  RunUsageSpend,
+} from './insights-run-usage';
 // Insights · Flow (Insights slice F)
 export type {
   FlowFlakyCheck,
