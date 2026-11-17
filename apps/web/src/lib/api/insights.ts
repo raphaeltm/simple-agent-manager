@@ -1,7 +1,9 @@
 import type {
   InsightsRange,
+  InsightsSetupGrouping,
   ProjectAccountsResponse,
   ProjectFlowResponse,
+  ProjectSetupsResponse,
 } from '@simple-agent-manager/shared';
 
 import { request } from './client';
@@ -23,5 +25,16 @@ export function getProjectAccounts(
 ): Promise<ProjectAccountsResponse> {
   return request<ProjectAccountsResponse>(
     `/api/projects/${encodeURIComponent(projectId)}/insights/accounts?range=${range}`
+  );
+}
+
+/** Insights · Agent setups for one project (`GET /api/projects/:projectId/insights/setups`). */
+export function getProjectSetups(
+  projectId: string,
+  range: InsightsRange,
+  groupBy: InsightsSetupGrouping
+): Promise<ProjectSetupsResponse> {
+  return request<ProjectSetupsResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/insights/setups?range=${range}&groupBy=${groupBy}`
   );
 }

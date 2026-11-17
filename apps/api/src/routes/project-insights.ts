@@ -5,11 +5,15 @@
  *   read by the Insights page and the Project Overview's "This week" pane;
  * - GET /api/projects/:projectId/insights/accounts?range=7d|30d|90d — Accounts (slice A,
  *   `projectAccounts`). Private to the viewer (their own account names and limit windows), so
- *   never cached by a shared cache.
+ *   never cached by a shared cache;
+ * - GET /api/projects/:projectId/insights/setups?range=7d|30d|90d&groupBy=profile|skill|model —
+ *   Agent setups (slice S, `projectSetups`). Private for the same reason: it names the viewer's
+ *   own personal profiles and skills.
  */
 import {
   projectAccounts,
   projectFlow,
+  projectSetups,
   toOperationHttpError,
 } from '@simple-agent-manager/operations';
 import { Hono } from 'hono';
@@ -43,6 +47,22 @@ projectInsightsRoutes.get('/accounts', requireAuth(), requireApproved(), async (
     const result = await projectAccounts(webOperationContext(c, userId), {
       projectId,
       range: c.req.query('range'),
+    });
+    return c.json(result);
+  } catch (error) {
+    throw toOperationHttpError(error);
+  }
+});
+
+projectInsightsRoutes.get('/setups', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  c.header('Cache-Control', 'private, no-store');
+  try {
+    const result = await projectSetups(webOperationContext(c, userId), {
+      projectId,
+      range: c.req.query('range'),
+      groupBy: c.req.query('groupBy'),
     });
     return c.json(result);
   } catch (error) {
