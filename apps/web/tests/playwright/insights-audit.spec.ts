@@ -13,10 +13,10 @@
 import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
 
+import { acmeBillingProject, acmeBillingUser } from './acme-billing-fixtures';
 import {
   assertNoClippedOverflow,
   assertNoOverflow,
-  makeMockUser,
   screenshot,
 } from './audit-helpers';
 import { docsShot } from './docs-shot';
@@ -28,34 +28,9 @@ const PROJECT_ID = 'proj-insights';
 const USER_ID = 'user-insights';
 const BASE = `/projects/${PROJECT_ID}/insights`;
 
-const MOCK_USER = makeMockUser({
-  email: 'dana@example.com',
-  name: 'Dana Reyes',
-  sessionId: 'session-insights',
-  userId: USER_ID,
-});
+const MOCK_USER = acmeBillingUser(USER_ID, 'session-insights');
 
-const MOCK_PROJECT = {
-  id: PROJECT_ID,
-  name: 'Acme Billing',
-  repository: 'acme/billing',
-  repoProvider: 'github',
-  defaultBranch: 'main',
-  userId: USER_ID,
-  installationId: 'inst-1',
-  defaultWorkspaceProfile: 'full',
-  defaultDevcontainerConfigName: '',
-  createdAt: '2026-10-01T00:00:00Z',
-  updatedAt: '2026-11-15T00:00:00Z',
-  multiplayerActive: false,
-  summary: {
-    activeWorkspaceCount: 0,
-    activeSessionCount: 0,
-    lastActivityAt: null,
-    taskCountsByStatus: {},
-    linkedWorkspaces: 0,
-  },
-};
+const MOCK_PROJECT = acmeBillingProject(PROJECT_ID, USER_ID);
 
 async function setupScene(
   page: Page,
