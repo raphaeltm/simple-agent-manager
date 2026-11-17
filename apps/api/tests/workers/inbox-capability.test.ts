@@ -318,6 +318,56 @@ describe('inbox capability through the real entry points', () => {
     expect(late.status).toBe(409);
   });
 
+  it('a marker-era item on a chat whose workspace is gone archives without telling anyone', async () => {
+    // Production shape (2026-11-17): a SAM check-in pause left on a chat whose task was cancelled,
+    // workspace deleted and session stopped. Archive tried to tell the (absent) agent, the
+    // live-agent resolver 404'd, the claim was released, and the inbox read the 404 as "already
+    // handled" and showed the item again: it could never be archived.
+    const s = await seed();
+    await s.project.createAttentionMarker({
+      sessionId: s.chatSessionId,
+      taskId: s.taskId,
+      workspaceId: s.workspaceId,
+      kind: 'needs_input',
+      source: 'reconciliation_loop',
+      reason: 'SAM paused automatic check-ins because the runtime rejected the selected model.',
+      metadata: null,
+      expiresAt: null,
+    });
+    await s.project.stopSession(s.chatSessionId);
+    await testEnv.DATABASE.prepare(`UPDATE workspaces SET status = 'deleted' WHERE id = ?`)
+      .bind(s.workspaceId)
+      .run();
+    await testEnv.DATABASE.prepare(`UPDATE agent_sessions SET status = 'completed' WHERE id = ?`)
+      .bind(s.agentSessionId)
+      .run();
+    await syncSummaries(s.project);
+
+    const before = await get<ListBody>('/api/inbox', s.ownerCookie);
+    const ref = before.body.items.find((item) => item.projectId === s.projectId)?.ref;
+    expect(ref).toMatch(new RegExp(`^attention:${s.chatSessionId}:`));
+
+    const archived = await post(
+      `/api/projects/${s.projectId}/inbox/items/${encodeURIComponent(ref!)}/archive`,
+      s.ownerCookie
+    );
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ outcome: 'archived', agentNotified: false });
+    // No agent exists to receive a prompt, so none is sent.
+    const prompt = fetchMock.mock.calls.find(([input]) =>
+      (typeof input === 'string' ? input : input.url).includes('/prompt')
+    );
+    expect(prompt).toBeUndefined();
+
+    const markerId = ref!.split(':')[2]!;
+    const { marker } = await s.project.getAttentionRequest(s.chatSessionId, markerId, s.ownerId);
+    expect(marker).toMatchObject({ resolvedReason: 'archived', resolvedAnswer: null });
+    expect(marker?.resolvedAt).not.toBeNull();
+    await syncSummaries(s.project);
+    const after = await get<ListBody>('/api/inbox', s.ownerCookie);
+    expect(after.body.items.map((entry) => entry.ref)).not.toContain(ref);
+  });
+
   it('a secret request archived through the inbox is declined and the agent notified', async () => {
     const s = await seed();
     const created = await callTool(s.token, 'request_secret', {

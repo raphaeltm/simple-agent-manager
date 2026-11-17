@@ -37,6 +37,7 @@ import {
 import * as projectDataService from '../services/project-data';
 import { recordSharedSessionAnswer } from '../services/session-access';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
+import { resolveLiveWorkspaceForSession } from './chat-workspace-resolver';
 
 /** The `request_human_input` category stored with the question, or null when absent/unknown. */
 function parseAttentionCategory(metadata: string | null): HumanInputCategory | null {
@@ -397,6 +398,21 @@ export async function archiveAttention(
 
   let preparedPrompt;
   try {
+    // No workspace bridges this chat any more (the chat ended, its workspace was deleted), so no
+    // agent can ever be told. Close the item without a notice: otherwise the 404 from the
+    // live-agent resolver below releases the claim and the item can never leave the inbox. A
+    // sleeping workspace still counts as live (`liveSessionWorkspaceCondition`), so a chat that
+    // can be woken keeps the notifying path.
+    const liveWorkspace = await resolveLiveWorkspaceForSession(db, {
+      projectId,
+      sessionId,
+      userId: writer.ownerUserId,
+    });
+    if (!liveWorkspace) {
+      await projectDataService.completeAttentionArchive(env, projectId, sessionId, markerId);
+      await recordSharedSessionAnswer(env, writer, { markerId, wake: agentWakeRecord(wake) });
+      return { agentNotified: false };
+    }
     preparedPrompt = await preparePromptForLiveAgent(env, db, {
       projectId,
       sessionId,

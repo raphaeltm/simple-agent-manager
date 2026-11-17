@@ -212,7 +212,8 @@ item closes by itself. An item you archived stays archived while the thing keeps
 
 **Archive** (the box at the top) means you will not act on the item: it closes, and the agent is
 told. A permission is denied, a secret declined and an approval denied. A Problem has no agent, so
-archiving it tells no one. For a few seconds the
+archiving it tells no one. A question from a chat whose workspace is gone (the chat ended or was
+stopped) also closes without telling anyone, because no agent is left to tell. For a few seconds the
 receipt offers **Undo**; nothing is sent until that time is up. If you leave the page or close the
 tab first, the archive is sent then.
 
