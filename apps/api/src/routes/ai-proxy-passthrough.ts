@@ -14,6 +14,7 @@
  * workspaceId, and projectId. Upstream provider credentials are never accepted
  * from, or returned to, tenant workspaces.
  */
+import type { MeasuredTokenUsage } from '@simple-agent-manager/ai-proxy';
 import {
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
@@ -33,6 +34,7 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
+import { proxyRunUsageRecorder } from '../services/agent-run-usage';
 import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
 import {
@@ -86,6 +88,8 @@ interface PreparedProxyRequest extends PassthroughAuthResult {
   body: Record<string, unknown>;
   modelId: string;
   upstream: ResolvedProxyUpstream;
+  /** Insights run usage hook for this request (`proxyRunUsageRecorder`). */
+  recordRunUsage: (usage: MeasuredTokenUsage) => Promise<void>;
 }
 
 type PreparedProxyResult =
@@ -287,7 +291,14 @@ async function prepareProxyRequest(
     return { ok: false, response: options.missingUpstreamResponse() };
   }
 
-  return { ok: true, value: { ...auth, body, modelId, upstream } };
+  // Insights run usage: the measured tokens go to this workspace's run, keyed by the credential
+  // the proxy forwards with.
+  const recordRunUsage = proxyRunUsageRecorder(c.env, auth, {
+    model: modelId,
+    credentialReference: upstream.credentialReference,
+    credentialSource: upstream.credentialSource,
+  });
+  return { ok: true, value: { ...auth, body, modelId, upstream, recordRunUsage } };
 }
 
 function buildJsonUpstreamHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
@@ -413,6 +424,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
       format: 'anthropic',
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
+      onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });
@@ -588,6 +600,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       format: 'openai',
       fallbackInputTokens: estimateInputTokensFromMessages(body.messages),
       provider: upstream.provider,
+      onMeasuredUsage: prepared.value.recordRunUsage,
       executionCtx: optionalExecutionContext(() => c.executionCtx),
       headers: responseHeaders,
     });

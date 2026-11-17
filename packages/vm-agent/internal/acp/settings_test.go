@@ -8,6 +8,12 @@ import (
 )
 
 func TestBuildCodexACPManagedConfigEnv(t *testing.T) {
+	type managedConfig struct {
+		SandboxMode     string  `json:"sandbox_mode"`
+		ApprovalPolicy  string  `json:"approval_policy"`
+		Model           *string `json:"model"`
+		BypassHookTrust *bool   `json:"bypass_hook_trust"`
+	}
 	for _, tc := range []struct {
 		name      string
 		settings  *agentSettingsPayload
@@ -27,23 +33,22 @@ func TestBuildCodexACPManagedConfigEnv(t *testing.T) {
 			if !strings.HasPrefix(envVar, prefix) {
 				t.Fatalf("managed config env = %q, want %q prefix", envVar, prefix)
 			}
-			var config map[string]string
+			var config managedConfig
 			if err := json.Unmarshal([]byte(strings.TrimPrefix(envVar, prefix)), &config); err != nil {
 				t.Fatalf("managed config is not valid JSON: %v", err)
 			}
-			if got := config["sandbox_mode"]; got != "danger-full-access" {
-				t.Fatalf("sandbox_mode = %q, want danger-full-access", got)
+			if config.SandboxMode != "danger-full-access" || config.ApprovalPolicy != "never" {
+				t.Fatalf("sandbox/approval = %q/%q, want danger-full-access/never", config.SandboxMode, config.ApprovalPolicy)
 			}
-			if got := config["approval_policy"]; got != "never" {
-				t.Fatalf("approval_policy = %q, want never", got)
+			// Repository hooks run in every Codex session (idea 01M7J0TXAHGRY8CWA7Y7SJZAK0).
+			if config.BypassHookTrust == nil || !*config.BypassHookTrust {
+				t.Fatalf("bypass_hook_trust = %v, want true", config.BypassHookTrust)
 			}
-			if got := config["model"]; got != tc.wantModel {
-				t.Fatalf("model = %q, want %q", got, tc.wantModel)
-			}
-			if tc.wantModel == "" {
-				if _, ok := config["model"]; ok {
-					t.Fatalf("empty model should be omitted: %#v", config)
-				}
+			switch {
+			case tc.wantModel == "" && config.Model != nil:
+				t.Fatalf("empty model should be omitted, got %q", *config.Model)
+			case tc.wantModel != "" && (config.Model == nil || *config.Model != tc.wantModel):
+				t.Fatalf("model = %v, want %q", config.Model, tc.wantModel)
 			}
 		})
 	}

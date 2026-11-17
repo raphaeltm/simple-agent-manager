@@ -40,6 +40,7 @@ export {
   resolutionStatusQueryOptions,
   sessionAgentCredentialQueryOptions,
 } from './accounts';
+export { adminHealthCostQueryKeys, adminHealthCostQueryOptions } from './admin-health-cost';
 export {
   adminProjectDataArchiveBreakersQueryOptions,
   adminProjectDataArchiveProblemMigrationsQueryOptions,
@@ -143,7 +144,11 @@ export {
   workspacePortsQueryOptions,
   workspaceQueryKeys,
 } from './infrastructure';
-export { insightsQueryKeys, projectFlowQueryOptions } from './insights';
+export {
+  insightsQueryKeys,
+  projectAccountsQueryOptions,
+  projectFlowQueryOptions,
+} from './insights';
 export {
   libraryFileQueryOptions,
   type LibraryIndexQueryData,

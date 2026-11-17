@@ -1,3 +1,5 @@
+import type { RunReceiptTokens } from './insights-run-usage';
+
 /**
  * The Run receipt (Insights slice R): one read of where a task-backed run's time went, what it
  * produced, which account it ran on, what it used and what slowed it down.
@@ -84,7 +86,13 @@ export interface RunReceiptPhase {
 }
 
 /** A part of the receipt that could not be read; the rest is still returned. */
-export type RunReceiptSection = 'outcome' | 'toolCalls' | 'waiting' | 'comparison' | 'account';
+export type RunReceiptSection =
+  | 'outcome'
+  | 'toolCalls'
+  | 'waiting'
+  | 'comparison'
+  | 'account'
+  | 'tokens';
 
 export interface RunReceiptPullRequest {
   number: number;
@@ -95,15 +103,19 @@ export interface RunReceiptPullRequest {
   mergedAt: string | null;
 }
 
+export type RunReceiptCiFirstTry = 'passed' | 'failed' | 'pending' | 'not_recorded';
+
 export interface RunReceiptOutcome {
   pullRequest: RunReceiptPullRequest | null;
   /** Check state on the pull request's latest head; null without a pull request or checks. */
   checks: 'success' | 'failure' | 'pending' | 'neutral' | null;
   /**
-   * Whether CI passed on the first push. Not derivable from stored data: check rows are kept per
-   * head commit without the pull request they belong to, and a re-run overwrites its own row.
+   * Whether CI passed on the pull request's opening commit, by the same rule as Insights · Flow
+   * (`firstTryVerdictSql`, `packages/operations/src/insights-flow-sql.ts`). `pending` while checks
+   * run or when none reported; `not_recorded` when there is no pull request, or SAM did not see it
+   * from its first commit (`pull_request_heads.from_open`).
    */
-  ciFirstTry: 'not_recorded';
+  ciFirstTry: RunReceiptCiFirstTry;
   terminalReason: string | null;
 }
 
@@ -171,8 +183,8 @@ export interface RunReceipt {
   resources: RunReceiptResources;
   /** Null when tool calls could not be counted (archived or unavailable). */
   toolCalls: RunReceiptToolCalls | null;
-  /** Token usage arrives with Insights slice U; until then it is never estimated. */
-  tokens: { state: 'not_reported' };
+  /** Measured token usage per model (slice U), or `not_reported`; never estimated. */
+  tokens: RunReceiptTokens;
   /** Up to three, largest delay first. */
   slowedDown: RunReceiptSlowItem[];
   unavailable: RunReceiptSection[];

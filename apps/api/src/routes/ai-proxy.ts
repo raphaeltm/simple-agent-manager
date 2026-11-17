@@ -18,6 +18,7 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readRequestJsonRecord } from '../lib/runtime-validation';
+import { proxyRunUsageRecorder } from '../services/agent-run-usage';
 import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import { isAnthropicModel } from '../services/ai-proxy-shared';
@@ -211,7 +212,18 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       });
     }
 
-    return accountingResponse(c, response, prepared.userId, estimatedInputTokens);
+    const attribution = provider === 'anthropic' ? anthropicAuth : openaiCredential;
+    return accountingResponse(
+      c,
+      response,
+      prepared.userId,
+      estimatedInputTokens,
+      proxyRunUsageRecorder(c.env, prepared, {
+        model: modelId,
+        credentialReference: attribution?.credentialReference ?? null,
+        credentialSource: attribution?.credentialSource ?? null,
+      })
+    );
   } catch (err) {
     log.error('ai_proxy.fetch_error', {
       userId: prepared.userId,
@@ -325,7 +337,17 @@ aiProxyRoutes.post('/responses', async (c) => {
       source: 'ai-proxy.openai.responses',
     });
 
-    return accountingResponse(c, response, prepared.userId, estimatedInputTokens);
+    return accountingResponse(
+      c,
+      response,
+      prepared.userId,
+      estimatedInputTokens,
+      proxyRunUsageRecorder(c.env, prepared, {
+        model: modelId,
+        credentialReference: openaiCredential.credentialReference,
+        credentialSource: openaiCredential.credentialSource,
+      })
+    );
   } catch (err) {
     log.error('ai_proxy.responses.fetch_error', {
       userId: prepared.userId,

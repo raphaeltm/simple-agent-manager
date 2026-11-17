@@ -4,6 +4,7 @@ export {
   configureProjectDataPort,
   configureProjectDataPorts,
   type CredentialsPort,
+  type InboxErrorsPort,
   type NoticesPort,
   type NotificationsPort,
   type ObservabilityPort,
