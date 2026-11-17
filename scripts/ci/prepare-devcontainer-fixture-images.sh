@@ -49,7 +49,7 @@ FROM ${base_image}
 
 ARG PNPM_VERSION
 
-RUN set -eux; \\
+RUN set -eu; \\
     mkdir -p /workspaces /usr/local/etc/vscode-dev-containers; \\
     if ! id -u vscode >/dev/null 2>&1; then \\
       if ! getent group vscode >/dev/null 2>&1; then \\

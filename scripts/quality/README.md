@@ -199,6 +199,39 @@ original incident (`runtime.Lightweight = opt.Lightweight`), at every sampled co
 direct form, and the remaining forms (`patch.x ?? false`, spreads) are also how records
 are created, so a lint would be mostly noise.
 
+## No secret readback in CI code (policy 795e72a6)
+
+`pnpm quality:no-secret-readback` (`scripts/quality/check-no-secret-readback.ts`, blocking in
+Code Quality Checks) scans every `.yml`, `.yaml`, `.sh` and JS/TS file under `.github/`,
+`scripts/` and `infra/` except tests (`*.test.*`, `*.spec.*`, `test-*.sh`, `__tests__/`,
+`fixtures/`) and itself. Comment lines are skipped. It reports:
+
+- `show-secrets`: `--show-secrets`, `showSecrets: true` (Pulumi secret readback);
+- `decryption`: `subtle.decrypt(`, `createDecipher(iv)(`, `require(...).decrypt*`, and any
+  import or re-export, single- or multi-line, that names `decrypt*` or loads the API's
+  `services/encryption` module;
+- `xtrace`: `set -x` in any flag cluster (`set -euxo`), `set -o xtrace`, `bash -x`/`sh -x`;
+- `env-dump`: a bare `env`, `printenv` (with or without a name), `export -p`, `declare -p`.
+
+A legacy line that cannot go yet carries `# sam:secret-readback-allowed <task>` on the line or
+up to three lines above it. The task must be an existing file under `tasks/backlog/` or
+`tasks/active/`; an archived or missing task makes the line a finding and the marker is
+reported. Today the only such line is the Pulumi readback in `scripts/deploy/configure-secrets.sh`,
+tracked by `tasks/backlog/2026-11-17-remove-pulumi-secret-readback.md` (idea
+01M7M5PJCY4T3CR715AFKRM74R), and every value it reads is masked before any other use.
+
+Measured 2026-11-17. Current tree: 206 files and 42,008 lines scanned, 0 findings, 1 tracked
+read. History: 25 first-parent commits on `main` sampled evenly back to 2026-06-11. Every one
+reported only real instances of the class: the `configure-secrets.sh` readback, the three
+`set -euxo pipefail` in `devcontainer-cache-experiments.yml`, and `set -eux` in a fixture
+Dockerfile. At the newest sample (2026-11-17, before this fix) it also reported the staging2
+bootstrap's `--show-secrets` read and its `crypto.subtle.decrypt`. There were no false positives, so the
+check was blocking from the start (policy f9ae7f88). The tests reintroduce the staging2 bootstrap
+step and its decrypt helper and import, and include negative controls for nearby shapes. Each
+guard (each pattern, the import pass, the comment skip and the open-task check) was deleted once
+and the tests went red. A test also requires every pattern to be the only match for at least one
+reintroduced line.
+
 ## Runtime workflow state
 
 `pnpm quality:runtime-state-files` rejects committed or staged `.do-state.md` and

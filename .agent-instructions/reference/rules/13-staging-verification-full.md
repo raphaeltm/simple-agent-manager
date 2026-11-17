@@ -48,34 +48,49 @@ primary-only, and so is the signed GitHub-trigger audit (staging2 has no GitHub 
 shared deployment engine (`use_shared_engine`) is not supported for staging2. A `staging2` GitHub Environment exists only because lease records are kept per
 installation; it holds no secrets and must not get any (staging2's jobs run with `staging`).
 
-**Signing in to staging2.** Use workload identity; no separate token exists for staging2. (The
-staging smoke token is also registered there, as the admin, so the deploy's smoke tests and pool
-seeding can sign in; agents should use workload identity.) Audience
-`https://api.sammy2.party/api/auth/workload-identity-login`; targets `staging2-agent-admin`
-(superadmin) or `staging2-agent-user` (ordinary user). Add the returned cookie for
-`.sammy2.party`. The issuer and allowed source project/user are the same as for `staging`.
+**Signing in to staging2.** Use workload identity; no separate token exists for staging2.
+Audience `https://api.sammy2.party/api/auth/workload-identity-login`; targets
+`staging2-agent-admin` (superadmin) or `staging2-agent-user` (ordinary user). Add the returned
+cookie for `.sammy2.party`. The issuer and allowed source project/user are the same as for
+`staging`. The trust comes from the `staging` Environment's GitHub secret
+`AGENT_SIGN_IN_TRUST_STAGING2`, which deploys hand straight to `configure-secrets.sh`. Deploys
+never derive it from staging's trust. While that secret is unset, a deploy leaves staging2's
+Worker secret as it is. The staging smoke token works on staging2 only where a
+registration row already exists (the one made before 2026-11-17 does). Deploys no longer register it,
+because that needs staging2's `ENCRYPTION_KEY` in the runner. When staging2 refuses the token,
+the deploy's smoke tests are skipped with a warning.
 
-**What a fresh staging2 has.** The deploy bootstraps it on every run
-(`scripts/deploy/bootstrap-staging-installation.ts`, secondary installations only): the two users
-above, a platform cloud credential copied from `staging` (a platform GCP credential, or a GCP
-service-account key owned by one of staging's agent test accounts, otherwise any other enabled
-platform cloud credential, today Hetzner; staging's GCP credential today is workload identity, which only trusts
-`sammy.party`'s issuer, so staging2 uses Hetzner), the staging smoke token registered for
-the admin, and the shared compute pool's machines (the same ones `staging`'s pool has active, or, when the
-providers differ, the two cheapest machines per role with at least 2 vCPU and 8 GB).
-Both users are opted into the SAM AI proxy for each copied agent key
-(`providerMode: sam`), the only way a platform key is used. Today that is Claude Code, so
-start sessions with the Claude Code agent (for example set the project's default agent);
-the installation default agent has no key. There is no GitHub App: use Artifacts-backed
-projects. The shared pool is capped at 2 nodes on first seeding, because the Hetzner account
-is shared with staging and production.
+**What a fresh staging2 has.** The deploy seeds only what needs no secret value
+(`scripts/deploy/bootstrap-staging-installation.ts`, secondary installations only): the two
+users above, both opted into the SAM AI proxy for Claude Code (`providerMode: sam`, the only way
+a platform key is used). It never reads a Pulumi secret, decrypts a credential, or copies
+anything from `staging` (policy 795e72a6, `.claude/rules/83-no-secret-readback-in-ci.md`). A
+human (Raphaël) sets up the rest by hand, once per installation:
+
+1. Admin → Credentials: a platform cloud credential (Hetzner today; staging's GCP credential is
+   workload identity, which only trusts `sammy.party`'s issuer) and a Claude Code platform
+   agent key.
+2. Admin → Infrastructure: pick the shared pool's machines (at least 2 vCPU and 8 GB, at most
+   2 nodes, because the Hetzner account is shared with staging and production).
+3. GitHub → Environments → `staging`: the `AGENT_SIGN_IN_TRUST_STAGING2` secret. It is staging's
+   trust JSON with `allowedTargets` set to `["staging2-agent-admin", "staging2-agent-user"]`.
+
+The rows copied by earlier deploys (credentials `staging2-bootstrap-cloud` and
+`staging2-bootstrap-agent-claude-code`, smoke token `staging2-bootstrap-smoke-token`, the pool
+machines) remain on the current staging2, so it works today. A teardown removes them, and
+staging2 then has no cloud credential, agent key, pool or smoke token until the steps above are
+repeated. Before tearing staging2 down, ask Raphaël (inbox) whether he can redo them; do not
+expect a rebuilt staging2 to run VMs or agent sessions on its own. Start sessions with the
+Claude Code agent (for example set the project's default agent); the installation default
+agent has no key. There is no GitHub App: use Artifacts-backed projects.
 
 **Querying staging2 directly.** Same account and `$CF_TOKEN` as staging. Look the D1 id up by
 name (`sam2-staging2`): `GET /accounts/$CF_ACCOUNT_ID/d1/database?name=sam2-staging2`.
 
 **Teardown.** Actions → Teardown → `staging2` → `DELETE`. It touches only `sam2-*` resources,
 the `staging2` Pulumi stack and the `sammy2.party` zone's workspace and node records. Delete test workspaces and
-nodes first; teardown does not delete VMs. The next deploy rebuilds staging2 from nothing.
+nodes first; teardown does not delete VMs. The next deploy rebuilds staging2 with only its two
+users. Credentials, pool and smoke token then need Raphaël's manual setup again (above).
 
 **Branches that add a Durable Object migration.** Durable Object migrations only move forward.
 Once a branch deploys a tag that `origin/main` lacks (a new `[[migrations]]` entry in
@@ -87,7 +102,8 @@ include it, and the deploy-time migration preflight stays the backstop). Use `st
 when you are done on `staging2`, tear it down (Actions → Teardown → `staging2` → `DELETE`, after
 deleting test workspaces and nodes) and redeploy `main` to it (`gh workflow run deploy-staging.yml
 --ref main -f environment=staging2 -f sam_task_id=<id>`) before you release. staging2 rebuilds
-from nothing, so main-based branches can use it again. Nothing does this automatically.
+from nothing, so main-based branches can use it again, but without credentials until Raphaël
+redoes the manual setup (file an inbox item for him). Nothing does this automatically.
 
 Adding a third: one entry in `scripts/deploy/staging-installations.mjs` plus a zone in the
 staging Cloudflare account that the staging deploy token can edit.
