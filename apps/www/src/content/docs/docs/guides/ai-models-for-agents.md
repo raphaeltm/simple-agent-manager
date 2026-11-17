@@ -108,4 +108,10 @@ The agent gets the reason, and usually tells you. What each means:
 
 ## For administrators
 
+Agent model calls need the installation's Cloudflare Workers AI binding. On an installation
+without it, the **AI Models** section of Project settings is hidden, and the model field on a
+profile or skill reads **Not available on this installation: model calls need Cloudflare Workers
+AI.** The same check hides the microphone in chat and makes read-aloud use the browser's own voice
+(see [Voice Input](/docs/guides/chat-features/#voice-input)).
+
 Superadmins can tune this feature under **Admin → Settings → AI models**. The available settings are listed in [Admin settings](/docs/guides/admin-settings/#ai-models), including a switch that turns agent model calls off for every project.

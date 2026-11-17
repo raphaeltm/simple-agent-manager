@@ -212,6 +212,7 @@ function buildInspectorResponse(input: {
     batches,
     attempts,
     accounting: input.status.accounting,
+    admission: input.status.admission,
     hasMore: input.status.hasMore,
   };
 }

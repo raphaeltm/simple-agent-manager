@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 /**
  * The absolute product invariant for the ProjectData storage-relief work: message TEXT
  * (`chat_messages.content`) is never rewritten by any cleanup, archive or relief
- * path. The canonical ingest module alone may append a verified new suffix;
- * real workerd tests prove that it never opens historical rows for appending.
+ * path. Canonical ingest alone may append a verified new suffix or update an identified tool snapshot;
+ * real workerd tests cover receipts, archive fences and historical search refresh.
  * Only `tool_metadata` may be stripped, and only after a verified archive.
  *
  * The behavioural tests cover the paths that DO write (they assert `content` survives a
@@ -45,9 +45,10 @@ describe('ProjectData message-text invariant', () => {
     expect(files.length).toBeGreaterThan(20);
   });
 
-  it('permits only the canonical ingest suffix append to write chat_messages.content', () => {
+  it('permits only canonical ingest suffix appends and tool snapshots to write chat_messages.content', () => {
     const offenders: string[] = [];
     let canonicalAppends = 0;
+    let canonicalTools = 0;
     for (const file of files) {
       const source = readFileSync(file, 'utf8');
       for (const statement of chatMessageMutations(source)) {
@@ -63,12 +64,21 @@ describe('ProjectData message-text invariant', () => {
             canonicalAppends++;
             continue;
           }
+          if (
+            file.endsWith('/tool-call-merge.ts') &&
+            /^\s*content\s*=\s*\?,\s*tool_metadata\s*=\s*\?\s*$/i.test(setClause) &&
+            /WHERE id = \? AND session_id = \?/.test(statement)
+          ) {
+            canonicalTools++;
+            continue;
+          }
           offenders.push(`${file}: ${statement.slice(0, 160)}`);
         }
       }
     }
     expect(offenders).toEqual([]);
     expect(canonicalAppends).toBe(1);
+    expect(canonicalTools).toBe(1);
   });
 
   it('never deletes chat_messages rows outside the explicitly archived session path', () => {

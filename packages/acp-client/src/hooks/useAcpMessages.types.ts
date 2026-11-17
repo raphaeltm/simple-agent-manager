@@ -88,6 +88,8 @@ export interface ToolCallItem {
   contentSize?: number;
   /** Whether content has been lazy-loaded (false = needs fetch on expand). */
   contentLoaded?: boolean;
+  /** Durable snapshot revision; invalidates cached and in-flight lazy output. */
+  revision?: number;
   /** Message ID for lazy-loading content via the tool-content endpoint. */
   messageId?: string;
 }

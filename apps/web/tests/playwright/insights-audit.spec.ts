@@ -2,7 +2,7 @@
  * Visual and layout audit for the Insights page (Insights slice F) at 375×667 and 1280×800.
  * The Flow read is served exactly as the API answers it (`insights-fixtures.ts`). Scenes: a
  * realistic month, a stressed project (long names, every stop reason, 13 weeks, a capped idea
- * sample), an empty project, a failed read, the range switch, and the coming-soon tabs.
+ * sample), an empty project, a failed read and the range switch.
  * Accounts (slice A, `insights-accounts-fixtures.ts`): a realistic month, a stressed project
  * (long and hostile names, eight accounts, 13 weeks, a capped stall scan), an empty project, a
  * failed read, a failed stall section, and a range switch held mid-flight.
@@ -10,51 +10,20 @@
  * stressed project (long and hostile names, 30 setups, every missing measure), an empty project,
  * a failed read, the grouping switch, and applying a suggestion through PATCH skill.
  */
-import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { isInsightsRange } from '@simple-agent-manager/shared';
 
-import {
-  assertNoClippedOverflow,
-  assertNoOverflow,
-  makeMockUser,
-  screenshot,
-} from './audit-helpers';
+import { docsShot } from './docs-shot';
 import { type AccountsScene, makeAccounts } from './insights-accounts-fixtures';
+import {
+  auditOnPhoneAndDesktop,
+  BASE,
+  capture,
+  PROJECT_ID,
+  routeInsightsApi,
+} from './insights-audit-support';
 import { type FlowScene, makeFlow } from './insights-fixtures';
 import { makeSetups, type SetupsScene } from './insights-setups-fixtures';
-
-const PROJECT_ID = 'proj-insights';
-const USER_ID = 'user-insights';
-const BASE = `/projects/${PROJECT_ID}/insights`;
-
-const MOCK_USER = makeMockUser({
-  email: 'raph@example.com',
-  name: 'Raph',
-  sessionId: 'session-insights',
-  userId: USER_ID,
-});
-
-const MOCK_PROJECT = {
-  id: PROJECT_ID,
-  name: 'Acme Billing',
-  repository: 'acme/billing',
-  repoProvider: 'github',
-  defaultBranch: 'main',
-  userId: USER_ID,
-  installationId: 'inst-1',
-  defaultWorkspaceProfile: 'full',
-  defaultDevcontainerConfigName: '',
-  createdAt: '2026-10-01T00:00:00Z',
-  updatedAt: '2026-11-15T00:00:00Z',
-  multiplayerActive: false,
-  summary: {
-    activeWorkspaceCount: 0,
-    activeSessionCount: 0,
-    lastActivityAt: null,
-    taskCountsByStatus: {},
-    linkedWorkspaces: 0,
-  },
-};
 
 async function setupScene(
   page: Page,
@@ -65,53 +34,15 @@ async function setupScene(
   skillPatches: Array<{ skillId: string; body: unknown }> = []
 ) {
   const applied = new Set<string>();
-  await page.addInitScript((id) => {
-    localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true');
-  }, USER_ID);
-  await page.route(/^https?:\/\/[^/]+\/api\//, async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path === '/api/cc/credentials') return respond(200, { credentials: [] });
-    if (path === '/api/cc/configurations') return respond(200, { configurations: [] });
-    if (path === '/api/cc/attachments') return respond(200, { attachments: [] });
-    if (path === '/api/cc/profile-attachments') return respond(200, { attachments: [] });
-    if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
-    if (path === '/api/credentials/limits')
-      return respond(200, { credentials: [], generatedAt: Date.now() });
-    if (path === '/api/credentials') return respond(200, []);
-    if (path === '/api/agents') return respond(200, { agents: [] });
-    if (path === `/api/projects/${PROJECT_ID}/overview`)
-      return respond(200, {
-        projectId: PROJECT_ID,
-        running: { items: [], total: 0, waitingOnViewerTotal: 0 },
-        recent: { ideas: [], mergedPullRequests: [] },
-        unavailable: [],
-        generatedAt: new Date().toISOString(),
-      });
-    if (path === `/api/projects/${PROJECT_ID}/agent-profiles`) return respond(200, { items: [] });
-    if (path === `/api/projects/${PROJECT_ID}/skills`) return respond(200, { items: [] });
-    if (path === `/api/projects/${PROJECT_ID}/triggers`) return respond(200, { triggers: [] });
-    if (path === `/api/projects/${PROJECT_ID}/members`)
-      return respond(200, { members: [], inviteLinks: [], accessRequests: [] });
-    if (path === '/api/trial-status')
-      return respond(200, { available: false, hasInfraCredential: true });
-    if (path.startsWith('/api/notifications'))
-      return respond(200, { notifications: [], unreadCount: 0 });
-    if (path === '/api/projects')
-      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
-    if (path === `/api/projects/${PROJECT_ID}`) return respond(200, MOCK_PROJECT);
-    if (path === `/api/projects/${PROJECT_ID}/insights/flow`) {
-      const range = url.searchParams.get('range');
+  await routeInsightsApi(page, (url, route, respond) => {
+    const range = url.searchParams.get('range');
+    if (url.pathname === `/api/projects/${PROJECT_ID}/insights/flow`) {
       requests.push(range ?? '');
       if (scene === 'error')
         return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
       return respond(200, makeFlow(PROJECT_ID, isInsightsRange(range) ? range : '30d', scene));
     }
-    if (path === `/api/projects/${PROJECT_ID}/insights/accounts`) {
-      const range = url.searchParams.get('range');
+    if (url.pathname === `/api/projects/${PROJECT_ID}/insights/accounts`) {
       requests.push(`accounts:${range ?? ''}`);
       if (accountsScene === 'error')
         return respond(500, { error: 'INTERNAL_ERROR', message: 'Insights are unavailable' });
@@ -120,8 +51,7 @@ async function setupScene(
         makeAccounts(PROJECT_ID, isInsightsRange(range) ? range : '30d', accountsScene)
       );
     }
-    if (path === `/api/projects/${PROJECT_ID}/insights/setups`) {
-      const range = url.searchParams.get('range');
+    if (url.pathname === `/api/projects/${PROJECT_ID}/insights/setups`) {
       const groupBy = url.searchParams.get('groupBy');
       requests.push(`setups:${range ?? ''}:${groupBy ?? ''}`);
       if (setupsScene === 'error')
@@ -136,47 +66,22 @@ async function setupScene(
       body.suggestions = body.suggestions.filter((s) => !applied.has(s.apply.skillId));
       return respond(200, body);
     }
-    const skillPatch = path.match(new RegExp(`^/api/projects/${PROJECT_ID}/skills/([^/]+)$`));
+    const skillPatch = url.pathname.match(
+      new RegExp(`^/api/projects/${PROJECT_ID}/skills/([^/]+)$`)
+    );
     if (skillPatch && route.request().method() === 'PATCH') {
       const skillId = skillPatch[1] ?? '';
       skillPatches.push({ skillId, body: route.request().postDataJSON() });
       applied.add(skillId);
       return respond(200, { id: skillId, projectId: PROJECT_ID, name: skillId });
     }
-    if (path.includes('/sessions')) return respond(200, { sessions: [], total: 0, hasMore: false });
-    return respond(200, {});
+    return undefined;
   });
 }
 
-function onlyOn(names: string[]) {
-  return ({ page: _page }: { page: Page }, testInfo: TestInfo) => {
-    test.skip(!names.includes(testInfo.project.name), 'audited on a phone and desktop');
-  };
-}
-test.beforeEach(onlyOn(['iPhone SE (375x667)', 'Desktop (1280x800)']));
+auditOnPhoneAndDesktop();
 
-async function capture(page: Page, name: string) {
-  await expect(page.getByText('Something went wrong')).toHaveCount(0);
-  await assertNoOverflow(page);
-  await assertNoClippedOverflow(page);
-  // The page root fits the viewport (rule 56): it is never sized by its own content.
-  const rootWidth = await page
-    .getByTestId('project-insights')
-    .evaluate((el) => el.getBoundingClientRect().width);
-  expect(rootWidth).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
-  // The app shell scrolls inside <main>: grow every scroller to its content so the
-  // screenshot shows the whole page, not the first screen.
-  await page.evaluate(() => {
-    let node = document.querySelector<HTMLElement>('[data-testid="project-insights"]');
-    while (node) {
-      node.style.overflow = 'visible';
-      node.style.height = 'auto';
-      node.style.maxHeight = 'none';
-      node = node.parentElement;
-    }
-  });
-  await screenshot(page, name);
-}
+const isPhoneViewport = (page: Page) => (page.viewportSize()?.width ?? 0) < 640;
 
 test.describe('Insights', () => {
   test('flow with a realistic month', async ({ page }) => {
@@ -200,6 +105,8 @@ test.describe('Insights', () => {
       page.getByTestId('insights-waiting-ideas').getByRole('link', { name: /Tax ID validation/ })
     ).toHaveAttribute('href', `/projects/${PROJECT_ID}/ideas/idea-c`);
     await expect(page.getByTestId('insights-waiting-ideas')).toContainText('PR open, CI red');
+    // Docs image (insights.md): the first screen, before capture() grows the scrollers.
+    await docsShot(page, isPhoneViewport(page) ? 'insights-flow-mobile' : 'insights-flow');
     await capture(page, 'insights-flow-realistic');
   });
 
@@ -264,15 +171,6 @@ test.describe('Insights', () => {
     await expect(page.getByText('Runs per day by outcome')).toBeVisible();
     expect(requests).toEqual(['30d', '7d']);
     await capture(page, 'insights-flow-7d');
-  });
-
-  test('the People tab says it is coming', async ({ page }) => {
-    await setupScene(page, 'realistic');
-    await page.goto(`${BASE}/flow`);
-    await page.getByRole('tab', { name: 'People', exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`${BASE}/people`));
-    await expect(page.getByTestId('insights-coming-soon-people')).toContainText('coming soon');
-    await capture(page, 'insights-coming-soon');
   });
 
   test('agent setups with a realistic month', async ({ page }) => {
@@ -401,7 +299,24 @@ test.describe('Insights', () => {
     ).toContainText('Teammates’ accounts (2)');
     const key = page.getByTestId('insights-account-cred:cc-key');
     await expect(key).toContainText('API key · pay as you go');
-    await expect(key.getByText('Not reported')).toHaveCount(1);
+    // An API key's spend: an estimate, and per merged pull request.
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('~$41.27');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('~$3.44 per merged PR');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText(
+      'Estimated at SAM’s model prices.'
+    );
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('21.6M');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('1.8M per merged PR');
+    // A subscription shows tokens, never money.
+    await expect(own.getByTestId('insights-usage-tokens')).toContainText('48.2M');
+    await expect(own.getByTestId('insights-usage-spend')).toHaveCount(0);
+    // A teammate's key: tokens, spend private. A key with no usage: not reported.
+    const mates = page.getByTestId('insights-account-teammate:claude-code:api_key');
+    await expect(mates.getByTestId('insights-usage-tokens')).toContainText('2.3M');
+    await expect(mates.getByTestId('insights-usage-spend')).toContainText('Private');
+    const spare = page.getByTestId('insights-account-cred:cc-key2');
+    await expect(spare.getByTestId('insights-usage-spend')).toContainText('Not reported');
+    await expect(spare.getByTestId('insights-usage-tokens')).toHaveCount(0);
     await expect(page.getByTestId('insights-accounts-chart')).toBeVisible();
     await expect(page.getByTestId('insights-stall-list').locator('li')).toHaveCount(6);
     await expect(page.getByTestId('insights-stall-list')).toContainText(
@@ -417,6 +332,23 @@ test.describe('Insights', () => {
     await setupScene(page, 'realistic', [], 'stress');
     await page.goto(`${BASE}/accounts?range=90d`);
     await expect(page.locator('[data-testid^="insights-account-"]')).toHaveCount(8);
+    // Partial spend names every unpriced model and reads as a floor; capped usage says so too.
+    const key = page.getByTestId('insights-account-cred:cc-x');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('At least ~$12,345.68');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText(
+      'mystery-model-with-an-extremely-long-name-that-has-no-catalog-price-at-all'
+    );
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('412M+');
+    await expect(
+      page
+        .getByTestId('insights-account-project:openai-codex:api_key')
+        .getByTestId('insights-usage-spend')
+    ).toContainText('No estimate');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText(
+      'Cut at the usage row limit, so this is a floor.'
+    );
+    // A long unpriced list is cut after three names.
+    await expect(key.getByTestId('insights-usage-spend')).not.toContainText(' more.');
     // Untrusted names render as text, never as markup.
     await expect(page.getByText('<script>alert("x")</script> 🔑 key').first()).toBeVisible();
     // Five accounts get a colour; the other three fold into "Other".
@@ -457,6 +389,24 @@ test.describe('Insights', () => {
     await expect(own).toContainText('Not loaded');
     await expect(own).not.toContainText('Never');
     await capture(page, 'insights-accounts-partial');
+  });
+
+  test('accounts with the token read unavailable say "Not loaded", not nothing', async ({
+    page,
+  }) => {
+    await setupScene(page, 'realistic', [], 'tokens-failed');
+    await page.goto(`${BASE}/accounts`);
+    await expect(
+      page.getByText('Some numbers could not be loaded: tokens and spend.')
+    ).toBeVisible();
+    const key = page.getByTestId('insights-account-cred:cc-key');
+    await expect(key.getByTestId('insights-usage-tokens')).toContainText('Not loaded');
+    await expect(key.getByTestId('insights-usage-spend')).toContainText('Not loaded');
+    // A subscription has no spend row to fail; its runs still show (liveness).
+    const own = page.getByTestId('insights-account-cred:cc-max');
+    await expect(own.getByTestId('insights-usage-spend')).toHaveCount(0);
+    await expect(own).toContainText('64');
+    await capture(page, 'insights-accounts-tokens-failed');
   });
 
   test('switching range on accounts keeps the cards on screen until the new range arrives', async ({

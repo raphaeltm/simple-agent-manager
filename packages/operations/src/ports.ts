@@ -52,6 +52,7 @@ import type {
   TokenBudget,
   TriggerStatusUpdates,
 } from './port-types';
+import type { ProjectBriefSettingName } from './project-brief-settings-definition';
 import type { OperationProjectDataPort } from './project-data-port';
 import type { OperationContext } from './types';
 
@@ -91,7 +92,8 @@ export type OperationSettingName =
   | InboxSettingName
   | InsightsReceiptSettingName
   | InsightsPageSettingName
-  | InsightsInstallationSettingName;
+  | InsightsInstallationSettingName
+  | ProjectBriefSettingName;
 
 export type OperationSettingValue = boolean | number | string | readonly string[] | null;
 

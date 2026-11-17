@@ -132,8 +132,16 @@ describe('shared deployment workflow routing', () => {
     const privateJson = engine?.env?.SAM_CI_SECRETS_JSON ?? '';
     expect(privateJson).not.toContain('toJSON(secrets)');
     const manifest = readFileSync('scripts/deploy/installer-engine-ci-env.json', 'utf8');
+    // A secondary-only value (`secondary == 'true' && ... || ''`) is never evaluated by the
+    // engine, which refuses secondary installations, so its secret is not in the bundle.
+    const secondaryOnly =
+      /"\$\{\{ steps\.deploy_resources\.outputs\.secondary == 'true' && [^"]* \|\| '' \}\}"/g;
     const required = [
-      ...new Set([...manifest.matchAll(/secrets\.([A-Z_0-9]+)/g)].map((match) => match[1])),
+      ...new Set(
+        [...manifest.replace(secondaryOnly, '""').matchAll(/secrets\.([A-Z_0-9]+)/g)].map(
+          (match) => match[1]
+        )
+      ),
     ].sort();
     const supplied = [...privateJson.matchAll(/toJSON\(secrets\.([A-Z_0-9]+) \|\| ''\)/g)]
       .map((match) => match[1])

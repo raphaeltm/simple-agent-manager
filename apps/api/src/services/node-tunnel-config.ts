@@ -30,6 +30,7 @@ import {
   type NodeTunnelSettingName,
 } from './admin-settings-node-tunnel-definitions';
 import { getNodeBackendHostname } from './dns-core';
+import { nodeTransportExtension } from './node-transport-extension';
 
 /** Worker configuration is canonical; no separate pre-integration environment contract. */
 export type TunnelEnv = Env;
@@ -138,6 +139,7 @@ export function nodeTunnelBootVariables(env: TunnelBootConfigEnv) {
 export interface ManagedNodeTransportInput {
   runtime: string;
   nodeClass: string;
+  nodeRole?: string;
 }
 
 /**
@@ -150,6 +152,8 @@ export function resolveManagedNodeTransport(
 ): NodeTransport | null {
   const configured = env.VM_AGENT_TRANSPORT?.trim() ?? '';
   if (configured === '' || configured === 'vm-public-dns') return null;
+  const adapter = nodeTransportExtension(configured);
+  if (adapter) return adapter.select(node);
   if (configured !== 'cloudflare-tunnel') {
     throw new Error(`Unsupported VM_AGENT_TRANSPORT ${JSON.stringify(configured)}`);
   }
