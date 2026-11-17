@@ -69,9 +69,14 @@ regardless.
       guard-deletion proof, noise on tree + sampled history), blocking in CI, README entry
 - [x] path-scoped rule for `.github/workflows/**`, `scripts/deploy/**`, `infra/**`; indexes regenerated
 - [x] docs: staging reference "Two Staging Installations", any doc saying staging2 copies credentials
-- [ ] ONE inbox item for Raphaël (inbox_write assign) with the manual staging2 steps
-- [ ] deploy staging2 and staging from the branch; logs show no `--show-secrets`/decryption except
-      the masked, tracked configure-secrets reads; staging2 users exist
+- [x] ONE inbox item for Raphaël (inbox_write assign) with the manual staging2 steps
+      (ask:01M7M7EZKVGHRMHNGF8DYZ3WSD, archived by Raphaël; he then set up test-user himself and
+      asked for `AGENT_SIGN_IN_TRUST_STAGING2` to be set by the agent, which was done from
+      non-secret values and validated with `resolveAgentSignInTrust`)
+- [x] deploy staging2 and staging from the branch; logs show no `--show-secrets`/decryption except
+      the masked, tracked configure-secrets reads; staging2 users exist (staging2 runs 44065820550
+      and 44103618203, staging run 44089796856: 0 readback/decrypt lines, masks consumed, 12 smoke
+      tests passed; workload-identity sign-in as `staging2-test-user` returns test-user, superadmin)
 
 ## Acceptance criteria
 
