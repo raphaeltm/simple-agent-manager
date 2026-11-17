@@ -514,6 +514,24 @@ describe('inbox asks writes', () => {
     expect(edges.acceptPromptDelivery).not.toHaveBeenCalled();
   });
 
+  it('the sweep sends nothing for questions and reviews an earlier build archived without a notice', async () => {
+    const resolvedAt = Date.now() - 10 * 60_000;
+    const closed = { source_session_id: 'chat-1', source_task_id: 'task-1', resolved_at: resolvedAt };
+    ask('old-question', { ...closed, kind: 'question', status: 'archived' });
+    ask('old-review', { ...closed, kind: 'review', status: 'archived' });
+    // Control: an answer whose notice was not queued is still retried in the same run.
+    ask('old-answer', { ...closed, kind: 'review', status: 'answered' });
+    await expect(runInboxAskSweep(env, Date.now())).resolves.toMatchObject({ noticesRetried: 1 });
+    expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(1);
+    expect(edges.acceptPromptDelivery).toHaveBeenLastCalledWith(
+      env,
+      P1,
+      expect.objectContaining({ deliveryId: 'inbox-ask:old-answer' })
+    );
+    expect(askRow('old-question').notified_at).toBeNull();
+    expect(askRow('old-review').notified_at).toBeNull();
+  });
+
   it('the sweep expires an open ask past its deadline and leaves an unexpired one', async () => {
     ask('due', { expires_at: 5_000, source_session_id: 'chat-1', source_task_id: 'task-1' });
     ask('later', { expires_at: 50_000 });

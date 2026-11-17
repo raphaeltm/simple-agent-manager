@@ -758,6 +758,24 @@ describe('an answer whose agent notice the inbox sweep gave up on', () => {
       created_at: resolvedAt - 1000,
       updated_at: resolvedAt,
     });
+    // A question an earlier build archived without a notice: archiving tells the agent nothing,
+    // so no notice was lost and no delivery item may name it.
+    insert('asks', {
+      id: 'q-archived',
+      project_id: P1,
+      assignee_kind: 'user',
+      assignee_user_id: 'owner',
+      kind: 'question',
+      blocking: 1,
+      title: 'Which bucket?',
+      status: 'archived',
+      source_session_id: 'chat-answer',
+      source_task_id: 't-answer',
+      resolved_by_user_id: 'owner',
+      resolved_at: resolvedAt,
+      created_at: resolvedAt - 1000,
+      updated_at: resolvedAt,
+    });
     // Control: one still inside its retry window is left to the notice sweep.
     insert('asks', {
       id: 'q-retrying',
@@ -783,6 +801,7 @@ describe('an answer whose agent notice the inbox sweep gave up on', () => {
       title: "Your answer didn't reach the agent in “Pick a region”",
       links: expect.arrayContaining([{ kind: 'ask', id: 'q-lost', label: null }]),
     });
+    expect(item!.links).not.toContainEqual(expect.objectContaining({ id: 'q-archived' }));
     expect((await runInboxSystemErrorSweep(env)).filed).toBe(0);
     expect(errorAsks()).toHaveLength(1);
     expect(errorAsks()[0]!.failure_count).toBe(1);
