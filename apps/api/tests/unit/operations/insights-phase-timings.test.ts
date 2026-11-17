@@ -250,6 +250,27 @@ describe('insights phase timings reads', () => {
     ]);
   });
 
+  it('cuts equal timestamps by id, the same way on every call', async () => {
+    // Four rows in the same millisecond, sample 2: the two newest ids (durations 30 and 40) stay.
+    for (const durationMs of [10, 20, 30, 40]) {
+      insert({ project: 'p', phase: 'git_clone', durationMs, ageMs: DAY });
+    }
+    const read = () =>
+      phaseDurationStats(db, { projectId: 'p', skillId: 'skill-1', sampleLimit: 2, now: NOW });
+    const first = await read();
+    expect(first.stats).toEqual([
+      {
+        operation: 'workspace',
+        phase: 'git_clone',
+        count: 2,
+        medianMs: 30,
+        p90Ms: 40,
+        truncated: true,
+      },
+    ]);
+    expect(await read()).toEqual(first);
+  });
+
   it('takes the newest successful rows of a phase past a run of newer failures', async () => {
     for (let i = 0; i < 20; i += 1) {
       insert({

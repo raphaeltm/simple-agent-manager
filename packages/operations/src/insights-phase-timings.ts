@@ -243,7 +243,9 @@ export async function phaseDurationStats(
                   AND s.phase = p.phase
                   AND s.outcome = 'success'
                   AND s.created_at >= ?
-                ORDER BY s.created_at DESC
+                -- id breaks equal timestamps, so the cut is the same on every plan (rule 65);
+                -- the index ends in the rowid, so this order still needs no sort.
+                ORDER BY s.created_at DESC, s.id DESC
                 LIMIT ?)
           WHERE p.operation IS NOT NULL
             ${phaseFilter}
