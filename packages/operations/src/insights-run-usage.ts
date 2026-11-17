@@ -433,7 +433,8 @@ export function summarizeAccountUsage(
     spend: {
       state: 'reported',
       costUsd,
-      perMergedPullRequestUsd: costUsd === null || merged === null ? null : roundUsd(costUsd / merged),
+      perMergedPullRequestUsd:
+        costUsd === null || merged === null ? null : roundUsd(costUsd / merged),
       unpricedModels: [...unpriced].sort((a, b) => a.localeCompare(b)),
     },
   };
