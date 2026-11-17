@@ -61,7 +61,7 @@ Reverse-tunnel nodes add one indexed lease read per control-plane request.
 - [x] Docs: self-hosting guide gateway/entry contract
 - [x] Lint/typecheck/test/build (CI to confirm); reviews: security-auditor, cloudflare-specialist, test-engineer,
       task-completion-validator
-- [ ] Staging: fresh default-transport VM heartbeat, system-info, terminal and agent WebSockets,
+- [x] Staging: fresh default-transport VM heartbeat, system-info, terminal and agent WebSockets,
       node log stream; self-host gateway routes absent on Cloudflare; cleanup to zero VMs
 - [ ] BOX debt: integration run after M4 includes L17b, before L22 (coordinator option (c),
       channel seq 165; not a per-slice merge gate)
@@ -102,3 +102,33 @@ Delta Cloudflare/security and test/completion reviews PASS. BOX remains owed aft
 celld entry calls `withReverseTunnel(worker, frpcRenderer)`, and main's `node-agent-route.ts`
 and `node-websocket-gateway.ts` supersede the integration copies. Merge still waits for live
 staging, current-head CI, and the coordinator's production #2841 hold-lift message.
+
+## Final staging and late review validation
+
+Head `2bb45037e`: full CI 44190373350, E2E 44190373407, Sonar, and gated staging2
+44195223179 all passed. On a fresh GCP e2-medium VM in asia-south1-b (existing pool,
+no settings changes), the default cloudflare-tunnel transport had a fresh heartbeat,
+system-info, terminal command output, agent WebSocket session_state, and node log entries.
+Cloudflare returned 404 for GET gateway/node-websocket and POST gateway/frps-plugin.
+Workspace `01M7NXH8E2MPR3DY6TS48FPPTE`, node `01M7NXH86C9ECC4TQ6K8SBZTTY`, and
+project `01M7NXFW8V3B9S532GH07E16V8` were deleted with 200 then GET 404; D1 confirms
+our node row is absent. Preexisting Instant resources and an unrelated destroying
+Hetzner row with no provider instance ID were preserved. Normal release: 44201139702.
+
+Two late Codex P2 findings were reproduced and addressed before merge:
+
+- Existing public snapshot relays stay selectable after new nodes switch to reverse
+  tunnels. The stored-transport SQL predicate still excludes tunnel-only nodes; new
+  relay provisioning remains disabled. A real SQLite mixed-transport regression
+  failed before this change and passes afterward.
+- Unexpected extension route exceptions retain global sanitized 500 handling. Only
+  an expected missing current lease throws a sanitized NodeAgentRouteError (503).
+  The injected D1 failure regression failed before this change; real Worker/D1
+  gateway/proxy tests assert generic 500 bodies for invalid ports, retaining missing
+  lease 503 and valid-port controls.
+
+Both new unit cases were RED (2 failures, 17 controls passing). Final affected unit
+suites: 49/49; real Worker/D1 suites: 35/35. Typecheck, focused lint and the secret
+readback guard pass. Independent Cloudflare/security and test/completion delta
+reviews PASS with no findings. Final-head CI and staging disposition remain tracked
+in the PR body; BOX remains the documented integration debt, not a slice merge gate.

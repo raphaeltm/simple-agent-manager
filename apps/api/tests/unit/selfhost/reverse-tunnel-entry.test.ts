@@ -240,6 +240,24 @@ describe('reverse-tunnel node routing', () => {
     expect(nodeFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves unexpected lease lookup errors for the global sanitized server-error handler', async () => {
+    const node = await reverseNode();
+    const failure = new Error('private lease database diagnostic');
+    const originalPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+    const prepare = vi.spyOn(env.DATABASE, 'prepare').mockImplementation((sql) => {
+      if (sql.includes('SELECT l.port AS port')) throw failure;
+      return originalPrepare(sql);
+    });
+    try {
+      await expect(
+        fetchNodeAgent(node.id, env, publicUrl(node.id), { method: 'GET' }, 1000)
+      ).rejects.toBe(failure);
+      expect(nodeFetch).not.toHaveBeenCalled();
+    } finally {
+      prepare.mockRestore();
+    }
+  });
+
   it('control: a public-transport probe makes its one public fetch and no D1 read', async () => {
     const prepare = vi.spyOn(env.DATABASE, 'prepare');
     for (const transport of [null, 'vm-public-dns', 'cloudflare-tunnel']) {

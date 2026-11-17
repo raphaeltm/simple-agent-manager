@@ -52,11 +52,9 @@ export async function resolveNodeAgentRoute(
   const transport = row?.transport ?? null;
   const extension = transport ? nodeTransportExtension(transport) : undefined;
   if (extension) {
-    try {
-      return { kind: 'extension', origin: await extension.resolveAgentOrigin(env, nodeId) };
-    } catch (err) {
-      throw new NodeAgentRouteError(nodeId, err instanceof Error ? err.message : String(err));
-    }
+    // The driver names expected missing routes with NodeAgentRouteError. Unexpected
+    // database/configuration failures retain the global sanitized server-error handling.
+    return { kind: 'extension', origin: await extension.resolveAgentOrigin(env, nodeId) };
   }
   if (transport && EXTENSION_ONLY_TRANSPORTS.has(transport)) {
     throw new NodeAgentRouteError(

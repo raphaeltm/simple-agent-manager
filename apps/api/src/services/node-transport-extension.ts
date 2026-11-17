@@ -46,7 +46,8 @@ export function nodeTransportExtension(
 /**
  * True when this installation provisions new nodes on an installed extension transport. Such
  * nodes are reachable only from the control-plane host (no public backend hostname), so a
- * feature that hands one VM another VM's URL (the snapshot upload relay) must stay off.
+ * feature that hands one VM another VM's URL must not provision such nodes as upload relays.
+ * Existing public-transport relays remain selectable through their stored transport.
  * Cloudflare installs no extension: always false, no I/O.
  */
 export function provisionsExtensionTransportNodes(env: Pick<Env, 'VM_AGENT_TRANSPORT'>): boolean {

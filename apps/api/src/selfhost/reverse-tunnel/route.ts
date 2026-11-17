@@ -1,3 +1,4 @@
+import { NodeAgentRouteError } from '../../services/node-agent-route';
 import { assertReverseTunnelUpstreamPort, reverseTunnelUpstreamOrigin } from './config';
 import type { ReverseTunnelEnv as Env } from './env';
 
@@ -18,8 +19,9 @@ export async function resolveReverseTunnelAgentOrigin(env: Env, nodeId: string):
     .bind(nodeId)
     .first<{ port: unknown }>();
   if (!row) {
-    throw new Error(
-      `Node ${nodeId} has no active reverse-tunnel lease for its current incarnation`
+    throw new NodeAgentRouteError(
+      nodeId,
+      'Node has no active reverse-tunnel route for its current incarnation'
     );
   }
   // Caddy and fetch() connect to exactly this loopback port: the assertion refuses a

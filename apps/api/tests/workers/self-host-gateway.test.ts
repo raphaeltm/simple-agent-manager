@@ -627,8 +627,11 @@ describe('lease port range membership at the point the upstream is produced', ()
       const cookie = await seedSignedInUser(userId);
       const path = `/api/nodes/${node.nodeId}/logs/stream`;
       const refused = await call(gatewayCall(`api.${env.BASE_DOMAIN}`, path, { Cookie: cookie }));
-      expect(refused.status).toBe(503);
-      expect(await refused.json()).toMatchObject({ error: 'NODE_UNREACHABLE' });
+      expect(refused.status).toBe(500);
+      expect(await refused.json()).toMatchObject({
+        error: 'INTERNAL_ERROR',
+        message: 'Internal server error',
+      });
       expect(refused.headers.get('X-SAM-Upstream')).toBeNull();
       expect(refused.headers.get('X-SAM-Upstream-Authorization')).toBeNull();
       // Control: the same node on an in-range port is authorized.
@@ -656,8 +659,11 @@ describe('lease port range membership at the point the upstream is produced', ()
           headers: { Cookie: await seedSignedInUser(userId) },
         })
       );
-      expect(response.status).toBe(503);
-      expect(await response.json()).toMatchObject({ error: 'NODE_UNREACHABLE' });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({
+        error: 'INTERNAL_ERROR',
+        message: 'Internal server error',
+      });
       expect(upstream).not.toHaveBeenCalled();
     }
   );

@@ -106,8 +106,8 @@ describe('native relay selection', () => {
     });
   });
 
-  it('an installation provisioning extension-transport nodes neither selects nor provisions relays', async () => {
-    const { env } = fixture();
+  it('keeps an existing public relay selectable after switching new nodes to reverse tunnels, without provisioning tunnel-only relays', async () => {
+    const { sqlite, env } = fixture();
     const input = {
       workspaceId: 'ws',
       userId: 'user',
@@ -133,10 +133,19 @@ describe('native relay selection', () => {
     });
     const selfHostEnv = { ...env, VM_AGENT_TRANSPORT: 'reverse-tunnel' } as Env;
     const prepare = vi.spyOn(selfHostEnv.DATABASE, 'prepare');
+    expect(await findSessionSnapshotUploadRelay(selfHostEnv, 'user', 'project')).toEqual({
+      id: 'node',
+      name: 'native node',
+    });
+    const legacyTargets = await resolveSessionSnapshotUploadTargets(selfHostEnv, input);
+    expect(legacyTargets.upload.home).toContain('node');
+    expect(legacyTargets.needsRelayProvisioning).toBe(false);
+    sqlite.exec("UPDATE nodes SET transport = 'reverse-tunnel'");
     expect(await findSessionSnapshotUploadRelay(selfHostEnv, 'user', 'project')).toBeNull();
     const targets = await resolveSessionSnapshotUploadTargets(selfHostEnv, input);
     expect(targets.needsRelayProvisioning).toBe(false);
     expect(targets.upload.home).toMatch(/^\/api\/workspaces\/ws\/session-snapshot/);
+    prepare.mockClear();
     await ensureSessionSnapshotUploadRelay(selfHostEnv, {
       userId: 'user',
       sourceNodeId: 'node',
