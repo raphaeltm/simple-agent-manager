@@ -129,7 +129,7 @@ export const RULES: readonly Rule[] = [
     pattern: new RegExp(
       // Options or NAME=VALUE only, no command after them: `env -0`, `env -u NAME`, `env A=1`, a bare `export`,
       // `declare -x` or `set` all print the (exported) environment.
-      String.raw`${COMMAND_START}${EXECUTABLE_PATH}(?:env(?:\s+(?:-u\s+\S+|--unset=\S+|-[-\w]+|[A-Za-z_]\w*=\S*))*|printenv|export(?:\s+-p)?|(?:declare|typeset)(?:\s+-[A-Za-z]+)*|set)${COMMAND_END}`
+      String.raw`${COMMAND_START}${EXECUTABLE_PATH}(?:env(?:\s+(?:-u\s+\S+|--unset(?:=|\s+)\S+|-[-\w]+|[A-Za-z_]\w*=\S*))*|printenv|export(?:\s+-p)?|(?:declare|typeset)(?:\s+-[A-Za-z]+)*|set)${COMMAND_END}`
     ),
     shellOnly: true,
   },
